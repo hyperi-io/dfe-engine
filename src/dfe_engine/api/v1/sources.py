@@ -451,7 +451,7 @@ class SourceEnabledPatchRequest(BaseModel):
 class BulkActionItem(BaseModel):
     """One source in a bulk request."""
 
-    name: str = Field(description="Source name (_source label)")
+    source: str = Field(description="Source name (_source label)")
     version: str | None = Field(
         default=None,
         description=(
@@ -481,7 +481,7 @@ class BulkActionRequest(BaseModel):
     def _coerce_source_names(cls, value: Any) -> Any:
         if not isinstance(value, list):
             return value
-        return [{"name": item} if isinstance(item, str) else item for item in value]
+        return [{"source": item} if isinstance(item, str) else item for item in value]
 
 
 class BulkDeployTask(BaseModel):
@@ -2188,33 +2188,33 @@ def _submit_bulk_deploys(
     failed: list[dict[str, str]] = []
 
     for item in body.sources:
-        if not registry.source_exists(item.name):
+        if not registry.source_exists(item.source):
             failed.append(
                 {
-                    "source": item.name,
+                    "source": item.source,
                     "code": "not_found",
-                    "error": f"Source '{item.name}' not found",
+                    "error": f"Source '{item.source}' not found",
                 }
             )
             continue
         if item.version is not None:
             try:
-                source = registry.get_source(item.name)
+                source = registry.get_source(item.source)
             except SourceNotFoundError:
                 failed.append(
                     {
-                        "source": item.name,
+                        "source": item.source,
                         "code": "not_found",
-                        "error": f"Source '{item.name}' not found",
+                        "error": f"Source '{item.source}' not found",
                     }
                 )
                 continue
             if item.version not in source.versions:
                 failed.append(
                     {
-                        "source": item.name,
+                        "source": item.source,
                         "code": "not_found",
-                        "error": (f"Version '{item.version}' not found for source '{item.name}'"),
+                        "error": (f"Version '{item.version}' not found for source '{item.source}'"),
                     }
                 )
                 continue
@@ -2222,7 +2222,7 @@ def _submit_bulk_deploys(
         info = manager.submit(
             _SOURCE_DEPLOY_TASK_KIND,
             _run_source_deploy_task,
-            item.name,
+            item.source,
             item.version,
             body.dry_run,
             user,
@@ -2232,7 +2232,7 @@ def _submit_bulk_deploys(
         )
         deployments.append(
             BulkDeployTask(
-                source=item.name,
+                source=item.source,
                 version=item.version,
                 task_id=info.id,
                 kind=info.kind,
@@ -2266,7 +2266,7 @@ def _apply_bulk(
     failed: list[dict[str, str]] = []
     deleted: list[Source] = []
     for item in body.sources:
-        name = item.name
+        name = item.source
         try:
             if body.action == "delete":
                 # Read before the delete, for the topics it owns. A name with no

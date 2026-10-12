@@ -923,11 +923,25 @@ def _live_body(outcome: SourceLiveOutcome) -> SourceLiveApply:
     )
 
 
+class ApplyDefaultsPin(BaseModel):
+    """One source whose current version was considered for the table defaults."""
+
+    source: str = Field(description="Source name (_source label)")
+    version: str | None = Field(
+        default=None,
+        description="Version id that was pinned or already matched; null when unset",
+    )
+
+
 class ApplyDefaultsResponse(BaseModel):
     """Which named sources were pinned, which already had these defaults, and their tables."""
 
-    updated: list[str]
-    unchanged: list[str]
+    updated: list[ApplyDefaultsPin] = Field(
+        description="Sources whose current version was written with the defaults"
+    )
+    unchanged: list[ApplyDefaultsPin] = Field(
+        description="Sources whose current version already matched the defaults"
+    )
     live: list[SourceLiveApply] = Field(
         description="One entry per named source, in request order: what reached its table."
     )
@@ -990,11 +1004,12 @@ def apply_defaults(
             ) from None
         loaded.append(source)
 
-    updated: list[str] = []
-    unchanged: list[str] = []
+    updated: list[ApplyDefaultsPin] = []
+    unchanged: list[ApplyDefaultsPin] = []
     saved: list[Source] = []
     author = git_author(user)
     for source in loaded:
+        pin = ApplyDefaultsPin(source=source.source, version=source.current)
         pinned = pin_table_defaults(
             source,
             header_type=table.header_type,
@@ -1003,7 +1018,7 @@ def apply_defaults(
             engine=table.engine,
         )
         if pinned is None:
-            unchanged.append(source.source)
+            unchanged.append(pin)
             saved.append(source)
             continue
         stored = registry.save_source(
@@ -1018,13 +1033,14 @@ def apply_defaults(
             source.source,
             "updated",
             {
+                "version": source.current,
                 "ttl_days": ttl.effective,
                 "common_header_type": table.header_type,
                 "common_header_version": table.header_version,
                 "engine": table.engine,
             },
         )
-        updated.append(source.source)
+        updated.append(pin)
 
     def connect() -> Any:
         return get_clickhouse_client(settings)

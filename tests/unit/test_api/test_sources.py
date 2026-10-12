@@ -1235,7 +1235,7 @@ class TestBulkDeploy:
             "/api/v1/sources/bulk",
             json={
                 "action": "deploy",
-                "sources": ["deploy-a", {"name": "deploy-b", "version": "1.0.0"}],
+                "sources": ["deploy-a", {"source": "deploy-b", "version": "1.0.0"}],
             },
             headers=admin_headers,
         )
@@ -1263,7 +1263,7 @@ class TestBulkDeploy:
                 "action": "deploy",
                 "sources": [
                     "missing-source",
-                    {"name": sample_source["source"], "version": "9.9.9"},
+                    {"source": sample_source["source"], "version": "9.9.9"},
                 ],
             },
             headers=admin_headers,

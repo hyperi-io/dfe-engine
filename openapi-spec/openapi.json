@@ -24039,6 +24039,33 @@
         ],
         "title": "AppSummary"
       },
+      "ApplyDefaultsPin": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source name (_source label)"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Version id that was pinned or already matched; null when unset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "ApplyDefaultsPin",
+        "description": "One source whose current version was considered for the table defaults."
+      },
       "ApplyDefaultsRequest": {
         "properties": {
           "sources": {
@@ -24062,17 +24089,19 @@
         "properties": {
           "updated": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ApplyDefaultsPin"
             },
             "type": "array",
-            "title": "Updated"
+            "title": "Updated",
+            "description": "Sources whose current version was written with the defaults"
           },
           "unchanged": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ApplyDefaultsPin"
             },
             "type": "array",
-            "title": "Unchanged"
+            "title": "Unchanged",
+            "description": "Sources whose current version already matched the defaults"
           },
           "live": {
             "items": {
@@ -24456,9 +24485,9 @@
       },
       "BulkActionItem": {
         "properties": {
-          "name": {
+          "source": {
             "type": "string",
-            "title": "Name",
+            "title": "Source",
             "description": "Source name (_source label)"
           },
           "version": {
@@ -24476,7 +24505,7 @@
         },
         "type": "object",
         "required": [
-          "name"
+          "source"
         ],
         "title": "BulkActionItem",
         "description": "One source in a bulk request."
