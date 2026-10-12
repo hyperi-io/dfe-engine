@@ -68,9 +68,11 @@ POINT_IN_TIME_TILES = {
 # recorder cannot drop one series.
 COMMITTED_OFFSET_METRIC = "rdkafka_topic_partition_committed_offset"
 
-# The key a counter series is differenced under, as the console's counter_rates query
-# keys it (appmgmt/queries.yaml): one attribute set on one pod.
-COUNTER_SERIES_KEY = "cityHash64(Attributes), ResourceAttributes['service.instance.id']"
+# The key a counter stream is differenced under, as the console's counter_rates query
+# keys it (appmgmt/queries.yaml): one attribute set on one pod from one start time.
+COUNTER_SERIES_KEY = (
+    "cityHash64(Attributes), ResourceAttributes['service.instance.id'], StartTimeUnix"
+)
 
 
 def _tile_sources(dashboard: dict) -> set[str]:

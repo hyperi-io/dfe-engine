@@ -67,13 +67,22 @@ def _write(
     metric: str,
     resource: dict[str, str],
     attributes: dict[str, str] | None = None,
+    started: int = 0,
 ) -> None:
-    """Write one reading per ``(epoch_second, value)``."""
+    """Write one reading per ``(epoch_second, value)``.
+
+    ``started`` is the epoch second a counter's stream began; 0 is what a row
+    carrying no start time reads.
+    """
     attributes = attributes or {}
     resource = {"service.name": service, **resource}
+    counter = table == "otel_metrics_sum"
     columns, values = (
-        (", AggregationTemporality, IsMonotonic", ", 2, true")
-        if table == "otel_metrics_sum"
+        (
+            ", StartTimeUnix, AggregationTemporality, IsMonotonic",
+            ", toDateTime({started:UInt32}), 2, true",
+        )
+        if counter
         else ("", "")
     )
     # clickhouse-connect binds a dict as JSON, which a Map parameter refuses to parse.
@@ -85,6 +94,7 @@ def _write(
         "mapFromArrays({res_keys:Array(String)}, {res_values:Array(String)}), "
         "toDateTime({at:UInt32}), {value:Float64}" + values
     )
+    stream = {"started": started} if counter else {}
     for at, value in points:
         ch_client.command(
             sql,
@@ -97,6 +107,7 @@ def _write(
                 "res_values": list(resource.values()),
                 "at": at,
                 "value": value,
+                **stream,
             },
         )
 
@@ -177,6 +188,39 @@ def test_a_counter_tile_sums_each_pods_own_increase(
     assert rows[0][-1] == pytest.approx(60 / _INTERVAL if per_second else 60)
 
 
+@pytest.mark.parametrize(("tile_id", "metric", "attributes", "per_second"), _COUNTER_TILES)
+def test_a_counter_tile_sums_each_streams_own_increase(
+    ch_client, otel_db, bucket, tile_id, metric, attributes, per_second
+):
+    """One pod pushes two streams of one counter, adding 40 and 20: 60 in the bucket.
+
+    Keyed without the start time, the readings interleave as 680, 5, 700, 15, 720,
+    25 and every step down reads as a restart: 1445.
+    """
+    for started, points in (
+        (bucket - 3600, [(bucket + 5, 680.0), (bucket + 25, 700.0), (bucket + 45, 720.0)]),
+        (bucket - 1800, [(bucket + 15, 5.0), (bucket + 35, 15.0), (bucket + 55, 25.0)]),
+    ):
+        _write(
+            ch_client,
+            otel_db,
+            "otel_metrics_sum",
+            *points,
+            service="dfe-loader",
+            metric=metric,
+            resource=_scalo_rs("dfe-loader-a"),
+            attributes=attributes,
+            started=started,
+        )
+
+    rows = _run(ch_client, otel_db, tile_id, bucket)
+
+    assert len(rows) == 1, rows
+    if _tile(tile_id)["displayType"] in ("line", "stacked_bar"):
+        assert _epoch(rows[0][0]) == bucket
+    assert rows[0][-1] == pytest.approx(60 / _INTERVAL if per_second else 60)
+
+
 def test_an_increase_across_a_bucket_boundary_lands_in_the_later_bucket(ch_client, otel_db, bucket):
     """100 at 50s, 130 at 70s: the 30 lands in the second bucket.
 
@@ -237,6 +281,32 @@ def test_the_balance_table_sums_each_series_increase(ch_client, otel_db, bucket)
     rows = _run(ch_client, otel_db, "svc-balance", bucket)
 
     assert rows == [("dfe-receiver", 40, 0, 40, 0)]
+
+
+def test_the_balance_table_sums_each_streams_increase(ch_client, otel_db, bucket):
+    """One receiver pod pushes two streams of its received counter, adding 30 and 10: 40.
+
+    Keyed without the start time, the readings interleave as 1000, 50, 1030, 60 and
+    read 50 + 980 + 60 = 1090.
+    """
+    for started, points in (
+        (bucket - 3600, [(bucket + 5, 1000.0), (bucket + 35, 1030.0)]),
+        (bucket - 1800, [(bucket + 10, 50.0), (bucket + 40, 60.0)]),
+    ):
+        _write(
+            ch_client,
+            otel_db,
+            "otel_metrics_sum",
+            *points,
+            service="dfe-receiver",
+            metric="records_received_total",
+            resource=_scalo_rs("dfe-receiver-a"),
+            started=started,
+        )
+
+    rows = _run(ch_client, otel_db, "svc-balance", bucket)
+
+    assert rows == [("dfe-receiver", 40, 0, 0, 0)]
 
 
 # -- pods: named by k8s.pod.name, else service.instance.id --------------------
