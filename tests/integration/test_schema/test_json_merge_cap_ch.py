@@ -22,6 +22,8 @@ from dfe_schemas.deploy_defaults import JSON_TABLE_SETTINGS
 from dfe_schemas.manifest import load_manifest
 from dfe_schemas.render import Renderer
 
+from dfe_engine.api.v1 import sources as sources_module
+from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.schema.applier import SchemaApplier
 from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.manifest_applier import ManifestApplier
@@ -30,7 +32,13 @@ from dfe_engine.schema.plan import build_plan, core_schemas_root
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoader
-from dfe_engine.source.deployment import deploy_statements_for_build
+from dfe_engine.settings import (
+    APISettings,
+    ClickHouseResilienceSettings,
+    ClickHouseSettings,
+    DFESettings,
+)
+from dfe_engine.source.deployment import SettingsChange, deploy_statements_for_build
 from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -159,8 +167,7 @@ def _redeploy_statements(client, database: str, source: Source) -> tuple[list[st
     """The statements a deploy of *source* plans against the server as it is now.
 
     *client* is the engine's manager wrapper, which is what the deploy endpoint hands
-    the planner: the raw client has no ``execute``, so the planner would read the
-    table as absent. The flag is whether the planner found the table.
+    the planner. The flag is whether the planner found the table.
     """
     builder = SchemaBuilderV2(resolver=EngineResolver(client=client))
     result = builder.build(source)
@@ -220,6 +227,59 @@ def test_a_redeploy_of_a_source_table_with_the_cap_plans_no_settings_alter(
 
     assert found
     assert _settings_alters(planned) == []
+
+
+def test_a_dry_run_reports_the_settings_move_a_redeploy_would_make(
+    ch_client, manager_client, ch_params, database, tmp_path
+):
+    """The dry run names the same ALTER the plan emits, and none once the table is at the cap."""
+    source = _source("dry-run-probe")
+    first, _ = _redeploy_statements(manager_client, database, source)
+    for statement in first:
+        ch_client.command(statement)
+    _uncap(ch_client, database, source.table_name)
+    deployed = source.model_copy(update={"deployed_version": source.current})
+    builder = SchemaBuilderV2(resolver=EngineResolver(client=ch_client))
+    result = builder.build(source)
+    settings = DFESettings(
+        config_dir=str(tmp_path),
+        clickhouse=ClickHouseSettings(
+            host=ch_params["host"],
+            port=ch_params["port"],
+            username=ch_params["username"],
+            password=ch_params["password"],
+            secure=False,
+            data_database=database,
+            bootstrap_tables=False,
+            resilience=ClickHouseResilienceSettings(budget_seconds=5.0),
+        ),
+        api=APISettings(jwt_secret="test-secret-key-for-unit-tests-hmac32"),
+    )
+
+    def dry_run():
+        return sources_module._dry_run_table_moves(
+            builder, deployed, deployed.current, result, settings
+        )
+
+    ClickHouseManager.reset_instance()
+    try:
+        ttl_change, settings_change, error = dry_run()
+        planned, _ = _redeploy_statements(manager_client, database, source)
+        for statement in planned:
+            ch_client.command(statement)
+        _, settings_after, error_after = dry_run()
+    finally:
+        ClickHouseManager.reset_instance()
+
+    assert error is None
+    assert ttl_change is None
+    assert settings_change == SettingsChange(
+        assignments=[CAPPED],
+        statement=f"ALTER TABLE `{database}`.`{source.table_name}` MODIFY SETTING {CAPPED}",
+    )
+    assert _settings_alters(planned) == [settings_change.statement]
+    assert error_after is None
+    assert settings_after is None
 
 
 # -- core tables: the manifest render and ManifestApplier -------------------

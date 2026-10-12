@@ -379,9 +379,12 @@ class TestSources:
         source = SimpleNamespace(source="acme", table_name="acme", deployed_version="1")
         settings = SimpleNamespace(clickhouse=SimpleNamespace(effective_data_database="dfe"))
 
-        change, error = sources_module._dry_run_ttl_change(None, source, "1", None, settings)
+        ttl, settings_change, error = sources_module._dry_run_table_moves(
+            None, source, "1", None, settings
+        )
 
-        assert change is None
+        assert ttl is None
+        assert settings_change is None
         assert_hidden(error)
         assert_logged(audit_events)
 

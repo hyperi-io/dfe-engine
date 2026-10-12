@@ -85,6 +85,7 @@ from dfe_engine.settings import get_settings
 from dfe_engine.source import catalogue as source_catalogue_module
 from dfe_engine.source.deployment import (
     SchemaDeployResult,
+    SettingsChange,
     SourceBuildArtifact,
     SourceDeploymentStore,
     SourcePlanArtifact,
@@ -94,6 +95,7 @@ from dfe_engine.source.deployment import (
     plan_deploy_statements,
     plan_from_build,
     previous_deployed_version_ids,
+    settings_change_for_table,
     ttl_change_for_table,
 )
 from dfe_engine.source.flow import FlowError, SourceFlow, resolve_flow
@@ -1635,28 +1637,36 @@ def _record_source_deploy(
     return _reconcile_apps(request, user, registry)
 
 
-def _dry_run_ttl_change(
+def _dry_run_table_moves(
     builder: Any, source: Source, version_id: str, result: Any, settings: Any
-) -> tuple[TtlChange | None, str | None]:
-    """The TTL move a deploy would make on the source's table, and why it is unknown.
+) -> tuple[TtlChange | None, SettingsChange | None, str | None]:
+    """The TTL and settings moves a deploy would make on the source's table, and why unknown.
 
     Only a deployed source has a table to move. The table is read within
     ``clickhouse.interactive_budget_seconds``; a ClickHouse that cannot be read
-    leaves the move unknown and says so.
+    leaves both moves unknown and says so.
     """
     if source.deployed_version is None:
-        return None, None
+        return None, None, None
     db = settings.clickhouse.effective_data_database
+    client = get_interactive_clickhouse_client(settings)
     try:
-        live = live_tables(get_interactive_clickhouse_client(settings), db).get(source.table_name)
-    except SchemaApplyError as exc:
-        return None, hide_backend_text(
-            _CH_UNREADABLE, exc, event="dry run: live table unreadable", source=source.source
+        live = live_tables(client, db).get(source.table_name)
+        if live is None:
+            return None, None, None
+        settings_change = settings_change_for_table(
+            builder, source, version_id, result, db=db, client=client
         )
-    if live is None:
-        return None, None
-    change = ttl_change_for_table(builder, source, version_id, result, db=db, live=live.ttl)
-    return change, None
+    except SchemaApplyError as exc:
+        return (
+            None,
+            None,
+            hide_backend_text(
+                _CH_UNREADABLE, exc, event="dry run: live table unreadable", source=source.source
+            ),
+        )
+    ttl_change = ttl_change_for_table(builder, source, version_id, result, db=db, live=live.ttl)
+    return ttl_change, settings_change, None
 
 
 def _apply_source_schema(
@@ -1742,7 +1752,7 @@ def _apply_source_schema(
 
     # Plan mode: hand the DDL + validation back for review; never write to ClickHouse.
     if dry_run:
-        ttl_change, live_table_error = _dry_run_ttl_change(
+        ttl_change, settings_change, live_table_error = _dry_run_table_moves(
             builder, source, version_id, result, settings
         )
         return SchemaDeployResult(
@@ -1754,6 +1764,7 @@ def _apply_source_schema(
             views=views,
             validation_errors=validation_errors,
             ttl_change=ttl_change,
+            settings_change=settings_change,
             live_table_error=live_table_error,
         )
 

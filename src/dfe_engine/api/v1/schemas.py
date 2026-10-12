@@ -50,6 +50,7 @@ from dfe_engine.exchange.schemas import (
     build_meta_schema_export,
 )
 from dfe_engine.git_identity import git_author
+from dfe_engine.schema.applier import SchemaApplyError
 from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.schema.models import (
@@ -1615,14 +1616,21 @@ def _dedicated_source_table_ready(
     db: str | None,
     table: str,
 ) -> bool:
-    """Whether ``version_id`` is deployed and its ClickHouse table is present."""
+    """Whether ``version_id`` is deployed and its ClickHouse table is present.
+
+    Raises:
+        HTTPException: 422 when ClickHouse could not be read.
+    """
     if source.deployed_version != version_id:
         return False
     if ch is None or db is None:
         return True
     from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
 
-    return clickhouse_table_exists(ch, db, table)
+    try:
+        return clickhouse_table_exists(ch, db, table)
+    except SchemaApplyError as exc:
+        raise _promotion_refused(exc, "discovery_failed", source.source) from exc
 
 
 def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None, db=None):
