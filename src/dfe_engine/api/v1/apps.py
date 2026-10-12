@@ -2187,6 +2187,8 @@ def get_metrics(
     """Throughput, CPU, memory and saturation for the instance."""
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
+    # A stack-wide app reports under its own name, so only the overlay says this instance exists.
+    _overlay(_gitcrud(request), app)
     try:
         # An app whose manifest declares no transport carries no records to count.
         found = _reader(request, client).metrics(

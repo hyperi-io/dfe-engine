@@ -98,7 +98,7 @@ def test_the_last_arrival_is_the_latest_rise_across_series():
     assert reader.source_signals("auth", LOADERS).last_seen_epoch == 1757000060.0
 
 
-def test_the_landing_query_differences_each_loader_pod_on_its_own():
+def test_the_landing_query_differences_each_stream_on_its_own():
     reader, ch = _reader([])
 
     reader.source_signals("auth", LOADERS)
@@ -106,11 +106,12 @@ def test_the_landing_query_differences_each_loader_pod_on_its_own():
     sql = ch.calls[0][0]
     assert "arrayDifference(readings)" in sql
     assert (
-        "GROUP BY ServiceName, cityHash64(Attributes), ResourceAttributes['service.instance.id']"
+        "GROUP BY ServiceName, cityHash64(Attributes), "
+        "ResourceAttributes['service.instance.id'], StartTimeUnix"
     ) in sql
 
 
-def test_the_counter_query_differences_each_pod_before_summing_the_fleet():
+def test_the_counter_query_differences_each_stream_before_summing_the_fleet():
     reader, ch = _reader([])
 
     reader.metrics("dfe-receiver")
@@ -118,7 +119,8 @@ def test_the_counter_query_differences_each_pod_before_summing_the_fleet():
     sql = next(sql for sql, _, _ in ch.calls if "otel_metrics_sum" in sql)
     assert "arrayDifference(readings)" in sql
     assert (
-        "GROUP BY MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id']"
+        "GROUP BY MetricName, cityHash64(Attributes), "
+        "ResourceAttributes['service.instance.id'], StartTimeUnix"
     ) in sql
 
 
