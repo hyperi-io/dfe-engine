@@ -17,6 +17,7 @@ testcontainers integration test (no mocked database behaviour here).
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -53,6 +54,8 @@ class _NoCallClient:
     def execute(self, *args: object, **kwargs: object):
         raise AssertionError("ClickHouse must not be queried on an explicit-data_type path")
 
+    query = execute
+
 
 class _DiscoveryClient:
     """ClickHouse stand-in returning canned discovery rows; records each query."""
@@ -81,6 +84,9 @@ class _DiscoveryClient:
             return self._discover_rows
         return []
 
+    def query(self, sql: str, parameters: dict | None = None):
+        return SimpleNamespace(result_rows=self.execute(sql, parameters))
+
 
 class _SampleClient:
     """ClickHouse stand-in returning canned sample rows; records each query."""
@@ -108,6 +114,9 @@ class _SampleClient:
                 else []
             )
         return []
+
+    def query(self, sql: str, parameters: dict | None = None):
+        return SimpleNamespace(result_rows=self.execute(sql, parameters))
 
     def query_rows(self, sql: str, parameters: dict | None = None):
         self.calls.append((sql, parameters or {}))

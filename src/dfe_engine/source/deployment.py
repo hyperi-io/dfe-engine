@@ -10,6 +10,7 @@ from scalo.logger import logger
 from dfe_engine.clickhouse.statements import ddl_settings
 from dfe_engine.schema.applier import (
     LiveTtl,
+    SchemaApplyError,
     json_settings_move,
     read_table_ttl,
     replace_db,
@@ -68,6 +69,15 @@ class TtlChange(BaseModel):
             "True when the move deletes rows the table keeps today: the new TTL is "
             "shorter, the table had none, or its live TTL is not whole days"
         )
+    )
+    statement: str = Field(description="The ALTER TABLE that makes the move")
+
+
+class SettingsChange(BaseModel):
+    """The table-settings move a deploy makes on a table that already exists."""
+
+    assignments: list[str] = Field(
+        description="'name = value' for each setting the move sets",
     )
     statement: str = Field(description="The ALTER TABLE that makes the move")
 
@@ -167,11 +177,18 @@ class SchemaDeployResult(BaseModel):
             "table it already has; null when the TTL does not move"
         ),
     )
+    settings_change: SettingsChange | None = Field(
+        default=None,
+        description=(
+            "On a dry run, the table-settings move the deploy would make on the "
+            "table it already has; null when the settings do not move"
+        ),
+    )
     live_table_error: str | None = Field(
         default=None,
         description=(
-            "On a dry run, why the deployed table could not be read; its TTL move "
-            "is then unknown. Null otherwise."
+            "On a dry run, why the deployed table could not be read; its TTL and "
+            "settings moves are then unknown. Null otherwise."
         ),
     )
 
@@ -261,14 +278,19 @@ def qualify_ddl_statements(statements: list[str], db: str) -> list[str]:
 
 
 def _list_table_columns(client: Any, db: str, table: str) -> set[str]:
+    """The column names of ``db.table``.
+
+    Raises:
+        SchemaApplyError: ClickHouse could not be read.
+    """
     try:
-        rows = client.execute(
+        rows = client.query(
             "SELECT name FROM system.columns WHERE database = {db:String} AND table = {tbl:String}",
             parameters={"db": db, "tbl": table},
-        )
-        return {str(row[0]) for row in rows}
-    except Exception:
-        return set()
+        ).result_rows
+    except Exception as exc:
+        raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
+    return {str(row[0]) for row in rows}
 
 
 def _assert_version_on_source(source: Source, version_id: str) -> None:
@@ -347,6 +369,35 @@ def ttl_change_for_table(
     return TtlChange(move=move.move, expires_rows=move.expires_rows, statement=move.statement)
 
 
+def settings_change_for_table(
+    builder: SchemaBuilderV2,
+    source: Source,
+    version_id: str,
+    result: SchemaBuildResult,
+    *,
+    db: str,
+    client: Any,
+) -> SettingsChange | None:
+    """The settings move a deploy of *version_id* makes on the table the server holds.
+
+    None when the settings do not move, or the table has no JSON column to carry any.
+
+    Raises:
+        SchemaApplyError: ClickHouse could not be read.
+    """
+    move = json_settings_move(
+        client,
+        builder.ddl_generator,
+        database=db,
+        table=source.table_name,
+        columns=result.columns,
+        cfg=replace_db(builder.build_ddl_config_for_version(source, version_id), db),
+    )
+    if not move.statement:
+        return None
+    return SettingsChange(assignments=list(move.assignments), statement=move.statement)
+
+
 def plan_deploy_statements(
     builder: SchemaBuilderV2,
     source: Source,
@@ -365,7 +416,7 @@ def plan_deploy_statements(
     SETTING`` that adds them. Views follow.
 
     Raises:
-        SchemaApplyError: The existing table's TTL or settings could not be read.
+        SchemaApplyError: ClickHouse could not be read, so what the table holds is unknown.
     """
     table = source.table_name
     table_exists = clickhouse_table_exists(ch_client, db, table) if ch_client is not None else False
@@ -396,16 +447,11 @@ def plan_deploy_statements(
         )
         if ttl_change is not None:
             statements.append(ttl_change.statement)
-        settings = json_settings_move(
-            ch_client,
-            ddl_gen,
-            database=db,
-            table=table,
-            columns=result.columns,
-            cfg=replace_db(cfg, db),
+        settings_change = settings_change_for_table(
+            builder, source, version_id, result, db=db, client=ch_client
         )
-        if settings.statement:
-            statements.append(settings.statement)
+        if settings_change is not None:
+            statements.append(settings_change.statement)
 
     for view_ddl in (result.view_ddls or {}).values():
         statements.append(view_ddl.strip())

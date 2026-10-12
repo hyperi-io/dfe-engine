@@ -15,6 +15,8 @@ routers guard against missing infrastructure cleanly.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -304,7 +306,7 @@ class TestSchemasRouter:
             lambda _cfg: mock_manager,
         )
         monkeypatch.setattr(
-            "dfe_engine.services.schema.json_promotion_service.clickhouse_table_exists",
+            "dfe_engine.source.deployment.clickhouse_table_exists",
             lambda *_a, **_k: False,
         )
 
@@ -539,12 +541,10 @@ class TestSchemasRouter:
         reset_settings()
 
         class _FakeCh:
-            def execute(self, query: str, *args, **kwargs):
-                if "system.tables" in query:
-                    return []
-                if "system.columns" in query:
-                    return []
-                return []
+            """A server holding no tables: every system read answers no rows."""
+
+            def query(self, query: str, *args, **kwargs):
+                return SimpleNamespace(result_rows=[])
 
         schemas_root = tmp_path / "schemas"
         schemas_root.mkdir()

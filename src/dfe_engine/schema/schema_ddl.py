@@ -14,7 +14,7 @@ Usage:
 """
 
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 
 from dfe_schemas.deploy_defaults import json_table_settings
 from scalo.logger import logger
@@ -180,18 +180,6 @@ class TableSpec:
     name: str
     columns: list[SchemaColumn]
     config: DDLConfig
-
-
-def with_default_ttl(spec: TableSpec, days: int | None) -> TableSpec:
-    """*spec* with the deployment default retention, unless it declares its own.
-
-    A declared ``ttl_days`` always wins; ``days`` of None leaves the spec as it
-    is, and 0 declares no TTL. The config is copied, never mutated in place.
-    """
-    # A table with no ttl_columns cannot carry a TTL, and a default over none fails the CREATE.
-    if (days is None) or (spec.config.ttl_days is not None) or not (spec.config.ttl_columns):
-        return spec
-    return replace(spec, config=replace(spec.config, ttl_days=days))
 
 
 # -- Index templates -------------------------------------------------
