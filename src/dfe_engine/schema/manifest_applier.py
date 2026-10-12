@@ -19,6 +19,7 @@ What is applied automatically is additive only:
 
 * an absent object is created
 * a column the definition adds and the table lacks is added
+* a JSON table setting the rendered CREATE declares and the table lacks is set
 * a plain view whose SELECT changed is replaced, because it holds no state
 * a role, settings profile, quota or grant is re-asserted, because every
   statement in that set converges
@@ -42,11 +43,19 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from dfe_schemas.deploy_defaults import JSON_TABLE_SETTINGS
 from dfe_schemas.render import RenderedObject
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.statements import StatementTooLargeError, ddl_settings
-from dfe_engine.schema.applier import LiveTtl, ttl_from_engine_full, ttl_matches
+from dfe_engine.schema.applier import (
+    LiveTtl,
+    SettingsMove,
+    settings_from_engine_full,
+    settings_move,
+    ttl_from_engine_full,
+    ttl_matches,
+)
 from dfe_engine.schema.ledger import LedgerRow, MigrationLedger
 
 Action = Literal["created", "altered", "unchanged", "refused", "skipped"]
@@ -81,25 +90,34 @@ class ObjectOutcome:
     drift: tuple[str, ...] = ()
     extra_columns: tuple[str, ...] = ()
     reason: str = ""
+    # "name = value" for each table setting this pass set.
+    settings: tuple[str, ...] = ()
 
     @property
     def qualified(self) -> str:
         """How the object is named in a log line and in the ledger."""
         return f"{self.database}.{self.name}" if self.database else f"topic:{self.name}"
 
+    def _changes(self) -> list[str]:
+        """The additive changes this pass made, one phrase each."""
+        changes: list[str] = []
+        if self.columns_added:
+            added = ", ".join(self.columns_added)
+            changes.append(f"added {len(self.columns_added)} column(s) [{added}]")
+        if self.settings:
+            changes.append(f"set {', '.join(self.settings)}")
+        return changes
+
     def describe(self) -> str:
         """One line, in the past tense, for the apply log."""
         if self.action == "created":
             return f"created {self.qualified}"
         if self.action == "altered":
-            added = ", ".join(self.columns_added)
-            return f"altered {self.qualified}: added {len(self.columns_added)} column(s) [{added}]"
+            changes = self._changes() + [f"applied {message}" for message in self.drift]
+            return f"altered {self.qualified}: {'; '.join(changes)}"
         if self.action == "refused":
             refused = f"refused {self.qualified}: {'; '.join(self.drift) or self.reason}"
-            if self.columns_added:
-                added = ", ".join(self.columns_added)
-                refused += f"; added {len(self.columns_added)} column(s) [{added}]"
-            return refused
+            return "; ".join([refused, *self._changes()])
         if self.action == "skipped":
             return f"skipped {self.qualified}: {self.reason}"
         return f"unchanged {self.qualified}"
@@ -253,6 +271,25 @@ def _declared_ttl_clause(statement: str) -> str | None:
 
 def _ttl_text(live: LiveTtl | None) -> str:
     return "none" if live is None else live.describe()
+
+
+def declared_json_settings(statement: str) -> dict[str, int]:
+    """The JSON table settings a rendered CREATE TABLE declares in its SETTINGS clause.
+
+    Only the names in ``JSON_TABLE_SETTINGS``: the others a CREATE sets, such as
+    ``index_granularity``, are fixed when the table is made.
+    """
+    _, sep, tail = statement.partition("\nSETTINGS\n")
+    if not sep:
+        return {}
+    clause = tail.split("\nCOMMENT ", 1)[0]
+    declared: dict[str, int] = {}
+    for raw in clause.split(","):
+        name, eq, value = raw.partition("=")
+        name = name.strip()
+        if eq and name in JSON_TABLE_SETTINGS and value.strip().isdigit():
+            declared[name] = int(value.strip())
+    return declared
 
 
 def declared_ttl_days(statement: str) -> int | None:
@@ -418,7 +455,9 @@ class ManifestApplier:
             )
             added.append(name)
 
-        # A new column is additive whatever else drifted, so a refusal never holds one back.
+        # Additive like a new column, so a drift refusal never holds it back either.
+        settings = self._reconcile_settings(rendered)
+
         if drift and not self._allow_drift:
             return self._record(
                 rendered,
@@ -426,19 +465,46 @@ class ManifestApplier:
                 columns_added=tuple(added),
                 drift=tuple(drift),
                 extra_columns=tuple(extra),
+                settings=settings.assignments,
             )
 
         for message in drift:
             self._apply_drift(rendered, message, clauses)
 
-        action: Action = "altered" if added or (drift and self._allow_drift) else "unchanged"
+        changed = bool(added or settings.statement or (drift and self._allow_drift))
+        action: Action = "altered" if changed else "unchanged"
         return self._record(
             rendered,
             action,
             columns_added=tuple(added),
             drift=tuple(drift) if self._allow_drift else (),
             extra_columns=tuple(extra),
+            settings=settings.assignments,
         )
+
+    def _reconcile_settings(self, rendered: RenderedObject) -> SettingsMove:
+        """Set the JSON table settings the rendered CREATE declares and the live table lacks.
+
+        Takes the ON CLUSTER the rendered statement carries, as the TTL reconcile does:
+        MODIFY SETTING is replica-local, and replicas whose settings differ fail part
+        checksums against each other.
+        """
+        statement = rendered.statements[0]
+        wanted = declared_json_settings(statement)
+        if not wanted:
+            return SettingsMove()
+        database = rendered.database or ""
+        move = settings_move(
+            target=self._target(database, rendered.name),
+            on_cluster=self._on_cluster(statement),
+            wanted=wanted,
+            live=settings_from_engine_full(
+                self._live_shape(database, rendered.name).get("engine_full", "")
+            ),
+        )
+        if move.statement:
+            self._run(move.statement)
+        return move
 
     def _apply_stateful_view(self, rendered: RenderedObject) -> ObjectOutcome:
         """A materialised view: create when absent, refuse a changed SELECT.
@@ -669,6 +735,7 @@ class ManifestApplier:
         drift: tuple[str, ...] = (),
         extra_columns: tuple[str, ...] = (),
         reason: str = "",
+        settings: tuple[str, ...] = (),
     ) -> ObjectOutcome:
         outcome = ObjectOutcome(
             id=rendered.id,
@@ -681,6 +748,7 @@ class ManifestApplier:
             drift=drift,
             extra_columns=extra_columns,
             reason=reason,
+            settings=settings,
         )
         self.report.outcomes.append(outcome)
         if action in ("created", "altered", "unchanged"):
