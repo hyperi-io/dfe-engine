@@ -16,6 +16,7 @@ Usage:
 import re
 from dataclasses import dataclass, field, replace
 
+from dfe_schemas.deploy_defaults import json_table_settings
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.quoting import quote_literal
@@ -437,6 +438,9 @@ class DDLGenerator:
             settings_parts.append(
                 f"ttl_only_drop_parts = {int(self._ttl_drops_whole_parts(cfg, partition))}"
             )
+        settings_parts.extend(
+            f"{key} = {value}" for key, value in self.json_settings(columns).items()
+        )
         lines.append("SETTINGS\n    " + ",\n    ".join(settings_parts))
 
         # COMMENT
@@ -717,6 +721,17 @@ class DDLGenerator:
 
         ch_type = _with_max_dynamic_paths(resolved.ch_type, col.max_dynamic_paths)
         return ch_type, codec
+
+    def json_settings(self, columns: list[SchemaColumn]) -> dict[str, int]:
+        """The table SETTINGS dfe-schemas declares for a table with a JSON column.
+
+        Empty when no column resolves to JSON. The CREATE emits these and the
+        applier reconciles them onto a table that exists, so both read this one rule.
+
+        Raises:
+            TypeRegistryError: A column's type, attribute or override is not in the registry.
+        """
+        return json_table_settings(self.resolve_type(col)[0] for col in columns)
 
     @staticmethod
     def _default_expr(col: SchemaColumn) -> str | None:

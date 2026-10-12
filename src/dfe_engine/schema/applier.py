@@ -51,6 +51,9 @@ _DAY_SECONDS = 86_400
 # The resolver adds these to a variant for the topology; config never declares them.
 _TOPOLOGY_PREFIXES = ("Replicated", "Shared")
 
+# One `name = value` in engine_full's SETTINGS clause; a quoted value may hold a comma.
+_SETTING_RE = re.compile(r"(?P<name>\w+)\s*=\s*(?P<value>'(?:[^'\\]|\\.)*'|[^,\s]+)")
+
 
 class SchemaApplyError(Exception):
     """A DDL statement failed, or the server could not be read.
@@ -180,6 +183,55 @@ def ttl_move(
     )
 
 
+def settings_from_engine_full(engine_full: str) -> dict[str, str]:
+    """The table SETTINGS in a ``system.tables.engine_full`` value, by name, as printed."""
+    _, sep, clause = engine_full.rpartition(" SETTINGS ")
+    if not sep:
+        return {}
+    return {match.group("name"): match.group("value") for match in _SETTING_RE.finditer(clause)}
+
+
+@dataclass(frozen=True, slots=True)
+class SettingsMove:
+    """What bringing a table's settings to the declared ones takes.
+
+    Attributes:
+        statement: The ALTER TABLE that makes the move; empty when nothing moves.
+        assignments: ``name = value`` for each setting the statement sets.
+    """
+
+    statement: str = ""
+    assignments: tuple[str, ...] = ()
+
+
+def settings_move(
+    *, target: str, on_cluster: str, wanted: dict[str, int], live: dict[str, str]
+) -> SettingsMove:
+    """The ``MODIFY SETTING`` that brings *live* to *wanted*, not run.
+
+    Only the settings in *wanted* are compared, and one already at its value issues
+    nothing. A setting the live table carries and *wanted* omits is left alone.
+
+    Args:
+        target: The quoted ``database.table``.
+        on_cluster: The ``ON CLUSTER`` suffix, or "". MODIFY SETTING is replica-local, so
+            a replicated table needs the same suffix its CREATE took.
+        wanted: Setting name to the value the table should carry.
+        live: The table's settings now, as :func:`settings_from_engine_full` reads them.
+    """
+    assignments = tuple(
+        f"{name} = {value}"
+        for name, value in sorted(wanted.items())
+        if live.get(name) != str(value)
+    )
+    if not assignments:
+        return SettingsMove()
+    return SettingsMove(
+        statement=f"ALTER TABLE {target}{on_cluster} MODIFY SETTING {', '.join(assignments)}",
+        assignments=assignments,
+    )
+
+
 def table_target(database: str, table: str) -> str:
     """The quoted ``database.table`` a statement names."""
     return f"{quote_ident(database, what='database')}.{quote_ident(table, what='table name')}"
@@ -225,8 +277,8 @@ def live_tables(client: Any, database: str) -> dict[str, LiveTable]:
     }
 
 
-def read_table_ttl(client: Any, database: str, table: str) -> LiveTtl | None:
-    """The TTL of ``database.table`` as the server reports it; None when it has none.
+def read_engine_full(client: Any, database: str, table: str) -> str:
+    """``system.tables.engine_full`` for ``database.table``; empty when the table is absent.
 
     Raises:
         SchemaApplyError: ClickHouse could not be read.
@@ -239,8 +291,16 @@ def read_table_ttl(client: Any, database: str, table: str) -> LiveTtl | None:
         ).result_rows
     except Exception as exc:
         raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
-    engine_full = str(rows[0][0]) if rows and rows[0][0] is not None else ""
-    return ttl_from_engine_full(engine_full)
+    return str(rows[0][0]) if rows and rows[0][0] is not None else ""
+
+
+def read_table_ttl(client: Any, database: str, table: str) -> LiveTtl | None:
+    """The TTL of ``database.table`` as the server reports it; None when it has none.
+
+    Raises:
+        SchemaApplyError: ClickHouse could not be read.
+    """
+    return ttl_from_engine_full(read_engine_full(client, database, table))
 
 
 def _nullable(ch_type: str) -> bool:
@@ -261,6 +321,8 @@ class TableChange:
     ttl: str = ""
     # Why a declared TTL that differs from the live one could not be placed; empty otherwise.
     ttl_skipped: str = ""
+    # "name = value" for each table setting this pass set; empty when none moved.
+    settings: tuple[str, ...] = ()
 
     def describe(self) -> str:
         """One line, in the past tense, for the apply log."""
@@ -275,6 +337,8 @@ class TableChange:
                 parts.append(f"added {len(self.columns_added)} column(s) [{cols}]")
             if self.ttl:
                 parts.append(f"TTL {self.ttl} days")
+            if self.settings:
+                parts.append(f"set {', '.join(self.settings)}")
             return f"altered {target}: {', '.join(parts)}"
         return f"unchanged {target}"
 
@@ -365,11 +429,12 @@ class SchemaApplier:
         *,
         create_ddl: str | None = None,
     ) -> TableChange:
-        """Create *table*, or add whatever columns it is missing and reconcile its TTL.
+        """Create *table*, or add the columns it is missing and reconcile its TTL and settings.
 
         A declared ``config.ttl_days`` that differs from the live TTL is applied
         with ``MODIFY TTL``, a declared 0 with ``REMOVE TTL``; an undeclared one
-        leaves the live TTL alone.
+        leaves the live TTL alone. A table with a JSON column takes dfe-schemas'
+        JSON table settings with ``MODIFY SETTING`` when it lacks them.
 
         Args:
             database: Target database. Must be the REAL name -- the resolver
@@ -413,17 +478,19 @@ class SchemaApplier:
 
         # After the column adds: the TTL column may be one of them.
         ttl = self._reconcile_ttl(database, table, columns, cfg)
+        settings = self._reconcile_settings(database, table, columns, cfg)
 
         return self._record(
             TableChange(
                 database=database,
                 table=table,
-                action="altered" if missing or ttl.statement else "unchanged",
+                action="altered" if missing or ttl.statement or settings.statement else "unchanged",
                 columns_added=tuple(col.name for col in missing),
                 engine=resolved.clause,
                 on_cluster=resolved.on_cluster,
                 ttl=ttl.move,
                 ttl_skipped=ttl.skipped,
+                settings=settings.assignments,
             )
         )
 
@@ -451,6 +518,32 @@ class SchemaApplier:
         else:
             logger.info(f"{database}.{table}: TTL {move.move}")
         self._run(move.statement)
+        return move
+
+    def _reconcile_settings(
+        self,
+        database: str,
+        table: str,
+        columns: list[SchemaColumn],
+        cfg: DDLConfig,
+    ) -> SettingsMove:
+        """Bring the live table settings to the ones its JSON columns declare.
+
+        Takes the ON CLUSTER the TTL reconcile takes. A table with no JSON column
+        is not read at all.
+        """
+        wanted = self._ddl_gen.json_settings(columns)
+        if not wanted:
+            return SettingsMove()
+        move = settings_move(
+            target=table_target(database, table),
+            on_cluster=self._ddl_gen.on_cluster(cfg),
+            wanted=wanted,
+            live=settings_from_engine_full(read_engine_full(self._client, database, table)),
+        )
+        if move.statement:
+            logger.info(f"{database}.{table}: set {', '.join(move.assignments)}")
+            self._run(move.statement)
         return move
 
     def nullability_mismatches(
