@@ -13,12 +13,40 @@ schema phase applies, and ``OperationalReader`` answers over them with no mocks.
 fleet only ever lines up by accident: every test that matters here has its pods
 exporting in different seconds. Each row is stamped relative to one server
 ``now()`` read at the start of the test, so the spacing between readings is exact.
+
+The endpoint tests go through ``GET /api/v1/apps/{service}/{instance}/metrics`` on
+the real API, which is where the manifest's ``transports`` decides whether a
+counter with no rows reads as 0.
 """
 
-import pytest
+from types import SimpleNamespace
 
-from dfe_engine.appmgmt.operations import RECORDS_RECEIVED, OperationalReader
-from dfe_engine.schema.plan import render_one
+import pytest
+from fastapi.testclient import TestClient
+
+from dfe_engine.api.app import create_app
+from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
+from dfe_engine.appmgmt.operations import (
+    RECORDS_DELIVERED,
+    RECORDS_DLQ,
+    RECORDS_PROCESSED,
+    RECORDS_RECEIVED,
+    OperationalReader,
+)
+from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+from dfe_engine.settings import (
+    APISettings,
+    AuthSettings,
+    ClickHouseResilienceSettings,
+    ClickHouseSettings,
+    DFESettings,
+    HuntsSettings,
+    KafkaSettings,
+    LocalAuthSettings,
+    SecretsSettings,
+    ServicesSettings,
+    SourceSettings,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -26,26 +54,58 @@ _SERVICE = "dfe-receiver"
 _LOADER = "dfe-loader"
 _LANDING = "loader_messages_by_table_total"
 _TABLE = "auth"
-
-
-@pytest.fixture
-def otel_db(ch_client, clickhouse_test_database):
-    """An isolated database carrying the three metrics tables the console reads."""
-    db = clickhouse_test_database
-    for object_id in (
-        "data.otel_metrics_gauge",
-        "data.otel_metrics_sum",
-        "data.otel_metrics_histogram",
-    ):
-        for statement in render_one(object_id, data_database=db).statements:
-            ch_client.command(statement)
-    return db
+_INSTANCE = "default"
 
 
 @pytest.fixture
 def base(ch_client) -> int:
     """The server's now() as an epoch second, read once for the whole test."""
     return int(ch_client.command("SELECT toUnixTimestamp(now())"))
+
+
+@pytest.fixture
+def console(ch_params, manager_client, otel_db, monkeypatch, tmp_path):
+    """The engine API, reading its telemetry from ``otel_db`` on the harness's ClickHouse."""
+    for sub in ("sources", "services", "rules", "hunts", "auth", "secrets"):
+        (tmp_path / sub).mkdir()
+    settings = DFESettings(
+        config_dir=str(tmp_path),
+        clickhouse=ClickHouseSettings(
+            host=ch_params["host"],
+            port=ch_params["port"],
+            username=ch_params["username"],
+            password=ch_params["password"],
+            secure=False,
+            data_database=otel_db,
+            bootstrap_tables=False,
+            resilience=ClickHouseResilienceSettings(budget_seconds=5.0),
+        ),
+        kafka=KafkaSettings(ensure_topics=False),
+        source=SourceSettings(sources_dir=str(tmp_path / "sources")),
+        services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
+        hunts=HuntsSettings(rules_dir=str(tmp_path / "rules"), hunt_dir=str(tmp_path / "hunts")),
+        auth=AuthSettings(
+            enabled=True,
+            auth_dir=str(tmp_path / "auth"),
+            local=LocalAuthSettings(admin_password="test-admin-pw"),
+        ),
+        secrets=SecretsSettings(provider="file", path=str(tmp_path / "secrets")),
+        api=APISettings(jwt_secret="test-secret-key-for-unit-tests-hmac32"),
+    )
+    monkeypatch.setattr("dfe_engine.settings._settings", settings)
+    app = create_app(settings=settings)
+    app.dependency_overrides[get_clickhouse_client] = lambda: manager_client
+    token = create_access_token(
+        data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]}, settings=settings
+    )
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            # Off the issued password, which refuses every other call until changed.
+            app.state.account_store.reset_password("admin", "test-admin-pw")
+            yield SimpleNamespace(client=client, headers={"Authorization": f"Bearer {token}"})
+    finally:
+        _registries.clear()
+        ClickHouseManager.reset_instance()
 
 
 def _write(
@@ -225,3 +285,59 @@ def test_a_restarted_loader_pod_counts_from_zero(ch_client, manager_client, otel
 
     assert signals.records_per_min == pytest.approx(100.0, rel=1e-3)
     assert signals.last_seen_epoch == float(base)
+
+
+# -- the console endpoint: counters an app has not recorded ------------------
+
+
+def _info(ch_client, db: str, *, service: str, pod: str) -> None:
+    """One ``info`` reading now, which is what the liveness query reads as reporting."""
+    ch_client.command(
+        f"INSERT INTO `{db}`.otel_metrics_gauge "
+        "(ServiceName, MetricName, ResourceAttributes, TimeUnix, Value) "
+        "SELECT {service:String}, 'info', "
+        "mapFromArrays(['service.instance.id'], [{pod:String}]), now(), 1",
+        parameters={"service": service, "pod": pod},
+    )
+
+
+def _console_rates(console, service: str) -> dict[str, float]:
+    resp = console.client.get(
+        f"/api/v1/apps/{service}/{_INSTANCE}/metrics", headers=console.headers
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["rates"]
+
+
+def test_a_reporting_app_on_the_data_path_reads_an_unrecorded_counter_as_zero(
+    ch_client, otel_db, base, console
+):
+    """The receiver reports and receives 100 over 60s, but has processed, delivered and dead-lettered nothing.
+
+    A push carries only counters that have been recorded, so the other three have no
+    rows; the scrape served them as 0.
+    """
+    _info(ch_client, otel_db, service=_SERVICE, pod="dfe-receiver-a")
+    _write(ch_client, otel_db, base, (60, 1000), (30, 1050), (0, 1100), pod="dfe-receiver-a")
+
+    assert _console_rates(console, _SERVICE) == pytest.approx(
+        {
+            RECORDS_RECEIVED: 100 / 60,
+            RECORDS_PROCESSED: 0.0,
+            RECORDS_DELIVERED: 0.0,
+            RECORDS_DLQ: 0.0,
+        },
+        rel=1e-3,
+    )
+
+
+def test_a_reporting_app_with_no_transport_reads_only_what_it_recorded(ch_client, otel_db, console):
+    """dfe-engine declares ``transports: []``: it carries no records, so it gains no record counters."""
+    _info(ch_client, otel_db, service="dfe-engine", pod="dfe-engine-a")
+
+    assert _console_rates(console, "dfe-engine") == {}
+
+
+def test_an_app_that_is_not_reporting_reads_no_counters(console):
+    """No ``info`` in the window: the receiver is not reporting, so nothing reads as 0."""
+    assert _console_rates(console, _SERVICE) == {}

@@ -38,15 +38,6 @@ def gauge_db(ch_client, clickhouse_test_database):
     return db
 
 
-@pytest.fixture
-def otel_db(ch_client, gauge_db):
-    """The gauge database plus the sum and histogram tables the console also reads."""
-    for object_id in ("data.otel_metrics_sum", "data.otel_metrics_histogram"):
-        for statement in render_one(object_id, data_database=gauge_db).statements:
-            ch_client.command(statement)
-    return gauge_db
-
-
 def _shim(ch_client, db: str) -> QueryShim:
     settings = DFESettings(env="test")
     settings.clickhouse.data_database = db
