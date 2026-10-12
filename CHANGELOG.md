@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.32](https://github.com/hyperi-io/dfe-engine/compare/v1.22.31...v1.22.32) (2026-10-12)
+
+### Bug Fixes
+
+* key counter increases by cumulative stream ([#840](https://github.com/hyperi-io/dfe-engine/issues/840)) ([7706f4b](https://github.com/hyperi-io/dfe-engine/commit/7706f4b8c9e4db7b937361baa38e62fe68850505))
+
 ## [1.22.31](https://github.com/hyperi-io/dfe-engine/compare/v1.22.30...v1.22.31) (2026-10-12)
 
 ### Bug Fixes
