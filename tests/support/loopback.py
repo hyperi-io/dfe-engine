@@ -33,11 +33,23 @@ def wake_accept(listener: socket.socket) -> None:
 
     Closing the socket alone leaves that thread parked, and a later child exit
     resumes it on the reused fd. Shutting the socket down first makes the
-    ``accept()`` raise. An ``OSError`` here (not connected, already closed) is
-    ignored: there is nothing left to wake.
+    ``accept()`` raise on platforms that allow ``shutdown`` on a listening
+    socket. On macOS that call fails with ``ENOTCONN`` and does not wake
+    ``accept``, so a short connect to the port is used instead: ``accept``
+    returns, and the caller closes or finishes the request as usual.
     """
-    with contextlib.suppress(OSError):
+    try:
         listener.shutdown(socket.SHUT_RDWR)
+        return
+    except OSError:
+        pass
+    try:
+        host, port = listener.getsockname()[:2]
+    except OSError:
+        return
+    with contextlib.suppress(OSError):
+        with socket.create_connection((host, port), timeout=1.0):
+            pass
 
 
 def _end_after_first_bytes(conn: socket.socket, how: EndOfConnection) -> None:

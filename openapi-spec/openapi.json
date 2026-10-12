@@ -5793,7 +5793,7 @@
           "Sources"
         ],
         "summary": "Bulk Action",
-        "description": "Perform a bulk action (enable, disable, dormant, delete) on multiple sources.",
+        "description": "Perform a bulk action on multiple sources.\n\n``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.\n``deploy`` submits one ``source:deploy`` background task per accepted source\n(poll ``GET /tasks/{task_id}``); refused names land in ``failed``.",
         "operationId": "bulk_action_api_v1_sources_bulk_post",
         "requestBody": {
           "content": {
@@ -24039,6 +24039,33 @@
         ],
         "title": "AppSummary"
       },
+      "ApplyDefaultsPin": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source name (_source label)"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Version id that was pinned or already matched; null when unset"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "ApplyDefaultsPin",
+        "description": "One source whose current version was considered for the table defaults."
+      },
       "ApplyDefaultsRequest": {
         "properties": {
           "sources": {
@@ -24062,17 +24089,19 @@
         "properties": {
           "updated": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ApplyDefaultsPin"
             },
             "type": "array",
-            "title": "Updated"
+            "title": "Updated",
+            "description": "Sources whose current version was written with the defaults"
           },
           "unchanged": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ApplyDefaultsPin"
             },
             "type": "array",
-            "title": "Unchanged"
+            "title": "Unchanged",
+            "description": "Sources whose current version already matched the defaults"
           },
           "live": {
             "items": {
@@ -24454,20 +24483,54 @@
         ],
         "title": "Body_elastic_converter_api_v1_schemas_elastic_converter_post"
       },
+      "BulkActionItem": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source name (_source label)"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Deploy only: version id to deploy. Omitted uses the working current. Ignored for enable/disable/dormant/delete."
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "BulkActionItem",
+        "description": "One source in a bulk request."
+      },
       "BulkActionRequest": {
         "properties": {
           "action": {
             "type": "string",
             "title": "Action",
-            "description": "Action: enable, disable, dormant, delete"
+            "description": "Action: enable, disable, dormant, delete, deploy"
           },
           "sources": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/BulkActionItem"
             },
             "type": "array",
+            "minItems": 1,
             "title": "Sources",
-            "description": "Source names to act on"
+            "description": "Sources to act on. Plain name strings are accepted."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "description": "Deploy only: plan/validate DDL without applying it. Ignored otherwise.",
+            "default": false
           }
         },
         "type": "object",
@@ -24501,6 +24564,14 @@
             "type": "array",
             "title": "Failed",
             "description": "One entry per source left untouched: its name, the same code the single-source route answers with, and the message"
+          },
+          "deployments": {
+            "items": {
+              "$ref": "#/components/schemas/BulkDeployTask"
+            },
+            "type": "array",
+            "title": "Deployments",
+            "description": "Deploy only: one ``source:deploy`` task per accepted source. Poll via GET /tasks/{task_id}."
           }
         },
         "type": "object",
@@ -24509,6 +24580,44 @@
         ],
         "title": "BulkActionResponse",
         "description": "Result of a bulk operation."
+      },
+      "BulkDeployTask": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Version requested; null means the working current at task start"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Task id for polling via GET /tasks/{task_id}"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "Task kind",
+            "default": "source:deploy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "task_id"
+        ],
+        "title": "BulkDeployTask",
+        "description": "One accepted deploy submitted as a background task."
       },
       "BundleSchema-Input": {
         "properties": {
