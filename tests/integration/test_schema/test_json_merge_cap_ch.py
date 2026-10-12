@@ -27,9 +27,11 @@ from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.manifest_applier import ManifestApplier
 from dfe_engine.schema.phase import apply_plan
 from dfe_engine.schema.plan import build_plan, core_schemas_root
+from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoader
-from dfe_engine.source.models import SchemaColumn
+from dfe_engine.source.deployment import deploy_statements_for_build
+from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry
 
 pytestmark = pytest.mark.integration
@@ -148,6 +150,76 @@ def test_a_cluster_pin_puts_on_cluster_on_the_settings_alter(ch_client, database
     assert _settings_alters(planning.report.statements) == [
         f"ALTER TABLE `{database}`.`s3probe` ON CLUSTER dfe_cluster MODIFY SETTING {CAPPED}"
     ]
+
+
+# -- source redeploy: plan_deploy_statements -------------------------------
+
+
+def _redeploy_statements(client, database: str, source: Source) -> tuple[list[str], bool]:
+    """The statements a deploy of *source* plans against the server as it is now.
+
+    *client* is the engine's manager wrapper, which is what the deploy endpoint hands
+    the planner: the raw client has no ``execute``, so the planner would read the
+    table as absent. The flag is whether the planner found the table.
+    """
+    builder = SchemaBuilderV2(resolver=EngineResolver(client=client))
+    result = builder.build(source)
+    assert not result.validation_errors, result.validation_errors
+    statements, table_exists = deploy_statements_for_build(
+        builder, source, source.runtime_version_id(), result, db=database, ch_client=client
+    )
+    return statements, table_exists
+
+
+def _source(name: str) -> Source:
+    return Source.model_validate(
+        {
+            "source": name,
+            "match": {"field": "tags.collector.type", "value": name},
+            "header": {"type": "timeseries", "version": "1.0.0"},
+            "schema": {"ttl_days": 90, "engine": ""},
+        }
+    )
+
+
+def test_a_redeploy_of_a_source_table_without_the_cap_sets_it_once(
+    ch_client, manager_client, database
+):
+    """Running the planned statements adds the cap, and the next redeploy plans none."""
+    source = _source("redeploy-probe")
+    first, found = _redeploy_statements(manager_client, database, source)
+    assert not found
+    for statement in first:
+        ch_client.command(statement)
+    assert CAPPED in _engine_full(ch_client, database, source.table_name)
+    _uncap(ch_client, database, source.table_name)
+
+    planned, found = _redeploy_statements(manager_client, database, source)
+
+    assert found
+    assert _settings_alters(planned) == [
+        f"ALTER TABLE `{database}`.`{source.table_name}` MODIFY SETTING {CAPPED}"
+    ]
+    for statement in planned:
+        ch_client.command(statement)
+    assert CAPPED in _engine_full(ch_client, database, source.table_name)
+    again, found = _redeploy_statements(manager_client, database, source)
+    assert found
+    assert _settings_alters(again) == []
+
+
+def test_a_redeploy_of_a_source_table_with_the_cap_plans_no_settings_alter(
+    ch_client, manager_client, database
+):
+    source = _source("redeploy-capped")
+    first, _ = _redeploy_statements(manager_client, database, source)
+    for statement in first:
+        ch_client.command(statement)
+
+    planned, found = _redeploy_statements(manager_client, database, source)
+
+    assert found
+    assert _settings_alters(planned) == []
 
 
 # -- core tables: the manifest render and ManifestApplier -------------------

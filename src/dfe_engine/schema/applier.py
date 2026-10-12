@@ -294,6 +294,34 @@ def read_engine_full(client: Any, database: str, table: str) -> str:
     return str(rows[0][0]) if rows and rows[0][0] is not None else ""
 
 
+def json_settings_move(
+    client: Any,
+    ddl_gen: DDLGenerator,
+    *,
+    database: str,
+    table: str,
+    columns: list[SchemaColumn],
+    cfg: DDLConfig,
+) -> SettingsMove:
+    """The ``MODIFY SETTING`` that gives a table the settings its JSON columns declare.
+
+    Takes the ON CLUSTER the TTL move takes. A table with no JSON column is not read
+    at all, and one already at the declared values moves nothing.
+
+    Raises:
+        SchemaApplyError: ClickHouse could not be read.
+    """
+    wanted = ddl_gen.json_settings(columns)
+    if not wanted:
+        return SettingsMove()
+    return settings_move(
+        target=table_target(database, table),
+        on_cluster=ddl_gen.on_cluster(cfg),
+        wanted=wanted,
+        live=settings_from_engine_full(read_engine_full(client, database, table)),
+    )
+
+
 def read_table_ttl(client: Any, database: str, table: str) -> LiveTtl | None:
     """The TTL of ``database.table`` as the server reports it; None when it has none.
 
@@ -527,19 +555,14 @@ class SchemaApplier:
         columns: list[SchemaColumn],
         cfg: DDLConfig,
     ) -> SettingsMove:
-        """Bring the live table settings to the ones its JSON columns declare.
-
-        Takes the ON CLUSTER the TTL reconcile takes. A table with no JSON column
-        is not read at all.
-        """
-        wanted = self._ddl_gen.json_settings(columns)
-        if not wanted:
-            return SettingsMove()
-        move = settings_move(
-            target=table_target(database, table),
-            on_cluster=self._ddl_gen.on_cluster(cfg),
-            wanted=wanted,
-            live=settings_from_engine_full(read_engine_full(self._client, database, table)),
+        """Bring the live table settings to the ones its JSON columns declare."""
+        move = json_settings_move(
+            self._client,
+            self._ddl_gen,
+            database=database,
+            table=table,
+            columns=columns,
+            cfg=cfg,
         )
         if move.statement:
             logger.info(f"{database}.{table}: set {', '.join(move.assignments)}")
