@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.31](https://github.com/hyperi-io/dfe-engine/compare/v1.22.30...v1.22.31) (2026-10-12)
+
+### Bug Fixes
+
+* stop reading an unreadable ClickHouse as an absent table ([#839](https://github.com/hyperi-io/dfe-engine/issues/839)) ([63059e8](https://github.com/hyperi-io/dfe-engine/commit/63059e89cb7880578e0dd3058fb84de795e75898))
+
 ## [1.22.30](https://github.com/hyperi-io/dfe-engine/compare/v1.22.29...v1.22.30) (2026-10-12)
 
 ### Bug Fixes
