@@ -13,6 +13,10 @@ table. Whether a deployed table actually took the pinned TTL and header, kept it
 engine, and reads that way in the drift report is a question only the server
 answers, so every source here is deployed through the API and every table
 assertion reads ``system.tables`` or ``system.columns``.
+
+Apply never rewrites a deployed version: it pins a new one, and the table takes
+the values when that version is deployed. A deployed version that already carries
+the values has its table brought to them by apply itself.
 """
 
 import shutil
@@ -56,6 +60,8 @@ APPLY = "/api/v1/system/defaults/apply"
 DRIFT = "/api/v1/system/defaults/drift"
 REBUILD = "needs a table rebuild; applies to new tables only"
 REFUSED = "ClickHouse could not be read or refused the change; the engine log has why"
+# A schema already on the deployment's table defaults, so apply pins nothing new on it.
+ON_THE_DEFAULTS = {"meta_schema": "meta/syslog", "ttl_days": 90, "engine": "MergeTree"}
 
 
 def _settings(tmp_path: Path, ch_params: dict, database: str) -> DFESettings:
@@ -170,8 +176,13 @@ def _deploy_source(
         },
     )
     assert created.status_code in (200, 201), created.text
-    deployed = stack.client.post(f"/api/v1/sources/{name}/deploy", headers=stack.headers)
-    assert deployed.status_code == 200, deployed.text
+    _deploy(stack, name)
+
+
+def _deploy(stack, name: str) -> dict:
+    resp = stack.client.post(f"/api/v1/sources/{name}/deploy", headers=stack.headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
 
 
 def _apply(stack, *names: str) -> dict:
@@ -191,7 +202,7 @@ def _patch(stack, body: dict) -> None:
     assert resp.status_code == 200, resp.text
 
 
-def test_apply_moves_a_deployed_tables_ttl_without_a_restart(ch_client, stack):
+def test_apply_pins_a_new_version_and_its_deploy_moves_the_ttl(ch_client, stack):
     db = stack.database
     _deploy_source(stack, "syslog-ttl", schema={"meta_schema": "meta/syslog", "ttl_days": 90})
     # The default reconcile leaves a table whose source pins its own TTL alone.
@@ -200,19 +211,28 @@ def test_apply_moves_a_deployed_tables_ttl_without_a_restart(ch_client, stack):
 
     body = _apply(stack, "syslog-ttl")
 
-    assert _live_ttl_days(ch_client, db, "syslog-ttl") == 91
-    assert body["updated"] == [{"source": "syslog-ttl", "version": "1.0.0"}]
+    assert _live_ttl_days(ch_client, db, "syslog-ttl") == 90
+    assert body["updated"] == [{"source": "syslog-ttl", "version": "2.0.0"}]
     assert body["live"] == [
         {
             "source": "syslog-ttl",
-            "status": "altered",
+            "status": "not_deployed",
             "table": f"{db}.syslog-ttl",
-            "ttl": "90 -> 91",
+            "ttl": None,
             "columns_added": [],
             "not_applied": [],
-            "reason": None,
+            "reason": (
+                "version 2.0.0 carries these values and version 1.0.0 is deployed; "
+                "deploying 2.0.0 applies them"
+            ),
         }
     ]
+    assert _drift(stack)["syslog-ttl"]["ttl_days"] == {"stored": 91, "default": 91, "live": 90}
+
+    deployed = _deploy(stack, "syslog-ttl")
+
+    assert _live_ttl_days(ch_client, db, "syslog-ttl") == 91
+    assert deployed["ttl_change"]["move"] == "90 -> 91"
     assert "syslog-ttl" not in _drift(stack)
 
 
@@ -230,21 +250,23 @@ def test_drift_reads_the_ttl_the_table_runs_not_the_one_the_source_stores(ch_cli
     assert drift["ttl_days"] == {"stored": 91, "default": 91, "live": 90}
 
 
-def test_apply_adds_the_pinned_headers_columns_to_a_deployed_table(ch_client, stack):
+def test_deploying_the_applied_header_adds_its_columns_to_the_table(ch_client, stack):
     db = stack.database
     _deploy_source(stack, "syslog-minimal", header={"type": "minimal", "version": "1.0.0"})
-    before = _columns(ch_client, db, "syslog-minimal")
+    before = set(_columns(ch_client, db, "syslog-minimal"))
     header = {col.name for col in SchemaLoader.load_profile("timeseries", profile_version="1.0.0")}
-    missing = header - set(before)
+    missing = header - before
     assert {"_timestamp_received", "_tags"} <= missing
 
     body = _apply(stack, "syslog-minimal")
 
-    assert header <= set(_columns(ch_client, db, "syslog-minimal"))
-    live = body["live"][0]
-    assert live["status"] == "altered"
-    assert set(live["columns_added"]) == missing
-    assert live["not_applied"] == []
+    assert set(_columns(ch_client, db, "syslog-minimal")) == before
+    assert body["updated"] == [{"source": "syslog-minimal", "version": "2.0.0"}]
+    assert body["live"][0]["status"] == "not_deployed"
+
+    _deploy(stack, "syslog-minimal")
+
+    assert set(_columns(ch_client, db, "syslog-minimal")) - before == missing
     assert "syslog-minimal" not in _drift(stack)
 
 
@@ -252,7 +274,11 @@ def test_an_engine_change_needs_a_rebuild_and_stays_drift(ch_client, stack):
     db = stack.database
     _deploy_source(stack, "syslog-engine")
     _patch(stack, {"engine": "ReplacingMergeTree"})
+    staged = _apply(stack, "syslog-engine")
+    assert staged["updated"] == [{"source": "syslog-engine", "version": "2.0.0"}]
+    _deploy(stack, "syslog-engine")
 
+    # The deployed version now carries the engine, so apply goes to the table.
     body = _apply(stack, "syslog-engine")
 
     engine, _ = _table(ch_client, db, "syslog-engine")
@@ -265,7 +291,7 @@ def test_an_engine_change_needs_a_rebuild_and_stays_drift(ch_client, stack):
         "live": "MergeTree",
     }
     assert drift["ttl_days"]["live"] == 90
-    assert body["updated"] == [{"source": "syslog-engine", "version": "1.0.0"}]
+    assert body["unchanged"] == [{"source": "syslog-engine", "version": "2.0.0"}]
     live = body["live"][0]
     assert live["status"] == "unchanged"
     assert live["not_applied"] == [{"field": "engine", "reason": REBUILD}]
@@ -273,7 +299,7 @@ def test_an_engine_change_needs_a_rebuild_and_stays_drift(ch_client, stack):
 
 def test_an_existing_header_column_keeps_its_nullability(ch_client, stack):
     db = stack.database
-    _deploy_source(stack, "syslog-nullable")
+    _deploy_source(stack, "syslog-nullable", schema=ON_THE_DEFAULTS)
     # The header declares _uuid Nullable(UUID); the table now holds it non-nullable.
     ch_client.command(f"ALTER TABLE `{db}`.`syslog-nullable` MODIFY COLUMN `_uuid` UUID")
     retyped = {"_uuid"}
@@ -282,6 +308,7 @@ def test_an_existing_header_column_keeps_its_nullability(ch_client, stack):
     body = _apply(stack, "syslog-nullable")
 
     assert _columns(ch_client, db, "syslog-nullable")["_uuid"] == before["_uuid"]
+    assert body["unchanged"] == [{"source": "syslog-nullable", "version": "1.0.0"}]
     live = body["live"][0]
     assert live["status"] == "unchanged"
     [kept] = live["not_applied"]
@@ -325,12 +352,16 @@ def test_a_header_named_by_its_registry_path_is_not_drift(ch_client, stack):
 
 def test_one_table_clickhouse_refuses_does_not_hide_the_others(ch_client, stack):
     db = stack.database
-    _deploy_source(stack, "syslog-good", schema={"meta_schema": "meta/syslog", "ttl_days": 90})
-    _deploy_source(stack, "syslog-bad", schema={"meta_schema": "meta/syslog", "ttl_days": 90})
+    _patch(stack, {"ttl_days": 91})
+    schema = {**ON_THE_DEFAULTS, "ttl_days": 91}
+    _deploy_source(stack, "syslog-good", schema=schema)
+    _deploy_source(stack, "syslog-bad", schema=schema)
+    ch_client.command(
+        f"ALTER TABLE `{db}`.`syslog-good` MODIFY TTL _timestamp_load + INTERVAL 90 DAY"
+    )
     # A view under the deployed table's name: every ALTER on it is refused.
     ch_client.command(f"DROP TABLE `{db}`.`syslog-bad` SYNC")
     ch_client.command(f"CREATE VIEW `{db}`.`syslog-bad` AS SELECT 1 AS x")
-    _patch(stack, {"ttl_days": 91})
 
     captured: list = []
     handler_id = logger.add(captured.append, level="WARNING")
@@ -340,7 +371,8 @@ def test_one_table_clickhouse_refuses_does_not_hide_the_others(ch_client, stack)
         logger.remove(handler_id)
 
     assert _live_ttl_days(ch_client, db, "syslog-good") == 91
-    assert body["updated"] == [
+    assert body["updated"] == []
+    assert body["unchanged"] == [
         {"source": "syslog-bad", "version": "1.0.0"},
         {"source": "syslog-good", "version": "1.0.0"},
     ]
