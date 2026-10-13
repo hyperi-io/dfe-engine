@@ -8,14 +8,13 @@
 
 """How the cross-repo contract tests find what a producer ships.
 
-A checkout wins, an unreadable public contract fails in CI and skips elsewhere, a private
-one GitHub hides skips everywhere, a token stays on GitHub, and every pin is a release.
+A checkout wins, an unreadable contract fails in CI and skips elsewhere, a token stays on
+GitHub, and every pin is a release.
 The last test reads GitHub and warns when a producer has released a change to a file the
 engine still pins at an older release.
 """
 
 import contextlib
-import dataclasses
 import http.server
 import re
 import threading
@@ -25,15 +24,12 @@ import pytest
 from tests.support import producer_contract
 from tests.support.loopback import stop_server
 from tests.support.producer_contract import (
-    DFE_LOADER,
     PRODUCERS,
     SCALO_RS,
     ContractPinWarning,
-    ContractUnreadableError,
     Producer,
     check_pin,
     fetch_at,
-    hidden_private_reason,
     in_ci,
     producer_file,
 )
@@ -41,17 +37,12 @@ from tests.support.producer_contract import (
 # Nothing listens on the discard port, so a fetch fails at once without leaving the host.
 _UNREACHABLE = "http://127.0.0.1:9"
 _CEL = SCALO_RS.files[0]
-_PUBLIC = Producer(
-    repo="public-probe", ref="v0.0.0", dir_env="PUBLIC_PROBE_DIR", files=(_CEL,), private=False
-)
-_PRIVATE = dataclasses.replace(
-    _PUBLIC, repo="private-probe", dir_env="PRIVATE_PROBE_DIR", private=True
-)
+_PUBLIC = Producer(repo="public-probe", ref="v0.0.0", dir_env="PUBLIC_PROBE_DIR", files=(_CEL,))
 
 
 @pytest.fixture
 def no_checkout_named(monkeypatch):
-    for producer in (SCALO_RS, _PUBLIC, _PRIVATE):
+    for producer in (SCALO_RS, _PUBLIC):
         monkeypatch.delenv(producer.dir_env, raising=False)
     # One refused connection says as much as three, without the backoff between them.
     monkeypatch.setattr(producer_contract, "_ATTEMPTS", 1)
@@ -151,37 +142,6 @@ def test_a_public_producer_github_hides_still_fails_in_ci(tmp_path, local_server
         producer_file(_PUBLIC, _CEL, checkouts=tmp_path, base_url=base_url)
 
 
-@pytest.mark.usefixtures("no_checkout_named", "in_a_ci_run")
-def test_a_private_producer_github_hides_skips_even_in_ci(tmp_path, local_server):
-    base_url, _ = local_server(404)
-    with pytest.raises(pytest.skip.Exception) as skipped:
-        producer_file(_PRIVATE, _CEL, checkouts=tmp_path, base_url=base_url)
-    assert skipped.value.msg == (
-        "private-probe is private until GA; set GH_TOKEN with read on it, or it runs once "
-        "the repo is public (dfe-engine #553)"
-    )
-
-
-@pytest.mark.usefixtures("no_checkout_named", "in_a_ci_run")
-def test_a_private_producer_that_cannot_connect_still_fails_in_ci(tmp_path):
-    # Only GitHub's 404 means "private"; a refused connection is a real failure.
-    with pytest.raises(pytest.fail.Exception, match="ConnectError"):
-        producer_file(_PRIVATE, _CEL, checkouts=tmp_path, base_url=_UNREACHABLE)
-
-
-def test_the_dfe_loader_skip_says_why_and_when_it_ends():
-    assert hidden_private_reason(DFE_LOADER, ContractUnreadableError("hidden", 404)) == (
-        "dfe-loader is private until GA; set GH_TOKEN with read on it, or it runs once the "
-        "repo is public (dfe-engine #553)"
-    )
-
-
-def test_only_the_repos_private_until_ga_may_skip_in_ci():
-    # Marking a public producer private would let its contract skip in CI unnoticed.
-    private = {producer.repo for producer in PRODUCERS if producer.private}
-    assert private == {"dfe-loader", "dfe-transform-vrl"}
-
-
 def test_a_token_is_never_sent_off_github(monkeypatch, local_server):
     base_url, seen = local_server(200, b"served")
     monkeypatch.setenv("GITHUB_TOKEN", "held-for-github")
@@ -200,14 +160,6 @@ def test_every_pin_is_a_release_tag(producer: Producer):
     assert re.fullmatch(r"v\d+\.\d+\.\d+", producer.ref), (
         f"{producer.repo} is pinned to {producer.ref!r}, not a release tag"
     )
-
-
-@pytest.mark.usefixtures("in_a_ci_run")
-def test_a_private_pin_check_github_hides_stays_quiet(local_server, recwarn):
-    base_url, _ = local_server(404)
-    with pytest.raises(pytest.skip.Exception, match="private-probe is private until GA"):
-        check_pin(_PRIVATE, api_base=base_url, base_url=base_url)
-    assert not [w for w in recwarn if issubclass(w.category, ContractPinWarning)]
 
 
 @pytest.mark.usefixtures("in_a_ci_run")

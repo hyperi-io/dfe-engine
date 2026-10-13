@@ -14,10 +14,16 @@
   ],
   "packageRules": [
     {
-      "description": "Held on their current lines until after GA: their next releases change behaviour the engine relies on. The reason for each hold sits beside its dependency in pyproject.toml.",
-      "matchPackageNames": ["pysigma", "apprise", "scim2-models"],
+      "description": "Held below 2.0 until after GA: their next majors change behaviour the engine relies on. Updates inside the held line, security fixes included, still arrive. The reason for each hold sits beside its dependency in pyproject.toml.",
+      "matchPackageNames": ["pysigma", "apprise"],
       "minimumReleaseAge": "7 days",
-      "enabled": false
+      "allowedVersions": "<2"
+    },
+    {
+      "description": "Held on 0.6 until after GA: later 0.x minors change the SCIM models' API. Patch updates on 0.6 still arrive.",
+      "matchPackageNames": ["scim2-models"],
+      "minimumReleaseAge": "7 days",
+      "allowedVersions": "<0.7"
     }
   ]
 }
