@@ -934,15 +934,8 @@ def create_instance(
     The overlay's presence is what the layer2-apps ApplicationSet turns into an Argo
     Application, so this is the whole deployment step. A new instance stores nothing,
     so a masked value copied from another instance's read is a 400 ``masked_value``.
-    A per-config instance name too long for its Helm release name is a 422
-    ``name_too_long`` naming how many characters this app takes.
     """
     app = _resolve(service, body.instance)
-    budget = scaling.instance_name_budget(app.descriptor, _deploy_target(request))
-    try:
-        instances.check_name_budget(app, budget)
-    except instances.InstanceNameTooLongError as exc:
-        raise HTTPException(422, detail={"code": "name_too_long", "message": str(exc)}) from exc
     values = _restored({}, body.values)
     gc = _gitcrud(request)
     if instances.exists(gc, app):

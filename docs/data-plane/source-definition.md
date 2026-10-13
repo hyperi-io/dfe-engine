@@ -205,7 +205,6 @@ emits the schema YAML, which the source then names. The mapping table is in
 | What | Rule |
 |---|---|
 | `_source` label | unique, and `[a-z]([a-z0-9-]*[a-z0-9])?` up to 40 chars |
-| `_source` label, per-config apps | on Kubernetes, short enough for each fetcher or transform instance's Helm release name: 21 chars with a fetcher, 15 with `vrl`, 12 with `vector`, 11 with `elastic`. Compose has no such cap. Refused with 422 `validation_error` naming the limit |
 | match rule | no conflict across non-disabled sources (same field+operator+value); a dormant source HOLDS its match, only disabling releases it |
 | match operator | receiver-evaluable (`equals` or `exists`); `always` only on the reserved `main` source |
 | fetcher route | must not name its own source |
