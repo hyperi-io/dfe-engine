@@ -215,7 +215,12 @@ class QueryShim:
             rows = result.result_rows
             raw = rows[0][int(cfg.get("result_field", 0))] if rows else 0
             value = self._clamp(int(raw), cfg)
-            self._cache[cache_key] = value
+            # A failure already returns cold_hold when nothing is held, so holding it
+            # adds no information and a flood of distinct param values would grow the cache.
+            if value == cold_hold:
+                self._cache.pop(cache_key, None)
+            else:
+                self._cache[cache_key] = value
             return value
         except Exception as exc:  # fail-safe: a metric failure must NEVER reach KEDA
             # Drop a possibly-broken client so the next poll rebuilds it. Last-good
