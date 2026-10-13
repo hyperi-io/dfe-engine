@@ -3,6 +3,14 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.34](https://github.com/hyperi-io/dfe-engine/compare/v1.22.33...v1.22.34) (2026-10-13)
+
+### Bug Fixes
+
+* fix source application settings ([#848](https://github.com/hyperi-io/dfe-engine/issues/848)) ([0b06e9e](https://github.com/hyperi-io/dfe-engine/commit/0b06e9edb1d886ea3cc99d90347c2002c23b491f))
+* scalo 2.31.10, dfe-schemas 0.2.11, two fixes ([#849](https://github.com/hyperi-io/dfe-engine/issues/849)) ([5b62414](https://github.com/hyperi-io/dfe-engine/commit/5b62414187af6a86f3b6fa52713ff8dd67117350))
+* write the instance index by rename ([#847](https://github.com/hyperi-io/dfe-engine/issues/847)) ([20598ad](https://github.com/hyperi-io/dfe-engine/commit/20598ad2a30d0e156f305ec7f59ac392fad514f6))
+
 ## [1.22.33](https://github.com/hyperi-io/dfe-engine/compare/v1.22.32...v1.22.33) (2026-10-13)
 
 ### Bug Fixes
