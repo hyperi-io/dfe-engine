@@ -17591,7 +17591,7 @@
           "App Management"
         ],
         "summary": "Create Instance",
-        "description": "Deploy an instance by creating its values overlay.\n\nThe overlay's presence is what the layer2-apps ApplicationSet turns into an Argo\nApplication, so this is the whole deployment step. A new instance stores nothing,\nso a masked value copied from another instance's read is a 400 ``masked_value``.\nA per-config instance name too long for its Helm release name is a 422\n``name_too_long`` naming how many characters this app takes.",
+        "description": "Deploy an instance by creating its values overlay.\n\nThe overlay's presence is what the layer2-apps ApplicationSet turns into an Argo\nApplication, so this is the whole deployment step. A new instance stores nothing,\nso a masked value copied from another instance's read is a 400 ``masked_value``.",
         "operationId": "create_instance_api_v1_apps__service__instances_post",
         "parameters": [
           {

@@ -16,8 +16,7 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
-from dfe_engine.api.e2e.seed.apps import TRANSFORM_ENGINES, TRANSFORM_SEED_SOURCES
-from dfe_engine.appmgmt import catalogue, scaling
+from dfe_engine.api.e2e.seed.apps import TRANSFORM_ENGINES
 from dfe_engine.auth.bootstrap import admin_account_password
 from dfe_engine.settings import (
     APISettings,
@@ -431,7 +430,7 @@ class TestSeedThreeTransforms:
         headers = _admin(appmgmt_client)
 
         for engine, service, _variant in TRANSFORM_ENGINES:
-            name = TRANSFORM_SEED_SOURCES[engine]
+            name = f"filebeat{engine}"
             source = _get(appmgmt_client, f"{_SOURCES}/{name}", headers)
             version = source["versions"][source["current"]]
             assert version["transform"]["engine"] == engine
@@ -442,7 +441,7 @@ class TestSeedThreeTransforms:
         headers = _admin(appmgmt_client)
 
         def variant_of(engine: str) -> str | None:
-            source = _get(appmgmt_client, f"{_SOURCES}/{TRANSFORM_SEED_SOURCES[engine]}", headers)
+            source = _get(appmgmt_client, f"{_SOURCES}/filebeat{engine}", headers)
             return source["versions"][source["current"]]["transform"]["variant"]
 
         # dfe-transform-elastic reads no authored files and selects a compiled-in
@@ -457,18 +456,10 @@ class TestSeedThreeTransforms:
         headers = _admin(appmgmt_client)
 
         assert sorted(_operator_sources(appmgmt_client, headers)) == [
-            "fbelastic",
-            "fbvector",
+            "filebeatelastic",
+            "filebeatvector",
             "filebeatvrl",
         ]
-
-    @pytest.mark.parametrize(("engine", "service", "_variant"), TRANSFORM_ENGINES)
-    def test_every_seeded_name_renders_on_kubernetes(self, engine, service, _variant):
-        budget = scaling.instance_name_budget(
-            catalogue.descriptor(service), scaling.DeployTarget.KUBERNETES
-        )
-        assert budget is not None
-        assert len(TRANSFORM_SEED_SOURCES[engine]) <= budget
 
     def test_reset_all_removes_all_three(self, appmgmt_client):
         _seed(appmgmt_client, "seed_three_transforms")

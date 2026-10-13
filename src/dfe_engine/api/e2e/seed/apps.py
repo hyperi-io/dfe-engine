@@ -46,13 +46,6 @@ dfe-transform-elastic reads no authored files and picks its program by name, so 
 carries a variant while the two file-driven apps take None.
 """
 
-TRANSFORM_SEED_SOURCES = {"vrl": "filebeatvrl", "vector": "fbvector", "elastic": "fbelastic"}
-"""The source each engine's seeded instance is named for.
-
-Each fits its app's Helm release name on Kubernetes (``scaling.instance_name_budget``),
-so the seeded instances render there and not only on Compose.
-"""
-
 TRANSFORM_FILE_SET = "transforms"
 """The file set the seeded program and the seeded library link land in."""
 

@@ -743,11 +743,11 @@ class TestAdversarialRegressions:
         assert resp.json()["code"] == "policy_violation"
 
     def test_a_long_instance_name_deploys_and_undeploys(self, client, app, admin_headers, tmp_path):
-        # The service plus the longest instance its Helm release name leaves overruns
-        # the 50-character commit subject on its own, so the scope has to be trimmed.
+        # A service plus a legal 40-character instance overruns the 50-character
+        # commit subject on its own, so the scope has to be trimmed before it does.
         _wire(app, tmp_path)
         service = "dfe-transform-vector"
-        instance = "cust-alpha-1"
+        instance = "customer-alpha-primary"
         _live_source(client, admin_headers, instance, {"engine": "vector"})
         created = client.post(
             f"/api/v1/apps/{service}/instances",
@@ -769,9 +769,7 @@ class TestAdversarialRegressions:
         )
 
     def test_the_longest_legal_instance_name_deploys(self, client, app, admin_headers, tmp_path):
-        # Compose renders no Helm release, so only the DNS-label cap applies there.
-        _wire(app, tmp_path, target="docker")
-        app.state.settings.deployment.app_config_dir = str(tmp_path / "app-config")
+        _wire(app, tmp_path)
         service = "dfe-transform-vector"
         # The source-name cap is this same 40, so the longest legal instance is
         # still a nameable source.
@@ -787,6 +785,29 @@ class TestAdversarialRegressions:
             client.delete(f"/api/v1/apps/{service}/{instance}", headers=admin_headers).status_code
             == 200
         )
+
+    def test_a_40_character_elastic_instance_deploys_on_kubernetes(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The longest service name, so the longest Application name: past Helm's
+        # 53-character release cap, which the layer2-apps ApplicationSet bounds.
+        from dfe_engine.api.deps import _registries
+        from dfe_engine.source.registry import SourceRegistry
+
+        gc = _wire(app, tmp_path)
+        # Only a registry writing to the deploy repo runs the source save gate.
+        _registries["source"] = SourceRegistry(crud=gc)
+        service = "dfe-transform-elastic"
+        instance = "customer-alpha-primary-ingest-0123456789"
+        assert len(instance) == 40
+        assert _live_source(client, admin_headers, instance, {"engine": "elastic"})
+        created = client.post(
+            f"/api/v1/apps/{service}/instances",
+            json={"instance": instance, "values": {}},
+            headers=admin_headers,
+        )
+        assert created.status_code == 200, created.text
+        assert f"{service}-{instance}-values" in gc.list("helmvars")
 
     def test_a_scale_pool_app_refuses_a_second_instance(self, client, app, admin_headers, tmp_path):
         # dfe-loader's chart names its objects from the component alone, so a second
@@ -892,74 +913,6 @@ class TestAdversarialRegressions:
             headers=admin_headers,
         )
         assert "component" not in gc.get("helmvars", "dfe-loader-default-values")
-
-
-class TestNameBudget:
-    """A per-config instance name has to fit the Helm release name Argo CD builds from it.
-
-    The regression: an instance whose release name ran past Helm's 53 characters
-    was committed with a 200, and Argo then refused the Application with nothing
-    telling the operator.
-    """
-
-    VECTOR = "dfe-transform-vector"
-    BUDGET = 12
-
-    def _create(self, client, headers, service: str, instance: str):
-        return client.post(
-            f"/api/v1/apps/{service}/instances",
-            json={"instance": instance, "values": {}},
-            headers=headers,
-        )
-
-    def test_a_name_over_the_budget_is_422_naming_it(self, client, app, admin_headers, tmp_path):
-        gc = _wire(app, tmp_path)
-        name = "umbrellavector"
-        assert _live_source(client, admin_headers, name, {"engine": "vector"})
-
-        resp = self._create(client, admin_headers, self.VECTOR, name)
-
-        assert resp.status_code == 422, resp.text
-        assert resp.json()["code"] == "name_too_long"
-        assert f"at most {self.BUDGET} for {self.VECTOR}" in resp.json()["message"]
-        assert f"{self.VECTOR}-{name}-values" not in gc.list("helmvars")
-
-    def test_a_name_at_the_budget_deploys(self, client, app, admin_headers, tmp_path):
-        gc = _wire(app, tmp_path)
-        name = "v" * self.BUDGET
-        assert _live_source(client, admin_headers, name, {"engine": "vector"})
-
-        resp = self._create(client, admin_headers, self.VECTOR, name)
-
-        assert resp.status_code == 200, resp.text
-        assert f"{self.VECTOR}-{name}-values" in gc.list("helmvars")
-
-    def test_a_stack_wide_app_is_not_held_to_it(self, client, app, admin_headers, tmp_path):
-        _wire(app, tmp_path)
-        resp = self._create(client, admin_headers, "dfe-loader", "l" * 40)
-        assert resp.status_code == 200, resp.text
-
-    def test_an_instance_deployed_before_the_budget_can_still_be_read_and_removed(
-        self, client, app, admin_headers, tmp_path
-    ):
-        from dfe_engine.appmgmt import instances
-
-        gc = _wire(app, tmp_path)
-        stuck = instances.instance_of(self.VECTOR, "umbrellavector")
-        gc.put(
-            "helmvars",
-            stuck.overlay_name,
-            instances.initial_overlay(stuck),
-            "test",
-            message="test: an instance committed before the budget",
-        )
-
-        base = f"/api/v1/apps/{self.VECTOR}/umbrellavector"
-        assert client.get(base, headers=admin_headers).status_code == 200
-        removed = client.delete(base, headers=admin_headers)
-
-        assert removed.status_code == 200, removed.text
-        assert stuck.overlay_name not in gc.list("helmvars")
 
 
 class TestNotDeployed:
