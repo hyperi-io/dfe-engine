@@ -694,7 +694,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.8,<3" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.9,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.17.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -2235,7 +2235,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.31.8"
+version = "2.31.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2253,9 +2253,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/25/1f/a09dcdf747690943699b076c4615d506f006f2cd74fd26729b05656c4f0f/scalo-2.31.8.tar.gz", hash = "sha256:8a0214dfbf22da960e4c73d42ffc61da279be9b7e1e7fb987f867deb2a8ab405", size = 355119, upload-time = "2026-10-11T20:43:16.567Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/52/c8/c13403de3eb366029d2ace93aa8f80e3b34464fd06ec6cc88e39fd540877/scalo-2.31.9.tar.gz", hash = "sha256:bb6e59e4dfcf6c15826ef1c38215c1afccf85680f1334ee80ab147d869698dc4", size = 355653, upload-time = "2026-10-13T02:07:19.952Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/4b/515ca2d02a31aeaae6f60f0510592828fb8708d2a3f6fcd73a46c9505de0/scalo-2.31.8-py3-none-any.whl", hash = "sha256:0ba1aa031ecc692e45ef8e9d802fd53c8367bae7e04b6688d43f9eec19b40ca0", size = 427426, upload-time = "2026-10-11T20:43:14.732Z" },
+    { url = "https://files.pythonhosted.org/packages/f3/18/e69c2f0df85b29424e20c6cbd139511f918ba0cbf6c227ff29581e35a4ca/scalo-2.31.9-py3-none-any.whl", hash = "sha256:5114ea630d6ce44427a0772eaadfc3b15245a93724b72de2c83e5cf8f6c57669", size = 427954, upload-time = "2026-10-13T02:07:18.04Z" },
 ]
 
 [package.optional-dependencies]

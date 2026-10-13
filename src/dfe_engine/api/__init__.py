@@ -23,6 +23,7 @@ The other console scripts on the engine image are plain Typer apps, so they call
 import os
 
 from scalo.cli import CommonArgs
+from scalo.config import get_config
 
 from dfe_engine.api.app import create_app
 
@@ -35,9 +36,10 @@ def init_scalo_logger(service_name: str, *, otel_tracing: bool) -> None:
 
     The ``dfe-engine`` daemon gets this from ServiceApp's ``run``. A plain Typer app
     does not, so without this call every line goes through loguru's bare default
-    handler: no scalo format, no secret scrubbing, no keyword fields. ``LOG_LEVEL``
-    and ``LOG_FORMAT`` fill the slots the daemon's flags read them into, and the
-    config cascade loads under the daemon's prefix.
+    handler: no scalo format, no secret scrubbing, no keyword fields. ``./.env``
+    loads first, as ``ServiceApp.cli()`` loads it. Then ``LOG_LEVEL`` and
+    ``LOG_FORMAT`` fill the slots the daemon's flags read them into, and the config
+    cascade loads under the daemon's prefix.
 
     Args:
         service_name: ``service.name`` on exported spans.
@@ -48,6 +50,8 @@ def init_scalo_logger(service_name: str, *, otel_tracing: bool) -> None:
         scalo.cli.error.ConfigError: If the config cascade cannot be loaded.
         scalo.cli.error.LoggerError: If the logger cannot be initialised.
     """
+    # Before the prefix is set, so a bare DOTENV_CASCADE adds ~/.env as it does for the daemon.
+    get_config()
     args = CommonArgs(
         log_level=os.environ.get("LOG_LEVEL"),
         log_format=os.environ.get("LOG_FORMAT"),
