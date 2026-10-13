@@ -124,10 +124,10 @@ def other_usable_admin_exists(
 ) -> bool:
     """True when a usable system-admin account other than *excluding* remains.
 
-    The precondition for deleting an admin-role account: at least one other
-    enabled, unblocked account that holds the admin role through a system-scope
-    group must stay. Bootstrap admin and ``breakglass`` count when they can
-    sign in -- the floor is "someone can still run the deployment", not
+    The precondition for deleting or deactivating an admin-role account: at
+    least one other enabled, unblocked account that holds the admin role through
+    a system-scope group must stay. Bootstrap admin and ``breakglass`` count when
+    they can sign in -- the floor is "someone can still run the deployment", not
     "someone other than the recovery pair".
     """
     if account_store is None or group_store is None:
@@ -143,6 +143,34 @@ def other_usable_admin_exists(
         if account_holds_system_admin(account, groups, bindings=bindings):
             return True
     return False
+
+
+def locks_out_last_admin(
+    account: Account,
+    account_store: AccountStore | DocuStoreAccountStore | None,
+    group_store: GroupStore | DocuStoreGroupStore | None,
+    *,
+    bindings: Mapping[str, str],
+    enabled: bool | None = None,
+    blocked: bool | None = None,
+) -> bool:
+    """True when disabling or blocking *account* would leave no usable system admin.
+
+    No-op when the write does not lock the account out, when it already cannot
+    hold a session, or when it does not hold the system admin role.
+    """
+    if enabled is not False and blocked is not True:
+        return False
+    if account_store is None or group_store is None:
+        return False
+    if not _usable_admin_session(account):
+        return False
+    groups = group_store.list()
+    if not account_holds_system_admin(account, groups, bindings=bindings):
+        return False
+    return not other_usable_admin_exists(
+        account_store, group_store, bindings=bindings, excluding=account.username
+    )
 
 
 def another_admin_exists(

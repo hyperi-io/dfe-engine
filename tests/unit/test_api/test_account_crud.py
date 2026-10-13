@@ -760,6 +760,91 @@ class TestTheGroupsAnAccountShows:
         assert reenabled.json()["enabled"] is True
         assert reenabled.json()["disabled_at"] == ""
 
+    def test_deactivate_admin_is_allowed_when_another_usable_admin_remains(
+        self, recovery_accounts, client, admin_headers
+    ):
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        resp = client.put(
+            "/api/v1/auth/accounts/ops",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["enabled"] is False
+
+    def test_deactivate_last_usable_admin_is_refused(
+        self, recovery_accounts, client, admin_headers, app
+    ):
+        from dfe_engine.api.deps import create_access_token
+
+        store = recovery_accounts.state.account_store
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        store.update("admin", enabled=False, allow_protected=True)
+        store.update("breakglass", enabled=False, allow_protected=True)
+        ops_headers = {
+            "Authorization": (
+                "Bearer "
+                + create_access_token(
+                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
+                    settings=app.state.settings,
+                )
+            )
+        }
+
+        resp = client.put(
+            "/api/v1/auth/accounts/ops",
+            json={"enabled": False},
+            headers=ops_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "last_admin"
+        assert store.get("ops").enabled is True
+
+    def test_block_last_usable_admin_is_refused(
+        self, recovery_accounts, client, admin_headers, app
+    ):
+        from dfe_engine.api.deps import create_access_token
+
+        store = recovery_accounts.state.account_store
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        store.update("admin", enabled=False, allow_protected=True)
+        store.update("breakglass", enabled=False, allow_protected=True)
+        ops_headers = {
+            "Authorization": (
+                "Bearer "
+                + create_access_token(
+                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
+                    settings=app.state.settings,
+                )
+            )
+        }
+
+        resp = client.put(
+            "/api/v1/auth/accounts/ops",
+            json={"blocked": True},
+            headers=ops_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "last_admin"
+        assert store.get("ops").blocked is False
+
     def test_update_blocked(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",

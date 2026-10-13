@@ -683,6 +683,14 @@ async def get_account(
     "/{username}",
     response_model=AccountResponse,
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
+    responses={
+        409: {
+            "model": ErrorResponse,
+            "description": (
+                "last_admin: disabling or blocking this account would leave no usable system admin"
+            ),
+        },
+    },
 )
 async def update_account(
     username: str,
@@ -691,16 +699,38 @@ async def update_account(
     request: Request,
     settings: Settings,
 ):
-    """Update account groups, enabled/blocked status, or contact fields (admin only)."""
+    """Update account groups, enabled/blocked status, or contact fields (admin only).
+
+    Refused when disabling or blocking would leave no usable system-admin account.
+    """
+    from dfe_engine.auth import admin_retirement
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
     existing = _require_account(store, username)
+    bindings = provider_bindings(request)
+    if admin_retirement.locks_out_last_admin(
+        existing,
+        store,
+        group_store,
+        bindings=bindings,
+        enabled=body.enabled,
+        blocked=body.blocked,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "last_admin",
+                "message": (
+                    f"Cannot deactivate '{username}': it is the last usable account "
+                    "with the system admin role"
+                ),
+            },
+        )
     if body.groups is not None:
         groups = group_store.list()
-        bindings = provider_bindings(request)
         listed = {group.name for group in groups if username in group.members}
         held_after = groups_held_after(
             account=existing.model_copy(update={"groups": body.groups}),

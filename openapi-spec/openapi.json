@@ -875,7 +875,7 @@
           "Accounts"
         ],
         "summary": "Update Account",
-        "description": "Update account groups, enabled/blocked status, or contact fields (admin only).",
+        "description": "Update account groups, enabled/blocked status, or contact fields (admin only).\n\nRefused when disabling or blocking would leave no usable system-admin account.",
         "operationId": "update_account_api_v1_auth_accounts__username__put",
         "parameters": [
           {
@@ -921,6 +921,16 @@
           },
           "403": {
             "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "last_admin: disabling or blocking this account would leave no usable system admin",
             "content": {
               "application/json": {
                 "schema": {

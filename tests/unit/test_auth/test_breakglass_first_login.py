@@ -608,6 +608,24 @@ class TestAnotherAdminExists:
             is False
         )
 
+    def test_locks_out_last_admin_on_disable_or_block(self, tmp_path: Path, crud):
+        store, groups = self._stores(tmp_path, crud)
+        alice = store.create("alice", MINTED_SEED, groups=["dfe-admins"])
+        groups.add_member("dfe-admins", "alice")
+        store.update("admin", enabled=False, allow_protected=True)
+        store.update("breakglass", enabled=False, allow_protected=True)
+        alice = store.get("alice")
+
+        assert admin_retirement.locks_out_last_admin(
+            alice, store, groups, bindings={}, enabled=False
+        )
+        assert admin_retirement.locks_out_last_admin(
+            alice, store, groups, bindings={}, blocked=True
+        )
+        assert not admin_retirement.locks_out_last_admin(
+            alice, store, groups, bindings={}, enabled=True
+        )
+
     def test_an_admin_group_named_only_in_the_account_record_does_not_count(
         self, tmp_path: Path, crud
     ):

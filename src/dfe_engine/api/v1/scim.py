@@ -358,12 +358,15 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
 )
 async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Replace a user's writable attributes (SCIM PUT)."""
+    from dfe_engine.auth import admin_retirement
+
     body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    if store.get(user_id) is None:
+    existing = store.get(user_id)
+    if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
     try:
         inbound = ScimUser.model_validate(body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST)
@@ -371,6 +374,20 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
         return _invalid_body("User", exc)
 
     fields = scim_user_to_account_fields(inbound)
+    if admin_retirement.locks_out_last_admin(
+        existing,
+        store,
+        group_store,
+        bindings=provider_bindings(request),
+        enabled=bool(fields["enabled"]),
+    ):
+        return scim_error(
+            409,
+            (
+                f"Cannot deactivate '{user_id}': it is the last usable account "
+                "with the system admin role"
+            ),
+        )
     store.update(
         user_id,
         enabled=fields["enabled"],
@@ -392,12 +409,15 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
 )
 async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Apply a PatchOp - primarily the ``active`` toggle IdPs use to deprovision."""
+    from dfe_engine.auth import admin_retirement
+
     body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    if store.get(user_id) is None:
+    existing = store.get(user_id)
+    if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
     try:
         patch = PatchOp[ScimUser].model_validate(body, scim_ctx=Context.RESOURCE_PATCH_REQUEST)
@@ -411,13 +431,26 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
         value = op.value
         if path == "active":
             enabled = bool(value)
-            store.update(user_id, enabled=enabled)
         elif path == "" and isinstance(value, dict) and "active" in value:
             enabled = bool(value["active"])
-            store.update(user_id, enabled=enabled)
         # Other paths (userName is the immutable key; group membership is managed
         # on /Groups) are ignored - the record stays consistent either way.
     if enabled is not None:
+        if admin_retirement.locks_out_last_admin(
+            existing,
+            store,
+            group_store,
+            bindings=provider_bindings(request),
+            enabled=enabled,
+        ):
+            return scim_error(
+                409,
+                (
+                    f"Cannot deactivate '{user_id}': it is the last usable account "
+                    "with the system admin role"
+                ),
+            )
+        store.update(user_id, enabled=enabled)
         details = _audit_details(fields=["enabled"], enabled=enabled)
         audit_account_change(user.user_id, user_id, "updated", details)
 
