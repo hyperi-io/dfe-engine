@@ -106,14 +106,14 @@ class HuntWorker:
         Raises:
             EmptyHuntQuery: the hunt has no statement to run, so its rules named no
                 rule file the compiler could resolve. The watermark does NOT advance.
+                Raised unlogged: the runner logs it with its back-off.
         """
         statements = [statement for statement in spec.queries if statement.sql.strip()]
         if not statements:
-            logger.error(
+            raise EmptyHuntQuery(
                 f"hunt {spec.hunt_id} has no query to run: its rules compiled to nothing, "
                 "so the watermark is held and this fire is a failure, not a clean run"
             )
-            raise EmptyHuntQuery(f"hunt {spec.hunt_id} compiled to no statements")
 
         last = self._coord.get_watermark(spec.hunt_id)
         start, end = window(last, scheduled_start, spec.interval_seconds)
