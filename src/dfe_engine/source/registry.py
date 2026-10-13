@@ -868,17 +868,19 @@ class SourceRegistry:
                 raise SourceValidationError(gap)
 
     def _validate_instance_room(self, source: Source) -> None:
-        """A stage needing its OWN deployment must have one free here.
+        """A stage needing its OWN deployment must have one free here, under a name it can render.
 
         Kubernetes renders an Argo Application per overlay, so there is always
-        room. Compose declares its services in a committed file and creates none
-        at run time, so the first source to need a one-per-source app takes the
-        resident container and the next is refused rather than stored and never
-        run.
+        room, but the source's name becomes part of that Application's Helm release
+        name, which Helm caps. Compose declares its services in a committed file and
+        creates none at run time, so the first source to need a one-per-source app
+        takes the resident container and the next is refused rather than stored and
+        never run.
         """
         if self._crud is None:
             return
         from dfe_engine.appmgmt import instances
+        from dfe_engine.appmgmt.scaling import DeployTarget, instance_name_budget
         from dfe_engine.settings import get_settings
         from dfe_engine.source.flow import (
             FETCHER_SERVICE,
@@ -896,8 +898,14 @@ class SourceRegistry:
         needed = {flow.transform.app} if flow.transform is not None else set()
         if source.fetcher is not None:
             needed.add(FETCHER_SERVICE)
+        target = DeployTarget(settings.deployment.target)
         for service in sorted(needed):
             app = instances.instance_of(service, source.source)
+            budget = instance_name_budget(app.descriptor, target)
+            try:
+                instances.check_name_budget(app, budget, kind="source")
+            except instances.InstanceNameTooLongError as exc:
+                raise SourceValidationError(str(exc)) from exc
             ceiling = stage_instance_ceiling(app.descriptor, settings)
             allowed, reason = instances.additional_instance_allowed(self._crud, app, ceiling)
             if not allowed:

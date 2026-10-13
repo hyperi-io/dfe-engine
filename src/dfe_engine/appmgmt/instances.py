@@ -12,9 +12,9 @@ layer2-apps ApplicationSet globs to produce Argo Applications, so creating the f
 deploys the instance and deleting it undeploys it. There is no separate registry to
 drift from git.
 
-The instance name is load-bearing three times over: it keys the file, it names the
-Argo Application, and it becomes the app's OTel ``service.name`` - so it is validated
-as a DNS label rather than merely as a safe filename.
+The instance name does three jobs: it keys the file, it names the Argo Application
+and its Helm release, and it becomes the app's OTel ``service.name`` - so it is
+validated as a DNS label rather than merely as a safe filename.
 """
 
 import re
@@ -49,9 +49,26 @@ _OVERLAY_SUFFIX = "-values"
 # names, so anything wider than this fails at deploy time rather than here.
 _INSTANCE_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?")
 
+HELM_RELEASE_NAME_MAX = 53
+"""Helm's cap on a release name, which Argo CD takes from the Application name."""
+
+ARGO_CLUSTER_NAME_ALLOWANCE = 19
+"""Characters kept for the Argo CD cluster name, which nothing tells the engine.
+
+The layer2-apps ApplicationSet names each Application
+``{service}-{instance}-{cluster}`` and sets no ``releaseName``, so that string is
+the Helm release name. dfe-infra's bootstrap names the cluster ``dfe-<cloud>-<env>``,
+and 19 is that name for its longest cloud overlay, ``local-dfe``, with a five-letter
+env such as ``local``.
+"""
+
 
 class InvalidInstanceError(ValueError):
     """Raised when an instance name would not survive as a DNS label."""
+
+
+class InstanceNameTooLongError(ValueError):
+    """Raised when an instance name would push its Helm release name past Helm's cap."""
 
 
 class InstanceExistsError(ValueError):
@@ -96,6 +113,31 @@ def instance_of(service: str, instance: str) -> AppInstance:
     descriptor(service)
     validate_instance(instance)
     return AppInstance(service=service, instance=instance)
+
+
+def check_name_budget(app: AppInstance, budget: int | None, *, kind: str = "instance") -> None:
+    """Refuse an instance whose name is longer than *budget*, None meaning no cap.
+
+    Applied where an instance is created, never where one is read or removed, so an
+    instance deployed before the cap stays reachable and can still be undeployed.
+
+    Args:
+        app: The instance being created.
+        budget: The longest name this deployment can render for the app.
+        kind: What the caller calls the name, for the message.
+
+    Raises:
+        InstanceNameTooLongError: The name is longer than the budget.
+    """
+    if budget is None or len(app.instance) <= budget:
+        return
+    raise InstanceNameTooLongError(
+        f"{kind} name {app.instance!r} is {len(app.instance)} characters, and this "
+        f"deployment takes at most {budget} for {app.service}: Argo CD names the Helm "
+        f"release {app.service}-<name>-<cluster>, Helm refuses one over "
+        f"{HELM_RELEASE_NAME_MAX} characters, and {ARGO_CLUSTER_NAME_ALLOWANCE} are kept "
+        "for the cluster name"
+    )
 
 
 def fit_subject(app: AppInstance, summary: str) -> tuple[str, str]:

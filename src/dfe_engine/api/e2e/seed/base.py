@@ -227,11 +227,11 @@ class Seed:
             # side by side. The other seeds share a single vrl instance and
             # cannot tell a per-app surface from a per-source one.
             # ------------------------------------------------------------
-            from dfe_engine.api.e2e.seed.apps import TRANSFORM_ENGINES
+            from dfe_engine.api.e2e.seed.apps import TRANSFORM_ENGINES, TRANSFORM_SEED_SOURCES
 
             bound: dict[str, str] = {}
             for engine, service, variant in TRANSFORM_ENGINES:
-                name = f"filebeat{engine}"
+                name = TRANSFORM_SEED_SOURCES[engine]
                 self.sources.seed_transform_source(name, engine, variant)
                 bound[name] = service
             instances_written = self.apps.seed_transform_instances(bound)

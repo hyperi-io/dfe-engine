@@ -35,7 +35,12 @@ from .catalogue import (
     AppDescriptor,
     Multiplicity,
 )
-from .instances import HELMVARS_CLASS, parse_overlay_name
+from .instances import (
+    ARGO_CLUSTER_NAME_ALLOWANCE,
+    HELM_RELEASE_NAME_MAX,
+    HELMVARS_CLASS,
+    parse_overlay_name,
+)
 
 # Kubernetes quantity forms we accept. CPU is either a plain number of cores or
 # milli-cores; memory is a byte count with an optional binary or decimal suffix.
@@ -102,6 +107,22 @@ def instance_ceiling(
     if target is not DeployTarget.DOCKER:
         return None
     return None if writes_app_config else 0
+
+
+def instance_name_budget(app: AppDescriptor, target: DeployTarget) -> int | None:
+    """The longest instance name *app* can render on this target, None meaning no cap.
+
+    A per-config app's instance is named by whoever creates it, and Argo CD makes
+    that name part of a Helm release name, so the release cap leaves a fixed number
+    of characters for it. A stack-wide app's one instance is named by the deployer
+    and is not held to it. Compose renders no Helm release, and a target nobody
+    named is not assumed to be Compose.
+    """
+    if app.multiplicity is not Multiplicity.PER_CONFIG or target is DeployTarget.DOCKER:
+        return None
+    # The two dashes join service, instance and cluster.
+    budget = HELM_RELEASE_NAME_MAX - len(app.service) - ARGO_CLUSTER_NAME_ALLOWANCE - 2
+    return max(0, budget)
 
 
 def support(app: AppDescriptor, target: DeployTarget) -> tuple[bool, str]:
