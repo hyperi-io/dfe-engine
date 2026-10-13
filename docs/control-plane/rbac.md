@@ -263,6 +263,10 @@ A sign-in through `X-Oidc-Groups` resolves its roles the way a token does, from 
 
 The linked groups are also the sign-in allowlist. An IdP sign-in, through the OIDC callback or `X-Oidc-Groups`, is admitted only when the account it binds to would hold a role, from a group its identifiers link to or a group whose members name the account, so a linked group with no role (every group the sync creates, until an admin gives it one) admits nobody. Anyone else gets `401 no_role_granted` (a sign-in the console started, with `return_to`, goes back to the console with that code in the URL fragment instead) and an `auth.jit.login_refused` audit event, a first sign-in leaves no account, and an existing account records the groups its IdP now asserts and has every session ended, as a logout ends them, so an issued token answers `401 session_ended` on any route, refresh included. The local admin or the break-glass account (section 3.5) links the first group, and adding an account to a group by hand admits someone the IdP groups do not cover, which is the only way in through a `manual`-mode provider.
 
+An admin sets `source_id` and `source_provider` together through the groups API or dfe-ui's group form (section 4.4); `source_provider` names the provider whose logins the link answers. Where a `token_claim` provider's claim carries names (Okta's default, dex, Keycloak), `source_id` is the name the IdP sends; for Entra it is the object ID.
+
+A groups claim sent as one string is split on commas (on whitespace when it has none, `auth/oidc/rp.py`) and `X-Oidc-Groups` is split on commas. So a group name containing a space needs an array claim; a `source_id` containing a comma matches only an array claim on the relying-party path.
+
 For a local account the group files are the authority. The account's own `groups` list is kept in step by the API routes, but it grants nothing. A member removed from a group file in the live store loses that group's roles and orgs at its next engine request, whether the API removed it, someone edited the file in the engine's auth directory, or the Helm chart's `authConfig.groupsConfigMap` copied a new file in at pod start. The deploy repo's `governance/rbac` classes are neither read nor written at runtime, so an edit there changes nothing. An account an IdP owns (JIT or SCIM) also holds the groups its record says the IdP asserts, so a group an operator adds it to by hand sits beside those.
 
 dfe-hyperdx decides on the `role` claim of the token it holds, so there a role taken away lasts until that token expires or is refreshed (`api.jwt_expire_minutes`).
@@ -597,6 +601,19 @@ secret value. Resolution reads the store first, so a credential sent to
 `POST /api/v1/auth/oidc-providers` takes effect without a restart, then the
 environment, so an ESO-mounted variable keeps working.
 
+Surrounding whitespace, such as the newline a mounted secret file ends with, is stripped from a resolved credential. An Okta API token still holding a space, a control character or a non-ASCII one is never sent: the sync reads `error` and the connection test names the setting, never the value. Each secret's `*_env` field (`client_secret_env` plus `groups.api_token_env`, `groups.client_secret_env` and `groups.service_account_json_env`) moves that secret between the store and an env var on `PUT /api/v1/auth/oidc-providers/{name}`:
+
+| Request sends | Result |
+|---|---|
+| no `*_env` field | the env var name and any stored copy are kept |
+| `*_env` set to `""` | the name is cleared, the stored copy is kept |
+| a name, with no value for the secret, that differs from the one held or sits beside a stored copy | the env var must resolve non-empty in the engine: the name is saved and the stored copy is deleted once the update is saved |
+| the same, but the engine does not set that env var | `422`, the field error `env_var_not_set` on that `*_env` field; nothing is saved or deleted |
+| the name already held, with nothing stored | no change |
+| a value for the secret | the value is stored and the name saved as sent |
+
+A create naming an env var the engine does not set, with no value for that secret, is refused the same way. A stored copy whose delete fails after the update is saved is logged by its store path; the update still answers 200.
+
 ### 4.3 Adapter Implementations
 
 | Adapter | Status | Admin API | Group sync |
@@ -624,14 +641,16 @@ sequenceDiagram
     Sync->>Adapter: list_all_groups()
     Adapter-->>Sync: list[GroupInfo]
 
+    Sync->>GS: list()
+    GS-->>Sync: stored groups, by their link
+
     loop Each remote group
-        Sync->>GS: get(group_name)
-        alt No group of that name
-            Sync->>GS: create(empty roles,<br/>source_provider + source_id)
-        else Group linked to this IdP group, through this provider
+        alt Group linked to this IdP group, through this provider
             Sync->>GS: update(description only,<br/>preserve existing roles)
-        else Group carrying its id, linked to another provider
+        else Group of any name carrying its id, linked to another provider
             Note over Sync: skip, count provider_mismatch
+        else No group of that name
+            Sync->>GS: create(empty roles,<br/>source_provider + source_id)
         else Group not linked to it
             Note over Sync: skip, count name_taken
         end
@@ -642,11 +661,25 @@ sequenceDiagram
 
 The sync updates a stored group only when it is already linked to that IdP group: its `source_id` is the IdP group's id and its `source_provider` is this provider, or one `auth.source_provider_bindings` joins to it. The directory assigns that id, so a user cannot choose it the way they choose a display name. Okta is the exception: its groups claim carries names, so an Okta group's id here is its name ([idp-setup/okta.md](idp-setup/okta.md)). A group the sync creates is linked in the same write. A linked group keeps its roles, and the sync refreshes only its description. Admins assign roles to synced groups by hand.
 
-A name match links nothing. Directory display names are not unique, and in a tenant where users can create groups anyone can pick one, so an IdP group named `DFE Admins` would otherwise take the seeded `dfe-admins` and its `admin` role. A stored group of the same name with no `source_id`, or carrying another IdP group's id, is left untouched and counted as `name_taken`.
+A name match links nothing. Directory display names are not unique, and in a tenant where users can create groups anyone can pick one, so an IdP group named `DFE Admins` would otherwise take the seeded `dfe-admins` and its `admin` role. A stored group of the same name with no `source_id`, or carrying another IdP group's id, is left untouched and counted as `name_taken`. So is a new group whose name is a stored group's `source_id` or whose id is a stored group's name.
 
-A sync never moves a group between providers. Two providers can assign one id, and Okta's ids are group names, so an Okta group named `SOC Analysts` carries the same id as a Keycloak group of that name. A stored group carrying the IdP group's id but linked to another provider is left untouched and counted as `provider_mismatch`, and the engine log names the syncing provider, the provider the group is linked to and the reason. `auth.source_provider_bindings` declares two names one identity source, either way round, so with `{"scim": "entra"}` the `entra` sync refreshes a group SCIM stamped `scim` and leaves the stamp as it is.
+A sync never moves a group between providers. Two providers can assign one id, and Okta's ids are group names, so an Okta group named `SOC Analysts` carries the same id as a Keycloak group of that name. A stored group carrying the IdP group's id but linked to another provider, whatever it is called, is left untouched and counted as `provider_mismatch`, so the sync never creates a second group carrying the id, and the engine log names the syncing provider, the provider the group is linked to and the reason. `auth.source_provider_bindings` declares two names one identity source, either way round, so with `{"scim": "entra"}` the `entra` sync refreshes a group SCIM stamped `scim` and leaves the stamp as it is.
 
-Linking an IdP group to the stored group that holds its name is an admin's act. Set both `source_provider`, the provider's name in the registry, and `source_id`, the IdP group's id, in that group's file, in the live store or through the chart's `authConfig.groupsConfigMap`. The groups API sets neither field. `PUT /api/v1/scim/v2/Groups/{name}` sets `source_id` from `externalId`. On a group not yet linked it also sets `source_provider` to `scim`, so an OIDC sign-in reaches the group only through the provider `auth.source_provider_bindings` binds to `scim`. A group already linked keeps its provider.
+Linking an IdP group to a stored group is an admin's act. Set both `source_provider`, the provider's name in the registry, and `source_id`, the IdP group's id, through the groups API (`POST` or `PUT /api/v1/auth/groups`), dfe-ui's group form, the group's file in the live store or the chart's `authConfig.groupsConfigMap`. `PUT /api/v1/scim/v2/Groups/{name}` sets `source_id` from `externalId`. On a group not yet linked it also sets `source_provider` to `scim`, so an OIDC sign-in reaches the group only through the provider `auth.source_provider_bindings` binds to `scim`. A group already linked keeps its provider.
+
+The groups API refuses a link no login could use to reach the group alone:
+
+- `409 conflict`: another group carries the `source_id`, under any provider (SCIM answers `uniqueness`).
+- `409 identifier_taken`: a new group's name is another group's `source_id` or a new or changed `source_id` is another group's name (SCIM answers `uniqueness` for a `displayName` or `externalId`). An API key resolves each group identifier by name, then by `source_id`, so an identifier in both namespaces would let a key minted for one group take the other's roles once the first is deleted. A group whose name is its own `source_id` is one group and is accepted. A pair already stored is logged as a warning at startup, naming both groups.
+- `422 invalid_source_id`: the `source_id` is over 512 characters, starts or ends with whitespace or holds a control character.
+- `422 invalid_source_provider`: the `source_provider` is over 512 characters or is not an OIDC provider, a binding, `scim` or (while `auth.trust_proxy_auth_headers` is on) `auth.proxy_provider`.
+- `422 missing_source_provider`: a new or changed link has a `source_id` but no `source_provider`.
+
+Only a changed value is checked, so an edit to other fields of a group whose stored link these rules now refuse still succeeds. Setting, changing or clearing a link needs the role rights adding a member does, since each changes who holds the group's roles. Deleting a linked group needs them too, through the groups API and SCIM alike.
+
+An account write is checked against the groups the account holds before and after it. An IdP-owned account's own list is also its assertion, so a name in that list that is another group's `source_id` is checked as that group as well.
+
+A group write, through the groups API or SCIM, changes only the group's member list. It updates a local account's own `groups` list to match but never an IdP-owned account's (one with `source_provider` set): that list is what the IdP asserts, so a group name written there would be read as an assertion. The member still holds the group through the member list, which SCIM `/Users` reports.
 
 One bad group never aborts the sync. A provider group that carries no id, whose email, name or id makes no valid group name, whose name is held by a stored group that does not load, whose name is held by a stored group not linked to it, or whose stored group is linked to another provider, is skipped and counted on `auth_oidc_sync_groups_skipped_total{reason}` (`no_id`, `invalid_name`, `stored_unloadable`, `name_taken`, `provider_mismatch`), and the provider's `last_sync_status` reads `partial` with each reason. A group with no id can never be linked, from any provider, so the engine log counts those in one line per run and names none of them.
 

@@ -64,7 +64,12 @@ from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floo
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
 from dfe_engine.auth.accounts import AccountExistsError, discard_created
 from dfe_engine.auth.audit import audit_account_change, audit_group_change
-from dfe_engine.auth.groups import Group, GroupExistsError
+from dfe_engine.auth.groups import (
+    Group,
+    GroupExistsError,
+    identifier_holder,
+    source_id_holder,
+)
 from dfe_engine.auth.membership import forget_member, groups_held, linked_providers
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import (
@@ -190,19 +195,27 @@ def _audit_details(**fields) -> dict:
     return {"via": "scim", **fields}
 
 
-def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse | None:
-    """Refuse an externalId another group already carries as its provider id.
-
-    Login resolves a provider id to one group, and a second group sharing it would
-    decide by name order whose roles every IdP user asserting it gets.
-    """
-    if not source_id:
+def _refuse_identifier_collision(
+    *, name: str, source_id: str, store, target: str
+) -> JSONResponse | None:
+    """Refuse a displayName that is another group's provider id or an externalId that is another group's name (:func:`identifier_holder`); pass empty for the one the write leaves alone."""
+    holder = identifier_holder(exclude=target, groups=store.list(), name=name, source_id=source_id)
+    if holder is None:
         return None
-    if any(group.source_id == source_id and group.name != name for group in store.list()):
-        return scim_error(
-            409, f"externalId '{source_id}' is already another group's provider id", "uniqueness"
-        )
-    return None
+    if name and holder.source_id == name:
+        detail = f"displayName {name!r} is already another group's provider id"
+    else:
+        detail = f"externalId {source_id!r} is already another group's name"
+    return scim_error(detail=detail, scim_type="uniqueness", status_code=409)
+
+
+def _refuse_taken_provider_id(store, source_id: str, name: str) -> JSONResponse | None:
+    """Refuse an externalId another group already carries (:func:`source_id_holder`)."""
+    if source_id_holder(groups=store.list(), name=name, source_id=source_id) is None:
+        return None
+    return scim_error(
+        409, f"externalId '{source_id}' is already another group's provider id", "uniqueness"
+    )
 
 
 def _scim_may_move_link(group: Group, stamp: str, request: Request) -> bool:
@@ -430,7 +443,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     # Deleting a user takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
     held = groups_held(existing, groups, bindings=provider_bindings(request))
-    check_group_changes(request, user, groups, held, ())
+    check_group_changes(after=(), before=held, groups=groups, request=request, user=user)
     store.delete(user_id)
     forget_member(group_store, user_id)
     audit_account_change(user.user_id, user_id, "deleted", _audit_details(groups=held))
@@ -517,6 +530,11 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
     taken = _refuse_taken_provider_id(store, str(fields["source_id"]), name)
     if taken is not None:
         return taken
+    collision = _refuse_identifier_collision(
+        name=name, source_id=str(fields["source_id"]), store=store, target=name
+    )
+    if collision is not None:
+        return collision
     # create() decides, not get(): get() reports a stored group that does not load as absent.
     try:
         group = store.create(name, roles=[], description="", members=members)
@@ -573,6 +591,11 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
         taken = _refuse_taken_provider_id(store, str(fields["source_id"]), group_id)
         if taken is not None:
             return taken
+        collision = _refuse_identifier_collision(
+            name="", source_id=str(fields["source_id"]), store=store, target=group_id
+        )
+        if collision is not None:
+            return collision
     # A link names its provider: an id set on an unlinked group takes SCIM's, a linked one keeps its own.
     provider = existing.source_provider
     if fields["source_id"] and not provider:
@@ -656,8 +679,8 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     # GroupStore.delete refuses a non-empty group; detach members first and mirror
     # the removal onto each Account.groups.
     members = list(group.members)
-    if members:
-        # Every member loses the roles the group carries.
+    if (members) or (group.source_id):
+        # Its members and every login its source ID answers lose the roles it carries.
         check_role_assignment(request, user, group.roles, scope_of(group))
     # Checked before the first detach, so deleting the admin group with a recovery
     # credential in it refuses whole rather than part-way through.
@@ -667,7 +690,12 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     sync_account_groups_for_membership_change(account_store, group_id, removed=members)
     store.delete(group_id)
     request_ch_rbac_reconcile(request.app.state)
-    audit_group_change(user.user_id, group_id, "deleted", _audit_details(members=members))
+    details = _audit_details(
+        members=members, source_id=group.source_id, source_provider=group.source_provider
+    )
+    audit_group_change(
+        admin_id=user.user_id, change="deleted", details=details, group_name=group_id
+    )
     return Response(status_code=204)
 
 

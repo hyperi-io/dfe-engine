@@ -13,17 +13,22 @@ is linked when its ``source_id`` is the asserted identifier and its provider is 
 the assertion answers for.
 """
 
+from pathlib import Path
+
 import pytest
 
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.membership import (
     groups_held,
+    groups_held_after,
     linked_groups,
     linked_providers,
     sync_account_groups_for_membership_change,
     sync_group_members_for_account_groups_change,
 )
+from tests.unit.test_auth.factories import make_account_store
+from tests.unit.test_auth.membership_cases import MEMBERSHIP_MIRROR_CASES, MembershipMirrorCase
 
 
 class TestSyncAccountGroupsForMembershipChange:
@@ -58,6 +63,25 @@ class TestSyncAccountGroupsForMembershipChange:
         sync_account_groups_for_membership_change(accounts, "ops", added=["alice"])
 
         assert accounts.get("alice").groups == ["ops"]
+
+    @pytest.mark.parametrize(
+        "case", MEMBERSHIP_MIRROR_CASES, ids=[case["id"] for case in MEMBERSHIP_MIRROR_CASES]
+    )
+    def test_only_a_local_accounts_list_is_written(
+        self, tmp_path: Path, case: MembershipMirrorCase
+    ):
+        accounts = make_account_store(directory=tmp_path / "accounts")
+        accounts.create(groups=case["groups"], password="secret", username="alice")
+        accounts.update(source_provider=case["source_provider"], username="alice")
+
+        sync_account_groups_for_membership_change(
+            account_store=accounts,
+            added=case["added"],
+            group_name=case["group_name"],
+            removed=case["removed"],
+        )
+
+        assert accounts.get("alice").groups == case["expected_groups"]
 
 
 class TestSyncGroupMembersForAccountGroupsChange:
@@ -178,3 +202,28 @@ class TestGroupsHeld:
             _group("by-link", source_id="g-1", source_provider="entra"),
         ]
         assert groups_held(account, groups, bindings={}) == ["by-hand", "by-link"]
+
+
+class TestGroupsHeldAfter:
+    def test_an_idp_accounts_new_list_is_its_assertion_and_its_membership(self):
+        account = _idp_account(["DFE-Admins"])
+        groups = [
+            _group("DFE-Admins"),
+            _group("dfe-admins", source_id="DFE-Admins", source_provider="entra"),
+        ]
+
+        held = groups_held_after(
+            account=account, added=["DFE-Admins"], bindings={}, groups=groups, removed=[]
+        )
+
+        assert held == ["DFE-Admins", "dfe-admins"]
+
+    def test_a_removed_membership_is_no_longer_held(self):
+        account = Account(groups=[], password_hash="!", username="bob")
+        groups = [_group("dfe-analysts", members=["bob", "carol"])]
+
+        held = groups_held_after(
+            account=account, added=[], bindings={}, groups=groups, removed=["dfe-analysts"]
+        )
+
+        assert (held, groups[0].members) == ([], ["bob", "carol"])

@@ -6,6 +6,8 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import json
+
 import pytest
 
 from dfe_engine.auth.accounts import AccountStore
@@ -22,6 +24,7 @@ from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import sync_provider
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
+from tests.unit.test_auth.factories import OKTA_API_TOKEN_ENV, make_okta_directory_provider
 from tests.unit.test_auth.test_oidc.local_okta import LocalOkta, okta_adapter
 from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
@@ -193,3 +196,28 @@ class TestOktaApiTokenResolution:
         _, headers = OktaAdapter(provider, secrets=store)._api_base_and_headers()
 
         assert headers["Authorization"] == "SSWS from-env"
+
+
+class TestOktaLoginLookupWithATokenNoHeaderCanCarry:
+    """A token that is set but never sent finds no groups at login, so the log says which setting to fix."""
+
+    async def test_it_finds_no_groups_and_names_the_setting(
+        self, audit_events: list[dict], monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv(OKTA_API_TOKEN_ENV, "test-okta\napi-token")
+        adapter = OktaAdapter(provider=make_okta_directory_provider(okta_domain="example.okta.com"))
+
+        groups = await adapter.resolve_user_groups("00u1")
+
+        logged = [
+            (event["operation"], event["api_token_env"], event["api_token_path"])
+            for event in audit_events
+            if event["event"]
+            == "Okta API token not sent: it holds a character an HTTP header cannot carry"
+        ]
+        leaked = [event for event in audit_events if "api-token" in json.dumps(event, default=str)]
+        assert (groups, logged, leaked) == (
+            [],
+            [("resolve_user_groups", OKTA_API_TOKEN_ENV, "")],
+            [],
+        )

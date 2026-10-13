@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import (
+    DirectoryCredentialError,
     DirectoryCredentialUnreadableError,
     DirectoryNotConfiguredError,
     DirectoryPageError,
@@ -48,6 +49,9 @@ class OktaAdapter(OIDCGroupAdapter):
 
         base, headers = self._api_base_and_headers()
         if base is None or headers is None:
+            # A token that is set but never sent finds no groups, so the login says why once.
+            if base is not None and self._api_token.value:
+                self._warn_unsendable_token(operation="resolve_user_groups")
             return []
 
         from scalo.http import AsyncHttpClient
@@ -85,6 +89,8 @@ class OktaAdapter(OIDCGroupAdapter):
             DirectoryNotConfiguredError: The domain or the API token is not configured.
             DirectoryCredentialUnreadableError: The API token's secret store did
                 not answer or refused.
+            DirectoryCredentialError: The API token holds a character an HTTP header
+                cannot carry, so it is never sent.
             DirectoryPageError: A page Okta served was not a list of groups.
             DirectoryPageLimitError: Okta still linked a next page at the page limit.
             Exception: Whatever the client raised on a page Okta did not serve.
@@ -93,6 +99,9 @@ class OktaAdapter(OIDCGroupAdapter):
         """
         base, headers = self._api_base_and_headers()
         if base is None or headers is None:
+            if base is not None and self._api_token.value:
+                self._warn_unsendable_token(operation="list_all_groups")
+                raise DirectoryCredentialError
             if base is not None and self._api_token.unreadable:
                 raise DirectoryCredentialUnreadableError(refused=self._api_token.refused)
             raise DirectoryNotConfiguredError
@@ -127,6 +136,8 @@ class OktaAdapter(OIDCGroupAdapter):
         base, headers = self._api_base_and_headers()
         if base is None:
             return False, "Okta domain not configured (groups.okta_domain)"
+        if headers is None and self._api_token.value:
+            return False, f"Okta API token {self._unsendable_token()}"
         if headers is None and self._api_token.unreadable:
             return False, unreadable_credential_message(
                 credential="Okta API token", refused=self._api_token.refused
@@ -175,9 +186,28 @@ class OktaAdapter(OIDCGroupAdapter):
             return None, None
 
         token = self._api_token.value
-        if not token:
+        if not (_HEADER_SAFE_TOKEN.fullmatch(token)):
             return base, None
         return base, {"Authorization": f"SSWS {token}", "Accept": "application/json"}
+
+    def _unsendable_token(self) -> str:
+        """Why the configured API token cannot be sent and where to fix it, without its value."""
+        env = self._provider.groups.api_token_env
+        where = f"the env var {env!r}" if env else "the env var named in 'groups.api_token_env'"
+        return (
+            "holds a character an HTTP header cannot carry: a space, a control character or a "
+            f"non-ASCII one; re-send 'groups.api_token' to the provider API or fix {where}"
+        )
+
+    def _warn_unsendable_token(self, *, operation: str) -> None:
+        """Log that the configured API token is never sent, naming the settings that hold it and never its value."""
+        logger.warning(
+            "Okta API token not sent: it holds a character an HTTP header cannot carry",
+            api_token_env=self._provider.groups.api_token_env,
+            api_token_path=self._provider.groups.api_token_path,
+            operation=operation,
+            provider=self._provider.issuer,
+        )
 
 
 def _normalize_okta_api_base(okta_domain: str) -> str | None:
@@ -212,6 +242,9 @@ def _group_info_from_okta(item: dict[str, Any]) -> GroupInfo:
 
 
 _LINK_NEXT_RE = re.compile(r'<([^>]+)>\s*;\s*rel="next"')
+
+# Printable ASCII without spaces: a token holding anything else is never put in a header, since the HTTP client's error quotes the header it refuses and its retry hook logs that error.
+_HEADER_SAFE_TOKEN = re.compile(r"[\x21-\x7e]+")
 
 
 def _next_url_from_link_header(link: str | None) -> str | None:

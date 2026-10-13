@@ -8,6 +8,7 @@
 
 import builtins
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
@@ -211,6 +212,48 @@ class Group(BaseModel):
         if self.scope.startswith(_ORG_SCOPE_PREFIX):
             return self.scope[len(_ORG_SCOPE_PREFIX) :]
         return ""
+
+
+def source_id_holder(*, groups: Iterable[Group], name: str, source_id: str) -> Group | None:
+    """Return the group other than *name* that already carries *source_id* (None when no other does).
+
+    An API key's group identifiers also resolve by source ID (:meth:`GroupStore.by_source_id`, :func:`~dfe_engine.auth.membership.groups_named`), where two groups carrying one resolve by name order whatever their providers, so each source ID names one group across every provider. An empty source ID links nothing and is never held.
+    """
+    if not (source_id):
+        return None
+    for group in groups:
+        if group.source_id == source_id and group.name != name:
+            return group
+    return None
+
+
+def identifier_holder(
+    *, exclude: str, groups: Iterable[Group], name: str, source_id: str
+) -> Group | None:
+    """Return a group other than *exclude* whose source_id is *name* or whose name is *source_id* (None when no other's is).
+
+    An API key's group identifiers resolve by name first, then by source ID (:func:`~dfe_engine.auth.membership.groups_named`), so an identifier that is one group's name and another's source ID hands a key minted for the first the second's roles once the first is gone. A write passes the *name* and *source_id* it sets, empty for one it leaves alone. A group whose name is its own source ID, as an Okta group linked by its name is, is one group and never collides.
+    """
+    for group in groups:
+        if group.name == exclude:
+            continue
+        if (name and group.source_id == name) or (source_id and group.name == source_id):
+            return group
+    return None
+
+
+def warn_identifier_collisions(*, groups: Iterable[Group]) -> None:
+    """Log a warning naming each pair of stored groups where one's name is the other's source ID (:func:`identifier_holder`)."""
+    listed = list(groups)
+    names = {group.name for group in listed}
+    for group in listed:
+        if group.source_id in names and group.source_id != group.name:
+            logger.warning(
+                "a group's name is another group's source_id, so an API key naming it takes "
+                "the second group's roles once the first is gone",
+                group=group.source_id,
+                linked_group=group.name,
+            )
 
 
 class GroupStore:

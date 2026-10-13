@@ -14,7 +14,8 @@ from typing import Any
 
 from authlib.integrations.starlette_client import OAuth
 
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.oidc.adapters.entra import GraphCredentials
 from dfe_engine.auth.oidc.field_rules import FieldProblem
 from dfe_engine.auth.oidc.models import OIDCProvider
@@ -22,6 +23,14 @@ from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import NormalizedIdentity
 from dfe_engine.auth.oidc.scheduler import OidcSyncScheduler
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
+
+# The env var an Okta provider from make_okta_directory_provider reads its API token from.
+OKTA_API_TOKEN_ENV = "DFE_TEST_OKTA_API_TOKEN"
+
+
+def make_account_store(*, directory: Path) -> AccountStore:
+    """Build an auth.accounts.AccountStore over a directory of account files."""
+    return AccountStore(directory)
 
 
 def make_field_problem(*, code: str, field: str, message: str) -> FieldProblem:
@@ -34,6 +43,11 @@ def make_graph_credentials(
 ) -> GraphCredentials:
     """Build an auth.oidc.adapters.entra.GraphCredentials."""
     return GraphCredentials(client_id=client_id, client_secret=client_secret, tenant_id=tenant_id)
+
+
+def make_group(*, name: str, **kwargs: object) -> Group:
+    """Build an auth.groups.Group."""
+    return Group.model_validate({"name": name, **kwargs})
 
 
 def make_group_store(*, directory: Path) -> GroupStore:
@@ -89,4 +103,12 @@ def make_oidc_sync_scheduler(
         registry=registry,
         secrets=None,
         tick_seconds=tick_seconds,
+    )
+
+
+def make_okta_directory_provider(*, okta_domain: str, **kwargs: object) -> OIDCProvider:
+    """Build an api-mode Okta auth.oidc.models.OIDCProvider whose API token is read from OKTA_API_TOKEN_ENV."""
+    groups = {"api_token_env": OKTA_API_TOKEN_ENV, "mode": "api", "okta_domain": okta_domain}
+    return make_oidc_provider(
+        groups=groups, issuer="https://example.okta.com", type="okta", **kwargs
     )
