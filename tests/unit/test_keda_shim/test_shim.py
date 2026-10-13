@@ -204,6 +204,56 @@ def test_an_undeclared_param_does_not_hide_the_last_good_value():
     assert shim.run("pressure", {"service": "dfe-receiver", "cachebust": "1"}) == 42
 
 
+def test_answers_equal_to_cold_hold_add_no_cache_entries():
+    """A miss already returns cold_hold, so a held copy of it only grows the cache."""
+    shim = _shim(_FakeClient(rows=[[0]]))
+
+    for n in range(500):
+        assert shim.run("pressure", {"service": f"svc-{n}"}) == 0
+
+    assert shim._cache == {}
+
+
+def test_an_answer_other_than_cold_hold_is_still_held_among_cold_hold_ones():
+    client = _FakeClient(rows=[[0]])
+    shim = _shim(client)
+    for n in range(500):
+        shim.run("pressure", {"service": f"svc-{n}"})
+    client.rows = [[42]]
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+    client.error = RuntimeError("CH down")
+
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+    assert len(shim._cache) == 1
+
+
+def test_a_cold_hold_answer_replaces_the_value_held_before_it():
+    """A later failure must return cold_hold, not the stale value the answer superseded."""
+    client = _FakeClient(rows=[[42]])
+    shim = _shim(client)
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+    client.rows = [[0]]
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 0
+    client.error = RuntimeError("CH down")
+
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 0
+    assert shim._cache == {}
+
+
+def test_cold_hold_is_the_querys_own_value_not_zero(tmp_path):
+    """With a cold_hold of 5, a 0 answer is real information and is held."""
+    client = _FakeClient(rows=[[0]])
+    shim = _overridden_shim(client, tmp_path, "queries:\n  pressure:\n    cold_hold: 5\n")
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 0
+    client.error = RuntimeError("CH down")
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 0
+
+    client.error = None
+    client.rows = [[5]]
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 5
+    assert shim._cache == {}
+
+
 def test_every_client_a_failed_query_discards_is_closed():
     """A TLS client dropped unclosed keeps its pool and socket for the life of the process."""
     factory = _CountingFactory(error=RuntimeError("CH down"))
