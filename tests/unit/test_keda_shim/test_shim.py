@@ -15,7 +15,7 @@ last-good / cold value, never scale up.
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import patch
+from typing import Any
 
 import pytest
 
@@ -72,6 +72,18 @@ def _shim(client: _FakeClient) -> QueryShim:
     return QueryShim(DFESettings(env="test"), client_factory=lambda: client)
 
 
+class _ConnectRecorder:
+    """Takes clickhouse_connect.get_client's place and keeps the keyword arguments it got."""
+
+    def __init__(self) -> None:
+        self.kwargs: dict[str, Any] = {}
+        self.client = object()
+
+    def __call__(self, **kwargs: Any) -> object:
+        self.kwargs = kwargs
+        return self.client
+
+
 class TestChClientTls:
     """The shim's raw client takes the engine's ClickHouseSettings TLS posture."""
 
@@ -82,24 +94,24 @@ class TestChClientTls:
         settings.clickhouse.secure = True
         settings.clickhouse.verify = True
         settings.clickhouse.ca_cert = str(ca)
+        connect = _ConnectRecorder()
 
-        with patch("clickhouse_connect.get_client") as get_client:
-            _ch_client(settings)
-        kwargs = get_client.call_args[1]
-        assert kwargs["secure"] is True
-        assert kwargs["verify"] is True
-        assert kwargs["ca_cert"] == str(ca)
+        assert _ch_client(settings, connect=connect) is connect.client
+        assert connect.kwargs["secure"] is True
+        assert connect.kwargs["verify"] is True
+        assert connect.kwargs["ca_cert"] == str(ca)
 
     def test_insecure_settings_pass_no_tls_kwargs(self):
         settings = DFESettings(env="test")
         settings.clickhouse.secure = False
+        connect = _ConnectRecorder()
 
-        with patch("clickhouse_connect.get_client") as get_client:
-            _ch_client(settings)
-        kwargs = get_client.call_args[1]
-        assert "secure" not in kwargs
-        assert "verify" not in kwargs
-        assert "ca_cert" not in kwargs
+        _ch_client(settings, connect=connect)
+
+        assert connect.kwargs["host"] == settings.clickhouse.host
+        assert "secure" not in connect.kwargs
+        assert "verify" not in connect.kwargs
+        assert "ca_cert" not in connect.kwargs
 
 
 def test_pressure_returns_value():
@@ -171,6 +183,25 @@ def test_failsafe_holds_last_good():
 def test_failsafe_cold_hold_when_no_cache():
     shim = _shim(_FakeClient(error=RuntimeError("CH down")))
     assert shim.run("pressure", {"service": "dfe-receiver"}) == 0  # cold_hold
+
+
+def test_undeclared_params_add_no_cache_entries():
+    """/q/{name} hands the shim every request param, so only declared ones may key the cache."""
+    shim = _shim(_FakeClient(rows=[[42]]))
+
+    for n in range(500):
+        assert shim.run("pressure", {"service": "dfe-receiver", f"junk{n}": str(n)}) == 42
+
+    assert len(shim._cache) == 1
+
+
+def test_an_undeclared_param_does_not_hide_the_last_good_value():
+    client = _FakeClient(rows=[[42]])
+    shim = _shim(client)
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+    client.error = RuntimeError("CH down")
+
+    assert shim.run("pressure", {"service": "dfe-receiver", "cachebust": "1"}) == 42
 
 
 def test_every_client_a_failed_query_discards_is_closed():

@@ -14,10 +14,10 @@ built-in queries. Nothing here 5xx's on a metric outage - the shim's fail-safe t
 that into a held value (KEDA treats a 5xx as an error and may apply its own fallback).
 """
 
-from __future__ import annotations
-
 from fastapi import FastAPI, Request
 from scalo.health import HealthManager, create_health_router
+from scalo.metrics import MetricsManager
+from scalo.metrics.http_server import HttpServerMetricsMiddleware
 
 from dfe_engine.fastapi_telemetry import FASTAPI_TELEMETRY
 from dfe_engine.settings import DFESettings, load_settings
@@ -28,16 +28,35 @@ from .shim import QueryShim
 def create_app(
     settings: DFESettings | None = None,
     shim: QueryShim | None = None,
+    metrics_manager: MetricsManager | None = None,
 ) -> FastAPI:
-    """Build the shim's FastAPI app. ``shim`` is injectable for tests."""
+    """Build the shim's FastAPI app.
+
+    Args:
+        settings: DFE settings. Defaults to ``load_settings()``.
+        shim: The query runner the routes call. Injectable for tests.
+        metrics_manager: The scalo ``MetricsManager`` each request's duration is
+            recorded on. Left ``None``, no request is recorded.
+
+    Returns:
+        The configured FastAPI application.
+    """
     settings = settings or load_settings()
     shim = shim or QueryShim(settings)
     health = HealthManager()
 
-    app = FastAPI(title="dfe-keda-shim", docs_url=None, redoc_url=None, telemetry=FASTAPI_TELEMETRY)
+    app = FastAPI(
+        title="dfe-keda-shim",
+        docs_url=None,
+        redoc_url=None,
+        # scalo's middleware below records each request, and FastAPI's own would count it twice.
+        telemetry={**FASTAPI_TELEMETRY, "metrics": False},
+    )
     app.state.shim = shim
     app.state.health_manager = health
     app.include_router(create_health_router(health), include_in_schema=False)
+    if metrics_manager is not None:
+        app.add_middleware(HttpServerMetricsMiddleware, metrics=metrics_manager)
 
     @app.get("/q/{name}")
     def query(name: str, request: Request) -> dict:

@@ -7,9 +7,9 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Endpoint tests for the KEDA shim app - every route returns {"value": <int>}."""
 
-from __future__ import annotations
-
 from fastapi.testclient import TestClient
+from scalo.metrics import create_metrics
+from scalo.metrics.http_server import HttpServerMetricsMiddleware
 
 from dfe_engine.keda_shim.app import create_app
 from dfe_engine.settings import DFESettings
@@ -60,3 +60,20 @@ def test_health_live():
 def test_retired_health_alias_is_gone():
     # An alias that keeps answering 200 hides a probe still aimed at it.
     assert _client({}).get("/health/live").status_code == 404
+
+
+def test_a_metrics_manager_puts_the_request_histogram_outermost():
+    app = create_app(
+        settings=DFESettings(env="test"),
+        metrics_manager=create_metrics("keda-shim-outermost", backend="prometheus"),
+    )
+
+    assert app.user_middleware[0].cls is HttpServerMetricsMiddleware
+
+
+def test_no_metrics_manager_adds_no_histogram_middleware():
+    app = create_app(settings=DFESettings(env="test"))
+
+    assert all(
+        middleware.cls is not HttpServerMetricsMiddleware for middleware in app.user_middleware
+    )
