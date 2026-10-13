@@ -1852,7 +1852,7 @@
           "Groups"
         ],
         "summary": "Update Group",
-        "description": "Update group roles, description, or members (group:write at the group's scope).",
+        "description": "Update group roles, description, members or IdP link (group:write at the group's scope).",
         "operationId": "update_group_api_v1_auth_groups__name__put",
         "parameters": [
           {
@@ -3182,7 +3182,7 @@
           "OIDC Providers"
         ],
         "summary": "Create Provider",
-        "description": "Create a new OIDC provider configuration (admin only).\n\nSecret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind.",
+        "description": "Create a new OIDC provider configuration (admin only).\n\nSecret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).",
         "operationId": "create_provider_api_v1_auth_oidc_providers_post",
         "requestBody": {
           "required": true,
@@ -3441,7 +3441,7 @@
           "OIDC Providers"
         ],
         "summary": "Update Provider",
-        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits keeps the path the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules, checked before a secret is written.",
+        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential; an empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.",
         "operationId": "update_provider_api_v1_auth_oidc_providers__name__put",
         "parameters": [
           {
@@ -26194,6 +26194,18 @@
             "type": "array",
             "title": "Members",
             "description": "Account usernames in this group (local login resolves roles from this list)"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id",
+            "description": "The group identifier the identity provider asserts in its tokens: the group name for Okta, dex and Keycloak groups claims, the object ID for Entra. A login through source_provider asserting it takes this group's roles. Empty for a group managed only here. A non-empty source ID needs a source_provider. At most 512 characters, with no control characters and no leading or trailing whitespace; no other group may carry it.",
+            "default": ""
+          },
+          "source_provider": {
+            "type": "string",
+            "title": "Source Provider",
+            "description": "The provider whose logins the source ID answers, required with a source ID: an OIDC provider name, a key or value of auth.source_provider_bindings, 'scim' or, while auth.trust_proxy_auth_headers is on, auth.proxy_provider. At most 512 characters.",
+            "default": ""
           }
         },
         "type": "object",
@@ -26310,7 +26322,7 @@
           "client_secret_env": {
             "type": "string",
             "title": "Client Secret Env",
-            "description": "Env var name for the RP client secret used in the auth-code exchange",
+            "description": "Env var name for the RP client secret used in the auth-code exchange. With no client_secret, one the engine does not set is refused with 422 env_var_not_set on this field and nothing is saved.",
             "default": ""
           },
           "scopes": {
@@ -27957,10 +27969,16 @@
             "default": ""
           },
           "service_account_json_env": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Service Account Json Env",
-            "description": "Env var for Google SA JSON",
-            "default": ""
+            "description": "Env var for the Google service account JSON. Omit it on an update to keep the name and any stored copy or send an empty string to clear the name and keep the stored copy. Naming an env var with no value for the secret moves the secret onto it and the stored copy is deleted once the update is saved; resending the name already held, with nothing stored, changes nothing. When that move, or a create naming an env var with no value for the secret, names one the engine does not set, the request is refused with 422 env_var_not_set on this field and nothing is saved or deleted."
           },
           "domain": {
             "type": "string",
@@ -27975,10 +27993,16 @@
             "default": ""
           },
           "tenant_id_env": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Tenant Id Env",
-            "description": "Env var for Entra ID tenant ID, read when tenant_id is empty",
-            "default": ""
+            "description": "Env var for Entra ID tenant ID, read when tenant_id is empty. Omit it on an update to keep the name held; send an empty string to clear it."
           },
           "client_secret": {
             "type": "string",
@@ -27987,10 +28011,16 @@
             "default": ""
           },
           "client_secret_env": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Client Secret Env",
-            "description": "Env var for Entra ID client secret",
-            "default": ""
+            "description": "Env var for the Entra ID client secret. Omit it on an update to keep the name and any stored copy or send an empty string to clear the name and keep the stored copy. Naming an env var with no value for the secret moves the secret onto it and the stored copy is deleted once the update is saved; resending the name already held, with nothing stored, changes nothing. When that move, or a create naming an env var with no value for the secret, names one the engine does not set, the request is refused with 422 env_var_not_set on this field and nothing is saved or deleted."
           },
           "api_token": {
             "type": "string",
@@ -27999,10 +28029,16 @@
             "default": ""
           },
           "api_token_env": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Api Token Env",
-            "description": "Env var for Okta API token",
-            "default": ""
+            "description": "Env var for the Okta API token. Omit it on an update to keep the name and any stored copy or send an empty string to clear the name and keep the stored copy. Naming an env var with no value for the secret moves the secret onto it and the stored copy is deleted once the update is saved; resending the name already held, with nothing stored, changes nothing. When that move, or a create naming an env var with no value for the secret, names one the engine does not set, the request is refused with 422 env_var_not_set on this field and nothing is saved or deleted."
           },
           "okta_domain": {
             "type": "string",
@@ -28119,6 +28155,14 @@
           "scope": {
             "type": "string",
             "title": "Scope"
+          },
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "source_provider": {
+            "type": "string",
+            "title": "Source Provider"
           }
         },
         "type": "object",
@@ -28127,7 +28171,9 @@
           "description",
           "roles",
           "members",
-          "scope"
+          "scope",
+          "source_id",
+          "source_provider"
         ],
         "title": "GroupResponse"
       },
@@ -39917,6 +39963,30 @@
             ],
             "title": "Members",
             "description": "Replace member username list"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id",
+            "description": "Replace the source ID; omit to keep it. The group identifier the identity provider asserts in its tokens: the group name for Okta, dex and Keycloak groups claims, the object ID for Entra. A login through source_provider asserting it takes this group's roles. Empty for a group managed only here. A non-empty source ID needs a source_provider. At most 512 characters, with no control characters and no leading or trailing whitespace; no other group may carry it."
+          },
+          "source_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Provider",
+            "description": "Replace the source provider; omit to keep it. The provider whose logins the source ID answers, required with a source ID: an OIDC provider name, a key or value of auth.source_provider_bindings, 'scim' or, while auth.trust_proxy_auth_headers is on, auth.proxy_provider. At most 512 characters."
           }
         },
         "type": "object",
@@ -40083,7 +40153,7 @@
               }
             ],
             "title": "Client Secret Env",
-            "description": "Env var name for the RP client secret"
+            "description": "Env var name for the RP client secret. Omit it on an update to keep the name and any stored copy or send an empty string to clear the name and keep the stored copy. Naming an env var with no value for the secret moves the secret onto it and the stored copy is deleted once the update is saved; resending the name already held, with nothing stored, changes nothing. When that move, or a create naming an env var with no value for the secret, names one the engine does not set, the request is refused with 422 env_var_not_set on this field and nothing is saved or deleted."
           },
           "scopes": {
             "anyOf": [
@@ -41293,7 +41363,7 @@
           "groups_skipped": {
             "type": "integer",
             "title": "Groups Skipped",
-            "description": "Provider groups left unsynced: an identifier that makes no valid group name, a name held by a stored group that does not load, a name held by a stored group not linked to that provider group, a stored group carrying the id but linked to another provider, or no id to link a group by. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
+            "description": "Provider groups left unsynced: an identifier that makes no valid group name, a name held by a stored group that does not load, a name held by a stored group not linked to that provider group, a name another group carries as its source_id or an id another group has as its name, a stored group carrying the id but linked to another provider, or no id to link a group by. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
             "default": 0
           },
           "error": {

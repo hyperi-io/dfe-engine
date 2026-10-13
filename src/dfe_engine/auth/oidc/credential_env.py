@@ -100,12 +100,17 @@ def provider_secret_path(provider_name: str, field: str) -> str:
     return f"oidc/{provider_name}/{field}"
 
 
+def _from_env(env_name: str) -> str:
+    """Read env var *env_name* stripped of surrounding whitespace, empty when it is unset or no name is given."""
+    return os.environ.get(env_name, "").strip() if env_name else ""
+
+
 def _from_store(secret_path: str, secrets: DfeSecrets | None) -> ResolvedCredential:
-    """Read a secret from the store: its value, absent, or unreadable when the store did not answer or refused."""
+    """Read a secret from the store: its value stripped of surrounding whitespace, absent, or unreadable when the store did not answer or refused."""
     if not secret_path or secrets is None:
         return ResolvedCredential()
     try:
-        return ResolvedCredential(value=secrets.get(secret_path))
+        return ResolvedCredential(value=secrets.get(secret_path).strip())
     except SecretNotFoundError:
         return ResolvedCredential()
     except Exception as exc:
@@ -128,6 +133,9 @@ def resolve_credential(
 ) -> ResolvedCredential:
     """Resolve one credential: plain value, then the secret store, then the env.
 
+    Surrounding whitespace is stripped from each source, so the newline a mounted
+    secret file often ends with never reaches an HTTP header.
+
     Returns:
         The first value found. With none, an empty credential marked ``unreadable``
         when the secret store was asked and gave nothing back, and ``refused`` as well
@@ -135,12 +143,13 @@ def resolve_credential(
         path reads only ``value``, so an unreachable store leaves it as it would a
         credential that is not set.
     """
-    if value:
-        return ResolvedCredential(value=value)
+    plain = value.strip()
+    if plain:
+        return ResolvedCredential(value=plain)
     stored = _from_store(secret_path, secrets)
     if stored.value:
         return stored
-    from_env = os.environ.get(env_name, "") if env_name else ""
+    from_env = _from_env(env_name)
     if from_env:
         return ResolvedCredential(value=from_env)
     return ResolvedCredential(unreadable=stored.unreadable, refused=stored.refused)
@@ -161,12 +170,12 @@ def credential_check(
     secret store that did not answer is named too, unless the env var serves the
     credential, as it does for a login.
     """
-    if value:
+    if value.strip():
         return True, f"{label} is set"
     stored = _from_store(secret_path, secrets)
     if stored.value:
         return True, f"{label} resolved from the secret store at {secret_path}"
-    if env_name and os.environ.get(env_name):
+    if _from_env(env_name):
         return True, f"{env_name} is set"
     if stored.unreadable:
         return False, unreadable_credential_message(
@@ -184,3 +193,8 @@ def credential_check(
             f"{label} as '{label}' so it is written to the secret store",
         )
     return False, f"{env_name} is unset or empty"
+
+
+def env_var_resolves(*, env_name: str) -> bool:
+    """Whether env var *env_name* serves a credential in this process, read as :func:`resolve_credential` reads it."""
+    return bool(_from_env(env_name))

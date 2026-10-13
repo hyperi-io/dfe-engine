@@ -16,6 +16,7 @@ import pytest
 
 from dfe_engine.auth.oidc.credential_env import (
     credential_check,
+    env_var_resolves,
     is_env_var_name,
     provider_secret_path,
     resolve_credential,
@@ -104,6 +105,11 @@ class TestCredentialCheck:
         assert ok is True
         assert "oidc/acme/client_secret" in detail
         assert "stored-value" not in detail
+
+    def test_whitespace_only_env_is_unset(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("BLANK_OIDC_ID", " \n")
+        result = credential_check("client_id", env_name="BLANK_OIDC_ID")
+        assert result == (False, "BLANK_OIDC_ID is unset or empty")
 
     def test_path_with_nothing_stored_and_no_env_is_reported(self, store):
         ok, detail = credential_check(
@@ -314,6 +320,24 @@ class TestResolveCredential:
             "oidc/acme/client_secret",
         )
 
+    def test_surrounding_whitespace_is_stripped_from_the_env(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.setenv("OIDC_RP_SECRET", " from-env\n")
+        assert resolve_credential(env_name="OIDC_RP_SECRET").value == "from-env"
+
+    def test_surrounding_whitespace_is_stripped_from_the_store(self, store):
+        store.put("oidc/acme/client_secret", "from-store\n")
+        resolved = resolve_credential(secret_path="oidc/acme/client_secret", secrets=store)
+        assert resolved.value == "from-store"
+
+    def test_surrounding_whitespace_is_stripped_from_a_value(self):
+        assert resolve_credential(value=" plain-id ").value == "plain-id"
+
+    def test_a_whitespace_only_value_falls_through_to_the_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        monkeypatch.setenv("OIDC_CLIENT_ID", "from-env")
+        assert resolve_credential(env_name="OIDC_CLIENT_ID", value=" ").value == "from-env"
+
 
 class TestPathAndNameHelpers:
     def test_provider_secret_path_shape(self):
@@ -328,3 +352,22 @@ class TestPathAndNameHelpers:
     )
     def test_non_env_var_names_rejected(self, name):
         assert is_env_var_name(name) is False
+
+
+class TestEnvVarResolves:
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param("from-env", True, id="set"),
+            pytest.param("  from-env\n", True, id="set_with_surrounding_whitespace"),
+            pytest.param(" \n", False, id="whitespace_only"),
+            pytest.param("", False, id="empty"),
+        ],
+    )
+    def test_matches_expected(self, monkeypatch: pytest.MonkeyPatch, value: str, expected: bool):
+        monkeypatch.setenv("DFE_TEST_RESOLVES", value)
+        assert env_var_resolves(env_name="DFE_TEST_RESOLVES") is expected
+
+    def test_an_unset_one_does_not(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("DFE_TEST_RESOLVES", raising=False)
+        assert env_var_resolves(env_name="DFE_TEST_RESOLVES") is False
