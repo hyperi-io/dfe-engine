@@ -374,6 +374,8 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
         return _invalid_body("User", exc)
 
     fields = scim_user_to_account_fields(inbound)
+    if user_id == user.user_id and not fields["enabled"]:
+        return scim_error(403, "Cannot deactivate your own account")
     if admin_retirement.locks_out_last_admin(
         existing,
         store,
@@ -436,6 +438,8 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
         # Other paths (userName is the immutable key; group membership is managed
         # on /Groups) are ignored - the record stays consistent either way.
     if enabled is not None:
+        if user_id == user.user_id and not enabled:
+            return scim_error(403, "Cannot deactivate your own account")
         if admin_retirement.locks_out_last_admin(
             existing,
             store,

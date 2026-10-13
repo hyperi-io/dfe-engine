@@ -684,6 +684,10 @@ async def get_account(
     response_model=AccountResponse,
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
     responses={
+        403: {
+            "model": ErrorResponse,
+            "description": "self_deactivate: an account cannot disable or block itself",
+        },
         409: {
             "model": ErrorResponse,
             "description": (
@@ -701,7 +705,8 @@ async def update_account(
 ):
     """Update account groups, enabled/blocked status, or contact fields (admin only).
 
-    Refused when disabling or blocking would leave no usable system-admin account.
+    Refused when the caller disables or blocks their own account, or when that
+    would leave no usable system-admin account.
     """
     from dfe_engine.auth import admin_retirement
     from dfe_engine.auth.accounts import AccountStore
@@ -710,6 +715,14 @@ async def update_account(
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
     existing = _require_account(store, username)
+    if username == user.user_id and (body.enabled is False or body.blocked is True):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "self_deactivate",
+                "message": "Cannot deactivate your own account",
+            },
+        )
     bindings = provider_bindings(request)
     if admin_retirement.locks_out_last_admin(
         existing,

@@ -777,9 +777,8 @@ class TestTheGroupsAnAccountShows:
         assert resp.status_code == 200, resp.text
         assert resp.json()["enabled"] is False
 
-    def test_deactivate_last_usable_admin_is_refused(
-        self, recovery_accounts, client, admin_headers, app
-    ):
+    def test_deactivate_own_account_is_refused(self, recovery_accounts, client, admin_headers, app):
+        """Even with another admin still usable, an account cannot disable itself."""
         from dfe_engine.api.deps import create_access_token
 
         store = recovery_accounts.state.account_store
@@ -789,8 +788,6 @@ class TestTheGroupsAnAccountShows:
             headers=admin_headers,
         )
         assert created.status_code == 201, created.text
-        store.update("admin", enabled=False, allow_protected=True)
-        store.update("breakglass", enabled=False, allow_protected=True)
         ops_headers = {
             "Authorization": (
                 "Bearer "
@@ -807,13 +804,11 @@ class TestTheGroupsAnAccountShows:
             headers=ops_headers,
         )
 
-        assert resp.status_code == 409, resp.text
-        assert resp.json()["code"] == "last_admin"
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "self_deactivate"
         assert store.get("ops").enabled is True
 
-    def test_block_last_usable_admin_is_refused(
-        self, recovery_accounts, client, admin_headers, app
-    ):
+    def test_block_own_account_is_refused(self, recovery_accounts, client, admin_headers, app):
         from dfe_engine.api.deps import create_access_token
 
         store = recovery_accounts.state.account_store
@@ -823,8 +818,6 @@ class TestTheGroupsAnAccountShows:
             headers=admin_headers,
         )
         assert created.status_code == 201, created.text
-        store.update("admin", enabled=False, allow_protected=True)
-        store.update("breakglass", enabled=False, allow_protected=True)
         ops_headers = {
             "Authorization": (
                 "Bearer "
@@ -841,8 +834,8 @@ class TestTheGroupsAnAccountShows:
             headers=ops_headers,
         )
 
-        assert resp.status_code == 409, resp.text
-        assert resp.json()["code"] == "last_admin"
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "self_deactivate"
         assert store.get("ops").blocked is False
 
     def test_update_blocked(self, client, admin_headers):
@@ -1490,7 +1483,10 @@ class TestProtectedAccounts:
             headers=admin_headers,
         )
         assert resp.status_code == 403, resp.text
-        assert resp.json()["code"] == "protected_account"
+        # Disabling yourself is refused before the protected-name floor; another
+        # recovery credential still hits protected_account.
+        expected = "self_deactivate" if username == "admin" else "protected_account"
+        assert resp.json()["code"] == expected
         assert recovery_accounts.state.account_store.get(username).enabled is True
 
     def test_put_dropping_the_admin_group_is_refused(
