@@ -11,5 +11,13 @@
       ],
       "datasourceTemplate": "docker"
     }
+  ],
+  "packageRules": [
+    {
+      "description": "Held on their current lines until after GA: their next releases change behaviour the engine relies on. The reason for each hold sits beside its dependency in pyproject.toml.",
+      "matchPackageNames": ["pysigma", "apprise", "scim2-models"],
+      "minimumReleaseAge": "7 days",
+      "enabled": false
+    }
   ]
 }

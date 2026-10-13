@@ -40,6 +40,8 @@ dependencies = [
     #            earlier releases flushed nothing, so the last spans were lost.
     # >=2.31.9:  importing scalo loads no .env, so init_scalo_logger loads it
     #            through get_config() before it reads LOG_LEVEL and LOG_FORMAT.
+    # >=2.31.10: each OTel metrics backend takes its meter from its own provider,
+    #            so a second metrics manager no longer lands on the first's readers.
     # Upper bound: <3 is the API-stability boundary. An unbounded `>=` is invisible
     # to Renovate -- the constraint is satisfied by every future release, so no PR
     # is ever raised and the version moves silently in the lock.
@@ -51,14 +53,15 @@ dependencies = [
     # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
     # goes green while reporting nothing. [opentelemetry] is no longer a separate
     # extra: [metrics] carries the SDK.
-    "scalo[expression,http,metrics]>=2.31.9,<3",
+    "scalo[expression,http,metrics]>=2.31.10,<3",
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
-    # wheel. Floor is the release declaring the JSON table settings the DDL
-    # generator and both appliers read; uv.lock pins the hash.
+    # wheel. Floor is the release whose filebeat meta schema promotes
+    # data_stream.dataset to its own column, the identifier a beats source routes
+    # on; uv.lock pins the hash.
     # Upper bound: <1 is the API-stability boundary while dfe-schemas is 0.x.
-    "dfe-schemas>=0.2.10,<1",
+    "dfe-schemas>=0.2.11,<1",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",

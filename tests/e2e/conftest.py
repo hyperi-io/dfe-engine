@@ -18,6 +18,8 @@ Configure via env (typically `dfe-engine`-side of a `single`/`standard` deployme
   DFE_E2E_RECEIVER_TOKEN   bearer token for the receiver (optional)
   DFE_E2E_CH_HOST/PORT     ClickHouse HTTP endpoint (default port 8123)
   DFE_E2E_CH_USER/PASSWORD/DB   ClickHouse creds + database (default db: dfe)
+  DFE_E2E_CH_SECURE        1 when that endpoint speaks TLS (default off); set
+                           DFE_E2E_CH_PORT to its HTTPS port too
   DFE_E2E_HYPERDX_URL      HyperDX base URL
   DFE_E2E_HYPERDX_API_KEY  HyperDX API key (optional)
   DFE_E2E_ENGINE_URL       dfe-engine API base
@@ -40,16 +42,17 @@ whole suite reuses rather than one deployment's endpoint:
                              uppercased as /api/v1/auth/setup-status names it
 """
 
-from __future__ import annotations
-
 import json
 import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
+
+if TYPE_CHECKING:
+    from clickhouse_connect.driver.client import Client
 
 
 @dataclass(frozen=True)
@@ -62,6 +65,8 @@ class E2EConfig:
     ch_user: str
     ch_password: str | None = field(repr=False)
     ch_db: str
+    # Whether ClickHouse's HTTP interface is behind TLS, as a managed service's is.
+    ch_secure: bool
     hyperdx_url: str | None
     hyperdx_api_key: str | None = field(repr=False)
     engine_url: str | None
@@ -87,7 +92,13 @@ class E2EConfig:
     verify: bool
 
 
-def _cfg() -> E2EConfig:
+def _flag(name: str) -> bool:
+    """Whether the switch ``name`` is set to anything but empty, 0 or false."""
+    return os.getenv(name, "") not in ("", "0", "false", "False")
+
+
+def load_config() -> E2EConfig:
+    """The live deployment the DFE_E2E_* variables describe."""
     return E2EConfig(
         receiver_url=os.getenv("DFE_E2E_RECEIVER_URL"),
         receiver_token=os.getenv("DFE_E2E_RECEIVER_TOKEN"),
@@ -96,6 +107,7 @@ def _cfg() -> E2EConfig:
         ch_user=os.getenv("DFE_E2E_CH_USER", "admin"),
         ch_password=os.getenv("DFE_E2E_CH_PASSWORD"),
         ch_db=os.getenv("DFE_E2E_CH_DB", "dfe"),
+        ch_secure=_flag("DFE_E2E_CH_SECURE"),
         hyperdx_url=os.getenv("DFE_E2E_HYPERDX_URL"),
         hyperdx_api_key=os.getenv("DFE_E2E_HYPERDX_API_KEY"),
         engine_url=os.getenv("DFE_E2E_ENGINE_URL"),
@@ -108,13 +120,13 @@ def _cfg() -> E2EConfig:
         deploy_repo_token=os.getenv("DFE_E2E_DEPLOY_REPO_TOKEN"),
         deploy_repo_user=os.getenv("DFE_E2E_DEPLOY_REPO_USER", "dfe"),
         transform=os.getenv("DFE_E2E_TRANSFORM"),
-        verify=os.getenv("DFE_E2E_VERIFY", "") not in ("", "0", "false", "False"),
+        verify=_flag("DFE_E2E_VERIFY"),
     )
 
 
 @pytest.fixture(scope="session")
 def e2e() -> E2EConfig:
-    return _cfg()
+    return load_config()
 
 
 def require(cfg: E2EConfig, *attrs: str) -> None:
@@ -385,18 +397,24 @@ def count_rows(
     return int(result.result_rows[0][0]) if result.result_rows else 0
 
 
+def connect_clickhouse(cfg: E2EConfig) -> Client:
+    """A clickhouse-connect client against the live ClickHouse (native JSON path)."""
+    import clickhouse_connect
+
+    return clickhouse_connect.get_client(
+        host=cfg.ch_host,
+        port=cfg.ch_port,
+        username=cfg.ch_user,
+        password=cfg.ch_password or "",
+        database=cfg.ch_db,
+        secure=cfg.ch_secure,
+    )
+
+
 @pytest.fixture(scope="session")
 def ch_client(e2e: E2EConfig):
     """A clickhouse-connect client against the live ClickHouse (native JSON path)."""
     require(e2e, "ch_host")
-    import clickhouse_connect
-
-    client = clickhouse_connect.get_client(
-        host=e2e.ch_host,
-        port=e2e.ch_port,
-        username=e2e.ch_user,
-        password=e2e.ch_password or "",
-        database=e2e.ch_db,
-    )
+    client = connect_clickhouse(e2e)
     yield client
     client.close()
