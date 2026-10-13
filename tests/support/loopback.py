@@ -17,6 +17,7 @@ import contextlib
 import socket
 import struct
 import threading
+from collections.abc import Callable
 from socketserver import TCPServer
 from typing import Literal
 
@@ -52,18 +53,24 @@ def wake_accept(listener: socket.socket) -> None:
             pass
 
 
-def _end_after_first_bytes(conn: socket.socket, how: EndOfConnection) -> None:
+def _end_after_first_bytes(
+    conn: socket.socket, how: EndOfConnection, record: Callable[[bytes], None]
+) -> None:
     """Wait for the client's first write, end ``conn`` the way ``how`` says, then close it.
 
     ``"eof"`` shuts the write side and reads until the client hangs up, so nothing is
     left unread for the close to answer with a reset. ``"reset"`` closes with a zero
     linger, which sends a reset in place of a FIN. A client that never writes, or that
     has gone, ends the wait at ``_FIRST_BYTES_SECONDS``.
+
+    ``record`` gets the first write before the connection ends, so a client that has
+    seen the end can rely on it being recorded.
     """
     conn.settimeout(_FIRST_BYTES_SECONDS)
     try:
         with contextlib.suppress(OSError):
-            conn.recv(_READ_BYTES)
+            if first := conn.recv(_READ_BYTES):
+                record(first)
             if how == "reset":
                 conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
             else:
@@ -85,7 +92,7 @@ class CountingListener:
     ClientHello. A close that finds the write already queued answers with a reset,
     and one that lands before it with a clean EOF. ``after_first_bytes`` removes the
     race: each connection waits for the client's first write, then ends as ``"eof"``
-    or ``"reset"`` says, every time.
+    or ``"reset"`` says, every time, and keeps that write in ``first_writes``.
     """
 
     def __init__(
@@ -98,6 +105,7 @@ class CountingListener:
         self._listener.listen(16)
         self._lock = threading.Lock()
         self._connections = 0
+        self._first_writes: list[bytes] = []
         self._held: list[socket.socket] = []
         self._thread = threading.Thread(target=self._accept, daemon=True)
         self._thread.start()
@@ -111,6 +119,16 @@ class CountingListener:
         """Connections accepted so far."""
         with self._lock:
             return self._connections
+
+    @property
+    def first_writes(self) -> list[bytes]:
+        """The first write of each connection so far, when ``after_first_bytes`` is set."""
+        with self._lock:
+            return list(self._first_writes)
+
+    def _record_first_write(self, data: bytes) -> None:
+        with self._lock:
+            self._first_writes.append(data)
 
     def _accept(self) -> None:
         while True:
@@ -127,7 +145,7 @@ class CountingListener:
             if self._after_first_bytes is None:
                 conn.close()
             else:
-                _end_after_first_bytes(conn, self._after_first_bytes)
+                _end_after_first_bytes(conn, self._after_first_bytes, self._record_first_write)
 
     def close(self) -> None:
         wake_accept(self._listener)
