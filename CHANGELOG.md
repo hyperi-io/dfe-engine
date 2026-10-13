@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.36](https://github.com/hyperi-io/dfe-engine/compare/v1.22.35...v1.22.36) (2026-10-13)
+
+### Bug Fixes
+
+* let long instance names deploy now the release name is bounded ([#858](https://github.com/hyperi-io/dfe-engine/issues/858)) ([2c9b819](https://github.com/hyperi-io/dfe-engine/commit/2c9b8198bf7c184616d5b1adb121080ca3145c3d)), closes [hyperi-io/dfe-infra#704](https://github.com/hyperi-io/dfe-infra/issues/704)
+* refuse instance names past the Helm cap ([#857](https://github.com/hyperi-io/dfe-engine/issues/857)) ([f07252b](https://github.com/hyperi-io/dfe-engine/commit/f07252bc5a3f8d37b3d7a8cfdf55cf2b603ed708))
+
 ## [1.22.35](https://github.com/hyperi-io/dfe-engine/compare/v1.22.34...v1.22.35) (2026-10-13)
 
 ### Bug Fixes
