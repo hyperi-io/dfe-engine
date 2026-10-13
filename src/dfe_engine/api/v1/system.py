@@ -1033,14 +1033,14 @@ def apply_defaults(
             source.source,
             "updated",
             {
-                "version": source.current,
+                "version": stored.current,
                 "ttl_days": ttl.effective,
                 "common_header_type": table.header_type,
                 "common_header_version": table.header_version,
                 "engine": table.engine,
             },
         )
-        updated.append(pin)
+        updated.append(ApplyDefaultsPin(source=stored.source, version=stored.current))
 
     def connect() -> Any:
         return get_clickhouse_client(settings)
