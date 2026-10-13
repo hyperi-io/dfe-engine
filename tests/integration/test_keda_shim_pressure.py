@@ -17,6 +17,9 @@ scrape target. A push from a scalo release without the resource id carries no po
 at all, so every replica lands in one series.
 """
 
+import time
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from dfe_engine.appmgmt.operations import SCALING_PRESSURE, OperationalReader
@@ -136,3 +139,50 @@ def test_no_gauge_reads_zero_and_only_a_query_error_holds_the_last_good_value(ch
     for statement in render_one("data.otel_metrics_gauge", data_database=gauge_db).statements:
         ch_client.command(statement)
     assert shim.run("pressure", {"service": _SERVICE}) == 0
+
+
+def _wait_running(ch_client, marker: str, deadline_seconds: float = 10.0) -> None:
+    """Return once ClickHouse lists a query carrying ``marker``; fail at the deadline."""
+    deadline = time.monotonic() + deadline_seconds
+    while time.monotonic() < deadline:
+        running = ch_client.query(
+            "SELECT count() FROM system.processes WHERE query LIKE {pattern:String} "
+            "AND query NOT LIKE '%system.processes%'",
+            parameters={"pattern": f"%{marker}%"},
+        ).result_rows[0][0]
+        if running:
+            return
+        time.sleep(0.05)
+    pytest.fail(f"no query carrying {marker!r} started within {deadline_seconds}s")
+
+
+def test_a_poll_answers_while_another_poll_is_still_in_flight(
+    ch_params, ch_client, gauge_db, tmp_path
+):
+    """FastAPI serves each poll on its own thread, so polls overlap on the one client.
+
+    The shim builds its own client here, as the deployed pod does. Neither poll may
+    fall back to the held value because the other was mid-query.
+    """
+    catalogue = tmp_path / "queries.yaml"
+    catalogue.write_text(
+        "queries:\n"
+        "  slow:\n"
+        "    database: data\n"
+        "    sql: SELECT toUInt32(7 + sleep(2)) AS overlap_marker\n",
+        encoding="utf-8",
+    )
+    settings = DFESettings(env="test", keda_shim={"query_config": str(catalogue)})
+    ch = settings.clickhouse
+    ch.host, ch.port = ch_params["host"], ch_params["port"]
+    ch.username, ch.password = ch_params["username"], ch_params["password"]
+    ch.secure = ch_params["secure"]
+    ch.data_database = gauge_db
+    shim = QueryShim(settings)
+    _write(ch_client, gauge_db, 80, resource=_pod("dfe-receiver-a"))
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        slow = pool.submit(shim.run, "slow")
+        _wait_running(ch_client, "overlap_marker")
+        assert shim.run("pressure", {"service": _SERVICE}) == 80
+        assert slow.result(timeout=30) == 7
