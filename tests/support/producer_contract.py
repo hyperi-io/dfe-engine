@@ -17,9 +17,7 @@ A contract test holds an engine fixture or model against what a producer repo sh
 3. GitHub, at the release pinned in ``PRODUCERS`` (or ``DFE_INFRA``).
 
 When none of them answers, a CI run fails and a local run skips: a skip in CI is a green
-build that compared nothing. The one exception is a producer marked ``private``, which
-GitHub answers with a 404 until someone can read it: that skips everywhere, saying why.
-``GH_TOKEN`` or ``GITHUB_TOKEN`` authenticates the fetch.
+build that compared nothing. ``GH_TOKEN`` or ``GITHUB_TOKEN`` authenticates the fetch.
 
 To bump a pin, set ``ref`` to the release the suite ships, then run the contract tests
 with no checkout beside this one so they read the pin. ``check_pin`` warns with
@@ -75,15 +73,12 @@ class Producer:
         ref: The release tag the engine is tested against.
         dir_env: Variable naming a checkout of ``repo`` kept anywhere.
         files: Every file the contract tests read, relative to the repo root.
-        private: GitHub hides the repo from a caller without read on it, so a 404 is
-            the expected answer in CI and skips rather than fails.
     """
 
     repo: str
     ref: str
     dir_env: str
     files: tuple[str, ...]
-    private: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,23 +106,18 @@ DFE_LOADER = Producer(
     ref="v1.18.50",
     dir_env="DFE_LOADER_DIR",
     files=("src/config/pipeline.rs", "src/config/loader.rs"),
-    # Risk accepted until GA: CI holds no token that reads it, so its tests skip there.
-    private=True,
 )
 SCALO_RS = Producer(
     repo="scalo-rs",
     ref="v2.12.11",
     dir_env="SCALO_RS_DIR",
     files=("tests/fixtures/cel_classifier_parity.json",),
-    private=False,
 )
 DFE_TRANSFORM_VRL = Producer(
     repo="dfe-transform-vrl",
     ref="v1.1.29",
     dir_env="DFE_TRANSFORM_VRL_DIR",
     files=("tests/fixtures/filebeat/filebeat-testdata.tar.gz",),
-    # Risk accepted until GA, as for dfe-loader.
-    private=True,
 )
 PRODUCERS = (DFE_LOADER, SCALO_RS, DFE_TRANSFORM_VRL)
 
@@ -139,7 +129,6 @@ DFE_INFRA = Producer(
     ref="2.2.1-rc.5",
     dir_env="DFE_INFRA_DIR",
     files=("versions.yaml",),
-    private=False,
 )
 
 
@@ -147,20 +136,6 @@ def in_ci() -> bool:
     """Whether this is a CI run, where an unreadable contract fails rather than skips."""
     ci = os.environ.get("CI", "").strip().lower()
     return ci in {"1", "true", "yes"} or os.environ.get("GITHUB_ACTIONS") == "true"
-
-
-def hidden_private_reason(producer: Producer, exc: ContractUnreadableError) -> str | None:
-    """Why a private producer is out of reach, or None when the failure is anything else.
-
-    Only a 404 counts: it is how GitHub hides a private repo. A network failure on a
-    private producer is still a failure.
-    """
-    if producer.private and exc.status == httpx.codes.NOT_FOUND:
-        return (
-            f"{producer.repo} is private until GA; set GH_TOKEN with read on it, or it runs "
-            "once the repo is public (dfe-engine #553)"
-        )
-    return None
 
 
 def _get(url: str, *, accept: str | None = None) -> bytes:
@@ -216,8 +191,7 @@ def check_pin(producer: Producer, *, api_base: str = API_BASE, base_url: str = R
     """Warn when the producer's latest release changed a file the engine pins older.
 
     A release that leaves every pinned file alone needs no bump, so it passes quietly. A
-    private producer GitHub hides skips quietly too, or it would warn on every run. Any
-    other failure to check skips locally and warns in CI rather than passing as current.
+    failure to check skips locally and warns in CI rather than passing as current.
 
     Args:
         producer: The repo whose pin is checked.
@@ -238,8 +212,6 @@ def check_pin(producer: Producer, *, api_base: str = API_BASE, base_url: str = R
                 if fetch_at(producer.repo, latest, path, base_url) != pinned[path]
             ]
     except ContractUnreadableError as exc:
-        if hidden := hidden_private_reason(producer, exc):
-            pytest.skip(hidden)
         if not in_ci():
             pytest.skip(f"could not check {producer.repo}'s pin: {exc}")
         warnings.warn(
@@ -273,8 +245,6 @@ def _unreadable(
     producer: Producer, relative: str, exc: ContractUnreadableError, checkouts: Path
 ) -> NoReturn:
     """Skip, or fail in CI, a test whose producer path neither a checkout nor GitHub gave."""
-    if hidden := hidden_private_reason(producer, exc):
-        pytest.skip(hidden)
     reason = (
         f"{OWNER}/{producer.repo}@{producer.ref} {relative} could not be read ({exc}), "
         f"and there is no checkout at ${producer.dir_env} or {checkouts / producer.repo}."
@@ -296,8 +266,7 @@ def producer_file(
 ) -> ProducerFile:
     """Read one of ``producer.files`` from a checkout, else from GitHub at the pin.
 
-    When neither answers it skips the calling test, and in CI fails it instead, unless
-    the producer is private and GitHub hid it, which skips everywhere.
+    When neither answers it skips the calling test, and in CI fails it instead.
 
     Args:
         producer: The repo that ships the file.
