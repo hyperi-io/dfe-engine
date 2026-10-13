@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.33](https://github.com/hyperi-io/dfe-engine/compare/v1.22.32...v1.22.33) (2026-10-13)
+
+### Bug Fixes
+
+* let the groups API set a group's IdP link ([#844](https://github.com/hyperi-io/dfe-engine/issues/844)) ([4d8aea1](https://github.com/hyperi-io/dfe-engine/commit/4d8aea19717a5711de1784656aea6ff1ea79fd92)), closes [#758](https://github.com/hyperi-io/dfe-engine/issues/758)
+* scalo 2.31.9 and .env before logger init ([#846](https://github.com/hyperi-io/dfe-engine/issues/846)) ([717c339](https://github.com/hyperi-io/dfe-engine/commit/717c3392d876a8bd1cd1a0fea0a05549279920d7))
+
 ## [1.22.32](https://github.com/hyperi-io/dfe-engine/compare/v1.22.31...v1.22.32) (2026-10-12)
 
 ### Bug Fixes
