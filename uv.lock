@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -695,7 +695,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
     { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.9,<3" },
-    { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
+    { name = "scim2-models", specifier = ">=0.10.3,<0.11" },
     { name = "sqlglot", specifier = ">=30.17.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
     { name = "starlette", specifier = ">=1.3.1" },
@@ -1156,6 +1156,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c3/e4/f645c4dc5042f0de7473665d510040d702c079e3a40f9227d04e478d9c16/jq-1.12.0-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:1dff708ccf14b425b733bf2b94398d95d2c697ace7678cf4e332fafb78e037f8", size = 759497, upload-time = "2026-07-10T12:36:01.572Z" },
     { url = "https://files.pythonhosted.org/packages/f0/95/31ace4332bd17ee6a96f0b8323d7a24dd2164d1663049b78f8d2465e7281/jq-1.12.0-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:7cf775589ad923609c3833668880712da44bf01d06508622aef6c47b67c05f98", size = 767868, upload-time = "2026-07-10T12:36:03.34Z" },
     { url = "https://files.pythonhosted.org/packages/2e/55/925c4df48f6e1a06cebe64007b98dc0bbdca227f22100279b1031aa928ff/jq-1.12.0-cp314-cp314t-win_amd64.whl", hash = "sha256:de7aa00e1328fc3838dcccb9633035a7ea5fc7f716215941c517fead55f94695", size = 432114, upload-time = "2026-07-10T12:36:05.675Z" },
+]
+
+[[package]]
+name = "lark"
+version = "1.3.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/34/28fff3ab31ccff1fd4f6c7c7b0ceb2b6968d8ea4950663eadcb5720591a0/lark-1.3.1.tar.gz", hash = "sha256:b426a7a6d6d53189d318f2b6236ab5d6429eaf09259f1ca33eb716eed10d2905", size = 382732, upload-time = "2025-10-27T18:25:56.653Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/82/3d/14ce75ef66813643812f3093ab17e46d3a206942ce7376d31ec2d36229e7/lark-1.3.1-py3-none-any.whl", hash = "sha256:c629b661023a014c37da873b4ff58a817398d12635d3bbb2c5a03be7fe5d1e12", size = 113151, upload-time = "2025-10-27T18:25:54.882Z" },
 ]
 
 [[package]]
@@ -2277,14 +2286,15 @@ metrics = [
 
 [[package]]
 name = "scim2-models"
-version = "0.6.12"
+version = "0.10.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "lark" },
     { name = "pydantic", extra = ["email"] },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ad/67/121a60b8433839fb19a9986e8d9f5416941e42ea6827bd7e520783477cca/scim2_models-0.6.12.tar.gz", hash = "sha256:3a57c5ec10dc1007e5f4391d3bddeaca974be8d55e9ede4a1de20019ad3a920b", size = 48631, upload-time = "2026-04-13T12:37:11.888Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/db/d0b6a0f5df0bfbe833abc02eb28c50117a78d69751ec8c94e33851b8d44c/scim2_models-0.10.6.tar.gz", hash = "sha256:3f6547e385e6c16385e8ce3a82eac6039249f3878faaf38e87af07d0e7fece37", size = 103592, upload-time = "2026-10-06T10:22:21.831Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/b0/04d4b4e10ce59e813a3000d3ccb97537e88ab0341aacebc51abee50ed637/scim2_models-0.6.12-py3-none-any.whl", hash = "sha256:8ccc8139c61f84a29a1c54d8eda3f8fd121534cdd292166be1e8289d6f05902a", size = 61012, upload-time = "2026-04-13T12:37:10.322Z" },
+    { url = "https://files.pythonhosted.org/packages/51/b0/b3b9c98d0a896554b67cba3d9c1c545001c36e9ef31a5fc33b5b8be1a710/scim2_models-0.10.6-py3-none-any.whl", hash = "sha256:6d7822427e4c5ec30ff82d0a019f650455c9bacf7750bdd25fdf67fa200af449", size = 126256, upload-time = "2026-10-06T10:22:20.173Z" },
 ]
 
 [[package]]

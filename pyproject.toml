@@ -97,7 +97,7 @@ dependencies = [
     # Signs the OIDC RP session cookie (SessionMiddleware / Authlib OAuth state+nonce)
     "itsdangerous>=2.2.0",
     # Held on 0.6 for GA: later 0.x minors change the SCIM models' API.
-    "scim2-models>=0.6.12,<0.7",
+    "scim2-models>=0.10.3,<0.11",
     # Document store for control-plane state (accounts now; preferences, teams
     # later) over FerretDB / mongo wire protocol. Sync client on purpose -- the
     # engine is a low-volume control plane, so no async driver is warranted.
