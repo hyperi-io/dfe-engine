@@ -105,6 +105,7 @@ class CountingListener:
         self._listener.listen(16)
         self._lock = threading.Lock()
         self._connections = 0
+        self._stopping = False
         self._first_writes: list[bytes] = []
         self._held: list[socket.socket] = []
         self._thread = threading.Thread(target=self._accept, daemon=True)
@@ -137,6 +138,12 @@ class CountingListener:
             except OSError:
                 return
             with self._lock:
+                # ``close`` may dial once to wake this ``accept`` on platforms
+                # where ``shutdown`` on a listening socket is a no-op; that
+                # connect is not a client under test.
+                if self._stopping:
+                    conn.close()
+                    continue
                 self._connections += 1
                 if self._hold:
                     self._held.append(conn)
@@ -148,6 +155,8 @@ class CountingListener:
                 _end_after_first_bytes(conn, self._after_first_bytes, self._record_first_write)
 
     def close(self) -> None:
+        with self._lock:
+            self._stopping = True
         wake_accept(self._listener)
         self._listener.close()
         self._thread.join(timeout=_JOIN_SECONDS)
