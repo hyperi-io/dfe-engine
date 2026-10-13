@@ -87,8 +87,8 @@ CUSTOM_ENV_SUFFIX = ".custom.env"
 CUSTOM_ENV_MODE = 0o640
 """Owner writes, the env directory's group reads, nobody else sees it.
 
-Compose reads ``env_file`` as whichever operator runs it, and that is rarely the
-engine's own user, so the group is how the file reaches it.
+Compose reads ``env_file`` and the deployer reads the instance index as whichever
+operator runs them, rarely the engine's own user, so the group is how a file reaches them.
 """
 
 INSTANCE_INDEX_SUFFIX = ".instances"
@@ -247,7 +247,8 @@ def _share_with_directory_group(handle: int, directory: Path) -> None:
 
     A directory with the setgid bit has already done it, and then there is nothing
     to change. Otherwise only a member of that group may hand a file to it, and a
-    file left on the engine's own group is one the operator's Compose cannot read.
+    file left on the engine's own group is one the operator's Compose and deployer
+    cannot read.
     """
     group = directory.stat().st_gid
     if os.fstat(handle).st_gid == group:
@@ -256,8 +257,8 @@ def _share_with_directory_group(handle: int, directory: Path) -> None:
         os.fchown(handle, -1, group)
     except PermissionError as exc:
         logger.warning(
-            "an app env file cannot take its directory's group, so Compose run by "
-            "that group cannot read it",
+            "a file in the app env directory cannot take its directory's group, so an "
+            "operator in that group cannot read it",
             directory=str(directory),
             group=group,
             error=str(exc),
@@ -519,7 +520,8 @@ def write_instance_index(settings: Any, service: str, names: list[str]) -> None:
         return
     try:
         directory.mkdir(parents=True, exist_ok=True)
-        target.write_text(rendered, encoding="utf-8")
+        # A rename needs write on the directory only, so it replaces an index the operator created.
+        _write_group_readable(target, rendered)
     except OSError as exc:
         _report_unwritable(target.name, directory, exc)
 

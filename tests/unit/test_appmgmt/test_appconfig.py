@@ -454,6 +454,29 @@ class TestOneContainerPerInstance:
         assert _index(settings, VRL).read_text() == "crowdstrike-eu\n"
         assert not _app_dir(settings, VRL, "crowdstrike-us").exists()
 
+    def test_an_index_the_engine_cannot_open_for_writing_is_still_replaced(
+        self, crud, tmp_path, captured_logs
+    ):
+        # The operator's checkout can hold an index another user created, which the
+        # engine reaches only through the directory; owner read-only stands in for it.
+        if os.geteuid() == 0:
+            pytest.skip("root opens a read-only file for writing")
+        settings = _settings(tmp_path)
+        index = _index(settings, VRL)
+        index.parent.mkdir(parents=True)
+        index.write_text("", encoding="utf-8")
+        index.chmod(0o444)
+        _deploy(crud, VRL, "crowdstrike-eu")
+
+        appconfig.render(crud, settings)
+
+        assert index.read_text(encoding="utf-8") == "crowdstrike-eu\n"
+        # The deployer reads it through the directory's group, as Compose does an env file.
+        assert index.stat().st_mode & 0o777 == 0o640
+        assert index.stat().st_gid == index.parent.stat().st_gid
+        warning = [line for line in captured_logs if line.startswith("WARNING ")]
+        assert not [line for line in warning if index.name in line]
+
     def test_an_unwritable_env_directory_does_not_cost_the_apps_their_config(self, crud, tmp_path):
         # That directory is the operator's own checkout, so its mode is theirs to
         # fix; the containers still have to get the config they read.
