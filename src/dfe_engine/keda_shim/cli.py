@@ -14,15 +14,34 @@ app from the standard settings cascade and serves it with uvicorn until SIGTERM.
 
 import typer
 import uvicorn
+from fastapi import FastAPI
+from scalo.metrics import create_metrics
+from scalo.metrics.groups import ResourceMetrics
 
 from dfe_engine.api import init_scalo_logger
-from dfe_engine.settings import load_settings
+from dfe_engine.settings import DFESettings, load_settings
 
 from .app import create_app
 
 app = typer.Typer(help="dfe-keda-shim: config-driven ClickHouse -> KEDA metrics-api adapter.")
 
 _SERVICE_NAME = "dfe-keda-shim"
+
+
+def served_app(settings: DFESettings) -> FastAPI:
+    """Build the app the pod serves, with process and request metrics on its own manager.
+
+    Args:
+        settings: The settings the shim reads its ClickHouse and query config from.
+
+    Returns:
+        The shim app, recording each request on a manager that also carries the
+        process and container gauges.
+    """
+    # Unprefixed, as on the daemon: dashboards read process_* and http.server.request.duration.
+    metrics = create_metrics(_SERVICE_NAME)
+    ResourceMetrics(mgr=metrics)
+    return create_app(settings=settings, metrics_manager=metrics)
 
 
 # No app.callback(): with one command Typer runs it bare, and the chart invokes it with no args.
@@ -34,7 +53,7 @@ def run() -> None:
     ks = settings.keda_shim
     uvicorn.Server(
         uvicorn.Config(
-            create_app(settings=settings),
+            served_app(settings),
             host=ks.host,
             port=ks.port,
             log_level="info",

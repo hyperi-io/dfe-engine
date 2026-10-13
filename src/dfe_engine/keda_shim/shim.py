@@ -43,7 +43,9 @@ _BUILTIN_QUERIES = Path(__file__).parent / "queries.yaml"
 _IDENT = re.compile(r"^[A-Za-z0-9_-]+\Z")
 
 
-def _ch_client(settings: DFESettings) -> Any:
+def _ch_client(
+    settings: DFESettings, *, connect: Callable[..., Any] = clickhouse_connect.get_client
+) -> Any:
     """A raw clickhouse-connect client from the engine's CH settings.
 
     Raw (not the ClickHouseManager resilience wrapper): the shim is a tiny read-only
@@ -53,10 +55,17 @@ def _ch_client(settings: DFESettings) -> Any:
 
     No session: FastAPI runs each poll on its own worker thread, and
     clickhouse-connect refuses a second query in flight on one session.
+
+    Args:
+        settings: The engine settings whose ``clickhouse`` section is used.
+        connect: Builds the client from keyword arguments.
+
+    Returns:
+        The client ``connect`` built.
     """
     ch = settings.clickhouse
     tls = resolve_clickhouse_tls(secure=ch.secure, verify=ch.verify, ca_cert=ch.ca_cert)
-    return clickhouse_connect.get_client(
+    return connect(
         host=ch.host,
         port=ch.port,
         username=ch.username,
@@ -184,11 +193,15 @@ class QueryShim:
         Unknown ``name`` is a config error (raised) so the route can log it; every
         RUNTIME failure is swallowed by the fail-safe and returns the last-good or
         cold-hold value, so KEDA can only ever hold or scale DOWN on a bad metric.
+
+        A param the query does not declare is ignored, as ``_build`` never binds one.
         """
-        params = params or {}
         cfg = self._queries.get(name)
         if cfg is None:
             raise KeyError(name)
+        # The cache keys on these alone, so a caller's extra params cannot grow it.
+        declared = cfg.get("params", [])
+        params = {key: value for key, value in (params or {}).items() if key in declared}
         cache_key = self._cache_key(name, params)
         cold_hold = int(cfg.get("cold_hold", 0))
         client = None
