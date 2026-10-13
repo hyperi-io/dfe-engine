@@ -35,6 +35,7 @@ from dfe_engine.source.models import (
     SourceHeader,
     SourceSchema,
     engine_registry,
+    next_major_source_version,
 )
 
 from .commit_policy import CommitContext, build_message
@@ -349,13 +350,17 @@ def pin_table_defaults(
     ttl_days: int,
     engine: str,
 ) -> Source | None:
-    """Pin the current version to these defaults. None when that version already has them.
+    """Pin these defaults onto a working copy. None when that copy already has them.
 
-    Other versions are left alone, and so is every other field on the current
-    version. Header, TTL and engine are written even when the source was only
-    inheriting the same values, so a later change to the deployment default
-    does not move this source again. The header type is written as the bare
-    profile name, and a stored ``common-header/<name>`` already matches ``<name>``.
+    A draft is updated in place, including a source that has never been deployed.
+    When ``current`` is the deployed version, the pins land on a new major version
+    and ``current`` moves to it, leaving the deployed snapshot until that working
+    copy is deployed. Other versions, and every other field on the pinned
+    snapshot, are left alone. Header, TTL and engine are written even when the
+    source was only inheriting the same values, so a later change to the
+    deployment default does not move this source again. The header type is
+    written as the bare profile name, and a stored ``common-header/<name>``
+    already matches ``<name>``.
     """
     snap = source.versions[source.current]
     header = SourceHeader(type=header_profile_name(header_type), version=header_version)
@@ -374,8 +379,11 @@ def pin_table_defaults(
     ):
         return None
     versions = dict(source.versions)
-    versions[source.current] = snap.model_copy(update={"header": header, "schema_config": schema})
-    return source.model_copy(update={"versions": versions})
+    target = source.current
+    if source.deployed_version is not None and source.deployed_version == source.current:
+        target = next_major_source_version(versions)
+    versions[target] = snap.model_copy(update={"header": header, "schema_config": schema})
+    return source.model_copy(update={"versions": versions, "current": target})
 
 
 @dataclass(frozen=True)
