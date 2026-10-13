@@ -81,6 +81,7 @@ read it directly and carry no routing config of their own.
   the source, and that name becomes an Argo Application and a set of Kubernetes
   object names, so the charset has to be a subset of what a label allows.
 - Max 40 characters, the cap the instance name carries
+- Shorter on Kubernetes when the source deploys a fetcher or transform instance. Argo CD names that instance's Helm release `{service}-{source}-{cluster}`, Helm caps a release name at 53 characters, and the engine keeps 19 for the cluster name. That leaves 21 for a fetcher source, 15 with a `vrl` transform, 12 with `vector` and 11 with `elastic`. Compose renders no Helm release and has no such cap.
 - Unique across all sources
 
 A hyphenated name has to be quoted in a ClickHouse identifier position. The DDL
