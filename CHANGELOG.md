@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.35](https://github.com/hyperi-io/dfe-engine/compare/v1.22.34...v1.22.35) (2026-10-13)
+
+### Bug Fixes
+
+* bound keda-shim cache key, add shim metrics ([#852](https://github.com/hyperi-io/dfe-engine/issues/852)) ([8dcc952](https://github.com/hyperi-io/dfe-engine/commit/8dcc952b25221cbbae329d0ad7042bb214d05cad))
+* close keda-shim clients dropped on a failure ([#851](https://github.com/hyperi-io/dfe-engine/issues/851)) ([76b74e4](https://github.com/hyperi-io/dfe-engine/commit/76b74e4345dd7c18001f0375198b955decf39240))
+* hold the GA-pinned deps by range, and run every contract test in CI ([#850](https://github.com/hyperi-io/dfe-engine/issues/850)) ([b736be7](https://github.com/hyperi-io/dfe-engine/commit/b736be7a4fba2a33f0126f83ee12f20c664c317c))
+* skip caching keda-shim cold_hold answers ([#855](https://github.com/hyperi-io/dfe-engine/issues/855)) ([d63a34e](https://github.com/hyperi-io/dfe-engine/commit/d63a34eb31ad1ca5f16471cddd733ddb78709c8a))
+
 ## [1.22.34](https://github.com/hyperi-io/dfe-engine/compare/v1.22.33...v1.22.34) (2026-10-13)
 
 ### Bug Fixes
