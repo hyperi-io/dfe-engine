@@ -156,6 +156,7 @@ def test_a_listener_waiting_for_the_first_write_ends_every_connection_with_an_eo
                 client.sendall(b"client hello")
                 assert client.recv(1) == b""
         assert _until(lambda: listener.connections == 25)
+        assert listener.first_writes == [b"client hello"] * 25
     finally:
         listener.close()
 

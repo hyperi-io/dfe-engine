@@ -834,20 +834,27 @@ class SourceRegistry:
         The resolver holds every transport rule (what the deployment offers, what
         each app carries, what archiving needs), so the save path asks it rather
         than restating any of them. An archive nothing would copy, the source's own
-        or a route target's, is refused here and not in the resolver, which also
-        compiles the sources already stored.
+        or a route target's, or one on a profile that deploys no archiver, is
+        refused here and not in the resolver, which also compiles the sources
+        already stored.
         """
         from dfe_engine.settings import get_settings
-        from dfe_engine.source.flow import FlowError, archive_gap, resolve_flow, route_archive_gap
+        from dfe_engine.source.flow import (
+            FlowError,
+            archive_gap,
+            archiver_offer_gap,
+            resolve_flow,
+            route_archive_gap,
+        )
 
         settings = get_settings()
         try:
             flow = resolve_flow(source, settings)
         except FlowError as exc:
             raise SourceValidationError(str(exc)) from exc
-        gap = archive_gap(flow)
-        if gap is not None:
-            raise SourceValidationError(gap)
+        for gap in (archiver_offer_gap(flow, settings), archive_gap(flow)):
+            if gap is not None:
+                raise SourceValidationError(gap)
 
         fetcher = source.fetcher
         for route in fetcher.routes if fetcher else ():

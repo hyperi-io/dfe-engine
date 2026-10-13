@@ -1,11 +1,14 @@
 """Tests for sources router — CRUD, pagination, search, sort, bulk."""
 
+from dataclasses import replace
+
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import _registries
 from dfe_engine.api.v1.sources import _raise_save_validation_http
+from dfe_engine.appmgmt import catalogue
 from dfe_engine.kafka.topics import TopicRemoveResult
 from dfe_engine.source.registry import SourceValidationError
 
@@ -422,6 +425,77 @@ class TestCreateOnATransportTheDeploymentLacks:
         )
 
         assert resp.status_code == 201, resp.text
+
+
+class TestArchiveWhereTheProfileDeploysNoArchiver:
+    """``archive: true`` on a profile without an archiver would keep nothing, so save refuses it."""
+
+    PROFILE = "single"
+
+    @pytest.fixture(autouse=True)
+    def _deployment(self, monkeypatch, api_settings):
+        api_settings.deployment.profile = self.PROFILE
+        monkeypatch.setattr("dfe_engine.settings.get_settings", lambda: api_settings)
+
+    @staticmethod
+    def _offer_the_archiver_only_on_another_tier(monkeypatch) -> None:
+        """Restrict the archiver in the catalogue, so the shipped manifest stays the assertion."""
+        restricted = replace(catalogue.descriptor("dfe-archiver"), profiles=frozenset({"scale"}))
+        monkeypatch.setitem(catalogue.APP_CATALOGUE, "dfe-archiver", restricted)
+
+    @pytest.fixture
+    def no_archiver_here(self, monkeypatch):
+        self._offer_the_archiver_only_on_another_tier(monkeypatch)
+
+    @pytest.mark.usefixtures("no_archiver_here")
+    def test_an_archived_source_is_refused_naming_the_profile_and_the_archiver(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        resp = client.post(
+            "/api/v1/sources", json={**sample_source, "archive": True}, headers=admin_headers
+        )
+
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["code"] == "validation_error"
+        assert f"the {self.PROFILE} profile does not deploy dfe-archiver" in body["message"]
+        assert client.get("/api/v1/sources/test-source", headers=admin_headers).status_code == 404
+
+    @pytest.mark.usefixtures("no_archiver_here")
+    def test_the_same_source_without_archive_still_saves(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        resp = client.post(
+            "/api/v1/sources", json={**sample_source, "archive": False}, headers=admin_headers
+        )
+
+        assert resp.status_code == 201, resp.text
+
+    def test_a_profile_that_deploys_the_archiver_accepts_it(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        resp = client.post(
+            "/api/v1/sources", json={**sample_source, "archive": True}, headers=admin_headers
+        )
+
+        assert resp.status_code == 201, resp.text
+
+    def test_an_archived_source_stored_before_the_archiver_went_still_reads(
+        self, client: TestClient, admin_headers: dict, sample_source: dict, monkeypatch
+    ):
+        saved = client.post(
+            "/api/v1/sources", json={**sample_source, "archive": True}, headers=admin_headers
+        )
+        assert saved.status_code == 201, saved.text
+        self._offer_the_archiver_only_on_another_tier(monkeypatch)
+
+        read = client.get("/api/v1/sources/test-source", headers=admin_headers)
+        flow = client.get("/api/v1/sources/test-source/flow", headers=admin_headers)
+
+        assert read.status_code == 200, read.text
+        assert read.json()["archive"] is True
+        assert flow.status_code == 200, flow.text
+        assert flow.json()["outputs"]["archive"] is True
 
 
 class TestGetSource:

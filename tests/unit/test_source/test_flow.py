@@ -20,7 +20,7 @@ import pytest
 
 from dfe_engine.appmgmt import catalogue
 from dfe_engine.settings import DFESettings
-from dfe_engine.source.flow import FlowError, resolve_flow
+from dfe_engine.source.flow import FlowError, archiver_offer_gap, resolve_flow
 from dfe_engine.source.models import Source
 
 
@@ -319,6 +319,30 @@ class TestAProfileThatDeploysNoSuchApp:
         assert resolve_flow(_source(), _settings(default="bus", profile=profile)).origin == (
             "receiver"
         )
+
+    @pytest.mark.parametrize(
+        ("profile", "refused"), [("slim", True), ("scale", False), ("", False)]
+    )
+    def test_an_archive_the_profile_cannot_keep_is_a_save_gap_not_a_resolve_error(
+        self, profile, refused
+    ):
+        # The resolver also compiles stored sources, so it keeps resolving one that
+        # was archived before the archiver left this tier.
+        restricted = dict(catalogue.APP_CATALOGUE)
+        restricted["dfe-archiver"] = replace(
+            catalogue.descriptor("dfe-archiver"), profiles=frozenset({"scale"})
+        )
+        settings = _settings(default="bus", profile=profile)
+
+        flow = resolve_flow(_source(archive=True), settings, restricted)
+        gap = archiver_offer_gap(flow, settings, restricted)
+
+        assert flow.outputs.archive is True
+        if refused:
+            assert gap is not None
+            assert "the slim profile does not deploy dfe-archiver" in gap
+        else:
+            assert gap is None
 
     def test_the_rule_is_manifest_data_rather_than_a_branch_per_app(self):
         # A transform restricted to another tier is refused the same way, which

@@ -362,6 +362,31 @@ def archive_gap(flow: SourceFlow) -> str | None:
     )
 
 
+def archiver_offer_gap(
+    flow: SourceFlow,
+    settings: DFESettings,
+    catalogue_apps: dict[str, AppDescriptor] | None = None,
+) -> str | None:
+    """Why this flow asks to be archived on a profile that deploys no archiver, or None.
+
+    The same offer ``_stage_app`` reads for every other stage, but kept out of
+    ``resolve_flow`` for the same reason as ``archive_gap``: a source stored before
+    the deployment moved keeps compiling its routing and still reads.
+    """
+    if not flow.outputs.archive:
+        return None
+    apps = catalogue_apps if catalogue_apps is not None else catalogue.APP_CATALOGUE
+    archiver = apps.get(ARCHIVER_SERVICE)
+    profile = settings.deployment.profile
+    if archiver is None or archiver.offered_in(profile):
+        return None
+    return (
+        f"source {flow.source!r} asks to be archived, but the {profile} profile does not "
+        f"deploy {ARCHIVER_SERVICE}, so nothing would keep its records: set archive to "
+        "false, or archive it on a profile that deploys the archiver"
+    )
+
+
 def route_archive_gap(flow: SourceFlow, target: SourceFlow) -> str | None:
     """Why a fetcher route from this flow into *target* skips the target's archive, or None.
 
