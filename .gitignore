@@ -1,7 +1,5 @@
 # =============================================================================
-
-# Core (from ci/templates/gitignore/core.gitignore)
-
+# Core
 # =============================================================================
 
 # Editor/IDE
@@ -35,10 +33,11 @@ test-results/
 coverage/
 coverage.xml
 
+# Node
+node_modules/
+
 # =============================================================================
-
-# Python (from ci/templates/gitignore/python.gitignore)
-
+# Python
 # =============================================================================
 
 # Python bytecode
@@ -67,9 +66,7 @@ htmlcov/
 .ruff_cache/
 
 # =============================================================================
-
 # Project-specific
-
 # =============================================================================
 
 # Test artifacts
@@ -87,26 +84,14 @@ meta_schemas.zip
 # Docker
 docker-compose.yml
 
-# Runtime config directory (created by bootstrap)
-config/
-
-# OS junk (never useful in repo)
-.DS_Store
-Thumbs.db
-*.swp
-*.swo
-*~
-
-# Editor / IDE local state
-.idea/
-.vscode/
+# Runtime config directory (created by bootstrap). Anchored to the root so the
+# fixtures under tests/resources/test_hunts/hunt_config/config/ stay tracked.
+/config/
 
 # Local environment files (never commit -- contain secrets)
-.env
 .env.*
-!.env.example
+!.env*.example
 !.env.example.*
-!.env.e2e.example
 
 # Agent working docs: local by default, never committed.
 docs/superpowers/
@@ -115,21 +100,21 @@ docs/superpowers/
 # dir) so git still descends into shared/ for the negation to re-include it.
 docs/plans/*
 !docs/plans/shared/
-.mcp.json
 .ai-version
 
-# committed -- mirrored in .git/info/exclude.
+# Local working files (not committed)
 CLAUDE.md
 TODO.md
 AGENTS.md
 GEMINI.md
+.cursorrules
 .claude/
 .codex/
 .cursor/
 .gemini/
-.cursorrules
-.hyperi-ai/
 .superpowers/
+.mcp.json
+.hyperi-ai
 
 # Local tool caches (kubectl cache dir when KUBECONFIG points here)
 .kube/
@@ -138,14 +123,9 @@ GEMINI.md
 .worktrees/
 
 # Python build artefacts
-__pycache__/
-*.py[cod]
 *$py.class
-*.so
 .Python
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -156,25 +136,14 @@ sdist/
 var/
 wheels/
 share/python-wheels/
-*.egg-info/
 .installed.cfg
-*.egg
 MANIFEST
 
 # Python virtual envs and caches
-.venv/
-venv/
 env/
 ENV/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 .pyre/
 .pytype/
-.coverage
-.coverage.*
-coverage.xml
-htmlcov/
 .tox/
 .nox/
 pip-wheel-metadata/
