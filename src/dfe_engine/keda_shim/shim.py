@@ -20,7 +20,9 @@ Queries live in config (``queries.yaml`` + an optional mounted override), not co
 so a HyperDX schema rename or a new scaling signal is a config edit, not a rebuild.
 """
 
+import contextlib
 import re
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -48,6 +50,9 @@ def _ch_client(settings: DFESettings) -> Any:
     poller, so it wants the plain client, not the autowake/pool machinery. Same
     host/port/username/password/secure/verify/ca_cert the hunt-runner and the
     integration ``ch_client`` fixture build from.
+
+    No session: FastAPI runs each poll on its own worker thread, and
+    clickhouse-connect refuses a second query in flight on one session.
     """
     ch = settings.clickhouse
     tls = resolve_clickhouse_tls(secure=ch.secure, verify=ch.verify, ca_cert=ch.ca_cert)
@@ -56,6 +61,7 @@ def _ch_client(settings: DFESettings) -> Any:
         port=ch.port,
         username=ch.username,
         password=ch.password,
+        autogenerate_session_id=False,
         **tls.connect_kwargs(),
     )
 
@@ -72,6 +78,8 @@ class QueryShim:
         self._settings = settings
         self._client_factory = client_factory or (lambda: _ch_client(settings))
         self._client: Any = None
+        # Polls arrive on concurrent worker threads; the lock guards which client is current.
+        self._client_lock = threading.Lock()
         self._cache: dict[str, int] = {}
         self._queries = self._load_queries()
 
@@ -88,9 +96,42 @@ class QueryShim:
         return sorted(self._queries)
 
     def _client_get(self) -> Any:
-        if self._client is None:
-            self._client = self._client_factory()
-        return self._client
+        """Return the shared client, building one when there is none.
+
+        The build runs outside the lock, so a ClickHouse that is slow to connect
+        cannot queue every poll behind it. A poll that loses the race to install its
+        client closes it and uses the winner's.
+        """
+        with self._client_lock:
+            if self._client is not None:
+                return self._client
+        built = self._client_factory()
+        with self._client_lock:
+            if self._client is None:
+                self._client = built
+                return built
+            current = self._client
+        self._close(built)
+        return current
+
+    def _client_drop(self, client: Any) -> None:
+        """Close a client whose query failed, so the next poll builds a fresh one."""
+        with self._client_lock:
+            if self._client is client:
+                self._client = None
+        self._close(client)
+
+    @staticmethod
+    def _close(client: Any) -> None:
+        """Close a client the shim no longer holds.
+
+        clickhouse-connect registers a TLS client's connection pool in a process-wide
+        table that only ``close()`` removes it from, so a client dropped unclosed
+        holds its pool and socket for the life of the process.
+        """
+        # A failed close must not turn the held value into an error KEDA sees.
+        with contextlib.suppress(Exception):
+            client.close()
 
     def _db(self, token: str) -> str:
         """Resolve a query's ``database`` token to a validated CH identifier.
@@ -150,10 +191,12 @@ class QueryShim:
             raise KeyError(name)
         cache_key = self._cache_key(name, params)
         cold_hold = int(cfg.get("cold_hold", 0))
+        client = None
         try:
             sql, ch_params = self._build(cfg, params)
             timeout = int(cfg.get("timeout_seconds", 5))
-            result = self._client_get().query(
+            client = self._client_get()
+            result = client.query(
                 sql, parameters=ch_params, settings={"max_execution_time": timeout}
             )
             rows = result.result_rows
@@ -165,7 +208,8 @@ class QueryShim:
             # Drop a possibly-broken client so the next poll rebuilds it. Last-good
             # freezes scaling at current; no last-good holds at the conservative
             # cold_hold (min). Either way, a broken metric never scales UP.
-            self._client = None
+            if client is not None:
+                self._client_drop(client)
             cached = self._cache.get(cache_key)
             held = cached if cached is not None else cold_hold
             logger.warning(
