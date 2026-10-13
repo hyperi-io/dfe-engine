@@ -975,6 +975,10 @@ async def account_git_status(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
     responses={
+        403: {
+            "model": ErrorResponse,
+            "description": "self_delete: an account cannot delete itself",
+        },
         409: {
             "model": ErrorResponse,
             "description": "last_admin: deleting this account would leave no usable system admin",
@@ -988,9 +992,10 @@ async def delete_account(
 ):
     """Delete an account (admin only).
 
-    Refused when the account holds the system admin role and no other usable
-    admin-role account would remain (bootstrap admin and break-glass count when
-    they can sign in). Recovery credentials are also refused by the store.
+    Refused when the caller targets their own account, when the account holds the
+    system admin role and no other usable admin-role account would remain
+    (bootstrap admin and break-glass count when they can sign in), or when the
+    store refuses a recovery credential.
     """
     from dfe_engine.auth import admin_retirement
     from dfe_engine.auth.accounts import AccountStore
@@ -998,6 +1003,14 @@ async def delete_account(
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
     existing = _require_account(store, username)
+    if username == user.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "self_delete",
+                "message": "Cannot delete your own account",
+            },
+        )
     # Deleting an account takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
     bindings = provider_bindings(request)

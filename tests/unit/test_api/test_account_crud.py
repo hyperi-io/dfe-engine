@@ -1337,6 +1337,11 @@ class TestDeleteAccount:
         resp = client.delete("/api/v1/auth/accounts/admin", headers=viewer_headers)
         assert resp.status_code == 403
 
+    def test_delete_own_account_is_refused(self, client, admin_headers):
+        resp = client.delete("/api/v1/auth/accounts/admin", headers=admin_headers)
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "self_delete"
+
     def test_delete_admin_is_allowed_when_another_usable_admin_remains(
         self, recovery_accounts, client, admin_headers
     ):
@@ -1354,28 +1359,21 @@ class TestDeleteAccount:
         resp = client.delete("/api/v1/auth/accounts/ops", headers=admin_headers)
         assert resp.status_code == 204, resp.text
 
-    def test_delete_last_usable_admin_is_refused(
+    def test_delete_own_account_as_last_admin_is_self_delete(
         self, recovery_accounts, client, admin_headers, app
     ):
-        """With recovery credentials unable to sign in, the sole admin-role account stays."""
+        """The sole usable admin cannot remove itself; self_delete wins over last_admin."""
         from dfe_engine.api.deps import create_access_token
 
         store = recovery_accounts.state.account_store
-        groups = recovery_accounts.state.group_store
         created = client.post(
             "/api/v1/auth/accounts",
-            json={
-                "username": "ops",
-                "password": _PASSWORD,
-                "groups": ["dfe-admins"],
-            },
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
             headers=admin_headers,
         )
         assert created.status_code == 201, created.text
-        assert "ops" in groups.get("dfe-admins").members
         store.update("admin", enabled=False, allow_protected=True)
         store.update("breakglass", enabled=False, allow_protected=True)
-        # The bootstrap admin can no longer authenticate; speak as ops.
         ops_headers = {
             "Authorization": (
                 "Bearer "
@@ -1388,8 +1386,8 @@ class TestDeleteAccount:
 
         resp = client.delete("/api/v1/auth/accounts/ops", headers=ops_headers)
 
-        assert resp.status_code == 409, resp.text
-        assert resp.json()["code"] == "last_admin"
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "self_delete"
         assert store.get("ops") is not None
 
 

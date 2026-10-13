@@ -442,6 +442,8 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     existing = store.get(user_id)
     if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
+    if user_id == user.user_id:
+        return scim_error(403, "Cannot delete your own account")
     # Deleting a user takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
     bindings = provider_bindings(request)
