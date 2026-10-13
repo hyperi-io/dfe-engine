@@ -435,6 +435,8 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
 )
 async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a user (SCIM 204)."""
+    from dfe_engine.auth import admin_retirement
+
     store = request.app.state.account_store
     group_store = request.app.state.group_store
     existing = store.get(user_id)
@@ -442,8 +444,20 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
         return scim_error(404, f"User '{user_id}' not found")
     # Deleting a user takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
-    held = groups_held(existing, groups, bindings=provider_bindings(request))
+    bindings = provider_bindings(request)
+    held = groups_held(existing, groups, bindings=bindings)
     check_group_changes(after=(), before=held, groups=groups, request=request, user=user)
+    if admin_retirement.account_holds_system_admin(existing, groups, bindings=bindings):
+        if not admin_retirement.other_usable_admin_exists(
+            store, group_store, bindings=bindings, excluding=user_id
+        ):
+            return scim_error(
+                409,
+                (
+                    f"Cannot delete '{user_id}': it is the last usable account "
+                    "with the system admin role"
+                ),
+            )
     store.delete(user_id)
     forget_member(group_store, user_id)
     audit_account_change(user.user_id, user_id, "deleted", _audit_details(groups=held))

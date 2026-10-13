@@ -951,7 +951,7 @@
           "Accounts"
         ],
         "summary": "Delete Account",
-        "description": "Delete an account (admin only).",
+        "description": "Delete an account (admin only).\n\nRefused when the account holds the system admin role and no other usable\nadmin-role account would remain (bootstrap admin and break-glass count when\nthey can sign in). Recovery credentials are also refused by the store.",
         "operationId": "delete_account_api_v1_auth_accounts__username__delete",
         "parameters": [
           {
@@ -980,6 +980,16 @@
           },
           "403": {
             "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "last_admin: deleting this account would leave no usable system admin",
             "content": {
               "application/json": {
                 "schema": {

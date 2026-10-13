@@ -974,13 +974,25 @@ async def account_git_status(
     "/{username}",
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
+    responses={
+        409: {
+            "model": ErrorResponse,
+            "description": "last_admin: deleting this account would leave no usable system admin",
+        },
+    },
 )
 async def delete_account(
     username: str,
     user: CurrentUser,
     request: Request,
 ):
-    """Delete an account (admin only)."""
+    """Delete an account (admin only).
+
+    Refused when the account holds the system admin role and no other usable
+    admin-role account would remain (bootstrap admin and break-glass count when
+    they can sign in). Recovery credentials are also refused by the store.
+    """
+    from dfe_engine.auth import admin_retirement
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
@@ -988,8 +1000,23 @@ async def delete_account(
     existing = _require_account(store, username)
     # Deleting an account takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
-    held = groups_held(existing, groups, bindings=provider_bindings(request))
+    bindings = provider_bindings(request)
+    held = groups_held(existing, groups, bindings=bindings)
     check_group_changes(after=(), before=held, groups=groups, request=request, user=user)
+    if admin_retirement.account_holds_system_admin(existing, groups, bindings=bindings):
+        if not admin_retirement.other_usable_admin_exists(
+            store, group_store, bindings=bindings, excluding=username
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "last_admin",
+                    "message": (
+                        f"Cannot delete '{username}': it is the last usable account "
+                        "with the system admin role"
+                    ),
+                },
+            )
     # The store refuses the local admin and breakglass, the accounts the deploy repo carries.
     store.delete(username)
     forget_member(group_store, username)

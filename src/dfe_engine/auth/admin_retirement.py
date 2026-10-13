@@ -39,8 +39,8 @@ from dfe_engine.gitcrud.engine import ResourceNotFoundError
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
-    from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
+    from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
+    from dfe_engine.auth.groups import DocuStoreGroupStore, Group, GroupStore
     from dfe_engine.gitcrud.engine import GitCrud
     from dfe_engine.gitops.repo import PublishResult
 
@@ -87,6 +87,64 @@ def set_retired(crud: GitCrud, actor: str) -> PublishResult:
     return crud.set_key(CLASS, NAME, KEY, True, actor, message=message)
 
 
+def _system_admin_group_names(groups: list[Group]) -> set[str]:
+    """Names of system-scope groups that carry the admin role."""
+    from dfe_engine.auth.groups import GROUP_SCOPE_SYSTEM
+
+    return {g.name for g in groups if ADMIN_ROLE in g.roles and g.scope == GROUP_SCOPE_SYSTEM}
+
+
+def account_holds_system_admin(
+    account: Account,
+    groups: list[Group],
+    *,
+    bindings: Mapping[str, str],
+) -> bool:
+    """True when *account* holds a system-scope group that carries the admin role."""
+    from dfe_engine.auth.membership import groups_held, groups_named
+
+    admin_names = _system_admin_group_names(groups)
+    if not admin_names:
+        return False
+    held = groups_named(groups_held(account, groups, bindings=bindings), groups)
+    return any(group.name in admin_names for group in held)
+
+
+def _usable_admin_session(account: Account) -> bool:
+    """Whether *account* can sign in with roles (enabled, unblocked, past issued password)."""
+    return account.session_denied() is None and not account.password_change_required
+
+
+def other_usable_admin_exists(
+    account_store: AccountStore | DocuStoreAccountStore | None,
+    group_store: GroupStore | DocuStoreGroupStore | None,
+    *,
+    bindings: Mapping[str, str],
+    excluding: str,
+) -> bool:
+    """True when a usable system-admin account other than *excluding* remains.
+
+    The precondition for deleting an admin-role account: at least one other
+    enabled, unblocked account that holds the admin role through a system-scope
+    group must stay. Bootstrap admin and ``breakglass`` count when they can
+    sign in -- the floor is "someone can still run the deployment", not
+    "someone other than the recovery pair".
+    """
+    if account_store is None or group_store is None:
+        return False
+    groups = group_store.list()
+    if not _system_admin_group_names(groups):
+        return False
+    for account in account_store.list():
+        if account.username == excluding:
+            continue
+        if not _usable_admin_session(account):
+            continue
+        if account_holds_system_admin(account, groups, bindings=bindings):
+            return True
+    return False
+
+
 def another_admin_exists(
     account_store: AccountStore | DocuStoreAccountStore | None,
     group_store: GroupStore | DocuStoreGroupStore | None,
@@ -108,24 +166,16 @@ def another_admin_exists(
     no roles.
     """
     from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
-    from dfe_engine.auth.groups import GROUP_SCOPE_SYSTEM
-    from dfe_engine.auth.membership import groups_held, groups_named
 
     if account_store is None or group_store is None:
         return False
     groups = group_store.list()
-    admin_names = {
-        g.name for g in groups if ADMIN_ROLE in g.roles and g.scope == GROUP_SCOPE_SYSTEM
-    }
-    if not admin_names:
+    if not _system_admin_group_names(groups):
         return False
     seeded = {admin_name, BREAKGLASS_USERNAME}
     for account in account_store.list():
-        if account.username in seeded or account.session_denied() is not None:
+        if account.username in seeded or not _usable_admin_session(account):
             continue
-        if account.password_change_required:
-            continue
-        held = groups_named(groups_held(account, groups, bindings=bindings), groups)
-        if any(group.name in admin_names for group in held):
+        if account_holds_system_admin(account, groups, bindings=bindings):
             return True
     return False
