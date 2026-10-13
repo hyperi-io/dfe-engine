@@ -972,14 +972,16 @@ def apply_defaults(
     these values is unchanged in the deploy repo. A missing or engine-owned name
     fails the request before any source is written.
 
-    Then every named source whose current version is the deployed one, pinned now
-    or earlier, has its table brought to the pinned values in this request: the
-    TTL moves and the header's missing columns are added. The engine of an
-    existing table needs a rebuild, so it reaches new tables only, and existing
-    columns keep their type. ``live`` reports each source: what reached the table,
-    what did not and why. A source with no table for the pinned version takes the
-    values on its next deploy. A ClickHouse failure is reported on that source,
-    and the pin stays committed.
+    A draft takes the values in place. A deployed version is never rewritten: the
+    values land on a new major version, which becomes ``current``. Either way the
+    table takes them when that version is deployed.
+
+    A named source whose deployed version already carries the values has its table
+    brought to them in this request: the TTL moves and the header's missing
+    columns are added. The engine of an existing table needs a rebuild, so it
+    reaches new tables only, and existing columns keep their type. ``live``
+    reports each source: what reached the table, what did not and why. A
+    ClickHouse failure is reported on that source, and the pin stays committed.
     """
     gc = _optional_gitcrud(request)
     ttl = resolve_state(gc, settings)

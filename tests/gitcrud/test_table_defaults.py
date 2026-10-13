@@ -181,7 +181,13 @@ class TestEffectiveSettings:
         assert effective.clickhouse.default_header_type == "timeseries"
 
 
-def _source(name: str, *, header: dict | None = None, schema: dict | None = None) -> Source:
+def _source(
+    name: str,
+    *,
+    header: dict | None = None,
+    schema: dict | None = None,
+    deployed: str | None = None,
+) -> Source:
     version: dict = {
         "date_time": "2026-01-01",
         "match": {"field": "tags.collector.type", "value": name},
@@ -191,7 +197,12 @@ def _source(name: str, *, header: dict | None = None, schema: dict | None = None
     if schema is not None:
         version["schema"] = schema
     return Source.model_validate(
-        {"source": name, "current": "1.0.0", "versions": {"1.0.0": version}}
+        {
+            "source": name,
+            "current": "1.0.0",
+            "deployed_version": deployed,
+            "versions": {"1.0.0": version},
+        }
     )
 
 
@@ -218,6 +229,52 @@ class TestPinTableDefaults:
         assert snap.schema_config.meta_schema == "meta.yaml"
         assert snap.match is not None
         assert snap.match.value == "syslog"
+
+    def test_a_deployed_version_is_left_and_the_pins_land_on_a_new_major(self):
+        source = _source(
+            "syslog", schema={"meta_schema": "meta.yaml", "ttl_days": 7}, deployed="1.0.0"
+        )
+
+        pinned = pin_table_defaults(
+            source,
+            header_type="minimal",
+            header_version="1.0.0",
+            ttl_days=30,
+            engine="ReplacingMergeTree",
+        )
+
+        assert pinned is not None
+        assert pinned.current == "2.0.0"
+        assert pinned.deployed_version == "1.0.0"
+        assert pinned.versions["1.0.0"] == source.versions["1.0.0"]
+        snap = pinned.versions["2.0.0"]
+        assert snap.header is not None
+        assert snap.header.type == "minimal"
+        assert snap.schema_config is not None
+        assert snap.schema_config.ttl_days == 30
+        assert snap.schema_config.engine == "ReplacingMergeTree"
+        assert snap.schema_config.meta_schema == "meta.yaml"
+
+    def test_a_draft_ahead_of_the_deployed_version_is_pinned_in_place(self):
+        staged = pin_table_defaults(
+            _source("syslog", schema={"meta_schema": "meta.yaml"}, deployed="1.0.0"),
+            header_type="minimal",
+            header_version="1.0.0",
+            ttl_days=30,
+            engine="MergeTree",
+        )
+        assert staged is not None
+
+        pinned = pin_table_defaults(
+            staged, header_type="minimal", header_version="1.0.0", ttl_days=60, engine="MergeTree"
+        )
+
+        assert pinned is not None
+        assert pinned.current == "2.0.0"
+        assert set(pinned.versions) == {"1.0.0", "2.0.0"}
+        schema = pinned.versions["2.0.0"].schema_config
+        assert schema is not None
+        assert schema.ttl_days == 60
 
     def test_a_source_already_storing_the_defaults_is_left_alone(self):
         source = _source(
