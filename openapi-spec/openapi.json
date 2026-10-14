@@ -21289,7 +21289,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Validate Action",
-        "description": "Dry-check an action definition: every violation + the would-be diff.\n\nNothing is committed - this is the authoring hand-hold, run before the\ndefine endpoint so a wizard can show the full diff and every problem in\none round trip.",
+        "description": "Dry-check an action definition: every violation + the would-be diff.\n\nNothing is committed - this is the authoring hand-hold, run before the\ndefine endpoint so a wizard can show the full diff and every problem in\none round trip. That includes each change invoke would refuse under the\ninfra overlay guards (``managed_by_provider``, ``scale_down_refused``), on\nevery enum map branch, reported by its message.",
         "operationId": "validate_action_api_v1_governance_admin_actions_validate_post",
         "requestBody": {
           "content": {

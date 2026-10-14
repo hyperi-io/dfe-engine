@@ -20,6 +20,7 @@ Operators get curated actions via `action:invoke:<name>`; raw class CRUD stays w
 admins (governance:write). Everything commits to gitops via the engine.
 """
 
+import functools
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -295,6 +296,19 @@ class ValidateResponse(BaseModel):
     diff: list[dict[str, Any]]
 
 
+def _overlay_refusal(
+    request: Request, cls: str, name: str, path: str, document: dict
+) -> str | None:
+    """The message invoke refuses this change with under the infra overlay guards, or None."""
+    try:
+        guard_action_change(request, cls, name, path, document)
+    except HTTPException as exc:
+        if not isinstance(exc.detail, dict):
+            raise
+        return exc.detail["message"]
+    return None
+
+
 @router.post(
     "/admin/actions/validate",
     response_model=ValidateResponse,
@@ -305,14 +319,21 @@ def validate_action(body: ActionDef, user: CurrentUser, request: Request) -> Val
 
     Nothing is committed - this is the authoring hand-hold, run before the
     define endpoint so a wizard can show the full diff and every problem in
-    one round trip.
+    one round trip. That includes each change invoke would refuse under the
+    infra overlay guards (``managed_by_provider``, ``scale_down_refused``), on
+    every enum map branch, reported by its message.
     """
     _check_name(body.name)
     policy = getattr(request.app.state, "policy_store", None)
     override = authorize(
         user, "helmvars:override", role_config=request.app.state.role_config
     ).allowed
-    diff, errors = _actions(request).preview(body, policy=policy, override=override)
+    diff, errors = _actions(request).preview(
+        body,
+        policy=policy,
+        override=override,
+        guard=functools.partial(_overlay_refusal, request),
+    )
     return ValidateResponse(valid=not errors, errors=errors, diff=diff)
 
 

@@ -12,7 +12,8 @@ Actions write the same overlay files as the backing-services router, so an
 operator holding only ``action:invoke:<name>`` could otherwise lower a broker
 count the router refuses to lower for anyone, or size a service a provider runs.
 The guards judge what the whole action leaves, so two changes to one value are
-judged on the last.
+judged on the last. Validate reports each of those refusals as an error, on every
+enum map branch, so a wizard that validates first is not refused at invoke.
 
 Everything runs against a real dulwich deploy repo.
 """
@@ -27,24 +28,32 @@ _ACTIONS = "/api/v1/governance/admin/actions"
 _CONFLUENT = BackingFactSettings(provider="confluent-cloud", tier="basic")
 
 
-def _define(client, headers, name: str, changes: list[dict]) -> None:
-    resp = client.post(
-        _ACTIONS,
-        json={
-            "name": name,
-            "description": name,
-            "required_action": f"action:invoke:{name}",
-            "changes": changes,
-        },
-        headers=headers,
-    )
+def _action(name: str, changes: list[dict], params: dict | None) -> dict:
+    return {
+        "name": name,
+        "description": name,
+        "required_action": f"action:invoke:{name}",
+        "params": params or {},
+        "changes": changes,
+    }
+
+
+def _define(client, headers, name: str, changes: list[dict], params: dict | None = None) -> None:
+    resp = client.post(_ACTIONS, json=_action(name, changes, params), headers=headers)
     assert resp.status_code == 201, resp.text
 
 
-def _invoke(client, headers, name: str, *, dry_run: bool = False):
+def _validate(client, headers, name: str, changes: list[dict], params: dict | None = None):
+    resp = client.post(f"{_ACTIONS}/validate", json=_action(name, changes, params), headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _invoke(client, headers, name: str, *, dry_run: bool = False, params: dict | None = None):
     return client.post(
         f"/api/v1/governance/actions/{name}/invoke",
         params={"dry_run": dry_run},
+        json={"params": params} if params else None,
         headers=headers,
     )
 
@@ -286,3 +295,234 @@ class TestWhatTheActionLeavesIsWhatIsJudged:
 
         assert resp.status_code == 200, resp.text
         assert gc.get("helmvars", "kafka")["kafka"]["replicas"] == 2
+
+
+_KAFKA_FIVE = [("infravars", "kafka", {"kafka": {"replicas": 5}})]
+
+_PARITY = [
+    pytest.param(
+        [],
+        BackingSettings(kafka=_CONFLUENT),
+        [_change("kafka", "kafka.replicas", 9)],
+        409,
+        id="read-only-value",
+    ),
+    pytest.param(
+        [],
+        BackingSettings(clickhouse=BackingFactSettings(provider="clickhouse-cloud")),
+        [_change("clickhouse-cluster", "clickhouse.storage.size", "2Ti")],
+        409,
+        id="provider-sized-disk",
+    ),
+    pytest.param(
+        _KAFKA_FIVE,
+        BackingSettings(kafka=_CONFLUENT),
+        [_change("kafka", "kafka.replicas", 2)],
+        409,
+        id="managed-before-count",
+    ),
+    pytest.param(
+        [],
+        BackingSettings(kafka=_CONFLUENT),
+        [_change("kafka", "kafka.name", "dfe-kafka")],
+        200,
+        id="outside-read-only",
+    ),
+    pytest.param(
+        [("infravars", "common", {"kafka": {"mode": "external"}})],
+        BackingSettings(kafka=BackingFactSettings(provider="strimzi")),
+        [_change("common", "kafka.mode", "cluster")],
+        200,
+        id="mode-handback",
+    ),
+    pytest.param(
+        _KAFKA_FIVE, None, [_change("kafka", "kafka.replicas", 2)], 400, id="fewer-brokers"
+    ),
+    pytest.param(
+        [("infravars", "clickhouse-cluster", {"clickhouse": {"keeper": {"replicas": 3}}})],
+        None,
+        [_change("clickhouse-cluster", "clickhouse.keeper.replicas", 1)],
+        400,
+        id="fewer-keepers",
+    ),
+    pytest.param(_KAFKA_FIVE, None, [_change("kafka", "kafka", {"x": 1})], 400, id="parent-drop"),
+    pytest.param(
+        _KAFKA_FIVE, None, [_change("kafka", "kafka.replicas", None)], 400, id="undeclared"
+    ),
+    pytest.param(
+        _KAFKA_FIVE, None, [_change("kafka", "kafka.replicas", "7")], 400, id="not-a-count"
+    ),
+    pytest.param(
+        [("infravars", "kafka", {"kafka": {"replicas": 3}})],
+        None,
+        [_change("kafka", "kafka.replicas", 6)],
+        200,
+        id="more-brokers",
+    ),
+    pytest.param(
+        _KAFKA_FIVE,
+        None,
+        [_change("kafka", "kafka.replicas", 7), _change("kafka", "kafka.replicas", 2)],
+        400,
+        id="grow-then-dip",
+    ),
+    pytest.param(
+        _KAFKA_FIVE,
+        None,
+        [_change("kafka", "kafka.replicas", 2), _change("kafka", "kafka.replicas", 7)],
+        200,
+        id="dip-then-grow",
+    ),
+    pytest.param(
+        [
+            ("infravars", "common", {"kafka": {"replicas": 5}}),
+            ("infravars", "kafka", {"kafka": {"replicas": 9}}),
+        ],
+        None,
+        [_change("common", "kafka.replicas", 2)],
+        200,
+        id="shared-below-winning",
+    ),
+    pytest.param(
+        _KAFKA_FIVE,
+        None,
+        [
+            _change("kafka", "kafka.resources.requests.cpu", "2"),
+            _change("kafka", "kafka.replicas", 1),
+        ],
+        400,
+        id="mixed",
+    ),
+    pytest.param(
+        [("helmvars", "kafka", {"kafka": {"replicas": 5}})],
+        None,
+        [{"cls": "helmvars", "name": "kafka", "path": "kafka.replicas", "value": 2}],
+        200,
+        id="other-class",
+    ),
+]
+
+
+class TestValidateAnswersAsInvokeDoes:
+    """Validate reports, as an error, each refusal invoke answers for the same definition."""
+
+    @pytest.mark.parametrize(("seeds", "backing", "changes", "status"), _PARITY)
+    def test_each_refusal_is_one_validate_error(
+        self, client, app, admin_headers, tmp_path, seeds, backing, changes, status
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        for cls, name, doc in seeds:
+            gc.put(cls, name, doc, "tester")
+        if backing is not None:
+            app.state.settings.deployment.backing = backing
+        head = gc.head_revision()
+
+        validated = _validate(client, admin_headers, "parity", changes)
+
+        assert gc.head_revision() == head
+        _define(client, admin_headers, "parity", changes)
+        invoked = _invoke(client, admin_headers, "parity", dry_run=True)
+        assert invoked.status_code == status, invoked.text
+        if status == 200:
+            assert validated["valid"] is True
+            assert validated["errors"] == []
+        else:
+            assert validated["valid"] is False
+            (error,) = validated["errors"]
+            assert error.endswith(f": {invoked.json()['message']}")
+
+
+_SIZE = "size"
+
+
+def _sized(values: list[str], default: str, mapping: dict) -> tuple[list[dict], dict]:
+    """A change setting kafka's broker count from an enum param, and that param."""
+    params = {_SIZE: {"type": "enum", "values": values, "default": default}}
+    changes = [_change("kafka", "kafka.replicas", {"$param": _SIZE, "map": mapping})]
+    return changes, params
+
+
+class TestValidateChecksEveryDetent:
+    """An enum map branch invoke refuses is reported, even where the default is accepted."""
+
+    @pytest.mark.parametrize(
+        ("lowered", "said"),
+        [
+            (2, "5 -> 2 would remove a member"),
+            (None, "this action leaves it undeclared"),
+            ("7", "replaces a member count with something else"),
+        ],
+    )
+    def test_a_detent_that_lowers_the_count_is_reported_by_its_branch(
+        self, client, app, admin_headers, tmp_path, lowered, said
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
+        changes, params = _sized(
+            ["keep", "grow", "shrink"], "keep", {"keep": 5, "grow": 9, "shrink": lowered}
+        )
+
+        validated = _validate(client, admin_headers, "resize", changes, params)
+
+        assert validated["valid"] is False
+        (error,) = validated["errors"]
+        assert error.startswith("infravars/kafka:kafka.replicas: map branch 'shrink': ")
+        assert said in error
+        _define(client, admin_headers, "resize", changes, params)
+        for size in ("keep", "grow"):
+            accepted = _invoke(client, admin_headers, "resize", dry_run=True, params={_SIZE: size})
+            assert accepted.status_code == 200, accepted.text
+        refused = _invoke(client, admin_headers, "resize", dry_run=True, params={_SIZE: "shrink"})
+        assert refused.status_code == 400, refused.text
+        assert error.endswith(f": {refused.json()['message']}")
+
+    def test_every_refusing_detent_is_reported_in_one_pass(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
+        changes, params = _sized(
+            ["keep", "halve", "single"], "keep", {"keep": 5, "halve": 3, "single": 1}
+        )
+
+        validated = _validate(client, admin_headers, "resize", changes, params)
+
+        assert len(validated["errors"]) == 2, validated["errors"]
+        halve, single = validated["errors"]
+        assert "map branch 'halve'" in halve
+        assert "5 -> 3 would remove a member" in halve
+        assert "map branch 'single'" in single
+        assert "5 -> 1 would remove a member" in single
+
+    def test_a_refused_default_is_reported_once(self, client, app, admin_headers, tmp_path):
+        """The default branch IS the landed document, so its refusal is not repeated."""
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
+        changes, params = _sized(["keep", "shrink"], "shrink", {"keep": 5, "shrink": 2})
+
+        validated = _validate(client, admin_headers, "resize", changes, params)
+
+        (error,) = validated["errors"]
+        assert "map branch" not in error
+        _define(client, admin_headers, "resize", changes, params)
+        refused = _invoke(client, admin_headers, "resize", dry_run=True)
+        assert refused.status_code == 400, refused.text
+        assert error == f"infravars/kafka:kafka.replicas: {refused.json()['message']}"
+
+    def test_a_detent_on_a_read_only_value_is_reported_once(
+        self, client, app, admin_headers, tmp_path
+    ):
+        """Every detent writes the same read-only path, so the refusal is the same for each."""
+        _wire_gitcrud(app, tmp_path)
+        app.state.settings.deployment.backing = BackingSettings(kafka=_CONFLUENT)
+        changes, params = _sized(["small", "large"], "small", {"small": 3, "large": 9})
+
+        validated = _validate(client, admin_headers, "resize", changes, params)
+
+        (error,) = validated["errors"]
+        _define(client, admin_headers, "resize", changes, params)
+        for size in ("small", "large"):
+            refused = _invoke(client, admin_headers, "resize", dry_run=True, params={_SIZE: size})
+            assert refused.status_code == 409, refused.text
+            assert refused.json()["code"] == "managed_by_provider"
+            assert error == f"infravars/kafka:kafka.replicas: {refused.json()['message']}"
