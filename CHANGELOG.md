@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.37](https://github.com/hyperi-io/dfe-engine/compare/v1.22.36...v1.22.37) (2026-10-14)
+
+### Bug Fixes
+
+* back off failing hunts and omit config nulls ([#862](https://github.com/hyperi-io/dfe-engine/issues/862)) ([ba8823d](https://github.com/hyperi-io/dfe-engine/commit/ba8823d82ce7ba3704edd66d24828e734263e4b6))
+* test defaults apply as pin then deploy ([#859](https://github.com/hyperi-io/dfe-engine/issues/859)) ([32101ad](https://github.com/hyperi-io/dfe-engine/commit/32101ad936de18407d0dc2590e757a3bac82f302))
+
 ## [1.22.36](https://github.com/hyperi-io/dfe-engine/compare/v1.22.35...v1.22.36) (2026-10-13)
 
 ### Bug Fixes
