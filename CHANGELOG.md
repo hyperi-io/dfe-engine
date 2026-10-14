@@ -3,6 +3,16 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.39](https://github.com/hyperi-io/dfe-engine/compare/v1.22.38...v1.22.39) (2026-10-14)
+
+### Bug Fixes
+
+* declare logreducer so smart sampling works ([#876](https://github.com/hyperi-io/dfe-engine/issues/876)) ([280b6e3](https://github.com/hyperi-io/dfe-engine/commit/280b6e39757ca62859cdb99828481da4cbba3fcc))
+* no ClickHouse user for a group with no platform role and no org ([#873](https://github.com/hyperi-io/dfe-engine/issues/873)) ([c53c0b8](https://github.com/hyperi-io/dfe-engine/commit/c53c0b88ddeec177d37640b2c71b15409894b8bd))
+* reset both recovery accounts durably ([#874](https://github.com/hyperi-io/dfe-engine/issues/874)) ([59ed7d1](https://github.com/hyperi-io/dfe-engine/commit/59ed7d1019cba33cd215574dd894bd08a29ce61d))
+* retire dfe kafka lifecycle, give roleless groups no ClickHouse user ([#871](https://github.com/hyperi-io/dfe-engine/issues/871)) ([5766f9a](https://github.com/hyperi-io/dfe-engine/commit/5766f9a03d577f0b13bc40496c2f9b12461a3fc6)), closes [#866](https://github.com/hyperi-io/dfe-engine/issues/866) [#580](https://github.com/hyperi-io/dfe-engine/issues/580)
+* use scalo's credential matcher, mask URL passwords whole ([#875](https://github.com/hyperi-io/dfe-engine/issues/875)) ([faa4c21](https://github.com/hyperi-io/dfe-engine/commit/faa4c215926a9c57a842f9864a83301a32d2839d)), closes [hyperi-io/scalo-py#51](https://github.com/hyperi-io/scalo-py/issues/51)
+
 ## [1.22.38](https://github.com/hyperi-io/dfe-engine/compare/v1.22.37...v1.22.38) (2026-10-14)
 
 ### Bug Fixes
