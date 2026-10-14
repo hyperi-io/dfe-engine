@@ -55,7 +55,7 @@ def test_the_preview_query_is_sent_read_only():
     client, result = _preview(DetectionGuardSettings())
 
     [(sql, kwargs)] = client.queries
-    assert "countIf(" in sql
+    assert "AS dfe_matched" in sql
     assert kwargs["settings"]["readonly"] == 1
     assert result.cost_estimate is not None
     assert result.cost_estimate.band is not VolumeBand.UNMEASURED
