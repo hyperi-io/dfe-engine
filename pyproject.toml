@@ -140,10 +140,10 @@ dependencies = [
     # than leaving them to the broker's auto-create. Ships manylinux wheels for
     # x86_64 and aarch64, so neither image platform builds librdkafka from source.
     "confluent-kafka>=2.15.0",
-    # Optional lazy runtime integrations (NOT locked here, imported on demand so a
-    # default install still runs; the code degrades with a clear error when absent):
-    #   - logreducer: sampler 'smart'/'anomaly' modes (add + SHA-pin once it hits
-    #     public PyPI; until then the sampler falls back with a clean message)
+    # Sampler smart (the default) and anomaly modes. [enhanced] adds fuzzy dedup, which
+    # SamplerSettings.level (default enhanced) uses. >=3.5.3: every dependency ships a wheel
+    # (no drain3 sdist), which the image's UV_NO_BUILD=1 install needs.
+    "logreducer[enhanced]>=3.5.3",
     "faker>=40.36.0",
     "sqlglot>=30.17.0",
 ]

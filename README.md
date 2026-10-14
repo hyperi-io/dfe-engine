@@ -225,7 +225,7 @@ moves.
 | dfe-schemas | Ships the schema and DDL trees as a PACKAGE, not a submodule. Read out of the installed wheel unless `DFE_SCHEMAS_DIR` points elsewhere. |
 | scalo-py | The shared Python library, plus a contract guard: this repo overrides scalo's runtime base image with its own literal, and its own test fails when the committed Dockerfile stops matching. |
 | dfe-loader, dfe-receiver | Their config validation is MIRRORED by hand in `services/plugins_builtin/`. Nothing is copied, so no script can check it -- re-read the producer whenever their config schema changes. |
-| logreducer | Imported at runtime and deliberately NOT declared; the sampler degrades with a message when it is absent. |
+| logreducer | A declared dependency (`logreducer[enhanced]`). The sampler's `smart` mode, its default, and `anomaly` mode run it, imported lazily so the scikit-learn stack loads only when one of them does. |
 
 **What depends on dfe-engine:**
 
