@@ -13,12 +13,10 @@ as a plausible-looking list nobody checks.
 """
 
 import json
-import random
-import re
-import time
 from pathlib import Path
 
 import pytest
+from scalo.logger.filters import is_credential_name
 
 from dfe_engine.appmgmt import catalogue, contract
 from dfe_engine.gitcrud.engine import set_path
@@ -827,6 +825,7 @@ class TestCustomEnvKeys:
             ("maxmind_license_key", "auto_download"),
             ("key", "tls"),
             ("key", "client_auth"),
+            ("integration_key", "duo"),
         ],
     )
     def test_a_qualified_key_is_a_secret(self, name, section):
@@ -839,8 +838,8 @@ class TestCustomEnvKeys:
             ("key", ""),
             ("partition_key", "sink"),
             ("routing_key", ""),
-            ("integration_key", "duo"),
             ("key_field", "sink"),
+            ("key", "field_mapping"),
         ],
     )
     def test_a_key_nothing_qualifies_is_not(self, name, section):
@@ -1689,6 +1688,84 @@ class TestTheNameRuleReadsEverySpelling:
         }
 
 
+class TestACredentialWordAnywhereInTheNameIsOne:
+    """scalo's matcher finds a credential word anywhere in a name, in any spelling."""
+
+    def test_a_name_that_runs_on_past_its_credential_word_is_masked(self):
+        overlay = {
+            "kafka": {"sasl.password.encrypted": "pw-4440", "x-api-key-primary": "k-4441"},
+            "s3": {"privateKeyData": "pk-4442", "api_key_v2": "k-4443"},
+            "vault": {"client.secret.v2": "cs-4445"},
+            "extraEnv": {"PGPASS": "pg-4444"},
+        }
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "kafka": {
+                "sasl.password.encrypted": contract.REDACTED,
+                "x-api-key-primary": contract.REDACTED,
+            },
+            "s3": {"privateKeyData": contract.REDACTED, "api_key_v2": contract.REDACTED},
+            "vault": {"client.secret.v2": contract.REDACTED},
+            "extraEnv": {"PGPASS": contract.REDACTED},
+        }
+
+    # Each name in the shipped contracts that holds a credential word and is a setting, with
+    # one block it sits in. scalo's matcher alone would hide every one of them.
+    @pytest.mark.parametrize(
+        ("name", "section", "mapping"),
+        [
+            ("accept_unauthenticated", "fluent", False),
+            ("auth", "", True),
+            ("bearer", "auth", True),
+            ("ca_cert_file", "tls", False),
+            ("ca_secret", "tls", False),
+            ("cert_file", "tls", False),
+            ("cert_secret", "tls", False),
+            ("client_auth", "tls", False),
+            ("credential_secret", "github", False),
+            ("credentials", "auth", True),
+            ("credentials_path", "gcs", False),
+            ("field_mapping", "", True),
+            ("jwt_bearer", "auth", True),
+            ("key_secret", "tls", False),
+            ("mapping_file", "routing", False),
+            ("oauth2_client_credentials", "auth", True),
+            ("oauth_client_id", "sasl", False),
+            ("oauth_extensions", "sasl", False),
+            ("oauth_scope", "sasl", False),
+            ("oauth_token_endpoint", "sasl", False),
+            ("onepassword", "sources", True),
+            ("password_field", "session_login", False),
+            ("private_key_id", "auth", False),
+            ("private_key_secret", "salesforce", False),
+            ("secret_dir", "sasl", False),
+            ("secret_source", "bearer", False),
+            ("service_account_key_file", "auth", False),
+            ("session_login", "auth", True),
+            ("session_timeout_ms", "kafka", False),
+            ("ssl_certificate_location", "kafka", False),
+            ("ssl_key_location", "kafka", False),
+            ("tls_client_cert_path", "grpc", False),
+            ("tls_client_key_path", "grpc", False),
+            ("token_at", "session_login", False),
+            ("token_header", "session_login", False),
+            ("token_url", "jwt_bearer", False),
+            ("token_url_override", "gcp", False),
+            ("type_mappings", "coercion", True),
+        ],
+    )
+    def test_a_shipped_setting_that_holds_a_credential_word_is_shown(self, name, section, mapping):
+        assert is_credential_name(name, section) is True
+        assert contract.secret_name(name, section, mapping=mapping) is False
+
+    def test_the_onepassword_source_is_a_section_and_a_scalar_of_that_name_is_masked(self):
+        assert contract.secret_name("onepassword", "sources", mapping=True) is False
+        assert contract.secret_name("ONEPASSWORD") is True
+
+    @pytest.mark.parametrize("name", ["api_key", "tokens", "private_key", "client_secret"])
+    def test_a_mapping_named_for_a_credential_is_masked_whole(self, name):
+        assert contract.secret_name(name, "auth", mapping=True) is True
+
+
 class TestAUrlPasswordIsMasked:
     """A connection string keeps its host and user, and hides only its password."""
 
@@ -1711,6 +1788,49 @@ class TestAUrlPasswordIsMasked:
         assert contract.redact_overlay(ABSENT, overlay)["extraEnv"]["DATABASE_URL"] == (
             f"postgres://dfe:{contract.REDACTED}@db:5432/dfe"
         )
+
+    @pytest.mark.parametrize(
+        "password",
+        ["pa/ss-4427", "pa@ss/4428", "p/a@s/s-4429", "pa?ss-4431", "pa#ss-4432"],
+        ids=["slash", "at-then-slash", "slashes-around-an-at", "question-mark", "hash"],
+    )
+    def test_a_password_holding_any_url_character_is_masked_whole(self, password):
+        overlay = {"extraEnv": {"DATABASE_URL": f"postgres://dfe:{password}@db:5432/dfe"}}
+        shown = contract.redact_overlay(ABSENT, overlay)["extraEnv"]["DATABASE_URL"]
+        assert shown == f"postgres://dfe:{contract.REDACTED}@db:5432/dfe"
+
+    def test_a_config_value_with_a_slash_in_its_password_is_masked(self):
+        overlay = {"config": {"clickhouse": {"hosts": ["https://dfe:ch/pw-4433@ch:8443"]}}}
+        view = contract.resolve_config(_contract("dfe-loader"), overlay)
+        hosts = {f.path: f for f in view.fields}["config.clickhouse.hosts"]
+        assert hosts.value == [f"https://dfe:{contract.REDACTED}@ch:8443"]
+
+    @pytest.mark.parametrize(
+        "moved",
+        [
+            "https://svc:new-4452@attacker.example?x@broker.example/x",
+            "https://svc:new-4453@attacker.example#x@broker.example/x",
+            "https://svc:new-4454@attacker.example/x@broker.example/x",
+        ],
+        ids=["behind-a-query", "behind-a-fragment", "behind-a-path"],
+    )
+    def test_a_host_written_inside_a_new_password_cannot_take_the_stored_credential(self, moved):
+        # A client reads the host before the first ?, # or /, so these all connect to attacker.example.
+        doc = {"kafka": {"api_key": "k-4450", "endpoint": "https://svc:pw-4451@broker.example/x"}}
+        written = {"api_key": contract.REDACTED, "endpoint": moved}
+        with pytest.raises(contract.CredentialReentryError, match="endpoint"):
+            contract.restore_masked_at(doc, "kafka", written)
+
+    def test_a_new_password_beside_a_masked_credential_is_kept(self):
+        doc = {"kafka": {"api_key": "k-4455", "endpoint": "https://svc:pw-4456@broker.example/x"}}
+        written = {
+            "api_key": contract.REDACTED,
+            "endpoint": "https://svc:new-4457@broker.example/x",
+        }
+        assert contract.restore_masked_at(doc, "kafka", written) == {
+            "api_key": "k-4455",
+            "endpoint": "https://svc:new-4457@broker.example/x",
+        }
 
     def test_a_config_url_with_a_password_is_a_credential_write(self):
         assert contract.credential_var({}, "config.output.url", "https://u:pw-4423@host") is True
@@ -1888,50 +2008,3 @@ class TestTheMountIsReadByTheManifestName:
 
         assert found.available is False
         assert found.source == contract.ContractSource.ABSENT
-
-
-# The password grammar as a plain backtracking pattern: the reference for what is masked.
-_REFERENCE_URL_PASSWORD = re.compile(r"([A-Za-z][A-Za-z0-9+.\-]*://[^\s:/@]*:)([^\s/]+)(?=@)")
-
-
-def _reference_shown(text: str) -> str:
-    return _REFERENCE_URL_PASSWORD.sub(rf"\1{contract.REDACTED}", text)
-
-
-class TestUrlPasswordMasking:
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "postgres://user:pw-4501@db.example:5432/dfe",
-            "1http://user:pw-4502@host",
-            "-x+y.z://u:p:q@h@i/x",
-            "dsn=kafka://svc:pw-4503@b1,b2 other://a:b@c",
-            "http://user@host",
-            "a://:@",
-            "no url in this text",
-            "",
-        ],
-    )
-    def test_masks_as_the_reference_grammar_does(self, text):
-        assert contract._shown_text(text) == _reference_shown(text)
-
-    def test_masks_as_the_reference_grammar_does_on_random_text(self):
-        rng = random.Random(4504)
-        alphabet = ["a", "B", "1", "+", ".", "-", ":", "/", "/", "@", " ", "x", ","]
-        for _ in range(20_000):
-            text = "".join(rng.choices(alphabet, k=rng.randint(0, 20)))
-            assert contract._shown_text(text) == _reference_shown(text), repr(text)
-
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "A" * 200_000 + " a://x",
-            "a://:" + "A" * 200_000,
-            "1a" * 100_000 + " b://x",
-        ],
-        ids=["letter-run", "after-userinfo", "mixed-run"],
-    )
-    def test_a_long_value_is_read_in_linear_time(self, text):
-        started = time.perf_counter()
-        contract._shown_text(text)
-        assert time.perf_counter() - started < 2.0

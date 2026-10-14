@@ -320,7 +320,7 @@ class TestOidcAuthentication:
         assert [(e["user_id"], e["source_provider"], e["reason"]) for e in refused] == [
             ("bob@example.com", "oidc", "no_role_granted")
         ]
-        assert [(e["user_id"], e["auth_path"], e["reason"]) for e in denied] == [
+        assert [(e["user_id"], e["login_method"], e["reason"]) for e in denied] == [
             ("bob@example.com", "oidc", "no_role_granted")
         ]
         assert "unknown-group-xyz" not in json.dumps(refused + denied, default=str)

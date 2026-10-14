@@ -210,7 +210,7 @@ class TestOktaLoginLookupWithATokenNoHeaderCanCarry:
         groups = await adapter.resolve_user_groups("00u1")
 
         logged = [
-            (event["operation"], event["api_token_env"], event["api_token_path"])
+            (event["operation"], event["env_var"], event["store_path"])
             for event in audit_events
             if event["event"]
             == "Okta API token not sent: it holds a character an HTTP header cannot carry"
