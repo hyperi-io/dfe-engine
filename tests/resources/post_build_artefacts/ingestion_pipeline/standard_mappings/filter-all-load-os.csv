@@ -1,2 +1,0 @@
-iterator,match_column,match_value,action
-finalise,tags.event.category,logs_netflow,never_match

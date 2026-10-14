@@ -1,8 +1,0 @@
-# Test template for 104-transform-extract-fields
-transforms:
-  extract_fields:
-    type: remap
-    inputs:
-      - "*"
-    source: |
-      . = parse_json!(.message)
