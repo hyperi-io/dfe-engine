@@ -36,6 +36,8 @@ TICK_DURATION = "hunt_tick_duration_seconds"
 DETECTIONS_CAPPED = "hunt_detections_capped_total"
 DETECTIONS_DROPPED = "hunt_detections_dropped_total"
 CLICKHOUSE_UNAVAILABLE = "hunt_clickhouse_unavailable_total"
+FIRE_FAILURES = "hunt_fire_failures_total"
+FIRES_HELD = "hunt_fires_held_total"
 
 
 class HuntRunnerMetrics:
@@ -81,6 +83,16 @@ class HuntRunnerMetrics:
             "Connects and ticks that found ClickHouse unreachable or refusing the runner's "
             "user, and were retried",
             ["stage", "reason"],
+        )
+        self._fire_failures = manager.counter(
+            FIRE_FAILURES,
+            "Hunt fires that failed, by the ClickHouse error category or empty_query",
+            ["hunt_id", "reason"],
+        )
+        self._fires_held = manager.counter(
+            FIRES_HELD,
+            "Due fires not attempted because the hunt is waiting out a back-off after failing",
+            ["hunt_id"],
         )
 
     @property
@@ -156,6 +168,24 @@ class HuntRunnerMetrics:
             return
         self._unavailable.labels(stage=stage, reason=reason).inc()
 
+    def fire_failed(self, hunt_id: str, *, reason: str) -> None:
+        """Record why a fire failed.
+
+        Args:
+            hunt_id: The hunt whose fire failed.
+            reason: A ClickHouse error category (``not_found`` for a missing table)
+                or ``empty_query``, so the label stays bounded.
+        """
+        if self._manager is None:
+            return
+        self._fire_failures.labels(hunt_id=hunt_id, reason=reason).inc()
+
+    def fire_held(self, hunt_id: str) -> None:
+        """Record a due fire skipped because its hunt is backing off after failing."""
+        if self._manager is None:
+            return
+        self._fires_held.labels(hunt_id=hunt_id).inc()
+
 
 def create(app_name: str = "dfe-hunt-runner") -> HuntRunnerMetrics:
     """Build the instrument set on scalo's metrics backend.
@@ -180,6 +210,8 @@ __all__ = [
     "CLICKHOUSE_UNAVAILABLE",
     "DETECTIONS_CAPPED",
     "DETECTIONS_DROPPED",
+    "FIRES_HELD",
+    "FIRE_FAILURES",
     "OVERRUNS",
     "ROWS_WRITTEN",
     "RUNS",

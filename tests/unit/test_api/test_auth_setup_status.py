@@ -323,6 +323,48 @@ def test_setup_status_returns_registries_while_incomplete(tmp_path):
         _registries.clear()
 
 
+def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path):
+    """The console's order: create the organisation, then the first user."""
+    app = create_app(settings=_settings(tmp_path))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            owner_password = secrets.token_urlsafe(16)
+            _change_admin_password(client, owner_password)
+            token = client.post(
+                "/api/v1/auth/login", json={"username": "admin", "password": owner_password}
+            ).json()["access_token"]
+            admin = {"Authorization": f"Bearer {token}"}
+
+            created = client.post(
+                "/api/v1/orgs",
+                json={"name": "northwind", "display_name": "Northwind"},
+                headers=admin,
+            )
+            assert created.status_code == 201, created.text
+
+            body = client.get("/api/v1/auth/setup-status").json()
+            assert body["initial_setup"]["complete"] is False
+            assert "organisations" in body["initial_setup"]["completed_steps"]
+            assert [o["name"] for o in body["organisations"]] == ["northwind"]
+
+            user = client.post(
+                "/api/v1/auth/accounts",
+                json={"username": "alexops", "password": secrets.token_urlsafe(16)},
+                headers=admin,
+            )
+            assert user.status_code in (200, 201), user.text
+
+            # Complete now, so the anonymous endpoint withholds the org inventory;
+            # the authenticated list still carries it.
+            body = client.get("/api/v1/auth/setup-status").json()
+            assert body["initial_setup"]["complete"] is True
+            assert body["organisations"] == []
+            listed = client.get("/api/v1/orgs", headers=admin).json()
+            assert [o["name"] for o in listed["items"]] == ["northwind"]
+    finally:
+        _registries.clear()
+
+
 def test_setup_status_never_returns_accounts(tmp_path):
     """The account list is not served pre-login — only the first_user verdict is."""
     app = create_app(settings=_settings(tmp_path))

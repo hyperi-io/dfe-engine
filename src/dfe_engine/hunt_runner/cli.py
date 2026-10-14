@@ -51,7 +51,7 @@ from .ch_coordinator import ChCoordinator
 from .connect import TickGuard, connect_when_available
 from .daemon import run_loop
 from .rule_compiler import detection_cap
-from .runner import HuntRunner
+from .runner import HuntFailures, HuntRunner
 from .schedule import publish_schedule
 from .spec_loader import load_specs
 from .worker import HuntWorker
@@ -183,6 +183,8 @@ def run(
     worker = HuntWorker(ch, coord, metrics=obs)
     hunt_dir = settings.hunts.hunt_dir
     sources = _spec_sources(settings, db)
+    # Outlives each rebuild below, so a reload does not restart a failing hunt's back-off.
+    failures = HuntFailures()
 
     def _build_runner() -> HuntRunner:
         return HuntRunner(
@@ -192,6 +194,7 @@ def run(
             cap=cap,
             poll_seconds=poll_seconds,
             metrics=obs,
+            failures=failures,
         )
 
     # The runner lives in a one-element cell so on_reload can swap in a runner built

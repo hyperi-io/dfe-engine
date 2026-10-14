@@ -35,6 +35,8 @@ def test_the_whole_instrument_set_is_registered_up_front(manager):
         ("counter", "hunt_detections_capped_total"),
         ("counter", "hunt_detections_dropped_total"),
         ("counter", "hunt_clickhouse_unavailable_total"),
+        ("counter", "hunt_fire_failures_total"),
+        ("counter", "hunt_fires_held_total"),
     ]
 
 
@@ -66,6 +68,8 @@ def test_no_backend_registers_nothing_and_records_nothing():
     metrics.tick_completed(0.2)
     metrics.detections_capped("h", "r", dropped=4)
     metrics.clickhouse_unavailable(stage="tick", reason="connection")
+    metrics.fire_failed("h", reason="not_found")
+    metrics.fire_held("h")
 
 
 def test_a_completed_fire_counts_once_and_records_its_duration(manager):
