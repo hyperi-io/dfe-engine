@@ -248,6 +248,10 @@ class TestCredentialName:
             ("token_count", ""),
             ("ssl_key_size", ""),
             ("auth_retries", ""),
+            ("password_env", "connections"),
+            ("api_token_env", "groups"),
+            ("ch_password_env", ""),
+            ("DFE_HYPERDX_API_KEY_ENV", ""),
         ],
     )
     def test_a_setting_that_holds_a_credential_word_is_not(self, name, parent):
@@ -263,9 +267,12 @@ class TestCredentialName:
             "token_count",
             "ssl_key_size",
             "auth_retries",
+            "password_env",
+            "api_token_env",
+            "ch_password_env",
         ],
     )
-    def test_scalo_alone_would_mask_a_quantity_setting(self, name):
+    def test_scalo_alone_would_mask_each_of_these_settings(self, name):
         # Each case above is one the engine's own rule shows, not one scalo never matched.
         assert is_credential_name(name) is True
 

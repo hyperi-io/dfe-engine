@@ -39,6 +39,7 @@ SETTING_WORDS = frozenset(
         "count",
         "dir",
         "endpoint",
+        "env",
         "field",
         "file",
         "header",
@@ -65,7 +66,8 @@ SETTING_WORDS = frozenset(
 ``ssl_key_location``, ``token_url``, ``password_field``, ``credential_type``,
 ``session_timeout_ms`` and dfe-fetcher's ``session_login`` block each carry a
 credential word and hold a setting, as do ``ping_interval``, ``password_min_length``,
-``SESSION_TIMEOUT`` and ``token_ttl``. No name scalo lists ends in one of these.
+``SESSION_TIMEOUT``, ``token_ttl`` and ``password_env``, which names the environment
+variable holding the password. No name scalo lists ends in one of these.
 """
 
 SHOWN_ENDINGS: frozenset[tuple[str, ...]] = frozenset(

@@ -100,6 +100,9 @@ dfe-fetcher's ``credential_secret`` and ``private_key_secret`` and dfe-receiver'
 ``imagePullSecrets`` name Kubernetes Secrets.
 """
 
+_ENV_WORD = "env"
+"""The last word of a name for environment variables: one variable's name, or a map of them."""
+
 _SECRET_KEY_NAMES = ("secret", "keys")
 _SECRET_REFERENCE = ("existing", "secret")
 """A chart's ``secretKeys`` beside ``existingSecret``: which key of that Secret holds each value.
@@ -467,14 +470,19 @@ def secret_name(name: str, section: str = "", *, mapping: bool = False) -> bool:
 
     ``mapping`` says the value is a mapping or a list of them, which a name whose last
     word is in :data:`SECTION_TERMS` does not hide whole: its fields are judged one by one.
+    A mapping whose name ends in ``env`` is judged by the words before it, so
+    ``secretEnv``, which maps variable names to their values, is hidden whole while a
+    scalar ``password_env`` names a variable and is shown.
 
     Part of the fleet ships no secret marker at all, so trusting the marker alone
     would hand an operator's Kafka password back over the API. The rule errs towards
     hiding, and holds for an app that has not adopted the marker yet.
     """
+    parts = words(name)
+    if mapping and len(parts) > 1 and parts[-1] == _ENV_WORD:
+        return credential_name("_".join(parts[:-1]), section)
     if not credential_name(name, section):
         return False
-    parts = words(name)
     if len(parts) > 1 and parts[-1] in ("secret", "secrets") and parts[-2] in SECRET_SOURCE_WORDS:
         return False
     return not (mapping and parts[-1] in SECTION_TERMS)

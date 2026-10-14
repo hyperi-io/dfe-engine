@@ -1983,6 +1983,27 @@ class TestCredentialsNamedByWhatHoldsThem:
             }
         }
 
+    def test_a_variable_name_shows_and_a_map_of_variable_values_does_not(self):
+        overlay = {
+            "connections": {"password_env": "CH_DEFAULT_PASSWORD"},
+            "groups": {"api_token_env": "OKTA_API_TOKEN"},
+            "org": {"ch_password_env": "CH_ORG_PASSWORD"},
+            "app": {"secretEnv": {"SIGNING": "s-4442", "DB_PASSWORD": "p-4443"}},
+        }
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "connections": {"password_env": "CH_DEFAULT_PASSWORD"},
+            "groups": {"api_token_env": "OKTA_API_TOKEN"},
+            "org": {"ch_password_env": "CH_ORG_PASSWORD"},
+            "app": {"secretEnv": contract.REDACTED},
+        }
+
+    @pytest.mark.parametrize("name", ["password", "api_token", "client_secret"])
+    def test_a_credential_beside_its_variable_name_is_still_masked(self, name):
+        overlay = {"auth": {name: "c-4444", f"{name}_env": "AUTH_CREDENTIAL"}}
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "auth": {name: contract.REDACTED, f"{name}_env": "AUTH_CREDENTIAL"}
+        }
+
     def test_an_oauth_client_credentials_block_written_back_restores_its_secret(self):
         doc = {
             "auth": {

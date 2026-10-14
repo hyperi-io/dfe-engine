@@ -357,6 +357,7 @@ class TestSourceFetcher:
             },
             {"auth": {"credentials": [{"header": "X-Key", "value": "{{ credentials.pair_a }}"}]}},
             {"auth": {"credentials": {"pair_a": "vault:kv/dfe/pair:a"}}},
+            {"auth": {"password_env": "FETCHER_PASSWORD", "api_token_env": "FETCHER_TOKEN"}},
         ],
     )
     def test_a_setting_beside_a_credential_word_is_accepted(self, config):
