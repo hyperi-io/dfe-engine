@@ -20959,6 +20959,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "List Actions",
+        "description": "List the defined actions by name.",
         "operationId": "list_actions_api_v1_governance_actions_get",
         "responses": {
           "200": {
@@ -21077,6 +21078,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "List Policies",
+        "description": "List the protected-var policies by name.",
         "operationId": "list_policies_api_v1_governance_policies_get",
         "responses": {
           "200": {
@@ -21127,6 +21129,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Get Policy",
+        "description": "Return one protected-var policy.",
         "operationId": "get_policy_api_v1_governance_policies__name__get",
         "parameters": [
           {
@@ -21289,7 +21292,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Validate Action",
-        "description": "Dry-check an action definition: every violation + the would-be diff.\n\nNothing is committed - this is the authoring hand-hold, run before the\ndefine endpoint so a wizard can show the full diff and every problem in\none round trip.",
+        "description": "Dry-check an action definition: every violation + the would-be diff.\n\nNothing is committed - this is the authoring hand-hold, run before the\ndefine endpoint so a wizard can show the full diff and every problem in\none round trip. That includes each change invoke would refuse under the\ninfra overlay guards (``managed_by_provider``, ``scale_down_refused``), on\nevery enum map branch, reported by its message.",
         "operationId": "validate_action_api_v1_governance_admin_actions_validate_post",
         "requestBody": {
           "content": {
@@ -21423,6 +21426,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Delete Action",
+        "description": "Remove a defined action.",
         "operationId": "delete_action_api_v1_governance_admin_actions__name__delete",
         "parameters": [
           {
@@ -21483,6 +21487,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Create Policy",
+        "description": "Define or replace a protected-var policy.",
         "operationId": "create_policy_api_v1_governance_admin_policies_post",
         "requestBody": {
           "content": {
@@ -21549,6 +21554,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Delete Policy",
+        "description": "Remove a protected-var policy.",
         "operationId": "delete_policy_api_v1_governance_admin_policies__name__delete",
         "parameters": [
           {
@@ -21609,7 +21615,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Reconcile Ch Rbac Endpoint",
-        "description": "Reconcile CH quota tiers + service roles + per-org row policies into\nClickHouse, minting the service-user secrets via the secrets seam. Idempotent.\ngovernance:write.",
+        "description": "Reconcile ClickHouse quota tiers, service roles and per-org row policies.\n\nIt mints the service-user secrets in the configured secrets backend, and a repeat run\nchanges nothing.",
         "operationId": "reconcile_ch_rbac_endpoint_api_v1_governance_ch_rbac_reconcile_post",
         "responses": {
           "200": {
@@ -29401,7 +29407,8 @@
           "changed",
           "diff"
         ],
-        "title": "InvokeResponse"
+        "title": "InvokeResponse",
+        "description": "Outcome of invoking a defined action: the diff, and the commit or review PR it made."
       },
       "JsonPathInfo": {
         "properties": {
