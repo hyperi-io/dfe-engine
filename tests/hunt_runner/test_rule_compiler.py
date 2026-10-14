@@ -66,7 +66,7 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     statement = sql[0]
     assert statement.startswith("INSERT INTO `dfe`.`detection`")
     assert "FROM `dfe`.`main`" in statement
-    assert "WHERE {window} AND (process_name = 'certutil.exe')" in statement
+    assert "WHERE {window} AND (\nprocess_name = 'certutil.exe'\n    )" in statement
     assert "'certutil' AS rule_id" in statement
     assert "'Certutil Abuse' AS rule_name" in statement
     assert "'critical' AS severity" in statement
@@ -96,10 +96,26 @@ def test_the_rule_runs_in_a_subquery_where_no_label_is_in_scope(tmp_path: Path):
     assert inner == (
         "    SELECT _timestamp_load, _timestamp, _org_id, _uuid, _json\n"
         "    FROM `acme`.`aws-guardduty`\n"
-        "    WHERE {window} AND (severity >= 7)\n"
+        "    WHERE {window} AND (\n"
+        "severity >= 7\n"
+        "    )\n"
         ")\n"
         "LIMIT 1000"
     )
+
+
+def test_a_rule_ending_in_a_line_comment_keeps_its_closing_bracket(tmp_path: Path):
+    _save_rule(tmp_path, rule_id="noted", name="Noted", where_clause="severity >= 7 -- reviewed")
+    [statement] = compile_hunt_queries(
+        {"rules": ["noted"], "global_source_table_name": "acme.main"},
+        "h",
+        rules_dir=tmp_path,
+        default_target="acme.detection",
+    )
+
+    # The comment runs to the end of its line, so the bracket closing the rule starts the next.
+    assert "AND (\nseverity >= 7 -- reviewed\n    )\n)" in statement.sql
+    assert "AND (\nseverity >= 7 -- reviewed\n    )\n)" in statement.count_sql
 
 
 def test_each_rule_gets_its_own_statement(tmp_path: Path):
@@ -193,12 +209,12 @@ def test_a_rule_with_only_sql_is_put_through_the_rewriter(tmp_path: Path):
     [
         pytest.param(
             "ServiceName = 'dfe-loader' AND {timestamp_condition}",
-            "WHERE {window} AND (ServiceName = 'dfe-loader')",
+            "WHERE {window} AND (\nServiceName = 'dfe-loader'\n    )",
             id="trailing",
         ),
         pytest.param(
             "{timestamp_condition} AND (action = 'delete')",
-            "WHERE {window} AND ((action = 'delete'))",
+            "WHERE {window} AND (\n(action = 'delete')\n    )",
             id="leading-sigma",
         ),
     ],
@@ -309,7 +325,7 @@ def test_a_lookup_rule_using_the_in_operator_compiles(tmp_path: Path):
     )
 
     assert [statement.rule_id for statement in statements] == ["lookup"]
-    assert f"AND ({lookup})" in statements[0].sql
+    assert f"AND (\n{lookup}\n    )" in statements[0].sql
 
 
 def test_the_dropped_rule_is_logged_with_the_call_it_made(tmp_path: Path):
@@ -378,7 +394,9 @@ def test_every_compiled_rule_is_capped_at_the_shipped_default(tmp_path: Path):
     assert statement.cap == MAX_DETECTIONS_PER_RUN == 1000
     assert statement.rule_id == "flood"
     # The LIMIT closes the statement, after the subquery the rule runs in.
-    assert statement.sql.endswith("WHERE {window} AND (_json.kind = 'flood')\n)\nLIMIT 1000")
+    assert statement.sql.endswith(
+        "WHERE {window} AND (\n_json.kind = 'flood'\n    )\n)\nLIMIT 1000"
+    )
 
 
 def test_the_cap_given_is_the_limit_compiled(tmp_path: Path):
@@ -405,7 +423,9 @@ def test_the_count_reads_the_same_window_and_rule_without_a_limit(tmp_path: Path
     assert inner == (
         "    SELECT _timestamp_load, _timestamp, _org_id\n"
         "    FROM `acme`.`main`\n"
-        "    WHERE {window} AND (_json.kind = 'flood')\n"
+        "    WHERE {window} AND (\n"
+        "_json.kind = 'flood'\n"
+        "    )\n"
         ")"
     )
 

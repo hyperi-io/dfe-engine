@@ -301,6 +301,10 @@ convention = "google"
     "PT017",  # assertions on exception in except (acceptable in tests)
 ]
 
+[tool.ty.environment]
+# Tests import shared helpers as `common.*` from tests/, the path pytest's pythonpath adds.
+extra-paths = ["tests"]
+
 
 [project.scripts]
 # Order matters: hyperi-ci's generate-artefacts build step invokes the FIRST

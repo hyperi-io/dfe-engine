@@ -12,6 +12,8 @@ The runner stamps every detection with labels named ``rule_id``, ``rule_name``,
 sources carry columns by those names: GuardDuty and Security Hub both have a
 numeric ``severity``. ClickHouse resolves a name in ``WHERE`` to a ``SELECT``
 alias before a column, so a rule in the same scope as the labels read the label.
+The volume preview names its counts ``dfe_total`` and ``dfe_matched``, and holds
+the rule to the same scope, so it counts what a run would write.
 
 The rule and the hunt are written the way the API writes them, the source is the
 real landing table plus the vendor's columns, and the detections land in the
@@ -26,6 +28,8 @@ from common.hunt_files import write_hunt, write_rule
 
 from dfe_engine.hunt_runner import ChCoordinator, HuntRunner, HuntWorker, load_specs
 from dfe_engine.hunt_runner.spread import current_fire
+from dfe_engine.hunts.rule_guard import preview_settings, preview_sql
+from dfe_engine.settings import DetectionGuardSettings
 
 _INTERVAL = 60  # "* * * * *", the cron write_hunt gives every hunt
 _SOURCE = "aws-guardduty"
@@ -132,3 +136,49 @@ def test_a_capped_rule_counts_on_a_column_named_like_the_counts_own_alias(
         parameters={"h": hunt, "nil": _NIL_UUID},
     ).result_rows[0]
     assert (int(detections), int(matched)) == (2, 5)
+
+
+# Each rule matches the first three of the eight rows _land_eight writes. One reads source
+# columns named like the preview's counts; the other ends in a line comment.
+PREVIEWED_RULES = {
+    "count names": "dfe_total = 1 AND dfe_matched = 1",
+    "trailing comment": "severity >= 7 -- reviewed",
+}
+
+
+def _land_eight(ch_client, db: str, fire: int) -> None:
+    """Eight findings inside both the run's window and the preview's hour."""
+    ch_client.command(
+        f"INSERT INTO `{db}`.`{_SOURCE}` (_timestamp_load, _timestamp, _org_id, _json, "
+        f"severity, dfe_total, dfe_matched) SELECT toDateTime64({fire - 1} - number, 3) AS at, "
+        "at, 'acme', '{}', if(number < 3, 8, 3), number < 5, number < 3 FROM numbers(8)"
+    )
+
+
+def _preview(ch_client, db: str, rule: str) -> tuple[int, int]:
+    """The volume preview's (total, matched) for *rule* over the source's last hour."""
+    sql = preview_sql(db, _SOURCE, "_timestamp_load", rule, 60)
+    settings = preview_settings(DetectionGuardSettings())
+    [(total, matched)] = ch_client.query(sql, settings=settings).result_rows
+    return int(total), int(matched)
+
+
+@pytest.mark.parametrize("rule", list(PREVIEWED_RULES.values()), ids=list(PREVIEWED_RULES))
+def test_the_preview_counts_the_rows_a_run_writes(ch_client, dfe_db, tmp_path, rule):
+    _source(ch_client, dfe_db, ("severity UInt8", "dfe_total UInt8", "dfe_matched UInt8"))
+    hunt = f"label_{uuid.uuid4().hex[:8]}"
+    rule_id = f"{hunt}_rule"
+    write_rule(tmp_path / "rules", rule_id, rule)
+    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db, source=_SOURCE)
+    fire = current_fire(hunt, _INTERVAL, int(time.time()))
+    _land_eight(ch_client, dfe_db, fire)
+
+    preview = _preview(ch_client, dfe_db, rule)
+    specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
+    _tick(ch_client, dfe_db, specs, fire)
+
+    [(written,)] = ch_client.query(
+        f"SELECT count() FROM `{dfe_db}`.detection WHERE hunt_name = {{h:String}}",
+        parameters={"h": hunt},
+    ).result_rows
+    assert (preview, int(written)) == ((8, 3), 3)

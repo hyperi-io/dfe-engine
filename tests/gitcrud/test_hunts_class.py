@@ -123,7 +123,7 @@ class TestHuntsLandWhereTheRunnerLooks:
         assert spec.interval_seconds == 300
         assert spec.target_table == "dfe.detection"
         assert len(spec.queries) == 1
-        assert "WHERE {window} AND (process_name = 'certutil.exe')" in spec.queries[0].sql
+        assert "WHERE {window} AND (\nprocess_name = 'certutil.exe'\n    )" in spec.queries[0].sql
 
     def test_a_rule_compiles_off_the_synced_rules_directory(self, rules, crud):
         rules.save(RULE)
