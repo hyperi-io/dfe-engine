@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.42](https://github.com/hyperi-io/dfe-engine/compare/v1.22.41...v1.22.42) (2026-10-14)
+
+### Bug Fixes
+
+* turn the sigma API off by default ([#888](https://github.com/hyperi-io/dfe-engine/issues/888)) ([bbb0a15](https://github.com/hyperi-io/dfe-engine/commit/bbb0a156b9ad39afae66a8624107a36944cfa0c7))
+
 ## [1.22.41](https://github.com/hyperi-io/dfe-engine/compare/v1.22.40...v1.22.41) (2026-10-14)
 
 ### Bug Fixes
