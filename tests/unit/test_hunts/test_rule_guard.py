@@ -264,12 +264,19 @@ def test_an_empty_window_is_unmeasured_not_quiet():
 def test_the_preview_counts_the_window_and_the_matches_under_its_own_names():
     sql = preview_sql("dfe", "main", "_timestamp_load", "severity = 'high'", 60)
 
+    # The matches come from the subquery the hunt runner reads, outside both aliases' scope.
+    window = "`_timestamp_load` >= now() - INTERVAL 60 MINUTE"
     assert sql == (
-        "SELECT count() AS dfe_total, countIf(\n"
+        "SELECT\n"
+        f"    (SELECT count() FROM `dfe`.`main` WHERE {window}) AS dfe_total,\n"
+        "    count() AS dfe_matched\n"
+        "FROM (\n"
+        "    SELECT `_timestamp_load`\n"
+        "    FROM `dfe`.`main`\n"
+        f"    WHERE {window} AND (\n"
         "severity = 'high'\n"
-        ") AS dfe_matched\n"
-        "FROM `dfe`.`main`\n"
-        "WHERE `_timestamp_load` >= now() - INTERVAL 60 MINUTE"
+        "    )\n"
+        ")"
     )
 
 

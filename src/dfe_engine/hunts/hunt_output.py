@@ -120,21 +120,25 @@ def matching_rows(
     """Build the subquery yielding ``columns`` of the source rows the window and rule match.
 
     The rule runs where only the source table's own columns are in scope, so no
-    alias the outer query gives a label or a count can shadow one it reads.
+    alias the outer query gives a label or a count can shadow one it reads. The
+    hunt runner's statements and the volume preview all read through here, so a
+    rule matches the same rows in each.
 
     Args:
         source_db: Source database, backtick-quoted here.
         source_table: Source table, backtick-quoted here.
         columns: Source columns the outer query reads, by name and never aliased.
         where_clause: Detection logic (without time bounds).
-        timestamp_placeholder: Placeholder for checkpoint time bounds.
+        timestamp_placeholder: The time-window condition, or the placeholder the
+            runner fills with one.
 
     Returns:
         The parenthesised subquery, to follow ``FROM``.
     """
     where_parts = [timestamp_placeholder]
     if where_clause.strip():
-        where_parts.append(f"({where_clause.strip()})")
+        # On its own lines, so a rule ending in a line comment cannot comment out the bracket.
+        where_parts.append(f"(\n{where_clause.strip()}\n    )")
     condition = " AND ".join(where_parts)
     # Named, never *, which leaves out a MATERIALIZED or ALIAS column such as a source's _uuid.
     selected = ", ".join(columns)

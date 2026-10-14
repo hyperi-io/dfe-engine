@@ -32,6 +32,7 @@ from sqlglot.optimizer.simplify import simplify
 from ..clickhouse.function_guard import CallNotPermittedError, refuse_calls_outside_the_row
 from ..clickhouse.quoting import quote_identifier
 from ..settings import DetectionGuardSettings
+from .hunt_output import matching_rows
 from .rule_model import Rule
 
 # Header columns every DFE event carries, so a presence check on one narrows nothing.
@@ -254,7 +255,7 @@ def _as_condition(node: exp.Expr) -> exp.Expr:
 
 # -- Measured alert volume ------------------------------------------------
 
-# Aliased dfe_* so neither shadows a source column the rule's condition reads.
+# The preview's two result columns, in the order the service reads them.
 _TOTAL = "dfe_total"
 _MATCHED = "dfe_matched"
 
@@ -264,8 +265,9 @@ def preview_sql(
 ) -> str:
     """The count the volume preview runs: every event in the window, and the matches.
 
-    The condition sits on its own lines so nothing it ends with can swallow the
-    rest of the statement.
+    The matches are counted over :func:`~dfe_engine.hunts.hunt_output.matching_rows`,
+    the subquery the hunt runner's statements read, so neither count's alias is in
+    scope for the rule and the preview matches the rows a run would write.
 
     Args:
         source_db: Database of the rule's source table.
@@ -277,12 +279,15 @@ def preview_sql(
     Returns:
         One SELECT returning ``dfe_total`` and ``dfe_matched``.
     """
+    column = quote_identifier(time_column)
+    window = f"{column} >= now() - INTERVAL {int(window_minutes)} MINUTE"
+    source = f"{quote_identifier(source_db)}.{quote_identifier(source_table)}"
+    matched = matching_rows(source_db, source_table, (column,), where, window)
     return (
-        f"SELECT count() AS {_TOTAL}, countIf(\n"
-        f"{where}\n"
-        f") AS {_MATCHED}\n"
-        f"FROM {quote_identifier(source_db)}.{quote_identifier(source_table)}\n"
-        f"WHERE {quote_identifier(time_column)} >= now() - INTERVAL {int(window_minutes)} MINUTE"
+        f"SELECT\n"  # noqa: S608 - quoted source and column; an integer window; the rule itself
+        f"    (SELECT count() FROM {source} WHERE {window}) AS {_TOTAL},\n"
+        f"    count() AS {_MATCHED}\n"
+        f"FROM {matched}"
     )
 
 
@@ -308,7 +313,7 @@ def preview_settings(guard: DetectionGuardSettings) -> dict[str, float | int | s
 def refuse_offbox_calls(where: str, *, subject: str = "A rule's detection condition") -> str | None:
     """Say why a detection condition may not run, or None when every call is fine.
 
-    The condition is spliced into the preview's ``countIf`` and into the hunt
+    The condition is spliced into the preview's count and into the hunt
     runner's ``INSERT ... SELECT``, which needs write access and so cannot be
     made read-only. A call that reads outside the row or posts to another
     service is refused here instead -- in the API before the rule is saved, and
