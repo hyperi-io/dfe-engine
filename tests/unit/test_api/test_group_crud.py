@@ -2099,3 +2099,64 @@ class TestProtectedGroupMembership:
         members = recovery_accounts.state.group_store.get("dfe-admins").members
         assert "operator" in members
         assert username in members
+
+
+class TestLastAdminGroupMembership:
+    """Dropping the last usable system admin from dfe-admins is refused."""
+
+    def test_remove_member_is_refused_when_sole_usable_admin(
+        self, recovery_accounts, client, admin_headers, app
+    ):
+        from dfe_engine.api.deps import create_access_token
+
+        store = recovery_accounts.state.account_store
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "ops",
+                "password": secrets.token_urlsafe(16),
+                "groups": ["dfe-admins"],
+            },
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        store.update("admin", enabled=False, allow_protected=True)
+        store.update("breakglass", enabled=False, allow_protected=True)
+        ops_headers = {
+            "Authorization": (
+                "Bearer "
+                + create_access_token(
+                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
+                    settings=app.state.settings,
+                )
+            )
+        }
+
+        resp = client.delete(
+            "/api/v1/auth/groups/dfe-admins/members/ops",
+            headers=ops_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "last_admin"
+        assert "ops" in recovery_accounts.state.group_store.get("dfe-admins").members
+
+    def test_remove_member_is_allowed_when_another_usable_admin_remains(
+        self, recovery_accounts, client, admin_headers
+    ):
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "ops",
+                "password": secrets.token_urlsafe(16),
+                "groups": ["dfe-admins"],
+            },
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        resp = client.delete(
+            "/api/v1/auth/groups/dfe-admins/members/ops",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert "ops" not in recovery_accounts.state.group_store.get("dfe-admins").members

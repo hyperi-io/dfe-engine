@@ -875,7 +875,7 @@
           "Accounts"
         ],
         "summary": "Update Account",
-        "description": "Update account groups, enabled/blocked status, or contact fields (admin only).",
+        "description": "Update account groups, enabled/blocked status, or contact fields (admin only).\n\nRefused when the caller disables or blocks their own account, or when that\n(or stripping every system-scope admin group) would leave no usable\nsystem-admin account.",
         "operationId": "update_account_api_v1_auth_accounts__username__put",
         "parameters": [
           {
@@ -920,7 +920,17 @@
             }
           },
           "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "description": "self_deactivate: an account cannot disable or block itself",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "last_admin: disabling, blocking, or stripping the system admin group from this account would leave no usable system admin",
             "content": {
               "application/json": {
                 "schema": {
@@ -951,7 +961,7 @@
           "Accounts"
         ],
         "summary": "Delete Account",
-        "description": "Delete an account (admin only).",
+        "description": "Delete an account (admin only).\n\nRefused when the caller targets their own account, when the account holds the\nsystem admin role and no other usable admin-role account would remain\n(bootstrap admin and break-glass count when they can sign in), or when the\nstore refuses a recovery credential.",
         "operationId": "delete_account_api_v1_auth_accounts__username__delete",
         "parameters": [
           {
@@ -979,7 +989,17 @@
             }
           },
           "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "description": "self_delete: an account cannot delete itself",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "last_admin: deleting this account would leave no usable system admin",
             "content": {
               "application/json": {
                 "schema": {

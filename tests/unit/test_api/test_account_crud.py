@@ -760,6 +760,137 @@ class TestTheGroupsAnAccountShows:
         assert reenabled.json()["enabled"] is True
         assert reenabled.json()["disabled_at"] == ""
 
+    def test_deactivate_admin_is_allowed_when_another_usable_admin_remains(
+        self, recovery_accounts, client, admin_headers
+    ):
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        resp = client.put(
+            "/api/v1/auth/accounts/ops",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["enabled"] is False
+
+    def test_strip_admin_group_from_last_usable_admin_is_refused(
+        self, recovery_accounts, client, admin_headers, app
+    ):
+        """When only one usable system admin remains, dropping dfe-admins is refused."""
+        from dfe_engine.api.deps import create_access_token
+
+        store = recovery_accounts.state.account_store
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        store.update("admin", enabled=False, allow_protected=True)
+        store.update("breakglass", enabled=False, allow_protected=True)
+        ops_headers = {
+            "Authorization": (
+                "Bearer "
+                + create_access_token(
+                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
+                    settings=app.state.settings,
+                )
+            )
+        }
+
+        resp = client.put(
+            "/api/v1/auth/accounts/ops",
+            json={"groups": ["dfe-viewers"]},
+            headers=ops_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "last_admin"
+        assert "dfe-admins" in store.get("ops").groups
+        assert "ops" in recovery_accounts.state.group_store.get("dfe-admins").members
+
+    def test_strip_admin_group_is_allowed_when_another_usable_admin_remains(
+        self, recovery_accounts, client, admin_headers
+    ):
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        resp = client.put(
+            "/api/v1/auth/accounts/ops",
+            json={"groups": ["dfe-viewers"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["groups"] == ["dfe-viewers"]
+
+    def test_deactivate_own_account_is_refused(self, recovery_accounts, client, admin_headers, app):
+        """Even with another admin still usable, an account cannot disable itself."""
+        from dfe_engine.api.deps import create_access_token
+
+        store = recovery_accounts.state.account_store
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        ops_headers = {
+            "Authorization": (
+                "Bearer "
+                + create_access_token(
+                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
+                    settings=app.state.settings,
+                )
+            )
+        }
+
+        resp = client.put(
+            "/api/v1/auth/accounts/ops",
+            json={"enabled": False},
+            headers=ops_headers,
+        )
+
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "self_deactivate"
+        assert store.get("ops").enabled is True
+
+    def test_block_own_account_is_refused(self, recovery_accounts, client, admin_headers, app):
+        from dfe_engine.api.deps import create_access_token
+
+        store = recovery_accounts.state.account_store
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        ops_headers = {
+            "Authorization": (
+                "Bearer "
+                + create_access_token(
+                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
+                    settings=app.state.settings,
+                )
+            )
+        }
+
+        resp = client.put(
+            "/api/v1/auth/accounts/ops",
+            json={"blocked": True},
+            headers=ops_headers,
+        )
+
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "self_deactivate"
+        assert store.get("ops").blocked is False
+
     def test_update_blocked(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
@@ -1337,6 +1468,59 @@ class TestDeleteAccount:
         resp = client.delete("/api/v1/auth/accounts/admin", headers=viewer_headers)
         assert resp.status_code == 403
 
+    def test_delete_own_account_is_refused(self, client, admin_headers):
+        resp = client.delete("/api/v1/auth/accounts/admin", headers=admin_headers)
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "self_delete"
+
+    def test_delete_admin_is_allowed_when_another_usable_admin_remains(
+        self, recovery_accounts, client, admin_headers
+    ):
+        """Bootstrap admin still signs in, so a second admin-role account may go."""
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "ops",
+                "password": _PASSWORD,
+                "groups": ["dfe-admins"],
+            },
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        resp = client.delete("/api/v1/auth/accounts/ops", headers=admin_headers)
+        assert resp.status_code == 204, resp.text
+
+    def test_delete_own_account_as_last_admin_is_self_delete(
+        self, recovery_accounts, client, admin_headers, app
+    ):
+        """The sole usable admin cannot remove itself; self_delete wins over last_admin."""
+        from dfe_engine.api.deps import create_access_token
+
+        store = recovery_accounts.state.account_store
+        created = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "ops", "password": _PASSWORD, "groups": ["dfe-admins"]},
+            headers=admin_headers,
+        )
+        assert created.status_code == 201, created.text
+        store.update("admin", enabled=False, allow_protected=True)
+        store.update("breakglass", enabled=False, allow_protected=True)
+        ops_headers = {
+            "Authorization": (
+                "Bearer "
+                + create_access_token(
+                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
+                    settings=app.state.settings,
+                )
+            )
+        }
+
+        resp = client.delete("/api/v1/auth/accounts/ops", headers=ops_headers)
+
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "self_delete"
+        assert store.get("ops") is not None
+
 
 # ── The protected-name floor (issue #505) ────────────────────
 
@@ -1352,7 +1536,10 @@ class TestProtectedAccounts:
             headers=admin_headers,
         )
         assert resp.status_code == 403, resp.text
-        assert resp.json()["code"] == "protected_account"
+        # Disabling yourself is refused before the protected-name floor; another
+        # recovery credential still hits protected_account.
+        expected = "self_deactivate" if username == "admin" else "protected_account"
+        assert resp.json()["code"] == expected
         assert recovery_accounts.state.account_store.get(username).enabled is True
 
     def test_put_dropping_the_admin_group_is_refused(
