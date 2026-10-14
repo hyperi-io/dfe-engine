@@ -146,7 +146,7 @@ def compute_drops(
       credential stays live is still a tenant of the platform; the drop is the
       revocation.
     - ``dfe_grp_*`` users no binding renders any more: the group was deleted or
-      renamed, holds no roles and claims no org, or now claims an org that is
+      renamed, claims no org and holds no platform role, or now claims an org that is
       unregistered or ambiguous. A platform group's user reads every org's rows,
       so leaving it live after the group goes is a credential nothing governs.
 
