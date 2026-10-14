@@ -1,6 +1,7 @@
 """Tests for DFE settings, particularly DFE_CONFIG_DIR resolution."""
 
 import os
+from typing import Any
 from unittest import mock
 
 import pytest
@@ -708,7 +709,7 @@ class TestEnvOverrides:
 
 def _listed(settings: DFESettings, path: str, key: str | None) -> list:
     """The list at a dotted settings path, reduced to each item's ``key`` when given."""
-    value = settings.model_dump()
+    value: Any = settings.model_dump()
     for part in path.split("."):
         value = value[part]
     return value if key is None else [item[key] for item in value]
