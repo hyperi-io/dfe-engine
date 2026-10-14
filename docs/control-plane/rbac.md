@@ -527,12 +527,18 @@ detection) and `credential_fetch_command`: `make creds` for docker, `kubectl -n
 the environment file for local. Both survive setup completion (#301) -- that is
 when an operator has lost the password.
 
-**Rotation.** `POST /auth/accounts/{admin}/rotate-password` writes through the
-scalo secrets seam when `DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH` is set, else
-returns 501 with `context.store_command`. The engine never writes the password
-into its own YAML store. The new password faces the two rules that gate startup
--- 12 characters minimum, never the default -- so a rotation cannot lock the
-deployment out of its own next boot. Either is a 422 naming the field.
+**Changing either password.** `POST /auth/accounts/{username}/reset-password` works for both accounts on every deployment, and is the console's one password action for each. The new password works at the next sign-in, and the engine keeps it where that account's password lives so a restart does not undo it:
+
+| Account | Kept in | Gitops off |
+|---|---|---|
+| `admin` | the live account store, and its whole account doc at `governance/rbac/accounts/<admin>.yaml` | the live account store only |
+| `breakglass` | its bcrypt hash at `governance/settings/auth.yaml`, which every boot seeds the account from | no `breakglass` account |
+
+A deployment that commits straight to main (dev, solo, auto-merge) is done at once. Production with `DFE_GITOPS_MODE=team` opens a review instead, and the response's `git.pending` carries the PR URL, or the merge command when no forge is configured. A restart before the review merges brings the old password back. `GET /auth/accounts/{username}/git-status` reports when it has merged.
+
+**Rotation.** `POST /auth/accounts/{admin}/rotate-password` changes the value the deployment injects, not the live password: it writes the deployment's secret store when `DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH` is set, else returns 501 with the command that changes it where the deployment keeps it (`context.store_command`). The next boot issues the rotated value with a forced change. The engine never writes the password into its own YAML store. The new password faces the two rules that gate startup -- 12 characters minimum, never the default -- so a rotation cannot lock the deployment out of its own next boot. Either is a 422 naming the field. Any other account answers 400 `not_store_backed` and is reset instead.
+
+**The admin is kept.** The console never retires `admin`: its first login replaces the minted password, and from then on it is reset like any other account. `POST /api/v1/auth/setup/retire-admin` remains for an operator whose policy is to disable it once the deployment has an admin of its own.
 
 ---
 

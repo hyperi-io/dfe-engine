@@ -22,9 +22,10 @@ Two accounts are seeded from injected config, through ONE reconcile path:
 ``breakglass`` the recovery admin, seeded from a hash committed in the deploy
                repo (:mod:`dfe_engine.auth.breakglass`).
 
-Once the deployment has an admin of its own, the operator retires the bootstrap
-admin (:mod:`dfe_engine.auth.admin_retirement`): the seed is skipped, the account
-stays disabled, and the injected password may be deleted from the secret store.
+The bootstrap admin is kept by default. An operator whose policy says otherwise
+can retire it once the deployment has an admin of its own
+(:mod:`dfe_engine.auth.admin_retirement`): the seed is skipped, the account stays
+disabled, and the injected password may be deleted from the secret store.
 
 Usage::
 

@@ -72,14 +72,17 @@ _DEPLOY_BLOCK = catalogue.DEPLOY_SERVICE_PATH.rpartition(".")[0]
 RUN_STATE_CLASSES = ("infravars", "gov_settings")
 """Deploy-repo classes a reset clears, beyond the ones the child seeders own.
 
-Both are per-run state on the same three tests: nothing seeds them at startup,
-each is only written through an API a spec drives, and its absence IS the shipped
-default. ``infravars`` is the infra overlay (backing-service node counts,
-storage, CPU); ``gov_settings`` is the auto-merge posture flag.
+``infravars`` is per-run state on the same three tests: nothing seeds it at
+startup, it is only written through an API a spec drives, and its absence IS the
+shipped default -- it is the infra overlay (backing-service node counts, storage,
+CPU). ``gov_settings`` holds the auto-merge posture flag, the admin retirement
+fact and the break-glass hash. The first two are per-run state in the same way;
+the hash is minted at the first boot, so ``reset_all`` mints it again from the
+configured password once this clears it (``Accounts.restore_breakglass``).
 
 Deliberately NOT here: ``actions`` and ``policies`` are the shipped governance
 library, re-seeded from packaged resources on every start; ``accounts`` is the
-durable break-glass copy the reset re-mirrors rather than removes.
+durable copy of the local admin the reset re-mirrors rather than removes.
 """
 
 _COMMON_OVERLAY = "common"
@@ -239,11 +242,11 @@ class Apps(Seed):
     def delete_run_state(self) -> None:
         """Clear the deploy-repo classes no seeder creates but a spec can change.
 
-        Nothing seeds either of these at startup and both are only ever written
-        through an API a spec drives, so whatever is there came from the run that
-        just finished. Deleting the resource restores the shipped default rather
-        than removing configuration: an absent overlay declares nothing, and an
-        absent auto-merge flag reads as off.
+        Apart from the break-glass hash, which ``reset_all`` mints again, both are
+        only ever written through an API a spec drives, so whatever is there came
+        from the run that just finished. Deleting the resource restores the shipped
+        default rather than removing configuration: an absent overlay declares
+        nothing, and an absent auto-merge flag reads as off.
 
         Without this, a backing-service node count raised by one spec is still
         raised for the next -- the state that survived a reset and failed a spec
