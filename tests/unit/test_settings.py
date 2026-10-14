@@ -344,6 +344,13 @@ class TestEnvOverrides:
         )
         assert load_settings(str(target)).auth.oidc_group_sync_enabled is True
 
+    def test_api_max_request_body_bytes_defaults_to_four_mib(self):
+        assert load_settings().api.max_request_body_bytes == 4 * 1024 * 1024
+
+    def test_api_max_request_body_bytes_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_MAX_REQUEST_BODY_BYTES", "65536")
+        assert load_settings().api.max_request_body_bytes == 65_536
+
     def test_api_elastic_converter_max_upload_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
         settings = load_settings()

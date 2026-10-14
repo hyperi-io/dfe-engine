@@ -681,6 +681,11 @@ def create_app(
 
     install_core_resource_guard(app)
 
+    # Outside the guard, which reads every write body whole; inside CORS, so a 413 has its headers.
+    from dfe_engine.api.body_limits import RequestBodyCapMiddleware
+
+    app.add_middleware(RequestBodyCapMiddleware)
+
     # CORS
     origins = cors_origins or settings.api.cors_origins
     app.add_middleware(
