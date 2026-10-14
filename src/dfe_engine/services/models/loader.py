@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, m
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
     AcknowledgementsConfig,
-    KafkaTlsConfig,
+    ClientTlsConfig,
     MemoryConfig,
     SaslConfig,
     without_keys,
@@ -37,7 +37,7 @@ class LoaderKafkaConfig(BaseModel):
     topic_regex: str | None = None
     client_id: str = "dfe-loader"
     sasl: SaslConfig | None = None
-    tls: KafkaTlsConfig | None = None
+    tls: ClientTlsConfig | None = None
     acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
 
 
@@ -109,7 +109,7 @@ class ClickHouseConfig(BaseModel):
     password: SecretStr = SecretStr("")
     protocol: str = Field(default="http", description="http")
     tables: list[str] = []
-    tls: KafkaTlsConfig | None = None
+    tls: ClientTlsConfig | None = None
 
     @field_validator("protocol")
     @classmethod
@@ -367,7 +367,8 @@ class LoaderConfig(BaseServiceConfig):
     Mirrors the Rust Config struct in dfe-loader/src/config/loader.rs.
     """
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    # The loader reads its schema cache block as `schema`, the alias, never the field name.
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
 
     transport: str = Field(
         default="kafka",

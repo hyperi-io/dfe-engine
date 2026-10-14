@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
-    KafkaTlsConfig,
+    ClientTlsConfig,
     MemoryConfig,
     SaslConfig,
 )
@@ -42,7 +42,7 @@ class TransformKafkaConsumerConfig(BaseModel):
     topic_regex: str | None = None
     client_id: str = "dfe-transform-vector"
     sasl: SaslConfig | None = None
-    tls: KafkaTlsConfig | None = None
+    tls: ClientTlsConfig | None = None
 
 
 class TransformKafkaProducerConfig(BaseModel):
@@ -56,7 +56,7 @@ class TransformKafkaProducerConfig(BaseModel):
     batch_size: int = Field(default=8 * 1024 * 1024, gt=0)
     linger_ms: int = Field(default=20, ge=0)
     sasl: SaslConfig | None = None
-    tls: KafkaTlsConfig | None = None
+    tls: ClientTlsConfig | None = None
 
 
 class TransformKafkaConfig(BaseModel):

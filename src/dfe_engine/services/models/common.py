@@ -1,6 +1,14 @@
 """Shared configuration models used across DFE Rust services."""
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 
 def without_keys(data: object, *keys: str) -> object:
@@ -56,16 +64,39 @@ class SaslConfig(BaseModel):
 
 
 class KafkaTlsConfig(BaseModel):
-    """TLS configuration for Kafka connections.
+    """TLS configuration for Kafka connections, written with the CA under ``ca_file``.
 
-    Used by loader (ca_cert_file in YAML) and receiver (ca_file in YAML).
-    Accepts both field names via alias + populate_by_name.
+    dfe-receiver and dfe-fetcher read ``ca_file``. The apps that read
+    ``ca_cert_file`` use :class:`ClientTlsConfig`. ``ca_cert_file`` is still accepted
+    here as an input spelling.
     """
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     enabled: bool = False
     ca_file: str | None = Field(default=None, alias="ca_cert_file")
+    cert_file: str | None = None
+    key_file: str | None = None
+    skip_verify: bool = False
+
+
+class ClientTlsConfig(BaseModel):
+    """TLS for an outbound connection, written with the CA under ``ca_cert_file``.
+
+    Field-for-field the ``TlsConfig`` that dfe-loader (src/config/kafka.rs, for its
+    Kafka and ClickHouse connections), dfe-transform-vrl and dfe-transform-vector
+    each read. serde drops an unknown key without a word, so a CA path written
+    under any other name leaves the app verifying against the system trust store.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    ca_cert_file: str | None = Field(
+        default=None,
+        # Configs already on disk carry the receiver's spelling, ca_file.
+        validation_alias=AliasChoices("ca_cert_file", "ca_file"),
+    )
     cert_file: str | None = None
     key_file: str | None = None
     skip_verify: bool = False

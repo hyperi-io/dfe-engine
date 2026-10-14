@@ -105,7 +105,13 @@ DFE_LOADER = Producer(
     repo="dfe-loader",
     ref="v1.18.51",
     dir_env="DFE_LOADER_DIR",
-    files=("src/config/pipeline.rs", "src/config/loader.rs"),
+    files=("src/config/pipeline.rs", "src/config/loader.rs", "docs/config-schema.json"),
+)
+DFE_RECEIVER = Producer(
+    repo="dfe-receiver",
+    ref="v1.15.48",
+    dir_env="DFE_RECEIVER_DIR",
+    files=("docs/config-schema.json",),
 )
 SCALO_RS = Producer(
     repo="scalo-rs",
@@ -115,11 +121,17 @@ SCALO_RS = Producer(
 )
 DFE_TRANSFORM_VRL = Producer(
     repo="dfe-transform-vrl",
-    ref="v1.1.29",
+    ref="v1.1.34",
     dir_env="DFE_TRANSFORM_VRL_DIR",
-    files=("tests/fixtures/filebeat/filebeat-testdata.tar.gz",),
+    files=("tests/fixtures/filebeat/filebeat-testdata.tar.gz", "docs/config-schema.json"),
 )
-PRODUCERS = (DFE_LOADER, SCALO_RS, DFE_TRANSFORM_VRL)
+DFE_TRANSFORM_VECTOR = Producer(
+    repo="dfe-transform-vector",
+    ref="v1.0.50",
+    dir_env="DFE_TRANSFORM_VECTOR_DIR",
+    files=("docs/config-schema.json",),
+)
+PRODUCERS = (DFE_LOADER, DFE_RECEIVER, SCALO_RS, DFE_TRANSFORM_VRL, DFE_TRANSFORM_VECTOR)
 
 # Read for the thin-chart digests its versions.yaml pins, a file every release moves, so
 # it stays out of PRODUCERS or check_pin warns on each one. Tagged with the suite

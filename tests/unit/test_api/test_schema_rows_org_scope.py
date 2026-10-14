@@ -13,12 +13,14 @@ every row-reading query bound to its orgs' tenant ids, and a table it cannot be
 held on is refused before any row is read. A platform caller reads as before.
 """
 
+from collections.abc import Iterator
+
 import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
-from dfe_engine.settings import DFESettings, get_settings
+from dfe_engine.settings import DFESettings
 from tests.support.accounts import admin_on_its_own_password
 from tests.support.held_callers import caller_in_group, define_role
 from tests.unit.test_api.test_json_promotion import (
@@ -80,7 +82,7 @@ def app(settings, ch):
 
 
 @pytest.fixture
-def client(app) -> TestClient:
+def client(app) -> Iterator[TestClient]:
     with TestClient(app, raise_server_exceptions=False) as c:
         admin_on_its_own_password(app)
         yield c
@@ -100,17 +102,17 @@ def tenant(app, client, settings) -> TestClient:
     return caller_in_group(app, settings, "tenant", roles=["tenant_schema"], org_ids=["acme"])
 
 
-def _landing() -> str:
-    clickhouse = get_settings().clickhouse
+def _landing(settings: DFESettings) -> str:
+    clickhouse = settings.clickhouse
     return f"`{clickhouse.effective_data_database}`.`{clickhouse.landing_table}`"
 
 
-def test_sample_rows_binds_the_held_callers_tenant_ids(tenant, ch):
+def test_sample_rows_binds_the_held_callers_tenant_ids(tenant, ch, settings):
     resp = tenant.get(f"/api/v1/schemas/{NOMETA_SOURCE}/sample-rows")
 
     assert resp.status_code == 200, resp.text
     [(sql, params)] = ch.row_reads()
-    assert f"FROM {_landing()} WHERE {HELD} AND ({MATCH})" in sql
+    assert f"FROM {_landing(settings)} WHERE {HELD} AND ({MATCH})" in sql
     assert params["orgs"] == ["t-acme"]
     assert params["match_value"] == NOMETA_SOURCE
 

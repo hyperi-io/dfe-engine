@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
     AcknowledgementsConfig,
-    KafkaTlsConfig,
+    ClientTlsConfig,
     LoggingConfig,
     MetricsConfig,
     SaslConfig,
@@ -29,7 +29,7 @@ class VrlSourceConfig(BaseModel):
     group_id: str = "dfe-transform-vrl"
     max_buffer_bytes: int = Field(default=67_108_864, gt=0, description="Consumer buffer (bytes)")
     sasl: SaslConfig | None = None
-    tls: KafkaTlsConfig | None = None
+    tls: ClientTlsConfig | None = None
     # A group's first join on "latest" skips every record already on the topic.
     auto_offset_reset: str = "earliest"
     session_timeout_ms: int = Field(default=30_000, gt=0)
@@ -57,7 +57,7 @@ class VrlSinkConfig(BaseModel):
     compression: str = Field(default="zstd", description="none, gzip, lz4, snappy, zstd")
     max_buffer_bytes: int = Field(default=67_108_864, gt=0, description="Producer buffer (bytes)")
     sasl: SaslConfig | None = None
-    tls: KafkaTlsConfig | None = None
+    tls: ClientTlsConfig | None = None
     message_timeout_ms: int = Field(default=300_000, gt=0)
     librdkafka_options: dict[str, str] = Field(default_factory=dict)
 

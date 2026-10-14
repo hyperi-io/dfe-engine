@@ -22,6 +22,7 @@ from dfe_engine.services.models.receiver import (
     ReceiverRoutingConfig,
     SourceRule,
 )
+from dfe_engine.services.registry import stored_form
 from dfe_engine.services.source_routing import (
     UnsupportedMatchOperatorError,
     compile_loader_routing,
@@ -557,8 +558,9 @@ class TestLoaderRoutingAgainstRustContract:
 
     def test_every_top_level_key_exists_in_the_rust_config(self, rust_loader_fields):
         # Scoped to RoutingConfig alone, this pin missed an entire emitted block
-        # the loader had no field for.
-        emitted = set(LoaderConfig().model_dump(mode="json", by_alias=True))
+        # the loader had no field for. The keys are the ones stored_form writes,
+        # since a by_alias dump spells them as no file on disk does.
+        emitted = set(stored_form(LoaderConfig()))
         unknown = emitted - rust_loader_fields
         assert not unknown, (
             f"the loader's Config has no {sorted(unknown)} - serde would drop "

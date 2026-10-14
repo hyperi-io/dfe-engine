@@ -74,7 +74,6 @@ from dfe_engine.services.schema.elastic_schema_service import (
     ElasticSchemaService,
 )
 from dfe_engine.services.schema.json_promotion_service import PROMOTED_FIELD_TYPE
-from dfe_engine.settings import get_settings
 from dfe_engine.source.models import Source, SourceHeader, SourceWriteRequest
 from dfe_engine.source.registry import SourceNotFoundError, SourceValidationError
 
@@ -1163,7 +1162,7 @@ async def elastic_converter(
     Upload size is capped by ``api.elastic_converter_max_upload_bytes`` (reject with 413 and
     ``upload_too_large`` when exceeded). Override with ``DFE_API_ELASTIC_CONVERTER_*``.
     """
-    api_s = get_settings().api
+    api_s = request.app.state.settings.api
     max_bytes = api_s.elastic_converter_max_upload_bytes
     slack = api_s.elastic_converter_content_length_slack_bytes
     chunk_sz = api_s.elastic_converter_read_chunk_size
@@ -1249,7 +1248,7 @@ async def get_schema_columns(
             },
         )
 
-    settings = ttl_settings(request, get_settings())
+    settings = ttl_settings(request, request.app.state.settings)
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
@@ -1332,7 +1331,7 @@ def build_schema(
             },
         )
 
-    settings = ttl_settings(request, get_settings())
+    settings = ttl_settings(request, request.app.state.settings)
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
@@ -1640,7 +1639,9 @@ def _dedicated_source_table_ready(
         raise _promotion_refused(exc, "discovery_failed", source.source) from exc
 
 
-def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None, db=None):
+def _discovery_target(
+    source, ver, schema_registry, *, version_id: str, landing: str, ch=None, db=None
+):
     """Resolve where to discover a source version's ``_json`` paths.
 
     A version with a ``meta_schema`` owns its own table once that version is
@@ -1654,7 +1655,6 @@ def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None,
         is set when sampling/discovery runs on the landing table filtered by the
         version's match; null when the dedicated source table is queried whole.
     """
-    landing = get_settings().clickhouse.landing_table
     match_rule = ver.match
     if ver.effective_schema().meta_schema:
         _canonical, meta, _ = _resolve_meta_schema(
@@ -1781,9 +1781,16 @@ async def discover_json_paths(
         ) from None
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
-    db = get_settings().clickhouse.effective_data_database
+    clickhouse = request.app.state.settings.clickhouse
+    db = clickhouse.effective_data_database
     target_table, match_rule, columns = _discovery_target(
-        source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
+        source,
+        ver,
+        schema_registry,
+        version_id=_version_id,
+        landing=clickhouse.landing_table,
+        ch=ch,
+        db=db,
     )
     match_kw = _match_query_kwargs(match_rule)
 
@@ -1881,9 +1888,16 @@ async def sample_source_rows(
         ) from None
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
-    db = get_settings().clickhouse.effective_data_database
+    clickhouse = request.app.state.settings.clickhouse
+    db = clickhouse.effective_data_database
     target_table, match_rule, schema_columns = _discovery_target(
-        source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
+        source,
+        ver,
+        schema_registry,
+        version_id=_version_id,
+        landing=clickhouse.landing_table,
+        ch=ch,
+        db=db,
     )
     match_kw = _match_query_kwargs(match_rule)
 
@@ -2010,9 +2024,16 @@ async def promote_field(
         for p in raw_paths
     ]
 
-    db = get_settings().clickhouse.effective_data_database
+    clickhouse = request.app.state.settings.clickhouse
+    db = clickhouse.effective_data_database
     target_table, match_rule, _ = _discovery_target(
-        source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
+        source,
+        ver,
+        schema_registry,
+        version_id=_version_id,
+        landing=clickhouse.landing_table,
+        ch=ch,
+        db=db,
     )
     match_kw = _match_query_kwargs(match_rule)
 
