@@ -737,9 +737,9 @@ def create_app(
     install_exception_handlers(app)
 
     # API routes
-    from dfe_engine.api.v1 import v1_router
+    from dfe_engine.api.v1 import build_v1_router
 
-    app.include_router(v1_router, prefix="/api")
+    app.include_router(build_v1_router(settings), prefix="/api")
 
     if e2e_docs:
         from dfe_engine.api.e2e import router as e2e_router

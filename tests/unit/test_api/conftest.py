@@ -21,6 +21,7 @@ from dfe_engine.settings import (
     SchemasSettings,
     SecretsSettings,
     ServicesSettings,
+    SigmaSettings,
     SourceSettings,
 )
 from tests.support.core_sources import write_landing_definition
@@ -33,7 +34,13 @@ BREAKGLASS_PASSWORD = "test-breakglass-pw"
 
 
 @pytest.fixture
-def api_settings(tmp_path: Path) -> DFESettings:
+def sigma_enabled() -> bool:
+    """Off, as a deployment ships; a module testing the sigma API overrides it to True."""
+    return False
+
+
+@pytest.fixture
+def api_settings(tmp_path: Path, sigma_enabled: bool) -> DFESettings:
     """Minimal DFESettings for API tests with tmp_path isolation."""
     sources_dir = tmp_path / "sources"
     sources_dir.mkdir()
@@ -64,6 +71,7 @@ def api_settings(tmp_path: Path) -> DFESettings:
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
         schemas=SchemasSettings(schemas_dir=str(schemas_dir)),
         hunts=HuntsSettings(rules_dir=str(rules_dir), hunt_dir=str(hunts_dir)),
+        sigma=SigmaSettings(enabled=sigma_enabled),
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(auth_dir),

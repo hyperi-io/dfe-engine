@@ -15,7 +15,7 @@ from pathlib import Path
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.e2e_docs import build_e2e_spec
-from dfe_engine.settings import load_settings
+from dfe_engine.settings import SigmaSettings, load_settings
 
 SPEC_DIR = Path(__file__).parent
 SPEC_FILE = SPEC_DIR / "openapi.json"
@@ -63,9 +63,10 @@ def _spec_version(reported: str) -> str:
 def main() -> None:
     # Schema export only — avoid production posture guard on dev JWT placeholder.
     os.environ["DFE_ENV"] = "dev"
-    settings = load_settings()
-    if settings.e2e_server:
-        settings = settings.model_copy(update={"e2e_server": False})
+    # The spec describes every operation a deployment can switch on, sigma included.
+    settings = load_settings().model_copy(
+        update={"e2e_server": False, "sigma": SigmaSettings(enabled=True)}
+    )
     app = create_app(settings=settings)
 
     # Health probes are excluded from the schema at their include

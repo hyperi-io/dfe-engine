@@ -31,7 +31,7 @@ from pathlib import Path
 import pytest
 
 from dfe_engine.api.app import create_app
-from dfe_engine.settings import load_settings, reset_settings
+from dfe_engine.settings import SigmaSettings, load_settings, reset_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SPEC_DIR = REPO_ROOT / "openapi-spec"
@@ -64,9 +64,9 @@ def _drop_version(spec: dict) -> dict:
 def generated(monkeypatch) -> dict:
     """The spec the app produces now, built exactly as generate.py builds it."""
     monkeypatch.setenv("DFE_ENV", "dev")
-    settings = load_settings()
-    if settings.e2e_server:
-        settings = settings.model_copy(update={"e2e_server": False})
+    settings = load_settings().model_copy(
+        update={"e2e_server": False, "sigma": SigmaSettings(enabled=True)}
+    )
     app = create_app(settings=settings)
     app.openapi_schema = None
     return app.openapi()

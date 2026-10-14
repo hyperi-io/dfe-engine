@@ -12,6 +12,8 @@ the view with no database, over a source whose label carries ``-``, compiled to
 nothing, so every propagated hunt ran empty. No live ClickHouse.
 """
 
+import pytest
+
 from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
@@ -36,6 +38,12 @@ level: high
 date: 2022-01-01
 modified: 2023-05-01
 """
+
+
+@pytest.fixture
+def sigma_enabled() -> bool:
+    """The sigma routes mount only on a deployment that enables them."""
+    return True
 
 
 def _propagate(client, app, headers, tmp_path) -> None:

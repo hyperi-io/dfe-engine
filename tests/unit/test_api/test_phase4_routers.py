@@ -13,8 +13,6 @@ All CH-dependent endpoints return 503 (not configured) by design — the
 routers guard against missing infrastructure cleanly.
 """
 
-from __future__ import annotations
-
 from types import SimpleNamespace
 
 import pytest
@@ -61,6 +59,11 @@ class TestDiscoveryRouter:
 
 class TestSigmaRouter:
     """GET/POST /api/v1/sigma endpoints."""
+
+    @pytest.fixture
+    def sigma_enabled(self) -> bool:
+        """The sigma routes mount only on a deployment that enables them."""
+        return True
 
     def test_mappings_source_not_found(self, client, admin_headers):
         """Returns 503 or 404 when source not configured/found."""

@@ -45,6 +45,7 @@ from dfe_engine.api.v1.tasks import router as tasks_router
 from dfe_engine.api.v1.transforms import router as transforms_router
 from dfe_engine.clickhouse.attribution import tags_context
 from dfe_engine.gitops.repo import read_scope
+from dfe_engine.settings import DFESettings
 
 
 async def _deploy_repo_scope():
@@ -72,13 +73,6 @@ async def _attribution_scope(request: Request):
         yield
 
 
-v1_router = APIRouter(
-    prefix="/v1", dependencies=[Depends(_attribution_scope), Depends(_deploy_repo_scope)]
-)
-v1_router.include_router(auth_router)
-# OIDC RP login/callback - self-prefixed /auth/oidc, unauthenticated (it IS login)
-v1_router.include_router(oidc_login_router)
-
 # Auth sub-routers mounted under /auth prefix
 _auth_sub = APIRouter(prefix="/auth")
 _auth_sub.include_router(accounts_router)
@@ -86,52 +80,75 @@ _auth_sub.include_router(account_groups_router)
 _auth_sub.include_router(api_keys_router)
 _auth_sub.include_router(roles_router)
 _auth_sub.include_router(oidc_providers_router)
-v1_router.include_router(_auth_sub)
 
-v1_router.include_router(orgs_router)
-v1_router.include_router(sources_router)
-# The Kafka topics those sources imply: ensure, converge, status, remove
-v1_router.include_router(kafka_topics_router)
-v1_router.include_router(services_router)
-v1_router.include_router(admin_links_router)
-v1_router.include_router(fieldmaps_router)
-v1_router.include_router(rules_router)
-v1_router.include_router(alerts_router)
-v1_router.include_router(system_router)
-v1_router.include_router(transforms_router)
-v1_router.include_router(hunts_router)
-v1_router.include_router(queries_router)
-v1_router.include_router(sampler_router)
-v1_router.include_router(synthetic_data_router)
-v1_router.include_router(pipeline_router)
-v1_router.include_router(tasks_router)
-v1_router.include_router(discovery_router)
-# Ahead of schemas_router: /definitions/derived/... would otherwise be swallowed
-# by its /definitions/{schema_path:path} routes.
-v1_router.include_router(derived_schemas_router)
-v1_router.include_router(schemas_router)
-# SCIM 2.0 provisioning face (/scim/v2) over the account/group stores
-v1_router.include_router(scim_router)
-v1_router.include_router(sigma_router)
-v1_router.include_router(cel_router)
-# Governed Ops (Tier-1 helm-var CRUD + Tier-2 actions/admin) - 503 until gitops on
-v1_router.include_router(helm_router)
-# The substrate/platform half of the same overlay layer -- declared config out,
-# governed writes in, storage model and modes locked by policy
-v1_router.include_router(backing_services_router)
-v1_router.include_router(apps_router)
-# What each app image says its own config is, emitted by the pinned binary itself
-v1_router.include_router(app_contracts_router)
-# The versioned artefact library an app instance links its consumed files to
-v1_router.include_router(library_router)
-v1_router.include_router(governance_router)
-v1_router.include_router(gitops_router)
-v1_router.include_router(lifecycle_router)
-v1_router.include_router(authoring_router)
-# Runtime client-config bootstrap for the UI (public, no secrets)
-v1_router.include_router(config_router)
-# Per-org ClickHouse connection material the HyperDX fork seeds a team with
-v1_router.include_router(hyperdx_router)
-v1_router.include_router(repository_router)
 
-__all__ = ["v1_router"]
+def build_v1_router(settings: DFESettings) -> APIRouter:
+    """Assemble the /v1 API one app serves, mounting sigma only when ``sigma.enabled`` is set.
+
+    Built per app rather than at import, so the settings an app is created with decide
+    what it mounts. With sigma off every path under /v1/sigma answers 404.
+
+    Args:
+        settings: The settings the app is created with.
+
+    Returns:
+        The /v1 router to include under the app's /api prefix.
+    """
+    v1_router = APIRouter(
+        prefix="/v1", dependencies=[Depends(_attribution_scope), Depends(_deploy_repo_scope)]
+    )
+    v1_router.include_router(auth_router)
+    # OIDC RP login/callback - self-prefixed /auth/oidc, unauthenticated (it IS login)
+    v1_router.include_router(oidc_login_router)
+    v1_router.include_router(_auth_sub)
+
+    v1_router.include_router(orgs_router)
+    v1_router.include_router(sources_router)
+    # The Kafka topics those sources imply: ensure, converge, status, remove
+    v1_router.include_router(kafka_topics_router)
+    v1_router.include_router(services_router)
+    v1_router.include_router(admin_links_router)
+    v1_router.include_router(fieldmaps_router)
+    v1_router.include_router(rules_router)
+    v1_router.include_router(alerts_router)
+    v1_router.include_router(system_router)
+    v1_router.include_router(transforms_router)
+    v1_router.include_router(hunts_router)
+    v1_router.include_router(queries_router)
+    v1_router.include_router(sampler_router)
+    v1_router.include_router(synthetic_data_router)
+    v1_router.include_router(pipeline_router)
+    v1_router.include_router(tasks_router)
+    v1_router.include_router(discovery_router)
+    # Ahead of schemas_router: /definitions/derived/... would otherwise be swallowed
+    # by its /definitions/{schema_path:path} routes.
+    v1_router.include_router(derived_schemas_router)
+    v1_router.include_router(schemas_router)
+    # SCIM 2.0 provisioning face (/scim/v2) over the account/group stores
+    v1_router.include_router(scim_router)
+    if settings.sigma.enabled:
+        v1_router.include_router(sigma_router)
+    v1_router.include_router(cel_router)
+    # Governed Ops (Tier-1 helm-var CRUD + Tier-2 actions/admin) - 503 until gitops on
+    v1_router.include_router(helm_router)
+    # The backing-services half of the same overlay layer -- declared config out,
+    # governed writes in, storage model and modes locked by policy
+    v1_router.include_router(backing_services_router)
+    v1_router.include_router(apps_router)
+    # What each app image says its own config is, emitted by the pinned binary itself
+    v1_router.include_router(app_contracts_router)
+    # The versioned artefact library an app instance links its consumed files to
+    v1_router.include_router(library_router)
+    v1_router.include_router(governance_router)
+    v1_router.include_router(gitops_router)
+    v1_router.include_router(lifecycle_router)
+    v1_router.include_router(authoring_router)
+    # Runtime client-config bootstrap for the UI (public, no secrets)
+    v1_router.include_router(config_router)
+    # Per-org ClickHouse connection material the HyperDX fork seeds a team with
+    v1_router.include_router(hyperdx_router)
+    v1_router.include_router(repository_router)
+    return v1_router
+
+
+__all__ = ["build_v1_router"]
