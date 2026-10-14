@@ -1331,7 +1331,9 @@ class TestResetPassword:
 class TestRotatePassword:
     """POST /api/v1/auth/accounts/{username}/rotate-password"""
 
-    def test_unwired_secrets_seam_returns_501_with_the_store_command(self, client, admin_headers):
+    def test_a_password_kept_outside_dfe_returns_501_with_the_store_command(
+        self, client, admin_headers
+    ):
         resp = client.post(
             "/api/v1/auth/accounts/admin/rotate-password",
             json={"new_password": "a-newly-minted-admin-password"},
@@ -1340,12 +1342,14 @@ class TestRotatePassword:
 
         assert resp.status_code == 501
         body = resp.json()
-        assert body["code"] == "secrets_seam_not_wired"
+        assert body["code"] == "admin_password_kept_outside_dfe"
         # The wording varies with the detected deploy kind; that it names a store
         # operation rather than an engine one is what matters here.
         assert body["context"]["store_command"]
 
-    def test_a_wired_seam_writes_the_password_to_the_store(self, app, client, admin_headers):
+    def test_a_declared_secret_path_writes_the_password_to_the_store(
+        self, app, client, admin_headers
+    ):
         from dfe_engine.secrets import build_secrets
 
         settings = app.state.settings

@@ -15,13 +15,15 @@ shows those settings by the engine's own rules first, then asks scalo.
 :mod:`dfe_engine.appmgmt.contract` reads documents back masked through it, and
 :mod:`dfe_engine.source.models` refuses a literal credential with it.
 
-The URL helpers find the password in ``scheme://user:password@host``. It runs to the
-last ``@`` the host follows, so a password holding ``@`` or ``/`` is found whole.
+scalo's :func:`~scalo.logger.filters.mask_url_userinfo` masks the password in
+``scheme://user:password@host``, which runs to the last ``@`` the host follows, so a
+password holding ``@`` or ``/`` goes whole. :func:`url_passwords` finds the same
+passwords, so a written URL can be checked for one that hides its host.
 """
 
 import re
 
-from scalo.logger.filters import MASK_VALUE, is_credential_name
+from scalo.logger.filters import is_credential_name
 
 _NAME_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 """One word of a name: an acronym, a capitalised or lower-case run, or digits.
@@ -32,27 +34,38 @@ Every other character separates words, so ``bearer-tokens``, ``bearer_tokens``,
 
 SETTING_WORDS = frozenset(
     {
+        "age",
         "at",
+        "count",
         "dir",
         "endpoint",
         "field",
         "file",
         "header",
+        "interval",
+        "length",
         "location",
         "login",
         "ms",
         "override",
         "path",
+        "retries",
+        "seconds",
+        "secs",
+        "size",
         "source",
+        "timeout",
+        "ttl",
         "type",
         "url",
     }
 )
-"""Last words that say a name holds where a credential is, or how it is used.
+"""Last words that say a name holds where a credential is, how it is used, or how much.
 
 ``ssl_key_location``, ``token_url``, ``password_field``, ``credential_type``,
 ``session_timeout_ms`` and dfe-fetcher's ``session_login`` block each carry a
-credential word and hold a setting. No name scalo lists ends in one of these.
+credential word and hold a setting, as do ``ping_interval``, ``password_min_length``,
+``SESSION_TIMEOUT`` and ``token_ttl``. No name scalo lists ends in one of these.
 """
 
 SHOWN_ENDINGS: frozenset[tuple[str, ...]] = frozenset(
@@ -76,19 +89,18 @@ key; ``config_hash`` and ``capture_json`` stay shown.
 """
 
 CREDENTIAL_MAP = ("credentials",)
-"""A mapping whose name ends in this word holds credentials by name, so each value is one.
+"""The words of a mapping name that holds credentials by name, so each value is one.
 
 dfe-fetcher's ``auth.credentials`` maps a name to the credential its placements read.
-A list of that name holds placements instead, and each entry's fields are judged by name.
+Only a mapping named exactly so counts: ``oauth2_client_credentials`` holds settings
+beside its secret. A list of that name holds placements instead, and each entry's
+fields are judged by name.
 """
-
-USERINFO_MASK = "***"
-"""What stands in for a URL's whole ``user:password`` in a log line."""
 
 _URL_PASSWORD = re.compile(
     r"(?P<head>://[^\s:/@]*:)(?P<password>(?:(?!://)\S)*)(?=@[^\s@/?#]*(?:[/?#\s]|\Z))"
 )
-"""The ``user:password`` of a URL, anywhere in a string.
+"""The ``user:password`` of a URL, anywhere in a string, as scalo's masker reads it.
 
 The password runs to the last ``@`` that a host follows, so one holding ``@`` or ``/``
 is matched whole. It never runs past whitespace or the next ``://``, so each scan ends
@@ -135,30 +147,15 @@ def credential_name(name: str, parent: str = "") -> bool:
     return any(is_credential_name(spelling, holder) for spelling in spellings)
 
 
-def mask_url_password(text: str, mask: str = MASK_VALUE) -> str:
-    """``text`` with the password of every ``scheme://user:password@host`` in it replaced by ``mask``.
-
-    The scheme and user stay, so an operator still sees where the URL points and as whom.
-    """
-    return _URL_PASSWORD.sub(
-        lambda found: f"{found['head']}{mask}" if found["password"] else found[0], text
-    )
-
-
-def mask_url_userinfo(text: str, mask: str = USERINFO_MASK) -> str:
-    """``text`` with the whole ``user:password`` of every URL in it replaced by ``mask``."""
-    return _URL_PASSWORD.sub(lambda _found: f"://{mask}", text)
-
-
 def url_passwords(text: str) -> list[str]:
-    """Every non-empty URL password in ``text``, as :func:`mask_url_password` finds them."""
+    """Every non-empty URL password in ``text``, as scalo's ``mask_url_userinfo`` masks them."""
     return [found["password"] for found in _URL_PASSWORD.finditer(text) if found["password"]]
 
 
 def hides_a_host(text: str) -> bool:
-    """Whether a URL password in ``text`` holds a character that ends a URL's authority.
+    r"""Whether a URL password in ``text`` holds a character that ends a URL's authority.
 
     A client reads the host after the last ``@`` before the first ``/``, ``?``, ``#`` or
-    ``\\``, so a password holding one of those can hide the host a client connects to.
+    ``\``, so a password holding one of those can hide the host a client connects to.
     """
     return any(_AUTHORITY_ENDS.intersection(password) for password in url_passwords(text))

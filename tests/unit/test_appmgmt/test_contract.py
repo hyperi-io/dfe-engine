@@ -1960,6 +1960,44 @@ class TestCredentialsNamedByWhatHoldsThem:
             "profile": {"credentials": [{"header": "X-Key", "from": "pair_a"}]},
         }
 
+    def test_only_a_mapping_named_credentials_masks_every_entry(self):
+        # An OAuth client-credentials block holds its token URL and scope beside its secret.
+        overlay = {
+            "auth": {
+                "oauth2_client_credentials": {
+                    "token_url": "https://idp.example/token",
+                    "scope": "logs.read",
+                    "client_secret": "cs-4437",
+                },
+                "credentials": {"anything": "x-4438"},
+            }
+        }
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "auth": {
+                "oauth2_client_credentials": {
+                    "token_url": "https://idp.example/token",
+                    "scope": "logs.read",
+                    "client_secret": contract.REDACTED,
+                },
+                "credentials": {"anything": contract.REDACTED},
+            }
+        }
+
+    def test_an_oauth_client_credentials_block_written_back_restores_its_secret(self):
+        doc = {
+            "auth": {
+                "oauth2_client_credentials": {
+                    "token_url": "https://idp.example/token",
+                    "client_secret": "cs-4439",
+                }
+            }
+        }
+        shown = contract.redact_overlay(ABSENT, doc)["auth"]["oauth2_client_credentials"]
+        assert contract.restore_masked_at(doc, "auth.oauth2_client_credentials", shown) == {
+            "token_url": "https://idp.example/token",
+            "client_secret": "cs-4439",
+        }
+
     def test_a_masked_credentials_map_written_back_restores(self):
         doc = {"auth": {"credentials": {"github": "gh-4433", "pair_a": "pa-4434"}}}
         shown = contract.redact_overlay(ABSENT, doc)["auth"]["credentials"]

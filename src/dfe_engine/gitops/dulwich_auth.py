@@ -5,8 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""dulwich HTTPS-credential helpers - embed for a single op, keep it off disk and
-out of the logs.
+"""dulwich HTTPS-credential helpers: embed for one op, keep it off disk and out of logs.
 
 ``dulwich.porcelain`` clone/push/fetch take no username/password kwargs; HTTPS
 auth is carried IN THE URL. That has two security hazards:
@@ -26,15 +25,15 @@ every dulwich caller (the gitops deploy repo + the sigma git-repo provider) so
 the escaping, the scrub and the redaction are written once.
 """
 
-from __future__ import annotations
-
 import io
 import re
 from pathlib import Path
 
 from scalo.logger import logger
+from scalo.logger.filters import mask_url_userinfo
 
-from dfe_engine.masking import mask_url_userinfo
+_USERINFO_MASK = "***"
+"""What stands in for a URL's whole ``user:password`` in a log line."""
 
 # Git sideband progress rewrites one line with \r and only ends it with \n, so a
 # \n-only split buffers a whole fetch's progress into one unredacted-until-EOF blob.
@@ -50,11 +49,11 @@ def redact_credentials(text: str) -> str:
     ``@`` or ``/`` goes whole; a credential-free ``ssh://git@host`` has no colon and is
     left alone.
     """
-    return mask_url_userinfo(text)
+    return mask_url_userinfo(text, _USERINFO_MASK, keep_user=False)
 
 
 class RedactingErrStream(io.RawIOBase):
-    """Binary sink for a dulwich op's ``errstream``, redacted and logged at debug.
+    r"""Binary sink for a dulwich op's ``errstream``, redacted and logged at debug.
 
     ``porcelain.push`` writes ``Push to <remote_location> successful.`` here, and
     ``remote_location`` is the URL as supplied - including the basic-auth token the
@@ -63,11 +62,12 @@ class RedactingErrStream(io.RawIOBase):
 
     Redaction is per LINE, not per chunk: dulwich writes progress in whatever sizes
     the transport hands it, so a URL split across two writes would pass the regex
-    unredacted if each chunk were matched on its own. A line ends at ``\\r`` or
-    ``\\n`` -- sideband progress uses the carriage return to overwrite in place.
+    unredacted if each chunk were matched on its own. A line ends at ``\r`` or
+    ``\n`` -- sideband progress uses the carriage return to overwrite in place.
     """
 
     def __init__(self) -> None:
+        """Start with nothing buffered."""
         self._buffer = bytearray()
 
     def writable(self) -> bool:
