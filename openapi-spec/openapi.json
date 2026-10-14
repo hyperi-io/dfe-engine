@@ -21174,7 +21174,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Invoke Action",
-        "description": "Invoke a defined action - gated on the action's OWN required_action.\n\n``body.params`` supplies values for the action's declared params (422 on a\nconstraint violation; omitted params take their defaults). A hunt or rule\ndocument the action would leave invalid is 422 ``invalid_document``, with the\nhunts API's own message. Direct commit in dev/solo; a production+team invoke is\nrouted to a review PR (or 409 ``review_required`` when no forge is configured).",
+        "description": "Invoke a defined action - gated on the action's OWN required_action.\n\n``body.params`` supplies values for the action's declared params (422 on a\nconstraint violation; omitted params take their defaults). A hunt or rule\ndocument the action would leave invalid is 422 ``invalid_document``, with the\nhunts API's own message. A change to the infra overlay meets the backing-services\nguards on what the action leaves, dry run included, whatever the caller holds:\n409 ``managed_by_provider`` for a read-only value of a service DFE does not run,\nthen 400 ``scale_down_refused`` where it lowers or un-declares a node or broker\ncount.\nDirect commit in dev/solo; a production+team invoke is routed to a review PR (or\n409 ``review_required`` when no forge is configured).",
         "operationId": "invoke_action_api_v1_governance_actions__name__invoke_post",
         "parameters": [
           {
