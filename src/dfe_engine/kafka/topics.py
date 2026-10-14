@@ -391,6 +391,33 @@ def topics_managed_at_startup(settings: DFESettings) -> bool:
     return settings.kafka.ensure_topics is True
 
 
+def read_broker_count(
+    *,
+    settings: DFESettings | None = None,
+    admin: TopicAdmin | None = None,
+) -> int | None:
+    """Brokers the configured bus reports, or None when it cannot be asked.
+
+    None on any fault, including a bus that reports no brokers, so a caller can
+    tell an unknown size from a real one.
+    """
+    from dfe_engine.kafka.contract import KafkaContractError
+
+    try:
+        admin = admin or build_admin(settings=settings)
+        nodes = admin.node_count()
+    except KafkaContractError as exc:
+        logger.warning("kafka config rejected; the broker count is unknown", error=str(exc))
+        return None
+    except Exception as exc:
+        logger.warning("broker unreachable; the broker count is unknown", error=str(exc))
+        return None
+    if nodes < 1:
+        logger.warning("the bus reported no brokers; the broker count is unknown")
+        return None
+    return nodes
+
+
 def broker_count(
     *,
     settings: DFESettings | None = None,
@@ -405,19 +432,9 @@ def broker_count(
     replicas than the cluster can place is accepted and then never becomes Ready,
     which is a worse failure than running one replica.
     """
-    from dfe_engine.kafka.contract import KafkaContractError
-
-    try:
-        admin = admin or build_admin(settings=settings)
-        nodes = admin.node_count()
-    except KafkaContractError as exc:
-        logger.warning("kafka config rejected; clamping replication to one broker", error=str(exc))
-        return 1
-    except Exception as exc:
-        logger.warning("broker unreachable; clamping replication to one broker", error=str(exc))
-        return 1
-    if nodes < 1:
-        logger.warning("the bus reported no brokers; clamping replication to one")
+    nodes = read_broker_count(settings=settings, admin=admin)
+    if nodes is None:
+        logger.warning("clamping topic replication to one broker")
         return 1
     logger.info("kafka broker count read for the replication clamp", brokers=nodes)
     return nodes

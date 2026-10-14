@@ -8487,7 +8487,7 @@
           "System"
         ],
         "summary": "Get Deployment",
-        "description": "What this deployment IS: its profile, what it can carry records on, and its versions.\n\nAuthenticated but ungated, for the same reason /version is: every console pane\nthat must not guess reads this, and the body carries deployment shape and\nversions only. Without it the console has to assume the widest deployment and\noffer a transport or an app this tier does not run.",
+        "description": "What this deployment IS: its profile, transports, backing services and versions.\n\nAuthenticated but ungated, for the same reason /version is: every console pane\nthat must not guess reads this, and the body carries deployment shape and\nversions only. Without it the console has to assume the widest deployment and\noffer a transport or an app this tier does not run.",
         "operationId": "get_deployment_api_v1_system_deployment_get",
         "responses": {
           "200": {
@@ -17095,7 +17095,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "List Backing Services",
-        "description": "Every backing service's DECLARED deploy configuration.\n\nDeclared, not observed: these are the values the deploy repo asks for, read\nfrom git. The engine runs no Kubernetes client, so a figure here can differ\nfrom the cluster whenever Argo has not synced the declaration yet.",
+        "description": "Every backing service's DECLARED deploy configuration, and who runs it.\n\nDeclared, not observed: these are the values the deploy repo asks for, read\nfrom git. The engine runs no Kubernetes client, so a figure here can differ\nfrom the cluster whenever Argo has not synced the declaration yet. A service\nDFE does not run (managed_by provider or external) adds ``observed``, read from\nits own broker or server within the console's read budget, and ``read_only``,\nthe values a write is refused on.",
         "operationId": "list_backing_services_api_v1_backing_services_get",
         "responses": {
           "200": {
@@ -17338,7 +17338,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "Set Overlay Var",
-        "description": "Set a substrate/platform value.\n\n403 with the policy that blocked it when the var is protected - the storage\nmodel, the data-layer modes and the disk size are decided at deploy, and moving\none on a live deployment is a data migration. 400 when the value would lower a\ndeclared node or broker count, or leave it undeclared (a parent map that omits\nit), which loses data rather than capacity; helmvars:override does not lift it.",
+        "description": "Set a substrate/platform value.\n\n409 managed_by_provider, before any other check, when DFE does not run the\nservice and the value is one of its read_only paths; helmvars:override does not\nlift it. 403 with the policy that blocked it when the var is protected - the\nstorage model, the data-layer modes and the disk size are decided at deploy, and\nmoving one on a live deployment is a data migration. 400 when the value would\nlower a declared node or broker count, or leave it undeclared (a parent map that\nomits it), which loses data rather than capacity; helmvars:override does not lift it.",
         "operationId": "set_overlay_var_api_v1_backing_services_overlays__name__vars__path__put",
         "parameters": [
           {
@@ -17417,6 +17417,16 @@
               }
             }
           },
+          "409": {
+            "description": "managed_by_provider: DFE does not run the service, so nothing in the deployment reads this value; context names who sizes it and set_in where. Also conflict (a stale If-Match) and review_required (production+team).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -17439,7 +17449,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "Delete Overlay Var",
-        "description": "Revert a substrate/platform value to its chart default. Protected vars refuse.\n\n400 when the revert would lower a declared node or broker count, or leave it\nundeclared, unless the caller holds helmvars:override. An undeclared count falls\nto the chart or profile default, which the engine cannot read, so a revert that\nleaves one undeclared is refused whatever that default is.",
+        "description": "Revert a substrate/platform value to its chart default. Protected vars refuse.\n\n409 managed_by_provider, before any other check and whatever the caller holds,\nwhen DFE does not run the service and the value is one of its read_only paths.\n400 when the revert would lower a declared node or broker count, or leave it\nundeclared, unless the caller holds helmvars:override. An undeclared count falls\nto the chart or profile default, which the engine cannot read, so a revert that\nleaves one undeclared is refused whatever that default is.",
         "operationId": "delete_overlay_var_api_v1_backing_services_overlays__name__vars__path__delete",
         "parameters": [
           {
@@ -17484,6 +17494,16 @@
           },
           "403": {
             "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "managed_by_provider: DFE does not run the service, so nothing in the deployment reads this value; context names who sizes it and set_in where. Also conflict (a stale If-Match) and review_required (production+team).",
             "content": {
               "application/json": {
                 "schema": {
@@ -23937,6 +23957,33 @@
         "title": "AppContractResponse",
         "description": "One app's contract, as the pinned image wrote it."
       },
+      "AppPrincipal": {
+        "properties": {
+          "app": {
+            "type": "string",
+            "title": "App",
+            "description": "The DFE app, e.g. dfe-loader."
+          },
+          "principal": {
+            "type": "string",
+            "title": "Principal",
+            "description": "The user or service account it connects as."
+          },
+          "mechanism": {
+            "type": "string",
+            "title": "Mechanism",
+            "description": "How it authenticates, e.g. SCRAM-SHA-512."
+          }
+        },
+        "type": "object",
+        "required": [
+          "app",
+          "principal",
+          "mechanism"
+        ],
+        "title": "AppPrincipal",
+        "description": "The identity one app connects to the service as. Names only, never a secret."
+      },
       "AppSummary": {
         "properties": {
           "service": {
@@ -24289,8 +24336,101 @@
         ],
         "title": "AvailableOrgIdsResponse"
       },
+      "BackingFacts": {
+        "properties": {
+          "managed_by": {
+            "$ref": "#/components/schemas/ManagedBy",
+            "description": "dfe: DFE runs it and every declared value reaches it. provider: a SaaS whose API DFE knows runs it. external: someone else runs it, and DFE has no API to it. dfe wherever the deployer states no provider."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "The provider key the deployer stated; null when it stated none."
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier",
+            "description": "The provider tier or instance type the deployer stated; null when none."
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region",
+            "description": "The provider region the deployer stated; null when none."
+          }
+        },
+        "type": "object",
+        "required": [
+          "managed_by",
+          "provider",
+          "tier",
+          "region"
+        ],
+        "title": "BackingFacts",
+        "description": "Who runs one backing service, from what the deployer states and the provider catalogue."
+      },
       "BackingServiceConfig": {
         "properties": {
+          "managed_by": {
+            "$ref": "#/components/schemas/ManagedBy",
+            "description": "dfe: DFE runs it and every declared value reaches it. provider: a SaaS whose API DFE knows runs it. external: someone else runs it, and DFE has no API to it. dfe wherever the deployer states no provider."
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "description": "The provider key the deployer stated; null when it stated none."
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier",
+            "description": "The provider tier or instance type the deployer stated; null when none."
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region",
+            "description": "The provider region the deployer stated; null when none."
+          },
           "service": {
             "type": "string",
             "title": "Service"
@@ -24329,10 +24469,49 @@
             },
             "type": "object",
             "title": "Resources"
+          },
+          "read_only": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Read Only",
+            "description": "Value paths below prefix that a write is refused on with 409 managed_by_provider, at the path, below it or at a parent, because nothing in the deployment reads them. Empty where DFE runs the service."
+          },
+          "observed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ObservedSizing"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The size the service's own data plane reports, read on each request; null where DFE runs the service, whose declared values are the answer."
+          },
+          "limits": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderLimit"
+            },
+            "type": "array",
+            "title": "Limits",
+            "description": "The provider's caps for this tier; empty until the catalogue carries limits."
+          },
+          "principals": {
+            "items": {
+              "$ref": "#/components/schemas/AppPrincipal"
+            },
+            "type": "array",
+            "title": "Principals",
+            "description": "The identity each app connects as; empty until per-app identities deploy."
           }
         },
         "type": "object",
         "required": [
+          "managed_by",
+          "provider",
+          "tier",
+          "region",
           "service",
           "chart",
           "overlay",
@@ -24341,10 +24520,14 @@
           "storage_model",
           "replicas",
           "storage_size",
-          "storage_class"
+          "storage_class",
+          "read_only",
+          "observed",
+          "limits",
+          "principals"
         ],
         "title": "BackingServiceConfig",
-        "description": "A backing service's deploy configuration AS DECLARED, not as observed."
+        "description": "A backing service's deploy configuration as DECLARED, and who runs it.\n\nA service DFE does not run also carries ``observed``, its size as its own data\nplane reports it, because the declared values do not reach it."
       },
       "BackingWriteResult": {
         "properties": {
@@ -26679,6 +26862,14 @@
             ],
             "title": "Source",
             "description": "deploy-repo when the stack version came from pins.yaml, deployment when it came from what deployed this pod, else engine."
+          },
+          "backing": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/BackingFacts"
+            },
+            "type": "object",
+            "title": "Backing",
+            "description": "Who runs each backing service, keyed as GET /backing-services names it. managed_by is dfe wherever the deployer states no provider."
           }
         },
         "type": "object",
@@ -26691,7 +26882,8 @@
           "engine",
           "ui",
           "apps",
-          "source"
+          "source",
+          "backing"
         ],
         "title": "DeploymentResponse",
         "description": "What this deployment IS, so a console never has to guess at it."
@@ -29937,6 +30129,16 @@
         "title": "LookalikeRequest",
         "description": "Inline lookalike generation from a sample (the sampler's rows/lines).\n\nIdentity values in the sample (IPs, users, hosts, emails, ...) are never\nreplayed - they are synthesised from the entity pool. Enum vocabularies\nand message structure are kept."
       },
+      "ManagedBy": {
+        "type": "string",
+        "enum": [
+          "dfe",
+          "provider",
+          "external"
+        ],
+        "title": "ManagedBy",
+        "description": "Who runs a backing service."
+      },
       "MatchConflictContext": {
         "properties": {
           "source": {
@@ -30737,6 +30939,109 @@
         ],
         "title": "ObjectMetadata",
         "description": "Metadata for a stored object (PUT response)."
+      },
+      "ObservedSizing": {
+        "properties": {
+          "brokers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Brokers",
+            "description": "Kafka brokers the cluster metadata lists."
+          },
+          "replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replicas",
+            "description": "ClickHouse replicas per shard in the cluster system.clusters lists; null where the server declares no cluster to count."
+          },
+          "shards": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Shards",
+            "description": "ClickHouse shards in that cluster."
+          },
+          "memory_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Bytes",
+            "description": "Memory available to the ClickHouse server that answered: its cgroup limit, else the host total."
+          },
+          "provider_replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Replicas",
+            "description": "Replicas the ClickHouse Cloud service object states; null unless clickhouse.cloud is configured."
+          },
+          "provider_min_replica_memory_gb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Min Replica Memory Gb",
+            "description": "The ClickHouse Cloud service object's minimum memory per replica, in GB."
+          },
+          "provider_max_replica_memory_gb": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Max Replica Memory Gb",
+            "description": "The ClickHouse Cloud service object's maximum memory per replica, in GB."
+          },
+          "provider_idle_scaling": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Idle Scaling",
+            "description": "Whether the ClickHouse Cloud service idles when unused."
+          }
+        },
+        "type": "object",
+        "title": "ObservedSizing",
+        "description": "A service's size as its own data plane reports it, read on each request.\n\nShown, never acted on. A field is null where its read failed or does not apply\nto the service, so a down broker or server blanks it rather than failing the read."
       },
       "OidcCallbackResponse": {
         "properties": {
@@ -33075,6 +33380,51 @@
         ],
         "title": "ProviderKind",
         "description": "The adapter implementation a provider config selects."
+      },
+      "ProviderLimit": {
+        "properties": {
+          "limit": {
+            "type": "string",
+            "title": "Limit",
+            "description": "What is capped, e.g. partitions."
+          },
+          "allowed": {
+            "type": "integer",
+            "title": "Allowed",
+            "description": "The provider's published cap for this tier."
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Used",
+            "description": "What the data plane reports in use; null where it could not be read."
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url",
+            "description": "Where the provider publishes the cap."
+          },
+          "as_of": {
+            "type": "string",
+            "title": "As Of",
+            "description": "The date the cap was read, YYYY-MM-DD."
+          }
+        },
+        "type": "object",
+        "required": [
+          "limit",
+          "allowed",
+          "source_url",
+          "as_of"
+        ],
+        "title": "ProviderLimit",
+        "description": "One cap the provider publishes for this tier, and how much of it is in use."
       },
       "ProviderResponse": {
         "properties": {

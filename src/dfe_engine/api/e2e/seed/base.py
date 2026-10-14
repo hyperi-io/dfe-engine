@@ -84,6 +84,7 @@ class Seed:
         from dfe_engine.api.e2e.seed.accounts import Accounts
         from dfe_engine.api.e2e.seed.apps import Apps
         from dfe_engine.api.e2e.seed.artefacts import Artefacts
+        from dfe_engine.api.e2e.seed.backing import Backing
         from dfe_engine.api.e2e.seed.organisations import Organisations
         from dfe_engine.api.e2e.seed.sources import Sources
 
@@ -94,6 +95,7 @@ class Seed:
             self.sources = self._child(Sources, env)
             self.apps = self._child(Apps, env)
             self.artefacts = self._child(Artefacts, env)
+            self.backing = self._child(Backing, env)
             return
         if cls is Accounts:
             self.accounts = self
@@ -109,6 +111,9 @@ class Seed:
             return
         if cls is Artefacts:
             self.artefacts = self
+            return
+        if cls is Backing:
+            self.backing = self
 
     def _require_gitcrud(self) -> GitCrud:
         """The deploy repo, or a named error saying which setting is off."""
@@ -264,6 +269,10 @@ class Seed:
             dials = self.apps.seed_app_scaling_state()
             logger.info("e2e seed", script=script, pools=pools, dials=dials)
             return True
+        if script == "seed_managed_backing":
+            providers = self.backing.seed_managed_backing()
+            logger.info("e2e seed", script=script, providers=providers)
+            return True
         if script == "reset_all":
             # Delete all accounts and organisations
             self.accounts.delete_all()
@@ -292,6 +301,9 @@ class Seed:
             # in the store and in the config, and due its forced change at login.
             self._set_configured_admin_password("")
             self.accounts.reset_break_glass_admin()
+
+            # Who runs each backing service, as the deployer's environment states it.
+            self.backing.reset_backing()
             logger.info("e2e seed", script=script, derived=derived)
             return True
         return False

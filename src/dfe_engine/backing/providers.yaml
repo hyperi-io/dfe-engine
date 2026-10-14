@@ -1,0 +1,88 @@
+# providers.yaml -- what each backing service's provider key means to the engine.
+#
+# The deployment dial picks a provider per service and the deployer injects it as
+# DFE_DEPLOYMENT_KAFKA_PROVIDER / DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER. This file says
+# what each key means: who runs the service, and which deploy-repo values a write
+# cannot move there because nothing in the deployment reads them.
+#
+# The source of truth is dfe-infra's providers.yaml; this is the snapshot bundled
+# in the engine image. The engine resolves the catalogue in this order:
+# DFE_PROVIDER_CATALOGUE_FILE (which a chart points at its mounted copy), then
+# this snapshot.
+#
+# services.<service>
+#   The service as GET /api/v1/backing-services names it.
+#
+# services.<service>.providers.<key>.managed_by
+#   dfe       DFE runs it. Nothing below applies, and today's 400 and 403 rules hold.
+#   provider  A SaaS whose API DFE knows runs it.
+#   external  Someone else runs it and DFE has no API to it.
+#
+# services.<service>.providers.<key>.set_in   (provider only)
+#   deployment  A deployment dial sizes it: change the dial and redeploy.
+#   provider    Only the provider's own console or API moves it.
+#   An external service is always changed by whoever runs it.
+#
+# services.<service>.providers.<key>.read_only   (provider only)
+#   Value paths below the service's values prefix that a write is refused on
+#   (409 managed_by_provider), at the path, below it, or at any parent of it.
+#
+# services.<service>.external.read_only
+#   The same, for a service DFE does not run and has no API to: a provider key
+#   whose managed_by is external, or any key other than a provider-managed one
+#   where the deploy repo declares <prefix>.mode external.
+#
+# A provider key this file does not list reads as DFE-run unless the deploy repo
+# declares mode external.
+
+services:
+  kafka:
+    external:
+      read_only: &kafka_sizing
+        - mode
+        - replicas
+        - storage
+        - storageModel
+        - resources
+        - objectStore
+        - tieredObject
+        - sizing
+        - controllerPool
+    providers:
+      strimzi:
+        managed_by: dfe
+      redpanda:
+        managed_by: dfe
+      msk:
+        managed_by: provider
+        set_in: deployment
+        read_only: *kafka_sizing
+      confluent-cloud:
+        managed_by: provider
+        set_in: deployment
+        read_only: *kafka_sizing
+      redpanda-cloud:
+        managed_by: provider
+        set_in: provider
+        read_only: *kafka_sizing
+
+  clickhouse:
+    external:
+      read_only: &clickhouse_sizing
+        - mode
+        - replicas
+        - keeper.replicas
+        - storage
+        - storageModel
+        - resources
+        - objectStore
+        - tieredBlock
+    providers:
+      in_cluster:
+        managed_by: dfe
+      clickhouse-cloud:
+        managed_by: provider
+        set_in: provider
+        read_only: *clickhouse_sizing
+      external:
+        managed_by: external

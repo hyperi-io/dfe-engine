@@ -130,6 +130,14 @@ Stack identity (what the deploy says this pod came from):
 - DFE_PROFILE -> deployment.profile (the tier the deploy chose; empty = unknown)
 - DFE_ADMIN_LINKS -> deployment.admin_links (JSON array of the admin UIs the deploy runs)
 
+Backing-service facts (who runs Kafka and ClickHouse; never DFE_KAFKA_PROVIDER, which
+derives the engine's own SASL protocol):
+- DFE_DEPLOYMENT_KAFKA_PROVIDER -> deployment.backing.kafka.provider
+- DFE_DEPLOYMENT_KAFKA_TIER -> deployment.backing.kafka.tier
+- DFE_DEPLOYMENT_KAFKA_REGION -> deployment.backing.kafka.region
+- DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER -> deployment.backing.clickhouse.provider
+- DFE_DEPLOYMENT_CLICKHOUSE_TIER -> deployment.backing.clickhouse.tier
+
 Repository (scope-aligned small-object store; lives in the DFE database):
 - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
 - DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
@@ -1082,6 +1090,59 @@ class RepositorySettings(BaseModel):
     )
 
 
+class BackingFactSettings(BaseModel):
+    """What the deployer states about one backing service, and nothing it detects.
+
+    Empty everywhere means the deployer stated nothing, which every deployment that
+    runs its own Kafka and ClickHouse is, so the engine reports the service as one
+    DFE runs.
+    """
+
+    provider: str = Field(
+        default="",
+        description=(
+            "The provider key the deployment dial chose for this service "
+            "(strimzi, msk, confluent-cloud, clickhouse-cloud, external, ...). "
+            "The provider catalogue says what the key means; a key it does not "
+            "list reads as DFE-run unless the deploy repo declares mode external."
+        ),
+    )
+    tier: str = Field(
+        default="",
+        description="The provider's tier or instance type as the dial set it; reported only.",
+    )
+    region: str = Field(
+        default="",
+        description="The provider region the service runs in; reported only.",
+    )
+
+    @field_validator("provider")
+    @classmethod
+    def _provider_key(cls, value: str) -> str:
+        # Catalogue keys are lower-case identifiers, so a deployer's casing cannot miss one.
+        return value.strip().lower()
+
+
+class BackingSettings(BaseModel):
+    """The deployer's facts for each backing service the engine reports on.
+
+    Environment variables:
+    - DFE_DEPLOYMENT_KAFKA_PROVIDER -> deployment.backing.kafka.provider
+    - DFE_DEPLOYMENT_KAFKA_TIER -> deployment.backing.kafka.tier
+    - DFE_DEPLOYMENT_KAFKA_REGION -> deployment.backing.kafka.region
+    - DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER -> deployment.backing.clickhouse.provider
+    - DFE_DEPLOYMENT_CLICKHOUSE_TIER -> deployment.backing.clickhouse.tier
+    """
+
+    kafka: BackingFactSettings = Field(default_factory=BackingFactSettings)
+    clickhouse: BackingFactSettings = Field(default_factory=BackingFactSettings)
+
+    def facts(self, service: str) -> BackingFactSettings:
+        """The facts for *service*, empty for a service the deployer cannot state facts about."""
+        stated = {"kafka": self.kafka, "clickhouse": self.clickhouse}
+        return stated.get(service, BackingFactSettings())
+
+
 class DeploymentSettings(BaseModel):
     """Deployment configuration settings.
 
@@ -1094,7 +1155,17 @@ class DeploymentSettings(BaseModel):
     - DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR -> deployment.app_config_base_dir
     - DFE_DEPLOYMENT_APP_CONFIG_MOUNT -> deployment.app_config_mount
     - DFE_DEPLOYMENT_APP_ENV_DIR -> deployment.app_env_dir
+    - DFE_DEPLOYMENT_KAFKA_* / DFE_DEPLOYMENT_CLICKHOUSE_* -> deployment.backing
     """
+
+    backing: BackingSettings = Field(
+        default_factory=BackingSettings,
+        description=(
+            "Who runs each backing service, as the deployer states it. Injected by "
+            "the deployer, never detected, and kept apart from kafka.provider, "
+            "which derives the engine's own broker protocol."
+        ),
+    )
 
     profile: str = Field(
         default="",
@@ -2073,6 +2144,16 @@ def _load_defaults() -> dict:
     return {}
 
 
+def backing_from_environment() -> BackingSettings:
+    """The backing-service facts the environment states, parsed as ``load_settings`` parses them.
+
+    Reads the environment alone, which is where a deployer injects these facts; a
+    config-file value is not seen here.
+    """
+    deployment = _get_env_overrides().get("deployment") or {}
+    return BackingSettings(**(deployment.get("backing") or {}))
+
+
 def _get_env_overrides() -> dict:
     """Get configuration overrides from environment variables.
 
@@ -2473,6 +2554,21 @@ def _get_env_overrides() -> dict:
         overrides["deployment"]["app_config_mount"] = val.strip()
     if val := _get_env("DFE_DEPLOYMENT_APP_ENV_DIR"):
         overrides["deployment"]["app_env_dir"] = val.strip()
+    # Who runs each backing service. Never DFE_KAFKA_PROVIDER: it derives the engine's own
+    # SASL protocol, and an in-cluster listener does not speak what a provider key derives.
+    backing: dict[str, dict[str, str]] = {"kafka": {}, "clickhouse": {}}
+    if val := _get_env("DFE_DEPLOYMENT_KAFKA_PROVIDER"):
+        backing["kafka"]["provider"] = val.strip()
+    if val := _get_env("DFE_DEPLOYMENT_KAFKA_TIER"):
+        backing["kafka"]["tier"] = val.strip()
+    if val := _get_env("DFE_DEPLOYMENT_KAFKA_REGION"):
+        backing["kafka"]["region"] = val.strip()
+    if val := _get_env("DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER"):
+        backing["clickhouse"]["provider"] = val.strip()
+    if val := _get_env("DFE_DEPLOYMENT_CLICKHOUSE_TIER"):
+        backing["clickhouse"]["tier"] = val.strip()
+    if stated := {service: facts for service, facts in backing.items() if facts}:
+        overrides["deployment"]["backing"] = stated
 
     # Transform validation
     if val := _get_env("DFE_TRANSFORM_VALIDATION_ENABLED"):
