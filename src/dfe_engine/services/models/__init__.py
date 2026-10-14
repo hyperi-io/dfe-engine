@@ -14,6 +14,7 @@ from dfe_engine.services.models.archiver import (
 )
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
+    ClientTlsConfig,
     DlqConfig,
     KafkaTlsConfig,
     LoggingConfig,
@@ -118,6 +119,7 @@ __all__ = [
     "SERVICE_TRANSFORM_WASM",
     "VALID_SERVICES",
     # Common
+    "ClientTlsConfig",
     "DlqConfig",
     "KafkaTlsConfig",
     "LoggingConfig",
