@@ -92,6 +92,17 @@ def test_the_dulwich_success_line_loses_its_credentials():
     assert redacted.startswith("Push to http://***@forge.svc:3000/dfe-admin/deploy.git")
 
 
+@pytest.mark.parametrize(
+    "token",
+    ["s3c@r3t", "s3c/r3t", "s3c@r/3t"],
+    ids=["at-sign", "slash", "at-sign-then-slash"],
+)
+def test_a_token_holding_a_url_character_loses_every_part(token):
+    line = f"Push to http://dfe-admin:{token}@forge.svc:3000/deploy.git successful."
+    redacted = redact_credentials(line)
+    assert redacted == "Push to http://***@forge.svc:3000/deploy.git successful."
+
+
 def test_a_credential_free_url_is_left_alone():
     for url in ("https://github.com/hyperi-io/dfe-engine.git", "ssh://git@forge/deploy.git"):
         assert redact_credentials(url) == url

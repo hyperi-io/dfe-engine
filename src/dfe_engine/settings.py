@@ -95,16 +95,6 @@ Transport (what carries a source's records between its stages):
 - DFE_MESH_ENABLED -> transport.mesh_enabled (true/false)
 - DFE_MESH_NAMESPACE -> transport.mesh_namespace (where the pool listeners live)
 
-Redpanda Cloud lifecycle (control plane; opt-in, WS-C dfe-engine#99):
-- DFE_REDPANDA_API_KEY -> kafka.redpanda_cloud.client_id (OAuth2 client id)
-- DFE_REDPANDA_API_SECRET -> kafka.redpanda_cloud.client_secret (OAuth2 client secret)
-- DFE_REDPANDA_CLOUD_AUTH_URL -> kafka.redpanda_cloud.auth_url
-- DFE_REDPANDA_CLOUD_AUDIENCE -> kafka.redpanda_cloud.audience
-- DFE_REDPANDA_CLOUD_API_BASE -> kafka.redpanda_cloud.api_base
-- DFE_REDPANDA_CLOUD_RESOURCE_GROUP -> kafka.redpanda_cloud.resource_group
-- DFE_REDPANDA_CLOUD_CLUSTER_NAME -> kafka.redpanda_cloud.cluster_name
-- DFE_REDPANDA_CLOUD_KAFKA_USER -> kafka.redpanda_cloud.kafka_user
-
 Schemas:
 - DFE_SCHEMAS_DIR -> schemas.schemas_dir (dfe-schemas tree root)
 
@@ -586,44 +576,6 @@ class ArtifactorySettings(BaseModel):
     templates_version: str = Field(default="latest")
 
 
-class RedpandaCloudSettings(BaseModel):
-    """Redpanda Cloud Serverless control-plane config (opt-in; WS-C dfe-engine#99).
-
-    Separate from the SASL data-plane connection (``kafka.bootstrap_servers`` +
-    ``kafka.sasl_*``, populated by ``dfe kafka lifecycle up`` once the cluster
-    exists). This block is the CONTROL-PLANE OAuth2 client (``auth.prd.cloud.
-    redpanda.com`` + ``api.redpanda.com``) used to create/delete the cluster and
-    mint/revoke the SCRAM-512 data-plane user - the first (proven) provider behind
-    ``dfe_engine.kafka.cloud.base.ManagedKafkaProvider``. See
-    docs/deployment/managed-kafka-lifecycle.md.
-    """
-
-    client_id: str = Field(default="", description="OAuth2 service-account client id.")
-    client_secret: str = Field(default="", description="OAuth2 service-account client secret.")
-    auth_url: str = Field(
-        default="https://auth.prd.cloud.redpanda.com/oauth/token",
-        description="OAuth2 client-credentials token endpoint.",
-    )
-    audience: str = Field(
-        default="cloudv2-production.redpanda.cloud", description="OAuth2 token audience."
-    )
-    api_base: str = Field(default="https://api.redpanda.com", description="Control-plane API base.")
-    resource_group: str = Field(
-        default="dfe", description="Resource group name (created if absent, find-or-create)."
-    )
-    cluster_name: str = Field(
-        default="dfe-kafka", description="Serverless cluster name (find-or-create, idempotent)."
-    )
-    kafka_user: str = Field(
-        default="dfe-engine", description="SCRAM-512 data-plane username minted on `up`."
-    )
-
-    @property
-    def configured(self) -> bool:
-        """True when the control-plane creds are present (lifecycle usable)."""
-        return bool(self.client_id and self.client_secret)
-
-
 class TransportSettings(BaseModel):
     """What this deployment can carry a source's records on, between its stages.
 
@@ -740,7 +692,6 @@ class KafkaSettings(BaseModel):
     )
     sasl_username: str = Field(default="", description="SASL username")
     sasl_password: str = Field(default="", description="SASL password")
-    redpanda_cloud: RedpandaCloudSettings = Field(default_factory=RedpandaCloudSettings)
     ensure_topics: bool | None = Field(
         default=None,
         description=(
@@ -2399,30 +2350,6 @@ def _get_env_overrides() -> dict:
         overrides["transport"]["mesh_enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_MESH_NAMESPACE"):
         overrides["transport"]["mesh_namespace"] = val
-
-    # Redpanda Cloud lifecycle (control-plane OAuth2 client; opt-in, WS-C
-    # dfe-engine#99). DFE_REDPANDA_API_KEY/_SECRET are the pre-existing names this
-    # repo's .env already uses for the OAuth2 client id/secret - kept as the
-    # primary names rather than inventing a DFE_REDPANDA_CLOUD_CLIENT_* pair.
-    redpanda_cloud: dict = {}
-    if val := _get_env("DFE_REDPANDA_API_KEY", "DFE_REDPANDA_CLOUD_CLIENT_ID"):
-        redpanda_cloud["client_id"] = val
-    if val := _get_env("DFE_REDPANDA_API_SECRET", "DFE_REDPANDA_CLOUD_CLIENT_SECRET"):
-        redpanda_cloud["client_secret"] = val
-    if val := _get_env("DFE_REDPANDA_CLOUD_AUTH_URL"):
-        redpanda_cloud["auth_url"] = val
-    if val := _get_env("DFE_REDPANDA_CLOUD_AUDIENCE"):
-        redpanda_cloud["audience"] = val
-    if val := _get_env("DFE_REDPANDA_CLOUD_API_BASE"):
-        redpanda_cloud["api_base"] = val
-    if val := _get_env("DFE_REDPANDA_CLOUD_RESOURCE_GROUP"):
-        redpanda_cloud["resource_group"] = val
-    if val := _get_env("DFE_REDPANDA_CLOUD_CLUSTER_NAME"):
-        redpanda_cloud["cluster_name"] = val
-    if val := _get_env("DFE_REDPANDA_CLOUD_KAFKA_USER"):
-        redpanda_cloud["kafka_user"] = val
-    if redpanda_cloud:
-        overrides["kafka"]["redpanda_cloud"] = redpanda_cloud
 
     # Storage settings (for on-prem/Rancher deployments)
     if val := _get_env("DFE_STORAGE_TYPE"):

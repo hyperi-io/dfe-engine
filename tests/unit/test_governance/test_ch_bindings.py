@@ -17,6 +17,7 @@ from types import SimpleNamespace
 import pytest
 
 from dfe_engine.auth.models import Scope, ScopedGrant, platform_grants
+from dfe_engine.auth.roles import RoleConfig, RoleDefinition
 from dfe_engine.governance.ch.bindings import derive_group_bindings
 
 
@@ -89,10 +90,52 @@ class TestOrgScopedGroups:
         }
 
 
+class TestRolelessGroups:
+    def test_a_roleless_group_claiming_no_org_gets_no_binding(self):
+        """Every OIDC-synced group starts here, and the binding would be unrestricted."""
+        assert derive_group_bindings([_group("synced")], [_org("acme")]) == []
+
+    def test_a_roleless_group_claiming_an_org_keeps_its_pin(self):
+        bindings = derive_group_bindings([_group("acme-ro", org_ids=["acme"])], [_org("acme")])
+        assert [(b.group, b.org) for b in bindings] == [("acme-ro", "acme")]
+
+    def test_a_skipped_roleless_group_does_not_stop_the_others(self):
+        groups = [_group("synced"), _group("platform", roles=["data_viewer"])]
+        bindings = derive_group_bindings(groups, [_org("acme")])
+        assert [(b.group, b.org) for b in bindings] == [("platform", "")]
+
+
+class TestGroupsWithNoPlatformRole:
+    """Nothing such a group holds reads across orgs, so with no org it reads nothing."""
+
+    def test_an_org_viewer_group_claiming_no_org_gets_no_binding(self):
+        assert (
+            derive_group_bindings([_group("viewers", roles=["org_viewer"])], [_org("acme")]) == []
+        )
+
+    def test_a_scoped_role_group_claiming_no_org_gets_no_binding(self):
+        tenant = RoleDefinition(
+            description="a tenant role", permissions=["query:execute"], scoped=True
+        )
+        config = RoleConfig({**RoleConfig.load_builtin().roles, "tenant_viewer": tenant})
+        group = _group("tenants", roles=["tenant_viewer"])
+        assert derive_group_bindings([group], [_org("acme")], role_config=config) == []
+
+    def test_a_role_the_definitions_do_not_declare_gets_no_binding(self):
+        assert derive_group_bindings([_group("typo", roles=["data_anlayst"])], [_org("acme")]) == []
+
+    def test_an_org_viewer_group_claiming_an_org_keeps_its_pin(self):
+        group = _group("acme-view", org_ids=["acme"], roles=["org_viewer"])
+        bindings = derive_group_bindings([group], [_org("acme")])
+        assert [(b.group, b.org) for b in bindings] == [("acme-view", "acme")]
+
+
 class TestUnrestrictedGroups:
     def test_group_claiming_no_org_is_unrestricted(self):
         """The platform team: no tenant role, so no row policy targets it."""
-        bindings = derive_group_bindings([_group("platform")], [_org("acme")])
+        bindings = derive_group_bindings(
+            [_group("platform", roles=["data_viewer"])], [_org("acme")]
+        )
         assert [(b.group, b.org) for b in bindings] == [("platform", "")]
 
     def test_platform_role_beats_org_markers(self):
