@@ -875,7 +875,7 @@
           "Accounts"
         ],
         "summary": "Update Account",
-        "description": "Update account groups, enabled/blocked status, or contact fields (admin only).\n\nRefused when the caller disables or blocks their own account, or when that\nwould leave no usable system-admin account.",
+        "description": "Update account groups, enabled/blocked status, or contact fields (admin only).\n\nRefused when the caller disables or blocks their own account, or when that\n(or stripping every system-scope admin group) would leave no usable\nsystem-admin account.",
         "operationId": "update_account_api_v1_auth_accounts__username__put",
         "parameters": [
           {
@@ -930,7 +930,7 @@
             }
           },
           "409": {
-            "description": "last_admin: disabling or blocking this account would leave no usable system admin",
+            "description": "last_admin: disabling, blocking, or stripping the system admin group from this account would leave no usable system admin",
             "content": {
               "application/json": {
                 "schema": {

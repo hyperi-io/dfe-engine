@@ -626,6 +626,37 @@ class TestAnotherAdminExists:
             alice, store, groups, bindings={}, enabled=True
         )
 
+    def test_locks_out_last_admin_by_group_loss(self, tmp_path: Path, crud):
+        store, groups = self._stores(tmp_path, crud)
+        alice = store.create("alice", MINTED_SEED, groups=["dfe-admins"])
+        groups.add_member("dfe-admins", "alice")
+        store.update("admin", enabled=False, allow_protected=True)
+        store.update("breakglass", enabled=False, allow_protected=True)
+        alice = store.get("alice")
+
+        assert admin_retirement.locks_out_last_admin_by_group_loss(
+            alice, store, groups, bindings={}, held_after=["dfe-viewers"]
+        )
+        assert not admin_retirement.locks_out_last_admin_by_group_loss(
+            alice, store, groups, bindings={}, held_after=["dfe-admins", "dfe-viewers"]
+        )
+
+    def test_locks_out_last_admin_by_member_removals(self, tmp_path: Path, crud):
+        store, groups = self._stores(tmp_path, crud)
+        store.create("alice", MINTED_SEED, groups=["dfe-admins"])
+        store.create("bob", MINTED_SEED, groups=["dfe-admins"])
+        groups.add_member("dfe-admins", "alice")
+        groups.add_member("dfe-admins", "bob")
+        store.update("admin", enabled=False, allow_protected=True)
+        store.update("breakglass", enabled=False, allow_protected=True)
+
+        assert not admin_retirement.locks_out_last_admin_by_member_removals(
+            store, groups, bindings={}, group_name="dfe-admins", removed=["alice"]
+        )
+        assert admin_retirement.locks_out_last_admin_by_member_removals(
+            store, groups, bindings={}, group_name="dfe-admins", removed=["alice", "bob"]
+        )
+
     def test_an_admin_group_named_only_in_the_account_record_does_not_count(
         self, tmp_path: Path, crud
     ):

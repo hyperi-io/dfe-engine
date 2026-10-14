@@ -37,7 +37,7 @@ from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
 from dfe_engine.gitcrud.engine import ResourceNotFoundError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Collection, Mapping
 
     from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
     from dfe_engine.auth.groups import DocuStoreGroupStore, Group, GroupStore
@@ -171,6 +171,71 @@ def locks_out_last_admin(
     return not other_usable_admin_exists(
         account_store, group_store, bindings=bindings, excluding=account.username
     )
+
+
+def locks_out_last_admin_by_group_loss(
+    account: Account,
+    account_store: AccountStore | DocuStoreAccountStore | None,
+    group_store: GroupStore | DocuStoreGroupStore | None,
+    *,
+    bindings: Mapping[str, str],
+    held_after: Collection[str],
+) -> bool:
+    """True when a membership write would leave no usable system admin.
+
+    *held_after* is the group names the account would hold once the write lands
+    (:func:`~dfe_engine.auth.membership.groups_held_after`). No-op when the
+    account already cannot hold a session, does not hold system admin now, or
+    would still hold a system-scope admin group after the write.
+    """
+    if account_store is None or group_store is None:
+        return False
+    if not _usable_admin_session(account):
+        return False
+    groups = group_store.list()
+    if not account_holds_system_admin(account, groups, bindings=bindings):
+        return False
+    admin_names = _system_admin_group_names(groups)
+    if any(name in admin_names for name in held_after):
+        return False
+    return not other_usable_admin_exists(
+        account_store, group_store, bindings=bindings, excluding=account.username
+    )
+
+
+def locks_out_last_admin_by_member_removals(
+    account_store: AccountStore | DocuStoreAccountStore | None,
+    group_store: GroupStore | DocuStoreGroupStore | None,
+    *,
+    bindings: Mapping[str, str],
+    group_name: str,
+    removed: Collection[str],
+) -> bool:
+    """True when dropping *removed* from *group_name* leaves no usable system admin.
+
+    Simulates the whole removal set at once, so a single write that drops every
+    remaining usable admin is refused even when each member alone would still
+    leave another.
+    """
+    if not removed or account_store is None or group_store is None:
+        return False
+    dropped = set(removed)
+    groups = [
+        (
+            group.model_copy(update={"members": [m for m in group.members if m not in dropped]})
+            if group.name == group_name
+            else group
+        )
+        for group in group_store.list()
+    ]
+    if not _system_admin_group_names(groups):
+        return False
+    for account in account_store.list():
+        if not _usable_admin_session(account):
+            continue
+        if account_holds_system_admin(account, groups, bindings=bindings):
+            return False
+    return True
 
 
 def another_admin_exists(

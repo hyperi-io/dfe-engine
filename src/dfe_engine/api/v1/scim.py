@@ -231,6 +231,30 @@ def _scim_may_move_link(group: Group, stamp: str, request: Request) -> bool:
     return group.source_provider in linked_providers([stamp], provider_bindings(request))
 
 
+def _scim_last_admin_member_removals(
+    request: Request, *, group_name: str, removed: set[str] | list[str]
+) -> JSONResponse | None:
+    """Refuse a membership write that would leave no usable system admin."""
+    from dfe_engine.auth import admin_retirement
+
+    dropped = sorted({name for name in removed if name})
+    if not dropped:
+        return None
+    if not admin_retirement.locks_out_last_admin_by_member_removals(
+        request.app.state.account_store,
+        request.app.state.group_store,
+        bindings=provider_bindings(request),
+        group_name=group_name,
+        removed=dropped,
+    ):
+        return None
+    return scim_error(
+        409,
+        f"Cannot remove the last usable system admin from '{group_name}'",
+        "mutability",
+    )
+
+
 # -- /Users ---------------------------------------------------
 
 
@@ -633,6 +657,9 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     # An IdP login resolves a group by its provider id, so moving the id moves the roles.
     if old != new or moves_link:
         check_role_assignment(request, user, existing.roles, scope_of(existing))
+    last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=old - new)
+    if last_admin is not None:
+        return last_admin
     if moves_link:
         if not _scim_may_move_link(existing, str(fields["source_provider"]), request):
             return scim_error(
@@ -703,6 +730,9 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
     # Checked before anything is written, so a refusal leaves the membership as it was.
     if added or removed:
         check_role_assignment(request, user, group.roles, scope_of(group))
+        last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=removed)
+        if last_admin is not None:
+            return last_admin
         # One write for the whole set; the store refuses it whole if it drops a recovery credential.
         store.update(group_id, members=members)
         sync_account_groups_for_membership_change(
@@ -738,6 +768,9 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     # Checked before the first detach, so deleting the admin group with a recovery
     # credential in it refuses whole rather than part-way through.
     store.protected.check_member_removal(group_id, members)
+    last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=members)
+    if last_admin is not None:
+        return last_admin
     for username in members:
         store.remove_member(group_id, username)
     sync_account_groups_for_membership_change(account_store, group_id, removed=members)

@@ -691,7 +691,8 @@ async def get_account(
         409: {
             "model": ErrorResponse,
             "description": (
-                "last_admin: disabling or blocking this account would leave no usable system admin"
+                "last_admin: disabling, blocking, or stripping the system admin "
+                "group from this account would leave no usable system admin"
             ),
         },
     },
@@ -706,7 +707,8 @@ async def update_account(
     """Update account groups, enabled/blocked status, or contact fields (admin only).
 
     Refused when the caller disables or blocks their own account, or when that
-    would leave no usable system-admin account.
+    (or stripping every system-scope admin group) would leave no usable
+    system-admin account.
     """
     from dfe_engine.auth import admin_retirement
     from dfe_engine.auth.accounts import AccountStore
@@ -759,6 +761,23 @@ async def update_account(
             request=request,
             user=user,
         )
+        if admin_retirement.locks_out_last_admin_by_group_loss(
+            existing,
+            store,
+            group_store,
+            bindings=bindings,
+            held_after=held_after,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "last_admin",
+                    "message": (
+                        f"Cannot remove the system admin group from '{username}': "
+                        "it is the last usable account with the system admin role"
+                    ),
+                },
+            )
     update_fields: dict[str, object] = _contact_updates(body)
     if body.groups is not None:
         update_fields["groups"] = body.groups
