@@ -47,7 +47,7 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.api.v1.account_groups import check_group_changes
 from dfe_engine.api.v1.auth import throttled
-from dfe_engine.auth import account_durability
+from dfe_engine.auth import account_durability, breakglass
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import (
     BCRYPT_MAX_PASSWORD_BYTES,
@@ -83,11 +83,11 @@ async def _persist_account(
 ) -> AccountGitState:
     """Mirror an account write into the durable deploy repo and report the state.
 
-    Only the break-glass admin is git-persisted; regular users are durable in their
-    own store (document store/yaml), so they never touch the deploy repo. The mirror
-    is a commit and a push, so it runs on a worker thread.
+    Only the local admin's account doc is git-persisted; regular users are durable
+    in their own store (document store/yaml), so they never touch the deploy repo.
+    The mirror is a commit and a push, so it runs on a worker thread.
     """
-    if not account_durability.is_break_glass(username, settings.auth.local.admin_name):
+    if not account_durability.is_local_admin(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
     return await run_blocking(
         functools.partial(
@@ -111,7 +111,7 @@ def _mirror_account(
     summary: str,
     actor: str,
 ) -> AccountGitState:
-    """Commit the break-glass admin's account doc to the deploy repo."""
+    """Commit the local admin's account doc to the deploy repo."""
     gc = getattr(request.app.state, "gitcrud", None)
     forge = getattr(request.app.state, "forge", None)
     outcome = account_durability.publish_account(
@@ -126,6 +126,58 @@ def _mirror_account(
         request_id=request.headers.get("X-Request-ID", ""),
     )
     return account_durability.state_from_outcome(gc, outcome)
+
+
+def _publish_breakglass_hash(
+    request: Request, settings: Settings, *, digest: str, actor: str
+) -> AccountGitState:
+    """Commit breakglass's new hash to the governance settings it is seeded from."""
+    gc = getattr(request.app.state, "gitcrud", None)
+    outcome = account_durability.publish_breakglass_hash(
+        gc,
+        getattr(request.app.state, "forge", None),
+        environment=settings.env,
+        mode=settings.gitops.mode,
+        digest=digest,
+        summary="reset password",
+        actor=actor,
+        request_id=request.headers.get("X-Request-ID", ""),
+    )
+    return account_durability.state_from_outcome(gc, outcome)
+
+
+async def _persist_password(
+    request: Request,
+    settings: Settings,
+    *,
+    username: str,
+    account: Account,
+    actor: str,
+) -> AccountGitState:
+    """Make a new password durable where that account's password is kept.
+
+    The local admin's whole doc is mirrored into the deploy repo, ``breakglass``
+    keeps only its hash in the governance settings, and any other account is
+    durable in its own store. Either commit is a git write, so it runs off the loop.
+    """
+    if username == breakglass.USERNAME:
+        return await run_blocking(
+            functools.partial(
+                _publish_breakglass_hash,
+                request,
+                settings,
+                digest=account.password_hash,
+                actor=actor,
+            )
+        )
+    return await _persist_account(
+        request,
+        settings,
+        username=username,
+        account=account,
+        summary="reset password",
+        actor=actor,
+    )
 
 
 # -- Request / Response models --------------------------------
@@ -221,7 +273,7 @@ class RotatePasswordRequest(BaseModel):
     new_password: str = Field(
         min_length=MIN_ADMIN_PASSWORD_LENGTH,
         description=(
-            "New plaintext password to write to the store; at least "
+            "New plaintext password to write to the secret store; at least "
             f"{MIN_ADMIN_PASSWORD_LENGTH} characters, at most {BCRYPT_MAX_PASSWORD_BYTES} "
             "bytes, and never the shipped default"
         ),
@@ -234,17 +286,22 @@ class RotatePasswordRequest(BaseModel):
         refuse_unhashable_password(value)
         if default_credentials_in_use(value):
             raise ValueError(
-                "the shipped default admin password -- the engine refuses to start "
-                "on it outside a dev posture; choose another"
+                "That is the default admin password, which the engine will not start "
+                "on outside a development deployment. Choose another."
             )
         return value
 
 
 class RotatePasswordResponse(BaseModel):
-    """Outcome of a rotation written through the secrets seam."""
+    """Outcome of a rotation written to the deployment's secrets backend."""
 
-    message: str = Field(default="password rotated in the secret store")
-    secret_path: str = Field(description="scalo.secrets path the new password was written to")
+    message: str = Field(
+        default=(
+            "Password saved in the secret store. The engine gives it to the admin at "
+            "its next restart, and the admin must change it at the next sign-in."
+        )
+    )
+    secret_path: str = Field(description="Where in the secret store the new password went")
 
 
 class AccountResponse(BaseModel):
@@ -364,8 +421,8 @@ def _refuse_external(account: Account) -> None:
             detail={
                 "code": "external_account",
                 "message": (
-                    f"Account '{account.username}' authenticates through its identity "
-                    "provider; a local password cannot be set"
+                    f"'{account.username}' signs in through its identity provider, so "
+                    "change its password there, not in DFE."
                 ),
             },
         )
@@ -397,7 +454,7 @@ async def _reset_stored_password(
     new_password: str,
     actor: str,
 ) -> ResetPasswordResponse:
-    """Apply a password reset in the live store and mirror it if git-backed.
+    """Apply a password reset in the live store and commit it where it is kept.
 
     The new password ends every session the account held (its session marker moves).
     """
@@ -422,12 +479,11 @@ async def _reset_stored_password(
                 ),
             },
         )
-    git = await _persist_account(
+    git = await _persist_password(
         request,
         settings,
         username=username,
         account=store.get(username) or existing,
-        summary="reset password",
         actor=actor,
     )
     return ResetPasswordResponse(git=git)
@@ -750,7 +806,7 @@ async def reset_current_user_password(
             status_code=403,
             detail={
                 "code": "invalid_current_password",
-                "message": "current_password is not this account's password",
+                "message": "That is not this account's current password.",
             },
         )
     throttle.succeeded(account.username)
@@ -815,14 +871,15 @@ async def rotate_password(
     request: Request,
     settings: Settings,
 ) -> RotatePasswordResponse:
-    """Rotate an account's password in the deployment's secret store.
+    """Rotate the local admin's password in the deployment's secret store.
 
     The store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that
-    password, so the engine writes the new value through the scalo secrets seam
-    and never into its own YAML. The next boot reconcile issues the rotated value
-    to the admin, who must replace it at the following login. Returns 501 with the
-    store command when the deployment has not declared a secrets path for the
-    password.
+    password, so the engine writes the new value through its secrets backend and
+    never into its own YAML. The next boot reconcile issues the rotated value to
+    the admin, who must replace it at the following login. Returns 501 with the
+    command that changes it where it is kept when the deployment has not declared
+    a secrets path for the password. Every other account, ``breakglass`` included,
+    changes its password through reset-password.
     """
     from dfe_engine.auth.deployment_hints import detect_deploy_kind, rotation_store_command
     from dfe_engine.secrets import build_secrets
@@ -834,27 +891,28 @@ async def rotate_password(
             detail={
                 "code": "not_store_backed",
                 "message": (
-                    f"Only the local admin password is held in the secret store; "
-                    f"use reset-password for '{username}'"
+                    f"'{username}' does not get its password from the deployment's "
+                    "secret store, so there is nothing to rotate. Reset its password "
+                    "instead."
                 ),
             },
         )
     if not local.admin_password_secret_path:
-        kind = detect_deploy_kind(settings.deployment.target)
+        command = rotation_store_command(
+            detect_deploy_kind(settings.deployment.target),
+            namespace=settings.deployment.namespace,
+            secret_name=local.admin_secret_name,
+            secret_key=local.admin_secret_key,
+        )
         raise HTTPException(
             status_code=501,
             detail={
                 "code": "secrets_seam_not_wired",
                 "message": (
-                    "This deployment does not source the admin password from the "
-                    "secrets seam, so rotation is a store operation"
+                    "This deployment keeps the admin password outside DFE, so change "
+                    f"it where it is stored: {command}"
                 ),
-                "store_command": rotation_store_command(
-                    kind,
-                    namespace=settings.deployment.namespace,
-                    secret_name=local.admin_secret_name,
-                    secret_key=local.admin_secret_key,
-                ),
+                "store_command": command,
             },
         )
 
@@ -876,22 +934,34 @@ async def account_git_status(
 ) -> AccountGitState:
     """Poll whether an account's password has merged to the deploy repo's main.
 
-    Step 2 of the review-PR path for the break-glass admin: the UI polls this after
-    the operator merges the PR; it fetches remote main and flips ``merged`` true.
-    Durable immediately in the auto-merge and file-share modes. A regular user is
-    never git-persisted, so it reports not-git-backed (durable in its own store).
+    Step 2 of the review-PR path for the local admin and ``breakglass``: the UI
+    polls this after the operator merges the PR; it fetches remote main and flips
+    ``merged`` true. Durable immediately in the auto-merge and file-share modes. A
+    regular user is never git-persisted, so it reports not-git-backed (durable in
+    its own store).
     """
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
     _require_account(store, username)
-    if not account_durability.is_break_glass(username, settings.auth.local.admin_name):
+    gc = getattr(request.app.state, "gitcrud", None)
+    # Each poll fetches the deploy repo's remote, so it runs on a worker thread.
+    if username == breakglass.USERNAME:
+        return await run_blocking(
+            functools.partial(
+                account_durability.breakglass_state,
+                gc,
+                store,
+                environment=settings.env,
+                mode=settings.gitops.mode,
+            )
+        )
+    if not account_durability.is_local_admin(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
-    # Fetches the deploy repo's remote, so it runs on a worker thread.
     return await run_blocking(
         functools.partial(
             account_durability.remote_state,
-            getattr(request.app.state, "gitcrud", None),
+            gc,
             store,
             username,
             environment=settings.env,
@@ -920,7 +990,7 @@ async def delete_account(
     groups = group_store.list()
     held = groups_held(existing, groups, bindings=provider_bindings(request))
     check_group_changes(after=(), before=held, groups=groups, request=request, user=user)
-    # The store refuses the break-glass admin, the one account the deploy repo carries.
+    # The store refuses the local admin and breakglass, the accounts the deploy repo carries.
     store.delete(username)
     forget_member(group_store, username)
     audit_account_change(user.user_id, username, "deleted")

@@ -287,7 +287,7 @@
           "Auth"
         ],
         "summary": "Retire Bootstrap Admin",
-        "description": "Retire the bootstrap admin: disable it and record the fact in the deploy repo.\n\nThe deployment mints the admin password and the engine reissues it whenever\nthe injected value changes, so until it is retired anyone able to write the\nSecret or ``.env`` can issue themselves the admin at the next boot. Retiring\nends the reseed: the account stays disabled, the password may be deleted, and\n``breakglass`` is the recovery path.\n\nRefused unless the deployment already has an enabled admin-role account of its\nown -- ``retire_admin_available`` on the setup status is the same predicate, so\nthe wizard only offers what this accepts. Returns the setup status, which now\nreports ``admin_retired``. Reversal is not an API: remove ``admin_retired``\nfrom ``governance/settings/auth.yaml`` in the deploy repo and restart.",
+        "description": "Retire the bootstrap admin: disable it and record the fact in the deploy repo.\n\nThe deployment mints the admin password and the engine reissues it whenever\nthe injected value changes, so until it is retired anyone able to write the\nSecret or ``.env`` can issue themselves the admin at the next boot. Retiring\nends the reseed: the account stays disabled, the password may be deleted, and\n``breakglass`` is the recovery path.\n\nThe console keeps the bootstrap admin. Retiring it is an operator's policy\nchoice made here. Refused unless the deployment already has an enabled\nadmin-role account of its own -- ``retire_admin_available`` on the setup status\nis the same predicate. Returns the setup status, which now\nreports ``admin_retired``. Reversal is not an API: remove ``admin_retired``\nfrom ``governance/settings/auth.yaml`` in the deploy repo and restart.",
         "operationId": "retire_bootstrap_admin_api_v1_auth_setup_retire_admin_post",
         "responses": {
           "200": {
@@ -1167,7 +1167,7 @@
           "Accounts"
         ],
         "summary": "Rotate Password",
-        "description": "Rotate an account's password in the deployment's secret store.\n\nThe store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that\npassword, so the engine writes the new value through the scalo secrets seam\nand never into its own YAML. The next boot reconcile issues the rotated value\nto the admin, who must replace it at the following login. Returns 501 with the\nstore command when the deployment has not declared a secrets path for the\npassword.",
+        "description": "Rotate the local admin's password in the deployment's secret store.\n\nThe store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that\npassword, so the engine writes the new value through its secrets backend and\nnever into its own YAML. The next boot reconcile issues the rotated value to\nthe admin, who must replace it at the following login. Returns 501 with the\ncommand that changes it where it is kept when the deployment has not declared\na secrets path for the password. Every other account, ``breakglass`` included,\nchanges its password through reset-password.",
         "operationId": "rotate_password_api_v1_auth_accounts__username__rotate_password_post",
         "parameters": [
           {
@@ -1245,7 +1245,7 @@
           "Accounts"
         ],
         "summary": "Account Git Status",
-        "description": "Poll whether an account's password has merged to the deploy repo's main.\n\nStep 2 of the review-PR path for the break-glass admin: the UI polls this after\nthe operator merges the PR; it fetches remote main and flips ``merged`` true.\nDurable immediately in the auto-merge and file-share modes. A regular user is\nnever git-persisted, so it reports not-git-backed (durable in its own store).",
+        "description": "Poll whether an account's password has merged to the deploy repo's main.\n\nStep 2 of the review-PR path for the local admin and ``breakglass``: the UI\npolls this after the operator merges the PR; it fetches remote main and flips\n``merged`` true. Durable immediately in the auto-merge and file-share modes. A\nregular user is never git-persisted, so it reports not-git-backed (durable in\nits own store).",
         "operationId": "account_git_status_api_v1_auth_accounts__username__git_status_get",
         "parameters": [
           {
@@ -23542,7 +23542,7 @@
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
-            "description": "This account is git-persisted (the break-glass admin on a gitops deploy). False for a regular user -- durable in its own store, no git flow."
+            "description": "This account's password is kept in the deploy repo: the local admin and breakglass on a gitops deploy. False for a regular user -- durable in its own store, no git flow."
           },
           "auto_merge": {
             "type": "boolean",
@@ -33318,7 +33318,7 @@
           "secret_path": {
             "type": "string",
             "title": "Secret Path",
-            "description": "Path in the scalo.secrets seam holding the token/key",
+            "description": "Path in the secret store holding the token or key",
             "default": ""
           },
           "username": {
@@ -34278,7 +34278,7 @@
             "type": "string",
             "minLength": 12,
             "title": "New Password",
-            "description": "New plaintext password to write to the store; at least 12 characters, at most 72 bytes, and never the shipped default"
+            "description": "New plaintext password to write to the secret store; at least 12 characters, at most 72 bytes, and never the shipped default"
           }
         },
         "type": "object",
@@ -34293,12 +34293,12 @@
           "message": {
             "type": "string",
             "title": "Message",
-            "default": "password rotated in the secret store"
+            "default": "Password saved in the secret store. The engine gives it to the admin at its next restart, and the admin must change it at the next sign-in."
           },
           "secret_path": {
             "type": "string",
             "title": "Secret Path",
-            "description": "scalo.secrets path the new password was written to"
+            "description": "Where in the secret store the new password went"
           }
         },
         "type": "object",
@@ -34306,7 +34306,7 @@
           "secret_path"
         ],
         "title": "RotatePasswordResponse",
-        "description": "Outcome of a rotation written through the secrets seam."
+        "description": "Outcome of a rotation written to the deployment's secrets backend."
       },
       "RoutingResponse": {
         "properties": {
@@ -36738,7 +36738,7 @@
           "admin_username": {
             "type": "string",
             "title": "Admin Username",
-            "description": "The bootstrap admin's account name, which the deployment may rename. The console names it in the retire prompt and marks it retired in the account list, so it cannot guess at 'admin'.",
+            "description": "The bootstrap admin's account name, which the deployment may rename. The console looks the account up by it and marks it retired in the account list, so it cannot guess at 'admin'.",
             "default": ""
           },
           "admin_retired": {
@@ -36750,7 +36750,7 @@
           "retire_admin_available": {
             "type": "boolean",
             "title": "Retire Admin Available",
-            "description": "True when retiring the bootstrap admin would be accepted now: setup is complete, an enabled admin-role account other than the seeded pair exists, and the admin is not retired yet. The wizard enables its button on it.",
+            "description": "True when retiring the bootstrap admin would be accepted now: setup is complete, an enabled admin-role account other than the seeded pair exists, and the admin is not retired yet. The console keeps the admin, so retiring it is an operator's choice made through the API.",
             "default": false
           }
         },

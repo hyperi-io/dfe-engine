@@ -38,10 +38,12 @@ The status also carries ``deploy_kind`` and ``credential_fetch_command``, which
 the pre-login page shows so an operator can read the password their deployment
 minted rather than guessing at one.
 
-``admin_retired`` and ``retire_admin_available`` close that loop: once the
-deployment has an admin of its own, the operator retires the bootstrap admin
-(:mod:`dfe_engine.auth.admin_retirement`) and deletes the minted password from
-the Secret or ``.env``.
+The bootstrap admin is kept by default: its first login replaces the minted
+password, and the console resets it like any other account. ``admin_retired``
+and ``retire_admin_available`` serve the operator who chooses otherwise: once the
+deployment has an admin of its own, retiring the bootstrap admin
+(:mod:`dfe_engine.auth.admin_retirement`) lets the minted password be deleted
+from the Secret or ``.env``.
 
 The machine is pure. It reads a :class:`SetupContext` -- never a Request -- so
 it can be evaluated in a unit test with hand-built stores.
@@ -191,7 +193,7 @@ class SetupContext:
 def _break_glass_git_state(
     state: Any, account_store: AccountStore | None, admin_name: str
 ) -> AccountGitState | None:
-    """Durability of the break-glass admin password in the deploy repo, or None.
+    """Durability of the local admin's password in the deploy repo, or None.
 
     None while auth or settings are still bootstrapping; otherwise the steady-state
     git status for the seeded admin so the wizard can show "persisted" vs a pending
@@ -342,8 +344,8 @@ class SetupStatus(BaseModel):
     admin_username: str = Field(
         default="",
         description="The bootstrap admin's account name, which the deployment may "
-        "rename. The console names it in the retire prompt and marks it retired in "
-        "the account list, so it cannot guess at 'admin'.",
+        "rename. The console looks the account up by it and marks it retired in the "
+        "account list, so it cannot guess at 'admin'.",
     )
     admin_retired: bool = Field(
         default=False,
@@ -355,7 +357,8 @@ class SetupStatus(BaseModel):
         default=False,
         description="True when retiring the bootstrap admin would be accepted now: "
         "setup is complete, an enabled admin-role account other than the seeded pair "
-        "exists, and the admin is not retired yet. The wizard enables its button on it.",
+        "exists, and the admin is not retired yet. The console keeps the admin, so "
+        "retiring it is an operator's choice made through the API.",
     )
 
 
@@ -459,8 +462,8 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
 def retire_admin_available(ctx: SetupContext, setup_complete: bool) -> bool:
     """Whether retiring the bootstrap admin would be accepted right now.
 
-    ONE predicate for the wizard's hint and the endpoint's refusal, so the UI
-    cannot offer a button the API answers with a 409. Retirement needs somewhere
+    ONE predicate for the status hint and the endpoint's refusal, so a caller
+    that reads the hint is never answered with a 409. Retirement needs somewhere
     durable to record the fact, so a deployment without a deploy repo never
     qualifies.
     """

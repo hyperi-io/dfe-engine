@@ -15,8 +15,9 @@ gets it automatically while a bare local engine or the hermetic tests keep
 working with no database. ``document`` forces it (and fails loudly if
 unreachable -- an explicit opt-in); ``yaml`` forces the file store.
 
-gitcrud is deliberately NOT a store option here: only the break-glass admin is
-additionally git-persisted (see :mod:`dfe_engine.auth.account_durability`).
+gitcrud is deliberately NOT a store option here: only the local admin and the
+break-glass hash are additionally git-persisted (see
+:mod:`dfe_engine.auth.account_durability`).
 """
 
 from __future__ import annotations

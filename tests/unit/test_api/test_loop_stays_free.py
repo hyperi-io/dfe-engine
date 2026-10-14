@@ -225,7 +225,7 @@ _DEPLOY_REPO_CASES: list[tuple[str, str, dict | None]] = [
             "saved_search_name": "Loop probe",
         },
     ),
-    # The break-glass admin is the one account mirrored into the deploy repo.
+    # The local admin is the one account whose doc is mirrored into the deploy repo.
     ("PUT", "/api/v1/auth/accounts/admin", {"name": "Loop Probe"}),
     ("PUT", "/api/v1/auth/accounts/me", {"name": "Loop Probe"}),
     ("POST", "/api/v1/auth/accounts/admin/reset-password", {"new_password": _NEW_PASSWORD}),

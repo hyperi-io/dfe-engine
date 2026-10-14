@@ -57,7 +57,7 @@ class ProviderAuth(BaseModel):
 
     kind: AuthKind = AuthKind.NONE
     secret_path: str = Field(
-        default="", description="Path in the scalo.secrets seam holding the token/key"
+        default="", description="Path in the secret store holding the token or key"
     )
     username: str = Field(default="", description="Git username for token auth (HTTPS)")
 

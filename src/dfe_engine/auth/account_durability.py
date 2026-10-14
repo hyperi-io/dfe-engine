@@ -13,12 +13,15 @@ takes effect immediately -- a password reset is live on the next login. That
 directory is ephemeral on a container rebuild, so on its own the credential is
 lost the moment the pod is recreated.
 
-This module mirrors every account mutation into the deploy repo's governed
-``accounts`` class (``governance/rbac/accounts``), which is the durable SSoT, and
-hydrates the live store back from it on boot. The mirror goes through the normal
-governed-write routing (``gitcrud/routing.py``): a dev/solo deployment commits
-straight to main (auto-merge), a production+team deployment opens a review PR --
-or, when no forge is configured, hands back the git commands to merge the branch.
+This module mirrors every change to the local admin into the deploy repo's
+governed ``accounts`` class (``governance/rbac/accounts``), which is the durable
+SSoT, and hydrates the live store back from it on boot. The ``breakglass``
+account's password is held differently -- as one hash in the governance settings
+(:mod:`dfe_engine.auth.breakglass`) -- so a new password for it is committed
+there instead. Both go through the normal governed-write routing
+(``gitcrud/routing.py``): a dev/solo deployment commits straight to main
+(auto-merge), a production+team deployment opens a review PR -- or, when no forge
+is configured, hands back the git commands to merge the branch.
 
 When gitops is disabled (no deploy repo) the live store IS the durable store -- a
 plain file share -- so there is nothing to mirror and ``git_merged`` is trivially
@@ -32,6 +35,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
+from dfe_engine.auth import breakglass
 from dfe_engine.gitcrud.auto_merge import resolve_state
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
 from dfe_engine.gitcrud.engine import ResourceNotFoundError
@@ -44,9 +48,12 @@ from dfe_engine.gitcrud.routing import (
 from dfe_engine.yaml_utils import yaml_load_string
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
     from dfe_engine.gitcrud.engine import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
+    from dfe_engine.gitops.repo import PublishResult
 
 # The gitcrud resource class for accounts (registry.py). rbac_prefix "governance",
 # so routing forces a review PR on production+team and a direct commit otherwise.
@@ -74,8 +81,9 @@ class AccountGitState(BaseModel):
     """Durability state of an account change, for the API + the setup wizard."""
 
     enabled: bool = Field(
-        description="This account is git-persisted (the break-glass admin on a gitops "
-        "deploy). False for a regular user -- durable in its own store, no git flow."
+        description="This account's password is kept in the deploy repo: the local admin "
+        "and breakglass on a gitops deploy. False for a regular user -- durable in its "
+        "own store, no git flow."
     )
     auto_merge: bool = Field(description="Effective auto-merge: changes commit straight to main.")
     committed: bool = Field(
@@ -105,15 +113,15 @@ def not_git_backed_state() -> AccountGitState:
     return _FILE_SHARE_STATE
 
 
-def is_break_glass(username: str, admin_name: str) -> bool:
-    """True for the break-glass admin -- the ONLY account git-persisted by default.
+def is_local_admin(username: str, admin_name: str) -> bool:
+    """True for the local admin, the one account whose whole doc the deploy repo carries.
 
-    Regular users and groups live in the resolved store (document store/yaml); gitcrud is
-    the exception, reserved for the emergency credential that must survive a total
-    teardown. ``admin_name`` is the configured name
+    Regular users and groups live in the resolved store (document store/yaml).
+    ``breakglass`` is git-backed too, but only as a hash in the governance settings,
+    so it is not this. ``admin_name`` is the configured name
     (``settings.auth.local.admin_name``, empty string for the default) and is
     required: a caller that omitted it would silently strip the deployment's renamed
-    break-glass account of its git-durability path.
+    admin of its git-durability path.
     """
     from dfe_engine.auth.bootstrap import admin_account_name
 
@@ -174,9 +182,91 @@ def publish_account(
 
     message = _commit_message(username, summary, actor, request_id)
 
-    def _write(branch: str) -> WriteOutcome:
+    def _write(branch: str) -> PublishResult:
         return gc.put(ACCOUNTS_CLASS, username, doc, actor, message, branch=branch)
 
+    return _route(
+        gc,
+        forge,
+        environment=environment,
+        mode=mode,
+        username=username,
+        summary=summary,
+        what=f"local account '{username}'",
+        actor=actor,
+        request_id=request_id,
+        write=_write,
+    )
+
+
+def publish_breakglass_hash(
+    gc: GitCrud | None,
+    forge: ForgeProvider | None,
+    *,
+    environment: str,
+    mode: str,
+    digest: str,
+    summary: str,
+    actor: str,
+    request_id: str = "",
+) -> WriteOutcome | None:
+    """Commit a new ``breakglass`` hash to the governance settings. None without gitops.
+
+    The boot reconcile puts the committed hash back over the live account
+    (:func:`dfe_engine.auth.breakglass.seed`), so a password change that stopped
+    at the live store would be undone by the next restart. Routed like an account
+    change: direct to main in dev/solo, a review PR in production+team, a review
+    branch and the merge command when that posture has no forge.
+    """
+    if gc is None:
+        return None
+
+    message = _commit_message(breakglass.USERNAME, summary, actor, request_id)
+
+    def _write(branch: str) -> PublishResult:
+        return gc.set_key(
+            breakglass.CLASS,
+            breakglass.NAME,
+            breakglass.KEY_HASH,
+            digest,
+            actor,
+            message=message,
+            branch=branch,
+        )
+
+    return _route(
+        gc,
+        forge,
+        environment=environment,
+        mode=mode,
+        username=breakglass.USERNAME,
+        summary=summary,
+        what="the break-glass password hash",
+        actor=actor,
+        request_id=request_id,
+        write=_write,
+    )
+
+
+def _route(
+    gc: GitCrud,
+    forge: ForgeProvider | None,
+    *,
+    environment: str,
+    mode: str,
+    username: str,
+    summary: str,
+    what: str,
+    actor: str,
+    request_id: str,
+    write: Callable[[str], PublishResult],
+) -> WriteOutcome:
+    """Run one account write through the governed path, never onto a refused main.
+
+    Production+team with no forge cannot open a PR, so the write goes to a review
+    branch and the outcome carries it for the caller to hand back merge commands.
+    """
+    resource = f"account/{username}"
     try:
         return route_write(
             gc=gc,
@@ -184,25 +274,23 @@ def publish_account(
             environment=environment,
             mode=mode,
             rbac_class=_RBAC_CLASS,
-            resource=f"account/{username}",
+            resource=resource,
             actor=actor,
             title=f"account({username}): {summary}",
             body=(
-                f"Persist local account '{username}' ({summary}) by {actor}. "
+                f"Persist {what} ({summary}) by {actor}. "
                 "Opened for review because production+team may not commit to main."
             ),
-            write=_write,
+            write=write,
             request_id=request_id,
         )
     except ReviewRequiredError:
-        # Production+team with no forge: commit to a review branch (never main) and
-        # let the caller surface the CLI merge commands: a PR where there is a forge, else CLI.
-        branch = pr_branch_name(_RBAC_CLASS, username, request_id)
-        res = gc.put(ACCOUNTS_CLASS, username, doc, actor, message, branch=branch)
+        branch = pr_branch_name(_RBAC_CLASS, resource, request_id)
+        res = write(branch)
         logger.warning(
             "REVIEW REQUIRED: account change committed to a branch; no forge to open a PR",
             actor=actor,
-            resource=f"account/{username}",
+            resource=resource,
             branch=branch,
         )
         return WriteOutcome(
@@ -306,10 +394,37 @@ def remote_state(
     if content is not None and live is not None:
         doc = yaml_load_string(content) or {}
         merged = doc.get("password_hash") == live.password_hash
-    # This poll only runs for the git-backed break-glass account after a committing
-    # write, so the change is committed (on main if merged, else the review branch).
+    # This poll only runs for the git-backed local admin after a committing write, so
+    # the change is committed (on main if merged, else the review branch).
     return AccountGitState(
         enabled=True, auto_merge=state.effective, committed=True, merged=merged, pending=None
+    )
+
+
+def breakglass_state(
+    gc: GitCrud | None,
+    account_store: AccountStore | DocuStoreAccountStore | None,
+    *,
+    environment: str,
+    mode: str,
+) -> AccountGitState:
+    """Whether the deploy repo's main carries the ``breakglass`` password the store serves.
+
+    The remote is read where there is one, so a review merged on the forge shows as
+    merged before this clone pulls it; a local-init repo is its own truth.
+    """
+    if gc is None or account_store is None:
+        return _FILE_SHARE_STATE
+    state = resolve_state(gc, environment=environment, mode=mode, warn=False)
+    committed = breakglass.published_hash(gc)
+    live = account_store.get(breakglass.USERNAME)
+    merged = bool(committed) and live is not None and committed == live.password_hash
+    return AccountGitState(
+        enabled=True,
+        auto_merge=state.effective,
+        committed=bool(committed),
+        merged=merged,
+        pending=None,
     )
 
 

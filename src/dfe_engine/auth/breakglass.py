@@ -18,6 +18,9 @@ the engine and the UI.
 The plaintext is never stored. ``DFE_AUTH_BREAKGLASS_PASSWORD`` is a mint-once
 input: with no hash committed yet it is hashed and committed, and from then on it
 is ignored, so leaving it in a compose file does not reassert an old password.
+A password reset through the accounts API replaces the committed hash
+(:func:`dfe_engine.auth.account_durability.publish_breakglass_hash`), which is
+what keeps the new password through a restart.
 
 ``breakglass.enabled`` (default true) turns the account off once OIDC is verified;
 a login attempt against a disabled account is refused with a reason rather than
@@ -99,6 +102,11 @@ def stored_hash(crud: GitCrud | None) -> str:
         return ""
     value = _section(crud).get("password_hash", "")
     return value if isinstance(value, str) else ""
+
+
+def published_hash(crud: GitCrud) -> str:
+    """The hash on the deploy repo's main: the remote's where there is one, else this clone's."""
+    return _remote_hash(crud) if crud.repo.has_remote else stored_hash(crud)
 
 
 def is_enabled(crud: GitCrud | None) -> bool:

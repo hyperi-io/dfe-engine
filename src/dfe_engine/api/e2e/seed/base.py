@@ -298,9 +298,11 @@ class Seed:
             derived = self.apps.reconcile_derived()
 
             # Back to a fresh deployment: the local admin issued the shipped default,
-            # in the store and in the config, and due its forced change at login.
+            # in the store and in the config, and due its forced change at login, and
+            # breakglass on the hash the deploy repo carries.
             self._set_configured_admin_password("")
             self.accounts.reset_break_glass_admin()
+            self.accounts.restore_breakglass()
 
             # Who runs each backing service, as the deployer's environment states it.
             self.backing.reset_backing()

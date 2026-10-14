@@ -98,15 +98,40 @@ class Accounts(Seed):
         """Clear all accounts from the YAML account registry.
 
         Reaches past the protected-name floor: this is the e2e-server store wipe,
-        mounted only where ``e2e_routes_enabled``, and it reseeds break-glass after.
+        mounted only where ``e2e_routes_enabled``, and ``reset_all`` puts the local
+        admin and ``breakglass`` back after it.
         """
         for account in self._account_store.list():
             self._account_store.delete(account.username, allow_protected=True)
 
+    def restore_breakglass(self) -> bool:
+        """Put ``breakglass`` back the way a first boot seeds it.
+
+        A fresh gitops deployment has the account, and :meth:`delete_all` removed
+        it. The hash is minted from ``DFE_AUTH_BREAKGLASS_PASSWORD`` when the deploy
+        repo carries none, so every reset leaves the password the engine was
+        configured with. With no deploy repo, or neither a hash nor a configured
+        password, there is nothing to seed from.
+
+        Returns:
+            True when the account was put back.
+        """
+        from dfe_engine.auth import breakglass
+
+        local = self._settings.auth.local if self._settings is not None else None
+        digest = breakglass.seed(
+            self._account_store,
+            self._group_store,
+            self._gitcrud,
+            local.breakglass_password if local is not None else "",
+            recovery_email=local.recovery_email if local is not None else "",
+        )
+        return bool(digest)
+
     def _ensure_admin(
         self, name: str = "admin", *, password: str, change_required: bool = False
     ) -> bool:
-        """Create or reset local break-glass admin account.
+        """Create or reset a local account in the admin group.
 
         Returns True when the account was created, False when it was reset.
         """
@@ -158,7 +183,7 @@ class Accounts(Seed):
     def _mirror_to_deploy_repo(self, name: str) -> None:
         """Persist the break-glass account into the deploy repo, as a real write does.
 
-        ``setup-status`` reports the break-glass admin as durable only when the
+        ``setup-status`` reports the local admin as durable only when the
         copy in the deploy repo MATCHES the live one, and it compares the stored
         password hash. Writing only the live store therefore leaves every seeded
         e2e run reporting an undurable break-glass account.
@@ -167,7 +192,7 @@ class Accounts(Seed):
         bcrypt salts afresh every time: deriving it twice would produce two hashes
         of the same password that never compare equal.
 
-        Only the break-glass admin is git-backed, and only when gitops is on --
+        Only the local admin's doc is git-backed, and only when gitops is on --
         the same two conditions ``api/v1/accounts.py`` applies, through the same
         routing, so a seeded deployment and an operator's password reset leave the
         repo in the same shape.
@@ -175,7 +200,7 @@ class Accounts(Seed):
         if self._gitcrud is None:
             return
         settings = self._require_settings()
-        if not account_durability.is_break_glass(name, settings.auth.local.admin_name):
+        if not account_durability.is_local_admin(name, settings.auth.local.admin_name):
             return
         account = self._account_store.get(name)
         if account is None:

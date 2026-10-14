@@ -69,7 +69,7 @@ def rotation_store_command(
     secret_name: str = "",
     secret_key: str = "",
 ) -> str:
-    """The store operation that rotates the admin password, for the 501 body.
+    """The command that changes the admin password where it is kept, for the 501 body.
 
     The engine never writes the password into its own YAML: the store that injects
     it is the source, so a rotation the engine performed alone would be reverted by
