@@ -16,6 +16,7 @@ from scalo.logger.filters import (
     SENSITIVE_FIELDS,
     is_credential_name,
     mask_url_userinfo,
+    url_passwords,
 )
 
 from dfe_engine import masking
@@ -58,18 +59,6 @@ _URL_TEXTS = [
     "Push to http://dfe-admin:s3c@r/t@forge.svc:3000/deploy.git successful.",
 ]
 """Every URL text the tests below read."""
-
-
-def _assert_masks_what_the_engine_finds(text: str) -> None:
-    """scalo's masker hides exactly the passwords :func:`masking.url_passwords` finds, in order."""
-    mask = "\x00"
-    pieces = mask_url_userinfo(text, mask).split(mask)
-    found = masking.url_passwords(text)
-    assert len(pieces) == len(found) + 1, repr(text)
-    rebuilt = pieces[0]
-    for password, rest in zip(found, pieces[1:], strict=True):
-        rebuilt += password + rest
-    assert rebuilt == text, repr(text)
 
 
 def _password_end(text: str, start: int, run_end: int) -> int | None:
@@ -124,6 +113,18 @@ def _reference(text: str, *, whole: bool, mask: str) -> str:
     return "".join(out)
 
 
+def _assert_lists_what_the_reference_reads(text: str) -> None:
+    """scalo's :func:`url_passwords` lists exactly the passwords the reference grammar masks, in order."""
+    mask = "\x00"
+    pieces = _reference(text, whole=False, mask=mask).split(mask)
+    found = url_passwords(text)
+    assert len(pieces) == len(found) + 1, repr(text)
+    rebuilt = pieces[0]
+    for password, rest in zip(found, pieces[1:], strict=True):
+        rebuilt += password + rest
+    assert rebuilt == text, repr(text)
+
+
 class TestUrlPassword:
     """scalo masks a URL's password, and the engine finds the same password to check a write."""
 
@@ -139,16 +140,16 @@ class TestUrlPassword:
         )
 
     def test_the_passwords_are_listed_whole(self):
-        assert masking.url_passwords("x://u:a/b@h y://v:@h z://w:c@d@h") == ["a/b", "c@d"]
+        assert url_passwords("x://u:a/b@h y://v:@h z://w:c@d@h") == ["a/b", "c@d"]
 
     @pytest.mark.parametrize(("text", "hides"), _HIDES)
     def test_a_password_that_can_hide_a_host_is_told_apart(self, text, hides):
         assert masking.hides_a_host(text) is hides
 
     @pytest.mark.parametrize("text", _URL_TEXTS)
-    def test_scalo_masks_every_password_the_engine_finds(self, text):
-        # hides_a_host judges what url_passwords finds, so the two grammars must agree.
-        _assert_masks_what_the_engine_finds(text)
+    def test_scalo_lists_every_password_the_reference_reads(self, text):
+        # hides_a_host judges what url_passwords lists, so scalo must read the grammar it assumes.
+        _assert_lists_what_the_reference_reads(text)
 
     def test_masks_as_the_reference_reads_it_on_random_text(self):
         rng = random.Random(4504)
@@ -161,7 +162,7 @@ class TestUrlPassword:
             assert mask_url_userinfo(text, "***", keep_user=False) == _reference(
                 text, whole=True, mask="***"
             ), repr(text)
-            _assert_masks_what_the_engine_finds(text)
+            _assert_lists_what_the_reference_reads(text)
 
     @pytest.mark.parametrize(
         "text",
@@ -190,7 +191,7 @@ class TestUrlPassword:
         started = time.perf_counter()
         mask_url_userinfo(text)
         mask_url_userinfo(text, keep_user=False)
-        masking.url_passwords(text)
+        masking.hides_a_host(text)
         assert time.perf_counter() - started < 2.0
 
 
