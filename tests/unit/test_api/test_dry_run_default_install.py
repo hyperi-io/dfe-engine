@@ -1,15 +1,15 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_api/test_dry_run_default_install.py
-#  Purpose:      A transform dry run samples rows on a default install, held to the caller's orgs
+#  Purpose:      A transform dry run samples the newest rows, held to the caller's orgs
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The dry run samples through the real sampler without logreducer.
+"""The dry run samples the newest rows through the real sampler.
 
-logreducer is not a dependency, so the sampler's gated default mode cannot run in
-a default install. The dry run asks for the newest rows instead, and a caller with
-no platform grant still has that read bound to its org's tenant ids.
+It asks for the newest rows, not the sampler's gated default mode that reduces the
+scan through logreducer, and a caller with no platform grant still has that read
+bound to its org's tenant ids.
 """
 
 import pytest

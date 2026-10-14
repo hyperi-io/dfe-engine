@@ -14,8 +14,8 @@ both raw ``lines`` and parsed ``rows`` + discovered ``keys``.
 
 logreducer ("smart"/"anomaly") is memory-hungry, so it runs behind an
 asyncio.Semaphore capped at ``sampler.max_concurrent`` and each run is bounded
-to ``sampler.max_memory_gb``. logreducer is imported lazily inside those paths
-so the engine runs (and the fast modes work) even before it is installed.
+to ``sampler.max_memory_gb``. logreducer is imported lazily inside those paths:
+importing it loads scikit-learn and scipy, which the fast modes never need.
 """
 
 import asyncio

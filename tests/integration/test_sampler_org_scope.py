@@ -149,6 +149,16 @@ def test_a_filter_cannot_reach_a_third_orgs_rows(stack, mode):
     assert _orgs(resp) == VIEWER_ORGS
 
 
+@pytest.mark.parametrize("mode", ["smart", "anomaly"])
+def test_a_gated_mode_reduces_only_the_held_orgs_rows(stack, mode):
+    # logreducer streams the scan through the engine's own ClickHouse client.
+    resp = _sample(stack, stack.viewer, "events", mode=mode, wait=60)
+
+    orgs = _orgs(resp)
+    assert orgs
+    assert set(orgs) <= set(VIEWER_ORGS)
+
+
 def test_an_admin_gets_every_orgs_rows(stack):
     assert _orgs(_sample(stack, stack.admin, "events")) == EVERY_ORG
 

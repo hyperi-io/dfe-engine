@@ -8,15 +8,17 @@
 """Sampler service unit tests.
 
 Fast modes (recent/random) run against a fake ClickHouse client. Gated modes
-(smart/anomaly) are exercised via their graceful degradation - logreducer is not
-installed in this env, which is exactly the pre-PyPI state we ship for.
+(smart/anomaly) run the installed logreducer over an in-memory source, and the
+absent-logreducer error is proved by hiding the module.
 """
 
 import asyncio
 import shutil
 import subprocess
+import sys
 
 import pytest
+from logreducer.kafka import KafkaSource
 from pydantic import ValidationError
 
 from dfe_engine.clickhouse import function_guard
@@ -28,6 +30,7 @@ from dfe_engine.sampling import (
     SamplerError,
 )
 from dfe_engine.sampling.clickhouse_reader import build_where, filter_predicate
+from dfe_engine.sampling.kafka_reader import build_source
 from dfe_engine.sampling.service import _reservoir
 from dfe_engine.settings import ClickHouseSettings, KafkaSettings, SamplerSettings
 from dfe_engine.source.registry import SourceNotFoundError
@@ -395,14 +398,64 @@ def test_kafka_target_is_land_topic():
     )
 
 
-# ── gated modes without logreducer ─────────────────────────────
+# ── gated modes (logreducer) ───────────────────────────────────
 
 
-def test_smart_without_logreducer_raises_clean_error():
-    ch = FakeCH(['{"a": 1}'])
+def _scan_lines() -> list[str]:
+    """200 near-identical INFO lines with a few rare ERROR and WARN lines among them."""
+    common = [f"INFO request ok id={i} user=u{i % 7}" for i in range(190)]
+    rare = [f"ERROR timeout upstream=payments id={i}" for i in range(5)]
+    rare += [f"WARN disk 91 percent on host-{i}" for i in range(5)]
+    return common + rare
+
+
+def _scan_returns(monkeypatch, lines: list[str]) -> None:
+    """Hand the reducer ``lines`` in place of the ClickHouse or Kafka scan."""
+    monkeypatch.setattr(Sampler, "_build_reduce_source", lambda *_args: lines)
+
+
+def test_a_request_with_no_mode_reduces_the_scan_through_logreducer(monkeypatch):
+    lines = _scan_lines()
+    _scan_returns(monkeypatch, lines)
+
+    result = _run(SampleRequest(table="`db`.`events`"), FakeCH([]), None)
+
+    assert result["mode"] == "smart"
+    assert result["stats"]["logreducer_mode"] == "hybrid"
+    assert result["stats"]["level"] == "enhanced"
+    assert 0 < result["stats"]["reduced_total"] < len(lines)
+    assert set(result["lines"]) <= set(lines)
+
+
+def test_anomaly_mode_runs_logreducers_anomaly_reducer(monkeypatch):
+    lines = _scan_lines()
+    _scan_returns(monkeypatch, lines)
+
+    result = _run(SampleRequest(mode=SampleMode.ANOMALY, table="`db`.`events`"), FakeCH([]), None)
+
+    assert result["stats"]["logreducer_mode"] == "anomaly"
+    assert result["count"] > 0
+    assert set(result["lines"]) <= set(lines)
+
+
+def test_a_gated_mode_without_logreducer_raises_clean_error(monkeypatch):
+    # A None entry in sys.modules makes the import raise ImportError.
+    monkeypatch.setitem(sys.modules, "logreducer", None)
     req = SampleRequest(mode=SampleMode.SMART, table="`db`.`events`")
-    with pytest.raises(SamplerError, match="logreducer"):
-        _run(req, ch, None)
+
+    with pytest.raises(SamplerError, match="needs logreducer"):
+        _run(req, FakeCH(['{"a": 1}']), None)
+
+
+def test_the_kafka_scan_is_a_bounded_logreducer_source():
+    source = build_source(
+        {"bootstrap.servers": "localhost:9092"}, "events_land", max_messages=5, group_suffix="ab12"
+    )
+
+    assert isinstance(source, KafkaSource)
+    assert source.topics == ["events_land"]
+    assert source.max_messages == 5
+    assert "dfe-sampler-ab12" in repr(source)
 
 
 # ── helpers ────────────────────────────────────────────────────
