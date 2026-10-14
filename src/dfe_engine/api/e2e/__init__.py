@@ -66,6 +66,7 @@ class SeedRequest(BaseModel):
         "seed_three_transforms",
         "seed_library_artefact",
         "seed_app_scaling_state",
+        "seed_managed_backing",
         "reset_all",
     ]
 

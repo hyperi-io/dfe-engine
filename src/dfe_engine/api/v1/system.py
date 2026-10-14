@@ -1,6 +1,7 @@
 """System router -- deployment facts, settings summary, default retention.
 
-GET /api/v1/system/deployment  -> What this deployment IS: profile, transports, mesh, routing, versions
+GET /api/v1/system/deployment  -> What this deployment IS: profile, transports, mesh, routing,
+                                  backing services, versions
 GET /api/v1/system/version     -> What this deployment runs: stack, engine, schemas, ui
 GET /api/v1/system/schema      -> What the last schema bootstrap pass did, object by object
 GET /api/v1/system/status      -> Conditions that leave the engine degraded while it serves
@@ -13,12 +14,14 @@ POST /api/v1/system/defaults/apply -> Pin those defaults onto the named sources 
 GET /api/v1/system/defaults/drift  -> Sources and tables off the defaults, searched and paginated
 """
 
+import functools
 import sys
 from typing import Any, Literal
 
 from dfe_schemas import __version__ as schemas_version
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine import __version__
@@ -32,6 +35,7 @@ from dfe_engine.api.deps import (
 )
 from dfe_engine.api.errors import ErrorResponse, backend_failure, engine_message
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
+from dfe_engine.api.v1.backing_services import BackingFacts, backing_facts
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
 from dfe_engine.auth.audit import audit_resource_change
@@ -273,6 +277,12 @@ class DeploymentResponse(BaseModel):
             "came from what deployed this pod, else engine."
         )
     )
+    backing: dict[str, BackingFacts] = Field(
+        description=(
+            "Who runs each backing service, keyed as GET /backing-services names it. "
+            "managed_by is dfe wherever the deployer states no provider."
+        ),
+    )
 
 
 class DegradedCondition(BaseModel):
@@ -344,6 +354,8 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
     with no pins base still knows what stood it up, because the chart passes that
     in, so the footer shows a stack version rather than nothing. With neither, the
     engine's own version is the whole answer.
+
+    Blocking: it reads the deploy repo, so a route calls it off the event loop.
     """
     gc = _optional_gitcrud(request)
     if gc is None:
@@ -376,6 +388,7 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
         ui=apps.get(UI_COMPONENT) or settings.ui_version or None,
         apps=apps,
         source="deploy-repo" if pinned else ("deployment" if stack else "engine"),
+        backing=backing_facts(request),
     )
 
 
@@ -383,14 +396,14 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
 async def get_deployment(
     user: CurrentUser, request: Request, settings: Settings
 ) -> DeploymentResponse:
-    """What this deployment IS: its profile, what it can carry records on, and its versions.
+    """What this deployment IS: its profile, transports, backing services and versions.
 
     Authenticated but ungated, for the same reason /version is: every console pane
     that must not guess reads this, and the body carries deployment shape and
     versions only. Without it the console has to assume the widest deployment and
     offer a transport or an app this tier does not run.
     """
-    return deployment_facts(request, settings)
+    return await run_blocking(functools.partial(deployment_facts, request, settings))
 
 
 @router.get("/version", response_model=VersionResponse)
@@ -400,7 +413,7 @@ async def get_version(user: CurrentUser, request: Request, settings: Settings) -
     Authenticated but ungated on purpose: the console footer is on every page, and
     the body carries versions only.
     """
-    facts = deployment_facts(request, settings)
+    facts = await run_blocking(functools.partial(deployment_facts, request, settings))
     return VersionResponse(
         stack=facts.stack,
         engine=facts.engine,

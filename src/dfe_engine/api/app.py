@@ -660,6 +660,10 @@ def create_app(
     from dfe_engine.auth.login_throttle import LoginThrottle
 
     app.state.login_throttle = LoginThrottle(settings.auth.login_throttle)
+
+    from dfe_engine.backing.observed import SizingCache
+
+    app.state.observed_sizing = SizingCache()
     app.state.seed_metrics = SeedMetrics(metrics_manager)
     app.state.oidc_sync_metrics = SyncMetrics(metrics_manager)
     # Every store writes YAML without the app in reach, so its refusals count process-wide.

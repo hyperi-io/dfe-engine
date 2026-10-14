@@ -23,7 +23,15 @@ any file it matches becomes an Argo application.
 
 Reads are DECLARED values, never observed ones. The engine has no Kubernetes
 client, so nothing here reports a pod phase, a running replica count or actual
-disk use - only what the deploy repo says the deployment asked for.
+disk use - only what the deploy repo says the deployment asked for. The one
+exception is a service DFE does not run: its sizing is the provider's or its
+operator's, so the read adds what the broker or server itself reports.
+
+Who runs each service comes from the deployer (``deployment.backing``) and the
+provider catalogue (``dfe_engine.backing.providers``). Where DFE does not run it,
+a write to a value nothing in the deployment reads is refused with 409
+``managed_by_provider`` before any other check, and helmvars:override does not
+lift it: the commit would land and change nothing.
 
 Node and broker counts are UP-ONLY here, and not out of caution: both stores place
 data per member, so removing one takes its copy with it unless something moves the
@@ -41,10 +49,14 @@ from typing import Any, TypeGuard
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, get_interactive_clickhouse_client, require_action
+from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.backing import observed, providers
+from dfe_engine.backing.providers import ManagedBy, Resolution, SetIn
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, get_path, set_path
+from dfe_engine.settings import BackingFactSettings
 
 from .helm import (
     SetVarRequest,
@@ -70,6 +82,9 @@ _CLASS = "infravars"
 # The deployment-wide overlay, read before the per-chart one so the per-chart file
 # wins - the same order the ApplicationSets stack them in.
 _COMMON = "common"
+
+MANAGED_REFUSAL = "managed_by_provider"
+"""The 409 code for a write to a value DFE does not set because it does not run the service."""
 
 
 class BackingReload(StrEnum):
@@ -117,6 +132,34 @@ class BackingService:
     segment alone.
     """
 
+    observe: Callable[[Any], ObservedSizing] | None = None
+    """Reads the service's size off the data plane, given the engine settings."""
+
+
+def _observe_kafka(settings: Any) -> ObservedSizing:
+    """Kafka's size as its cluster metadata reports it."""
+    return ObservedSizing(brokers=observed.kafka_brokers(settings))
+
+
+def _observe_clickhouse(settings: Any) -> ObservedSizing:
+    """ClickHouse's size as the server reports it, plus the Cloud service object where configured.
+
+    Both reads are bounded by ``clickhouse.interactive_budget_seconds``, because a
+    console request waits on them.
+    """
+    budget = settings.clickhouse.interactive_budget_seconds
+    topology = observed.clickhouse_topology(lambda: get_interactive_clickhouse_client(settings))
+    service = observed.cloud_service(settings.clickhouse.cloud, timeout=budget)
+    return ObservedSizing(
+        replicas=topology.replicas,
+        shards=topology.shards,
+        memory_bytes=topology.memory_bytes,
+        provider_replicas=service.num_replicas if service else None,
+        provider_min_replica_memory_gb=service.min_replica_memory_gb if service else None,
+        provider_max_replica_memory_gb=service.max_replica_memory_gb if service else None,
+        provider_idle_scaling=service.idle_scaling if service else None,
+    )
+
 
 CATALOGUE: tuple[BackingService, ...] = (
     BackingService(
@@ -140,6 +183,7 @@ CATALOGUE: tuple[BackingService, ...] = (
             "storageModel": BackingReload.RECREATE,
             "tieredBlock": BackingReload.RECREATE,
         },
+        observe=_observe_clickhouse,
     ),
     BackingService(
         service="kafka",
@@ -159,6 +203,7 @@ CATALOGUE: tuple[BackingService, ...] = (
             "storageModel": BackingReload.ROLL,
             "tieredObject": BackingReload.ROLL,
         },
+        observe=_observe_kafka,
     ),
 )
 
@@ -200,8 +245,100 @@ class DeclaredValue(BaseModel):
     protected: bool = False
 
 
-class BackingServiceConfig(BaseModel):
-    """A backing service's deploy configuration AS DECLARED, not as observed."""
+class BackingFacts(BaseModel):
+    """Who runs one backing service, from what the deployer states and the provider catalogue."""
+
+    managed_by: ManagedBy = Field(
+        description=(
+            "dfe: DFE runs it and every declared value reaches it. provider: a SaaS "
+            "whose API DFE knows runs it. external: someone else runs it, and DFE has "
+            "no API to it. dfe wherever the deployer states no provider."
+        ),
+    )
+    provider: str | None = Field(
+        description="The provider key the deployer stated; null when it stated none."
+    )
+    tier: str | None = Field(
+        description="The provider tier or instance type the deployer stated; null when none.",
+    )
+    region: str | None = Field(
+        description="The provider region the deployer stated; null when none."
+    )
+
+
+class ObservedSizing(BaseModel):
+    """A service's size as its own data plane reports it, held briefly per service.
+
+    Shown, never acted on. A field is null where its read failed or does not apply
+    to the service, so a down broker or server blanks it rather than failing the read.
+    """
+
+    brokers: int | None = Field(
+        default=None, description="Kafka brokers the cluster metadata lists."
+    )
+    replicas: int | None = Field(
+        default=None,
+        description=(
+            "ClickHouse replicas per shard in the cluster system.clusters lists; null "
+            "where the server declares no cluster to count."
+        ),
+    )
+    shards: int | None = Field(default=None, description="ClickHouse shards in that cluster.")
+    memory_bytes: int | None = Field(
+        default=None,
+        description=(
+            "Memory available to the ClickHouse server that answered: its cgroup "
+            "limit, else the host total."
+        ),
+    )
+    provider_replicas: int | None = Field(
+        default=None,
+        description=(
+            "Replicas the ClickHouse Cloud service object states; null unless "
+            "clickhouse.cloud is configured."
+        ),
+    )
+    provider_min_replica_memory_gb: float | None = Field(
+        default=None,
+        description="The ClickHouse Cloud service object's minimum memory per replica, in GB.",
+    )
+    provider_max_replica_memory_gb: float | None = Field(
+        default=None,
+        description="The ClickHouse Cloud service object's maximum memory per replica, in GB.",
+    )
+    provider_idle_scaling: bool | None = Field(
+        default=None,
+        description="Whether the ClickHouse Cloud service idles when unused.",
+    )
+
+
+class ProviderLimit(BaseModel):
+    """One cap the provider publishes for this tier, and how much of it is in use."""
+
+    limit: str = Field(description="What is capped, e.g. partitions.")
+    allowed: int = Field(description="The provider's published cap for this tier.")
+    used: int | None = Field(
+        default=None,
+        description="What the data plane reports in use; null where it could not be read.",
+    )
+    source_url: str = Field(description="Where the provider publishes the cap.")
+    as_of: str = Field(description="The date the cap was read, YYYY-MM-DD.")
+
+
+class AppPrincipal(BaseModel):
+    """The identity one app connects to the service as. Names only, never a secret."""
+
+    app: str = Field(description="The DFE app, e.g. dfe-loader.")
+    principal: str = Field(description="The user or service account it connects as.")
+    mechanism: str = Field(description="How it authenticates, e.g. SCRAM-SHA-512.")
+
+
+class BackingServiceConfig(BackingFacts):
+    """A backing service's deploy configuration as DECLARED, and who runs it.
+
+    A service DFE does not run also carries ``observed``, its size as its own data
+    plane reports it, because the declared values do not reach it.
+    """
 
     service: str
     chart: str
@@ -218,6 +355,26 @@ class BackingServiceConfig(BaseModel):
     storage_size: DeclaredValue
     storage_class: DeclaredValue
     resources: dict[str, DeclaredValue] = Field(default_factory=dict)
+    read_only: list[str] = Field(
+        description=(
+            "Value paths below prefix that a write is refused on with 409 "
+            "managed_by_provider, at the path, below it or at a parent, because "
+            "nothing in the deployment reads them. Empty where DFE runs the service."
+        ),
+    )
+    observed: ObservedSizing | None = Field(
+        description=(
+            "The size the service's own data plane reports, read at most every "
+            f"{observed.OBSERVED_TTL_SECONDS:g} seconds per service; null where DFE runs "
+            "the service, whose declared values are the answer."
+        ),
+    )
+    limits: list[ProviderLimit] = Field(
+        description="The provider's caps for this tier; empty until the catalogue carries limits.",
+    )
+    principals: list[AppPrincipal] = Field(
+        description="The identity each app connects as; empty until per-app identities deploy.",
+    )
 
 
 class BackingWriteResult(WriteResult):
@@ -258,13 +415,61 @@ def _declared(
     return found
 
 
+def _stated(request: Request, spec: BackingService) -> BackingFactSettings:
+    """What the deployer states about this service."""
+    return request.app.state.settings.deployment.backing.facts(spec.service)
+
+
+def _resolution(
+    spec: BackingService,
+    stated: BackingFactSettings,
+    docs: Callable[[], list[tuple[str, dict]]],
+) -> Resolution:
+    """Who runs this service. ``docs`` is read only where the mode decides it."""
+    return providers.resolve(
+        spec.service, stated.provider, lambda: _resolved(docs(), f"{spec.prefix}.mode")
+    )
+
+
+def _facts(stated: BackingFactSettings, resolution: Resolution) -> dict[str, Any]:
+    """The ``BackingFacts`` fields, with an unstated fact as null rather than empty."""
+    return {
+        "managed_by": resolution.managed_by,
+        "provider": stated.provider or None,
+        "tier": stated.tier or None,
+        "region": stated.region or None,
+    }
+
+
+def backing_facts(request: Request) -> dict[str, BackingFacts]:
+    """Who runs each backing service, keyed by service, for GET /system/deployment.
+
+    Blocking where a stated provider leaves the answer to the declared mode, which
+    is read from the deploy repo; with gitops off nothing is declared.
+    """
+    has_repo = getattr(request.app.state, "gitcrud", None) is not None
+    out: dict[str, BackingFacts] = {}
+    for spec in CATALOGUE:
+        stated = _stated(request, spec)
+
+        def docs(chart: str = spec.chart) -> list[tuple[str, dict]]:
+            return _docs(request, chart) if has_repo else []
+
+        out[spec.service] = BackingFacts(**_facts(stated, _resolution(spec, stated, docs)))
+    return out
+
+
 def _config(request: Request, spec: BackingService) -> BackingServiceConfig:
+    """One service's declared values, who runs it, and its observed size where DFE does not."""
     docs = _docs(request, spec.chart)
 
     def at(leaf: str) -> DeclaredValue:
         return _declared(request, docs, spec.chart, f"{spec.prefix}.{leaf}")
 
+    stated = _stated(request, spec)
+    resolution = _resolution(spec, stated, lambda: docs)
     return BackingServiceConfig(
+        **_facts(stated, resolution),
         service=spec.service,
         chart=spec.chart,
         overlay=f"{spec.chart}.yaml",
@@ -275,7 +480,26 @@ def _config(request: Request, spec: BackingService) -> BackingServiceConfig:
         storage_size=at(spec.storage_size),
         storage_class=at(spec.storage_class),
         resources={p: at(p) for p in _RESOURCE_PATHS},
+        read_only=list(resolution.read_only),
+        observed=_observed(request, spec, resolution),
+        limits=[],
+        principals=[],
     )
+
+
+def _observed(
+    request: Request, spec: BackingService, resolution: Resolution
+) -> ObservedSizing | None:
+    """A managed service's size off its data plane, held per service; None where DFE runs it.
+
+    A self-run service's declared values are its size, so it is never read.
+    """
+    observe = spec.observe
+    if observe is None or resolution.managed_by is ManagedBy.DFE:
+        return None
+    settings = request.app.state.settings
+    cache: observed.SizingCache[ObservedSizing] = request.app.state.observed_sizing
+    return cache.get(spec.service, lambda: observe(settings))
 
 
 def _owner(path: str) -> BackingService | None:
@@ -400,13 +624,91 @@ def _guard_member_count(
         )
 
 
+def _managed_message(
+    spec: BackingService, path: str, stated: BackingFactSettings, resolution: Resolution
+) -> str:
+    """Why a managed value is refused, and where it is changed instead."""
+    refused = f"{path} is not this deployment's to set"
+    on_tier = f" on the {stated.tier} tier" if stated.tier else ""
+    if resolution.set_in is SetIn.DEPLOYMENT:
+        return (
+            f"{refused}: {stated.provider} sizes {spec.service}{on_tier}. Change it in the "
+            "deployment dial and redeploy, or change it in the provider."
+        )
+    if resolution.set_in is SetIn.PROVIDER:
+        return (
+            f"{refused}: {stated.provider} sizes {spec.service}{on_tier}. Change it in the "
+            "provider's own console or API."
+        )
+    return (
+        f"{refused}: DFE does not run this {spec.service} and has no API to it. Change it "
+        "where the service is run."
+    )
+
+
+def _refuse_managed(request: Request, name: str, path: str) -> None:
+    """Refuse a write to a value the deployment never reads, because DFE does not run the service.
+
+    Runs before every other check, and helmvars:override does not lift it: the
+    commit would land and change nothing, so it is a fact about the deployment
+    rather than a policy. A write at a read-only path, below one, or at any parent
+    of one is refused, in ``common`` or the service's own overlay. A service DFE
+    runs refuses nothing here.
+
+    Args:
+        request: The request carrying the settings and the gitops client.
+        name: The overlay resource the write lands in.
+        path: The dot-path the write sets or removes.
+
+    Raises:
+        HTTPException: 409 ``managed_by_provider`` naming who sizes the value and where.
+    """
+    spec = _owner(path)
+    if spec is None or name not in (_COMMON, spec.chart):
+        return
+    stated = _stated(request, spec)
+    resolution = _resolution(spec, stated, lambda: _docs(request, spec.chart))
+    relative = path.removeprefix(spec.prefix).removeprefix(".")
+    if not resolution.refuses(relative):
+        return
+    raise HTTPException(
+        409,
+        detail={
+            "code": MANAGED_REFUSAL,
+            "message": _managed_message(spec, path, stated, resolution),
+            "service": spec.service,
+            "path": path,
+            "managed_by": str(resolution.managed_by),
+            "provider": stated.provider or None,
+            "tier": stated.tier or None,
+            "set_in": str(resolution.set_in) if resolution.set_in else None,
+            "read_only": list(resolution.read_only),
+        },
+    )
+
+
+_WRITE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    409: {
+        "model": ErrorResponse,
+        "description": (
+            "managed_by_provider: DFE does not run the service, so nothing in the "
+            "deployment reads this value; context names who sizes it and set_in where. "
+            "Also conflict (a stale If-Match) and review_required (production+team)."
+        ),
+    },
+}
+
+
 @router.get("", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
 def list_backing_services(user: CurrentUser, request: Request) -> list[BackingServiceConfig]:
-    """Every backing service's DECLARED deploy configuration.
+    """Every backing service's DECLARED deploy configuration, and who runs it.
 
     Declared, not observed: these are the values the deploy repo asks for, read
     from git. The engine runs no Kubernetes client, so a figure here can differ
-    from the cluster whenever Argo has not synced the declaration yet.
+    from the cluster whenever Argo has not synced the declaration yet. A service
+    DFE does not run (managed_by provider or external) adds ``observed``, read from
+    its own broker or server and held briefly per service, and ``read_only``, the
+    values a write is refused on.
     """
     return [_config(request, spec) for spec in CATALOGUE]
 
@@ -456,6 +758,7 @@ def get_backing_service(service: str, user: CurrentUser, request: Request) -> Ba
 @router.put(
     "/overlays/{name}/vars/{path}",
     response_model=BackingWriteResult,
+    responses=_WRITE_RESPONSES,
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
 def set_overlay_var(
@@ -468,13 +771,16 @@ def set_overlay_var(
 ) -> BackingWriteResult:
     """Set a substrate/platform value.
 
-    403 with the policy that blocked it when the var is protected - the storage
-    model, the data-layer modes and the disk size are decided at deploy, and moving
-    one on a live deployment is a data migration. 400 when the value would lower a
-    declared node or broker count, or leave it undeclared (a parent map that omits
-    it), which loses data rather than capacity; helmvars:override does not lift it.
+    409 managed_by_provider, before any other check, when DFE does not run the
+    service and the value is one of its read_only paths; helmvars:override does not
+    lift it. 403 with the policy that blocked it when the var is protected - the
+    storage model, the data-layer modes and the disk size are decided at deploy, and
+    moving one on a live deployment is a data migration. 400 when the value would
+    lower a declared node or broker count, or leave it undeclared (a parent map that
+    omits it), which loses data rather than capacity; helmvars:override does not lift it.
     """
     check_name(name)
+    _refuse_managed(request, name, path)
     _guard_member_count(request, name, path, lambda doc: set_path(doc, path, body.value))
     result = set_var_governed(_CLASS, name, path, body.value, user, request, if_match)
     return BackingWriteResult(**result.model_dump(), reload=str(_reload_for(path)))
@@ -483,6 +789,7 @@ def set_overlay_var(
 @router.delete(
     "/overlays/{name}/vars/{path}",
     response_model=BackingWriteResult,
+    responses=_WRITE_RESPONSES,
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
 def delete_overlay_var(
@@ -490,12 +797,15 @@ def delete_overlay_var(
 ) -> BackingWriteResult:
     """Revert a substrate/platform value to its chart default. Protected vars refuse.
 
+    409 managed_by_provider, before any other check and whatever the caller holds,
+    when DFE does not run the service and the value is one of its read_only paths.
     400 when the revert would lower a declared node or broker count, or leave it
     undeclared, unless the caller holds helmvars:override. An undeclared count falls
     to the chart or profile default, which the engine cannot read, so a revert that
     leaves one undeclared is refused whatever that default is.
     """
     check_name(name)
+    _refuse_managed(request, name, path)
     if not has_override(request, user):
         # A revert reaching a policy lock refuses as protected_var before the count guard runs.
         enforce_protected(request, user, _CLASS, name, path)
