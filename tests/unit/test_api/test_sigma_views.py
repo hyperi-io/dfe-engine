@@ -11,11 +11,17 @@ Exercises the CRUD over the stored per-source view definition and the generate
 action that renders DDL from it, including the JSON-derived column extraction.
 """
 
-from __future__ import annotations
+import pytest
 
 from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
+
+
+@pytest.fixture
+def sigma_enabled() -> bool:
+    """The sigma routes mount only on a deployment that enables them."""
+    return True
 
 
 def _wire_gitcrud(app, tmp_path):

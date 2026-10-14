@@ -1301,6 +1301,19 @@ class FieldMapSettings(BaseModel):
     )
 
 
+class SigmaSettings(BaseModel):
+    """Sigma detection pipeline settings.
+
+    Environment variables:
+    - DFE_SIGMA_ENABLED -> sigma.enabled
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Mount the /api/v1/sigma API; while off every path under it answers 404",
+    )
+
+
 class ServicesSettings(BaseModel):
     """Where the engine reaches the managed DFE services.
 
@@ -2011,6 +2024,7 @@ class DFESettings(BaseModel):
     schemas: SchemasSettings = Field(default_factory=SchemasSettings)
     source: SourceSettings = Field(default_factory=SourceSettings)
     fieldmap: FieldMapSettings = Field(default_factory=FieldMapSettings)
+    sigma: SigmaSettings = Field(default_factory=SigmaSettings)
     services: ServicesSettings = Field(default_factory=ServicesSettings)
     repository: RepositorySettings = Field(default_factory=RepositorySettings)
     deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
@@ -2144,6 +2158,7 @@ def _get_env_overrides() -> dict:
         "schemas": {},
         "source": {},
         "fieldmap": {},
+        "sigma": {},
         "services": {},
         "repository": {},
         "deployment": {},
@@ -2465,6 +2480,10 @@ def _get_env_overrides() -> dict:
     # FieldMap settings
     if val := _get_env("DFE_FIELDMAPS_DIR"):
         overrides["fieldmap"]["fieldmaps_dir"] = val
+
+    # Sigma settings
+    if val := _get_env("DFE_SIGMA_ENABLED"):
+        overrides["sigma"]["enabled"] = val.lower() in ("true", "1", "yes")
 
     # Services settings
     if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_URL"):

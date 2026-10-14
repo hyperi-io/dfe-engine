@@ -12,7 +12,7 @@ catalogue; the rule is selected, then POST /sigma/propagate generates a DFE rule
 over the source's {source}_sigma view + a per-source hunt. No live ClickHouse.
 """
 
-from __future__ import annotations
+import pytest
 
 from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
@@ -24,6 +24,12 @@ from dfe_engine.hunts.rule_registry import RuleRegistry
 
 _ID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
 _BINDING = f"sigma_windows-audit_{_ID.replace('-', '')}"
+
+
+@pytest.fixture
+def sigma_enabled() -> bool:
+    """The sigma routes mount only on a deployment that enables them."""
+    return True
 
 
 def _wire_gitcrud(app, tmp_path):

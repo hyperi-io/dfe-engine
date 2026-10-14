@@ -11,12 +11,18 @@ The provider is a local-files provider pointed at a tmp import dir (no network);
 sync runs through the real task manager into the real id-keyed gitcrud store.
 """
 
-from __future__ import annotations
+import pytest
 
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 
 _UUID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+
+
+@pytest.fixture
+def sigma_enabled() -> bool:
+    """The sigma routes mount only on a deployment that enables them."""
+    return True
 
 
 def _wire_gitcrud(app, tmp_path):

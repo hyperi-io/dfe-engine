@@ -9,6 +9,8 @@
 
 # Sigma detection pipeline
 
+Sigma is off by default in DFE 2.2.1: every path under `/api/v1/sigma` answers 404 until the engine runs with `sigma.enabled` set, which is `DFE_SIGMA_ENABLED=true` in its environment. A `sigma` entry in a source's `views` is a field-map view and deploys either way.
+
 DFE turns community + commercial Sigma rules into live DFE detections. External
 feeds are pulled into an operator-curated catalogue; the operator SELECTS the
 rules they want; propagation then generates a DFE detection rule and a per-source

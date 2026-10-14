@@ -78,6 +78,8 @@ def test_updating_a_hunt_to_a_non_table_target_is_refused_and_keeps_the_old_one(
     assert stored["global_target_table_name"] == "dfe.detection"
 
 
+# The sigma routes mount only on a deployment that enables them.
+@pytest.mark.parametrize("sigma_enabled", [True])
 def test_propagating_sigma_rules_into_a_non_table_target_is_refused(
     client, app, admin_headers, tmp_path
 ):
