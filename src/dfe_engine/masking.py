@@ -17,13 +17,14 @@ shows those settings by the engine's own rules first, then asks scalo.
 
 scalo's :func:`~scalo.logger.filters.mask_url_userinfo` masks the password in
 ``scheme://user:password@host``, which runs to the last ``@`` the host follows, so a
-password holding ``@`` or ``/`` goes whole. :func:`url_passwords` finds the same
-passwords, so a written URL can be checked for one that hides its host.
+password holding ``@`` or ``/`` goes whole. scalo's
+:func:`~scalo.logger.filters.url_passwords` lists the passwords that masker replaces,
+and :func:`hides_a_host` checks a written URL for one that hides its host.
 """
 
 import re
 
-from scalo.logger.filters import is_credential_name
+from scalo.logger.filters import is_credential_name, url_passwords
 
 _NAME_WORD = re.compile(r"[A-Z]+(?![a-z])|[A-Z]?[a-z]+|[0-9]+")
 """One word of a name: an acronym, a capitalised or lower-case run, or digits.
@@ -99,16 +100,6 @@ beside its secret. A list of that name holds placements instead, and each entry'
 fields are judged by name.
 """
 
-_URL_PASSWORD = re.compile(
-    r"(?P<head>://[^\s:/@]*:)(?P<password>(?:(?!://)\S)*)(?=@[^\s@/?#]*(?:[/?#\s]|\Z))"
-)
-"""The ``user:password`` of a URL, anywhere in a string, as scalo's masker reads it.
-
-The password runs to the last ``@`` that a host follows, so one holding ``@`` or ``/``
-is matched whole. It never runs past whitespace or the next ``://``, so each scan ends
-where the next starts and a long string is read in linear time.
-"""
-
 _AUTHORITY_ENDS = frozenset("/?#\\")
 """Characters that end a URL's authority, so a host a client reads can sit after one."""
 
@@ -147,11 +138,6 @@ def credential_name(name: str, parent: str = "") -> bool:
     if stem != kept:
         spellings.append("_".join(stem))
     return any(is_credential_name(spelling, holder) for spelling in spellings)
-
-
-def url_passwords(text: str) -> list[str]:
-    """Every non-empty URL password in ``text``, as scalo's ``mask_url_userinfo`` masks them."""
-    return [found["password"] for found in _URL_PASSWORD.finditer(text) if found["password"]]
 
 
 def hides_a_host(text: str) -> bool:
