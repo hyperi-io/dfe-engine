@@ -104,8 +104,8 @@ def test_a_plain_source_compiles_quoted_into_the_insert_and_the_count(
         entry_source=source if where == "entry" else "",
     )
 
-    assert f"\nFROM {quoted}\n" in statement.sql
-    assert f"\nFROM {quoted}\n" in statement.count_sql
+    assert f"\n    FROM {quoted}\n" in statement.sql
+    assert f"\n    FROM {quoted}\n" in statement.count_sql
     assert statement.sql.startswith("INSERT INTO `dfe`.`detection`\n")
 
 
@@ -114,8 +114,8 @@ def test_a_rule_files_bare_database_and_table_compile_quoted(tmp_path: Path):
 
     [statement] = _compile(tmp_path, hunt_source="dfe.main")
 
-    assert "\nFROM `acme`.`windows_audit`\n" in statement.sql
-    assert "\nFROM `acme`.`windows_audit`\n" in statement.count_sql
+    assert "\n    FROM `acme`.`windows_audit`\n" in statement.sql
+    assert "\n    FROM `acme`.`windows_audit`\n" in statement.count_sql
     assert statement.summary_params["dfe_source_table"] == "windows_audit"
 
 
@@ -192,7 +192,7 @@ def test_one_refused_rule_leaves_the_hunts_other_rules_compiling(tmp_path: Path)
         rules_dir=tmp_path,
     )
 
-    assert [statement.sql.split("\nFROM ")[1].splitlines()[0] for statement in statements] == [
+    assert [statement.sql.split("\n    FROM ")[1].splitlines()[0] for statement in statements] == [
         "`dfe`.`main`"
     ]
 
@@ -211,4 +211,4 @@ def test_the_insert_builder_quotes_whatever_source_it_is_handed():
         severity="low",
     )
 
-    assert "\nFROM `dfe`.`main) -- ```\nWHERE " in sql
+    assert "\n    FROM `dfe`.`main) -- ```\n    WHERE " in sql

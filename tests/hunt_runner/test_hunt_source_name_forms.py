@@ -82,8 +82,8 @@ def test_a_hyphenated_source_compiles_quoted(tmp_path: Path, where, source, quot
 
     assert errors == []
     [statement] = statements
-    assert f"\nFROM {quoted}\n" in statement.sql
-    assert f"\nFROM {quoted}\n" in statement.count_sql
+    assert f"\n    FROM {quoted}\n" in statement.sql
+    assert f"\n    FROM {quoted}\n" in statement.count_sql
 
 
 def test_a_rule_files_hyphenated_table_compiles_quoted(tmp_path: Path):
@@ -95,7 +95,7 @@ def test_a_rule_files_hyphenated_table_compiles_quoted(tmp_path: Path):
         rules_dir=tmp_path,
     )
 
-    assert "\nFROM `dfe`.`windows-audit_sigma`\n" in statement.sql
+    assert "\n    FROM `dfe`.`windows-audit_sigma`\n" in statement.sql
     assert statement.summary_params["dfe_source_table"] == "windows-audit_sigma"
 
 
@@ -140,8 +140,8 @@ def test_the_runner_reads_an_unqualified_source_from_its_data_database(
 
     assert errors == []
     [statement] = specs["bare"].queries
-    assert f"\nFROM {quoted}\n" in statement.sql
-    assert f"\nFROM {quoted}\n" in statement.count_sql
+    assert f"\n    FROM {quoted}\n" in statement.sql
+    assert f"\n    FROM {quoted}\n" in statement.count_sql
     # The default target lands in the same data database.
     assert statement.sql.startswith("INSERT INTO `tenant_a`.`detection`\n")
 
@@ -154,7 +154,7 @@ def test_a_rule_files_bare_table_is_read_from_the_data_database(tmp_path: Path):
     specs = load_specs(tmp_path / "hunts", **_runner_sources(rules_dir, "tenant_a"))
 
     [statement] = specs["bare"].queries
-    assert "\nFROM `tenant_a`.`cisco-ios`\n" in statement.sql
+    assert "\n    FROM `tenant_a`.`cisco-ios`\n" in statement.sql
 
 
 def test_without_a_data_database_an_unqualified_source_still_has_none(tmp_path: Path):

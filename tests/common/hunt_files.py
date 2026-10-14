@@ -38,14 +38,14 @@ def write_rule(
         registry.close()
 
 
-def write_hunt(hunts_dir: Path, hunt: str, rule_id: str, db: str) -> None:
+def write_hunt(hunts_dir: Path, hunt: str, rule_id: str, db: str, *, source: str = "main") -> None:
     """Write one hunt file exactly as POST /api/v1/hunts writes it, firing every minute."""
     body = HuntCreateRequest(
         name=hunt,
         cron="* * * * *",
         rules=[rule_id],
         customers=["acme"],
-        global_source_table_name=f"{db}.main",
+        global_source_table_name=f"{db}.{source}",
         global_target_table_name=f"{db}.detection",
     )
     hunts_dir.mkdir(parents=True, exist_ok=True)

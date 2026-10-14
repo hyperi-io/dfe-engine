@@ -11,13 +11,16 @@ A hunt written by ``POST /api/v1/hunts`` carries rule NAMES, never SQL. This is
 the missing half of that path: each named rule's detection WHERE clause, plus the
 hunt's source and target, become one
 
-    INSERT INTO <target> (...) SELECT ... FROM <source> WHERE {window} AND (<rule>)
-    LIMIT <cap>
+    INSERT INTO <target> (...) SELECT ... FROM (
+        SELECT <columns> FROM <source> WHERE {window} AND (<rule>)
+    ) LIMIT <cap>
 
 composed by :class:`~dfe_engine.hunts.hunt_output.HuntResultSchema`, so hunt output
 keeps the schema's shape instead of a second definition of it. One statement per
 rule, because rule id, rule name and severity are literals in the SELECT and a
-merged statement could not carry a different set per matched row.
+merged statement could not carry a different set per matched row. Those labels
+sit outside the subquery the rule runs in, so a rule on a source column named
+``severity`` or ``rule_id`` reads the column, not the label.
 
 The LIMIT is the per-rule, per-run detection cap. A rule that matches everything
 would otherwise write its whole window into the detection table on every fire.
@@ -46,7 +49,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.quoting import plain_source_name, plain_table_name, quote_identifier
-from dfe_engine.hunts.hunt_output import HuntResultSchema
+from dfe_engine.hunts.hunt_output import HuntResultSchema, matching_rows
 from dfe_engine.hunts.rule_guard import refuse_offbox_calls
 from dfe_engine.hunts.rule_names import RuleNameError, rule_file
 from dfe_engine.hunts.rule_rewriter import RuleRewriter, strip_time_placeholder
@@ -66,6 +69,9 @@ NIL_UUID = "00000000-0000-0000-0000-000000000000"
 # the count reaches the row inside the summary JSON the worker builds.
 MATCHED = "dfe_matched"
 SUMMARY = "dfe_summary"
+
+# Source columns the count aggregates over, read inside the subquery the rule runs in.
+_COUNT_COLUMNS = ("_timestamp_load", "_timestamp", "_org_id")
 
 # How the summary row fills each column the detection INSERT names. The window
 # columns come off the count, so the row sorts beside the detections it stands for.
@@ -136,17 +142,18 @@ def _detection_clause(payload: dict[str, Any], rewriter: RuleRewriter) -> tuple[
 def _count_sql(source_db: str, source_table: str, where: str) -> str:
     """Every match in the window, plus what the summary row is stamped with.
 
-    Aliased ``dfe_*`` so no alias shadows a source column the rule's WHERE reads. The
-    org is named only when every match shares one, because the count spans tenants.
+    The rule runs in the same subquery the INSERT reads, so none of the count's
+    aliases is in scope for it. The org is named only when every match shares one,
+    because the count spans tenants.
     """
+    matched = matching_rows(source_db, source_table, _COUNT_COLUMNS, where, WINDOW_TOKEN)
     return (
         f"SELECT\n"
         f"    count() AS {MATCHED},\n"
         f"    toUnixTimestamp64Milli(toDateTime64(max(_timestamp), 3)) AS dfe_last_ts,\n"
         f"    toUnixTimestamp64Milli(toDateTime64(max(_timestamp_load), 3)) AS dfe_last_load,\n"
         f"    if(min(_org_id) = max(_org_id), min(_org_id), '') AS dfe_org\n"
-        f"FROM {quote_identifier(source_db)}.{quote_identifier(source_table)}\n"
-        f"WHERE {WINDOW_TOKEN} AND ({where})"
+        f"FROM {matched}"
     )
 
 

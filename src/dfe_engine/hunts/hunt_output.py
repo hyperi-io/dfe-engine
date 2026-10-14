@@ -8,6 +8,11 @@ This replaces hardcoded INSERT/SELECT templates with a schema-driven
 approach. The output is always lean: common header columns + matched record
 UUID + rule metadata + _json copy of the matched record.
 
+The rule's WHERE runs in a subquery over the source, and the rule metadata is
+projected outside it. ClickHouse resolves a name in WHERE to a SELECT alias
+before a column, so a ``'high' AS severity`` beside the rule would stand in for
+a source's own ``severity`` column.
+
 Usage:
     from dfe_engine.hunts.hunt_output import HuntResultSchema
 
@@ -22,6 +27,7 @@ Usage:
     )
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 from scalo.logger import logger
@@ -56,7 +62,7 @@ class HuntDetectionColumn:
     """A hunt-specific detection column."""
 
     name: str
-    select_expr: str | None = None  # None = literal value injected at query time
+    select_expr: str | None = None  # source column copied; None = literal injected at query time
     ch_type: str = "LowCardinality(String)"
     codec: str = "ZSTD(1)"
     comment: str = ""
@@ -102,6 +108,44 @@ RESULTS_TABLE_COLUMNS: frozenset[str] = (
     | frozenset(dc.name for dc in HUNT_DETECTION_COLUMNS)
     | frozenset({"_json"})
 )
+
+
+def matching_rows(
+    source_db: str,
+    source_table: str,
+    columns: Sequence[str],
+    where_clause: str,
+    timestamp_placeholder: str,
+) -> str:
+    """Build the subquery yielding ``columns`` of the source rows the window and rule match.
+
+    The rule runs where only the source table's own columns are in scope, so no
+    alias the outer query gives a label or a count can shadow one it reads.
+
+    Args:
+        source_db: Source database, backtick-quoted here.
+        source_table: Source table, backtick-quoted here.
+        columns: Source columns the outer query reads, by name and never aliased.
+        where_clause: Detection logic (without time bounds).
+        timestamp_placeholder: Placeholder for checkpoint time bounds.
+
+    Returns:
+        The parenthesised subquery, to follow ``FROM``.
+    """
+    where_parts = [timestamp_placeholder]
+    if where_clause.strip():
+        where_parts.append(f"({where_clause.strip()})")
+    condition = " AND ".join(where_parts)
+    # Named, never *, which leaves out a MATERIALIZED or ALIAS column such as a source's _uuid.
+    selected = ", ".join(columns)
+    # Source is hunt configuration text, so it can only ever name a table.
+    source = f"{quote_identifier(source_db)}.{quote_identifier(source_table)}"
+    return (
+        f"(\n    SELECT {selected}\n"  # noqa: S608 - quoted source; schema column names; the condition is the rule itself
+        f"    FROM {source}\n"
+        f"    WHERE {condition}\n"
+        f")"
+    )
 
 
 class HuntResultSchema:
@@ -152,6 +196,14 @@ class HuntResultSchema:
         """
         cols = [col.name for col in self._header_copy_columns]
         cols.extend(dc.name for dc in HUNT_DETECTION_COLUMNS)
+        if self._include_json_copy and self._has_json:
+            cols.append("_json")
+        return cols
+
+    def _source_columns(self) -> list[str]:
+        """Source columns the SELECT expression reads, in the order it reads them."""
+        cols = [col.name for col in self._header_copy_columns]
+        cols.extend(dc.select_expr for dc in HUNT_DETECTION_COLUMNS if dc.select_expr)
         if self._include_json_copy and self._has_json:
             cols.append("_json")
         return cols
@@ -225,7 +277,9 @@ class HuntResultSchema:
 
         This is the primary method for generating hunt rule SQL.
         The WHERE clause should contain the detection logic only --
-        time bounds are injected via the timestamp placeholder.
+        time bounds are injected via the timestamp placeholder. Both run in
+        a subquery over the source (:func:`matching_rows`), so the rule reads
+        the source's own ``severity`` rather than the label of that name.
 
         Args:
             target_db: Target database (usually org_id), backtick-quoted here.
@@ -251,22 +305,14 @@ class HuntResultSchema:
             severity=severity,
         )
 
-        # Compose WHERE: timestamp condition AND detection logic
-        where_parts = [timestamp_placeholder]
-        if where_clause.strip():
-            where_parts.append(f"({where_clause.strip()})")
-        full_where = " AND ".join(where_parts)
+        matched = matching_rows(
+            source_db, source_table, self._source_columns(), where_clause, timestamp_placeholder
+        )
 
-        # Source and target are hunt configuration text, so each can only ever name a table.
+        # Target is hunt configuration text, so it can only ever name a table.
         target = f"{quote_identifier(target_db)}.{quote_identifier(target_table)}"
-        source = f"{quote_identifier(source_db)}.{quote_identifier(source_table)}"
         return (
-            f"INSERT INTO {target}\n"
-            f"    ({insert_cols})\n"
-            f"SELECT\n"
-            f"    {select_expr}\n"
-            f"FROM {source}\n"
-            f"WHERE {full_where}"
+            f"INSERT INTO {target}\n    ({insert_cols})\nSELECT\n    {select_expr}\nFROM {matched}"
         )
 
     def result_table_columns(self) -> list[dict]:

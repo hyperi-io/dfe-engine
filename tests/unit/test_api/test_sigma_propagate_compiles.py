@@ -91,6 +91,6 @@ def test_a_propagated_hunt_compiles_over_its_sigma_view(
 
     [statement] = specs[_HUNT].queries
     assert statement.rule_id == _BINDING
-    assert f"\nFROM `{database}`.`windows-audit_sigma`\n" in statement.sql
+    assert f"\n    FROM `{database}`.`windows-audit_sigma`\n" in statement.sql
     assert "Image ILIKE" in statement.sql
     assert statement.sql.startswith(f"INSERT INTO `{database}`.`detection`\n")

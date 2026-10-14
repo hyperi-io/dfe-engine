@@ -52,7 +52,7 @@ def test_a_hunt_over_a_hyphenated_source_saves_and_compiles(client, admin_header
     assert hunt.status_code == 201, hunt.text
 
     [statement] = _runner_specs(api_settings)["cisco_hunt"].queries
-    assert "\nFROM `dfe`.`cisco-ios`\n" in statement.sql
+    assert "\n    FROM `dfe`.`cisco-ios`\n" in statement.sql
     assert "process_name = 'certutil.exe'" in statement.sql
 
 
@@ -76,5 +76,5 @@ def test_a_hunt_over_a_bare_source_compiles_against_the_data_database(
 
     database = api_settings.clickhouse.effective_data_database
     [statement] = _runner_specs(api_settings)["bare_hunt"].queries
-    assert f"\nFROM `{database}`.`main`\n" in statement.sql
+    assert f"\n    FROM `{database}`.`main`\n" in statement.sql
     assert statement.sql.startswith(f"INSERT INTO `{database}`.`detection`\n")
