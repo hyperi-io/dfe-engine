@@ -96,8 +96,8 @@ def another_admin_exists(
 ) -> bool:
     """True when an account other than the seeded pair can sign in holding the admin role.
 
-    The precondition for retirement, and the hint the wizard enables its button
-    from -- one predicate, so the UI cannot offer what the API refuses. Neither
+    The precondition for retirement, and the hint setup-status reports -- one
+    predicate, so the hint never offers what the API refuses. Neither
     the bootstrap admin nor ``breakglass`` counts: retiring onto the recovery
     credential is what this exists to avoid. Only a system-scope group counts --
     an org-scoped group's roles bind inside that org, so its members cannot run

@@ -22,6 +22,7 @@ from dulwich import porcelain
 from dulwich.repo import Repo
 
 from dfe_engine.auth import account_durability as ad
+from dfe_engine.auth import breakglass
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.gitcrud.auto_merge import set_stored
 from dfe_engine.gitcrud.engine import GitCrud
@@ -333,20 +334,114 @@ def test_read_remote_file_none_without_remote(tmp_path):
     assert repo.read_remote_file("governance/rbac/accounts/admin.yaml") is None
 
 
-# ── Break-glass gating (only the admin is git-persisted) ─────
+# ── Local admin gating (only the admin's doc is git-persisted) ─────
 
 
-def test_is_break_glass_matches_the_admin(monkeypatch):
+def test_is_local_admin_matches_the_admin(monkeypatch):
     # The configured name is REQUIRED: an empty string is the built-in default.
-    assert ad.is_break_glass("admin", "") is True
-    assert ad.is_break_glass("alice", "") is False
+    assert ad.is_local_admin("admin", "") is True
+    assert ad.is_local_admin("alice", "") is False
+    # breakglass keeps a hash in the governance settings, not an account doc.
+    assert ad.is_local_admin("breakglass", "") is False
 
 
-def test_is_break_glass_follows_the_configured_admin_name():
-    # DFE_AUTH_LOCAL_ADMIN_NAME renames the break-glass account; without the name
-    # threaded through, the renamed account loses its git-durability path entirely.
-    assert ad.is_break_glass("root", "root") is True
-    assert ad.is_break_glass("admin", "root") is False
+def test_is_local_admin_follows_the_configured_admin_name():
+    # DFE_AUTH_LOCAL_ADMIN_NAME renames the admin; without the name threaded
+    # through, the renamed account loses its git-durability path entirely.
+    assert ad.is_local_admin("root", "root") is True
+    assert ad.is_local_admin("admin", "root") is False
+
+
+# ── breakglass: one hash in the governance settings ──────────
+
+
+def _breakglass_live(tmp_path: Path, password_hash: str) -> AccountStore:
+    store = AccountStore(tmp_path / "live")
+    store.put(_account(username=breakglass.USERNAME, password_hash=password_hash))
+    return store
+
+
+def test_breakglass_hash_without_gitops_is_a_no_op():
+    outcome = ad.publish_breakglass_hash(
+        None, None, environment=DEV, mode="solo", digest=_HASH_B, summary="x", actor="a"
+    )
+    assert outcome is None
+    assert ad.state_from_outcome(None, outcome) == account_durability_file_share()
+
+
+def test_breakglass_hash_commits_straight_to_main_in_dev(tmp_path):
+    gc = _gc(tmp_path)
+    breakglass.mint_hash(gc, "first-boot-password")
+
+    outcome = ad.publish_breakglass_hash(
+        gc, None, environment=DEV, mode="solo", digest=_HASH_B, summary="reset", actor="kay"
+    )
+
+    assert outcome is not None
+    assert outcome.review_required is False
+    assert breakglass.stored_hash(gc) == _HASH_B
+    state = ad.breakglass_state(
+        gc, _breakglass_live(tmp_path, _HASH_B), environment=DEV, mode="solo"
+    )
+    assert (state.enabled, state.committed, state.merged) == (True, True, True)
+
+
+def test_breakglass_hash_waits_on_a_pr_in_production_team(tmp_path):
+    gc = _gc(tmp_path)
+    breakglass.mint_hash(gc, "first-boot-password")
+    before = breakglass.stored_hash(gc)
+    forge = _FakeForge()
+
+    outcome = ad.publish_breakglass_hash(
+        gc, forge, environment=PROD, mode="team", digest=_HASH_B, summary="reset", actor="kay"
+    )
+
+    assert outcome is not None
+    assert outcome.review_required is True
+    assert forge.opened
+    state = ad.state_from_outcome(gc, outcome)
+    assert state.pending is not None
+    assert state.pending.pr_url == "http://forge.local/pr/7"
+    # main keeps the old hash until the review merges.
+    assert breakglass.stored_hash(gc) == before
+    live = _breakglass_live(tmp_path, _HASH_B)
+    assert ad.breakglass_state(gc, live, environment=PROD, mode="team").merged is False
+
+
+def test_breakglass_hash_without_a_forge_hands_back_the_merge_command(tmp_path):
+    gc = _gc(tmp_path)
+    breakglass.mint_hash(gc, "first-boot-password")
+    before = breakglass.stored_hash(gc)
+
+    outcome = ad.publish_breakglass_hash(
+        gc, None, environment=PROD, mode="team", digest=_HASH_B, summary="reset", actor="kay"
+    )
+
+    assert outcome is not None
+    assert outcome.branch
+    state = ad.state_from_outcome(gc, outcome)
+    assert state.pending is not None
+    assert state.pending.pr_url is None
+    assert f"git merge --no-ff {outcome.branch}" in (state.pending.command or "")
+    assert breakglass.stored_hash(gc) == before
+
+
+def test_breakglass_state_follows_the_remote(tmp_path):
+    remote = GitopsRepo(local_path=str(tmp_path / "remote"), repo_url="", push=False)
+    remote_gc = GitCrud(remote)
+    remote_gc.set_key(breakglass.CLASS, breakglass.NAME, breakglass.KEY_HASH, _HASH_A, "seed")
+    branch = porcelain.active_branch(str(remote.path)).decode()
+    engine = GitopsRepo(
+        local_path=str(tmp_path / "engine"), repo_url=str(remote.path), push=False, branch=branch
+    )
+    engine_gc = GitCrud(engine)
+    live = _breakglass_live(tmp_path, _HASH_B)
+
+    assert ad.breakglass_state(engine_gc, live, environment=PROD, mode="team").merged is False
+
+    # The operator merges the review: remote main now carries the new hash.
+    remote_gc.set_key(breakglass.CLASS, breakglass.NAME, breakglass.KEY_HASH, _HASH_B, "merge")
+    assert ad.breakglass_state(engine_gc, live, environment=PROD, mode="team").merged is True
 
 
 def test_not_git_backed_state_is_durable():

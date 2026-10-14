@@ -1381,8 +1381,8 @@ class HelmSettings(BaseModel):
 class SeedAccount(BaseModel):
     """One named local account seeded + RECONCILED on every bootstrap.
 
-    Unlike the break-glass admin (seeded only into an empty store), each seed
-    account is reconciled on every startup: the configured password and groups
+    Unlike the local admin, whose owner's own password survives a restart, each
+    seed account is reconciled on every startup: the configured password and groups
     WIN, so a full teardown+rebuild restores the exact shared team logins
     unchanged (dfe-infra #106). A runtime password change to a seed account is
     therefore reasserted to the configured value on the next rebuild -- these are
@@ -1445,10 +1445,10 @@ class LocalAuthSettings(BaseModel):
     admin_password_secret_path: str = Field(
         default="",
         description=(
-            "scalo.secrets path the deployment sources the admin password from. Set "
-            "= the rotation endpoint writes the new password through the secrets "
-            "seam; empty = rotation is a store operation and the endpoint returns "
-            "501 with the command. DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH."
+            "Where in the secret store the deployment keeps the admin password. Set "
+            "= the rotation endpoint writes the new password there; empty = the "
+            "password is changed where the deployment keeps it, and the endpoint "
+            "returns 501 with the command. DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH."
         ),
     )
     admin_secret_name: str = Field(
@@ -1615,8 +1615,8 @@ class AuthSettings(BaseModel):
             "Central backend for BOTH local users and groups (config-cascade "
             "overridable): 'auto' (default -- document when a reachable URI is "
             "configured, else yaml files), 'document' (force; fail if unreachable), "
-            "or 'yaml'. gitcrud is not a store here -- only the break-glass admin is "
-            "additionally git-persisted, as the teardown backstop."
+            "or 'yaml'. gitcrud is not a store here -- only the local admin and the "
+            "break-glass hash are additionally git-persisted, as the teardown backstop."
         ),
     )
     accounts_store: AccountStoreSettings = Field(default_factory=AccountStoreSettings)

@@ -499,9 +499,10 @@ def retire_bootstrap_admin(
     ends the reseed: the account stays disabled, the password may be deleted, and
     ``breakglass`` is the recovery path.
 
-    Refused unless the deployment already has an enabled admin-role account of its
-    own -- ``retire_admin_available`` on the setup status is the same predicate, so
-    the wizard only offers what this accepts. Returns the setup status, which now
+    The console keeps the bootstrap admin. Retiring it is an operator's policy
+    choice made here. Refused unless the deployment already has an enabled
+    admin-role account of its own -- ``retire_admin_available`` on the setup status
+    is the same predicate. Returns the setup status, which now
     reports ``admin_retired``. Reversal is not an API: remove ``admin_retired``
     from ``governance/settings/auth.yaml`` in the deploy repo and restart.
     """
