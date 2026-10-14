@@ -138,7 +138,7 @@ _template_overrides: dict[str, dict[str, Any]] = {
             },
             "tls": {
                 "enabled": True,
-                "ca_file": "/etc/tls/kafka-ca.crt",
+                "ca_cert_file": "/etc/tls/kafka-ca.crt",
                 "cert_file": None,
                 "key_file": None,
                 "skip_verify": False,

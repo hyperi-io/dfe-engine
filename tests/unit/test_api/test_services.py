@@ -376,6 +376,48 @@ class TestAConfigStoredBeforeAKeyWasRetired:
         assert "ch-pw-8815" not in resp.text
 
 
+_LOADER_CA = "/etc/dfe/kafka-ca.pem"
+
+
+@pytest.fixture
+def loader_stored_in_the_receiver_s_spelling(api_settings: DFESettings) -> None:
+    """A loader file as the engine wrote it with the receiver's CA key and the field name."""
+    services = Path(api_settings.services.config_yaml_dir)
+    (services / "loader-tls.yaml").write_text(
+        f"kafka:\n  tls:\n    enabled: true\n    ca_file: {_LOADER_CA}\n"
+        "schema_cache:\n  cache_ttl_secs: 60\n",
+        encoding="utf-8",
+    )
+
+
+class TestTheLoaderCaRoundTrips:
+    """The loader's CA path is read back and written as dfe-loader reads it."""
+
+    URL = "/api/v1/services/loader/tls"
+    CA = _LOADER_CA
+
+    def test_a_read_written_back_keeps_the_ca_under_the_loader_s_key(
+        self, loader_stored_in_the_receiver_s_spelling, client, admin_headers, api_settings
+    ):
+        resp = client.get(self.URL, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        shown = resp.json()["config"]
+        assert shown["kafka"]["tls"]["ca_cert_file"] == self.CA
+        assert shown["schema"]["cache_ttl_secs"] == 60
+
+        assert client.put(self.URL, json=shown, headers=admin_headers).status_code == 200
+        saved = _saved(api_settings, "loader-tls")
+        assert saved["kafka"]["tls"] == {
+            "enabled": True,
+            "ca_cert_file": self.CA,
+            "cert_file": None,
+            "key_file": None,
+            "skip_verify": False,
+        }
+        assert saved["schema"]["cache_ttl_secs"] == 60
+        assert "schema_cache" not in saved
+
+
 class TestServicesSeed:
     def test_seed(self, client, admin_headers):
         resp = client.post("/api/v1/services/seed", headers=admin_headers)

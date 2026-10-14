@@ -1,13 +1,12 @@
 """Tests for ServiceConfigRegistry — CRUD, validation, list, schema-less mode."""
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.services.registry import (
     ConfigNotFoundError,
     ServiceConfigRegistry,
 )
+from dfe_engine.yaml_utils import yaml_load_string
 from tests.support.git_repos import own_repo
 
 
@@ -151,6 +150,48 @@ class TestSaveConfig:
             assert yaml_file.stat().st_size > 0
         finally:
             reg.close()
+
+    def test_a_loader_ca_is_written_where_the_loader_reads_it(self, registry, tmp_path):
+        tls = {"enabled": True, "ca_cert_file": "/etc/dfe/kafka-ca.pem"}
+        registry.save_config("loader", {"kafka": {"tls": tls}, "clickhouse": {"tls": tls}})
+
+        on_disk = yaml_load_string((tmp_path / "services" / "loader-default.yaml").read_text())
+        for block in ("kafka", "clickhouse"):
+            assert on_disk[block]["tls"]["ca_cert_file"] == "/etc/dfe/kafka-ca.pem"
+            assert "ca_file" not in on_disk[block]["tls"]
+        assert on_disk["schema"] == {"cache_ttl_secs": 300, "refresh_on_error": True}
+        assert "schema_cache" not in on_disk
+
+    def test_a_loader_file_in_the_old_spelling_loads_and_saves_in_the_loader_s(self, tmp_path):
+        svc_dir = tmp_path / "svc_old_loader"
+        svc_dir.mkdir()
+        (svc_dir / "loader-default.yaml").write_text(
+            "kafka:\n"
+            "  tls:\n"
+            "    enabled: true\n"
+            "    ca_file: /etc/dfe/kafka-ca.pem\n"
+            "schema_cache:\n"
+            "  cache_ttl_secs: 60\n"
+        )
+        reg = ServiceConfigRegistry(config_directory=svc_dir, refresh_interval=0)
+        try:
+            config = reg.get_config("loader", "default")
+            assert config.kafka.tls.ca_cert_file == "/etc/dfe/kafka-ca.pem"
+            reg.save_config("loader", config)
+
+            on_disk = yaml_load_string((svc_dir / "loader-default.yaml").read_text())
+            assert on_disk["kafka"]["tls"]["ca_cert_file"] == "/etc/dfe/kafka-ca.pem"
+            assert on_disk["schema"]["cache_ttl_secs"] == 60
+        finally:
+            reg.close()
+
+    def test_a_receiver_ca_keeps_the_receiver_s_key(self, registry, tmp_path):
+        tls = {"enabled": True, "ca_file": "/etc/dfe/kafka-ca.pem"}
+        registry.save_config("receiver", {"kafka": {"brokers": ["kafka:9092"], "tls": tls}})
+
+        on_disk = yaml_load_string((tmp_path / "services" / "receiver-default.yaml").read_text())
+        assert on_disk["kafka"]["tls"]["ca_file"] == "/etc/dfe/kafka-ca.pem"
+        assert "ca_cert_file" not in on_disk["kafka"]["tls"]
 
 
 # ---------------------------------------------------------------------------
