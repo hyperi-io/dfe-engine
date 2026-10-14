@@ -285,14 +285,16 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         allowed = breakglass.is_enabled(gc)
         audit_breakglass_login(client_ip, allowed, "" if allowed else "disabled")
         if not allowed:
+            # Only a deploy repo can turn the account off, so there is one to name.
+            where = request.app.state.gitcrud.resource_class(breakglass.CLASS)
             raise HTTPException(
                 status_code=403,
                 detail={
                     "code": "breakglass_disabled",
                     "message": (
-                        "The break-glass account is disabled in governance settings "
-                        f"({breakglass.CLASS}/{breakglass.NAME}, {breakglass.KEY_ENABLED}). "
-                        "Re-enable it there to use it."
+                        "The break-glass account is turned off. To turn it back on, set "
+                        f"{breakglass.KEY_ENABLED} to true in "
+                        f"{where.directory}/{breakglass.NAME}{where.suffix} in the deploy repo."
                     ),
                 },
             )

@@ -969,7 +969,7 @@ async def rotate_password(
         raise HTTPException(
             status_code=501,
             detail={
-                "code": "secrets_seam_not_wired",
+                "code": "admin_password_kept_outside_dfe",
                 "message": (
                     "This deployment keeps the admin password outside DFE, so change "
                     f"it where it is stored: {command}"

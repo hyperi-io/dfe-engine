@@ -321,6 +321,10 @@ class TestSourceFetcher:
             ({"auth": {"key": "k-4465"}}, "auth.key"),
             ({"auth": {"credentials": {"pair_a": "pa-4466"}}}, "auth.credentials.pair_a"),
             ({"auth": {"service_account_key": '{"private_key": "x"}'}}, "auth.service_account_key"),
+            (
+                {"auth": {"oauth2_client_credentials": {"client_secret": "cs-4467"}}},
+                "auth.oauth2_client_credentials.client_secret",
+            ),
         ],
     )
     def test_a_literal_credential_in_any_spelling_is_refused(self, config, where):
@@ -334,7 +338,14 @@ class TestSourceFetcher:
             {"service_account_key": "/etc/gcp/sa-key.json"},
             {"connections": [{"id": "a", "service_account_key": "/etc/gcp/a.json"}]},
             {"auth": {"service_account_key_file": "/etc/gcp/sa.json", "private_key_id": "kid-1"}},
-            {"auth": {"oauth2_client_credentials": {"token_url": "https://idp.example/token"}}},
+            {
+                "auth": {
+                    "oauth2_client_credentials": {
+                        "token_url": "https://idp.example/token",
+                        "scope": "logs.read",
+                    }
+                }
+            },
             {
                 "auth": {
                     "session_login": {
@@ -346,6 +357,7 @@ class TestSourceFetcher:
             },
             {"auth": {"credentials": [{"header": "X-Key", "value": "{{ credentials.pair_a }}"}]}},
             {"auth": {"credentials": {"pair_a": "vault:kv/dfe/pair:a"}}},
+            {"auth": {"password_env": "FETCHER_PASSWORD", "api_token_env": "FETCHER_TOKEN"}},
         ],
     )
     def test_a_setting_beside_a_credential_word_is_accepted(self, config):
