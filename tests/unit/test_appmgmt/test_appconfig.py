@@ -197,6 +197,70 @@ class TestWhatTheContainerReads:
 
         assert _rendered(settings, VRL)["source"]["topics"] == []
 
+    def test_a_null_never_reaches_the_file_a_rust_app_reads(self, crud, tmp_path):
+        # dfe-loader reads all three as plain Strings, which a strict YAML parser refuses a null for.
+        settings = _settings(tmp_path)
+        _base(settings, LOADER, "kafka:\n  group:\n  client_id: dfe-loader\n  topics: []\n")
+        # An overlay null over a base value clears it, as it does over a chart default.
+        _deploy(crud, LOADER, config__kafka__client_id=None, config__routing__default_db=None)
+
+        appconfig.render(crud, settings)
+
+        config = _rendered(settings, LOADER)
+        assert _null_paths(config) == []
+        assert config["kafka"] == {"topics": []}
+        assert "default_db" not in config.get("routing", {})
+
+    def test_a_rule_compiled_with_no_value_names_no_match_value(self, crud, tmp_path):
+        # dfe-receiver's SourceRule.match_value is Option<String> with a serde default.
+        settings = _settings(tmp_path)
+        source = Source.model_validate(
+            {
+                "source": "edr",
+                "state": "active",
+                "match": {"field": "edr.vendor", "operator": "exists"},
+            }
+        )
+        app = instances.instance_of(RECEIVER, "default")
+        doc = instances.initial_overlay(app)
+        routing.sync(app.descriptor, doc, FakeRegistry([source]), settings)
+        _put(crud, app, doc)
+
+        appconfig.render(crud, settings)
+
+        config = _rendered(settings, RECEIVER)
+        assert config["routing"]["source_rules"] == [
+            {"field": "edr.vendor", "mode": "key_present", "source": "edr"}
+        ]
+        assert _null_paths(config) == []
+
+    def test_nulls_are_left_out_at_any_depth_and_list_entries_stay_in_place(self):
+        config = {
+            "a": None,
+            "b": {"c": None, "d": [{"e": None, "f": 1}, None, "g"]},
+            "h": {"i": None},
+        }
+
+        assert appconfig.without_nulls(config) == {"b": {"d": [{"f": 1}, None, "g"]}, "h": {}}
+        # The render's own merged dict is left as it was.
+        assert config["a"] is None
+
+
+def _null_paths(node, path: str = "") -> list[str]:
+    """Every mapping key in a parsed config whose value is null, as a dot path."""
+    if isinstance(node, dict):
+        found = []
+        for key, value in node.items():
+            sub = f"{path}.{key}" if path else str(key)
+            found.extend([sub] if value is None else _null_paths(value, sub))
+        return found
+    if isinstance(node, list):
+        found = []
+        for i, value in enumerate(node):
+            found.extend(_null_paths(value, f"{path}[{i}]"))
+        return found
+    return []
+
 
 class TestFileSets:
     """A per-config app's file sets sit under its own instance directory."""

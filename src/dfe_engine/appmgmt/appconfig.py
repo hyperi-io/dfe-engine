@@ -18,6 +18,7 @@ and writes the app's own config file into one directory per app, which Compose
 mounts read-only into the container. The base is the deployment's - brokers,
 warehouse credentials, the dead-letter spool - and never reaches the deploy repo;
 the overlay is the governed half and wins wherever the two name the same key.
+A key whose merged value is null is left out of the file (``without_nulls``).
 
 A per-config app gets one directory per INSTANCE - ``<service>/<instance>/`` -
 because it runs one container per source and they must not read each other's
@@ -334,6 +335,27 @@ def write_custom_env(settings: Any, container: str, env: dict[str, Any]) -> bool
     return True
 
 
+def without_nulls(value: Any) -> Any:
+    """A copy of ``value`` with every mapping key whose value is None left out, at any depth.
+
+    A strict YAML parser refuses a null for a Rust String field and stops the app at
+    startup, while a key left out takes the field's own default, which is what Helm
+    makes of a null that clears a chart default on Kubernetes. A None that is a list
+    entry stays, so no entry moves position.
+
+    Args:
+        value: A merged config, or any part of one.
+
+    Returns:
+        The same shape with the null-valued keys gone; ``value`` itself is not changed.
+    """
+    if isinstance(value, dict):
+        return {key: without_nulls(item) for key, item in value.items() if item is not None}
+    if isinstance(value, list):
+        return [without_nulls(item) for item in value]
+    return value
+
+
 def _inner_path(path: str) -> str:
     """A manifest dot-path as it reads INSIDE the rendered file."""
     prefix = f"{CONFIG_ROOT}."
@@ -577,7 +599,7 @@ def _render_one(
     env_changed = write_custom_env(settings, container, custom_env(doc))
 
     target = app_dir / app.config_file
-    rendered = yaml_dump_string(config)
+    rendered = yaml_dump_string(without_nulls(config))
     previous = target.read_text(encoding="utf-8") if target.is_file() else None
     config_changed = previous != rendered
     # Rewritten when only a file set changed, so the file's mtime moves: the
