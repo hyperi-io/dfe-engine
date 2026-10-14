@@ -267,7 +267,7 @@ class BackingFacts(BaseModel):
 
 
 class ObservedSizing(BaseModel):
-    """A service's size as its own data plane reports it, read on each request.
+    """A service's size as its own data plane reports it, held briefly per service.
 
     Shown, never acted on. A field is null where its read failed or does not apply
     to the service, so a down broker or server blanks it rather than failing the read.
@@ -364,8 +364,9 @@ class BackingServiceConfig(BackingFacts):
     )
     observed: ObservedSizing | None = Field(
         description=(
-            "The size the service's own data plane reports, read on each request; "
-            "null where DFE runs the service, whose declared values are the answer."
+            "The size the service's own data plane reports, read at most every "
+            f"{observed.OBSERVED_TTL_SECONDS:g} seconds per service; null where DFE runs "
+            "the service, whose declared values are the answer."
         ),
     )
     limits: list[ProviderLimit] = Field(
@@ -467,8 +468,6 @@ def _config(request: Request, spec: BackingService) -> BackingServiceConfig:
 
     stated = _stated(request, spec)
     resolution = _resolution(spec, stated, lambda: docs)
-    # A self-run service's declared values are its size; only a managed one is read.
-    observe = spec.observe if resolution.managed_by is not ManagedBy.DFE else None
     return BackingServiceConfig(
         **_facts(stated, resolution),
         service=spec.service,
@@ -482,10 +481,25 @@ def _config(request: Request, spec: BackingService) -> BackingServiceConfig:
         storage_class=at(spec.storage_class),
         resources={p: at(p) for p in _RESOURCE_PATHS},
         read_only=list(resolution.read_only),
-        observed=observe(request.app.state.settings) if observe is not None else None,
+        observed=_observed(request, spec, resolution),
         limits=[],
         principals=[],
     )
+
+
+def _observed(
+    request: Request, spec: BackingService, resolution: Resolution
+) -> ObservedSizing | None:
+    """A managed service's size off its data plane, held per service; None where DFE runs it.
+
+    A self-run service's declared values are its size, so it is never read.
+    """
+    observe = spec.observe
+    if observe is None or resolution.managed_by is ManagedBy.DFE:
+        return None
+    settings = request.app.state.settings
+    cache: observed.SizingCache[ObservedSizing] = request.app.state.observed_sizing
+    return cache.get(spec.service, lambda: observe(settings))
 
 
 def _owner(path: str) -> BackingService | None:
@@ -693,8 +707,8 @@ def list_backing_services(user: CurrentUser, request: Request) -> list[BackingSe
     from git. The engine runs no Kubernetes client, so a figure here can differ
     from the cluster whenever Argo has not synced the declaration yet. A service
     DFE does not run (managed_by provider or external) adds ``observed``, read from
-    its own broker or server within the console's read budget, and ``read_only``,
-    the values a write is refused on.
+    its own broker or server and held briefly per service, and ``read_only``, the
+    values a write is refused on.
     """
     return [_config(request, spec) for spec in CATALOGUE]
 

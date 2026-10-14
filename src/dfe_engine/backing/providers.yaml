@@ -30,7 +30,9 @@
 # services.<service>.external.read_only
 #   The same, for a service DFE does not run and has no API to: a provider key
 #   whose managed_by is external, or any key other than a provider-managed one
-#   where the deploy repo declares <prefix>.mode external.
+#   where the deploy repo declares <prefix>.mode external. It leaves mode out:
+#   that declared mode is what made the service external, so writing it back is
+#   the way to hand the service to DFE again.
 #
 # A provider key this file does not list reads as DFE-run unless the deploy repo
 # declares mode external.
@@ -38,8 +40,7 @@
 services:
   kafka:
     external:
-      read_only: &kafka_sizing
-        - mode
+      read_only:
         - replicas
         - storage
         - storageModel
@@ -56,7 +57,16 @@ services:
       msk:
         managed_by: provider
         set_in: deployment
-        read_only: *kafka_sizing
+        read_only: &kafka_sizing
+          - mode
+          - replicas
+          - storage
+          - storageModel
+          - resources
+          - objectStore
+          - tieredObject
+          - sizing
+          - controllerPool
       confluent-cloud:
         managed_by: provider
         set_in: deployment
@@ -68,8 +78,7 @@ services:
 
   clickhouse:
     external:
-      read_only: &clickhouse_sizing
-        - mode
+      read_only:
         - replicas
         - keeper.replicas
         - storage
@@ -83,6 +92,14 @@ services:
       clickhouse-cloud:
         managed_by: provider
         set_in: provider
-        read_only: *clickhouse_sizing
+        read_only:
+          - mode
+          - replicas
+          - keeper.replicas
+          - storage
+          - storageModel
+          - resources
+          - objectStore
+          - tieredBlock
       external:
         managed_by: external

@@ -13,8 +13,13 @@ plus the ClickHouse Cloud service object where the deployment configured that
 control plane. Every reader answers None for what it could not read: an observed
 size is shown, never acted on, so a down broker or server blanks a field rather
 than failing the request that asked.
+
+A console polls the card, so each service's reading is held for
+``OBSERVED_TTL_SECONDS`` rather than opening a broker admin client per request.
 """
 
+import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -29,6 +34,57 @@ if TYPE_CHECKING:
 
 DEFAULT_CLUSTER = "default"
 """The cluster ClickHouse Cloud and a stock server declare when no macro names one."""
+
+OBSERVED_TTL_SECONDS = 30.0
+"""How long one service's observed size is served before its data plane is asked again."""
+
+
+class SizingCache[T]:
+    """Each service's last observed size, served until it is ``ttl_seconds`` old.
+
+    A failed read is held as well, so a down broker costs one admin timeout per
+    window rather than one per poll. Concurrent requests for the same service wait
+    on one read; different services never wait on each other.
+    """
+
+    def __init__(
+        self,
+        ttl_seconds: float = OBSERVED_TTL_SECONDS,
+        *,
+        now: Callable[[], float] = time.monotonic,
+    ) -> None:
+        """Hold each reading for *ttl_seconds*, measured on *now*.
+
+        Args:
+            ttl_seconds: How long one service's reading is served before it is read again.
+            now: A monotonic clock in seconds; tests pass one they move.
+        """
+        self._ttl = ttl_seconds
+        self._now = now
+        self._held: dict[str, tuple[float, T]] = {}
+        self._locks: dict[str, threading.Lock] = {}
+        self._guard = threading.Lock()
+
+    def get(self, service: str, read: Callable[[], T]) -> T:
+        """The held size for *service* while it is fresh, else what *read* returns now.
+
+        Args:
+            service: The backing service the size belongs to.
+            read: Reads the size off the data plane; called at most once per window.
+
+        Returns:
+            The size, from the cache or from *read*.
+        """
+        with self._guard:
+            lock = self._locks.setdefault(service, threading.Lock())
+        with lock:
+            held = self._held.get(service)
+            if held is not None and self._now() - held[0] < self._ttl:
+                return held[1]
+            value = read()
+            self._held[service] = (self._now(), value)
+            return value
+
 
 # The cgroup limit is what a containerised server may use; the host total is the
 # fallback where no cgroup limit is reported.

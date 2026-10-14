@@ -94,6 +94,96 @@ class TestClickHouseTopology:
         assert observed.clickhouse_topology(unbuildable) == observed.ClickHouseTopology()
 
 
+class _Clock:
+    """A clock the test moves, so the window is crossed without sleeping."""
+
+    def __init__(self) -> None:
+        self.t = 0.0
+
+    def now(self) -> float:
+        return self.t
+
+
+class _CountingRead:
+    """A read that answers the next value and counts how often it was asked."""
+
+    def __init__(self, *values: object) -> None:
+        self._values = list(values)
+        self.calls = 0
+
+    def __call__(self) -> object:
+        self.calls += 1
+        return self._values[min(self.calls, len(self._values)) - 1]
+
+
+class TestSizingCache:
+    def test_a_second_read_inside_the_window_is_served_from_the_cache(self):
+        clock = _Clock()
+        cache = observed.SizingCache[object](30.0, now=clock.now)
+        read = _CountingRead("first", "second")
+
+        assert cache.get("kafka", read) == "first"
+        clock.t = 29.9
+        assert cache.get("kafka", read) == "first"
+        assert read.calls == 1
+
+    def test_the_data_plane_is_asked_again_once_the_window_passes(self):
+        clock = _Clock()
+        cache = observed.SizingCache[object](30.0, now=clock.now)
+        read = _CountingRead("first", "second")
+
+        cache.get("kafka", read)
+        clock.t = 30.0
+
+        assert cache.get("kafka", read) == "second"
+        assert read.calls == 2
+
+    def test_each_service_has_its_own_window(self):
+        clock = _Clock()
+        cache = observed.SizingCache[object](30.0, now=clock.now)
+        kafka, clickhouse = _CountingRead("k"), _CountingRead("c")
+
+        assert cache.get("kafka", kafka) == "k"
+        assert cache.get("clickhouse", clickhouse) == "c"
+        assert (kafka.calls, clickhouse.calls) == (1, 1)
+
+    def test_a_failed_read_is_held_too(self):
+        """A down broker costs one admin timeout per window, not one per poll."""
+        clock = _Clock()
+        cache = observed.SizingCache[object](30.0, now=clock.now)
+        read = _CountingRead(None)
+
+        assert cache.get("kafka", read) is None
+        assert cache.get("kafka", read) is None
+        assert read.calls == 1
+
+    def test_concurrent_requests_for_one_service_wait_on_one_read(self):
+        import threading
+
+        cache = observed.SizingCache[object](30.0)
+        started, release = threading.Event(), threading.Event()
+        calls: list[int] = []
+
+        def slow_read() -> object:
+            calls.append(1)
+            started.set()
+            assert release.wait(timeout=10.0)
+            return "read once"
+
+        results: list[object] = []
+        first = threading.Thread(target=lambda: results.append(cache.get("kafka", slow_read)))
+        first.start()
+        assert started.wait(timeout=10.0)
+        second = threading.Thread(target=lambda: results.append(cache.get("kafka", slow_read)))
+        second.start()
+        release.set()
+        first.join(timeout=10.0)
+        second.join(timeout=10.0)
+
+        assert results == ["read once", "read once"]
+        assert calls == [1]
+
+
 class TestCloudService:
     def test_an_unconfigured_control_plane_is_never_asked(self):
         from dfe_engine.settings import ClickHouseCloudSettings

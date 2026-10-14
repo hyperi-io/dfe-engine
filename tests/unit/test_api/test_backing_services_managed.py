@@ -50,6 +50,9 @@ CLICKHOUSE_READ_ONLY = [
     "objectStore",
     "tieredBlock",
 ]
+# An external service leaves mode writable: the declared mode is the way back to DFE.
+KAFKA_EXTERNAL = KAFKA_READ_ONLY[1:]
+CLICKHOUSE_EXTERNAL = CLICKHOUSE_READ_ONLY[1:]
 
 # The fields GET /backing-services carried before managed services existed.
 DECLARED_FIELDS = {
@@ -189,6 +192,7 @@ class TestStatedFacts:
         monkeypatch.setenv("DFE_DEPLOYMENT_KAFKA_REGION", "us-east-1")
         monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER", "clickhouse-cloud")
         monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_TIER", "scale")
+        monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_REGION", "eu-west-1")
         app.state.settings.deployment.backing = backing_from_environment()
 
         body = _by_service(client, admin_headers)
@@ -205,7 +209,7 @@ class TestStatedFacts:
             "provider",
             "clickhouse-cloud",
             "scale",
-            None,
+            "eu-west-1",
         )
         assert ch["read_only"] == CLICKHOUSE_READ_ONLY
         assert kafka["limits"] == ch["limits"] == []
@@ -223,6 +227,21 @@ class TestStatedFacts:
         assert body["kafka"]["observed"] == UNKNOWN_SIZE
         assert body["clickhouse"]["observed"] == UNKNOWN_SIZE
         assert down_ch.connections >= 1
+
+    def test_a_poll_inside_the_window_does_not_dial_again(
+        self, client, app, admin_headers, tmp_path, down_ch
+    ):
+        """A console polls the card; the size is held per service rather than re-read."""
+        _wire_gitcrud(app, tmp_path)
+        _state(app, ch=CH_EXTERNAL)
+
+        _by_service(client, admin_headers)
+        dialled = down_ch.connections
+        _by_service(client, admin_headers)
+        client.get(f"{_BACKING}/clickhouse", headers=admin_headers)
+
+        assert dialled >= 1
+        assert down_ch.connections == dialled
 
     def test_one_service_managed_leaves_the_other_self_run(
         self, client, app, admin_headers, tmp_path, down_ch
@@ -246,7 +265,7 @@ class TestStatedFacts:
         kafka = _by_service(client, admin_headers)["kafka"]
 
         assert (kafka["managed_by"], kafka["provider"]) == ("external", "strimzi")
-        assert kafka["read_only"] == KAFKA_READ_ONLY
+        assert kafka["read_only"] == KAFKA_EXTERNAL
 
     def test_the_per_chart_mode_wins_over_common(
         self, client, app, admin_headers, tmp_path, down_ch
@@ -267,7 +286,7 @@ class TestStatedFacts:
         one = client.get(f"{_BACKING}/clickhouse", headers=admin_headers).json()
 
         assert (one["managed_by"], one["provider"]) == ("external", "external")
-        assert one["read_only"] == CLICKHOUSE_READ_ONLY
+        assert one["read_only"] == CLICKHOUSE_EXTERNAL
 
 
 def _put(client, headers, overlay, path, value):
@@ -387,6 +406,59 @@ class TestManagedWritesAreRefused:
             _put(client, admin_headers, "clickhouse-cluster", "clickhouse.replicas", 3).status_code
             == 200
         )
+
+
+class TestTheWayBackFromExternal:
+    """A service the deploy repo made external by its mode goes back to DFE by its mode."""
+
+    @staticmethod
+    def _made_external(app, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "common", {"kafka": {"mode": "external", "replicas": 3}}, "tester")
+        _state(app, kafka=BackingFactSettings(provider="strimzi"))
+        return gc
+
+    def test_writing_the_mode_back_hands_the_service_to_dfe(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = self._made_external(app, tmp_path)
+
+        resp = _put(client, admin_headers, "common", "kafka.mode", "cluster")
+
+        assert resp.status_code == 200, resp.text
+        assert gc.get("infravars", "common")["kafka"]["mode"] == "cluster"
+        assert _by_service(client, admin_headers)["kafka"]["managed_by"] == "dfe"
+
+    def test_reverting_the_mode_hands_the_service_to_dfe(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = self._made_external(app, tmp_path)
+
+        resp = _delete(client, admin_headers, "common", "kafka.mode")
+
+        assert resp.status_code == 200, resp.text
+        assert "mode" not in gc.get("infravars", "common")["kafka"]
+        assert _by_service(client, admin_headers)["kafka"]["managed_by"] == "dfe"
+
+    def test_sizing_stays_refused_while_it_is_external(self, client, app, admin_headers, tmp_path):
+        """Only the mode is the way back: the whole map still carries the sizing."""
+        gc = self._made_external(app, tmp_path)
+
+        replicas = _put(client, admin_headers, "common", "kafka.replicas", 5)
+        whole = _put(client, admin_headers, "common", "kafka", {"mode": "cluster"})
+
+        assert (replicas.status_code, whole.status_code) == (409, 409)
+        assert gc.get("infravars", "common") == {"kafka": {"mode": "external", "replicas": 3}}
+
+    def test_a_provider_managed_mode_stays_refused(self, client, app, admin_headers, tmp_path):
+        """No deploy-repo mode turns a SaaS broker into one DFE runs."""
+        _wire_gitcrud(app, tmp_path)
+        _state(app, kafka=MSK)
+
+        resp = _put(client, admin_headers, "kafka", "kafka.mode", "cluster")
+
+        assert resp.status_code == 409, resp.text
+        assert "mode" in resp.json()["context"]["read_only"]
 
 
 class TestTheRefusalBody:

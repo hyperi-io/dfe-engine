@@ -51,6 +51,9 @@ CLICKHOUSE_SIZING = (
     "objectStore",
     "tieredBlock",
 )
+# An external service leaves mode writable: the declared mode is the way back to DFE.
+KAFKA_EXTERNAL = KAFKA_SIZING[1:]
+CLICKHOUSE_EXTERNAL = CLICKHOUSE_SIZING[1:]
 
 SHIPPED = load_providers(BUNDLED_CATALOGUE)
 
@@ -99,7 +102,20 @@ class TestKafkaDerivation:
         """A customer's own broker: DFE deploys none, and has no API to it."""
         found = resolve("kafka", provider, _mode("external"), catalogue=SHIPPED)
 
-        assert found == Resolution(ManagedBy.EXTERNAL, SetIn.OPERATOR, KAFKA_SIZING)
+        assert found == Resolution(ManagedBy.EXTERNAL, SetIn.OPERATOR, KAFKA_EXTERNAL)
+
+    def test_external_by_declared_mode_leaves_that_mode_writable(self):
+        """Writing the mode back is how the service returns to DFE, so it is not refused."""
+        found = resolve("kafka", "strimzi", _mode("external"), catalogue=SHIPPED)
+
+        assert not found.refuses("mode")
+        assert found.refuses("replicas")
+        assert found.refuses("")
+
+    @pytest.mark.parametrize("provider", ["msk", "confluent-cloud", "redpanda-cloud"])
+    def test_a_provider_managed_service_keeps_its_mode_read_only(self, provider):
+        """No deploy-repo mode turns a SaaS broker into one DFE runs."""
+        assert resolve("kafka", provider, _never_read, catalogue=SHIPPED).refuses("mode")
 
     @pytest.mark.parametrize("mode", [None, "", "cluster"])
     def test_an_unlisted_key_without_mode_external_is_dfe(self, mode):
@@ -126,7 +142,7 @@ class TestClickHouseDerivation:
     def test_the_external_key_is_external_without_reading_the_mode(self):
         found = resolve("clickhouse", "external", _never_read, catalogue=SHIPPED)
 
-        assert found == Resolution(ManagedBy.EXTERNAL, SetIn.OPERATOR, CLICKHOUSE_SIZING)
+        assert found == Resolution(ManagedBy.EXTERNAL, SetIn.OPERATOR, CLICKHOUSE_EXTERNAL)
 
     @pytest.mark.parametrize("mode", [None, "", "single", "cluster"])
     def test_in_cluster_is_dfe(self, mode):

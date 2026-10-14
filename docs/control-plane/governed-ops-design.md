@@ -181,6 +181,8 @@ distinction applies to `replicaCount`, which the commit standard refuses unless
 the document being written explicitly disables KEDA -- with a controller owning
 the count, writing one renders nothing.
 
+Ahead of the count guard and the policy locks, the router refuses a write or revert of a `read_only` value on a backing service DFE does not run (`managed_by` `provider` or `external`, per `src/dfe_engine/backing/providers.yaml`) with 409 `managed_by_provider`. The override grant does not lift it: the chart deploys no store there, so the commit would change nothing.
+
 ### Constrained params -- a dial with detents, or a bounded knob
 
 An action may declare `params`, and every param carries a CLOSED constraint:

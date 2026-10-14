@@ -969,6 +969,7 @@ class TestSeedManagedBacking:
             "DFE_DEPLOYMENT_KAFKA_TIER",
             "DFE_DEPLOYMENT_KAFKA_REGION",
             "DFE_DEPLOYMENT_CLICKHOUSE_TIER",
+            "DFE_DEPLOYMENT_CLICKHOUSE_REGION",
         ):
             monkeypatch.delenv(name, raising=False)
         monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER", "clickhouse-cloud")
@@ -988,6 +989,7 @@ class TestSeedManagedBacking:
             "DFE_DEPLOYMENT_KAFKA_REGION",
             "DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER",
             "DFE_DEPLOYMENT_CLICKHOUSE_TIER",
+            "DFE_DEPLOYMENT_CLICKHOUSE_REGION",
         ):
             monkeypatch.delenv(name, raising=False)
         _seed(managed_client, "seed_managed_backing")

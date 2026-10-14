@@ -137,6 +137,7 @@ derives the engine's own SASL protocol):
 - DFE_DEPLOYMENT_KAFKA_REGION -> deployment.backing.kafka.region
 - DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER -> deployment.backing.clickhouse.provider
 - DFE_DEPLOYMENT_CLICKHOUSE_TIER -> deployment.backing.clickhouse.tier
+- DFE_DEPLOYMENT_CLICKHOUSE_REGION -> deployment.backing.clickhouse.region
 
 Repository (scope-aligned small-object store; lives in the DFE database):
 - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
@@ -1132,6 +1133,7 @@ class BackingSettings(BaseModel):
     - DFE_DEPLOYMENT_KAFKA_REGION -> deployment.backing.kafka.region
     - DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER -> deployment.backing.clickhouse.provider
     - DFE_DEPLOYMENT_CLICKHOUSE_TIER -> deployment.backing.clickhouse.tier
+    - DFE_DEPLOYMENT_CLICKHOUSE_REGION -> deployment.backing.clickhouse.region
     """
 
     kafka: BackingFactSettings = Field(default_factory=BackingFactSettings)
@@ -2567,6 +2569,8 @@ def _get_env_overrides() -> dict:
         backing["clickhouse"]["provider"] = val.strip()
     if val := _get_env("DFE_DEPLOYMENT_CLICKHOUSE_TIER"):
         backing["clickhouse"]["tier"] = val.strip()
+    if val := _get_env("DFE_DEPLOYMENT_CLICKHOUSE_REGION"):
+        backing["clickhouse"]["region"] = val.strip()
     if stated := {service: facts for service, facts in backing.items() if facts}:
         overrides["deployment"]["backing"] = stated
 

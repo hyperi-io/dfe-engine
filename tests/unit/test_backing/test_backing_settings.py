@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Five env vars carry who runs Kafka and ClickHouse, and one that must not.
+"""Six env vars carry who runs Kafka and ClickHouse, and one that must not.
 
 ``DFE_KAFKA_PROVIDER`` derives the engine's OWN broker protocol, and every
 in-cluster deploy's listener differs from what a provider key derives, so the
@@ -31,6 +31,7 @@ FACT_ENV = {
     "DFE_DEPLOYMENT_KAFKA_REGION": ("kafka", "region"),
     "DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER": ("clickhouse", "provider"),
     "DFE_DEPLOYMENT_CLICKHOUSE_TIER": ("clickhouse", "tier"),
+    "DFE_DEPLOYMENT_CLICKHOUSE_REGION": ("clickhouse", "region"),
 }
 
 

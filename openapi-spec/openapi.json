@@ -17095,7 +17095,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "List Backing Services",
-        "description": "Every backing service's DECLARED deploy configuration, and who runs it.\n\nDeclared, not observed: these are the values the deploy repo asks for, read\nfrom git. The engine runs no Kubernetes client, so a figure here can differ\nfrom the cluster whenever Argo has not synced the declaration yet. A service\nDFE does not run (managed_by provider or external) adds ``observed``, read from\nits own broker or server within the console's read budget, and ``read_only``,\nthe values a write is refused on.",
+        "description": "Every backing service's DECLARED deploy configuration, and who runs it.\n\nDeclared, not observed: these are the values the deploy repo asks for, read\nfrom git. The engine runs no Kubernetes client, so a figure here can differ\nfrom the cluster whenever Argo has not synced the declaration yet. A service\nDFE does not run (managed_by provider or external) adds ``observed``, read from\nits own broker or server and held briefly per service, and ``read_only``, the\nvalues a write is refused on.",
         "operationId": "list_backing_services_api_v1_backing_services_get",
         "responses": {
           "200": {
@@ -24487,7 +24487,7 @@
                 "type": "null"
               }
             ],
-            "description": "The size the service's own data plane reports, read on each request; null where DFE runs the service, whose declared values are the answer."
+            "description": "The size the service's own data plane reports, read at most every 30 seconds per service; null where DFE runs the service, whose declared values are the answer."
           },
           "limits": {
             "items": {
@@ -31041,7 +31041,7 @@
         },
         "type": "object",
         "title": "ObservedSizing",
-        "description": "A service's size as its own data plane reports it, read on each request.\n\nShown, never acted on. A field is null where its read failed or does not apply\nto the service, so a down broker or server blanks it rather than failing the read."
+        "description": "A service's size as its own data plane reports it, held briefly per service.\n\nShown, never acted on. A field is null where its read failed or does not apply\nto the service, so a down broker or server blanks it rather than failing the read."
       },
       "OidcCallbackResponse": {
         "properties": {
