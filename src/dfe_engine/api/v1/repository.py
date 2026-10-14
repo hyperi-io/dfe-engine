@@ -29,6 +29,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from scalo.logger import logger
 
+from dfe_engine.api import body_limits
 from dfe_engine.api.cli_exposure import CLI_HIDDEN
 from dfe_engine.api.deps import (
     ClickHouseClient,
@@ -349,6 +350,9 @@ async def get_object(
     "/objects/{scope}/{scope_id}/{namespace}/{key}",
     response_model=ObjectMetadata,
     openapi_extra=CLI_HIDDEN,
+)
+@body_limits.own_limit(
+    "repository.max_object_bytes", lambda settings: settings.repository.max_object_bytes
 )
 async def put_object(
     scope: str,
