@@ -11,7 +11,9 @@ An action bundles var changes behind one RBAC handle. Invoking applies ALL chang
 in ONE commit (atomic - a protected-var violation fails the whole action), honours
 the protected-var policy, and supports dry-run (returns the diff without writing).
 The invoke result carries every document as the action leaves it, so the router
-can hold an action to the guards a direct write to the same class meets.
+can hold an action to the guards a direct write to the same class meets. Preview
+takes the same guard as a callable and reports its refusals for every value a param
+can land: each enum map branch, each value of a bare enum, both bounds of a number.
 
 A hunt or rule document an action leaves behind is validated as the hunts API
 validates one, since the hunt runner compiles it straight off the deploy repo.
@@ -20,6 +22,7 @@ validates one, since the hunt runner compiles it straight off the deploy repo.
 import builtins
 import copy
 import functools
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -55,6 +58,12 @@ CREDENTIAL_REFUSAL = (
     "/api/v1/apps/{service}/{instance}/config or /api/v1/helm/files/{name}/vars/{path})"
 )
 """Why a change that would store a credential is refused, in the words the caller reads."""
+
+type ChangeGuard = Callable[[str, str, str, dict], str | None]
+"""Takes a change's class, resource, path and the document the action leaves there.
+
+Returns why invoke would refuse that change, or None where it would not.
+"""
 
 
 @functools.cache
@@ -126,6 +135,28 @@ def _substitute(value: Any, resolved: dict[str, Any]) -> Any:
     return mapping[pvalue] if mapping is not None else pvalue
 
 
+def _branches(action: ActionDef, value: Any) -> list[tuple[str, Any]]:
+    """Each value a param reference can land, labelled as validate reports it; none for a literal.
+
+    An enum map yields each mapped value and a bare enum each of its values. A bare
+    number yields its two bounds, because every refusal of a number shows at one: a
+    member count and a hunt's buffer or lookback are refused below a threshold, and
+    the KEDA ``replicaCount`` rule for every value but the stored one. The model
+    refuses a number without both bounds, so there is always a pair.
+    """
+    ref = param_ref(value)
+    if ref is None:
+        return []
+    pname, mapping = ref
+    if mapping is not None:
+        return [(f"map branch {key!r}", mapped) for key, mapped in mapping.items()]
+    spec = action.params[pname]
+    if spec.type == "enum":
+        return [(f"param {pname!r} = {v!r}", v) for v in spec.values or []]
+    ends = [int(b) if spec.type == "int" else b for b in (spec.min, spec.max) if b is not None]
+    return [(f"param {pname!r} = {end!r}", end) for end in ends]
+
+
 def _hunt_as_written(doc: dict) -> dict:
     """A hunt document with each bare rule name as the mapping the hunts API writes."""
     rules = doc.get("rules")
@@ -189,9 +220,11 @@ class ActionStore:
     """CRUD defined actions (gitops ``actions`` class) and invoke them."""
 
     def __init__(self, crud: GitCrud) -> None:
+        """Keep the deploy-repo client the definitions are read and written through."""
         self._crud = crud
 
     def list(self) -> builtins.list[str]:
+        """List the stored action definitions by name."""
         return self._crud.list(ACTION_CLASS)
 
     def get(self, name: str) -> ActionDef:
@@ -278,6 +311,7 @@ class ActionStore:
         return shown
 
     def save(self, action: ActionDef, actor: str, branch: str = "") -> PublishResult:
+        """Commit an action definition to the deploy repo, replacing any of the same name."""
         return self._crud.put(
             ACTION_CLASS,
             action.name,
@@ -288,6 +322,7 @@ class ActionStore:
         )
 
     def delete(self, name: str, actor: str, branch: str = "") -> PublishResult:
+        """Remove an action definition from the deploy repo."""
         return self._crud.delete(ACTION_CLASS, name, actor, branch=branch)
 
     def _walk(
@@ -420,39 +455,66 @@ class ActionStore:
         *,
         policy: PolicyStore | None = None,
         override: bool = False,
+        guard: ChangeGuard | None = None,
     ) -> tuple[builtins.list[dict[str, Any]], builtins.list[str]]:
         """Validate an UNSAVED action definition; nothing is written.
 
         Returns (diff, errors): the diff the action would apply, plus every
         violation found - unknown class, governance-class target, commit-policy
         ban, protected var without override, a credential, a hunt or rule document
-        the hunts API would refuse. Params resolve to their default or
-        representative value (closed constraints make one always available), so
-        a definition validates without a caller-supplied invocation - and every
-        enum map BRANCH is commit-policy checked in the document it lands in, not
-        just the representative, so no detent can hide a banned value until invoke
-        time.
+        the hunts API would refuse, and each refusal of ``guard``. Params resolve
+        to their default or representative value (closed constraints make one
+        always available), so a definition validates without a caller-supplied
+        invocation - and every other value a param can land is checked in the
+        document it lands in, by the commit policy, the hunts API's document check
+        and ``guard``: each enum map BRANCH, each value of a bare enum, both bounds
+        of a bare number. No detent or range end can hide a refusal until invoke time.
+
+        Args:
+            action: The definition to check.
+            policy: The protected-var policy store; None checks no locks.
+            override: Whether the caller holds the grant that lifts a lock.
+            guard: The check invoke runs on each change against the document the
+                whole action leaves; None runs none.
+
+        Returns:
+            The would-be diff and every violation, each naming the change it refuses.
         """
         representatives = {n: s.representative() for n, s in action.params.items()}
         docs, diff, errors = self._walk(
             action, policy=policy, override=override, collect=True, resolved=representatives
         )
         for ch in action.changes:
-            ref = param_ref(ch.value)
-            if ref is None or ref[1] is None:
-                continue
+            where = f"{ch.cls}/{ch.name}:{ch.path}"
             landed = docs.get((ch.cls, ch.name))
             if landed is None:
                 landed = self._target(ch)
-            # A branch reports only the violations it adds to the landed document.
+            refusal = guard(ch.cls, ch.name, ch.path, landed) if guard is not None else None
+            # Two changes to one path leave one document, so invoke refuses it once.
+            if refusal is not None and f"{where}: {refusal}" not in errors:
+                errors.append(f"{where}: {refusal}")
+            branches = _branches(action, ch.value)
+            if not branches:
+                continue
+            # Invoke judges a value against the stored document; a branch adds only what landed lacks.
+            stored = self._target(ch)
             default = keda_by_default(ch.cls, ch.name)
-            for enum_value, mapped in ref[1].items():
+            shown = {str(v) for v in added_violations(stored, landed, keda_by_default=default)}
+            landed_document = self._document_refusal(ch.cls, landed)
+            for label, branch_value in branches:
                 branch = copy.deepcopy(landed)
-                set_path(branch, ch.path, mapped)
-                for violation in added_violations(landed, branch, keda_by_default=default):
-                    errors.append(
-                        f"{ch.cls}/{ch.name}:{ch.path}: map branch {enum_value!r}: {violation}"
-                    )
+                set_path(branch, ch.path, branch_value)
+                for violation in added_violations(stored, branch, keda_by_default=default):
+                    if str(violation) not in shown:
+                        errors.append(f"{where}: {label}: {violation}")
+                branch_document = self._document_refusal(ch.cls, branch)
+                if branch_document is not None and branch_document != landed_document:
+                    errors.append(f"{where}: {label}: {branch_document}")
+                if guard is None:
+                    continue
+                branch_refusal = guard(ch.cls, ch.name, ch.path, branch)
+                if branch_refusal is not None and branch_refusal != refusal:
+                    errors.append(f"{where}: {label}: {branch_refusal}")
         errors.extend(f"{found}: {CREDENTIAL_REFUSAL}" for found in self.credential_changes(action))
         return diff, errors
 
