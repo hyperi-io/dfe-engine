@@ -14,11 +14,13 @@ and drifting *when* (not how often) it fires so the aggregate curves flatten ove
 time. This is a closed-loop **remediation** approach, not admission control: we do
 not gate or defer firing - we nudge phases and let the fleet settle.
 
-> **Status: BETA (opt-in, experimental).** Like some of the beta dfe-receiver transports,
-> the adaptive smoothing loop is AVAILABLE but opt-in and still settling: `smoothing.enabled`
-> defaults OFF, the actuator (the phase offset materialised into `hunt_schedule`) and the
-> cost tagging ship today, and the closed loop is turned on deliberately per deployment.
-> Treat its knobs and behaviour as subject to change until it graduates out of beta.
+> **Status: DESIGN -- not built, not an option in this release.** The adaptive loop on
+> this page does not exist in the engine. There is no `smoothing.enabled` setting and
+> nothing drifts phases. What ships is the static part: each rate hunt fires at a fixed
+> phase offset hashed from its id (`hunt_runner/spread.py`), that offset is written to
+> `hunt_schedule` for the KEDA due count, and every hunt query carries a JSON
+> `log_comment` that `query_log_archive` attributes back to the hunt. The adaptive loop
+> is tracked for a later version in hyperi-io/dfe-engine#864.
 
 ## The picture (intuition first)
 
@@ -216,9 +218,11 @@ well, not the initial hash guess) and bounds overlay growth.
 
 ## Cost model
 
-Attribution needs one cheap enabler: every hunt query carries
-`SETTINGS log_comment = 'hunt:<id>', workload = 'hunts'`. Then per hunt, over a
-trailing window:
+Attribution needs one cheap enabler, and it ships today: every hunt query carries a
+JSON `log_comment` (`DfeQueryTags`: `feature=hunts`, `kind=hunt`, `id=<hunt>`), which the
+`query_log_archive` view keeps. No `workload` is set, because the `hunts` WORKLOAD is not
+provisioned and naming an undefined one fails the query. Then per hunt, over a trailing
+window:
 
 ```text
 c_i ≈ p95( ProfileEvents CPU µs )      from system.query_log (type = QueryFinish)
@@ -318,6 +322,8 @@ Mechanics (consistent with the rest of the architecture):
 
 ## Config knobs
 
+Planned, not built: none of these settings exist in the engine today.
+
 | Knob | Default | Meaning |
 |---|---|---|
 | `smoothing.enabled` | off (v1) | master switch for the adaptive loop |
@@ -334,10 +340,12 @@ Mechanics (consistent with the rest of the architecture):
 
 ## Where it sits
 
-This is the v3 capability. v1 ("make the runner runnable") ships the *actuator* (the
-phase offset is already materialised into `hunt_schedule`) and the *tagging*
-(`log_comment` + `workload`), so the smoother drops in later once the cost model (v2)
-exists - no rework of the runner or the KEDA path.
+This is the v3 capability, tracked in hyperi-io/dfe-engine#864. v1 ("make the runner
+runnable") ships the static phase offsets and the JSON `log_comment` tagging. The offset
+in `hunt_schedule` is read only by the KEDA due count: the runner, materialise and the
+API's next-due each compute the hash offset themselves, so the smoother first needs one
+offset source that all of them read, and materialise must stop overwriting learned
+offsets. The cost model (v2) comes before that.
 
 ## Useful Links and References
 
