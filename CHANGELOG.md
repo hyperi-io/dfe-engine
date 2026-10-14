@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.40](https://github.com/hyperi-io/dfe-engine/compare/v1.22.39...v1.22.40) (2026-10-14)
+
+### Bug Fixes
+
+* account management fine tuning ([#877](https://github.com/hyperi-io/dfe-engine/issues/877)) ([5d56fad](https://github.com/hyperi-io/dfe-engine/commit/5d56fad9794abac3d9ee8d88654352c5057af3ac))
+* bump direct dependencies for GA ([#881](https://github.com/hyperi-io/dfe-engine/issues/881)) ([3afdb2f](https://github.com/hyperi-io/dfe-engine/commit/3afdb2fc7441942e30f2e1f5255d463a22bb355f))
+* masking follow-ups and plainer messages ([#879](https://github.com/hyperi-io/dfe-engine/issues/879)) ([db83c66](https://github.com/hyperi-io/dfe-engine/commit/db83c669bb7878e4c8dc66bf14609cbf05054d16))
+* report overlay guard refusals on validate ([#878](https://github.com/hyperi-io/dfe-engine/issues/878)) ([d2ccd14](https://github.com/hyperi-io/dfe-engine/commit/d2ccd147804d674cfbd9dc9b5dbdaa22afa7839e)), closes [#868](https://github.com/hyperi-io/dfe-engine/issues/868)
+
 ## [1.22.39](https://github.com/hyperi-io/dfe-engine/compare/v1.22.38...v1.22.39) (2026-10-14)
 
 ### Bug Fixes
