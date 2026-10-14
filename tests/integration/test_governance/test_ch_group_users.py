@@ -195,6 +195,32 @@ class TestRolelessGroups:
         assert w.rows_seen_by_group(tenant) == 3
 
 
+class TestGroupsWithNoPlatformRole:
+    def test_an_org_viewer_group_claiming_no_org_gets_no_user(self, group_world):
+        """``org_viewer`` reads only its holder's orgs, and this group names none."""
+        w = group_world
+        viewers = w.group("viewers", roles=["org_viewer"])
+        w.reconcile([viewers])
+        assert group_user_name(viewers.name) not in w.users()
+        assert not w.secret_exists(viewers)
+
+    def test_a_group_left_with_only_org_viewer_loses_its_user(self, group_world):
+        w = group_world
+        ops = w.group("ops", roles=["data_analyst", "org_viewer"])
+        w.reconcile([ops])
+        assert w.rows_seen_by_group(ops) == 5
+
+        w.reconcile([ops.model_copy(update={"roles": ["org_viewer"]})])
+        assert group_user_name(ops.name) not in w.users()
+        assert not w.secret_exists(ops)
+
+    def test_an_org_viewer_group_claiming_an_org_keeps_its_pinned_user(self, group_world):
+        w = group_world
+        viewers = w.group("viewers", roles=["org_viewer"])
+        w.reconcile([viewers.model_copy(update={"org_ids": [w.org_b]})])
+        assert w.rows_seen_by_group(viewers) == 2
+
+
 class TestDeletedGroups:
     def test_a_deleted_groups_user_grants_and_secret_go(self, group_world):
         w = group_world
