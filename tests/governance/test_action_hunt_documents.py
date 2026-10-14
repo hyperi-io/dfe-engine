@@ -162,6 +162,51 @@ def test_an_action_that_leaves_a_valid_document_still_writes(store, crud, change
     assert crud.get(cls, name)[path] == value
 
 
+def _tuned(params: dict, path: str, value: object) -> ActionDef:
+    return ActionDef(
+        name="tune",
+        description="x",
+        required_action="action:invoke:tune",
+        params=params,
+        changes=[VarChange(cls="hunts", name="windows_hunt", path=path, value=value)],
+    )
+
+
+def test_a_preview_refuses_a_document_at_the_end_of_a_number(store):
+    action = _tuned(
+        {"buffer": {"type": "int", "min": 0, "max": 600, "default": 60}},
+        "log_buffer",
+        {"$param": "buffer"},
+    )
+
+    _, errors = store.preview(action)
+
+    (error,) = errors
+    assert error.startswith("hunts/windows_hunt:log_buffer: param 'buffer' = 0: ")
+    assert "log_buffer" in error.split(": param 'buffer' = 0: ", 1)[1]
+    store.save(action, actor="admin")
+    store.invoke("tune", actor="bob", params={"buffer": 60}, dry_run=True)
+    with pytest.raises(ValueError, match="log_buffer"):
+        store.invoke("tune", actor="bob", params={"buffer": 0}, dry_run=True)
+
+
+def test_a_preview_refuses_a_document_on_a_map_branch(store):
+    action = _tuned(
+        {"source": {"type": "enum", "values": ["main", "out"], "default": "main"}},
+        "global_source_table_name",
+        {"$param": "source", "map": {"main": "dfe.main", "out": EXFIL}},
+    )
+
+    _, errors = store.preview(action)
+
+    (error,) = errors
+    assert error.startswith("hunts/windows_hunt:global_source_table_name: map branch 'out': ")
+    assert "is not a table name" in error
+    store.save(action, actor="admin")
+    with pytest.raises(ValueError, match="is not a table name"):
+        store.invoke("tune", actor="bob", params={"source": "out"}, dry_run=True)
+
+
 def test_a_hunt_naming_its_rules_bare_is_validated_as_the_api_writes_it(store, crud):
     crud.put("hunts", "windows_hunt", {**HUNT, "rules": ["certutil"]}, actor="admin")
     store.save(_action(("hunts", "windows_hunt", "cron", "*/15 * * * *")), actor="admin")

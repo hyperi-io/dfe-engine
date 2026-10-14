@@ -16,6 +16,7 @@ import pytest
 from pydantic import ValidationError
 
 from dfe_engine.gitcrud import GitCrud, ResourceClass, ResourceClassRegistry
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import (
     ActionDef,
@@ -327,3 +328,84 @@ class TestPreviewWithParams:
         assert len(errors) == 1, errors
         assert "map branch 'bad'" in errors[0]
         assert "image.tag" in errors[0]
+
+    def test_preview_checks_every_value_of_a_bare_enum(self, store):
+        # A bare reference substitutes the enum value itself, so each value is one invoke can land.
+        action = _surge_action(
+            params={"ver": {"type": "enum", "values": ["1.2.3", "latest"], "default": "1.2.3"}},
+            changes=[
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": "image.tag",
+                    "value": {"$param": "ver"},
+                }
+            ],
+        )
+        _, errors = store.preview(action)
+        assert len(errors) == 1, errors
+        assert "param 'ver' = 'latest'" in errors[0]
+        assert "image.tag" in errors[0]
+        store.save(action, actor="admin")
+        with pytest.raises(CommitPolicyError, match="latest"):
+            store.invoke("receiver-surge", actor="bob", params={"ver": "latest"}, dry_run=True)
+
+    @staticmethod
+    def _recount(bounds: dict) -> ActionDef:
+        return _surge_action(
+            params={"n": {"type": "int", **bounds}},
+            changes=[
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": "replicaCount",
+                    "value": {"$param": "n"},
+                }
+            ],
+        )
+
+    def test_preview_checks_both_bounds_of_a_bare_number(self, store, crud):
+        """KEDA owns this replicaCount, so the stored value is the only one invoke writes back."""
+        crud.put("helmvars", "receiver-default", {"replicaCount": 2}, actor="admin")
+        action = self._recount({"min": 1, "max": 9, "default": 2})
+
+        _, errors = store.preview(action)
+
+        assert len(errors) == 2, errors
+        assert "param 'n' = 1: replicaCount" in errors[0]
+        assert "param 'n' = 9: replicaCount" in errors[1]
+        store.save(action, actor="admin")
+        store.invoke("receiver-surge", actor="bob", params={"n": 2}, dry_run=True)
+        with pytest.raises(CommitPolicyError, match="replicaCount"):
+            store.invoke("receiver-surge", actor="bob", params={"n": 5}, dry_run=True)
+
+    def test_a_value_the_document_already_stores_is_not_reported(self, store, crud):
+        """Invoke lets a stored violation be written back unchanged, so preview does too."""
+        crud.put("helmvars", "receiver-default", {"image": {"tag": "latest"}}, actor="admin")
+        action = _surge_action(
+            params={"ver": {"type": "enum", "values": ["1.2.3", "latest"], "default": "1.2.3"}},
+            changes=[
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": "image.tag",
+                    "value": {"$param": "ver"},
+                }
+            ],
+        )
+
+        assert store.preview(action)[1] == []
+        store.save(action, actor="admin")
+        store.invoke("receiver-surge", actor="bob", params={"ver": "latest"}, dry_run=True)
+
+    def test_a_bound_equal_to_the_stored_value_is_not_reported(self, store, crud):
+        """Invoke accepts the stored value written back, so that bound is no refusal."""
+        crud.put("helmvars", "receiver-default", {"replicaCount": 2}, actor="admin")
+        action = self._recount({"min": 2, "max": 9, "default": 5})
+
+        _, errors = store.preview(action)
+
+        assert len(errors) == 1, errors
+        assert "param 'n'" not in errors[0]
+        store.save(action, actor="admin")
+        store.invoke("receiver-surge", actor="bob", params={"n": 2}, dry_run=True)
