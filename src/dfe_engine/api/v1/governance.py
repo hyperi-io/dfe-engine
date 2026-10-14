@@ -64,6 +64,8 @@ class InvokeRequest(BaseModel):
 
 
 class InvokeResponse(BaseModel):
+    """Outcome of invoking a defined action: the diff, and the commit or review PR it made."""
+
     dry_run: bool
     changed: bool
     commit_sha: str | None = None
@@ -138,6 +140,7 @@ def _route_admin_write(
 
 @router.get("/actions", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
 def list_actions(user: CurrentUser, request: Request) -> list[str]:
+    """List the defined actions by name."""
     return _actions(request).list()
 
 
@@ -154,6 +157,7 @@ def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
 
 @router.get("/policies", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
 def list_policies(user: CurrentUser, request: Request) -> list[str]:
+    """List the protected-var policies by name."""
     return _policies(request).list()
 
 
@@ -161,6 +165,7 @@ def list_policies(user: CurrentUser, request: Request) -> list[str]:
     "/policies/{name}", dependencies=[Depends(require_action(scopes_dict["governance_read"]))]
 )
 def get_policy(name: str, user: CurrentUser, request: Request) -> ProtectedPolicy:
+    """Return one protected-var policy."""
     _check_name(name)
     try:
         return _policies(request).get(name)
@@ -381,6 +386,7 @@ def create_action(
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 def delete_action(name: str, user: CurrentUser, request: Request, response: Response) -> None:
+    """Remove a defined action."""
     _check_name(name)
     # Surface 404 before any review routing.
     try:
@@ -412,6 +418,7 @@ def delete_action(name: str, user: CurrentUser, request: Request, response: Resp
 def create_policy(
     body: ProtectedPolicy, user: CurrentUser, request: Request, response: Response
 ) -> ProtectedPolicy:
+    """Define or replace a protected-var policy."""
     _check_name(body.name)
     gc = _gitcrud(request)
 
@@ -438,6 +445,7 @@ def create_policy(
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 def delete_policy(name: str, user: CurrentUser, request: Request, response: Response) -> None:
+    """Remove a protected-var policy."""
     _check_name(name)
     gc = _gitcrud(request)
     # Surface 404 before any review routing.
@@ -467,9 +475,10 @@ def delete_policy(name: str, user: CurrentUser, request: Request, response: Resp
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str, Any]:
-    """Reconcile CH quota tiers + service roles + per-org row policies into
-    ClickHouse, minting the service-user secrets via the secrets seam. Idempotent.
-    governance:write.
+    """Reconcile ClickHouse quota tiers, service roles and per-org row policies.
+
+    It mints the service-user secrets in the configured secrets backend, and a repeat run
+    changes nothing.
     """
     from dfe_engine.clickhouse.errors import is_connection_error
     from dfe_engine.governance.ch import (

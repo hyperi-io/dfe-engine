@@ -526,3 +526,71 @@ class TestValidateChecksEveryDetent:
             assert refused.status_code == 409, refused.text
             assert refused.json()["code"] == "managed_by_provider"
             assert error == f"infravars/kafka:kafka.replicas: {refused.json()['message']}"
+
+
+def _counted(bounds: dict) -> tuple[list[dict], dict]:
+    """A change setting kafka's broker count straight from an int param, and that param."""
+    params = {"n": {"type": "int", **bounds}}
+    changes = [_change("kafka", "kafka.replicas", {"$param": "n"})]
+    return changes, params
+
+
+class TestValidateChecksEachEndOfANumber:
+    """A numeric param is checked at both of its bounds, where any refusal of a number shows."""
+
+    def test_a_minimum_below_the_count_is_reported_though_the_default_is_accepted(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
+        changes, params = _counted({"min": 1, "max": 9, "default": 7})
+
+        validated = _validate(client, admin_headers, "brokers", changes, params)
+
+        assert validated["valid"] is False
+        (error,) = validated["errors"]
+        assert error.startswith("infravars/kafka:kafka.replicas: param 'n' = 1: ")
+        assert "5 -> 1 would remove a member" in error
+        _define(client, admin_headers, "brokers", changes, params)
+        for n in (7, 9):
+            accepted = _invoke(client, admin_headers, "brokers", dry_run=True, params={"n": n})
+            assert accepted.status_code == 200, accepted.text
+        refused = _invoke(client, admin_headers, "brokers", dry_run=True, params={"n": 2})
+        assert refused.status_code == 400, refused.text
+        assert refused.json()["code"] == "scale_down_refused"
+        assert "5 -> 2 would remove a member" in refused.json()["message"]
+
+    def test_a_range_that_never_lowers_the_count_validates_clean(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
+        changes, params = _counted({"min": 5, "max": 9})
+
+        validated = _validate(client, admin_headers, "brokers", changes, params)
+
+        assert validated["valid"] is True
+        assert validated["errors"] == []
+        _define(client, admin_headers, "brokers", changes, params)
+        for n in (5, 9):
+            accepted = _invoke(client, admin_headers, "brokers", dry_run=True, params={"n": n})
+            assert accepted.status_code == 200, accepted.text
+
+    @pytest.mark.parametrize(
+        "bounds", [{"min": 1}, {"max": 9}, {}], ids=["no-max", "no-min", "none"]
+    )
+    def test_a_number_without_both_bounds_is_refused_before_any_check(
+        self, client, app, admin_headers, tmp_path, bounds
+    ):
+        """An unbounded number has no end to check, so the definition itself is refused."""
+        _wire_gitcrud(app, tmp_path)
+        changes, params = _counted(bounds)
+
+        resp = client.post(
+            f"{_ACTIONS}/validate",
+            json=_action("brokers", changes, params),
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert "requires BOTH 'min' and 'max'" in resp.text
