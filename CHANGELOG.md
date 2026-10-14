@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.41](https://github.com/hyperi-io/dfe-engine/compare/v1.22.40...v1.22.41) (2026-10-14)
+
+### Bug Fixes
+
+* cap request bodies before they are buffered ([#883](https://github.com/hyperi-io/dfe-engine/issues/883)) ([da51387](https://github.com/hyperi-io/dfe-engine/commit/da51387f7448f628ecb8ce5c7ed14f523473d4d0))
+* move the dfe-loader contract pin to v1.18.51 ([#882](https://github.com/hyperi-io/dfe-engine/issues/882)) ([aa73612](https://github.com/hyperi-io/dfe-engine/commit/aa736122687c25cd9de9d425009b8ffbd3ee04a7))
+* read URL passwords with scalo's scanner ([#885](https://github.com/hyperi-io/dfe-engine/issues/885)) ([07947cc](https://github.com/hyperi-io/dfe-engine/commit/07947cc01e49d420194a687b74aac3c522536f28))
+* write TLS keys and settings the apps read ([#884](https://github.com/hyperi-io/dfe-engine/issues/884)) ([87c0f32](https://github.com/hyperi-io/dfe-engine/commit/87c0f32b67e55cbfa16757d5e0795165715f0e40))
+
 ## [1.22.40](https://github.com/hyperi-io/dfe-engine/compare/v1.22.39...v1.22.40) (2026-10-14)
 
 ### Bug Fixes
