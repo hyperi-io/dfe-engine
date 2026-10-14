@@ -12,10 +12,8 @@ integration tests; here we prove the ordered DDL composition and the stale-objec
 diff, both of which are pure functions.
 """
 
-from __future__ import annotations
-
 import hashlib
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -38,7 +36,7 @@ def _org(name: str, ids: list[str]) -> SimpleNamespace:
 
 
 @contextmanager
-def captured_logs() -> Iterator[list[str]]:
+def captured_logs() -> Generator[list[str]]:
     """Lines scalo's logger emits inside the block, with the fields bound to each."""
     lines: list[str] = []
     sink_id = logger.add(lines.append, level="DEBUG", format="{level} {message} {extra}")
@@ -176,6 +174,72 @@ class TestReconcilePasswordSync:
         assert result.dropped == ["DROP USER IF EXISTS `dfe_grp_deleted`"]
         assert "DROP USER IF EXISTS `dfe_grp_deleted`" in client.executed
         assert not any("DROP USER IF EXISTS `dfe_grp_soc`" in s for s in client.executed)
+
+    def test_a_dropped_groups_secret_is_deleted_with_it(self, tmp_path):
+        store = self._store(tmp_path)
+        store.put("ch/groups/deleted", "old-password")
+        client = _FakeAdminClient(group_users=["dfe_grp_soc", "dfe_grp_deleted"])
+        result = ChRbacReconciler(client, secrets_store=store).reconcile(
+            tiers=self._analyst_tiers(),
+            service_roles=[],
+            orgs=[],
+            bindings=[GroupChBinding(group="soc")],
+        )
+        assert not store.exists("ch/groups/deleted")
+        assert store.exists("ch/groups/soc")
+        assert result.forgotten == ["group/deleted"]
+
+    def test_a_drop_that_fails_keeps_the_secret(self, tmp_path):
+        """The user is still live, so its password stays with the operator until the drop lands."""
+
+        class _RefusesDrops(_FakeAdminClient):
+            def command(self, stmt: str) -> None:
+                if stmt.startswith("DROP USER"):
+                    raise RuntimeError("Code: 497. DB::Exception: refused")
+                super().command(stmt)
+
+        store = self._store(tmp_path)
+        store.put("ch/groups/deleted", "old-password")
+        result = ChRbacReconciler(
+            _RefusesDrops(group_users=["dfe_grp_deleted"]), secrets_store=store
+        ).reconcile(tiers=self._analyst_tiers(), service_roles=[], orgs=[], bindings=[])
+        assert store.exists("ch/groups/deleted")
+        assert result.forgotten == []
+        assert len(result.errors) == 1
+
+    def test_a_group_still_bound_under_another_user_keeps_its_secret(self, tmp_path):
+        """Its live user reads the same ``ch/groups/<group>`` secret as the one dropped."""
+        store = self._store(tmp_path)
+        client = _FakeAdminClient(group_users=["dfe_grp_soc"])
+        ChRbacReconciler(client, secrets_store=store).reconcile(
+            tiers=self._analyst_tiers(),
+            service_roles=[],
+            orgs=[],
+            bindings=[GroupChBinding(group="soc", ch_user="dfe_grp_custom")],
+        )
+        assert "DROP USER IF EXISTS `dfe_grp_soc`" in client.executed
+        assert store.exists("ch/groups/soc")
+
+    def test_a_secret_that_will_not_delete_is_reported_and_the_run_finishes(self, tmp_path):
+        class _StuckStore:
+            def __init__(self, inner) -> None:
+                self._inner = inner
+
+            def __getattr__(self, name: str):
+                return getattr(self._inner, name)
+
+            def delete(self, path: str) -> None:
+                raise RuntimeError("store is read-only")
+
+        client = _FakeAdminClient(group_users=["dfe_grp_deleted"])
+        result = ChRbacReconciler(
+            client, secrets_store=_StuckStore(self._store(tmp_path))
+        ).reconcile(tiers=self._analyst_tiers(), service_roles=[], orgs=[], bindings=[])
+        assert "DROP USER IF EXISTS `dfe_grp_deleted`" in client.executed
+        assert result.forgotten == []
+        assert result.errors == [
+            "deleting the secret of dropped group 'deleted' failed; the engine log has the reason"
+        ]
 
     def test_service_user_password_matches_the_served_secret(self, tmp_path):
         store = self._store(tmp_path)

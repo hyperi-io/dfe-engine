@@ -89,10 +89,27 @@ class TestOrgScopedGroups:
         }
 
 
+class TestRolelessGroups:
+    def test_a_roleless_group_claiming_no_org_gets_no_binding(self):
+        """Every OIDC-synced group starts here, and the binding would be unrestricted."""
+        assert derive_group_bindings([_group("synced")], [_org("acme")]) == []
+
+    def test_a_roleless_group_claiming_an_org_keeps_its_pin(self):
+        bindings = derive_group_bindings([_group("acme-ro", org_ids=["acme"])], [_org("acme")])
+        assert [(b.group, b.org) for b in bindings] == [("acme-ro", "acme")]
+
+    def test_a_skipped_roleless_group_does_not_stop_the_others(self):
+        groups = [_group("synced"), _group("platform", roles=["data_viewer"])]
+        bindings = derive_group_bindings(groups, [_org("acme")])
+        assert [(b.group, b.org) for b in bindings] == [("platform", "")]
+
+
 class TestUnrestrictedGroups:
     def test_group_claiming_no_org_is_unrestricted(self):
         """The platform team: no tenant role, so no row policy targets it."""
-        bindings = derive_group_bindings([_group("platform")], [_org("acme")])
+        bindings = derive_group_bindings(
+            [_group("platform", roles=["data_viewer"])], [_org("acme")]
+        )
         assert [(b.group, b.org) for b in bindings] == [("platform", "")]
 
     def test_platform_role_beats_org_markers(self):
