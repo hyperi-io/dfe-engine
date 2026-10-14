@@ -326,7 +326,7 @@ class TestRotate:
 
         assert resp.status_code == 501
         body = resp.json()
-        assert body["code"] == "secrets_seam_not_wired"
+        assert body["code"] == "admin_password_kept_outside_dfe"
         _assert_plain(body["message"])
         assert command in body["message"]
         assert command in body["context"]["store_command"]

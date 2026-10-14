@@ -717,7 +717,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.11,<3" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.12,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.17.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -2287,7 +2287,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.31.11"
+version = "2.31.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2305,9 +2305,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8b/55/4c3b5778e4a768017e931675519e744aafefca1b0ab0671d929cfbec9c88/scalo-2.31.11.tar.gz", hash = "sha256:1ca8e6f1cbd931b2288d699d46f58f0aef70587f535a507b2d22db3bd199d205", size = 357553, upload-time = "2026-10-14T07:15:03.858Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b4/47/6823f062040b6ad5b76fca2974e0d8aafe0f5990861c7e80f3b6343aadbf/scalo-2.31.12.tar.gz", hash = "sha256:2cb5381de83f00e5447e4eae93bd4f85827f9f8375f78c5f0b516c21a10d728d", size = 358147, upload-time = "2026-10-14T09:01:22.991Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0c/9a/6b4a007c6841087a985016b7e52e91bb375b0309052a5d09d108fd729143/scalo-2.31.11-py3-none-any.whl", hash = "sha256:0eff5ff950a7729915fe5406550a9ba0adb6b1891d525e7706ad41527701e4c6", size = 430036, upload-time = "2026-10-14T07:15:00.917Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/aa/fa8abc9048afdd3864e635fd06226e74bec4c77cbad854b5277a7643d1ec/scalo-2.31.12-py3-none-any.whl", hash = "sha256:9910dc50e2f38f96d781f10ded67e1961cf6018c396d743e82f7069423269698", size = 430635, upload-time = "2026-10-14T09:01:21.139Z" },
 ]
 
 [package.optional-dependencies]

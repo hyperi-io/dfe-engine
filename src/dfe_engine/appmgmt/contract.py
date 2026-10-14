@@ -30,19 +30,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
-from scalo.logger.filters import MASK_VALUE
+from scalo.logger.filters import MASK_VALUE, mask_url_userinfo
 
 from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
 from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, DEPLOY_SERVICE_PATH
 from dfe_engine.gitcrud.engine import flatten, get_path, set_path
 from dfe_engine.manifest import ManifestError, manifest_path
-from dfe_engine.masking import (
-    CREDENTIAL_MAP,
-    credential_name,
-    hides_a_host,
-    mask_url_password,
-    words,
-)
+from dfe_engine.masking import CREDENTIAL_MAP, credential_name, hides_a_host, words
 
 CONTRACT_DIR_ENV = "DFE_APP_CONTRACT_DIR"
 """Where a deployment mounts the directory its apps emitted their contracts into."""
@@ -105,6 +99,9 @@ dfe-fetcher's ``credential_secret`` and ``private_key_secret`` and dfe-receiver'
 ``vault:kv/data/github:token``; a chart's ``config_secret``, ``existingSecret`` and
 ``imagePullSecrets`` name Kubernetes Secrets.
 """
+
+_ENV_WORD = "env"
+"""The last word of a name for environment variables: one variable's name, or a map of them."""
 
 _SECRET_KEY_NAMES = ("secret", "keys")
 _SECRET_REFERENCE = ("existing", "secret")
@@ -462,14 +459,6 @@ def _branches(node: Any, root: dict) -> list[dict]:
     return out
 
 
-def _ends_in(parts: tuple[str, ...], term: tuple[str, ...]) -> bool:
-    """Whether ``parts`` ends in ``term``, or in its plural."""
-    size = len(term)
-    if len(parts) < size or parts[-size:-1] != term[:-1]:
-        return False
-    return parts[-1] in (term[-1], f"{term[-1]}s")
-
-
 def secret_name(name: str, section: str = "", *, mapping: bool = False) -> bool:
     """Whether a name says the value under it is a credential.
 
@@ -481,14 +470,19 @@ def secret_name(name: str, section: str = "", *, mapping: bool = False) -> bool:
 
     ``mapping`` says the value is a mapping or a list of them, which a name whose last
     word is in :data:`SECTION_TERMS` does not hide whole: its fields are judged one by one.
+    A mapping whose name ends in ``env`` is judged by the words before it, so
+    ``secretEnv``, which maps variable names to their values, is hidden whole while a
+    scalar ``password_env`` names a variable and is shown.
 
     Part of the fleet ships no secret marker at all, so trusting the marker alone
     would hand an operator's Kafka password back over the API. The rule errs towards
     hiding, and holds for an app that has not adopted the marker yet.
     """
+    parts = words(name)
+    if mapping and len(parts) > 1 and parts[-1] == _ENV_WORD:
+        return credential_name("_".join(parts[:-1]), section)
     if not credential_name(name, section):
         return False
-    parts = words(name)
     if len(parts) > 1 and parts[-1] in ("secret", "secrets") and parts[-2] in SECRET_SOURCE_WORDS:
         return False
     return not (mapping and parts[-1] in SECTION_TERMS)
@@ -559,13 +553,13 @@ def _masked(value: Any) -> Any:
 
 def _shown_text(text: str) -> str:
     """``text`` with the password of every ``scheme://user:password@`` URL in it masked."""
-    return mask_url_password(text, REDACTED)
+    return mask_url_userinfo(text, REDACTED)
 
 
 def _shows_as(text: str, shown: str) -> bool:
-    """Whether ``text`` is ``shown`` with a new URL password, and points where ``shown`` does.
+    r"""Whether ``text`` is ``shown`` with a new URL password, and points where ``shown`` does.
 
-    A password holding ``/``, ``?``, ``#`` or ``\\`` can hide a host a client reads, and
+    A password holding ``/``, ``?``, ``#`` or ``\`` can hide a host a client reads, and
     a mask over it would show only the host after it.
     """
     return _shown_text(text) == shown and not hides_a_host(text)
@@ -611,7 +605,7 @@ def _redact(
             props.update(branch.get("properties") or {})
             if extra is None and isinstance(branch.get("additionalProperties"), dict):
                 extra = branch["additionalProperties"]
-        by_name = not entry and _ends_in(words(name), CREDENTIAL_MAP)
+        by_name = not entry and words(name) == CREDENTIAL_MAP
         out: dict[Any, Any] = {}
         for key, child in value.items():
             if _secret_key_names(str(key), child, value):
