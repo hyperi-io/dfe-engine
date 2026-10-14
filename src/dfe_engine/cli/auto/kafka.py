@@ -29,9 +29,8 @@ Confluent Cloud); we never hand-set them. Creds come from the configured secrets
 source (``.env`` / OpenBao via settings) unless passed explicitly.
 
 The emitters live in ``scalo.kafka.toolconfig`` (one source of provider truth, many
-tools). ``dfe kafka lifecycle`` (mounted at the bottom of this module from
-``cli/kafka_lifecycle.py``) is the managed-cluster up/down/status seam (WS-C,
-dfe-engine#99) - see that module for detail.
+tools). Creating and deleting a managed cluster is the deployment's job, not the
+engine CLI's.
 
 ``dfe kafka topics`` is NOT here: topic CRUD is the governed engine surface
 (``api/v1/kafka_topics.py``, dfe-engine#97), so it is generated from the spec
@@ -82,7 +81,7 @@ def _write_600(body: str, path: str) -> str:
 
 @click.group(name="kafka", no_args_is_help=True)
 def kafka_group() -> None:
-    """Kafka provider tooling: emit client config, manage a managed cluster."""
+    """Kafka provider tooling: emit client config."""
 
 
 @kafka_group.command("client-config")
@@ -158,34 +157,6 @@ def client_config_cmd(
         return
 
     click.echo(body, nl=False)
-
-
-# =============================================================================
-# `dfe kafka lifecycle` - managed-cluster up/down/status (mounted scalo Typer)
-# =============================================================================
-
-
-def _mount_lifecycle() -> None:
-    """Mount the managed-Kafka lifecycle Typer under ``dfe kafka lifecycle``.
-
-    ``kafka_lifecycle_app`` (``cli/kafka_lifecycle.py``) is a scalo Typer, same
-    as ``cli/ch_cloud.py``; ``typer.main.get_command`` bridges it to a click
-    command so it slots straight under this click group - the same technique
-    ``cli/auto/local.py`` uses to mount ``ch-cloud`` under ``dfe local``.
-    Guarded so an import hiccup can never stop ``client-config``/``topics``
-    loading.
-    """
-    try:
-        import typer.main
-
-        from dfe_engine.cli.kafka_lifecycle import kafka_lifecycle_app
-
-        kafka_group.add_command(typer.main.get_command(kafka_lifecycle_app), name="lifecycle")
-    except Exception as exc:  # lifecycle is optional; never break the core group
-        click.echo(f"dfe kafka lifecycle is unavailable: {exc}", err=True)
-
-
-_mount_lifecycle()
 
 
 def attach_kafka(root: click.Group) -> None:

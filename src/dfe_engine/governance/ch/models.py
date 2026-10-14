@@ -23,8 +23,6 @@ CH object naming (spec 5.1): a tier ``analyst_tier_2`` yields role
 ``dfe_analyst_tier_2_quota``, from the naming rules the catalogue declares.
 """
 
-from __future__ import annotations
-
 from functools import lru_cache
 from typing import Any
 
@@ -147,6 +145,17 @@ def group_user_name(group: str) -> str:
 
 GROUP_USER_PREFIX = group_user_name("")
 """What every derived group user name starts with; the drop sweep is scoped to it."""
+
+
+def group_of_user(user: str) -> str | None:
+    """The group a derived group user name was made from, or None for any other name."""
+    group = user.removeprefix(GROUP_USER_PREFIX)
+    return group if group and group_user_name(group) == user else None
+
+
+def group_secret_path(group: str) -> str:
+    """Where a group's CH user password lives in the engine's secrets store."""
+    return f"ch/groups/{group}"
 
 
 # ---- Config models --------------------------------------------------------

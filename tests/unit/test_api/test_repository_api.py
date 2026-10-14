@@ -13,6 +13,8 @@ merge-patch fast path with etags, and the scoped-object RBAC matrix
 (membership reads, owner writes, org-wildcard admins, 404-not-403 hiding).
 """
 
+from collections.abc import Iterator
+
 import jwt as pyjwt
 import pytest
 from common.fake_repository_ch import FakeRepositoryCH
@@ -42,7 +44,7 @@ def _reset_schema_flag():
 
 
 @pytest.fixture
-def fake_ch(app) -> FakeRepositoryCH:
+def fake_ch(app) -> Iterator[FakeRepositoryCH]:
     # A server the engine's schema phase has already converged, which is what
     # every repository read now asserts before it runs.
     ch = FakeRepositoryCH(applied={("dfe", "repository")})

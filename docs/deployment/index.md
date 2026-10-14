@@ -14,7 +14,6 @@ the network model. The system map is [../architecture.md](../architecture.md).
 | [backing-services.md](backing-services.md) | per-backend swap-seam matrix |
 | [transports.md](transports.md) | profile x transport, the Kafka provider swap, the mesh tier's Envoy balancer and receiver buffers |
 | [keda-scaling.md](keda-scaling.md) | CPU-default + opt-in ScalingPressure via dfe-keda-shim |
-| [managed-kafka-lifecycle.md](managed-kafka-lifecycle.md) | managed-Kafka cost + delete-to-empty lifecycle |
 | [observability-standard.md](observability-standard.md) | one OTel destination, modes, log schema |
 | [supply-chain-pinning.md](supply-chain-pinning.md) | pick-latest-per-rules then SHA-pin |
 | [e2e-acceptance.md](e2e-acceptance.md) | the two sign-off scenarios (k8s + docker) |

@@ -68,7 +68,7 @@ def reconciled_world(ch_client, ch_params, tmp_path):
         )
 
     g_scoped = f"grp-scoped-{uid}"  # customer's-customer group -> pinned
-    g_open = f"grp-open-{uid}"  # no org -> unrestricted
+    g_open = f"grp-open-{uid}"  # platform role, no org -> unrestricted
     g_analyst = f"grp-analyst-{uid}"  # platform role + org markers -> unrestricted
     g_admin = f"grp-admin-{uid}"  # admin -> unrestricted + otel_reader composed
 
@@ -78,7 +78,7 @@ def reconciled_world(ch_client, ch_params, tmp_path):
     ]
     groups = [
         SimpleNamespace(name=g_scoped, scope_org=org_a, org_ids=[], roles=["org_viewer"]),
-        SimpleNamespace(name=g_open, scope_org="", org_ids=[], roles=[]),
+        SimpleNamespace(name=g_open, scope_org="", org_ids=[], roles=["data_viewer"]),
         SimpleNamespace(name=g_analyst, scope_org="", org_ids=[org_a], roles=["data_analyst"]),
         SimpleNamespace(name=g_admin, scope_org="", org_ids=[], roles=["admin"]),
     ]

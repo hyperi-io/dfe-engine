@@ -9,12 +9,11 @@
 
 Rendering is pure (``render_all``); ``reconcile`` adds the I/O: discover the
 ``_org_id``-bearing tables, mint-or-reuse the per-identity secrets, execute the
-DDL, and drop objects for orgs that no longer exist. Every statement is
-idempotent (``IF NOT EXISTS`` / computed diff for drops), so a second run is a
-no-op. See docs/superpowers/specs/2026-07-01-ch-org-rbac-quota-tiers-design.md.
+DDL, and drop the users of orgs and groups that no longer exist, deleting a
+dropped group user's secret with it. Every statement is idempotent (``IF NOT
+EXISTS`` / computed diff for drops), so a second run is a no-op. See
+docs/superpowers/specs/2026-07-01-ch-org-rbac-quota-tiers-design.md.
 """
-
-from __future__ import annotations
 
 import hashlib
 import secrets as _stdlib_secrets
@@ -32,6 +31,8 @@ from .models import (
     DEFAULT_SERVICE_ROLES,
     DEFAULT_TIERS,
     GROUP_USER_PREFIX,
+    group_of_user,
+    group_secret_path,
     org_user_name,
     tenant_policy_name,
 )
@@ -55,6 +56,7 @@ class ReconcileResult(BaseModel):
     statements: list[str] = Field(default_factory=list)  # DDL applied
     dropped: list[str] = Field(default_factory=list)  # stale objects dropped
     minted: list[str] = Field(default_factory=list)  # identities whose secret was touched
+    forgotten: list[str] = Field(default_factory=list)  # dropped identities, secret deleted
     errors: list[str] = Field(default_factory=list)
 
 
@@ -107,6 +109,21 @@ def _tenant_granted_dbs(tiers: list[Any]) -> list[str]:
     return sorted(dbs)
 
 
+def _drop_user(user: str) -> str:
+    """The DDL that drops ``user``; dropping a user takes its grants with it."""
+    return f"DROP USER IF EXISTS {_bq(user)}"
+
+
+def _stale_group_users(existing_group_users: set[str], bindings: list[Any]) -> list[str]:
+    """``dfe_grp_*`` users no binding renders any more, sorted."""
+    desired = {b.user() for b in bindings}
+    return [
+        user
+        for user in sorted(existing_group_users)
+        if user.startswith(GROUP_USER_PREFIX) and user not in desired
+    ]
+
+
 def compute_drops(
     existing_org_roles: set[str],
     existing_policies: list[tuple[str, str, str]],
@@ -128,17 +145,16 @@ def compute_drops(
     - ``dfe_org_*`` users for orgs no longer registered. An offboarded org whose
       credential stays live is still a tenant of the platform; the drop is the
       revocation.
-    - ``dfe_grp_*`` users no binding renders any more: the group was deleted, or
-      now claims an org that is unregistered or ambiguous. A platform group's
-      user reads every org's rows, so leaving it live after the group goes is a
-      credential nothing governs.
+    - ``dfe_grp_*`` users no binding renders any more: the group was deleted or
+      renamed, holds no roles and claims no org, or now claims an org that is
+      unregistered or ambiguous. A platform group's user reads every org's rows,
+      so leaving it live after the group goes is a credential nothing governs.
 
     ``existing_policies`` is ``(short_name, db, table)`` from system.row_policies.
     """
     desired_policies = {tenant_policy_name(db, t) for (db, t) in org_tables}
     desired_policies |= {tenant_policy_name(db, t) for (db, t) in (deny_tables or [])}
     desired_users = {org_user_name(o.name) for o in orgs}
-    desired_group_users = {b.user() for b in bindings or []}
     drops: list[str] = []
     for short_name, db, table in existing_policies:
         if short_name.startswith("dfe_rowpol_") and short_name not in desired_policies:
@@ -148,10 +164,9 @@ def compute_drops(
             drops.append(f"DROP ROLE IF EXISTS {_bq(role)}")
     for user in sorted(existing_org_users):
         if user.startswith("dfe_org_") and user not in desired_users:
-            drops.append(f"DROP USER IF EXISTS {_bq(user)}")
-    for user in sorted(existing_group_users or set()):
-        if user.startswith(GROUP_USER_PREFIX) and user not in desired_group_users:
-            drops.append(f"DROP USER IF EXISTS {_bq(user)}")
+            drops.append(_drop_user(user))
+    for user in _stale_group_users(existing_group_users or set(), bindings or []):
+        drops.append(_drop_user(user))
     return drops
 
 
@@ -307,7 +322,7 @@ class ChRbacReconciler:
             result.minted.append(f"service/{r.name}")
         return hashes
 
-    def _apply(self, stmts: list[str], result: ReconcileResult) -> None:
+    def _apply(self, stmts: list[str], result: ReconcileResult) -> set[str]:
         """Run each statement, recording a failure and carrying on with the rest.
 
         A lost connection is not a bad statement: it raises, so the run reads as
@@ -315,7 +330,11 @@ class ChRbacReconciler:
 
         ClickHouse's error text goes to the log only. ``result.errors`` reaches API
         callers, so it names the statement up to any password hash and nothing more.
+
+        Returns:
+            The statements that failed.
         """
+        failed: set[str] = set()
         for stmt in stmts:
             try:
                 self._client.command(stmt)
@@ -325,6 +344,40 @@ class ChRbacReconciler:
                 head = _statement_head(stmt)
                 logger.warning("CH RBAC statement failed", statement=head, error=str(exc))
                 result.errors.append(f"{head} failed; the engine log has ClickHouse's reason")
+                failed.add(stmt)
+        return failed
+
+    def _forget_dropped_groups(
+        self,
+        dropped_users: list[str],
+        bindings: list[Any],
+        failed: set[str],
+        result: ReconcileResult,
+    ) -> None:
+        """Delete the secret of each group whose user was dropped and no binding still names.
+
+        A drop that failed keeps its secret, because that user is still live and the
+        stored password is still the one it answers to; the next run drops it again.
+        """
+        if self._secrets is None:
+            return
+        bound = {b.group for b in bindings}
+        for user in dropped_users:
+            group = group_of_user(user)
+            if group is None or group in bound or _drop_user(user) in failed:
+                continue
+            try:
+                self._secrets.delete(group_secret_path(group))
+            except Exception as exc:  # the user is gone, so a leftover secret opens nothing
+                logger.warning(
+                    "deleting a dropped group's secret failed", group=group, error=str(exc)
+                )
+                result.errors.append(
+                    f"deleting the secret of dropped group {group!r} failed; "
+                    "the engine log has the reason"
+                )
+                continue
+            result.forgotten.append(f"group/{group}")
 
     # ---- pure render -----------------------------------------------------
 
@@ -432,7 +485,7 @@ class ChRbacReconciler:
                 org_hashes[o.name] = self._hash_for(f"ch/orgs/{o.name}")
                 result.minted.append(f"org/{o.name}")
             for b in bindings:
-                group_hashes[b.group] = self._hash_for(f"ch/groups/{b.group}")
+                group_hashes[b.group] = self._hash_for(group_secret_path(b.group))
                 result.minted.append(f"group/{b.group}")
 
         stmts = self.render_all(
@@ -446,6 +499,7 @@ class ChRbacReconciler:
             org_hashes=org_hashes,
             deny_tables=deny_tables,
         )
+        existing_group_users = self._existing_group_users()
         drops = compute_drops(
             self._existing_org_roles(),
             self._existing_row_policies(),
@@ -453,12 +507,15 @@ class ChRbacReconciler:
             orgs,
             org_tables,
             deny_tables,
-            existing_group_users=self._existing_group_users(),
+            existing_group_users=existing_group_users,
             bindings=bindings,
         )
         materialise = render_materialise(orgs, tiers)
 
-        self._apply(stmts + drops + materialise, result)
+        failed = self._apply(stmts + drops + materialise, result)
+        self._forget_dropped_groups(
+            _stale_group_users(existing_group_users, bindings), bindings, failed, result
+        )
         result.statements = stmts + materialise
         result.dropped = drops
 
@@ -472,6 +529,7 @@ class ChRbacReconciler:
                 statements=len(stmts),
                 dropped=len(drops),
                 minted=len(result.minted),
+                forgotten=len(result.forgotten),
             )
         return result
 
