@@ -398,6 +398,9 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
         return _invalid_body("User", exc)
 
     fields = scim_user_to_account_fields(inbound)
+    # Recovery credentials before self-deactivate: admin/breakglass stay mutability 403.
+    if not fields["enabled"]:
+        store.protected.check_account_update(user_id, {"enabled": False}, existing.groups)
     if user_id == user.user_id and not fields["enabled"]:
         return scim_error(403, "Cannot deactivate your own account")
     if admin_retirement.locks_out_last_admin(
@@ -462,6 +465,9 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
         # Other paths (userName is the immutable key; group membership is managed
         # on /Groups) are ignored - the record stays consistent either way.
     if enabled is not None:
+        # Recovery credentials before self-deactivate: admin/breakglass stay mutability 403.
+        if not enabled:
+            store.protected.check_account_update(user_id, {"enabled": False}, existing.groups)
         if user_id == user.user_id and not enabled:
             return scim_error(403, "Cannot deactivate your own account")
         if admin_retirement.locks_out_last_admin(
@@ -657,6 +663,8 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     # An IdP login resolves a group by its provider id, so moving the id moves the roles.
     if old != new or moves_link:
         check_role_assignment(request, user, existing.roles, scope_of(existing))
+    # Recovery credentials before last-admin: a drop of admin/breakglass is 403, not 409.
+    store.protected.check_members_replaced(group_id, existing.members, new_members)
     last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=old - new)
     if last_admin is not None:
         return last_admin
@@ -730,6 +738,8 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
     # Checked before anything is written, so a refusal leaves the membership as it was.
     if added or removed:
         check_role_assignment(request, user, group.roles, scope_of(group))
+        # Recovery credentials before last-admin: a drop of admin/breakglass is 403, not 409.
+        store.protected.check_members_replaced(group_id, group.members, members)
         last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=removed)
         if last_admin is not None:
             return last_admin
