@@ -683,6 +683,19 @@ async def get_account(
     "/{username}",
     response_model=AccountResponse,
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
+    responses={
+        403: {
+            "model": ErrorResponse,
+            "description": "self_deactivate: an account cannot disable or block itself",
+        },
+        409: {
+            "model": ErrorResponse,
+            "description": (
+                "last_admin: disabling, blocking, or stripping the system admin "
+                "group from this account would leave no usable system admin"
+            ),
+        },
+    },
 )
 async def update_account(
     username: str,
@@ -691,16 +704,48 @@ async def update_account(
     request: Request,
     settings: Settings,
 ):
-    """Update account groups, enabled/blocked status, or contact fields (admin only)."""
+    """Update account groups, enabled/blocked status, or contact fields (admin only).
+
+    Refused when the caller disables or blocks their own account, or when that
+    (or stripping every system-scope admin group) would leave no usable
+    system-admin account.
+    """
+    from dfe_engine.auth import admin_retirement
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
     existing = _require_account(store, username)
+    if username == user.user_id and (body.enabled is False or body.blocked is True):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "self_deactivate",
+                "message": "Cannot deactivate your own account",
+            },
+        )
+    bindings = provider_bindings(request)
+    if admin_retirement.locks_out_last_admin(
+        existing,
+        store,
+        group_store,
+        bindings=bindings,
+        enabled=body.enabled,
+        blocked=body.blocked,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "last_admin",
+                "message": (
+                    f"Cannot deactivate '{username}': it is the last usable account "
+                    "with the system admin role"
+                ),
+            },
+        )
     if body.groups is not None:
         groups = group_store.list()
-        bindings = provider_bindings(request)
         listed = {group.name for group in groups if username in group.members}
         held_after = groups_held_after(
             account=existing.model_copy(update={"groups": body.groups}),
@@ -716,6 +761,23 @@ async def update_account(
             request=request,
             user=user,
         )
+        if admin_retirement.locks_out_last_admin_by_group_loss(
+            existing,
+            store,
+            group_store,
+            bindings=bindings,
+            held_after=held_after,
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "last_admin",
+                    "message": (
+                        f"Cannot remove the system admin group from '{username}': "
+                        "it is the last usable account with the system admin role"
+                    ),
+                },
+            )
     update_fields: dict[str, object] = _contact_updates(body)
     if body.groups is not None:
         update_fields["groups"] = body.groups
@@ -974,22 +1036,62 @@ async def account_git_status(
     "/{username}",
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
+    responses={
+        403: {
+            "model": ErrorResponse,
+            "description": "self_delete: an account cannot delete itself",
+        },
+        409: {
+            "model": ErrorResponse,
+            "description": "last_admin: deleting this account would leave no usable system admin",
+        },
+    },
 )
 async def delete_account(
     username: str,
     user: CurrentUser,
     request: Request,
 ):
-    """Delete an account (admin only)."""
+    """Delete an account (admin only).
+
+    Refused when the caller targets their own account, when the account holds the
+    system admin role and no other usable admin-role account would remain
+    (bootstrap admin and break-glass count when they can sign in), or when the
+    store refuses a recovery credential.
+    """
+    from dfe_engine.auth import admin_retirement
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
     existing = _require_account(store, username)
+    if username == user.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "self_delete",
+                "message": "Cannot delete your own account",
+            },
+        )
     # Deleting an account takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
-    held = groups_held(existing, groups, bindings=provider_bindings(request))
+    bindings = provider_bindings(request)
+    held = groups_held(existing, groups, bindings=bindings)
     check_group_changes(after=(), before=held, groups=groups, request=request, user=user)
+    if admin_retirement.account_holds_system_admin(existing, groups, bindings=bindings):
+        if not admin_retirement.other_usable_admin_exists(
+            store, group_store, bindings=bindings, excluding=username
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "last_admin",
+                    "message": (
+                        f"Cannot delete '{username}': it is the last usable account "
+                        "with the system admin role"
+                    ),
+                },
+            )
     # The store refuses the local admin and breakglass, the accounts the deploy repo carries.
     store.delete(username)
     forget_member(group_store, username)

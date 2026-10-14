@@ -231,6 +231,30 @@ def _scim_may_move_link(group: Group, stamp: str, request: Request) -> bool:
     return group.source_provider in linked_providers([stamp], provider_bindings(request))
 
 
+def _scim_last_admin_member_removals(
+    request: Request, *, group_name: str, removed: set[str] | list[str]
+) -> JSONResponse | None:
+    """Refuse a membership write that would leave no usable system admin."""
+    from dfe_engine.auth import admin_retirement
+
+    dropped = sorted({name for name in removed if name})
+    if not dropped:
+        return None
+    if not admin_retirement.locks_out_last_admin_by_member_removals(
+        request.app.state.account_store,
+        request.app.state.group_store,
+        bindings=provider_bindings(request),
+        group_name=group_name,
+        removed=dropped,
+    ):
+        return None
+    return scim_error(
+        409,
+        f"Cannot remove the last usable system admin from '{group_name}'",
+        "mutability",
+    )
+
+
 # -- /Users ---------------------------------------------------
 
 
@@ -358,12 +382,15 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
 )
 async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Replace a user's writable attributes (SCIM PUT)."""
+    from dfe_engine.auth import admin_retirement
+
     body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    if store.get(user_id) is None:
+    existing = store.get(user_id)
+    if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
     try:
         inbound = ScimUser.model_validate(body, scim_ctx=Context.RESOURCE_REPLACEMENT_REQUEST)
@@ -371,6 +398,25 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
         return _invalid_body("User", exc)
 
     fields = scim_user_to_account_fields(inbound)
+    # Recovery credentials before self-deactivate: admin/breakglass stay mutability 403.
+    if not fields["enabled"]:
+        store.protected.check_account_update(user_id, {"enabled": False}, existing.groups)
+    if user_id == user.user_id and not fields["enabled"]:
+        return scim_error(403, "Cannot deactivate your own account")
+    if admin_retirement.locks_out_last_admin(
+        existing,
+        store,
+        group_store,
+        bindings=provider_bindings(request),
+        enabled=bool(fields["enabled"]),
+    ):
+        return scim_error(
+            409,
+            (
+                f"Cannot deactivate '{user_id}': it is the last usable account "
+                "with the system admin role"
+            ),
+        )
     store.update(
         user_id,
         enabled=fields["enabled"],
@@ -392,12 +438,15 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
 )
 async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Apply a PatchOp - primarily the ``active`` toggle IdPs use to deprovision."""
+    from dfe_engine.auth import admin_retirement
+
     body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    if store.get(user_id) is None:
+    existing = store.get(user_id)
+    if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
     try:
         patch = PatchOp[ScimUser].model_validate(body, scim_ctx=Context.RESOURCE_PATCH_REQUEST)
@@ -411,13 +460,31 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
         value = op.value
         if path == "active":
             enabled = bool(value)
-            store.update(user_id, enabled=enabled)
         elif path == "" and isinstance(value, dict) and "active" in value:
             enabled = bool(value["active"])
-            store.update(user_id, enabled=enabled)
         # Other paths (userName is the immutable key; group membership is managed
         # on /Groups) are ignored - the record stays consistent either way.
     if enabled is not None:
+        # Recovery credentials before self-deactivate: admin/breakglass stay mutability 403.
+        if not enabled:
+            store.protected.check_account_update(user_id, {"enabled": False}, existing.groups)
+        if user_id == user.user_id and not enabled:
+            return scim_error(403, "Cannot deactivate your own account")
+        if admin_retirement.locks_out_last_admin(
+            existing,
+            store,
+            group_store,
+            bindings=provider_bindings(request),
+            enabled=enabled,
+        ):
+            return scim_error(
+                409,
+                (
+                    f"Cannot deactivate '{user_id}': it is the last usable account "
+                    "with the system admin role"
+                ),
+            )
+        store.update(user_id, enabled=enabled)
         details = _audit_details(fields=["enabled"], enabled=enabled)
         audit_account_change(user.user_id, user_id, "updated", details)
 
@@ -435,15 +502,31 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
 )
 async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a user (SCIM 204)."""
+    from dfe_engine.auth import admin_retirement
+
     store = request.app.state.account_store
     group_store = request.app.state.group_store
     existing = store.get(user_id)
     if existing is None:
         return scim_error(404, f"User '{user_id}' not found")
+    if user_id == user.user_id:
+        return scim_error(403, "Cannot delete your own account")
     # Deleting a user takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
-    held = groups_held(existing, groups, bindings=provider_bindings(request))
+    bindings = provider_bindings(request)
+    held = groups_held(existing, groups, bindings=bindings)
     check_group_changes(after=(), before=held, groups=groups, request=request, user=user)
+    if admin_retirement.account_holds_system_admin(existing, groups, bindings=bindings):
+        if not admin_retirement.other_usable_admin_exists(
+            store, group_store, bindings=bindings, excluding=user_id
+        ):
+            return scim_error(
+                409,
+                (
+                    f"Cannot delete '{user_id}': it is the last usable account "
+                    "with the system admin role"
+                ),
+            )
     store.delete(user_id)
     forget_member(group_store, user_id)
     audit_account_change(user.user_id, user_id, "deleted", _audit_details(groups=held))
@@ -580,6 +663,11 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
     # An IdP login resolves a group by its provider id, so moving the id moves the roles.
     if old != new or moves_link:
         check_role_assignment(request, user, existing.roles, scope_of(existing))
+    # Recovery credentials before last-admin: a drop of admin/breakglass is 403, not 409.
+    store.protected.check_members_replaced(group_id, existing.members, new_members)
+    last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=old - new)
+    if last_admin is not None:
+        return last_admin
     if moves_link:
         if not _scim_may_move_link(existing, str(fields["source_provider"]), request):
             return scim_error(
@@ -650,6 +738,11 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
     # Checked before anything is written, so a refusal leaves the membership as it was.
     if added or removed:
         check_role_assignment(request, user, group.roles, scope_of(group))
+        # Recovery credentials before last-admin: a drop of admin/breakglass is 403, not 409.
+        store.protected.check_members_replaced(group_id, group.members, members)
+        last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=removed)
+        if last_admin is not None:
+            return last_admin
         # One write for the whole set; the store refuses it whole if it drops a recovery credential.
         store.update(group_id, members=members)
         sync_account_groups_for_membership_change(
@@ -685,6 +778,9 @@ async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Re
     # Checked before the first detach, so deleting the admin group with a recovery
     # credential in it refuses whole rather than part-way through.
     store.protected.check_member_removal(group_id, members)
+    last_admin = _scim_last_admin_member_removals(request, group_name=group_id, removed=members)
+    if last_admin is not None:
+        return last_admin
     for username in members:
         store.remove_member(group_id, username)
     sync_account_groups_for_membership_change(account_store, group_id, removed=members)

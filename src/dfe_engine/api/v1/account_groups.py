@@ -369,6 +369,35 @@ def check_group_changes(
             )
 
 
+def _refuse_last_admin_member_removals(
+    request: Request,
+    *,
+    group_name: str,
+    removed: Iterable[str],
+) -> None:
+    """Raise 409 when dropping *removed* from *group_name* leaves no usable system admin."""
+    from dfe_engine.auth import admin_retirement
+
+    dropped = sorted({name for name in removed if name})
+    if not dropped:
+        return
+    if not admin_retirement.locks_out_last_admin_by_member_removals(
+        request.app.state.account_store,
+        request.app.state.group_store,
+        bindings=provider_bindings(request),
+        group_name=group_name,
+        removed=dropped,
+    ):
+        return
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "last_admin",
+            "message": f"Cannot remove the last usable system admin from '{group_name}'",
+        },
+    )
+
+
 # -- Endpoints ------------------------------------------------
 
 
@@ -574,6 +603,11 @@ async def update_group(
         new_members = set(deduped)
         details["members_added"] = sorted(new_members - old_members)
         details["members_removed"] = sorted(old_members - new_members)
+        # Recovery credentials before last-admin: a drop of admin/breakglass is 403, not 409.
+        store.protected.check_members_replaced(name, existing.members, deduped)
+        _refuse_last_admin_member_removals(
+            request, group_name=name, removed=old_members - new_members
+        )
         group = store.update(name, **update_fields)
         sync_account_groups_for_membership_change(
             account_store,
@@ -654,6 +688,9 @@ async def remove_member(
     if username in existing.members:
         # The member loses every role the group carries.
         check_role_assignment(request, user, existing.roles, scope_of(existing))
+        # Recovery credentials before last-admin: a drop of admin/breakglass is 403, not 409.
+        store.protected.check_member_removal(name, [username])
+        _refuse_last_admin_member_removals(request, group_name=name, removed=[username])
     store.remove_member(name, username)
     sync_account_groups_for_membership_change(
         account_store,
