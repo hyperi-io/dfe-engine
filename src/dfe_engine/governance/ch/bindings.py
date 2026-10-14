@@ -24,6 +24,9 @@ HyperDX connection read and the sampler resolve them
 no registered org fails closed - it is skipped and gets no ClickHouse user at all,
 because the alternative is an unrestricted user, and an unrestricted user reads
 EVERY org's rows.
+
+A group holding no roles and claiming no org is skipped the same way. Every
+OIDC-synced group starts like that, and nothing in it asks for any ClickHouse access.
 """
 
 from typing import Any
@@ -63,6 +66,12 @@ def derive_group_bindings(
         claimed = scoped | set(group.org_ids)
 
         roles = set(getattr(group, "roles", []) or [])
+        if not roles and not claimed:
+            logger.debug(
+                "group holds no roles and claims no org; it gets no CH user", group=group.name
+            )
+            continue
+
         # Bound where api.deps binds them: the owning org's scope, else system-wide.
         grant_scope = Scope(type="org", id=group.scope_org) if group.scope_org else Scope()
         grants = [ScopedGrant(role=role, scope=grant_scope) for role in sorted(roles)]

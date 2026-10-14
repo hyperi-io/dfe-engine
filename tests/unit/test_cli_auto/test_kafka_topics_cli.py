@@ -10,15 +10,12 @@
 
 Topic CRUD is the governed engine surface (``api/v1/kafka_topics.py``), so
 ``dfe kafka topics`` is generated from the OpenAPI spec like every other API
-family. ``client-config`` and ``lifecycle`` reach no engine at all and stay
-hand-written here.
+family. ``client-config`` reaches no engine at all and stays hand-written here.
 
 Both halves want the name ``kafka``, and ``attach_kafka`` runs AFTER the tree is
 generated: a plain ``add_command`` would replace the generated group and drop the
 whole governed topic surface. What is pinned here is that it merges instead.
 """
-
-from __future__ import annotations
 
 import click
 
@@ -40,6 +37,13 @@ def _generated_kafka(root: click.Group) -> click.Group:
     return generated
 
 
+def _kafka(root: click.Group) -> click.Group:
+    """The ``kafka`` group under ``root``, which every case here expects to be a group."""
+    group = root.commands["kafka"]
+    assert isinstance(group, click.Group)
+    return group
+
+
 class TestTheLocalGroupMergesWithTheGeneratedOne:
     def test_the_governed_topic_surface_survives(self):
         root = _root()
@@ -47,7 +51,8 @@ class TestTheLocalGroupMergesWithTheGeneratedOne:
 
         attach_kafka(root)
 
-        topics = root.commands["kafka"].commands["topics"]
+        topics = _kafka(root).commands["topics"]
+        assert isinstance(topics, click.Group)
         assert sorted(topics.commands) == ["ensure", "list"]
 
     def test_the_local_commands_land_beside_it(self):
@@ -56,7 +61,7 @@ class TestTheLocalGroupMergesWithTheGeneratedOne:
 
         attach_kafka(root)
 
-        assert "client-config" in root.commands["kafka"].commands
+        assert "client-config" in _kafka(root).commands
 
     def test_a_generated_name_is_never_overwritten(self):
         """The governed route wins: it carries RBAC and an audit line, the local one does not."""
@@ -67,7 +72,7 @@ class TestTheLocalGroupMergesWithTheGeneratedOne:
 
         attach_kafka(root)
 
-        assert root.commands["kafka"].commands["client-config"] is marker
+        assert _kafka(root).commands["client-config"] is marker
 
     def test_it_still_mounts_when_the_spec_generated_nothing(self):
         """An offline CLI build has no spec, so the local group is all there is."""
