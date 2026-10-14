@@ -480,7 +480,7 @@ class TestUpdateProvider:
         )
 
         left = [
-            (event["secret_path"], event["error_type"])
+            (event["store_path"], event["error_type"])
             for event in audit_events
             if event["event"]
             == "OIDC provider secret left in the secret store: the provider no longer reads it"

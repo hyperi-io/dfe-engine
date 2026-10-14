@@ -36,6 +36,7 @@ from dfe_engine.clickhouse.function_guard import (
     refuse_calls_outside_the_row,
 )
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
+from dfe_engine.masking import CREDENTIAL_MAP, credential_name, words
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
 from dfe_engine.source.type_registry import (
     LOWCARDINALITY_ATTRIBUTE,
@@ -570,45 +571,52 @@ that tests which source a record is has this as its field.
 # Keys the engine sets on the compiled fetcher stanza; a source may not carry them.
 _FETCHER_ENGINE_KEYS = frozenset({"enabled", "topic"})
 
-# The source YAML is committed to git, so a value under any of these must be a
-# reference the fetcher resolves at runtime.
-_CREDENTIAL_KEYS = frozenset(
-    {
-        "api_key",
-        "access_key_id",
-        "secret_access_key",
-        "account_key",
-        "integration_key",
-        "secret_key",
-        "private_key",
-        "client_secret",
-        "token",
-    }
-)
-_CREDENTIAL_FRAGMENTS = ("secret", "token", "password")
 # dfe-fetcher's RESOLVED_PREFIXES (crates/core/src/secret.rs:35), verbatim. Its
 # UNRESOLVED_PREFIXES entry ``aws:`` is deliberately absent: that build carries no
 # provider for it, so such a reference reaches its consumer as literal text.
 _CREDENTIAL_REFERENCE_PREFIXES = ("vault:", "bao:", "openbao:", "env:", "file:")
 
+# Contact details the logger masks are personal data, not secrets, so a source may commit them.
+_PERSONAL_WORDS = frozenset({"email", "phone"})
 
-def _is_credential_key(key: str) -> bool:
-    lowered = key.lower()
-    return lowered in _CREDENTIAL_KEYS or any(f in lowered for f in _CREDENTIAL_FRAGMENTS)
+# dfe-fetcher's GCP-family sources hold the PATH to a key file here; under `auth` it is the key.
+_KEY_FILE_PATH = ("service", "account", "key")
 
 
-def _find_plaintext_credential(value: Any, path: str = "") -> str | None:
-    """The dot-path of the first credential-shaped key holding a literal, else None."""
+def _is_credential_key(key: str, parent: str = "") -> bool:
+    """Whether a literal under ``key``, in the mapping named ``parent``, is a credential.
+
+    The source YAML is committed to git, so a value under such a key must be a reference
+    the fetcher resolves at runtime. :func:`~dfe_engine.masking.credential_name` decides,
+    less a contact detail and a GCP key-file path.
+    """
+    parts = words(key)
+    if not credential_name(key, parent) or parts[-1] in _PERSONAL_WORDS:
+        return False
+    return parts != _KEY_FILE_PATH or words(parent)[-1:] == ("auth",)
+
+
+def _literal(value: Any) -> bool:
+    """Whether ``value`` is text that is not a reference the fetcher resolves."""
+    return isinstance(value, str) and not value.startswith(_CREDENTIAL_REFERENCE_PREFIXES)
+
+
+def _find_plaintext_credential(value: Any, path: str = "", parent: str = "") -> str | None:
+    """The dot-path of the first credential-shaped key holding a literal, else None.
+
+    ``parent`` is the name of the mapping ``value`` is, which qualifies a bare ``key``
+    in it. A list's entries are judged on their own fields: dfe-fetcher's
+    ``auth.credentials`` placements name credentials in a ``value`` and hold none. A
+    mapping named :data:`~dfe_engine.masking.CREDENTIAL_MAP` and nothing more holds a
+    credential under every name; ``oauth2_client_credentials`` holds settings.
+    """
     if isinstance(value, dict):
+        by_name = words(parent) == CREDENTIAL_MAP
         for key, inner in value.items():
             here = f"{path}.{key}" if path else str(key)
-            if (
-                _is_credential_key(str(key))
-                and isinstance(inner, str)
-                and not inner.startswith(_CREDENTIAL_REFERENCE_PREFIXES)
-            ):
+            if _literal(inner) and (by_name or _is_credential_key(str(key), parent)):
                 return here
-            found = _find_plaintext_credential(inner, here)
+            found = _find_plaintext_credential(inner, here, str(key))
             if found:
                 return found
     elif isinstance(value, list):
