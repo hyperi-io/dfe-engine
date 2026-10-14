@@ -10,6 +10,8 @@
 An action bundles var changes behind one RBAC handle. Invoking applies ALL changes
 in ONE commit (atomic - a protected-var violation fails the whole action), honours
 the protected-var policy, and supports dry-run (returns the diff without writing).
+The invoke result carries every document as the action leaves it, so the router
+can hold an action to the guards a direct write to the same class meets.
 
 A hunt or rule document an action leaves behind is validated as the hunts API
 validates one, since the hunt runner compiles it straight off the deploy repo.
@@ -175,6 +177,12 @@ class InvokeResult:
     changed: bool
     commit_sha: str | None
     diff: list[dict[str, Any]] = field(default_factory=list)
+    documents: dict[tuple[str, str], dict] = field(default_factory=dict)
+    """Each resource as the whole action leaves it, keyed by (class, name).
+
+    For a caller that guards a class on the end state, as a write to it directly
+    is guarded. Credentials are not masked here, so it never reaches a response.
+    """
 
 
 class ActionStore:
@@ -472,12 +480,18 @@ class ActionStore:
         )
 
         if dry_run:
-            return InvokeResult(dry_run=True, changed=False, commit_sha=None, diff=diff)
+            return InvokeResult(
+                dry_run=True, changed=False, commit_sha=None, diff=diff, documents=docs
+            )
 
         items = [(cls, nm, doc) for (cls, nm), doc in docs.items()]
         res = self._crud.put_many(
             items, actor, f"action({action.name}): invoke by {actor}", branch=branch
         )
         return InvokeResult(
-            dry_run=False, changed=res.changed, commit_sha=res.commit_sha, diff=diff
+            dry_run=False,
+            changed=res.changed,
+            commit_sha=res.commit_sha,
+            diff=diff,
+            documents=docs,
         )

@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from dfe_engine.api.deps import CurrentUser, live_role_config, require_action
 from dfe_engine.api.errors import backend_failure
 from dfe_engine.api.review import apply_review_headers
+from dfe_engine.api.v1.backing_services import guard_action_change
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
@@ -179,8 +180,13 @@ def invoke_action(
     ``body.params`` supplies values for the action's declared params (422 on a
     constraint violation; omitted params take their defaults). A hunt or rule
     document the action would leave invalid is 422 ``invalid_document``, with the
-    hunts API's own message. Direct commit in dev/solo; a production+team invoke is
-    routed to a review PR (or 409 ``review_required`` when no forge is configured).
+    hunts API's own message. A change to the infra overlay meets the backing-services
+    guards on what the action leaves, dry run included, whatever the caller holds:
+    409 ``managed_by_provider`` for a read-only value of a service DFE does not run,
+    then 400 ``scale_down_refused`` where it lowers or un-declares a node or broker
+    count.
+    Direct commit in dev/solo; a production+team invoke is routed to a review PR (or
+    409 ``review_required`` when no forge is configured).
     """
     _check_name(name)
     store = _actions(request)
@@ -220,6 +226,16 @@ def invoke_action(
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
     except contract.MaskedValueError as exc:
         raise HTTPException(400, detail={"code": exc.code, "message": str(exc)}) from exc
+
+    # The infra overlay's guards judge what the action leaves, as on a direct write there.
+    for change in action.changes:
+        guard_action_change(
+            request,
+            change.cls,
+            change.name,
+            change.path,
+            preview.documents[(change.cls, change.name)],
+        )
 
     if dry_run:
         return InvokeResponse(dry_run=True, changed=False, commit_sha=None, diff=preview.diff)

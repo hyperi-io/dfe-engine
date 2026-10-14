@@ -174,14 +174,14 @@ A `ProtectedPolicy` is the one thing that reaches below a class -- a list of loc
 Three policies ship and seed into every deploy repo. `baseline` locks image references. `storage-layout` locks the data-layer modes, the storage model, the `objectStore` / `tieredBlock` / `tieredObject` dial blocks, and the disk size and class. `sizing-locks` locks the Kafka sizing inputs, the KRaft controller layout and the cloud. Seeding never rewrites an existing file, so a repo carrying the earlier `storage-model` policy keeps it and gains `storage-layout` beside it -- hence the pre-vocabulary key spellings in the shipped lock.
 
 Not everything unsafe is a protected var. A lower node or broker count is refused
-by the backing-services router itself, with a 400 that names the reason, and the
+by the backing-services router itself, and by an action that leaves one in the infra overlay, with a 400 that names the reason, and the
 override grant does NOT get past it: the hazard is data loss rather than
 governance, and there is no correct way to grant your way through it. The same
 distinction applies to `replicaCount`, which the commit standard refuses unless
 the document being written explicitly disables KEDA -- with a controller owning
 the count, writing one renders nothing.
 
-Ahead of the count guard and the policy locks, the router refuses a write or revert of a `read_only` value on a backing service DFE does not run (`managed_by` `provider` or `external`, per `src/dfe_engine/backing/providers.yaml`) with 409 `managed_by_provider`. The override grant does not lift it: the chart deploys no store there, so the commit would change nothing.
+Ahead of the count guard and the policy locks, the router, and an action writing the infra overlay, refuse a write or revert of a `read_only` value on a backing service DFE does not run (`managed_by` `provider` or `external`, per `src/dfe_engine/backing/providers.yaml`) with 409 `managed_by_provider`. The override grant does not lift it: the chart deploys no store there, so the commit would change nothing.
 
 ### Constrained params -- a dial with detents, or a bounded knob
 
