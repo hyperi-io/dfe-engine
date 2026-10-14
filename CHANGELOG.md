@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.38](https://github.com/hyperi-io/dfe-engine/compare/v1.22.37...v1.22.38) (2026-10-14)
+
+### Bug Fixes
+
+* actions meet the infra overlay guards ([#867](https://github.com/hyperi-io/dfe-engine/issues/867)) ([a06671f](https://github.com/hyperi-io/dfe-engine/commit/a06671f778fc04c72817120b42488358628d7bbe))
+* preview hunt rules in the runner's subquery ([#870](https://github.com/hyperi-io/dfe-engine/issues/870)) ([c41de9e](https://github.com/hyperi-io/dfe-engine/commit/c41de9e79ab543d8842ff106a4cfbb3210201c58))
+* report managed backing, refuse inert sizing ([#863](https://github.com/hyperi-io/dfe-engine/issues/863)) ([4f3459e](https://github.com/hyperi-io/dfe-engine/commit/4f3459eff24835651ae464b679e94d07271d7d09))
+* stop hunt labels shadowing source columns ([#869](https://github.com/hyperi-io/dfe-engine/issues/869)) ([a0e0cf2](https://github.com/hyperi-io/dfe-engine/commit/a0e0cf214ac0e772d35350d8e45c98f697b02cba)), closes [#845](https://github.com/hyperi-io/dfe-engine/issues/845)
+
 ## [1.22.37](https://github.com/hyperi-io/dfe-engine/compare/v1.22.36...v1.22.37) (2026-10-14)
 
 ### Bug Fixes
