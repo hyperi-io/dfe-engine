@@ -73,6 +73,35 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     assert "'windows_hunt' AS hunt_name" in statement
 
 
+def test_the_rule_runs_in_a_subquery_where_no_label_is_in_scope(tmp_path: Path):
+    # ClickHouse reads a WHERE name as a SELECT alias before a column, so a label beside
+    # the rule would stand in for the source column of the same name.
+    _save_rule(
+        tmp_path,
+        rule_id="gd_high",
+        name="GuardDuty High",
+        severity="high",
+        where_clause="severity >= 7",
+    )
+    [statement] = compile_hunt_queries(
+        {"rules": ["gd_high"], "global_source_table_name": "acme.aws-guardduty"},
+        "gd_hunt",
+        rules_dir=tmp_path,
+        default_target="acme.detection",
+    )
+
+    outer, _, inner = statement.sql.partition("\nFROM (\n")
+    assert "'high' AS severity" in outer
+    assert "_uuid AS matched_uuid" in outer
+    assert inner == (
+        "    SELECT _timestamp_load, _timestamp, _org_id, _uuid, _json\n"
+        "    FROM `acme`.`aws-guardduty`\n"
+        "    WHERE {window} AND (severity >= 7)\n"
+        ")\n"
+        "LIMIT 1000"
+    )
+
+
 def test_each_rule_gets_its_own_statement(tmp_path: Path):
     # Rule id, name and severity are literals in the SELECT, so two rules cannot
     # share one statement without every detection row claiming the same rule.
@@ -348,8 +377,8 @@ def test_every_compiled_rule_is_capped_at_the_shipped_default(tmp_path: Path):
 
     assert statement.cap == MAX_DETECTIONS_PER_RUN == 1000
     assert statement.rule_id == "flood"
-    # The LIMIT closes the statement, after the rule's own parenthesised WHERE.
-    assert statement.sql.endswith("WHERE {window} AND (_json.kind = 'flood')\nLIMIT 1000")
+    # The LIMIT closes the statement, after the subquery the rule runs in.
+    assert statement.sql.endswith("WHERE {window} AND (_json.kind = 'flood')\n)\nLIMIT 1000")
 
 
 def test_the_cap_given_is_the_limit_compiled(tmp_path: Path):
@@ -368,13 +397,17 @@ def test_a_cap_that_would_write_nothing_is_refused(tmp_path: Path, cap: int):
 def test_the_count_reads_the_same_window_and_rule_without_a_limit(tmp_path: Path):
     count = _flood_hunt(tmp_path).count_sql
 
-    assert "count() AS dfe_matched" in count
-    assert "FROM `acme`.`main`" in count
-    assert count.endswith("WHERE {window} AND (_json.kind = 'flood')")
     assert "LIMIT" not in count
-    # No alias may shadow a column the rule's WHERE reads.
-    assert " AS _json" not in count
-    assert " AS _org_id" not in count
+    # The count's own aliases sit outside the subquery the rule runs in, so none can
+    # shadow a source column the rule reads.
+    outer, _, inner = count.partition("\nFROM (\n")
+    assert "count() AS dfe_matched" in outer
+    assert inner == (
+        "    SELECT _timestamp_load, _timestamp, _org_id\n"
+        "    FROM `acme`.`main`\n"
+        "    WHERE {window} AND (_json.kind = 'flood')\n"
+        ")"
+    )
 
 
 def test_the_summary_binds_every_value_rather_than_quoting_it(tmp_path: Path):
