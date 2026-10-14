@@ -687,6 +687,42 @@ def _refuse_managed(request: Request, name: str, path: str) -> None:
     )
 
 
+def _replaced_by(document: dict) -> Callable[[dict], object]:
+    """An edit that leaves a resource exactly as *document*."""
+
+    def edit(doc: dict) -> None:
+        doc.clear()
+        doc.update(copy.deepcopy(document))
+
+    return edit
+
+
+def guard_action_change(request: Request, cls: str, name: str, path: str, document: dict) -> None:
+    """Refuse an action change to the infra overlay that a write through this router would meet.
+
+    A defined action writes the same overlay files, so it meets the same guards, in
+    the same order, on what it leaves: a read-only value of a service DFE does not
+    run first, then a declared node or broker count it lowers or un-declares.
+    helmvars:override lifts neither, as on a set here: the first write would change
+    nothing, and the second loses data rather than breaking a policy.
+
+    Args:
+        request: The request carrying the settings and the gitops client.
+        cls: The class the change writes; any class but this router's is left alone.
+        name: The overlay resource the change lands in.
+        path: The dot-path the change sets.
+        document: The resource as the whole action leaves it, every change applied.
+
+    Raises:
+        HTTPException: 409 ``managed_by_provider`` naming who sizes the value, or 400
+            ``scale_down_refused`` naming the count and the change.
+    """
+    if cls != _CLASS:
+        return
+    _refuse_managed(request, name, path)
+    _guard_member_count(request, name, path, _replaced_by(document), verb="action")
+
+
 _WRITE_RESPONSES: dict[int | str, dict[str, Any]] = {
     409: {
         "model": ErrorResponse,
