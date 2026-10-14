@@ -83,7 +83,7 @@ class TestPasswordLoginRefusal:
         events = _denied(mock_logger)
         assert len(events) == 1
         assert events[0].kwargs["user_id"] == "admin"
-        assert events[0].kwargs["auth_path"] == "jwt"
+        assert events[0].kwargs["login_method"] == "jwt"
         assert events[0].kwargs["reason"]
 
     def test_bad_password_writes_no_success_event(self, client: TestClient):
@@ -133,5 +133,5 @@ class TestOidcCallbackRefusal:
         assert resp.status_code == 401
         events = _denied(mock_logger)
         assert len(events) == 1
-        assert events[0].kwargs["auth_path"] == "oidc"
+        assert events[0].kwargs["login_method"] == "oidc"
         assert events[0].kwargs["reason"]

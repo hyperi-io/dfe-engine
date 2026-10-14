@@ -17,6 +17,9 @@ No custom ClickHouse tables are needed -- the log events are the audit trail.
 Event naming convention: ``auth.<domain>.<outcome>``
 - Success events: ``logger.info``
 - Denied/failure events: ``logger.warning``
+
+scalo masks a field whose name holds a credential word, such as ``auth`` or ``token``,
+so each field here is named to reach the log in clear.
 """
 
 from scalo.logger import logger
@@ -34,14 +37,15 @@ def audit_login_success(
 
     Args:
         user_id: Authenticated identity (sub, ``apikey:<name>``, etc.).
-        auth_path: Which auth path succeeded (``oidc``, ``api_key``, ``jwt``, ``disabled``).
+        auth_path: Which auth path succeeded (``oidc``, ``api_key``, ``jwt``, ``disabled``),
+            logged as ``login_method``.
         client_ip: Client IP address, or None if unavailable.
         roles: Roles resolved for this identity.
     """
     logger.info(
         "auth.login.success",
         user_id=user_id,
-        auth_path=auth_path,
+        login_method=auth_path,
         client_ip=client_ip,
         roles=roles,
     )
@@ -57,14 +61,15 @@ def audit_login_denied(
 
     Args:
         user_id: Best-effort identity (key prefix, ``anonymous``, etc.).
-        auth_path: Which auth path was attempted (``oidc``, ``api_key``, ``jwt``, ``none``).
+        auth_path: Which auth path was attempted (``oidc``, ``api_key``, ``jwt``, ``none``),
+            logged as ``login_method``.
         client_ip: Client IP address, or None if unavailable.
         reason: Short machine-readable reason (e.g. ``invalid_key``, ``no_credentials``).
     """
     logger.warning(
         "auth.login.denied",
         user_id=user_id,
-        auth_path=auth_path,
+        login_method=auth_path,
         client_ip=client_ip,
         reason=reason,
     )
@@ -88,7 +93,7 @@ def audit_breakglass_login(
     logger.warning(
         "auth.breakglass.login",
         user_id="breakglass",
-        auth_path="jwt",
+        login_method="jwt",
         client_ip=client_ip,
         allowed=allowed,
         reason=reason,
@@ -179,7 +184,8 @@ def audit_api_key_change(
     Args:
         admin_id: Identity of the admin performing the change.
         key_name: Human-readable name of the API key.
-        short_token: The key's public lookup token, never the secret half of the key.
+        short_token: The key's public lookup token, never the secret half of the key,
+            logged as ``short_id``.
         change: One of ``"created"``, ``"revoked"``.
         details: Optional structured details. Never the full key or its hash.
     """
@@ -187,7 +193,7 @@ def audit_api_key_change(
         f"auth.api_key.{change}",
         admin_id=admin_id,
         key_name=key_name,
-        short_token=short_token,
+        short_id=short_token,
         change=change,
         details=details,
     )

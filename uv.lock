@@ -693,7 +693,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.10,<3" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.11,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.17.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -2221,7 +2221,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.31.10"
+version = "2.31.11"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2239,9 +2239,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/8e/38/245b6d9c575efe03fd53eaf36516e119ca567c0a34286c9ca3b6c47dc39d/scalo-2.31.10.tar.gz", hash = "sha256:37451ea816bdd925433d02bdf63e699329e76214950a278397fa1190ff2218d3", size = 355806, upload-time = "2026-10-13T06:23:45.604Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8b/55/4c3b5778e4a768017e931675519e744aafefca1b0ab0671d929cfbec9c88/scalo-2.31.11.tar.gz", hash = "sha256:1ca8e6f1cbd931b2288d699d46f58f0aef70587f535a507b2d22db3bd199d205", size = 357553, upload-time = "2026-10-14T07:15:03.858Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/6e/7f1a7fe64b5f38ebabc969b5e803ea3f833279bbdd4a6edcc4ff82efba61/scalo-2.31.10-py3-none-any.whl", hash = "sha256:792d6d83c445bc651a2b5fae5bdd51353f8de53d386bcc97510cb1606a17ce47", size = 428109, upload-time = "2026-10-13T06:23:43.8Z" },
+    { url = "https://files.pythonhosted.org/packages/0c/9a/6b4a007c6841087a985016b7e52e91bb375b0309052a5d09d108fd729143/scalo-2.31.11-py3-none-any.whl", hash = "sha256:0eff5ff950a7729915fe5406550a9ba0adb6b1891d525e7706ad41527701e4c6", size = 430036, upload-time = "2026-10-14T07:15:00.917Z" },
 ]
 
 [package.optional-dependencies]

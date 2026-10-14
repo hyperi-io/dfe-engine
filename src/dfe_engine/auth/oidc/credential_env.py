@@ -118,7 +118,7 @@ def _from_store(secret_path: str, secrets: DfeSecrets | None) -> ResolvedCredent
         fields = describe_http_error(exc)
         logger.warning(
             "OIDC credential unreadable from the secret store",
-            secret_path=secret_path,
+            store_path=secret_path,
             **fields,
         )
         return ResolvedCredential(unreadable=True, refused=_refused(exc))

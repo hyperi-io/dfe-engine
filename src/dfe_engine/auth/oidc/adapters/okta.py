@@ -203,8 +203,8 @@ class OktaAdapter(OIDCGroupAdapter):
         """Log that the configured API token is never sent, naming the settings that hold it and never its value."""
         logger.warning(
             "Okta API token not sent: it holds a character an HTTP header cannot carry",
-            api_token_env=self._provider.groups.api_token_env,
-            api_token_path=self._provider.groups.api_token_path,
+            env_var=self._provider.groups.api_token_env,
+            store_path=self._provider.groups.api_token_path,
             operation=operation,
             provider=self._provider.issuer,
         )

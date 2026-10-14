@@ -34,9 +34,7 @@ from pathlib import Path
 
 from scalo.logger import logger
 
-# ``scheme://user:secret@host`` - the userinfo half of a URL, anywhere in a string.
-# Requires the colon, so a credential-free ``ssh://git@host`` is left alone.
-_USERINFO_RE = re.compile(r"(?<=://)[^/@\s]+:[^/@\s]*@")
+from dfe_engine.masking import mask_url_userinfo
 
 # Git sideband progress rewrites one line with \r and only ends it with \n, so a
 # \n-only split buffers a whole fetch's progress into one unredacted-until-EOF blob.
@@ -44,13 +42,15 @@ _LINE_END_RE = re.compile(rb"[\r\n]")
 
 
 def redact_credentials(text: str) -> str:
-    """Return *text* with the ``user:secret@`` userinfo of every URL replaced.
+    """Return *text* with the ``user:secret`` userinfo of every URL replaced.
 
     Applied to anything derived from a credentialed remote URL before it reaches a
     log, a stream or an exception message - dulwich embeds the URL verbatim in all
-    three.
+    three. The userinfo runs to the last ``@`` a host follows, so a token holding
+    ``@`` or ``/`` goes whole; a credential-free ``ssh://git@host`` has no colon and is
+    left alone.
     """
-    return _USERINFO_RE.sub("***@", text)
+    return mask_url_userinfo(text)
 
 
 class RedactingErrStream(io.RawIOBase):

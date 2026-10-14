@@ -75,7 +75,7 @@ class TestCredentialExchangeWritesTheEvent:
         events = _login_successes(mock_logger)
         assert len(events) == 1
         assert events[0].kwargs["user_id"] == "admin"
-        assert events[0].kwargs["auth_path"] == "jwt"
+        assert events[0].kwargs["login_method"] == "jwt"
         assert "admin" in events[0].kwargs["roles"]
 
     def test_failed_password_login_writes_no_success_event(self, client: TestClient):
@@ -99,7 +99,7 @@ class TestCredentialExchangeWritesTheEvent:
         events = _login_successes(mock_logger)
         assert len(events) == 1
         assert events[0].kwargs["user_id"] == "alice@example.com"
-        assert events[0].kwargs["auth_path"] == "oidc"
+        assert events[0].kwargs["login_method"] == "oidc"
         assert "admin" in events[0].kwargs["roles"]
 
 

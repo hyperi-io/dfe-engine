@@ -467,7 +467,7 @@ class ClickHouseManager:
                 port=port,
                 secure=secure,
                 verify=tls.verify,
-                password_set=is_password_set,
+                pw_set=is_password_set,
             )
 
             # Custom pool manager for connection pooling (clickhouse-connect uses

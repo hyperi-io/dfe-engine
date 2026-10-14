@@ -314,7 +314,7 @@ class TestResolveCredential:
         ]
         assert STORE_ADDRESS not in json.dumps(audit_events, default=str)
         assert "error" not in line
-        assert (line["error_type"], line["transport_failure"], line["secret_path"]) == (
+        assert (line["error_type"], line["transport_failure"], line["store_path"]) == (
             "ConnectionError",
             "connection_refused",
             "oidc/acme/client_secret",

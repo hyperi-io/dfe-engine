@@ -655,7 +655,7 @@ def test_callback_refuses_an_identity_whose_groups_link_no_role(client, app, aud
     assert [(e["user_id"], e["source_provider"], e["reason"]) for e in refused] == [
         ("stub-user", "stub", "no_role_granted")
     ]
-    assert [(e["user_id"], e["auth_path"], e["reason"]) for e in denied] == [
+    assert [(e["user_id"], e["login_method"], e["reason"]) for e in denied] == [
         ("stub-user", "oidc", "no_role_granted")
     ]
     assert not [e for e in audit_events if e["event"] == "auth.login.success"]

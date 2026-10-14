@@ -558,7 +558,7 @@ def _delete_secrets(*, paths: Iterable[str], request: Request) -> None:
         except Exception as exc:
             logger.warning(
                 "OIDC provider secret left in the secret store: the provider no longer reads it",
-                secret_path=path,
+                store_path=path,
                 **describe_http_error(exc),
             )
 

@@ -14,11 +14,15 @@ explicit exceptions to the no-mocks policy for audit logging.
 """
 
 import json
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 import pytest
 
+import dfe_engine
 from dfe_engine.auth.audit import (
     audit_account_change,
     audit_api_key_change,
@@ -69,7 +73,7 @@ class TestAuditLoginSuccess:
         )
         _, kwargs = mock_logger.info.call_args
         assert kwargs["user_id"] == "alice"
-        assert kwargs["auth_path"] == "jwt"
+        assert kwargs["login_method"] == "jwt"
         assert kwargs["client_ip"] == "192.168.1.1"
         assert kwargs["roles"] == ["data_analyst", "viewer"]
 
@@ -94,7 +98,7 @@ class TestAuditLoginSuccess:
         )
         _, kwargs = mock_logger.info.call_args
         assert kwargs["user_id"] == "apikey:ci-pipeline"
-        assert kwargs["auth_path"] == "api_key"
+        assert kwargs["login_method"] == "api_key"
 
 
 class TestAuditLoginDenied:
@@ -130,7 +134,7 @@ class TestAuditLoginDenied:
         )
         _, kwargs = mock_logger.warning.call_args
         assert kwargs["user_id"] == "ABCDEF1234567890..."
-        assert kwargs["auth_path"] == "api_key"
+        assert kwargs["login_method"] == "api_key"
         assert kwargs["client_ip"] == "172.16.0.1"
         assert kwargs["reason"] == "invalid_key"
 
@@ -144,7 +148,7 @@ class TestAuditLoginDenied:
         )
         _, kwargs = mock_logger.warning.call_args
         assert kwargs["reason"] == "Signature verification failed"
-        assert kwargs["auth_path"] == "jwt"
+        assert kwargs["login_method"] == "jwt"
 
 
 class TestAuditPermissionDenied:
@@ -290,7 +294,7 @@ class TestAuditApiKeyChange:
         _, kwargs = mock_logger.info.call_args
         assert kwargs["admin_id"] == "superadmin"
         assert kwargs["key_name"] == "deploy-bot"
-        assert kwargs["short_token"] == "DEADBEEF12345678"
+        assert kwargs["short_id"] == "DEADBEEF12345678"
         assert kwargs["change"] == "revoked"
 
 
@@ -549,3 +553,41 @@ class TestAuditResourceChange:
         )
         _, kwargs = mock_logger.info.call_args
         assert kwargs["details"] is None
+
+
+# The engine's own logger, in JSON, writing three audit events.
+_AUDIT_CHILD = """
+from dfe_engine.api import init_scalo_logger
+init_scalo_logger("dfe-test", otel_tracing=False)
+from dfe_engine.auth.audit import audit_api_key_change, audit_breakglass_login, audit_login_success
+audit_login_success(user_id="alice", auth_path="oidc", client_ip=None, roles=[])
+audit_breakglass_login(client_ip=None, allowed=True)
+audit_api_key_change("admin", "ci-pipeline", "ab12cd34", "created")
+"""
+
+
+def test_the_audit_trail_reaches_the_log_with_its_login_method_and_key_id(tmp_path):
+    """Each field reaches scalo's JSON output in clear, past the masking it runs every line through."""
+    proc = subprocess.run(
+        [sys.executable, "-c", _AUDIT_CHILD],
+        cwd=tmp_path,
+        env={
+            "HOME": str(tmp_path),
+            "PATH": "/usr/bin:/bin",
+            "PYTHONPATH": str(Path(dfe_engine.__file__).parents[1]),
+            "OTEL_SDK_DISABLED": "true",
+            "LOG_FORMAT": "json",
+        },
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=120,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = [json.loads(line) for line in (proc.stdout + proc.stderr).splitlines() if line]
+    fields = {line["message"]: line["fields"] for line in lines if "fields" in line}
+    assert fields["auth.login.success"]["login_method"] == "oidc"
+    assert fields["auth.breakglass.login"]["login_method"] == "jwt"
+    assert fields["auth.api_key.created"]["short_id"] == "ab12cd34"

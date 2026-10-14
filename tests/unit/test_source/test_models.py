@@ -1,5 +1,6 @@
 """Tests for Source Pydantic models."""
 
+import re
 from typing import get_args
 
 import pytest
@@ -306,6 +307,49 @@ class TestSourceFetcher:
         # The source YAML is committed to git, so credentials travel as references.
         with pytest.raises(ValueError, match="literal credential"):
             SourceFetcher(source_type="okta", config=config)
+
+    @pytest.mark.parametrize(
+        ("config", "where"),
+        [
+            ({"apiKey": "k-4460"}, "apiKey"),
+            ({"x-api-key": "k-4461"}, "x-api-key"),
+            ({"privateKey": "-----BEGIN PRIVATE KEY-----"}, "privateKey"),
+            ({"accessKeyId": "AKIA4462"}, "accessKeyId"),
+            ({"backends": [{"accountKey": "ak-4463"}]}, "backends[0].accountKey"),
+            ({"connection_string": "AccountName=a;AccountKey=ak-4464"}, "connection_string"),
+            ({"auth": {"credentials_json": '{"secret_access_key": "x"}'}}, "auth.credentials_json"),
+            ({"auth": {"key": "k-4465"}}, "auth.key"),
+            ({"auth": {"credentials": {"pair_a": "pa-4466"}}}, "auth.credentials.pair_a"),
+            ({"auth": {"service_account_key": '{"private_key": "x"}'}}, "auth.service_account_key"),
+        ],
+    )
+    def test_a_literal_credential_in_any_spelling_is_refused(self, config, where):
+        with pytest.raises(ValueError, match=rf"fetcher\.config\.{re.escape(where)} holds"):
+            SourceFetcher(source_type="okta", config=config)
+
+    @pytest.mark.parametrize(
+        "config",
+        [
+            {"admin_email": "admin@corp.example"},
+            {"service_account_key": "/etc/gcp/sa-key.json"},
+            {"connections": [{"id": "a", "service_account_key": "/etc/gcp/a.json"}]},
+            {"auth": {"service_account_key_file": "/etc/gcp/sa.json", "private_key_id": "kid-1"}},
+            {"auth": {"oauth2_client_credentials": {"token_url": "https://idp.example/token"}}},
+            {
+                "auth": {
+                    "session_login": {
+                        "password_field": "password",
+                        "token_at": "/token",
+                        "token_header": "X-Session",
+                    }
+                }
+            },
+            {"auth": {"credentials": [{"header": "X-Key", "value": "{{ credentials.pair_a }}"}]}},
+            {"auth": {"credentials": {"pair_a": "vault:kv/dfe/pair:a"}}},
+        ],
+    )
+    def test_a_setting_beside_a_credential_word_is_accepted(self, config):
+        assert SourceFetcher(source_type="okta", config=config).config == config
 
     def test_credential_references_and_paths_are_accepted(self):
         f = SourceFetcher(
