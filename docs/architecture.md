@@ -266,7 +266,7 @@ ReplacingMergeTree state table, fail-open.
 |------|----------|--------|
 | Control-plane surface | [control-plane/index.md](control-plane/index.md) | governed ops, gitops commit standard, RBAC, OIDC, CLI, UI API, type-safety sync |
 | Data plane | [data-plane/index.md](data-plane/index.md) | sources, schemas, field mapping, CEL, query API, hunts |
-| Deployment seam | [deployment/index.md](deployment/index.md) | tiers + composition, backing services, KEDA, kafka lifecycle, observability, supply-chain pinning, e2e acceptance |
+| Deployment seam | [deployment/index.md](deployment/index.md) | tiers + composition, backing services, KEDA, observability, supply-chain pinning, e2e acceptance |
 | Integrations | [integrations/index.md](integrations/index.md) | dfe-ui guide, HyperDX fork maintenance |
 | Archive | [archive/index.md](archive/index.md) | superseded research + snapshots, kept for the decision trail |
 

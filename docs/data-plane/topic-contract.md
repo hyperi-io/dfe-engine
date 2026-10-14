@@ -69,8 +69,9 @@ spend the admin timeout finding that out.
 `kafka.provider` derives `security.protocol` and `sasl.mechanism`; the mechanism
 is never hand-set. One key names one LISTENER, so a DFE-owned broker on the
 TLS-off listener the deploy charts stand up is `strimzi-no-tls` or
-`redpanda-no-tls`, not `strimzi` with something turned down - see
-[../deployment/managed-kafka-lifecycle.md](../deployment/managed-kafka-lifecycle.md).
+`redpanda-no-tls`, not `strimzi` with something turned down. SCRAM is a
+challenge-response, so the password never reaches the wire on that listener; no
+PLAIN or OAUTHBEARER provider has a TLS-off key.
 
 Neither a deploy nor a delete ever fails on the topic step: the schema is already
 live by the time the topics are ensured, and the source is already gone by the
