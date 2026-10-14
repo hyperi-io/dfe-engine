@@ -514,6 +514,14 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.hyperdx.enabled is True
 
+    def test_sigma_is_off_by_default(self):
+        assert load_settings().sigma.enabled is False
+
+    @pytest.mark.parametrize(("value", "expected"), [("true", True), ("1", True), ("false", False)])
+    def test_sigma_enabled_override(self, monkeypatch, value, expected):
+        monkeypatch.setenv("DFE_SIGMA_ENABLED", value)
+        assert load_settings().sigma.enabled is expected
+
     def test_hyperdx_base_url_override(self, monkeypatch):
         monkeypatch.setenv("DFE_HYPERDX_BASE_URL", "http://hdx:8080")
         settings = load_settings()
