@@ -909,6 +909,106 @@ class TestResetClearsRunState:
             _registries.clear()
 
 
+@pytest.fixture
+def managed_client(appmgmt_client, monkeypatch):
+    """The app-management process with its ClickHouse down, so a managed read is bounded."""
+    from dfe_engine.api.v1 import backing_services
+    from tests.support.down_clickhouse import down_clickhouse
+
+    with down_clickhouse(appmgmt_client.app.state.settings) as (_listener, ch):
+        monkeypatch.setattr(backing_services, "get_interactive_clickhouse_client", lambda _s: ch)
+        yield appmgmt_client
+
+
+class TestSeedManagedBacking:
+    """The managed and external cards render from the facts this seed states."""
+
+    def test_kafka_reads_as_provider_managed_and_clickhouse_as_external(self, managed_client):
+        _seed(managed_client, "seed_managed_backing")
+        headers = _admin(managed_client)
+
+        listed = {s["service"]: s for s in _get(managed_client, _BACKING, headers)}
+
+        kafka, ch = listed["kafka"], listed["clickhouse"]
+        assert (kafka["managed_by"], kafka["provider"], kafka["tier"], kafka["region"]) == (
+            "provider",
+            "confluent-cloud",
+            "basic",
+            "us-east-1",
+        )
+        assert kafka["read_only"]
+        assert (ch["managed_by"], ch["provider"]) == ("external", "external")
+        assert kafka["observed"] is not None
+        assert ch["observed"] is not None
+
+    def test_the_deployment_facts_agree(self, managed_client):
+        _seed(managed_client, "seed_managed_backing")
+        headers = _admin(managed_client)
+
+        resp = managed_client.get("/api/v1/system/deployment", headers=headers)
+
+        assert resp.status_code == 200, resp.text
+        backing = resp.json()["backing"]
+        assert backing["kafka"]["managed_by"] == "provider"
+        assert backing["clickhouse"]["managed_by"] == "external"
+
+    def test_a_sizing_write_is_refused_after_seeding(self, managed_client):
+        _seed(managed_client, "seed_managed_backing")
+        headers = _admin(managed_client)
+
+        resp = managed_client.put(
+            f"{_BACKING}/overlays/kafka/vars/kafka.replicas", json={"value": 3}, headers=headers
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "managed_by_provider"
+
+    def test_reset_all_puts_back_what_the_environment_states(self, managed_client, monkeypatch):
+        for name in (
+            "DFE_DEPLOYMENT_KAFKA_PROVIDER",
+            "DFE_DEPLOYMENT_KAFKA_TIER",
+            "DFE_DEPLOYMENT_KAFKA_REGION",
+            "DFE_DEPLOYMENT_CLICKHOUSE_TIER",
+            "DFE_DEPLOYMENT_CLICKHOUSE_REGION",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER", "clickhouse-cloud")
+        _seed(managed_client, "seed_managed_backing")
+
+        _seed(managed_client, "reset_all")
+        headers = _admin(managed_client)
+
+        listed = {s["service"]: s for s in _get(managed_client, _BACKING, headers)}
+        assert (listed["kafka"]["managed_by"], listed["kafka"]["provider"]) == ("dfe", None)
+        assert listed["clickhouse"]["provider"] == "clickhouse-cloud"
+
+    def test_reset_all_with_nothing_stated_is_self_run(self, managed_client, monkeypatch):
+        for name in (
+            "DFE_DEPLOYMENT_KAFKA_PROVIDER",
+            "DFE_DEPLOYMENT_KAFKA_TIER",
+            "DFE_DEPLOYMENT_KAFKA_REGION",
+            "DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER",
+            "DFE_DEPLOYMENT_CLICKHOUSE_TIER",
+            "DFE_DEPLOYMENT_CLICKHOUSE_REGION",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        _seed(managed_client, "seed_managed_backing")
+
+        _seed(managed_client, "reset_all")
+        headers = _admin(managed_client)
+
+        for service in _get(managed_client, _BACKING, headers):
+            assert service["managed_by"] == "dfe", service["service"]
+
+    def test_the_seed_writes_nothing_to_the_deploy_repo(self, managed_client):
+        """Who runs a service is a deployment fact, never deploy-repo state."""
+        before = _deploy_commits(managed_client)
+
+        _seed(managed_client, "seed_managed_backing")
+
+        assert _deploy_commits(managed_client) == before
+
+
 def _setup_status(client: TestClient) -> dict:
     resp = client.get("/api/v1/auth/setup-status")
     assert resp.status_code == 200, resp.text

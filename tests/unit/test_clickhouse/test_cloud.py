@@ -38,6 +38,12 @@ class _Handler(BaseHTTPRequestHandler):
     def log_message(self, format: str, *args: object) -> None:
         return
 
+    @property
+    def api(self) -> _CloudApi:
+        """The server this request reached, with the service it emulates."""
+        assert isinstance(self.server, _CloudApi)
+        return self.server
+
     def _send(self, payload: dict, code: int = 200) -> None:
         body = json.dumps(payload).encode()
         self.send_response(code)
@@ -47,7 +53,7 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _record(self, method: str, body: dict | None = None) -> None:
-        self.server.requests.append(  # type: ignore[attr-defined]
+        self.api.requests.append(
             {
                 "method": method,
                 "path": self.path,
@@ -67,8 +73,9 @@ class _Handler(BaseHTTPRequestHandler):
                     "result": [
                         {
                             "id": "svc-1",
-                            "name": self.server.svc_name,  # type: ignore[attr-defined]
-                            "state": self.server.state,  # type: ignore[attr-defined]
+                            "name": self.api.svc_name,
+                            "state": self.api.state,
+                            **self.api.sizing,
                         }
                     ]
                 }
@@ -83,19 +90,27 @@ class _Handler(BaseHTTPRequestHandler):
         self._record("PATCH", body)
         command = body.get("command")
         if command == "start":
-            self.server.state = "running"  # type: ignore[attr-defined]
+            self.api.state = "running"
         elif command == "stop":
-            self.server.state = "stopped"  # type: ignore[attr-defined]
-        self._send({"result": {"state": self.server.state}})  # type: ignore[attr-defined]
+            self.api.state = "stopped"
+        self._send({"result": {"state": self.api.state}})
+
+
+class _CloudApi(HTTPServer):
+    """The stub server: the one service it emulates, and every request it answered."""
+
+    def __init__(self) -> None:
+        super().__init__(("127.0.0.1", 0), _Handler)
+        self.state = "stopped"
+        self.svc_name = "dfe"
+        self.sizing: dict[str, object] = {}
+        self.requests: list[dict[str, object]] = []
 
 
 @pytest.fixture
 def stub():
     """A real ephemeral HTTP server emulating the CH Cloud management API."""
-    server = HTTPServer(("127.0.0.1", 0), _Handler)
-    server.state = "stopped"  # type: ignore[attr-defined]
-    server.svc_name = "dfe"  # type: ignore[attr-defined]
-    server.requests = []  # type: ignore[attr-defined]
+    server = _CloudApi()
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
@@ -196,6 +211,66 @@ class TestWaitRunning:
         svc = CloudService(_cfg(stub), sleep=clock.sleep, now=clock.now)
         with pytest.raises(CloudServiceError, match="not running"):
             svc.wait_running(timeout=30.0, poll_interval=10.0)
+
+
+class TestServiceSizing:
+    """The service object already carries its sizing, so the status read keeps it."""
+
+    def test_the_stated_sizing_rides_the_status(self, stub):
+        stub.sizing = {
+            "minReplicaMemoryGb": 16,
+            "maxReplicaMemoryGb": 120.5,
+            "numReplicas": 3,
+            "idleScaling": True,
+        }
+
+        st = CloudService(_cfg(stub)).status()
+
+        assert (st.min_replica_memory_gb, st.max_replica_memory_gb) == (16.0, 120.5)
+        assert st.num_replicas == 3
+        assert st.idle_scaling is True
+
+    def test_a_service_object_without_sizing_reads_as_unknown(self, stub):
+        st = CloudService(_cfg(stub)).status()
+
+        assert st.min_replica_memory_gb is None
+        assert st.max_replica_memory_gb is None
+        assert st.num_replicas is None
+        assert st.idle_scaling is None
+
+    @pytest.mark.parametrize(
+        "sizing",
+        [
+            {"minReplicaMemoryGb": "16", "numReplicas": 3.0, "idleScaling": "yes"},
+            {"maxReplicaMemoryGb": True, "numReplicas": False, "idleScaling": 1},
+        ],
+    )
+    def test_a_field_of_the_wrong_type_is_unknown_rather_than_coerced(self, stub, sizing):
+        stub.sizing = sizing
+
+        st = CloudService(_cfg(stub)).status()
+
+        assert st.min_replica_memory_gb is None
+        assert st.max_replica_memory_gb is None
+        assert st.num_replicas is None
+        assert st.idle_scaling is None
+
+    def test_the_observed_read_returns_the_service_object(self, stub):
+        from dfe_engine.backing.observed import cloud_service
+
+        stub.sizing = {"numReplicas": 2}
+
+        found = cloud_service(_cfg(stub), timeout=5.0)
+
+        assert found is not None
+        assert found.num_replicas == 2
+
+    def test_the_observed_read_of_a_missing_service_is_unknown(self, stub):
+        from dfe_engine.backing.observed import cloud_service
+
+        stub.svc_name = "someone-elses-service"
+
+        assert cloud_service(_cfg(stub), timeout=5.0) is None
 
 
 class TestConfigured:

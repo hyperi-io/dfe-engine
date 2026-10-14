@@ -49,11 +49,19 @@ class CloudServiceError(Exception):
 
 @dataclass(slots=True)
 class CloudServiceStatus:
-    """A CH Cloud service's control-plane state."""
+    """A CH Cloud service's control-plane state, and the sizing its service object states.
+
+    Each sizing field is None where the service object omits it or carries it as
+    another type.
+    """
 
     id: str
     name: str
     state: str
+    min_replica_memory_gb: float | None = None
+    max_replica_memory_gb: float | None = None
+    num_replicas: int | None = None
+    idle_scaling: bool | None = None
 
     @property
     def is_running(self) -> bool:
@@ -68,6 +76,26 @@ class CloudServiceStatus:
         return self.state in _TRANSITIONING
 
 
+# bool is an int in Python, so each parser refuses it where it wants a number.
+def _number(value: object) -> float | None:
+    """A service-object number as a float, or None for anything else."""
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return None
+    return float(value)
+
+
+def _count(value: object) -> int | None:
+    """A service-object whole number, or None for anything else."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+def _flag(value: object) -> bool | None:
+    """A service-object boolean, or None for anything else."""
+    return value if isinstance(value, bool) else None
+
+
 class CloudService:
     """Drive a ClickHouse Cloud service's lifecycle over the management API.
 
@@ -80,6 +108,8 @@ class CloudService:
             Tests inject a fake so no network is touched.
         sleep / now: injectable clock for :meth:`wait_running` (tests pass fakes
             so they never really sleep and never race a wall clock).
+        timeout / attempts: per-request timeout in seconds, and how many tries the
+            default client makes. A read a console waits on passes fewer and shorter.
     """
 
     def __init__(
@@ -89,11 +119,15 @@ class CloudService:
         http_factory: Callable[[], Any] | None = None,
         sleep: Callable[[float], None] = time.sleep,
         now: Callable[[], float] = time.monotonic,
+        timeout: float = 30.0,
+        attempts: int = 3,
     ) -> None:
         self._config = config
         self._http_factory = http_factory or self._default_http_factory
         self._sleep = sleep
         self._now = now
+        self._timeout = timeout
+        self._attempts = attempts
         self._org_id_cache = config.organization_id or ""
 
     def _default_http_factory(self) -> Any:
@@ -107,8 +141,8 @@ class CloudService:
             )
         return HttpClient(
             base_url=self._config.api_base,
-            timeout=30.0,
-            retries=3,
+            timeout=self._timeout,
+            retries=self._attempts,
             auth=(self._config.api_key_id, self._config.api_key_secret),
         )
 
@@ -149,7 +183,13 @@ class CloudService:
                 not self._config.service_id and svc.get("name") == self._config.service_name
             ):
                 return org_id, CloudServiceStatus(
-                    id=svc.get("id", ""), name=svc.get("name", ""), state=svc.get("state", "")
+                    id=svc.get("id", ""),
+                    name=svc.get("name", ""),
+                    state=svc.get("state", ""),
+                    min_replica_memory_gb=_number(svc.get("minReplicaMemoryGb")),
+                    max_replica_memory_gb=_number(svc.get("maxReplicaMemoryGb")),
+                    num_replicas=_count(svc.get("numReplicas")),
+                    idle_scaling=_flag(svc.get("idleScaling")),
                 )
         selector = self._config.service_id or self._config.service_name
         available = ", ".join(f"{s.get('name')} ({s.get('state')})" for s in services)
