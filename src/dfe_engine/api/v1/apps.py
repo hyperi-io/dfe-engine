@@ -108,6 +108,7 @@ from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 from dfe_engine.sampling import SampleMode, SampleRequest, SamplerError
+from dfe_engine.settings import DFESettings
 from dfe_engine.source.flow import stage_instance_ceiling
 from dfe_engine.source.registry import SourceNotFoundError
 
@@ -1750,6 +1751,11 @@ _WRITE_ENVELOPE_BYTES = 1024
 """The ``{"content": ...}`` wrapper around a file, with room for whitespace."""
 
 
+def _file_write_bound(settings: DFESettings) -> int:
+    """The largest body a file write may send: every character escaped, plus its wrapper."""
+    return settings.repository.max_object_bytes * _JSON_ESCAPE_BYTES + _WRITE_ENVELOPE_BYTES
+
+
 async def _read_file_write(request: Request) -> FileWriteRequest:
     """The write's body, refused with 413 before a file over the object cap is buffered.
 
@@ -1759,7 +1765,7 @@ async def _read_file_write(request: Request) -> FileWriteRequest:
     limit = request.app.state.settings.repository.max_object_bytes
     raw = await body_limits.read_body_capped(
         request,
-        limit=limit * _JSON_ESCAPE_BYTES + _WRITE_ENVELOPE_BYTES,
+        limit=_file_write_bound(request.app.state.settings),
         code="payload_too_large",
         message=f"request body is larger than a file of {limit} bytes can be sent in "
         "(repository.max_object_bytes)",
@@ -1798,6 +1804,7 @@ async def _read_file_write(request: Request) -> FileWriteRequest:
         }
     },
 )
+@body_limits.own_limit("repository.max_object_bytes", _file_write_bound)
 async def write_app_file(
     service: str,
     instance: str,

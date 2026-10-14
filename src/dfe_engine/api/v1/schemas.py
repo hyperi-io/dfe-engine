@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
-from dfe_engine.api.body_limits import refuse_declared_oversize, too_large
+from dfe_engine.api.body_limits import own_limit, refuse_declared_oversize, too_large
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
@@ -1141,6 +1141,13 @@ async def import_meta_schema(
         },
     },
     dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
+)
+@own_limit(
+    "api.elastic_converter_max_upload_bytes",
+    lambda settings: (
+        settings.api.elastic_converter_max_upload_bytes
+        + settings.api.elastic_converter_content_length_slack_bytes
+    ),
 )
 async def elastic_converter(
     request: Request,
