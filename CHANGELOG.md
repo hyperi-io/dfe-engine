@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.43](https://github.com/hyperi-io/dfe-engine/compare/v1.22.42...v1.22.43) (2026-10-15)
+
+### Bug Fixes
+
+* drop the unread post-build test artefacts ([#889](https://github.com/hyperi-io/dfe-engine/issues/889)) ([3ac902a](https://github.com/hyperi-io/dfe-engine/commit/3ac902af263d8912e5489598e071d75e0d21329e))
+* keep a source's omitted fields on update ([#890](https://github.com/hyperi-io/dfe-engine/issues/890)) ([9e6ffa6](https://github.com/hyperi-io/dfe-engine/commit/9e6ffa681ff34e41a278f5d030e560b43e9dc90e))
+
 ## [1.22.42](https://github.com/hyperi-io/dfe-engine/compare/v1.22.41...v1.22.42) (2026-10-14)
 
 ### Bug Fixes
