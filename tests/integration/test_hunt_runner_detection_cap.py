@@ -121,17 +121,17 @@ def _run_status(ch_client, db: str, hunt: str, fire: int) -> str:
     )
 
 
-def _rule_hunt(tmp_path, db: str, where_clause: str) -> tuple[str, str]:
+def _rule_hunt(tmp_path, db: str, where_clause: str, *orgs: str) -> tuple[str, str]:
     hunt = f"cap_{uuid.uuid4().hex[:8]}"
     rule_id = f"{hunt}_rule"
     write_rule(tmp_path / "rules", rule_id, where_clause)
-    write_hunt(tmp_path / "hunts", hunt, rule_id, db)
+    write_hunt(tmp_path / "hunts", hunt, rule_id, db, customers=orgs)
     return hunt, rule_id
 
 
 def test_a_rule_over_the_cap_writes_the_cap_and_one_summary_row(ch_client, dfe_db, tmp_path):
     org = f"org-{uuid.uuid4().hex[:8]}"
-    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id = '{org}' AND _json.kind = 'flood'")
+    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id = '{org}' AND _json.kind = 'flood'", org)
     fire = current_fire(hunt, _INTERVAL, int(time.time()))
     matched = _SHIPPED_CAP + 250
     _land(ch_client, dfe_db, org, fire, matched)
@@ -167,7 +167,7 @@ def test_a_rule_over_the_cap_writes_the_cap_and_one_summary_row(ch_client, dfe_d
 
 def test_a_rule_under_the_cap_writes_every_match_and_no_summary(ch_client, dfe_db, tmp_path):
     org = f"org-{uuid.uuid4().hex[:8]}"
-    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id = '{org}' AND _json.kind = 'flood'")
+    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id = '{org}' AND _json.kind = 'flood'", org)
     fire = current_fire(hunt, _INTERVAL, int(time.time()))
     _land(ch_client, dfe_db, org, fire, 3)
     # Outside the window, and inside it for another org: neither may be written.
@@ -188,7 +188,7 @@ def test_a_rule_that_matches_exactly_the_cap_drops_nothing_and_writes_no_summary
     ch_client, dfe_db, tmp_path
 ):
     org = f"org-{uuid.uuid4().hex[:8]}"
-    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id = '{org}'")
+    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id = '{org}'", org)
     fire = current_fire(hunt, _INTERVAL, int(time.time()))
     _land(ch_client, dfe_db, org, fire, _SHIPPED_CAP)
 
@@ -204,7 +204,7 @@ def test_a_flood_across_orgs_names_no_single_org_on_its_summary(ch_client, dfe_d
     """A summary counts every tenant's matches, so it must not sit under one of them."""
     marker = uuid.uuid4().hex[:8]
     orgs = (f"org-a-{marker}", f"org-b-{marker}")
-    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id IN ('{orgs[0]}', '{orgs[1]}')")
+    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id IN ('{orgs[0]}', '{orgs[1]}')", *orgs)
     fire = current_fire(hunt, _INTERVAL, int(time.time()))
     for org in orgs:
         _land(ch_client, dfe_db, org, fire, 600)
@@ -223,7 +223,7 @@ def test_a_count_the_server_refuses_leaves_the_capped_rows_and_advances(
 ):
     """The capped INSERT is committed, so a failed count must not hold the window."""
     org = f"org-{uuid.uuid4().hex[:8]}"
-    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id = '{org}'")
+    hunt, rule_id = _rule_hunt(tmp_path, dfe_db, f"_org_id = '{org}'", org)
     fire = current_fire(hunt, _INTERVAL, int(time.time()))
     _land(ch_client, dfe_db, org, fire, 40)
     spec = _specs(tmp_path, max_detections=25)[hunt]

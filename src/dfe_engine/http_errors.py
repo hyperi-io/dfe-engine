@@ -21,8 +21,11 @@ one or an opaque user id.
 
 import json
 import re
+import secrets
 import socket
 import ssl
+import traceback
+from pathlib import Path
 
 # A provider error code is a short token; anything longer in a code slot may be prose naming the user.
 # ``\Z``, not ``$``: ``$`` also matches before a trailing newline.
@@ -206,6 +209,45 @@ def describe_http_error(exc: BaseException) -> dict[str, object]:
     if transport_failure := _transport_failure(exc):
         fields["transport_failure"] = transport_failure
     return fields
+
+
+def failure_frames(exc: BaseException, *, limit: int = 10) -> list[str]:
+    """Where ``exc`` was raised, innermost last, as ``file.py:line function``.
+
+    The file's name alone, with no directory, source line or local, so a frame names
+    code and never data.
+
+    Args:
+        exc: The failure.
+        limit: Frames kept, counted from the innermost.
+
+    Returns:
+        The frames, empty when ``exc`` was never raised.
+    """
+    frames = traceback.extract_tb(exc.__traceback__)[-limit:]
+    return [f"{Path(frame.filename).name}:{frame.lineno} {frame.name}" for frame in frames]
+
+
+def describe_failure(exc: BaseException) -> dict[str, object]:
+    """:func:`describe_http_error`'s fields plus :func:`failure_frames`, for a failure in our own code.
+
+    Args:
+        exc: The failure.
+
+    Returns:
+        The log fields, never the failure's text.
+    """
+    return {**describe_http_error(exc), "frames": failure_frames(exc)}
+
+
+def failure_reference() -> str:
+    """A fresh id joining one failure's generic answer to the log line holding its reason."""
+    return secrets.token_hex(6)
+
+
+def referenced(message: str, reference: str) -> str:
+    """``message`` naming ``reference``, so whoever reads the answer can find its log line."""
+    return f"{message} (reference {reference})"
 
 
 def credential_failure_message(*, service: str) -> str:

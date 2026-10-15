@@ -1917,8 +1917,9 @@ class TestUpdateGroup:
         assert resp.status_code == 404
 
     def test_update_requires_admin(self, client, viewer_headers):
+        """viewer sees dfe-viewers through its membership, so the refusal is a 403."""
         resp = client.put(
-            "/api/v1/auth/groups/dfe-admins",
+            "/api/v1/auth/groups/dfe-viewers",
             json={"roles": ["admin"]},
             headers=viewer_headers,
         )
@@ -1972,8 +1973,8 @@ class TestAddMember:
 
     def test_add_member_requires_admin(self, client, viewer_headers):
         resp = client.post(
-            "/api/v1/auth/groups/dfe-admins/members",
-            json={"username": "viewer"},
+            "/api/v1/auth/groups/dfe-viewers/members",
+            json={"username": "admin"},
             headers=viewer_headers,
         )
         assert resp.status_code == 403
@@ -2009,7 +2010,7 @@ class TestRemoveMember:
 
     def test_remove_member_requires_admin(self, client, viewer_headers):
         resp = client.delete(
-            "/api/v1/auth/groups/dfe-admins/members/admin",
+            "/api/v1/auth/groups/dfe-viewers/members/viewer",
             headers=viewer_headers,
         )
         assert resp.status_code == 403
@@ -2046,7 +2047,7 @@ class TestDeleteGroup:
         assert resp.status_code == 404
 
     def test_delete_requires_admin(self, client, viewer_headers):
-        resp = client.delete("/api/v1/auth/groups/dfe-admins", headers=viewer_headers)
+        resp = client.delete("/api/v1/auth/groups/dfe-viewers", headers=viewer_headers)
         assert resp.status_code == 403
 
 

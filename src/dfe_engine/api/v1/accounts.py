@@ -183,6 +183,12 @@ async def _persist_password(
 
 # -- Request / Response models --------------------------------
 
+_ORG_DESCRIPTION = (
+    "The registered org the account belongs to, which its sessions carry as org_id. "
+    "Empty binds it to none, so it reads no org-bound view. The binding grants nothing "
+    "itself: such a view also needs the org among those its groups grant."
+)
+
 
 class CreateAccountRequest(BaseModel):
     """What a console sends to create an account.
@@ -205,6 +211,7 @@ class CreateAccountRequest(BaseModel):
     groups: list[str] = Field(default_factory=list, description="Group memberships")
     phone: str = Field(default="", description="Contact phone")
     name: str = Field(default="", description="Display name")
+    org: str = Field(default="", description=_ORG_DESCRIPTION)
 
     @field_validator("password")
     @classmethod
@@ -219,6 +226,7 @@ class UpdateAccountRequest(BaseModel):
     email: str | None = Field(None, min_length=1, description="Contact email")
     phone: str | None = Field(None, description="Contact phone")
     name: str | None = Field(None, description="Display name")
+    org: str | None = Field(None, description=f"Replace the org binding. {_ORG_DESCRIPTION}")
 
 
 class UpdateOwnAccountRequest(BaseModel):
@@ -321,6 +329,7 @@ class AccountResponse(BaseModel):
     email: str
     phone: str = ""
     name: str = ""
+    org: str = Field(default="", description=_ORG_DESCRIPTION)
     external: bool = Field(
         description="True when the account authenticates through an identity provider",
     )
@@ -366,6 +375,7 @@ def _account_response(request: Request, account: Account, groups: list[Group]) -
         email=account.email,
         phone=account.phone,
         name=account.name,
+        org=account.org,
         external=account.external,
         oidc_id=account.oidc_id,
         password_change_required=account.password_change_required,
@@ -386,6 +396,18 @@ def _contact_updates(
     if body.name is not None:
         fields["name"] = body.name
     return fields
+
+
+def _refuse_unknown_org(request: Request, org: str) -> None:
+    """Refuse an org binding the org registry holds no org for, where empty binds none."""
+    if not org:
+        return
+    registry = getattr(request.app.state, "org_registry", None)
+    if registry is None or registry.get(org) is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "unknown_org", "message": f"Org '{org}' is not registered"},
+        )
 
 
 def _require_account(store: Any, username: str) -> Account:
@@ -517,6 +539,7 @@ async def create_account(
     )
     if store.get(body.username) is not None:
         raise conflict
+    _refuse_unknown_org(request, body.org)
     groups = group_store.list()
     created = Account(groups=body.groups, password_hash="", username=body.username)
     held_after = groups_held_after(
@@ -531,13 +554,16 @@ async def create_account(
     # It hashes the password, so it runs off the event loop.
     try:
         account = await run_blocking(
-            store.create,
-            body.username,
-            body.password,
-            groups=body.groups,
-            email=body.email,
-            phone=body.phone,
-            name=body.name,
+            functools.partial(
+                store.create,
+                body.username,
+                body.password,
+                groups=body.groups,
+                email=body.email,
+                phone=body.phone,
+                name=body.name,
+                org=body.org,
+            )
         )
     except AccountExistsError as exc:
         raise conflict from exc
@@ -559,7 +585,9 @@ async def create_account(
         summary="create account",
         actor=user.user_id,
     )
-    audit_account_change(user.user_id, account.username, "created", {"groups": body.groups})
+    audit_account_change(
+        user.user_id, account.username, "created", {"groups": body.groups, "org": body.org}
+    )
     return _account_response(request, account, group_store.list())
 
 
@@ -786,6 +814,9 @@ async def update_account(
         update_fields["enabled"] = body.enabled
     if body.blocked is not None:
         update_fields["blocked"] = body.blocked
+    if body.org is not None:
+        _refuse_unknown_org(request, body.org)
+        update_fields["org"] = body.org
     if body.groups is not None:
         # The group files decide membership, so diff against them: re-sending a list repairs drift.
         listed_in = {g.name for g in group_store.list() if username in g.members}
@@ -809,7 +840,7 @@ async def update_account(
     )
     # Field names only for the contact fields: their values are personal data.
     details: dict[str, object] = {"fields": sorted(update_fields)}
-    for name in ("groups", "enabled", "blocked"):
+    for name in ("groups", "enabled", "blocked", "org"):
         if name in update_fields:
             details[name] = update_fields[name]
     audit_account_change(user.user_id, account.username, "updated", details)

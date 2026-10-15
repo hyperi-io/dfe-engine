@@ -2814,7 +2814,7 @@
           "Roles"
         ],
         "summary": "Create Role",
-        "description": "Create a new RBAC role (admin only).",
+        "description": "Create a new RBAC role granting no more than the caller holds.",
         "operationId": "create_role_api_v1_auth_roles_post",
         "requestBody": {
           "required": true,
@@ -3065,7 +3065,7 @@
           "Roles"
         ],
         "summary": "Update Role",
-        "description": "Update a role (admin only).",
+        "description": "Update a role. A change to what it grants needs the caller to hold it before and after.",
         "operationId": "update_role_api_v1_auth_roles__name__put",
         "parameters": [
           {
@@ -10187,7 +10187,7 @@
           "queries"
         ],
         "summary": "Execute View",
-        "description": "Execute a parameterized view and return JSON results.\n\nThe ``org_id`` parameter is always injected from the authenticated\nuser's context -- it cannot be overridden by the client.",
+        "description": "Execute a parameterized view and return JSON results.\n\nThe ``org_id`` parameter is always injected from the authenticated\nuser's context -- it cannot be overridden by the client. It is the org the\nsession's account is bound to, and a view taking it runs only when the caller's\ngroups grant that org or it reads every org (``granted_bound_org``).",
         "operationId": "execute_view_api_v1_queries_views__label__execute_post",
         "parameters": [
           {
@@ -23653,6 +23653,12 @@
             "title": "Name",
             "default": ""
           },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "description": "The registered org the account belongs to, which its sessions carry as org_id. Empty binds it to none, so it reads no org-bound view. The binding grants nothing itself: such a view also needs the org among those its groups grant.",
+            "default": ""
+          },
           "external": {
             "type": "boolean",
             "title": "External",
@@ -26303,6 +26309,12 @@
             "title": "Name",
             "description": "Display name",
             "default": ""
+          },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "description": "The registered org the account belongs to, which its sessions carry as org_id. Empty binds it to none, so it reads no org-bound view. The binding grants nothing itself: such a view also needs the org among those its groups grant.",
+            "default": ""
           }
         },
         "type": "object",
@@ -28522,7 +28534,8 @@
             },
             "type": "array",
             "minItems": 1,
-            "title": "Customers"
+            "title": "Customers",
+            "description": "The _org_id values the hunt reads: an org's tenant ids, or its name when it declares none. The runner reads no other org's rows, and a hunt naming none runs nothing."
           },
           "customer_filters": {
             "anyOf": [
@@ -28663,7 +28676,8 @@
             },
             "type": "array",
             "minItems": 1,
-            "title": "Customers"
+            "title": "Customers",
+            "description": "The _org_id values the hunt reads: an org's tenant ids, or its name when it declares none. The runner reads no other org's rows, and a hunt naming none runs nothing."
           },
           "customer_filters": {
             "anyOf": [
@@ -29044,7 +29058,8 @@
             },
             "type": "array",
             "minItems": 1,
-            "title": "Customers"
+            "title": "Customers",
+            "description": "The _org_id values the hunt reads: an org's tenant ids, or its name when it declares none. The runner reads no other org's rows, and a hunt naming none runs nothing."
           },
           "customer_filters": {
             "anyOf": [
@@ -40292,6 +40307,18 @@
             ],
             "title": "Name",
             "description": "Display name"
+          },
+          "org": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org",
+            "description": "Replace the org binding. The registered org the account belongs to, which its sessions carry as org_id. Empty binds it to none, so it reads no org-bound view. The binding grants nothing itself: such a view also needs the org among those its groups grant."
           }
         },
         "type": "object",

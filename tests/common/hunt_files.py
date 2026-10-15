@@ -12,6 +12,7 @@ and the hunt through ``HuntCreateRequest.to_config_dict``, which are what
 ``POST /api/v1/rules`` and ``POST /api/v1/hunts`` write with.
 """
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from dfe_engine.api.v1.hunts import HuntCreateRequest
@@ -38,13 +39,24 @@ def write_rule(
         registry.close()
 
 
-def write_hunt(hunts_dir: Path, hunt: str, rule_id: str, db: str, *, source: str = "main") -> None:
-    """Write one hunt file exactly as POST /api/v1/hunts writes it, firing every minute."""
+def write_hunt(
+    hunts_dir: Path,
+    hunt: str,
+    rule_id: str,
+    db: str,
+    *,
+    source: str = "main",
+    customers: Sequence[str] = ("acme",),
+) -> None:
+    """Write one hunt file exactly as POST /api/v1/hunts writes it, firing every minute.
+
+    *customers* are the ``_org_id`` values the hunt reads, so a test names the org its rows carry.
+    """
     body = HuntCreateRequest(
         name=hunt,
         cron="* * * * *",
         rules=[rule_id],
-        customers=["acme"],
+        customers=list(customers),
         global_source_table_name=f"{db}.{source}",
         global_target_table_name=f"{db}.detection",
     )

@@ -95,7 +95,7 @@ def stack(ch_params, ch_client, tmp_path, monkeypatch):
     leak_view = f"dfe_v_probe{uid}_leak"
     ch_client.command(f"CREATE DATABASE IF NOT EXISTS `{DATA_DB}`")
     ch_client.command(f"CREATE TABLE {table} (org String, n UInt64) ENGINE = MergeTree ORDER BY n")
-    # The admin token below carries no org claim, so the API resolves it to `default`.
+    # The admin account below is bound to org `default`, which is the org the view reads.
     ch_client.command(f"INSERT INTO {table} VALUES ('default', 1), ('default', 2), ('other', 3)")
     ch_client.command(
         f"CREATE VIEW `{DATA_DB}`.`{who_view}` AS SELECT currentUser() AS who, n "
@@ -113,6 +113,7 @@ def stack(ch_params, ch_client, tmp_path, monkeypatch):
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             app.state.account_store.reset_password("admin", ADMIN_PASSWORD)
+            app.state.account_store.update("admin", org="default")
             token = create_access_token(data={"sub": "admin"}, settings=settings)
             yield SimpleNamespace(
                 app=app,

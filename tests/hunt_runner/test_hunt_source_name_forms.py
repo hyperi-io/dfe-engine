@@ -47,7 +47,12 @@ def _errors(run) -> tuple[object, list[str]]:
 
 def _write_hunt(hunt_dir: Path, name: str, **fields) -> None:
     hunt_dir.mkdir(parents=True, exist_ok=True)
-    definition = {"cron": "*/5 * * * *", "rules": [{"rule_name": "certutil"}], **fields}
+    definition = {
+        "cron": "*/5 * * * *",
+        "customers": ["acme"],
+        "rules": [{"rule_name": "certutil"}],
+        **fields,
+    }
     (hunt_dir / f"{name}.yaml").write_text(
         yaml_dump_string(definition), encoding="utf-8", newline="\n"
     )
@@ -73,6 +78,7 @@ def test_a_hyphenated_source_compiles_quoted(tmp_path: Path, where, source, quot
     if where == "entry":
         entry["source_table_name"] = source
     definition = {
+        "customers": ["acme"],
         "rules": [entry],
         "global_source_table_name": source if where == "hunt" else "dfe.main",
         "global_target_table_name": "dfe.detection",
@@ -90,7 +96,7 @@ def test_a_rule_files_hyphenated_table_compiles_quoted(tmp_path: Path):
     _save_rule(tmp_path, source_db="dfe", source_table="windows-audit_sigma")
 
     [statement] = compile_hunt_queries(
-        {"rules": ["certutil"], "global_target_table_name": "dfe.detection"},
+        {"customers": ["acme"], "rules": ["certutil"], "global_target_table_name": "dfe.detection"},
         "h",
         rules_dir=tmp_path,
     )
@@ -105,6 +111,7 @@ def test_a_hyphenated_target_is_still_refused(tmp_path: Path):
     statements, errors = _errors(
         lambda: compile_hunt_queries(
             {
+                "customers": ["acme"],
                 "rules": ["certutil"],
                 "global_source_table_name": "dfe.cisco-ios",
                 "global_target_table_name": "dfe.detection-results",
@@ -162,7 +169,7 @@ def test_without_a_data_database_an_unqualified_source_still_has_none(tmp_path: 
 
     statements, errors = _errors(
         lambda: compile_hunt_queries(
-            {"rules": ["certutil"], "global_source_table_name": "cisco-ios"},
+            {"customers": ["acme"], "rules": ["certutil"], "global_source_table_name": "cisco-ios"},
             "h",
             rules_dir=tmp_path,
             default_target="dfe.detection",

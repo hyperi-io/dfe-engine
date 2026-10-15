@@ -202,7 +202,14 @@ class _HuntConfigFields(BaseModel):
         description="Results table override; the rule's query carries its own target when omitted",
     )
     global_source_table_name: str | None = None
-    customers: list[str] = Field(min_length=1)
+    customers: list[str] = Field(
+        min_length=1,
+        description=(
+            "The _org_id values the hunt reads: an org's tenant ids, or its name when it "
+            "declares none. The runner reads no other org's rows, and a hunt naming none "
+            "runs nothing."
+        ),
+    )
     customer_filters: dict[str, Any] | None = None
     checkpoint_timestamp_field: str | None = None
     scheduling_mode: str | None = None

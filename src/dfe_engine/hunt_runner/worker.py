@@ -51,6 +51,10 @@ class EmptyHuntQuery(RuntimeError):
     """A hunt that compiled to no statements, so there is nothing to execute."""
 
 
+class NoHuntCustomers(EmptyHuntQuery):
+    """A rules hunt naming no customer, so it may read no org and runs nothing."""
+
+
 def _written_rows(result: Any) -> int:
     """Rows an INSERT wrote, from the driver's summary. 0 when it reports none.
 
@@ -104,10 +108,17 @@ class HuntWorker:
         """Execute the incremental window; return the new watermark (= window end).
 
         Raises:
+            NoHuntCustomers: a rules hunt names no customer, so it reads no org. The
+                watermark does NOT advance.
             EmptyHuntQuery: the hunt has no statement to run, so its rules named no
                 rule file the compiler could resolve. The watermark does NOT advance.
                 Raised unlogged: the runner logs it with its back-off.
         """
+        if spec.customers is not None and not spec.customers:
+            raise NoHuntCustomers(
+                f"hunt {spec.hunt_id} names no customers, so it reads no org: the fire "
+                "is refused and the watermark is held until the hunt names one"
+            )
         statements = [statement for statement in spec.queries if statement.sql.strip()]
         if not statements:
             raise EmptyHuntQuery(

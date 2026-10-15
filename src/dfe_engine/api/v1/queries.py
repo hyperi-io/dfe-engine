@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.api.deps import CurrentUser, Settings, granted_bound_org, require_action
 from dfe_engine.api.errors import backend_failure
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.query.models import (
@@ -173,14 +173,26 @@ def execute_view(
     body: ViewExecuteRequest,
     user: CurrentUser,
     executor: ViewExec,
+    request: Request,
 ) -> QueryResponse:
     """Execute a parameterized view and return JSON results.
 
     The ``org_id`` parameter is always injected from the authenticated
-    user's context -- it cannot be overridden by the client.
+    user's context -- it cannot be overridden by the client. It is the org the
+    session's account is bound to, and a view taking it runs only when the caller's
+    groups grant that org or it reads every org (``granted_bound_org``).
     """
     from dfe_engine.query.executor import ViewExecutionError, ViewRequestError
 
+    try:
+        view_def = executor.get_view(label)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"View '{label}' not found"},
+        )
+    if view_def.tenant_isolated:
+        granted_bound_org(request, user, scopes_dict["query_execute"])
     try:
         result = executor.execute(
             label=label,

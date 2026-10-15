@@ -69,7 +69,11 @@ def _compile(rules_dir: Path, *, hunt_source: str = "", entry_source: str = ""):
     entry: dict = {"rule_name": "certutil"}
     if entry_source:
         entry["source_table_name"] = entry_source
-    definition: dict = {"rules": [entry], "global_target_table_name": "dfe.detection"}
+    definition: dict = {
+        "customers": ["acme"],
+        "rules": [entry],
+        "global_target_table_name": "dfe.detection",
+    }
     if hunt_source:
         definition["global_source_table_name"] = hunt_source
     return compile_hunt_queries(definition, "h", rules_dir=rules_dir)
@@ -181,6 +185,7 @@ def test_one_refused_rule_leaves_the_hunts_other_rules_compiling(tmp_path: Path)
 
     statements = compile_hunt_queries(
         {
+            "customers": ["acme"],
             "rules": [
                 {"rule_name": "certutil", "source_table_name": REFUSED_SOURCES["table function"]},
                 {"rule_name": "certutil"},

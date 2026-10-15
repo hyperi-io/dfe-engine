@@ -32,7 +32,7 @@ flowchart TD
     RESOLVE_KEY --> CTX
 
     APIKEY -->|No| JWT{Authorization:<br/>Bearer?}
-    JWT -->|Yes| DECODE["Verify signature ES384 by default,<br/>issuer and expiry<br/>Take sub and org_id"]
+    JWT -->|Yes| DECODE["Verify signature ES384 by default,<br/>issuer and expiry<br/>Take sub"]
     DECODE --> BIND["Bind sub to its account<br/>disabled or blocked -> 401"]
     BIND --> RESOLVE_JWT["GroupStore resolves the account's<br/>groups -> roles + org_ids<br/>token claims ignored"]
     RESOLVE_JWT --> CTX
@@ -57,7 +57,9 @@ flowchart TD
 | JWT Bearer | Console sessions, standalone, dev | Issued by `POST /api/v1/auth/login`, the OIDC login callback and `POST /api/v1/auth/refresh` | `api.jwt_expire_minutes` (`DFE_API_JWT_EXPIRE_MINUTES`, default 60) |
 | Disabled | Dev/test | N/A | N/A |
 
-A JWT carries identity, not authority. Its `roles`, `groups` and `org_ids` claims grant nothing: every request re-resolves them from the account the `sub` binds to, so a role or org taken away is gone from the next request. A `sub` that binds no account holds nothing -- an API-key subject, a deleted account -- and with auth enabled `POST /api/v1/auth/refresh` answers 401 for it, since each refresh issues a new expiry.
+A JWT carries identity, not authority. Its `org_id`, `roles`, `groups` and `org_ids` claims grant nothing: every request re-resolves them from the account the `sub` binds to, so a role or org taken away is gone from the next request.
+
+A session's `org_id` is its account's `org`, set by `POST` or `PUT /api/v1/auth/accounts` (`422 unknown_org` for an unregistered org), and empty for an account bound to none or an API key. A view taking `org_id` runs only when the session's groups grant that org or it reads every org, else `403 no_org` or `403 org_not_granted`. A `sub` that binds no account holds nothing -- an API-key subject, a deleted account -- and with auth enabled `POST /api/v1/auth/refresh` answers 401 for it, since each refresh issues a new expiry.
 
 OIDC headers injected by Envoy Gateway SecurityPolicy, read only when `auth.trust_proxy_auth_headers` (`DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`) is true:
 
@@ -825,7 +827,7 @@ No custom ClickHouse audit table — standard OTel log ingestion is used.
 
 ```python
 class AuthContext(BaseModel):
-    org_id: str = "default"  # Primary tenant
+    org_id: str = ""  # The account's org, empty when bound to none
     user_id: str  # Required unique identifier
     email: str | None = None  # From the OIDC/JWT claim, for git author attribution
     roles: list[str]  # Resolved DFE roles

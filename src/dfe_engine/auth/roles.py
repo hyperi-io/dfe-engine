@@ -107,6 +107,38 @@ def permission_matches(permission: str, action: str) -> bool:
         return True
 
 
+def permission_covers(held: str, requested: str) -> bool:
+    """Check whether every action ``requested`` matches is one ``held`` matches.
+
+    The patterns read as :func:`permission_matches` reads them. A ``*`` segment covers
+    any segment in its place, a literal covers only itself, and a pattern without a
+    trailing ``*`` matches one segment count, so it never covers a trailing one.
+
+    Args:
+        held: A permission pattern the caller holds.
+        requested: A permission pattern a write would hand out.
+
+    Returns:
+        True if ``held`` matches every action ``requested`` does.
+    """
+    if held == "*":
+        return True
+    held_parts = held.split(":")
+    requested_parts = requested.split(":")
+
+    def segment_covers(held_segment: str, requested_segment: str) -> bool:
+        return held_segment in ("*", requested_segment)
+
+    if held_parts[-1] == "*":
+        if len(requested_parts) < len(held_parts):
+            return False
+        prefix = zip(held_parts[:-1], requested_parts, strict=False)
+        return all(segment_covers(h, r) for h, r in prefix)
+    if requested_parts[-1] == "*" or len(requested_parts) != len(held_parts):
+        return False
+    return all(segment_covers(h, r) for h, r in zip(held_parts, requested_parts, strict=True))
+
+
 class RoleDefinition(BaseModel):
     """Definition of a single role with permissions and scope flag."""
 

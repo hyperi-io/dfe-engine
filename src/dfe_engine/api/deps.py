@@ -42,7 +42,7 @@ from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.http_errors import describe_http_error
-from dfe_engine.orgs.tenant_scope import tenant_ids_for
+from dfe_engine.orgs.tenant_scope import resolve_orgs, tenant_ids_for
 from dfe_engine.secrets import DfeSecrets
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -681,11 +681,12 @@ async def get_current_user(request: Request) -> AuthContext:
                     },
                 ) from exc
 
-        require_local_account_enabled(request, oidc_subject)
+        bound = require_local_account_enabled(request, oidc_subject)
         # The token path's resolution, so a member an operator added by hand holds the group here too.
         live = resolve_live_grants_for_user(request, oidc_subject, groups=listed)
         logger.debug("OIDC auth", user_id=oidc_subject, groups=live.groups, roles=live.roles)
         return AuthContext(
+            org_id=bound.org if bound is not None else "",
             user_id=oidc_subject,
             email=oidc_email,
             roles=live.roles,
@@ -776,17 +777,16 @@ async def get_current_user(request: Request) -> AuthContext:
         if account is not None and account.password_change_required:
             # Its token carries no roles, groups or orgs, so neither does the session.
             return AuthContext(
-                org_id=payload.get("org_id", "default"),
                 user_id=jwt_user_id,
                 email=jwt_email,
                 request_id=request_id,
                 client_ip=client_ip,
                 user_agent=user_agent,
             )
-        # The token's roles, groups and org_ids claims grant nothing; the bound account decides.
+        # The token's org_id, roles, groups and org_ids claims grant nothing: the bound account decides.
         live = resolve_live_grants_for_user(request, jwt_user_id)
         return AuthContext(
-            org_id=payload.get("org_id", "default"),
+            org_id=account.org if account is not None else "",
             user_id=jwt_user_id,
             email=jwt_email,
             roles=live.roles,
@@ -926,6 +926,51 @@ def held_tenant_ids(request: Request, user: AuthContext, action: str) -> list[st
     org_registry = getattr(request.app.state, "org_registry", None)
     orgs = org_registry.list() if org_registry is not None else []
     return tenant_ids_for(user.org_ids, orgs)
+
+
+def granted_bound_org(request: Request, user: AuthContext, action: str) -> str:
+    """The org a session's org-bound read is held to: the one its account is bound to.
+
+    The binding grants nothing by itself. The caller must also read every org with
+    ``action`` (:func:`reads_every_org`), or hold the org through its groups.
+
+    Args:
+        request: The request, for the settings, role definitions and org registry.
+        user: The caller's auth context.
+        action: The action the read is gated on.
+
+    Returns:
+        The session's ``org_id``.
+
+    Raises:
+        HTTPException: 403 ``no_org`` for a session bound to no org, and 403
+            ``org_not_granted`` for one bound to an org its groups do not grant.
+    """
+    if not request.app.state.settings.auth.enabled:
+        return user.org_id
+    if not user.org_id:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "no_org",
+                "message": "This read is held to one org, and the session's account is "
+                "bound to none: bind the account to an org first",
+            },
+        )
+    if reads_every_org(request, user, action):
+        return user.org_id
+    org_registry = getattr(request.app.state, "org_registry", None)
+    orgs = org_registry.list() if org_registry is not None else []
+    if user.org_id not in {org.name for org in resolve_orgs(user.org_ids, orgs)}:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "org_not_granted",
+                "message": f"The session's account is bound to org '{user.org_id}', "
+                "which none of its groups grants",
+            },
+        )
+    return user.org_id
 
 
 def check_action(

@@ -13,6 +13,8 @@ when the condition narrows anything at all, or cannot be read.
 
 ``refuse_offbox_calls`` reads the same WHERE and refuses a condition that calls
 a ClickHouse function reading outside the row or sending it to another service.
+``refuse_bracket_escape`` refuses one whose brackets do not balance, since it runs
+inside a bracket beside the window and the hunt's orgs.
 ``refuse_direct_query`` holds a hunt's hand-written ``query`` to that refusal and
 to one statement that reads, or inserts what it reads.
 
@@ -28,8 +30,13 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.simplify import simplify
+from sqlglot.tokens import TokenType
 
-from ..clickhouse.function_guard import CallNotPermittedError, refuse_calls_outside_the_row
+from ..clickhouse.function_guard import (
+    CallNotPermittedError,
+    refuse_calls_outside_the_row,
+    tokenize,
+)
 from ..clickhouse.quoting import quote_identifier
 from ..settings import DetectionGuardSettings
 from .hunt_output import matching_rows
@@ -333,6 +340,39 @@ def refuse_offbox_calls(where: str, *, subject: str = "A rule's detection condit
         refuse_calls_outside_the_row(where, subject=subject)
     except CallNotPermittedError as exc:
         return str(exc)
+    return None
+
+
+def refuse_bracket_escape(
+    where: str, *, subject: str = "A rule's detection condition"
+) -> str | None:
+    """Say why a condition would close the bracket it runs in, or None when its brackets balance.
+
+    The hunt runner wraps the condition in a bracket ANDed with the window and the
+    hunt's orgs, so a condition that closes it early, ``x = 1) OR (1 = 1``, would OR
+    its way past both. Brackets inside a string or a comment are not counted.
+
+    Args:
+        where: The rule's detection WHERE, as it will run.
+        subject: What the message names the SQL as.
+
+    Returns:
+        The refusal message, or None when every bracket closes inside the condition.
+    """
+    try:
+        tokens = tokenize(where, subject=subject)
+    except CallNotPermittedError as exc:
+        return str(exc)
+    depth = 0
+    for token in tokens:
+        if token.token_type is TokenType.L_PAREN:
+            depth += 1
+        elif token.token_type is TokenType.R_PAREN:
+            depth -= 1
+            if depth < 0:
+                return f"{subject} closes a bracket it never opened"
+    if depth:
+        return f"{subject} leaves {depth} bracket(s) open"
     return None
 
 

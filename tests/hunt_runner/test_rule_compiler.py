@@ -55,6 +55,7 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     )
     sql = _compiled_sql(
         {
+            "customers": ["acme"],
             "rules": [{"rule_name": "certutil"}],
             "global_source_table_name": "dfe.main",
             "global_target_table_name": "dfe.detection",
@@ -66,7 +67,10 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     statement = sql[0]
     assert statement.startswith("INSERT INTO `dfe`.`detection`")
     assert "FROM `dfe`.`main`" in statement
-    assert "WHERE {window} AND (\nprocess_name = 'certutil.exe'\n    )" in statement
+    assert (
+        "WHERE {window} AND _org_id IN ('acme') AND (\nprocess_name = 'certutil.exe'\n    )"
+        in statement
+    )
     assert "'certutil' AS rule_id" in statement
     assert "'Certutil Abuse' AS rule_name" in statement
     assert "'critical' AS severity" in statement
@@ -84,7 +88,11 @@ def test_the_rule_runs_in_a_subquery_where_no_label_is_in_scope(tmp_path: Path):
         where_clause="severity >= 7",
     )
     [statement] = compile_hunt_queries(
-        {"rules": ["gd_high"], "global_source_table_name": "acme.aws-guardduty"},
+        {
+            "customers": ["acme"],
+            "rules": ["gd_high"],
+            "global_source_table_name": "acme.aws-guardduty",
+        },
         "gd_hunt",
         rules_dir=tmp_path,
         default_target="acme.detection",
@@ -96,7 +104,7 @@ def test_the_rule_runs_in_a_subquery_where_no_label_is_in_scope(tmp_path: Path):
     assert inner == (
         "    SELECT _timestamp_load, _timestamp, _org_id, _uuid, _json\n"
         "    FROM `acme`.`aws-guardduty`\n"
-        "    WHERE {window} AND (\n"
+        "    WHERE {window} AND _org_id IN ('acme') AND (\n"
         "severity >= 7\n"
         "    )\n"
         ")\n"
@@ -107,7 +115,7 @@ def test_the_rule_runs_in_a_subquery_where_no_label_is_in_scope(tmp_path: Path):
 def test_a_rule_ending_in_a_line_comment_keeps_its_closing_bracket(tmp_path: Path):
     _save_rule(tmp_path, rule_id="noted", name="Noted", where_clause="severity >= 7 -- reviewed")
     [statement] = compile_hunt_queries(
-        {"rules": ["noted"], "global_source_table_name": "acme.main"},
+        {"customers": ["acme"], "rules": ["noted"], "global_source_table_name": "acme.main"},
         "h",
         rules_dir=tmp_path,
         default_target="acme.detection",
@@ -125,6 +133,7 @@ def test_each_rule_gets_its_own_statement(tmp_path: Path):
     _save_rule(tmp_path, rule_id="two", name="Two", where_clause="b = 2")
     sql = _compiled_sql(
         {
+            "customers": ["acme"],
             "rules": [{"rule_name": "one"}, {"rule_name": "two"}],
             "global_source_table_name": "dfe.main",
         },
@@ -140,7 +149,7 @@ def test_each_rule_gets_its_own_statement(tmp_path: Path):
 def test_bare_rule_name_strings_are_accepted(tmp_path: Path):
     _save_rule(tmp_path, rule_id="plain", name="Plain", where_clause="a = 1")
     sql = _compiled_sql(
-        {"rules": ["plain"], "global_source_table_name": "dfe.main"},
+        {"customers": ["acme"], "rules": ["plain"], "global_source_table_name": "dfe.main"},
         "hunt",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -158,7 +167,7 @@ def test_the_rules_own_source_table_wins_over_the_hunts(tmp_path: Path):
         source_table="windows_audit",
     )
     sql = _compiled_sql(
-        {"rules": ["scoped"], "global_source_table_name": "dfe.main"},
+        {"customers": ["acme"], "rules": ["scoped"], "global_source_table_name": "dfe.main"},
         "hunt",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -169,7 +178,7 @@ def test_the_rules_own_source_table_wins_over_the_hunts(tmp_path: Path):
 
 def test_the_default_target_applies_only_when_nothing_names_one(tmp_path: Path):
     _save_rule(tmp_path, rule_id="r", name="R", where_clause="a = 1")
-    definition = {"rules": ["r"], "global_source_table_name": "dfe.main"}
+    definition = {"customers": ["acme"], "rules": ["r"], "global_source_table_name": "dfe.main"}
     assert (
         "INSERT INTO `dfe`.`detection`"
         in _compiled_sql(definition, "h", rules_dir=tmp_path, default_target="dfe.detection")[0]
@@ -198,7 +207,12 @@ def test_a_rule_with_only_sql_is_put_through_the_rewriter(tmp_path: Path):
             "SELECT * FROM acme.events WHERE _timestamp > '2026-01-01' AND action = 'delete'"
         ),
     )
-    sql = _compiled_sql({"rules": ["raw"]}, "h", rules_dir=tmp_path, default_target="dfe.detection")
+    sql = _compiled_sql(
+        {"customers": ["acme"], "rules": ["raw"]},
+        "h",
+        rules_dir=tmp_path,
+        default_target="dfe.detection",
+    )
     assert "FROM `acme`.`events`" in sql[0]
     assert "action = 'delete'" in sql[0]
     assert "2026-01-01" not in sql[0]
@@ -209,12 +223,12 @@ def test_a_rule_with_only_sql_is_put_through_the_rewriter(tmp_path: Path):
     [
         pytest.param(
             "ServiceName = 'dfe-loader' AND {timestamp_condition}",
-            "WHERE {window} AND (\nServiceName = 'dfe-loader'\n    )",
+            "WHERE {window} AND _org_id IN ('acme') AND (\nServiceName = 'dfe-loader'\n    )",
             id="trailing",
         ),
         pytest.param(
             "{timestamp_condition} AND (action = 'delete')",
-            "WHERE {window} AND (\n(action = 'delete')\n    )",
+            "WHERE {window} AND _org_id IN ('acme') AND (\n(action = 'delete')\n    )",
             id="leading-sigma",
         ),
     ],
@@ -223,7 +237,7 @@ def test_a_stored_time_placeholder_leaves_only_the_window(tmp_path: Path, stored
     """The worker fills in only the window; ClickHouse refuses any other placeholder."""
     _save_rule(tmp_path, rule_id="ph", name="Placeholder", where_clause=stored)
     sql = _compiled_sql(
-        {"rules": ["ph"], "global_source_table_name": "dfe.main"},
+        {"customers": ["acme"], "rules": ["ph"], "global_source_table_name": "dfe.main"},
         "h",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -233,13 +247,17 @@ def test_a_stored_time_placeholder_leaves_only_the_window(tmp_path: Path, stored
 
 
 def test_a_hunt_with_no_rules_compiles_to_nothing(tmp_path: Path):
-    assert compile_hunt_queries({"rules": []}, "h", rules_dir=tmp_path) == []
+    assert compile_hunt_queries({"customers": ["acme"], "rules": []}, "h", rules_dir=tmp_path) == []
 
 
 def test_a_missing_rule_file_is_dropped_not_guessed(tmp_path: Path):
     _save_rule(tmp_path, rule_id="present", name="Present", where_clause="a = 1")
     sql = _compiled_sql(
-        {"rules": ["absent", "present"], "global_source_table_name": "dfe.main"},
+        {
+            "customers": ["acme"],
+            "rules": ["absent", "present"],
+            "global_source_table_name": "dfe.main",
+        },
         "h",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -258,7 +276,7 @@ def test_a_rule_name_that_leaves_the_rules_dir_compiles_nothing(tmp_path: Path, 
     name = str(tmp_path / "outside") if escape == "ABSOLUTE" else escape
 
     statements = compile_hunt_queries(
-        {"rules": [name, "present"], "global_source_table_name": "dfe.main"},
+        {"customers": ["acme"], "rules": [name, "present"], "global_source_table_name": "dfe.main"},
         "h",
         rules_dir=rules_dir,
         default_target="dfe.detection",
@@ -272,7 +290,7 @@ def test_a_rule_with_no_detection_logic_is_dropped(tmp_path: Path):
     _save_rule(tmp_path, rule_id="empty", name="Empty", where_clause="")
     assert (
         compile_hunt_queries(
-            {"rules": ["empty"], "global_source_table_name": "dfe.main"},
+            {"customers": ["acme"], "rules": ["empty"], "global_source_table_name": "dfe.main"},
             "h",
             rules_dir=tmp_path,
             default_target="dfe.detection",
@@ -302,7 +320,11 @@ def test_a_hand_edited_rule_that_reads_outside_the_row_compiles_nothing(tmp_path
     _save_rule(tmp_path, rule_id="present", name="Present", where_clause="a = 1")
 
     statements = compile_hunt_queries(
-        {"rules": ["offbox", "present"], "global_source_table_name": "dfe.main"},
+        {
+            "customers": ["acme"],
+            "rules": ["offbox", "present"],
+            "global_source_table_name": "dfe.main",
+        },
         "h",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -318,7 +340,7 @@ def test_a_lookup_rule_using_the_in_operator_compiles(tmp_path: Path):
     _save_rule(tmp_path, rule_id="lookup", name="Lookup", where_clause=lookup)
 
     statements = compile_hunt_queries(
-        {"rules": ["lookup"], "global_source_table_name": "dfe.main"},
+        {"customers": ["acme"], "rules": ["lookup"], "global_source_table_name": "dfe.main"},
         "h",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -334,7 +356,7 @@ def test_the_dropped_rule_is_logged_with_the_call_it_made(tmp_path: Path):
     handler_id = logger.add(captured.append, level="ERROR")
     try:
         statements = compile_hunt_queries(
-            {"rules": ["offbox"], "global_source_table_name": "dfe.main"},
+            {"customers": ["acme"], "rules": ["offbox"], "global_source_table_name": "dfe.main"},
             "h",
             rules_dir=tmp_path,
             default_target="dfe.detection",
@@ -351,7 +373,10 @@ def test_a_rule_with_no_source_is_dropped(tmp_path: Path):
     _save_rule(tmp_path, rule_id="nosource", name="No source", where_clause="a = 1")
     assert (
         compile_hunt_queries(
-            {"rules": ["nosource"]}, "h", rules_dir=tmp_path, default_target="dfe.detection"
+            {"customers": ["acme"], "rules": ["nosource"]},
+            "h",
+            rules_dir=tmp_path,
+            default_target="dfe.detection",
         )
         == []
     )
@@ -361,6 +386,7 @@ def test_an_unqualified_target_lands_beside_its_source(tmp_path: Path):
     _save_rule(tmp_path, rule_id="r", name="R", where_clause="a = 1")
     sql = _compiled_sql(
         {
+            "customers": ["acme"],
             "rules": ["r"],
             "global_source_table_name": "tenant_a.main",
             "global_target_table_name": "detection",
@@ -380,7 +406,7 @@ def _flood_hunt(tmp_path: Path, **kwargs):
         where_clause="_json.kind = 'flood'",
     )
     return compile_hunt_queries(
-        {"rules": ["flood"], "global_source_table_name": "acme.main"},
+        {"customers": ["acme"], "rules": ["flood"], "global_source_table_name": "acme.main"},
         "noisy",
         rules_dir=tmp_path,
         default_target="acme.detection",
@@ -395,7 +421,7 @@ def test_every_compiled_rule_is_capped_at_the_shipped_default(tmp_path: Path):
     assert statement.rule_id == "flood"
     # The LIMIT closes the statement, after the subquery the rule runs in.
     assert statement.sql.endswith(
-        "WHERE {window} AND (\n_json.kind = 'flood'\n    )\n)\nLIMIT 1000"
+        "WHERE {window} AND _org_id IN ('acme') AND (\n_json.kind = 'flood'\n    )\n)\nLIMIT 1000"
     )
 
 
@@ -423,7 +449,7 @@ def test_the_count_reads_the_same_window_and_rule_without_a_limit(tmp_path: Path
     assert inner == (
         "    SELECT _timestamp_load, _timestamp, _org_id\n"
         "    FROM `acme`.`main`\n"
-        "    WHERE {window} AND (\n"
+        "    WHERE {window} AND _org_id IN ('acme') AND (\n"
         "_json.kind = 'flood'\n"
         "    )\n"
         ")"

@@ -17,7 +17,8 @@ and skipped (a later phase adds them). One bad file never sinks the whole load.
 A hunt states what it runs one of two ways: a direct `query` (pre-compiled, one
 statement) or `rules` (rule YAML names), which is what the API writes. Rules are
 compiled here, through rule_compiler, so a hunt made in the UI runs without anyone
-hand-editing its YAML.
+hand-editing its YAML. A compiled hunt reads only its `customers`' orgs, and one
+naming none fails every fire as ``no_customers``.
 
 Only a compiled rule carries the per-run detection cap. A direct `query` is SQL the
 author wrote whole, so no LIMIT can be put into it safely; it runs uncapped, and
@@ -42,7 +43,7 @@ from dfe_engine.yaml_utils import yaml_load
 from .checkpoint import TIMESTAMP_FIELD
 from .interval import parse_interval
 from .models import HuntSpec, HuntStatement
-from .rule_compiler import compile_hunt_queries
+from .rule_compiler import compile_hunt_queries, hunt_customers
 
 
 def _resolve_schedule_value(definition: dict[str, Any], stem: str) -> str | int | None:
@@ -134,6 +135,7 @@ def _build_spec(
             hunt_id=stem,
         )
         queries = [HuntStatement(sql=query)]
+        customers = None
     else:
         queries = compile_hunt_queries(
             definition,
@@ -143,11 +145,13 @@ def _build_spec(
             default_database=default_database,
             max_detections=max_detections,
         )
+        customers = hunt_customers(definition)
 
     return HuntSpec(
         hunt_id=stem,
         interval_seconds=interval_seconds,
         queries=queries,
+        customers=customers,
         target_table=str(definition.get("global_target_table_name", definition.get("target", ""))),
         timestamp_field=_timestamp_field(definition),
     )
