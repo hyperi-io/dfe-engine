@@ -1142,7 +1142,7 @@ class TestSourceWriteRequest:
         assert updated.current == "1.0.0"
         assert updated.versions["1.0.0"].schema_config.meta_schema_version == "2.0.0"
 
-    def test_apply_write_update_omitted_header_not_persisted(self):
+    def test_apply_write_update_omitted_header_keeps_the_stored_one(self):
         existing = Source.model_validate(
             {
                 "source": "src-a",
@@ -1166,8 +1166,8 @@ class TestSourceWriteRequest:
         )
         updated = apply_source_write_update(existing, write)
         ver = updated.versions["1.0.0"]
-        assert ver.header is None
-        assert "header" not in ver.to_yaml_dict()
+        assert ver.header == SourceHeader(type="timeseries", version="1.0.0")
+        assert ver.to_yaml_dict()["header"] == {"type": "timeseries", "version": "1.0.0"}
         assert ver.schema_config.ttl_days == 30
 
     def test_apply_write_update_in_place_after_deploy_non_bump_fields(self):
@@ -1883,6 +1883,95 @@ class TestFlowFields:
             FetcherRoute.model_validate(
                 {"match": {"field": "f", "value": "v"}, "source": "Not_A_Label"}
             )
+
+
+class TestOmittedFieldsKeepTheStoredValue:
+    """A PUT keeps what its body leaves out; only an explicit empty value clears it."""
+
+    MATCH = {"field": "f", "value": "v"}
+    STORED = {
+        "date_time": "2026-01-01",
+        "header": {"type": "minimal", "version": "1.0.0"},
+        "match": MATCH,
+        "schema": {"ttl_days": 30},
+        "views": [{"standard": "sigma", "taxonomy": "windows", "field_map": "sigma/windows"}],
+        "transform": {"engine": "vrl"},
+    }
+    OWN_TABLE = {"meta_schema": "meta/aws/cloudtrail", "meta_schema_version": "1.0.0"}
+
+    def _deployed(self, schema: dict) -> Source:
+        version = {**self.STORED, "schema": {**self.STORED["schema"], **schema}}
+        return Source.model_validate(
+            {
+                "source": "auth",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {"1.0.0": version},
+            }
+        )
+
+    @pytest.mark.parametrize(
+        "schema",
+        [pytest.param({}, id="shared-table"), pytest.param(OWN_TABLE, id="own-table")],
+    )
+    def test_an_unchanged_save_keeps_every_field_and_cuts_no_version(self, schema):
+        existing = self._deployed(schema)
+        write = SourceWriteRequest.model_validate(
+            {"description": "doc-only edit", "match": self.MATCH}
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.versions.keys() == {"1.0.0"}
+        assert updated.current == "1.0.0"
+        kept = updated.versions["1.0.0"].model_dump(exclude={"date_time"})
+        assert kept == existing.versions["1.0.0"].model_dump(exclude={"date_time"})
+
+    @pytest.mark.parametrize("cleared_views", [[], None], ids=["empty-list", "null"])
+    def test_an_explicit_empty_value_clears_each_field(self, cleared_views):
+        existing = self._deployed({})
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": self.MATCH,
+                "views": cleared_views,
+                "header": None,
+                "schema": None,
+                "transform": None,
+            }
+        )
+
+        updated = apply_source_write_update(existing, write)
+
+        assert updated.current == "2.0.0"
+        cleared = updated.versions["2.0.0"]
+        assert cleared.views == []
+        assert cleared.header is None
+        assert cleared.schema_config == SourceSchema()
+        assert cleared.transform is None
+        assert updated.versions["1.0.0"].views[0].field_map == "sigma/windows"
+
+    def test_a_draft_keeps_its_own_fields_not_the_deployed_ones(self):
+        draft = {
+            **self.STORED,
+            "header": {"type": "timeseries", "version": "1.0.0"},
+            "transform": {"engine": "vrl", "variant": "okta_system"},
+        }
+        existing = Source.model_validate(
+            {
+                "source": "auth",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {"1.0.0": self.STORED, "2.0.0": draft},
+            }
+        )
+        write = SourceWriteRequest.model_validate({"match": self.MATCH})
+
+        updated = apply_source_write_update(existing, write)
+
+        kept = updated.versions["2.0.0"]
+        assert kept.header == SourceHeader(type="timeseries", version="1.0.0")
+        assert kept.transform is not None
+        assert kept.transform.variant == "okta_system"
 
 
 class TestSourceVersionGetResponse:
