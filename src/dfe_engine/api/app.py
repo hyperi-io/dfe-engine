@@ -317,6 +317,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             auth_dir / "sensitive-group-attributes"
         )
 
+    from dfe_engine.secrets import build_secrets, warn_on_aws_managed_key
+
+    # Ahead of the first store use, so a failed mint cannot hide which key it ran under.
+    warn_on_aws_managed_key(settings.secrets)
+
     # JWT authority: the engine as the single ES384 issuer - signs, verifies, and
     # publishes the JWKS. Shares its scalo.secrets signing key with create_access_token.
     from dfe_engine.api.deps import jwt_authority_for
@@ -325,8 +330,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # The one seam for secrets the engine mints - OIDC provider credentials and
     # sigma provider tokens resolve through it, never through a backend SDK.
-    from dfe_engine.secrets import build_secrets
-
     app.state.dfe_secrets = build_secrets(settings.secrets)
 
     from dfe_engine.governance import PolicyStore

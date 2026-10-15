@@ -22,6 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from scalo.logger import logger
+from scalo.secrets.exceptions import SecretAlreadyExistsError
 
 from dfe_engine.clickhouse.errors import is_connection_error
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
@@ -283,13 +284,19 @@ class ChRbacReconciler:
 
         Reuse is essential: ``CREATE USER IF NOT EXISTS`` never rotates an existing
         user's password, so regenerating every run would desync CH from the store.
+        The mint is create-only, so two replicas reconciling together keep one password.
         """
-        if self._secrets is not None and self._secrets.exists(path):
-            plaintext = self._secrets.get(path)
-        else:
-            plaintext = _stdlib_secrets.token_urlsafe(24)[:32]
-            if self._secrets is not None:
-                self._secrets.put(path, plaintext)
+        minted = _stdlib_secrets.token_urlsafe(24)[:32]
+        if self._secrets is None:
+            return hashlib.sha256(minted.encode()).hexdigest()
+        plaintext = self._secrets.get_or_none(path)
+        if plaintext is None:
+            try:
+                self._secrets.create(path, minted)
+                plaintext = minted
+            except SecretAlreadyExistsError:
+                # Another replica stored one between this read and the create, so use that one.
+                plaintext = self._secrets.get(path)
         return hashlib.sha256(plaintext.encode()).hexdigest()
 
     def _service_hash(self, role: Any) -> str | None:
@@ -304,7 +311,7 @@ class ChRbacReconciler:
         if not provided:
             return self._hash_for(path) if self._secrets is not None else None
         if self._secrets is not None:
-            stored = self._secrets.get(path) if self._secrets.exists(path) else None
+            stored = self._secrets.get_or_none(path)
             if stored != provided:
                 self._secrets.put(path, provided)
         return hashlib.sha256(provided.encode()).hexdigest()

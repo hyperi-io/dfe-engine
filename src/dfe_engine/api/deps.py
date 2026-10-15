@@ -43,6 +43,7 @@ from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.http_errors import describe_http_error
 from dfe_engine.orgs.tenant_scope import tenant_ids_for
+from dfe_engine.secrets import DfeSecrets
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 if TYPE_CHECKING:
@@ -57,6 +58,24 @@ def get_app_settings(request: Request) -> DFESettings:
 
 
 Settings = Annotated[DFESettings, Depends(get_app_settings)]
+
+
+def secrets_store(request: Request) -> DfeSecrets:
+    """The app's one store for the secrets the engine mints, built at startup.
+
+    Raises:
+        HTTPException: 503 when the app was built without one.
+    """
+    store = getattr(request.app.state, "dfe_secrets", None)
+    if store is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "secrets_unavailable",
+                "message": "no secrets backend is configured; set DFE_SECRETS_PROVIDER",
+            },
+        )
+    return store
 
 
 def ttl_settings(request: Request, settings: DFESettings) -> DFESettings:
@@ -987,15 +1006,13 @@ def jwt_authority_for(settings: DFESettings) -> JwtAuthority:
 
     s = settings.secrets
     a = settings.api
+    # The whole secrets config keys the cache, so a field added to it cannot be left out.
     cache_key = (
-        s.provider,
-        s.path,
-        s.addr,
-        s.mount,
-        s.role,
+        s.model_dump_json(),
         a.jwt_issuer,
         a.jwt_algorithm,
         a.jwt_key_path,
+        a.jwt_expire_minutes,
     )
     authority = _authority_cache.get(cache_key)
     if authority is None:

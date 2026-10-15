@@ -142,6 +142,4 @@ def service_user_password(settings: Any, username: str) -> str:
         return ""
     if provided := provided_service_password(role.name):
         return provided
-    store = build_secrets(settings.secrets)
-    path = role.secret_path()
-    return store.get(path) if store.exists(path) else ""
+    return build_secrets(settings.secrets).get_or_none(role.secret_path()) or ""
