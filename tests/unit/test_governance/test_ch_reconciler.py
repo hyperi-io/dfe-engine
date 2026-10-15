@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 import pytest
 from scalo.logger import logger
+from scalo.secrets import SecretsManager
 
 from dfe_engine.governance.ch.models import ChServiceRole, ChTier, GroupChBinding
 from dfe_engine.governance.ch.reconciler import (
@@ -29,6 +30,7 @@ from dfe_engine.governance.ch.reconciler import (
 )
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
+from tests.support.racing_stores import RacingSecrets
 
 
 def _org(name: str, ids: list[str]) -> SimpleNamespace:
@@ -108,6 +110,25 @@ class TestHashFor:
         store = self._store(tmp_path)
         rec = ChRbacReconciler(admin_client=None, secrets_store=store)
         assert rec._hash_for("ch/service/a") != rec._hash_for("ch/service/b")
+
+    def test_a_replica_that_loses_the_mint_race_keeps_the_stored_password(self, tmp_path):
+        """The mint is create-only, so ClickHouse and the store never hold two passwords."""
+        first = ChRbacReconciler(admin_client=None, secrets_store=self._store(tmp_path))
+        stored_hash = first._hash_for("ch/groups/soc")
+        racing = RacingSecrets(
+            SecretsManager.from_config({"cache": {"enabled": False}}),
+            provider="file",
+            root=str(tmp_path),
+            blind_to="ch/groups/soc",
+        )
+
+        raced_hash = ChRbacReconciler(admin_client=None, secrets_store=racing)._hash_for(
+            "ch/groups/soc"
+        )
+
+        assert raced_hash == stored_hash
+        stored = self._store(tmp_path).get("ch/groups/soc")
+        assert hashlib.sha256(stored.encode()).hexdigest() == stored_hash
 
 
 # ── password <-> served-secret sync (the bug) ───────────────────────
