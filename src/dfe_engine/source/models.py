@@ -797,6 +797,9 @@ _VERSIONED_KEYS = (
 # what a record becomes, never the shape of the table it lands in.
 _TRANSFORM_KEYS_WITHOUT_TABLE_EFFECT = {"variant"}
 
+# Named alike on SourceWriteRequest and SourceVersion; an update omitting one keeps the stored value.
+_INHERITED_ON_ABSENCE = ("header", "schema_config", "views", "transform", "transport", "archive")
+
 
 class SourceVersion(BaseModel):
     """Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."""
@@ -950,7 +953,12 @@ def next_major_source_version(
 
 
 class SourceWriteRequest(BaseModel):
-    """Flat source definition for create/update API (no version tree)."""
+    """Flat source definition for create/update API (no version tree).
+
+    On update, an omitted ``header``, ``schema``, ``views``, ``transform``,
+    ``transport`` or ``archive`` keeps the stored value; ``null`` (or ``[]``,
+    ``false``) clears it.
+    """
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
 
@@ -990,7 +998,7 @@ class SourceWriteRequest(BaseModel):
     )
     transport: SourceTransport | None = Field(
         default=None,
-        description="bus or direct; omitted takes the deployment default",
+        description="bus or direct; null takes the deployment default",
     )
     archive: bool = Field(
         default=False,
@@ -1076,21 +1084,21 @@ def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
 
 
 def _build_merged_version_snapshot(existing: Source, write: SourceWriteRequest) -> SourceVersion:
-    """Build the version snapshot for a write, inheriting unset optional fields.
+    """Build the version snapshot for a write, inheriting what the body leaves out.
 
-    ``transform``, ``transport`` and ``archive`` all inherit on ABSENCE from the
-    body, not on their value: ``transform: null`` is how a source releases its
-    transform app, ``transport: null`` is how it goes back on the deployment
-    default, and ``archive: false`` is how archiving is turned off, so a PUT that
-    only edits the description must not read as any of them.
+    Each of ``_INHERITED_ON_ABSENCE`` inherits from the ``current`` version (the
+    one this write replaces or bumps from) on ABSENCE from the body, not on its
+    value: ``views: []``, ``header: null``, ``schema: null``, ``transform: null``,
+    ``transport: null`` and ``archive: false`` are how a client clears each one,
+    so a PUT that only edits the description must not read as any of them.
     """
     snapshot = write.to_version_snapshot()
-    inherited: dict[str, Any] = {}
-    if "transform" not in write.model_fields_set and existing.transform is not None:
-        inherited["transform"] = existing.transform
-    for field in ("transport", "archive"):
-        if field not in write.model_fields_set:
-            inherited[field] = getattr(existing, field)
+    edited = existing.versions[existing.current]
+    inherited = {
+        field: getattr(edited, field)
+        for field in _INHERITED_ON_ABSENCE
+        if field not in write.model_fields_set
+    }
     return snapshot.model_copy(update=inherited) if inherited else snapshot
 
 

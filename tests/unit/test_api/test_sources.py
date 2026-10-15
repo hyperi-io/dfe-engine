@@ -920,6 +920,41 @@ class TestUpdateSource:
         assert body["current"] == "1.0.0"
         assert body["versions"]["1.0.0"]["schema"]["engine"] == "MergeTree"
 
+    @pytest.mark.parametrize(
+        "schema_config",
+        [
+            pytest.param({"engine": "MergeTree"}, id="shared-table"),
+            pytest.param(
+                {"meta_schema": "meta/aws_cloudtrail", "meta_schema_version": "1.0.0"},
+                id="own-table",
+            ),
+        ],
+    )
+    def test_a_deployed_save_that_omits_header_schema_and_views_keeps_them(
+        self, client: TestClient, admin_headers: dict, sample_source: dict, schema_config: dict
+    ):
+        views = [{"standard": "sigma", "taxonomy": "windows"}]
+        created = {**sample_source, "schema_config": schema_config, "views": views}
+        assert (
+            client.post("/api/v1/sources", json=created, headers=admin_headers).status_code == 201
+        )
+        _registries["source"].set_deployed_version("test-source", "1.0.0")
+
+        resp = client.put(
+            "/api/v1/sources/test-source",
+            json={"description": "edited", "match": sample_source["match"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        body = client.get("/api/v1/sources/test-source", headers=admin_headers).json()
+        assert list(body["versions"]) == ["1.0.0"]
+        stored = body["versions"]["1.0.0"]
+        assert stored["header"] == sample_source["header"]
+        assert {k: stored["schema"][k] for k in schema_config} == schema_config
+        assert [(v["standard"], v["taxonomy"]) for v in stored["views"]] == [("sigma", "windows")]
+        assert body["description"] == "edited"
+
     def test_update_refuses_to_swap_origin(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):

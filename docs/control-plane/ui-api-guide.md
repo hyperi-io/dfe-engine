@@ -169,6 +169,8 @@ A group sync answers 200 with `created`, `updated`, `total`, `groups_skipped`, `
 | POST | `/sources/bulk` | Bulk action (`enable` / `disable` / `dormant` / `delete` / `deploy`) on named sources |
 | POST | `/sources/seed` | Seed defaults |
 
+A PUT that omits `header`, `schema`, `views`, `transform`, `transport` or `archive` keeps the stored value. Send `null`, `[]` or `false` to clear one.
+
 The landing source is engine-owned: it reads as `resource_type: core`, and POST,
 PUT, PATCH and DELETE all answer `409 conflict`. Bulk reports it under `failed`
 with that same code and carries on with the other sources in the call. A deploy of it applies no DDL: the shipped definition has no schema and answers `404 no_schema`, and one given a schema answers `409 conflict` before ClickHouse is touched. A `dry_run` still plans.

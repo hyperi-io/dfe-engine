@@ -1985,8 +1985,8 @@ def update_source(
     Origin (receiver vs fetcher) cannot change, and a pinned ``meta_schema`` cannot be
     cleared: once a source owns its own table it cannot move back onto ``main``.
 
-    ``header`` is optional: when omitted, no header is stored on the written version snapshot
-    (same as create). Send ``header`` explicitly to set or change it.
+    A field the body omits keeps its stored value (``header``, ``schema``, ``views``,
+    ``transform``, ``transport``, ``archive``); ``null``, ``[]`` or ``false`` clears it.
 
     A schema pin naming nothing is accepted here and refused by ``/sources/import``.
     See ``create_source`` and #504; the asymmetry is known and undecided.
