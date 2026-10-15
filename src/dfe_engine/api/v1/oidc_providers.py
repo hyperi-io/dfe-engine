@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action, secrets_store
@@ -681,10 +682,15 @@ async def create_provider(
         )
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
 
-    _store_group_secrets(groups=body.groups, name=body.name, request=request)
+    await run_blocking(
+        lambda: _store_group_secrets(groups=body.groups, name=body.name, request=request)
+    )
     if body.client_secret:
-        _store_secret(
-            field="client_secret", name=body.name, request=request, value=body.client_secret
+        secret = body.client_secret
+        await run_blocking(
+            lambda: _store_secret(
+                field="client_secret", name=body.name, request=request, value=secret
+            )
         )
 
     try:
@@ -835,16 +841,20 @@ async def update_provider(
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
 
     if body.client_secret:
-        _store_secret(field="client_secret", name=name, request=request, value=body.client_secret)
+        secret = body.client_secret
+        await run_blocking(
+            lambda: _store_secret(field="client_secret", name=name, request=request, value=secret)
+        )
     if body.groups is not None:
-        _store_group_secrets(groups=body.groups, name=name, request=request)
+        groups = body.groups
+        await run_blocking(lambda: _store_group_secrets(groups=groups, name=name, request=request))
 
     provider = registry.update(name, **update_fields)
     # Picks up an enable/disable flip and a rotated client secret alike.
     _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "updated")
     # Deleted only once the saved config no longer points at them, so a failed update never leaves the provider on a missing secret.
-    _delete_secrets(paths=stale_paths, request=request)
+    await run_blocking(lambda: _delete_secrets(paths=stale_paths, request=request))
     return _provider_to_response(name, provider)
 
 
@@ -917,7 +927,7 @@ async def delete_provider(
         )
 
     registry.delete(name)
-    _delete_stored_secrets(request, provider)
+    await run_blocking(lambda: _delete_stored_secrets(request, provider))
     # A detached provider must stop serving logins immediately, not at restart.
     _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "deleted")

@@ -349,6 +349,14 @@ def install_exception_handlers(app: FastAPI) -> None:
             headers={"Retry-After": str(exc.retry_after_seconds)},
         )
 
+    # A secret still being deleted holds the name a write needs, which the caller can wait out.
+    from dfe_engine.secrets import SecretNameHeldError
+
+    @app.exception_handler(SecretNameHeldError)
+    async def secret_name_held_handler(_request: Request, exc: SecretNameHeldError):
+        body = ErrorResponse(code=ErrorCode.CONFLICT, message=exc.message)
+        return JSONResponse(status_code=409, content=_error_response_json(body))
+
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         logger.exception(f"Unhandled exception on {request.method} {request.url.path}")

@@ -118,13 +118,13 @@ flowchart LR
     P -->|file, the default| F["a directory on the engine's volume<br/>(0 extra service)"]
     P -->|ansible_vault| AV["a local encrypted file"]
     P -->|openbao| O["OpenBao, where the deployment configures it"]
-    P -->|aws| AWS["AWS Secrets Manager<br/>(prefix, region, KMS key, tags)"]
+    P -->|aws| AWS["AWS Secrets Manager<br/>(name prefix, region, KMS key, tags)"]
     P -.->|gcp / azure| NO["refused at startup"]
 ```
 
 The engine's JWT signing key, ClickHouse passwords and the OIDC client secrets an operator enters all go through `scalo.secrets`. With no `DFE_SECRETS_PROVIDER` they land in the `file` provider under `DFE_SECRETS_PATH`, which is all dfe-docker needs.
 
-`DFE_SECRETS_PROVIDER=aws` keeps them in AWS Secrets Manager as `<DFE_SECRETS_PREFIX>/<path>` in `DFE_SECRETS_REGION`. Each is encrypted with `DFE_SECRETS_KMS_KEY_ID` (the AWS managed key when unset, with a startup warning), tagged with the `DFE_SECRETS_TAGS` JSON object, and deleted with no recovery unless `DFE_SECRETS_RECOVERY_WINDOW_DAYS` sets 7-30. Inside a window the name stays taken, so re-creating that group or OIDC provider fails with an error naming the setting.
+`DFE_SECRETS_PROVIDER=aws` keeps them in AWS Secrets Manager as `<DFE_SECRETS_NAME_PREFIX>/<path>` in `DFE_SECRETS_REGION`. Each is encrypted with `DFE_SECRETS_KMS_KEY_ID` (the AWS managed key when unset, with a startup warning), tagged with the `DFE_SECRETS_TAGS` JSON object, and deleted with no recovery window unless `DFE_SECRETS_RECOVERY_WINDOW_DAYS` sets 7-30. AWS finishes a forced delete in the background, so re-creating the same name retries for up to 30 seconds. Inside a window the name stays taken: re-creating that OIDC provider answers 409 with the remedy, and a reconcile re-creating that group fails naming the setting.
 
 `openbao` is used where the deployment configures it. `gcp` and `azure` are refused: their secret names allow no `/`, and every engine path has one.
 

@@ -39,6 +39,7 @@ from typing import NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
     CurrentUser,
@@ -174,7 +175,8 @@ async def hyperdx_connection(
             detail={"code": identity.code, "message": identity.message},
         )
 
-    password = secrets_store(request).get_or_none(identity.secret_path) or ""
+    store = secrets_store(request)
+    password = await run_blocking(lambda: store.get_or_none(identity.secret_path)) or ""
     if not password:
         if identity.username == _PLATFORM_USERNAME:
             detail = {

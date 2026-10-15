@@ -13,13 +13,14 @@ service, org and group passwords, OIDC client secrets): they go to ``scalo.secre
 provider selected by ``settings.secrets``. ``file`` is the default, a directory on the
 engine's volume. ``ansible_vault`` is an encrypted local file, ``openbao``/``vault`` a
 KV mount the deployment configures, and ``aws`` AWS Secrets Manager with every name
-under the configured prefix.
+under the configured name prefix.
 
 The engine never imports a backend SDK - scalo owns that (see docs/deployment/backing-services.md).
 """
 
-from collections.abc import Generator
-from contextlib import contextmanager, suppress
+import time
+from collections.abc import Callable, Sequence
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -37,12 +38,15 @@ from dfe_engine.settings import SecretsSettings
 # Providers whose "path" is a real filesystem path - prefix with the configured root.
 _ROOTED = {"file", "ansible_vault"}
 
+# AWS finishes a forced delete in the background, so a write to that name waits up to 30s for it.
+FORCED_DELETE_BACKOFF: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 15.0)
+
 
 class SecretNameHeldError(ProviderError):
-    """A deleted secret inside its recovery window holds a name the engine reads or writes."""
+    """A deleted secret that has not finished deleting holds a name the engine reads or writes."""
 
     def __init__(self, provider: str, path: str, window_days: int) -> None:
-        """Name the held secret and the setting that decides how long a delete holds a name.
+        """Name the held secret, the remedy and the recovery window setting.
 
         Args:
             provider: The secrets provider that refused.
@@ -51,11 +55,11 @@ class SecretNameHeldError(ProviderError):
         """
         super().__init__(
             provider,
-            f"secret {path!r} is scheduled for deletion and keeps its name until its recovery "
-            "window ends or it is restored. The engine deletes with "
-            f"DFE_SECRETS_RECOVERY_WINDOW_DAYS={window_days}, and 0 frees a name at once",
+            f"secret {path!r} is scheduled for deletion, so its name stays taken until the "
+            "deletion finishes. Restore the secret, or wait out its recovery window, then retry. "
+            f"The engine deletes with DFE_SECRETS_RECOVERY_WINDOW_DAYS={window_days}, and 0 "
+            "deletes with no recovery window",
         )
-        self.path = path
 
 
 class DfeSecrets:
@@ -63,8 +67,8 @@ class DfeSecrets:
 
     ``put`` upserts (minted secrets rotate), ``create`` refuses to overwrite, ``get``
     returns the UTF-8 string and ``delete`` removes it. File-based providers store under
-    the configured root, openbao under its KV mount and aws under the configured prefix.
-    A secret the engine creates carries the configured tags where the provider keeps tags.
+    the configured root, openbao under its KV mount and aws under the configured name
+    prefix. A secret the engine creates on aws carries the configured tags.
     """
 
     def __init__(
@@ -74,9 +78,11 @@ class DfeSecrets:
         root: str,
         mount: str = "",
         *,
-        prefix: str = "",
+        name_prefix: str = "",
         tags: dict[str, str] | None = None,
         recovery_window_days: int = 0,
+        backoff: Sequence[float] = FORCED_DELETE_BACKOFF,
+        sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         """Bind a scalo manager to one provider.
 
@@ -85,17 +91,23 @@ class DfeSecrets:
             provider: The provider every call goes to.
             root: The file and ansible_vault root directory.
             mount: The openbao KV mount.
-            prefix: The aws name prefix.
-            tags: Tags each secret the engine creates carries.
-            recovery_window_days: The aws delete window, named when a held name refuses a call.
+            name_prefix: The aws name prefix.
+            tags: Tags each secret the engine creates on aws carries.
+            recovery_window_days: The aws delete window. With 0 a write waits out a forced
+                delete of the same name, and with a window it refuses without waiting.
+            backoff: The waits, in seconds, between write attempts on a name being deleted.
+            sleep: Waits out one backoff step.
         """
         self._mgr = manager
         self._provider = provider
         self._root = root
         self._mount = mount
-        self._prefix = prefix
-        self._tags = dict(tags) if tags else None
+        self._name_prefix = name_prefix
+        # OpenBao stores tags after the value, so a failed tag write would follow a stored secret.
+        self._tags = dict(tags) if tags and provider == "aws" else None
         self._window_days = recovery_window_days
+        self._backoff = tuple(backoff)
+        self._sleep = sleep
 
     def _full(self, path: str) -> str:
         if self._provider in _ROOTED:
@@ -104,26 +116,40 @@ class DfeSecrets:
             # openbao KV path = <kv-mount>/<path> (the provider inserts /data/ for KV v2)
             return f"{self._mount}/{path}"
         if self._provider == "aws":
-            return f"{self._prefix}/{path}"
+            return f"{self._name_prefix}/{path}"
         return path
 
-    @contextmanager
-    def _name_held(self, full: str) -> Generator[None]:
-        """Raise SecretNameHeldError when a deleted secret inside its recovery window holds *full*."""
+    def _write(self, full: str, write: Callable[[], object]) -> None:
+        """Run *write*, waiting out a forced delete of *full* that AWS has not finished.
+
+        Raises:
+            SecretNameHeldError: The name is still being deleted once the backoff is spent,
+                or a recovery window holds it.
+        """
+        # A windowed delete holds the name for days, so only a forced one is worth waiting out.
+        waits = self._backoff if self._window_days == 0 else ()
+        for wait in waits:
+            try:
+                write()
+                return
+            except SecretPendingDeletionError:
+                self._sleep(wait)
         try:
-            yield
+            write()
         except SecretPendingDeletionError as exc:
             raise SecretNameHeldError(self._provider, full, self._window_days) from exc
+
+    def _upsert(self, full: str, data: bytes) -> None:
+        try:
+            self._mgr.create_sync(full, data, tags=self._tags, provider=self._provider)
+        except SecretAlreadyExistsError:
+            self._mgr.update_sync(full, data, provider=self._provider)
 
     def put(self, path: str, value: str) -> None:
         """Create or update a secret (upsert)."""
         full = self._full(path)
         data = value.encode("utf-8")
-        with self._name_held(full):
-            try:
-                self._mgr.create_sync(full, data, tags=self._tags, provider=self._provider)
-            except SecretAlreadyExistsError:
-                self._mgr.update_sync(full, data, provider=self._provider)
+        self._write(full, lambda: self._upsert(full, data))
         # scalo keeps an in-memory read cache that writes do not invalidate;
         # clear it so a rotated secret is read fresh.
         self._mgr.clear_cache()
@@ -135,10 +161,11 @@ class DfeSecrets:
             SecretAlreadyExistsError: A secret is already stored at *path*.
         """
         full = self._full(path)
-        with self._name_held(full):
-            self._mgr.create_sync(
-                full, value.encode("utf-8"), tags=self._tags, provider=self._provider
-            )
+        data = value.encode("utf-8")
+        self._write(
+            full,
+            lambda: self._mgr.create_sync(full, data, tags=self._tags, provider=self._provider),
+        )
         self._mgr.clear_cache()
 
     def get(self, path: str) -> str:
@@ -146,15 +173,25 @@ class DfeSecrets:
         # openbao KV v2 wraps the value under a "value" field; file stores it raw.
         key = "value" if self._provider in ("openbao", "vault") else None
         full = self._full(path)
-        with self._name_held(full):
+        try:
             stored = self._mgr.get_sync(full, key=key, provider=self._provider)
+        except SecretPendingDeletionError as exc:
+            raise SecretNameHeldError(self._provider, full, self._window_days) from exc
         return stored.decode("utf-8")
 
     def get_or_none(self, path: str) -> str | None:
-        """Fetch a secret as a string, or None when nothing is stored at *path*."""
+        """Fetch a secret as a string, or None when nothing is stored at *path*.
+
+        With no recovery window a secret still being deleted reads as gone, so the next
+        write waits for its name rather than failing on its value.
+        """
         try:
             return self.get(path)
         except SecretNotFoundError:
+            return None
+        except SecretNameHeldError:
+            if self._window_days:
+                raise
             return None
 
     def exists(self, path: str) -> bool:
@@ -204,7 +241,7 @@ def build_secrets(cfg: SecretsSettings) -> DfeSecrets:
         provider=cfg.provider,
         root=cfg.path,
         mount=cfg.mount,
-        prefix=cfg.prefix,
+        name_prefix=cfg.name_prefix,
         tags=cfg.tags,
         recovery_window_days=cfg.recovery_window_days,
     )

@@ -91,6 +91,24 @@ def test_a_replica_that_loses_the_mint_race_signs_with_the_stored_key(tmp_path):
     assert _authority(tmp_path).kid == first.kid
 
 
+@pytest.mark.parametrize(
+    "stored",
+    ["", "\n", "-----BEGIN PRIVATE KEY-----\nMIG2AgEAMBAGByqGSM49", "not a key at all"],
+    ids=["empty", "blank-line", "truncated", "garbage"],
+)
+def test_an_unusable_stored_key_is_refused_naming_its_path(tmp_path, stored):
+    """The error says where the key is, and never repeats what the store holds."""
+    key_file = tmp_path / "jwt" / "signing-key"
+    key_file.parent.mkdir()
+    key_file.write_text(stored, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="'jwt/signing-key' is empty or not a PEM") as refused:
+        _authority(tmp_path)
+
+    if stored.strip():
+        assert stored.strip() not in str(refused.value)
+
+
 def test_tampered_payload_rejected(tmp_path):
     a = _authority(tmp_path)
     token = a.sign({"sub": "eve", "groups": ["admin"]})

@@ -978,7 +978,9 @@ async def rotate_password(
             },
         )
 
-    secrets_store(request).put(local.admin_password_secret_path, body.new_password)
+    store = secrets_store(request)
+    path = local.admin_password_secret_path
+    await run_blocking(lambda: store.put(path, body.new_password))
     audit_account_change(user.user_id, username, "rotated password in the secret store")
     return RotatePasswordResponse(secret_path=local.admin_password_secret_path)
 

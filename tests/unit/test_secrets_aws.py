@@ -50,7 +50,7 @@ def aws(monkeypatch, tmp_path):
 
 
 def _settings(**fields: object) -> SecretsSettings:
-    base = {"provider": "aws", "region": REGION, "prefix": PREFIX, "tags": TAGS}
+    base = {"provider": "aws", "region": REGION, "name_prefix": PREFIX, "tags": TAGS}
     return SecretsSettings.model_validate(base | fields)
 
 
@@ -81,7 +81,7 @@ def test_a_secret_round_trips_under_the_prefix(aws):
     assert store.exists("ch/orgs/acme") is False
     store.delete("ch/orgs/acme")
 
-    # The default window of 0 frees the name at once, so a re-created org gets it back.
+    # Window 0 deletes with no recovery window, so a re-created org gets the name back.
     store.put("ch/orgs/acme", "again")
     assert store.get("ch/orgs/acme") == "again"
 
@@ -94,11 +94,11 @@ def test_a_secret_lands_in_the_configured_region_only(aws):
 
 
 def test_two_prefixes_in_one_account_never_share_a_name(aws):
-    build_secrets(_settings(prefix="acme/dfe/a/engine")).put("jwt/signing-key", "a")
-    build_secrets(_settings(prefix="acme/dfe/b/engine")).put("jwt/signing-key", "b")
+    build_secrets(_settings(name_prefix="acme/dfe/a/engine")).put("jwt/signing-key", "a")
+    build_secrets(_settings(name_prefix="acme/dfe/b/engine")).put("jwt/signing-key", "b")
 
-    assert build_secrets(_settings(prefix="acme/dfe/a/engine")).get("jwt/signing-key") == "a"
-    assert build_secrets(_settings(prefix="acme/dfe/b/engine")).get("jwt/signing-key") == "b"
+    assert build_secrets(_settings(name_prefix="acme/dfe/a/engine")).get("jwt/signing-key") == "a"
+    assert build_secrets(_settings(name_prefix="acme/dfe/b/engine")).get("jwt/signing-key") == "b"
 
 
 def test_a_created_secret_carries_the_kms_key_and_the_tags(aws):
@@ -172,7 +172,7 @@ def test_a_replica_that_loses_the_mint_race_signs_with_the_stored_key(aws):
     first = JwtAuthority(build_secrets(_settings()), issuer=ISS)
     manager = SecretsManager.from_config({"aws": {"region": REGION}, "cache": {"enabled": False}})
     racing = RacingSecrets(
-        manager, provider="aws", root="", prefix=PREFIX, blind_to="jwt/signing-key"
+        manager, provider="aws", root="", name_prefix=PREFIX, blind_to="jwt/signing-key"
     )
 
     second = JwtAuthority(racing, issuer=ISS)
@@ -184,10 +184,10 @@ def test_a_replica_that_loses_the_mint_race_signs_with_the_stored_key(aws):
 
 def test_two_prefixes_get_two_signing_keys_from_the_shared_authority_cache(aws):
     a = jwt_authority_for(
-        DFESettings(env="test", secrets=_settings(prefix="acme/dfe/cache-a/engine"))
+        DFESettings(env="test", secrets=_settings(name_prefix="acme/dfe/cache-a/engine"))
     )
     b = jwt_authority_for(
-        DFESettings(env="test", secrets=_settings(prefix="acme/dfe/cache-b/engine"))
+        DFESettings(env="test", secrets=_settings(name_prefix="acme/dfe/cache-b/engine"))
     )
 
     assert a is not b

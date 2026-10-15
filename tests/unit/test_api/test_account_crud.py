@@ -1366,6 +1366,25 @@ class TestRotatePassword:
         stored = build_secrets(settings.secrets).get("auth/admin-password")
         assert stored == "a-newly-minted-admin-password"
 
+    def test_a_name_a_deleted_secret_still_holds_answers_409_with_the_remedy(
+        self, app, client, admin_headers
+    ):
+        from tests.support.failing_stores import make_name_held_secrets
+
+        settings = app.state.settings
+        settings.auth.local.admin_password_secret_path = "auth/admin-password"
+        app.state.dfe_secrets = make_name_held_secrets(root=settings.secrets.path)
+
+        resp = client.post(
+            "/api/v1/auth/accounts/admin/rotate-password",
+            json={"new_password": "a-newly-minted-admin-password"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "conflict"
+        assert "Restore the secret, or wait out its recovery window" in resp.json()["message"]
+
     def test_a_regular_account_is_not_store_backed(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts/viewer/rotate-password",

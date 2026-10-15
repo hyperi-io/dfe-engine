@@ -143,7 +143,13 @@ class JwtAuthority:
                 return minted
             # Another replica stored a key between this read and the create, so sign with that one.
             pem = self._secrets.get(self._key_path)
-        loaded = serialization.load_pem_private_key(pem.encode("utf-8"), password=None)
+        refusal = f"stored JWT signing key at {self._key_path!r} is empty or not a PEM private key"
+        if not pem.strip():
+            raise ValueError(refusal)
+        try:
+            loaded = serialization.load_pem_private_key(pem.encode("utf-8"), password=None)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(refusal) from exc
         if not isinstance(loaded, EllipticCurvePrivateKey):
             raise ValueError(f"stored JWT signing key at {self._key_path!r} is not an EC key")
         logger.info("JWT authority loaded signing key", alg=self._alg)
