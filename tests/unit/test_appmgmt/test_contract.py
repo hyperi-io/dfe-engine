@@ -426,6 +426,7 @@ class TestProvenance:
             "config.kafka.tls.enabled",
             "config.kafka.sasl.username",
             "config.kafka.sasl.password",
+            "config.kafka.sasl.mechanism",
             "config.clickhouse.hosts",
             "config.clickhouse.database",
             "config.clickhouse.username",
