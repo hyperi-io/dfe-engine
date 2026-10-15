@@ -451,18 +451,6 @@ def _no_ch_rbac_reconcile_against_a_real_clickhouse(request):
         _ch_rbac.ch_admin_client, _ch_rbac_bootstrap.ch_admin_client = originals
 
 
-@pytest.fixture(scope="session")
-def resources_path():
-    """Path to test resources directory."""
-    return Path(__file__).parent / "resources"
-
-
-@pytest.fixture(scope="session")
-def post_build_artefacts_path(resources_path):
-    """Path to post_build_artefacts test data."""
-    return resources_path / "post_build_artefacts"
-
-
 # =============================================================================
 # Docker Service Fixtures
 # =============================================================================
