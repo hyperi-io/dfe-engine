@@ -115,19 +115,18 @@ the provider per target. This is the whole trick, applied to every row above.
 ```mermaid
 flowchart LR
     E["dfe-engine<br/>SecretsManager.from_config(settings.secrets)"] --> P{"provider<br/>(from config)"}
-    P -->|file / ansible_vault| F["dfe-docker: local encrypted file<br/>(0 extra service)"]
-    P -->|openbao| O["on-prem: OpenBao"]
-    P -->|aws| AWS["AWS Secrets Manager (deferred)"]
-    P -->|gcp| GCP["GCP Secret Manager (deferred)"]
-    P -->|azure| AZ["Azure Key Vault (deferred)"]
+    P -->|file, the default| F["a directory on the engine's volume<br/>(0 extra service)"]
+    P -->|ansible_vault| AV["a local encrypted file"]
+    P -->|openbao| O["OpenBao, where the deployment configures it"]
+    P -->|aws| AWS["AWS Secrets Manager<br/>(prefix, region, KMS key, tags)"]
+    P -.->|gcp / azure| NO["refused at startup"]
 ```
 
-Secrets decisions (settled): OpenBao everywhere on k8s (external-first, in-cluster
-Layer-0 fallback, joins the existing bootstrap stage; static-key auto-unseal), ESO
-projects to a short-lived k8s Secret cache with etcd encryption on, cloud swaps to
-the managed manager. dfe-docker uses the `file`/`ansible_vault` provider - no
-OpenBao, ~0 added memory. The engine's mint/write path moves off the local dir onto
-`scalo.secrets` (this is the Class B gitops-authority fix).
+The engine's JWT signing key, ClickHouse passwords and the OIDC client secrets an operator enters all go through `scalo.secrets`. With no `DFE_SECRETS_PROVIDER` they land in the `file` provider under `DFE_SECRETS_PATH`, which is all dfe-docker needs.
+
+`DFE_SECRETS_PROVIDER=aws` keeps them in AWS Secrets Manager as `<DFE_SECRETS_PREFIX>/<path>` in `DFE_SECRETS_REGION`. Each is encrypted with `DFE_SECRETS_KMS_KEY_ID` (the AWS managed key when unset, with a startup warning), tagged with the `DFE_SECRETS_TAGS` JSON object, and deleted with no recovery unless `DFE_SECRETS_RECOVERY_WINDOW_DAYS` sets 7-30. Inside a window the name stays taken, so re-creating that group or OIDC provider fails with an error naming the setting.
+
+`openbao` is used where the deployment configures it. `gcp` and `azure` are refused: their secret names allow no `/`, and every engine path has one.
 
 ## The dfe-docker special case - keep it small
 
@@ -156,7 +155,7 @@ push weight to the k8s profiles, not the desktop.
 
 | Backing service | Seam status | Now (on-prem) | Deferred (cloud) |
 |---|---|---|---|
-| Secrets | ready (scalo.secrets) - engine mint-path rewrite pending | OpenBao / file | aws/gcp/azure providers |
+| Secrets | ready (scalo.secrets) - the engine mints through it | file / OpenBao | aws built; gcp/azure refused |
 | ClickHouse | partial - the CH gateway consolidation is the seam | DFE CH modes | Cloud endpoints |
 | Kafka | ready (scalo.kafka) | Strimzi / Redpanda | MSK / Confluent / Event Hubs |
 | Object store | ready (S3 API) | MinIO | S3 / GCS / Blob |
@@ -164,9 +163,8 @@ push weight to the k8s profiles, not the desktop.
 | Ingress, TLS, DNS, storage, registry, reconciler | ready (standard k8s interfaces) | on-prem wiring | cloud wiring in dfe-infra |
 | Observability | ready (OTel exporter) | HyperDX + CH | keep HyperDX or cloud sink |
 
-Only two rows need real engine work: the ClickHouse gateway (the consolidation that
-also carries RBAC + audit) and routing the secrets mint-path through scalo.secrets.
-Everything else is "use the standard interface + dfe-infra config".
+Only the ClickHouse gateway (the consolidation that also carries RBAC + audit) needs
+real engine work. Everything else is "use the standard interface + dfe-infra config".
 
 ## Next - reduce swap complexity and exception handling
 

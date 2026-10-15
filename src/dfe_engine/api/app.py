@@ -325,8 +325,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # The one seam for secrets the engine mints - OIDC provider credentials and
     # sigma provider tokens resolve through it, never through a backend SDK.
-    from dfe_engine.secrets import build_secrets
+    from dfe_engine.secrets import build_secrets, warn_on_aws_managed_key
 
+    warn_on_aws_managed_key(settings.secrets)
     app.state.dfe_secrets = build_secrets(settings.secrets)
 
     from dfe_engine.governance import PolicyStore

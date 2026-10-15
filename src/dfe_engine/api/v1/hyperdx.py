@@ -46,6 +46,7 @@ from dfe_engine.api.deps import (
     is_action_allowed,
     reads_every_org,
     require_action,
+    secrets_store,
 )
 from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -173,11 +174,7 @@ async def hyperdx_connection(
             detail={"code": identity.code, "message": identity.message},
         )
 
-    from dfe_engine.secrets import build_secrets
-
-    store = build_secrets(settings.secrets)
-    path = identity.secret_path
-    password = store.get(path) if store.exists(path) else ""
+    password = secrets_store(request).get_or_none(identity.secret_path) or ""
     if not password:
         if identity.username == _PLATFORM_USERNAME:
             detail = {

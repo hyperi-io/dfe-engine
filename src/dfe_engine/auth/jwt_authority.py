@@ -13,10 +13,10 @@ dfe-hyperdx - verifies by signature, not by trusting a header. Crypto-agile: the
 algorithm is config-driven so ML-DSA can replace ES384 once the JOSE + Envoy chain
 supports it (see docs/AUTH-ENVOY-TOPOLOGY.md).
 
-The signing private key lives in ``scalo.secrets`` (file provider for dfe-docker,
-OpenBao on k8s) via the engine's ``DfeSecrets`` seam - PyJWT does the crypto, scalo
-owns the key at rest. The ``kid`` is the RFC 7638 JWK thumbprint: stable, deterministic,
-and identical wherever the same public key is seen.
+The signing private key lives in ``scalo.secrets`` (the file provider by default, or
+the store the deployment configures) via the engine's ``DfeSecrets`` seam - PyJWT does
+the crypto, scalo owns the key at rest. The ``kid`` is the RFC 7638 JWK thumbprint:
+stable, deterministic, and identical wherever the same public key is seen.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from cryptography.hazmat.primitives.asymmetric.ec import (
 )
 from jwt.exceptions import InvalidTokenError
 from scalo.logger import logger
-from scalo.secrets.exceptions import SecretNotFoundError
+from scalo.secrets.exceptions import SecretAlreadyExistsError
 
 from dfe_engine.auth.hyperdx_role import CLAIM as ROLE_CLAIM
 from dfe_engine.auth.hyperdx_role import SERVICE_ROLE
@@ -136,27 +136,37 @@ class JwtAuthority:
         return self._alg
 
     def _load_or_mint(self) -> EllipticCurvePrivateKey:
-        try:
+        pem = self._secrets.get_or_none(self._key_path)
+        if pem is None:
+            minted = self._mint()
+            if minted is not None:
+                return minted
+            # Another replica stored a key between this read and the create, so sign with that one.
             pem = self._secrets.get(self._key_path)
-        except SecretNotFoundError:
-            key = ec.generate_private_key(_CURVE_FOR_ALG[self._alg]())
-            pem = key.private_bytes(
-                serialization.Encoding.PEM,
-                serialization.PrivateFormat.PKCS8,
-                serialization.NoEncryption(),
-            ).decode("utf-8")
-            self._secrets.put(self._key_path, pem)
-            logger.warning(
-                "JWT authority minted a new signing key",
-                alg=self._alg,
-                key_path=self._key_path,
-            )
-            return key
         loaded = serialization.load_pem_private_key(pem.encode("utf-8"), password=None)
         if not isinstance(loaded, EllipticCurvePrivateKey):
             raise ValueError(f"stored JWT signing key at {self._key_path!r} is not an EC key")
         logger.info("JWT authority loaded signing key", alg=self._alg)
         return loaded
+
+    def _mint(self) -> EllipticCurvePrivateKey | None:
+        """Mint a signing key and store it create-only, or None when a key was stored first."""
+        key = ec.generate_private_key(_CURVE_FOR_ALG[self._alg]())
+        pem = key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode("utf-8")
+        try:
+            self._secrets.create(self._key_path, pem)
+        except SecretAlreadyExistsError:
+            return None
+        logger.warning(
+            "JWT authority minted a new signing key",
+            alg=self._alg,
+            key_path=self._key_path,
+        )
+        return key
 
     def sign(
         self,

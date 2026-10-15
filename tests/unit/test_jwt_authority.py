@@ -7,14 +7,13 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The DFE JWT authority: ES384 sign/verify, JWKS, key persistence, tamper + expiry."""
 
-from __future__ import annotations
-
 from datetime import timedelta
 
 import jwt as pyjwt
 import pytest
 from cryptography.hazmat.primitives import serialization
 from jwt.exceptions import InvalidTokenError
+from scalo.secrets import SecretsManager
 
 from dfe_engine.auth import hyperdx_role
 from dfe_engine.auth.jwt_authority import (
@@ -26,6 +25,7 @@ from dfe_engine.auth.jwt_authority import (
 )
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
+from tests.support.racing_stores import RacingSecrets
 
 ISS = "https://dfe.test/api"
 
@@ -76,6 +76,19 @@ def test_key_persists_across_restarts(tmp_path):
     second = _authority(tmp_path)
     assert second.kid == kid
     assert second.verify(token)["sub"] == "bob"
+
+
+def test_a_replica_that_loses_the_mint_race_signs_with_the_stored_key(tmp_path):
+    """A mint never overwrites a stored key, so a token the first replica signed still verifies."""
+    first = _authority(tmp_path)
+    manager = SecretsManager.from_config({"cache": {"enabled": False}})
+    racing = RacingSecrets(manager, provider="file", root=str(tmp_path), blind_to="jwt/signing-key")
+
+    second = JwtAuthority(racing, issuer=ISS)
+
+    assert second.kid == first.kid
+    assert second.verify(first.sign({"sub": "bob"}))["sub"] == "bob"
+    assert _authority(tmp_path).kid == first.kid
 
 
 def test_tampered_payload_rejected(tmp_path):

@@ -1951,22 +1951,34 @@ class APISettings(BaseModel):
         return v
 
 
+# GCP Secret Manager and Azure Key Vault names allow letters, digits, '-' and (GCP only) '_'.
+_UNNAMEABLE_SECRET_PROVIDERS = frozenset({"gcp", "azure"})
+# Amazon MSK reads SCRAM credentials only from secrets whose names start with this.
+_MSK_NAME_PREFIX = "AmazonMSK_"
+
+
 class SecretsSettings(BaseModel):
     """Backing-service seam for secrets the engine MINTS - backend by config.
 
     The engine reads runtime config secrets from env; this is the WRITE seam for
-    secrets it generates (per-group ClickHouse passwords, OIDC client secrets, API
-    keys). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
-    product: 'file'/'ansible_vault' for dfe-docker (a local encrypted file, no extra
-    service), 'openbao' on k8s (external-first), 'aws'/'gcp'/'azure' for cloud
-    (deferred). See docs/deployment/backing-services.md.
+    secrets it generates (the JWT signing key, ClickHouse passwords, OIDC client
+    secrets). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
+    product: 'file' by default (a directory on the engine's volume), 'ansible_vault',
+    'openbao'/'vault' where a deployment runs one, and 'aws' for AWS Secrets Manager.
+    'gcp' and 'azure' are refused: their secret names allow no '/', and every path
+    the engine mints carries one. See docs/deployment/backing-services.md.
 
     Environment variables (DFE_SECRETS_ prefix):
-    - DFE_SECRETS_PROVIDER -> secrets.provider (file|ansible_vault|openbao|aws|gcp|azure)
+    - DFE_SECRETS_PROVIDER -> secrets.provider (file|ansible_vault|openbao|vault|aws)
     - DFE_SECRETS_PATH -> secrets.path (file/ansible_vault root)
     - DFE_SECRETS_ADDR -> secrets.addr (openbao/vault address)
     - DFE_SECRETS_MOUNT -> secrets.mount (kv mount / key prefix)
     - DFE_SECRETS_ROLE -> secrets.role (openbao AppRole role id)
+    - DFE_SECRETS_REGION -> secrets.region (aws region)
+    - DFE_SECRETS_PREFIX -> secrets.prefix (aws: every secret is named <prefix>/<path>)
+    - DFE_SECRETS_KMS_KEY_ID -> secrets.kms_key_id (aws KMS key id, ARN or alias)
+    - DFE_SECRETS_RECOVERY_WINDOW_DAYS -> secrets.recovery_window_days (aws: 0 or 7-30)
+    - DFE_SECRETS_TAGS -> secrets.tags (JSON object of tags on each secret it creates)
     """
 
     provider: str = Field(default="file", description="scalo.secrets backend provider")
@@ -1974,6 +1986,53 @@ class SecretsSettings(BaseModel):
     addr: str = Field(default="", description="openbao/vault address")
     mount: str = Field(default="dfe", description="kv mount / key prefix")
     role: str = Field(default="", description="openbao AppRole role id")
+    region: str = Field(default="", description="aws region the secrets live in")
+    # Engine-only: bootstrap.sh's DFE_SECRETS_PREFIX is the ESO store root, read in another process.
+    prefix: str = Field(default="", description="aws name prefix, so a secret is <prefix>/<path>")
+    kms_key_id: str = Field(
+        default="", description="aws KMS key id, ARN or alias, empty for the AWS managed key"
+    )
+    recovery_window_days: int = Field(
+        default=0,
+        description="aws days a deleted secret stays recoverable: 0 deletes it at once, or 7-30",
+    )
+    tags: dict[str, str] = Field(
+        default_factory=dict,
+        description="tags every secret the engine creates carries, where the provider keeps tags",
+    )
+
+    @model_validator(mode="after")
+    def _check_provider(self) -> SecretsSettings:
+        if self.provider in _UNNAMEABLE_SECRET_PROVIDERS:
+            raise ValueError(
+                f"DFE_SECRETS_PROVIDER={self.provider} is not supported yet for the secrets "
+                "the engine mints: its secret names cannot hold the '/' every engine path "
+                "carries. Use file, ansible_vault, openbao or aws"
+            )
+        if self.provider == "aws":
+            self._check_aws()
+        return self
+
+    def _check_aws(self) -> None:
+        if not self.region:
+            raise ValueError("DFE_SECRETS_PROVIDER=aws needs DFE_SECRETS_REGION")
+        if not self.prefix:
+            raise ValueError(
+                "DFE_SECRETS_PROVIDER=aws needs DFE_SECRETS_PREFIX, so two deployments "
+                "in one account never share a secret name"
+            )
+        if self.prefix.startswith("/") or self.prefix.endswith("/"):
+            raise ValueError(f"DFE_SECRETS_PREFIX {self.prefix!r} must not start or end with '/'")
+        if self.prefix.startswith(_MSK_NAME_PREFIX):
+            raise ValueError(
+                f"DFE_SECRETS_PREFIX {self.prefix!r} must not start with {_MSK_NAME_PREFIX!r}, "
+                "which names the secrets Amazon MSK authenticates against"
+            )
+        window = self.recovery_window_days
+        if window != 0 and not 7 <= window <= 30:
+            raise ValueError(
+                f"DFE_SECRETS_RECOVERY_WINDOW_DAYS must be 0 (delete at once) or 7-30, got {window}"
+            )
 
 
 class SeedOrg(BaseModel):
@@ -2728,6 +2787,22 @@ def _get_env_overrides() -> dict:
         overrides["secrets"]["mount"] = val
     if val := _get_env("DFE_SECRETS_ROLE"):
         overrides["secrets"]["role"] = val
+    if val := _get_env("DFE_SECRETS_REGION"):
+        overrides["secrets"]["region"] = val
+    if val := _get_env("DFE_SECRETS_PREFIX"):
+        overrides["secrets"]["prefix"] = val
+    if val := _get_env("DFE_SECRETS_KMS_KEY_ID"):
+        overrides["secrets"]["kms_key_id"] = val
+    if val := _get_env("DFE_SECRETS_RECOVERY_WINDOW_DAYS"):
+        overrides["secrets"]["recovery_window_days"] = int(val)
+    if val := _get_env("DFE_SECRETS_TAGS"):
+        # Fail loudly: a secret created without its tags escapes a tag-based cleanup.
+        import json
+
+        try:
+            overrides["secrets"]["tags"] = json.loads(val)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"DFE_SECRETS_TAGS is not valid JSON: {exc}") from exc
 
     # The stack this pod was deployed from, when the deploy passed it in
     if val := _get_env("DFE_STACK_VERSION"):

@@ -37,6 +37,7 @@ from dfe_engine.api.deps import (
     account_for_session_subject,
     provider_bindings,
     require_action,
+    secrets_store,
 )
 from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.pagination import (
@@ -944,7 +945,6 @@ async def rotate_password(
     changes its password through reset-password.
     """
     from dfe_engine.auth.deployment_hints import detect_deploy_kind, rotation_store_command
-    from dfe_engine.secrets import build_secrets
 
     local = settings.auth.local
     if username != admin_account_name(local.admin_name):
@@ -978,7 +978,7 @@ async def rotate_password(
             },
         )
 
-    build_secrets(settings.secrets).put(local.admin_password_secret_path, body.new_password)
+    secrets_store(request).put(local.admin_password_secret_path, body.new_password)
     audit_account_change(user.user_id, username, "rotated password in the secret store")
     return RotatePasswordResponse(secret_path=local.admin_password_secret_path)
 

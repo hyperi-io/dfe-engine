@@ -34,7 +34,7 @@ from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
 from scalo.logger import logger
 
-from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
+from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action, secrets_store
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -57,7 +57,6 @@ from dfe_engine.names import StoreName
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
-    from dfe_engine.secrets import DfeSecrets
 
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 
@@ -466,23 +465,9 @@ def _get_registry(request: Request):
     return registry
 
 
-def _secrets(request: Request) -> DfeSecrets:
-    """The DfeSecrets seam provider credentials are written to and read from."""
-    store = getattr(request.app.state, "dfe_secrets", None)
-    if store is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "secrets_unavailable",
-                "message": "no secrets backend is configured; set DFE_SECRETS_PROVIDER",
-            },
-        )
-    return store
-
-
 def _store_secret(*, field: str, name: str, request: Request, value: str) -> None:
     """Write one provider secret through the seam, at the path the provider records."""
-    _secrets(request).put(provider_secret_path(field=field, provider_name=name), value)
+    secrets_store(request).put(provider_secret_path(field=field, provider_name=name), value)
 
 
 def _group_config(

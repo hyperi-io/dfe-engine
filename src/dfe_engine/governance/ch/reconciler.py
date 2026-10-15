@@ -284,9 +284,8 @@ class ChRbacReconciler:
         Reuse is essential: ``CREATE USER IF NOT EXISTS`` never rotates an existing
         user's password, so regenerating every run would desync CH from the store.
         """
-        if self._secrets is not None and self._secrets.exists(path):
-            plaintext = self._secrets.get(path)
-        else:
+        plaintext = self._secrets.get_or_none(path) if self._secrets is not None else None
+        if plaintext is None:
             plaintext = _stdlib_secrets.token_urlsafe(24)[:32]
             if self._secrets is not None:
                 self._secrets.put(path, plaintext)
@@ -304,7 +303,7 @@ class ChRbacReconciler:
         if not provided:
             return self._hash_for(path) if self._secrets is not None else None
         if self._secrets is not None:
-            stored = self._secrets.get(path) if self._secrets.exists(path) else None
+            stored = self._secrets.get_or_none(path)
             if stored != provided:
                 self._secrets.put(path, provided)
         return hashlib.sha256(provided.encode()).hexdigest()
