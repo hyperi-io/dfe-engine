@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.44](https://github.com/hyperi-io/dfe-engine/compare/v1.22.43...v1.22.44) (2026-10-15)
+
+### Bug Fixes
+
+* **secrets:** store minted secrets right in AWS ([#898](https://github.com/hyperi-io/dfe-engine/issues/898)) ([81caeeb](https://github.com/hyperi-io/dfe-engine/commit/81caeeb45e3c5e8aeeafe13667673b7a6c570bc8))
+
 ## [1.22.43](https://github.com/hyperi-io/dfe-engine/compare/v1.22.42...v1.22.43) (2026-10-15)
 
 ### Bug Fixes
