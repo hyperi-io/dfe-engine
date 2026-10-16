@@ -25,7 +25,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 from scalo.logger import logger
 
@@ -35,6 +35,8 @@ from dfe_engine.api.deps import (
     OptionalAlertDestRegistry,
     OptionalRuleReg,
     Settings,
+    refuse_unknown_orgs,
+    registered_orgs,
     require_action,
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
@@ -46,6 +48,7 @@ from dfe_engine.hunt_runner.run_status import RunStatus, live_runner_count, read
 from dfe_engine.hunt_runner.spec_loader import interval_seconds_for
 from dfe_engine.hunt_runner.spread import next_due
 from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
+from dfe_engine.hunts.customers import CUSTOMER_TENANT_IDS, hunt_customers
 from dfe_engine.hunts.hunt_config_registry import (
     HuntConfigNotFoundError,
     default_display_name,
@@ -53,6 +56,7 @@ from dfe_engine.hunts.hunt_config_registry import (
 )
 from dfe_engine.hunts.validator import HuntValidator
 from dfe_engine.names import HuntName, InvalidNameError, validate_rule_name
+from dfe_engine.orgs.tenant_scope import tenant_ids_by_org
 
 
 def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:
@@ -94,6 +98,17 @@ def _refuse_new_rule_names(rules: list[str], stored: dict[str, Any]) -> None:
                 status_code=422,
                 detail={"code": "validation_error", "message": str(exc)},
             ) from exc
+
+
+def _resolve_customers(request: Request, config: dict[str, Any]) -> None:
+    """Store each customer's tenant ids beside the names, as the runner reads them.
+
+    Raises:
+        HTTPException: 422 ``unknown_org`` when a customer names no registered org.
+    """
+    customers = hunt_customers(config)
+    refuse_unknown_orgs(request, customers)
+    config[CUSTOMER_TENANT_IDS] = tenant_ids_by_org(customers, registered_orgs(request))
 
 
 def _validate_hunt_config(config: dict[str, Any], settings: Any, rules: Any) -> None:
@@ -205,12 +220,10 @@ class _HuntConfigFields(BaseModel):
     customers: list[str] = Field(
         min_length=1,
         description=(
-            "The _org_id values the hunt reads: an org's tenant ids, or its name when it "
-            "declares none. The runner reads no other org's rows, and a hunt naming none "
-            "runs nothing."
+            "Names of the registered orgs the hunt reads. The engine resolves each to its "
+            "tenant ids when it saves the hunt, and the runner reads no other org's rows."
         ),
     )
-    customer_filters: dict[str, Any] | None = None
     checkpoint_timestamp_field: str | None = None
     scheduling_mode: str | None = None
     min_interval_seconds: int | None = None
@@ -262,12 +275,34 @@ class HuntDetailResponse(_HuntConfigFields):
     name: str = Field(description="Hunt file name (YAML stem)")
     display_name: str = Field(description="Resolved human-readable label")
     rules: list[HuntRuleEntry] = Field(min_length=1)
+    # A stored hunt naming none is shown, and runs nothing.
+    customers: list[str] = Field(
+        default_factory=list, description="Names of the registered orgs the hunt reads"
+    )
+    customer_tenant_ids: dict[str, list[str]] = Field(  # noqa: V107
+        default_factory=dict,
+        description=(
+            "Each customer's tenant ids, resolved when the hunt was saved: the _org_id "
+            "values the runner reads. A customer missing here stops every run."
+        ),
+    )
 
     @classmethod
     def from_stored_config(cls, name: str, config: dict[str, Any]) -> HuntDetailResponse:
         payload = {k: v for k, v in config.items() if k not in ("hunt_id", "name")}
         payload["rules"] = _rules_from_stored(config.get("rules"))
         payload["display_name"] = resolve_display_name(config, name)
+        stored_ids = config.get(CUSTOMER_TENANT_IDS)
+        # A hand-written entry the runner would not read is shown as absent, not a 500.
+        payload[CUSTOMER_TENANT_IDS] = (
+            {
+                customer: [i for i in ids if isinstance(i, str)]
+                for customer, ids in stored_ids.items()
+                if isinstance(customer, str) and isinstance(ids, list)
+            }
+            if isinstance(stored_ids, dict)
+            else {}
+        )
         return cls.model_validate({"name": name, **payload})
 
 
@@ -463,12 +498,14 @@ def create_hunt(
     registry: HuntConfigReg,
     rules: OptionalRuleReg,
     settings: Settings,
+    request: Request,
     response: Response,
 ) -> HuntDetailResponse:
     """Create a new hunt configuration YAML.
 
     A production+team write is routed to a review branch instead of the branch the
-    runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
+    runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
+    ``unknown_org`` when a customer names no registered org.
     """
     if registry.name_exists(body.name):
         raise HTTPException(
@@ -477,6 +514,7 @@ def create_hunt(
         )
     config = body.to_config_dict(hunt_name=body.name)
     _validate_hunt_config(config, settings, rules)
+    _resolve_customers(request, config)
     outcome = registry.save(
         body.name,
         config,
@@ -521,12 +559,14 @@ def update_hunt(
     registry: HuntConfigReg,
     rules: OptionalRuleReg,
     settings: Settings,
+    request: Request,
     response: Response,
 ) -> HuntDetailResponse:
-    """Replace an existing hunt configuration.
+    """Replace an existing hunt configuration, resolving its customers afresh.
 
     A production+team write is routed to a review branch instead of the branch the
-    runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
+    runner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422
+    ``unknown_org`` when a customer names no registered org.
     """
     try:
         stored = registry.get(name)
@@ -539,6 +579,7 @@ def update_hunt(
     _refuse_new_rule_names(body.rules, stored)
     config = body.to_config_dict(hunt_name=name)
     _validate_hunt_config(config, settings, rules)
+    _resolve_customers(request, config)
     outcome = registry.save(
         name,
         config,

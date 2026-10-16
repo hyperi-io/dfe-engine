@@ -17,8 +17,12 @@ and skipped (a later phase adds them). One bad file never sinks the whole load.
 A hunt states what it runs one of two ways: a direct `query` (pre-compiled, one
 statement) or `rules` (rule YAML names), which is what the API writes. Rules are
 compiled here, through rule_compiler, so a hunt made in the UI runs without anyone
-hand-editing its YAML. A compiled hunt reads only its `customers`' orgs, and one
-naming none fails every fire as ``no_customers``.
+hand-editing its YAML. A compiled hunt reads only the tenant ids its `customers`
+resolved to when the engine wrote it. One naming none fails every fire as
+``no_customers``, and one holding a customer with no stored tenant ids as
+``unknown_customers``.
+
+A direct `query` is trusted deploy-repo SQL: it is not held to any customer.
 
 Only a compiled rule carries the per-run detection cap. A direct `query` is SQL the
 author wrote whole, so no LIMIT can be put into it safely; it runs uncapped, and
@@ -36,6 +40,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.hunts.customers import hunt_customers, hunt_tenant_ids
 from dfe_engine.hunts.rule_guard import refuse_direct_query
 from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
 from dfe_engine.yaml_utils import yaml_load
@@ -43,7 +48,7 @@ from dfe_engine.yaml_utils import yaml_load
 from .checkpoint import TIMESTAMP_FIELD
 from .interval import parse_interval
 from .models import HuntSpec, HuntStatement
-from .rule_compiler import compile_hunt_queries, hunt_customers
+from .rule_compiler import compile_hunt_queries
 
 
 def _resolve_schedule_value(definition: dict[str, Any], stem: str) -> str | int | None:
@@ -136,6 +141,7 @@ def _build_spec(
         )
         queries = [HuntStatement(sql=query)]
         customers = None
+        unresolved: list[str] = []
     else:
         queries = compile_hunt_queries(
             definition,
@@ -146,12 +152,14 @@ def _build_spec(
             max_detections=max_detections,
         )
         customers = hunt_customers(definition)
+        _, unresolved = hunt_tenant_ids(definition)
 
     return HuntSpec(
         hunt_id=stem,
         interval_seconds=interval_seconds,
         queries=queries,
         customers=customers,
+        unresolved_customers=unresolved,
         target_table=str(definition.get("global_target_table_name", definition.get("target", ""))),
         timestamp_field=_timestamp_field(definition),
     )

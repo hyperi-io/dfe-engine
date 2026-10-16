@@ -12,13 +12,25 @@ and the hunt through ``HuntCreateRequest.to_config_dict``, which are what
 ``POST /api/v1/rules`` and ``POST /api/v1/hunts`` write with.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
 from dfe_engine.api.v1.hunts import HuntCreateRequest
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleRegistry
 from dfe_engine.yaml_utils import yaml_dump_string
+
+# The hunt YAML key the engine writes and the runner reads, pinned as the file contract.
+CUSTOMER_TENANT_IDS = "customer_tenant_ids"
+
+
+def resolved_customers(*names: str) -> dict[str, Any]:
+    """``customers`` and the tenant ids the API stores for them, each org declaring none.
+
+    An org with no ``org_ids`` resolves to its own name, so each name maps to itself.
+    """
+    return {"customers": list(names), CUSTOMER_TENANT_IDS: {name: [name] for name in names}}
 
 
 def write_rule(
@@ -47,10 +59,12 @@ def write_hunt(
     *,
     source: str = "main",
     customers: Sequence[str] = ("acme",),
+    tenant_ids: Mapping[str, list[str]] | None = None,
 ) -> None:
     """Write one hunt file exactly as POST /api/v1/hunts writes it, firing every minute.
 
-    *customers* are the ``_org_id`` values the hunt reads, so a test names the org its rows carry.
+    *customers* are org names. *tenant_ids* is what the API resolved each to, and
+    defaults to each org declaring none, so a name reads the rows carrying it.
     """
     body = HuntCreateRequest(
         name=hunt,
@@ -60,9 +74,12 @@ def write_hunt(
         global_source_table_name=f"{db}.{source}",
         global_target_table_name=f"{db}.detection",
     )
+    config = body.to_config_dict(hunt_name=hunt)
+    resolved = resolved_customers(*customers)[CUSTOMER_TENANT_IDS]
+    config[CUSTOMER_TENANT_IDS] = dict(tenant_ids) if tenant_ids is not None else resolved
     hunts_dir.mkdir(parents=True, exist_ok=True)
     (hunts_dir / f"{hunt}.yaml").write_text(
-        yaml_dump_string(body.to_config_dict(hunt_name=hunt)),
+        yaml_dump_string(config),
         encoding="utf-8",
         newline="\n",
     )

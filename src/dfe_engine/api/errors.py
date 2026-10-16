@@ -15,6 +15,8 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 from starlette.routing import BaseRoute
 
+from dfe_engine.http_errors import failure_reference, referenced
+
 # -- Response models ------------------------------------------
 
 
@@ -150,24 +152,38 @@ def hide_backend_text(message: str, exc: BaseException, *, event: str, **fields:
 
 
 def backend_failure(
-    status_code: int, code: str, message: str, exc: BaseException, *, event: str, **fields: Any
+    status_code: int,
+    code: str,
+    message: str,
+    exc: BaseException,
+    *,
+    event: str,
+    headers: dict[str, str] | None = None,
+    **fields: Any,
 ) -> HTTPException:
-    """The HTTPException a route raises for a backend failure, its text logged instead of sent.
+    """The HTTPException a route raises for a failure whose text is logged instead of sent.
+
+    The answer and the log line carry the same reference, so whoever reads the
+    answer can find the reason.
 
     Args:
         status_code: The HTTP status to answer.
         code: The machine-readable error code.
-        message: What the caller is told.
-        exc: The backend failure whose text is logged.
+        message: What the caller is told, before the reference.
+        exc: The failure whose text is logged.
         event: The log line's message.
+        headers: Response headers, such as a 401's ``WWW-Authenticate``.
         **fields: Further structured fields for the log line.
 
     Returns:
         The exception to raise, chained from ``exc`` by the caller.
     """
+    reference = failure_reference()
+    told = hide_backend_text(message, exc, event=event, reference=reference, **fields)
     return HTTPException(
         status_code=status_code,
-        detail={"code": code, "message": hide_backend_text(message, exc, event=event, **fields)},
+        detail={"code": code, "message": referenced(told, reference)},
+        headers=headers,
     )
 
 

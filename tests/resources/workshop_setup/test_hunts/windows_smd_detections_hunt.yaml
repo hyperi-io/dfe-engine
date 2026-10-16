@@ -11,9 +11,3 @@ customers:
 rules:
   - rule_name: win_account_a_common_activities
     target_table_name: logs_alerts
-
-customer_filters:
-  detectionlab:
-    rules:
-      - name: win_account_a_common_activities
-        filter_clause: ""

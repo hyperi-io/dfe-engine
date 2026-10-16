@@ -16,6 +16,7 @@ another host. The address below is in the documentation range (RFC 5737).
 from pathlib import Path
 
 import pytest
+from common.hunt_files import resolved_customers
 from scalo.logger import logger
 
 from dfe_engine.hunt_runner.rule_compiler import compile_hunt_queries
@@ -55,7 +56,7 @@ def _compile(rules_dir: Path, *, hunt_target: str = "", entry_target: str = "", 
     if entry_target:
         entry["target_table_name"] = entry_target
     definition: dict = {
-        "customers": ["acme"],
+        **resolved_customers("acme"),
         "rules": [entry],
         "global_source_table_name": "dfe.main",
     }
@@ -109,7 +110,7 @@ def test_one_refused_rule_leaves_the_hunts_other_rules_compiling(tmp_path: Path)
 
     statements = compile_hunt_queries(
         {
-            "customers": ["acme"],
+            **resolved_customers("acme"),
             "rules": [
                 {"rule_name": "certutil", "target_table_name": REFUSED_TARGETS["table function"]},
                 {"rule_name": "certutil"},

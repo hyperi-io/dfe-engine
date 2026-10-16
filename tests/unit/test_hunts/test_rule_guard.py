@@ -12,7 +12,9 @@ from dfe_engine.hunts.rule_guard import (
     match_everything,
     preview_settings,
     preview_sql,
+    refuse_condition_escape,
     refuse_offbox_calls,
+    refuse_rule_condition,
     volume_verdict,
 )
 from dfe_engine.hunts.rule_rewriter import RuleRewriter
@@ -126,6 +128,57 @@ def test_an_empty_condition_has_nothing_to_refuse():
 )
 def test_a_condition_using_the_in_operator_is_not_refused(where):
     assert refuse_offbox_calls(where) is None
+
+
+# -- a condition that reads another table ---------------------------------------
+
+# ClickHouse reads each of these from another table: a lone name after IN is a
+# table, bracketed or not, unless a column of that name shadows it.
+READS_ANOTHER_TABLE = {
+    "in subquery": "_source IN (SELECT ioc FROM threat.iocs)",
+    "global not in subquery": "_source GLOBAL NOT IN (SELECT ioc FROM threat.iocs)",
+    "exists": "EXISTS (SELECT 1 FROM dfe.main WHERE _org_id = 'globex')",
+    "scalar subquery": "severity = (SELECT any(severity) FROM dfe.main)",
+    "lower-case select": "_source in (select ioc from threat.iocs)",
+    "in table": "_source IN threat.iocs",
+    "in bare table": "_source IN iocs",
+    "in bracketed table": "_source IN (threat.iocs)",
+    "in doubly bracketed table": "_source IN ((iocs))",
+    "in quoted table": "_source NOT IN (`threat`.`ioc-list`)",
+    "in keyword-named table": "_source IN (default.iocs)",
+}
+
+# Each of these reads only its own row.
+STAYS_IN_THE_ROW = [
+    "severity IN ('high', 'critical')",
+    "severity NOT IN ('low')",
+    "port IN (22, 3389)",
+    "lower(severity) IN (lower('HIGH'), 'critical')",
+    "msg = 'IN threat.iocs' -- SELECT in a comment",
+    "msg = 'select * from x'",
+    "`select` = 1",
+]
+
+
+@pytest.mark.parametrize("where", READS_ANOTHER_TABLE.values(), ids=list(READS_ANOTHER_TABLE))
+def test_a_condition_reading_another_table_is_refused(where):
+    message = refuse_condition_escape(where)
+
+    assert message is not None
+    assert message.startswith("A rule's detection condition may not ")
+
+
+@pytest.mark.parametrize("where", STAYS_IN_THE_ROW)
+def test_a_condition_over_its_own_row_is_not_refused(where):
+    assert refuse_condition_escape(where) is None
+    assert refuse_rule_condition(where) is None
+
+
+def test_the_rule_condition_check_refuses_an_offbox_call_first():
+    message = refuse_rule_condition("in(_source, dfe.main)")
+
+    assert message is not None
+    assert "may not call in()" in message
 
 
 def test_a_presence_check_names_the_column_every_event_has():

@@ -36,6 +36,7 @@ from dfe_engine.api.deps import (
     _get_client_ip,
     account_for_session_subject,
     provider_bindings,
+    refuse_unknown_orgs,
     require_action,
     secrets_store,
 )
@@ -398,18 +399,6 @@ def _contact_updates(
     return fields
 
 
-def _refuse_unknown_org(request: Request, org: str) -> None:
-    """Refuse an org binding the org registry holds no org for, where empty binds none."""
-    if not org:
-        return
-    registry = getattr(request.app.state, "org_registry", None)
-    if registry is None or registry.get(org) is None:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "unknown_org", "message": f"Org '{org}' is not registered"},
-        )
-
-
 def _require_account(store: Any, username: str) -> Account:
     """Return the account, or 404 when it is missing or soft-deleted."""
     account = store.get(username)
@@ -539,7 +528,7 @@ async def create_account(
     )
     if store.get(body.username) is not None:
         raise conflict
-    _refuse_unknown_org(request, body.org)
+    refuse_unknown_orgs(request, [body.org])
     groups = group_store.list()
     created = Account(groups=body.groups, password_hash="", username=body.username)
     held_after = groups_held_after(
@@ -815,7 +804,7 @@ async def update_account(
     if body.blocked is not None:
         update_fields["blocked"] = body.blocked
     if body.org is not None:
-        _refuse_unknown_org(request, body.org)
+        refuse_unknown_orgs(request, [body.org])
         update_fields["org"] = body.org
     if body.groups is not None:
         # The group files decide membership, so diff against them: re-sending a list repairs drift.

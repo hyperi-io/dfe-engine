@@ -18,9 +18,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import create_access_token
-from dfe_engine.query.executor import ViewExecutor
 from dfe_engine.settings import DFESettings
-from tests.unit.test_query.view_fakes import OneViewCatalog, RecordingClient, view_definition
+from tests.unit.test_query.view_fakes import RecordingClient
 
 ACCOUNTS = "/api/v1/auth/accounts"
 EXECUTE = "/api/v1/queries/views/analytics/events/execute"
@@ -111,16 +110,6 @@ class TestALocalAccountIsBoundToItsOrg:
 
         assert resp.status_code == 422, resp.text
         assert app.state.account_store.get("alice").org == "acme"
-
-
-@pytest.fixture
-def reader(app: FastAPI, client: TestClient) -> RecordingClient:
-    """A tenant-isolated view over a client that records what it was asked to bind."""
-    recording = RecordingClient()
-    app.state.view_executor = ViewExecutor(
-        restricted_client=recording, catalog=OneViewCatalog(view_definition()), database="dfe"
-    )
-    return recording
 
 
 def _tenant_viewer(app: FastAPI, client: TestClient, admin_headers, *, org: str, grants: list[str]):

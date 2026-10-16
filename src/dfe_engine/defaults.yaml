@@ -61,4 +61,3 @@ auth:
     admin_password: "changeme"
     operator_password: "changeme"
     viewer_password: "changeme"
-    org_id: "default"

@@ -95,6 +95,19 @@ REFUSED = {
         ("rules", "certutil", "where_clause", EXFIL),
         "may not call url()",
     ),
+    "rule where_clause reads another org": (
+        (
+            "rules",
+            "certutil",
+            "where_clause",
+            "process_name IN (SELECT process_name FROM dfe.main WHERE _org_id = 'globex')",
+        ),
+        "may not hold a SELECT",
+    ),
+    "rule where_clause reads a table after IN": (
+        ("rules", "certutil", "where_clause", "process_name IN (dfe.main)"),
+        "may not name a table after IN",
+    ),
 }
 
 

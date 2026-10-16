@@ -13,8 +13,10 @@ when the condition narrows anything at all, or cannot be read.
 
 ``refuse_offbox_calls`` reads the same WHERE and refuses a condition that calls
 a ClickHouse function reading outside the row or sending it to another service.
-``refuse_bracket_escape`` refuses one whose brackets do not balance, since it runs
-inside a bracket beside the window and the hunt's orgs.
+``refuse_condition_escape`` refuses one whose brackets do not balance or that reads
+another table, since it runs inside a bracket beside the window and the hunt's
+orgs. ``refuse_rule_condition`` applies both, wherever a rule's condition is saved
+or compiled.
 ``refuse_direct_query`` holds a hunt's hand-written ``query`` to that refusal and
 to one statement that reads, or inserts what it reads.
 
@@ -30,7 +32,7 @@ import sqlglot
 from sqlglot import exp
 from sqlglot.errors import SqlglotError
 from sqlglot.optimizer.simplify import simplify
-from sqlglot.tokens import TokenType
+from sqlglot.tokens import Token, TokenType
 
 from ..clickhouse.function_guard import (
     CallNotPermittedError,
@@ -343,28 +345,38 @@ def refuse_offbox_calls(where: str, *, subject: str = "A rule's detection condit
     return None
 
 
-def refuse_bracket_escape(
+def refuse_condition_escape(
     where: str, *, subject: str = "A rule's detection condition"
 ) -> str | None:
-    """Say why a condition would close the bracket it runs in, or None when its brackets balance.
+    """Say why a condition would read rows past the bracket it runs in, or None when it cannot.
 
     The hunt runner wraps the condition in a bracket ANDed with the window and the
-    hunt's orgs, so a condition that closes it early, ``x = 1) OR (1 = 1``, would OR
-    its way past both. Brackets inside a string or a comment are not counted.
+    hunt's orgs. A condition that closes it early, ``x = 1) OR (1 = 1``, would OR its
+    way past both. One holding a SELECT, ``x IN (SELECT y FROM t)``, or naming a table
+    after IN (:func:`_in_takes_a_table`) answers from rows neither holds, and its user
+    is not pinned to an org. Brackets and keywords inside a string or a comment are
+    not read.
 
     Args:
         where: The rule's detection WHERE, as it will run.
         subject: What the message names the SQL as.
 
     Returns:
-        The refusal message, or None when every bracket closes inside the condition.
+        The refusal message, or None when the condition stays inside its bracket.
     """
     try:
         tokens = tokenize(where, subject=subject)
     except CallNotPermittedError as exc:
         return str(exc)
+    if any(token.token_type is TokenType.SELECT for token in tokens):
+        return f"{subject} may not hold a SELECT, which reads rows outside the hunt's orgs"
     depth = 0
-    for token in tokens:
+    for index, token in enumerate(tokens):
+        if token.token_type is TokenType.IN and _in_takes_a_table(tokens, index):
+            return (
+                f"{subject} may not name a table after IN, which reads its rows: "
+                "use IN with a bracketed list of values"
+            )
         if token.token_type is TokenType.L_PAREN:
             depth += 1
         elif token.token_type is TokenType.R_PAREN:
@@ -374,6 +386,59 @@ def refuse_bracket_escape(
     if depth:
         return f"{subject} leaves {depth} bracket(s) open"
     return None
+
+
+_NAME_TOKENS = frozenset({TokenType.VAR, TokenType.IDENTIFIER, TokenType.DOT})
+_LITERAL_TOKENS = frozenset({TokenType.STRING, TokenType.NUMBER})
+
+
+def _names_something(token: Token) -> bool:
+    """Whether a token can be part of a table name: a word, a quoted name or a dot."""
+    if token.token_type in _NAME_TOKENS:
+        return True
+    return token.token_type not in _LITERAL_TOKENS and token.text.isidentifier()
+
+
+def _in_takes_a_table(tokens: list[Token], index: int) -> bool:
+    """Whether the IN at ``index`` takes a table: ``IN t``, ``IN db.t``, ``IN (t)``, ``IN ((t))``.
+
+    ClickHouse reads a lone name after IN, bracketed or not, as a table unless a
+    column of that name shadows it. Anything but a bracket after IN is refused, and
+    a bracket holding nothing but a name is too.
+    """
+    following = tokens[index + 1 :]
+    opened = 0
+    while opened < len(following) and following[opened].token_type is TokenType.L_PAREN:
+        opened += 1
+    if not opened:
+        return True
+    inside = following[opened:]
+    run = 0
+    while run < len(inside) and _names_something(inside[run]):
+        run += 1
+    return 0 < run < len(inside) and inside[run].token_type is TokenType.R_PAREN
+
+
+def refuse_rule_condition(
+    where: str, *, subject: str = "A rule's detection condition"
+) -> str | None:
+    """Say why a rule's condition may not run, or None when it may.
+
+    :func:`refuse_offbox_calls`, then :func:`refuse_condition_escape`: the API, the
+    governance actions and the hunt runner refuse the same conditions.
+
+    Args:
+        where: The rule's detection WHERE, as it will run.
+        subject: What the message names the SQL as.
+
+    Returns:
+        The first refusal message, or None.
+    """
+    if not where.strip():
+        return None
+    return refuse_offbox_calls(where, subject=subject) or refuse_condition_escape(
+        where, subject=subject
+    )
 
 
 _QUERY_SUBJECT = "A hunt's query"

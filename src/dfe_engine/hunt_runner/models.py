@@ -50,8 +50,10 @@ class HuntSpec(BaseModel):
     # Every statement this hunt runs, each carrying its own INSERT target and a
     # {window} placeholder. One per rule when the hunt was compiled from `rules`.
     queries: list[HuntStatement] = []
-    # The _org_id values a rules hunt reads, or None for a direct query, which is its own SQL.
+    # The org names a rules hunt reads, or None for a direct query, which is its own SQL.
     customers: list[str] | None = None
+    # Its customers the engine stored no tenant ids for, so every fire is refused.
+    unresolved_customers: list[str] = []
     # Optional target metadata. Empty by default - the query carries its own target,
     # resolved against effective_data_database by config; never hardcode 'dfe' here.
     target_table: str = ""

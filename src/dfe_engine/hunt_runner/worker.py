@@ -55,6 +55,10 @@ class NoHuntCustomers(EmptyHuntQuery):
     """A rules hunt naming no customer, so it may read no org and runs nothing."""
 
 
+class UnknownHuntCustomers(EmptyHuntQuery):
+    """A rules hunt holding a customer the engine stored no tenant ids for, so it runs nothing."""
+
+
 def _written_rows(result: Any) -> int:
     """Rows an INSERT wrote, from the driver's summary. 0 when it reports none.
 
@@ -110,6 +114,8 @@ class HuntWorker:
         Raises:
             NoHuntCustomers: a rules hunt names no customer, so it reads no org. The
                 watermark does NOT advance.
+            UnknownHuntCustomers: a rules hunt holds a customer with no stored tenant
+                ids. The watermark does NOT advance, so no customer's window is lost.
             EmptyHuntQuery: the hunt has no statement to run, so its rules named no
                 rule file the compiler could resolve. The watermark does NOT advance.
                 Raised unlogged: the runner logs it with its back-off.
@@ -118,6 +124,12 @@ class HuntWorker:
             raise NoHuntCustomers(
                 f"hunt {spec.hunt_id} names no customers, so it reads no org: the fire "
                 "is refused and the watermark is held until the hunt names one"
+            )
+        if spec.unresolved_customers:
+            raise UnknownHuntCustomers(
+                f"hunt {spec.hunt_id} names customers the engine resolved to no tenant ids "
+                f"({', '.join(spec.unresolved_customers)}): the fire is refused and the "
+                "watermark is held until the hunt is saved again through the API"
             )
         statements = [statement for statement in spec.queries if statement.sql.strip()]
         if not statements:

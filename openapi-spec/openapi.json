@@ -2444,7 +2444,7 @@
           "API Keys"
         ],
         "summary": "Create Api Key",
-        "description": "Create a new API key (admin only). Returns the full key exactly once.",
+        "description": "Create a new API key. Returns the full key exactly once.\n\n422 ``unknown_org`` when ``org`` names no registered org.",
         "operationId": "create_api_key_api_v1_auth_api_keys_post",
         "requestBody": {
           "required": true,
@@ -2509,7 +2509,7 @@
           "API Keys"
         ],
         "summary": "List Api Keys",
-        "description": "List API keys (admin only), paginated. No key hashes or full keys returned.",
+        "description": "List API keys, paginated. No key hashes or full keys returned.",
         "operationId": "list_api_keys_api_v1_auth_api_keys_get",
         "parameters": [
           {
@@ -2637,7 +2637,7 @@
           "API Keys"
         ],
         "summary": "Revoke Api Key",
-        "description": "Revoke (delete) an API key by short token (admin only).",
+        "description": "Revoke (delete) an API key by short token.",
         "operationId": "revoke_api_key_api_v1_auth_api_keys__short_token__delete",
         "parameters": [
           {
@@ -2879,7 +2879,7 @@
           "Roles"
         ],
         "summary": "List Roles",
-        "description": "List roles with pagination (admin only).",
+        "description": "List roles with pagination, for a caller holding role:read.",
         "operationId": "list_roles_api_v1_auth_roles_get",
         "parameters": [
           {
@@ -2999,7 +2999,7 @@
           "Roles"
         ],
         "summary": "Get Role",
-        "description": "Get one role by name (admin only).",
+        "description": "Get one role by name, for a caller holding role:read.",
         "operationId": "get_role_api_v1_auth_roles__name__get",
         "parameters": [
           {
@@ -3141,7 +3141,7 @@
           "Roles"
         ],
         "summary": "Delete Role",
-        "description": "Delete a role (admin only).",
+        "description": "Delete a role no group holds, for a caller holding role:delete.",
         "operationId": "delete_role_api_v1_auth_roles__name__delete",
         "parameters": [
           {
@@ -9649,7 +9649,7 @@
           "hunts"
         ],
         "summary": "Create Hunt",
-        "description": "Create a new hunt configuration YAML.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Create a new hunt configuration YAML.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org.",
         "operationId": "create_hunt_api_v1_hunts_post",
         "requestBody": {
           "required": true,
@@ -9782,7 +9782,7 @@
           "hunts"
         ],
         "summary": "Update Hunt",
-        "description": "Replace an existing hunt configuration.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Replace an existing hunt configuration, resolving its customers afresh.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so. 422\n``unknown_org`` when a customer names no registered org.",
         "operationId": "update_hunt_api_v1_hunts__name__put",
         "parameters": [
           {
@@ -16278,7 +16278,7 @@
           "sigma"
         ],
         "summary": "Propagate",
-        "description": "Generate sigma-bound DFE rules + hunts from the current selection.\n\nFor each SELECTED sigma rule, converts its detection to a ClickHouse WHERE over\nthe matching source's ``{source}_sigma`` view and stores a DFE rule (with a\n``sigma_rule_id`` back-reference), then binds it into a per-source hunt. Drifted\nor hand-edited bindings are reported ``skipped_drifted`` unless ``force``.\nSubmitted to the task manager; blocks up to ``wait`` seconds for inline\ncompletion, else returns ``pending`` - poll via GET /sigma/propagations/{id}.\n\nA production+team run commits each generated rule and hunt to its own review\nbranch rather than the branch the hunt runner syncs; the report carries every\nbranch and PR, and ``X-DFE-Review-Required`` says so on a run that completed\ninline.",
+        "description": "Generate sigma-bound DFE rules + hunts from the current selection.\n\nFor each SELECTED sigma rule, converts its detection to a ClickHouse WHERE over\nthe matching source's ``{source}_sigma`` view and stores a DFE rule (with a\n``sigma_rule_id`` back-reference), then binds it into a per-source hunt. Drifted\nor hand-edited bindings are reported ``skipped_drifted`` unless ``force``.\nSubmitted to the task manager; blocks up to ``wait`` seconds for inline\ncompletion, else returns ``pending`` - poll via GET /sigma/propagations/{id}.\n\nA production+team run commits each generated rule and hunt to its own review\nbranch rather than the branch the hunt runner syncs; the report carries every\nbranch and PR, and ``X-DFE-Review-Required`` says so on a run that completed\ninline. 422 ``unknown_org`` when ``hunt_customers`` names no registered org.",
         "operationId": "propagate_api_v1_sigma_propagate_post",
         "parameters": [
           {
@@ -23415,6 +23415,12 @@
             "type": "array",
             "title": "Groups"
           },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "description": "The org the key's sessions are bound to: a registered org's name, or empty for none. A view held to one org runs only for a key bound to an org its groups grant.",
+            "default": ""
+          },
           "description": {
             "type": "string",
             "title": "Description"
@@ -23480,6 +23486,12 @@
             },
             "type": "array",
             "title": "Groups"
+          },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "description": "The org the key's sessions are bound to: a registered org's name, or empty for none. A view held to one org runs only for a key bound to an org its groups grant.",
+            "default": ""
           },
           "description": {
             "type": "string",
@@ -26244,6 +26256,12 @@
             "title": "Groups",
             "description": "RBAC group memberships"
           },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "description": "The org the key's sessions are bound to: a registered org's name, or empty for none. A view held to one org runs only for a key bound to an org its groups grant.",
+            "default": ""
+          },
           "description": {
             "type": "string",
             "title": "Description",
@@ -28535,19 +28553,7 @@
             "type": "array",
             "minItems": 1,
             "title": "Customers",
-            "description": "The _org_id values the hunt reads: an org's tenant ids, or its name when it declares none. The runner reads no other org's rows, and a hunt naming none runs nothing."
-          },
-          "customer_filters": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Customer Filters"
+            "description": "Names of the registered orgs the hunt reads. The engine resolves each to its tenant ids when it saves the hunt, and the runner reads no other org's rows."
           },
           "checkpoint_timestamp_field": {
             "anyOf": [
@@ -28675,21 +28681,8 @@
               "type": "string"
             },
             "type": "array",
-            "minItems": 1,
             "title": "Customers",
-            "description": "The _org_id values the hunt reads: an org's tenant ids, or its name when it declares none. The runner reads no other org's rows, and a hunt naming none runs nothing."
-          },
-          "customer_filters": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Customer Filters"
+            "description": "Names of the registered orgs the hunt reads"
           },
           "checkpoint_timestamp_field": {
             "anyOf": [
@@ -28747,13 +28740,23 @@
             "type": "array",
             "minItems": 1,
             "title": "Rules"
+          },
+          "customer_tenant_ids": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Customer Tenant Ids",
+            "description": "Each customer's tenant ids, resolved when the hunt was saved: the _org_id values the runner reads. A customer missing here stops every run."
           }
         },
         "type": "object",
         "required": [
           "display_name",
           "cron",
-          "customers",
           "name",
           "rules"
         ],
@@ -29059,19 +29062,7 @@
             "type": "array",
             "minItems": 1,
             "title": "Customers",
-            "description": "The _org_id values the hunt reads: an org's tenant ids, or its name when it declares none. The runner reads no other org's rows, and a hunt naming none runs nothing."
-          },
-          "customer_filters": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Customer Filters"
+            "description": "Names of the registered orgs the hunt reads. The engine resolves each to its tenant ids when it saves the hunt, and the runner reads no other org's rows."
           },
           "checkpoint_timestamp_field": {
             "anyOf": [
@@ -33182,7 +33173,7 @@
             },
             "type": "array",
             "title": "Hunt Customers",
-            "description": "customers for a new hunt (operator adjusts later via PUT /hunts)"
+            "description": "Names of the registered orgs a new hunt reads (adjusted later via PUT /hunts). A new hunt naming none runs nothing until it names one."
           }
         },
         "type": "object",

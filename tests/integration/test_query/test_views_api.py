@@ -166,8 +166,8 @@ def test_a_view_over_url_is_refused_by_the_readers_grants(stack):
 
     assert resp.status_code == 500, resp.text
     assert resp.json()["code"] == "query_error"
-    assert resp.json()["message"] == (
-        f"View '{stack.leak}' failed to execute; the engine log has ClickHouse's reason"
+    assert resp.json()["message"].startswith(
+        f"View '{stack.leak}' failed to execute; the engine log has ClickHouse's reason (reference "
     )
     assert "ACCESS_DENIED" not in resp.text
     # Any failure gets the same answer, so only the logged cause shows the grant refused it.

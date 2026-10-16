@@ -20,6 +20,7 @@ from fastapi.routing import APIRoute, iter_route_contexts
 from scalo.logger import logger
 from starlette.routing import BaseRoute
 
+from dfe_engine.api.errors import backend_failure
 from dfe_engine.api.password_change import refuse_until_password_changed
 from dfe_engine.auth import AuthContext, AuthorizationError, Scope, ScopedGrant, authorize
 from dfe_engine.auth.api_keys import APIKeyStore
@@ -731,6 +732,7 @@ async def get_current_user(request: Request) -> AuthContext:
             roles=roles,
         )
         return AuthContext(
+            org_id=key_meta.org,
             user_id=f"{API_KEY_SUBJECT_PREFIX}{key_meta.name}",
             roles=roles,
             grants=resolution.grants,
@@ -751,12 +753,15 @@ async def get_current_user(request: Request) -> AuthContext:
         try:
             payload = request.app.state.jwt_authority.verify(token)
         except InvalidTokenError as e:
-            audit_login_denied("unknown", "jwt", client_ip, str(e))
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": "unauthorized", "message": f"Invalid token: {e}"},
+            audit_login_denied("unknown", "jwt", client_ip, type(e).__name__)
+            raise backend_failure(
+                status.HTTP_401_UNAUTHORIZED,
+                "unauthorized",
+                "Invalid token",
+                e,
+                event="bearer token refused",
                 headers={"WWW-Authenticate": "Bearer"},
-            )
+            ) from e
 
         jwt_user_id = payload.get("sub", "")
         jwt_email = payload.get("email") or None
@@ -904,6 +909,32 @@ def reads_every_org(request: Request, user: AuthContext, action: str) -> bool:
     return reader is not None and is_action_allowed(request, reader, action)
 
 
+def registered_orgs(request: Request) -> list[Any]:
+    """The org registry's entries, or none when the app carries no registry."""
+    org_registry = getattr(request.app.state, "org_registry", None)
+    return list(org_registry.list()) if org_registry is not None else []
+
+
+def refuse_unknown_orgs(request: Request, names: Iterable[str]) -> None:
+    """Refuse a write naming an org the registry does not hold, where an empty name names none.
+
+    Args:
+        request: The request, for the org registry.
+        names: The org names the write binds or reads.
+
+    Raises:
+        HTTPException: 422 ``unknown_org`` naming every unregistered org.
+    """
+    known = {org.name for org in registered_orgs(request)}
+    unknown = [name for name in dict.fromkeys(names) if name and name not in known]
+    if unknown:
+        listed = ", ".join(f"'{name}'" for name in unknown)
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "unknown_org", "message": f"Not a registered org: {listed}"},
+        )
+
+
 def held_tenant_ids(request: Request, user: AuthContext, action: str) -> list[str] | None:
     """The tenant ids a caller's reads are held to, or None when it may read every org.
 
@@ -923,9 +954,7 @@ def held_tenant_ids(request: Request, user: AuthContext, action: str) -> list[st
     """
     if reads_every_org(request, user, action):
         return None
-    org_registry = getattr(request.app.state, "org_registry", None)
-    orgs = org_registry.list() if org_registry is not None else []
-    return tenant_ids_for(user.org_ids, orgs)
+    return tenant_ids_for(user.org_ids, registered_orgs(request))
 
 
 def granted_bound_org(request: Request, user: AuthContext, action: str) -> str:
@@ -959,9 +988,8 @@ def granted_bound_org(request: Request, user: AuthContext, action: str) -> str:
         )
     if reads_every_org(request, user, action):
         return user.org_id
-    org_registry = getattr(request.app.state, "org_registry", None)
-    orgs = org_registry.list() if org_registry is not None else []
-    if user.org_id not in {org.name for org in resolve_orgs(user.org_ids, orgs)}:
+    granted = resolve_orgs(user.org_ids, registered_orgs(request))
+    if user.org_id not in {org.name for org in granted}:
         raise HTTPException(
             status_code=403,
             detail={

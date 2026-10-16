@@ -37,7 +37,7 @@ from dfe_engine.gitcrud.commit_policy import added_violations
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 from dfe_engine.gitops.repo import PublishResult
 from dfe_engine.hunt_runner.checkpoint import TIMESTAMP_FIELD
-from dfe_engine.hunts.rule_guard import refuse_offbox_calls
+from dfe_engine.hunts.rule_guard import refuse_rule_condition
 from dfe_engine.hunts.validator import HuntValidator
 
 from .models import ActionDef, VarChange, param_ref
@@ -435,7 +435,7 @@ class ActionStore:
             elif cls == RULE_CLASS:
                 HuntValidator.validate_rule_source(doc, "the rule")
                 # The runner compiles the stored WHERE unchecked; refuse it here as the rules API does at save.
-                where_refusal = refuse_offbox_calls(str(doc.get("where_clause") or ""))
+                where_refusal = refuse_rule_condition(str(doc.get("where_clause") or ""))
                 if where_refusal is not None:
                     return where_refusal
         except ValueError as exc:

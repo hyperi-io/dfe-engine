@@ -15,7 +15,7 @@ and malformed hunts are skipped per-file without sinking the rest of the load.
 
 from pathlib import Path
 
-from common.hunt_files import write_hunt, write_rule
+from common.hunt_files import resolved_customers, write_hunt, write_rule
 from scalo.logger import logger
 
 from dfe_engine.hunt_runner.models import HuntStatement
@@ -189,7 +189,8 @@ def test_a_hunt_the_api_writes_loads_with_a_query_to_run(tmp_path: Path):
         global_target_table_name="dfe.detection",
         checkpoint_timestamp_field="_timestamp_load",
     )
-    config = body.to_config_dict(hunt_name="api_hunt")
+    # The API stores the tenant ids it resolved the customers to beside them.
+    config = {**body.to_config_dict(hunt_name="api_hunt"), **resolved_customers("acme")}
     hunts_dir = tmp_path / "hunts"
     _write(hunts_dir, "api_hunt", yaml_dump_string(config))
 

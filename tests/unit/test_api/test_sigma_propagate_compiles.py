@@ -20,6 +20,8 @@ from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.hunt_runner import cli
 from dfe_engine.hunt_runner.spec_loader import load_specs
 
+pytestmark = pytest.mark.usefixtures("customer_orgs")
+
 _ID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
 _BINDING = f"sigma_windows-audit_{_ID.replace('-', '')}"
 _HUNT = "sigma_hunt_windows-audit"
@@ -71,7 +73,9 @@ def _propagate(client, app, headers, tmp_path) -> None:
     assert synced.status_code == 200, synced.text
     selected = client.post(f"/api/v1/sigma/catalogue/{_ID}/select", headers=headers)
     assert selected.status_code == 200, selected.text
-    resp = client.post("/api/v1/sigma/propagate", headers=headers)
+    resp = client.post(
+        "/api/v1/sigma/propagate", json={"hunt_customers": ["acme"]}, headers=headers
+    )
     assert resp.status_code == 200, resp.text
     assert resp.json()["report"]["created"] == [_BINDING]
 

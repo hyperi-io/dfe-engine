@@ -54,6 +54,7 @@ from .rule_guard import (
     match_everything,
     preview_settings,
     preview_sql,
+    refuse_condition_escape,
     refuse_offbox_calls,
     source_label,
     unmeasured_warning,
@@ -250,6 +251,10 @@ _EXPLAIN_PREFIX = "EXPLAIN AST "
 _CH_POSITION_RE = re.compile(r"failed at position (\d+)")
 
 _OFFBOX_FIX = "A rule matches rows of its own source table; take the call out of the SQL."
+_ESCAPE_FIX = (
+    "A rule matches rows of its own source table; compare against a list of values, "
+    "not another table."
+)
 
 
 def _syntax_error(message: str) -> SqlValidationError:
@@ -403,8 +408,11 @@ class RuleCreationService:
         # transpiled CEL filter reaches without passing through the SQL check above.
         if not sql_errors:
             offbox = refuse_offbox_calls(rule.where_clause)
+            escape = None if offbox is not None else refuse_condition_escape(rule.where_clause)
             if offbox is not None:
                 sql_errors = [SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX)]
+            elif escape is not None:
+                sql_errors = [SqlValidationError(message=escape, suggestion=_ESCAPE_FIX)]
 
         # Phase 4: a rule the API will refuse is neither judged nor measured further.
         refused = bool(sql_errors or rule.validate_rule())
@@ -466,6 +474,7 @@ class RuleCreationService:
            refused as the HyperDX sanitiser refuses it
         8. No call that reads outside the row (``url``, ``s3``, a dictionary) or
            sends it to another service (the ``ai*`` functions)
+        9. A condition that reads no other table: no subquery, no ``IN <table>``
         """
         errors: list[SqlValidationError] = []
         trimmed = sql.strip()
@@ -558,6 +567,9 @@ class RuleCreationService:
                 for clause in parsed.ignored_clauses
                 if clause in REFUSED_CLAUSES
             )
+            escape = refuse_condition_escape(parsed.where_clause, subject="A rule's condition")
+            if escape is not None:
+                errors.append(SqlValidationError(message=escape, suggestion=_ESCAPE_FIX))
 
         return errors
 

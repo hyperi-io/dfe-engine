@@ -19,6 +19,7 @@ What the capped SQL does on a server is proven against real ClickHouse in
 from pathlib import Path
 
 import pytest
+from common.hunt_files import resolved_customers
 from scalo.logger import logger
 
 from dfe_engine.hunt_runner.rule_compiler import (
@@ -55,7 +56,7 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     )
     sql = _compiled_sql(
         {
-            "customers": ["acme"],
+            **resolved_customers("acme"),
             "rules": [{"rule_name": "certutil"}],
             "global_source_table_name": "dfe.main",
             "global_target_table_name": "dfe.detection",
@@ -89,7 +90,7 @@ def test_the_rule_runs_in_a_subquery_where_no_label_is_in_scope(tmp_path: Path):
     )
     [statement] = compile_hunt_queries(
         {
-            "customers": ["acme"],
+            **resolved_customers("acme"),
             "rules": ["gd_high"],
             "global_source_table_name": "acme.aws-guardduty",
         },
@@ -115,7 +116,7 @@ def test_the_rule_runs_in_a_subquery_where_no_label_is_in_scope(tmp_path: Path):
 def test_a_rule_ending_in_a_line_comment_keeps_its_closing_bracket(tmp_path: Path):
     _save_rule(tmp_path, rule_id="noted", name="Noted", where_clause="severity >= 7 -- reviewed")
     [statement] = compile_hunt_queries(
-        {"customers": ["acme"], "rules": ["noted"], "global_source_table_name": "acme.main"},
+        {**resolved_customers("acme"), "rules": ["noted"], "global_source_table_name": "acme.main"},
         "h",
         rules_dir=tmp_path,
         default_target="acme.detection",
@@ -133,7 +134,7 @@ def test_each_rule_gets_its_own_statement(tmp_path: Path):
     _save_rule(tmp_path, rule_id="two", name="Two", where_clause="b = 2")
     sql = _compiled_sql(
         {
-            "customers": ["acme"],
+            **resolved_customers("acme"),
             "rules": [{"rule_name": "one"}, {"rule_name": "two"}],
             "global_source_table_name": "dfe.main",
         },
@@ -149,7 +150,7 @@ def test_each_rule_gets_its_own_statement(tmp_path: Path):
 def test_bare_rule_name_strings_are_accepted(tmp_path: Path):
     _save_rule(tmp_path, rule_id="plain", name="Plain", where_clause="a = 1")
     sql = _compiled_sql(
-        {"customers": ["acme"], "rules": ["plain"], "global_source_table_name": "dfe.main"},
+        {**resolved_customers("acme"), "rules": ["plain"], "global_source_table_name": "dfe.main"},
         "hunt",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -167,7 +168,7 @@ def test_the_rules_own_source_table_wins_over_the_hunts(tmp_path: Path):
         source_table="windows_audit",
     )
     sql = _compiled_sql(
-        {"customers": ["acme"], "rules": ["scoped"], "global_source_table_name": "dfe.main"},
+        {**resolved_customers("acme"), "rules": ["scoped"], "global_source_table_name": "dfe.main"},
         "hunt",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -178,7 +179,11 @@ def test_the_rules_own_source_table_wins_over_the_hunts(tmp_path: Path):
 
 def test_the_default_target_applies_only_when_nothing_names_one(tmp_path: Path):
     _save_rule(tmp_path, rule_id="r", name="R", where_clause="a = 1")
-    definition = {"customers": ["acme"], "rules": ["r"], "global_source_table_name": "dfe.main"}
+    definition = {
+        **resolved_customers("acme"),
+        "rules": ["r"],
+        "global_source_table_name": "dfe.main",
+    }
     assert (
         "INSERT INTO `dfe`.`detection`"
         in _compiled_sql(definition, "h", rules_dir=tmp_path, default_target="dfe.detection")[0]
@@ -208,7 +213,7 @@ def test_a_rule_with_only_sql_is_put_through_the_rewriter(tmp_path: Path):
         ),
     )
     sql = _compiled_sql(
-        {"customers": ["acme"], "rules": ["raw"]},
+        {**resolved_customers("acme"), "rules": ["raw"]},
         "h",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -237,7 +242,7 @@ def test_a_stored_time_placeholder_leaves_only_the_window(tmp_path: Path, stored
     """The worker fills in only the window; ClickHouse refuses any other placeholder."""
     _save_rule(tmp_path, rule_id="ph", name="Placeholder", where_clause=stored)
     sql = _compiled_sql(
-        {"customers": ["acme"], "rules": ["ph"], "global_source_table_name": "dfe.main"},
+        {**resolved_customers("acme"), "rules": ["ph"], "global_source_table_name": "dfe.main"},
         "h",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -247,14 +252,17 @@ def test_a_stored_time_placeholder_leaves_only_the_window(tmp_path: Path, stored
 
 
 def test_a_hunt_with_no_rules_compiles_to_nothing(tmp_path: Path):
-    assert compile_hunt_queries({"customers": ["acme"], "rules": []}, "h", rules_dir=tmp_path) == []
+    assert (
+        compile_hunt_queries({**resolved_customers("acme"), "rules": []}, "h", rules_dir=tmp_path)
+        == []
+    )
 
 
 def test_a_missing_rule_file_is_dropped_not_guessed(tmp_path: Path):
     _save_rule(tmp_path, rule_id="present", name="Present", where_clause="a = 1")
     sql = _compiled_sql(
         {
-            "customers": ["acme"],
+            **resolved_customers("acme"),
             "rules": ["absent", "present"],
             "global_source_table_name": "dfe.main",
         },
@@ -276,7 +284,11 @@ def test_a_rule_name_that_leaves_the_rules_dir_compiles_nothing(tmp_path: Path, 
     name = str(tmp_path / "outside") if escape == "ABSOLUTE" else escape
 
     statements = compile_hunt_queries(
-        {"customers": ["acme"], "rules": [name, "present"], "global_source_table_name": "dfe.main"},
+        {
+            **resolved_customers("acme"),
+            "rules": [name, "present"],
+            "global_source_table_name": "dfe.main",
+        },
         "h",
         rules_dir=rules_dir,
         default_target="dfe.detection",
@@ -290,7 +302,11 @@ def test_a_rule_with_no_detection_logic_is_dropped(tmp_path: Path):
     _save_rule(tmp_path, rule_id="empty", name="Empty", where_clause="")
     assert (
         compile_hunt_queries(
-            {"customers": ["acme"], "rules": ["empty"], "global_source_table_name": "dfe.main"},
+            {
+                **resolved_customers("acme"),
+                "rules": ["empty"],
+                "global_source_table_name": "dfe.main",
+            },
             "h",
             rules_dir=tmp_path,
             default_target="dfe.detection",
@@ -321,7 +337,7 @@ def test_a_hand_edited_rule_that_reads_outside_the_row_compiles_nothing(tmp_path
 
     statements = compile_hunt_queries(
         {
-            "customers": ["acme"],
+            **resolved_customers("acme"),
             "rules": ["offbox", "present"],
             "global_source_table_name": "dfe.main",
         },
@@ -335,12 +351,13 @@ def test_a_hand_edited_rule_that_reads_outside_the_row_compiles_nothing(tmp_path
     assert not any(where in statement.count_sql for statement in statements)
 
 
-def test_a_lookup_rule_using_the_in_operator_compiles(tmp_path: Path):
-    lookup = "_source IN (SELECT ioc FROM threat.iocs)"
+def test_a_rule_using_the_in_operator_over_values_compiles(tmp_path: Path):
+    """A lookup through ``IN (SELECT ...)`` is dropped (test_hunt_customers.py), a value list is not."""
+    lookup = "_source IN ('certutil', 'bitsadmin')"
     _save_rule(tmp_path, rule_id="lookup", name="Lookup", where_clause=lookup)
 
     statements = compile_hunt_queries(
-        {"customers": ["acme"], "rules": ["lookup"], "global_source_table_name": "dfe.main"},
+        {**resolved_customers("acme"), "rules": ["lookup"], "global_source_table_name": "dfe.main"},
         "h",
         rules_dir=tmp_path,
         default_target="dfe.detection",
@@ -356,7 +373,11 @@ def test_the_dropped_rule_is_logged_with_the_call_it_made(tmp_path: Path):
     handler_id = logger.add(captured.append, level="ERROR")
     try:
         statements = compile_hunt_queries(
-            {"customers": ["acme"], "rules": ["offbox"], "global_source_table_name": "dfe.main"},
+            {
+                **resolved_customers("acme"),
+                "rules": ["offbox"],
+                "global_source_table_name": "dfe.main",
+            },
             "h",
             rules_dir=tmp_path,
             default_target="dfe.detection",
@@ -373,7 +394,7 @@ def test_a_rule_with_no_source_is_dropped(tmp_path: Path):
     _save_rule(tmp_path, rule_id="nosource", name="No source", where_clause="a = 1")
     assert (
         compile_hunt_queries(
-            {"customers": ["acme"], "rules": ["nosource"]},
+            {**resolved_customers("acme"), "rules": ["nosource"]},
             "h",
             rules_dir=tmp_path,
             default_target="dfe.detection",
@@ -386,7 +407,7 @@ def test_an_unqualified_target_lands_beside_its_source(tmp_path: Path):
     _save_rule(tmp_path, rule_id="r", name="R", where_clause="a = 1")
     sql = _compiled_sql(
         {
-            "customers": ["acme"],
+            **resolved_customers("acme"),
             "rules": ["r"],
             "global_source_table_name": "tenant_a.main",
             "global_target_table_name": "detection",
@@ -406,7 +427,7 @@ def _flood_hunt(tmp_path: Path, **kwargs):
         where_clause="_json.kind = 'flood'",
     )
     return compile_hunt_queries(
-        {"customers": ["acme"], "rules": ["flood"], "global_source_table_name": "acme.main"},
+        {**resolved_customers("acme"), "rules": ["flood"], "global_source_table_name": "acme.main"},
         "noisy",
         rules_dir=tmp_path,
         default_target="acme.detection",

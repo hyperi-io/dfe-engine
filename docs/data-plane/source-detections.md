@@ -57,6 +57,8 @@ flowchart TD
     M --> A[(db.alerts)]
 ```
 
+A hunt's `customers` are org names. The engine resolves each to the org's tenant ids when it saves the hunt and stores them as `customer_tenant_ids`, and the runner reads only rows whose `_org_id` is one of them. A hunt with a customer the engine did not resolve fails every fire as `unknown_customers` until it is saved again. A rule condition may read only its own row, so a subquery or `IN <table>` is refused. A hunt carrying a direct `query` instead of `rules` is trusted SQL from the operator-controlled deploy repo, and no customer holds it.
+
 The alerts table is itself a source (`_source = "alerts"`, `header.type:
 timeseries`), so it gets the same schema management, retention and query
 surface as any other -- including rules written against alerts, which is how

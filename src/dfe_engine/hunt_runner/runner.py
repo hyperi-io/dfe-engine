@@ -49,7 +49,7 @@ from .ch_coordinator import ChCoordinator
 from .metrics import HuntRunnerMetrics
 from .models import HuntSpec
 from .spread import latest_fire
-from .worker import EmptyHuntQuery, HuntWorker, NoHuntCustomers
+from .worker import EmptyHuntQuery, HuntWorker, NoHuntCustomers, UnknownHuntCustomers
 
 FAILURE_BACKOFF_INITIAL_SECONDS = 30.0
 """The wait after a hunt's first failed fire, two polls at the default cadence."""
@@ -66,11 +66,16 @@ EMPTY_QUERY_REASON = "empty_query"
 NO_CUSTOMERS_REASON = "no_customers"
 """The failure reason for a rules hunt naming no customer, so reading no org."""
 
+UNKNOWN_CUSTOMERS_REASON = "unknown_customers"
+"""The failure reason for a rules hunt holding a customer with no stored tenant ids."""
+
 
 def failure_reason(exc: BaseException) -> str:
-    """A bounded label for why a fire failed: a ClickHouse category, no_customers, empty_query."""
+    """A bounded label for why a fire failed: a ClickHouse category or a hunt's own refusal."""
     if isinstance(exc, NoHuntCustomers):
         return NO_CUSTOMERS_REASON
+    if isinstance(exc, UnknownHuntCustomers):
+        return UNKNOWN_CUSTOMERS_REASON
     if isinstance(exc, EmptyHuntQuery):
         return EMPTY_QUERY_REASON
     return classify(exc).value

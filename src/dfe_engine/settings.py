@@ -103,7 +103,6 @@ Auth (local):
 - DFE_AUTH_LOCAL_ADMIN_PASSWORD -> auth.local.admin_password
 - DFE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
 - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
-- DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
 - DFE_AUTH_BREAKGLASS_PASSWORD -> auth.local.breakglass_password
 - DFE_RECOVERY_EMAIL -> auth.local.recovery_email
 - DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH -> auth.local.admin_password_secret_path
@@ -1381,7 +1380,6 @@ class LocalAuthSettings(BaseModel):
     """
 
     enabled: bool = Field(default=False, description="Seed built-in local accounts")
-    org_id: str = Field(default="default", description="Org id for the seeded accounts")
     admin_name: str = Field(default="", description="Bootstrap admin username")
     admin_password: str = Field(default="", description="Bootstrap admin password")
     operator_password: str = Field(default="", description="Bootstrap operator password")
@@ -2677,8 +2675,6 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("local", {})["operator_password"] = val
     if val := _get_env("DFE_AUTH_LOCAL_VIEWER_PASSWORD"):
         overrides["auth"].setdefault("local", {})["viewer_password"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
-        overrides["auth"].setdefault("local", {})["org_id"] = val
     if val := _get_env("DFE_AUTH_BREAKGLASS_PASSWORD"):
         overrides["auth"].setdefault("local", {})["breakglass_password"] = val
     if val := _get_env("DFE_RECOVERY_EMAIL"):

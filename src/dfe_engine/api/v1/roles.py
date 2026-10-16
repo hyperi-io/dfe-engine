@@ -246,7 +246,7 @@ async def list_roles(
         description="Case-insensitive match on role name or description",
     ),
 ) -> PaginatedResponse[RoleResponse]:
-    """List roles with pagination (admin only)."""
+    """List roles with pagination, for a caller holding role:read."""
     store: RoleStore = request.app.state.role_store
     roles = store.list()
     if resource_type is not None:
@@ -268,7 +268,7 @@ async def get_role(
     user: CurrentUser,
     request: Request,
 ) -> RoleResponse:
-    """Get one role by name (admin only)."""
+    """Get one role by name, for a caller holding role:read."""
     store: RoleStore = request.app.state.role_store
     role = store.get(name)
     if role is None:
@@ -331,7 +331,7 @@ async def delete_role(
     user: CurrentUser,
     request: Request,
 ) -> None:
-    """Delete a role (admin only)."""
+    """Delete a role no group holds, for a caller holding role:delete."""
     if _role_in_use(request, name):
         raise HTTPException(
             status_code=409,

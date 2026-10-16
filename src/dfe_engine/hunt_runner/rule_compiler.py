@@ -42,11 +42,12 @@ without a database is read from the data database the caller passes. A hunt
 left with NOTHING to run is a hard failure in the worker rather than a silent
 clean run.
 
-Every statement reads only the rows whose ``_org_id`` is one of the hunt's
-``customers``, as its own conjunct beside the window and the rule, so a hunt for
-one tenant never writes another's matches. A hunt naming no customer reads no org
-and compiles to nothing. A rule whose brackets do not balance is dropped, since
-closing the bracket it runs in would OR its way past that conjunct.
+Every statement reads only the rows whose ``_org_id`` is one of the tenant ids
+the hunt's ``customers`` resolved to (:mod:`~dfe_engine.hunts.customers`), as its
+own conjunct beside the window and the rule, so a hunt for one tenant never writes
+another's matches. A hunt naming no customer, or one the engine did not resolve,
+compiles to nothing. A rule whose brackets do not balance, or that reads another
+table, is dropped, since either would reach rows past that conjunct.
 """
 
 from pathlib import Path
@@ -60,8 +61,9 @@ from dfe_engine.clickhouse.quoting import (
     quote_identifier,
     quote_literal,
 )
+from dfe_engine.hunts.customers import hunt_tenant_ids
 from dfe_engine.hunts.hunt_output import HuntResultSchema, matching_rows
-from dfe_engine.hunts.rule_guard import refuse_bracket_escape, refuse_offbox_calls
+from dfe_engine.hunts.rule_guard import refuse_rule_condition
 from dfe_engine.hunts.rule_names import RuleNameError, rule_file
 from dfe_engine.hunts.rule_rewriter import RuleRewriter, strip_time_placeholder
 from dfe_engine.hunts.validator import rule_source
@@ -121,29 +123,12 @@ def detection_cap(configured: int, ceiling: int) -> int:
     return configured
 
 
-def hunt_customers(definition: dict[str, Any]) -> list[str]:
-    """The ``_org_id`` values a hunt may read: its ``customers``, each once.
-
-    Args:
-        definition: The parsed hunt YAML.
-
-    Returns:
-        The non-blank customer strings, stripped, in their given order. Empty when
-        the hunt names none, or ``customers`` is not a list.
-    """
-    customers = definition.get("customers")
-    if not isinstance(customers, list):
-        return []
-    named = [c.strip() for c in customers if isinstance(c, str) and c.strip()]
-    return list(dict.fromkeys(named))
-
-
-def _tenant_condition(customers: list[str]) -> str:
-    """The conjunct holding a read to *customers*, as quoted literals.
+def _tenant_condition(tenant_ids: list[str]) -> str:
+    """The conjunct holding a read to *tenant_ids*, as quoted literals.
 
     Literals, not a bind slot: binding would parse the rule's own text for placeholders.
     """
-    return f"{ORG_ID_COLUMN} IN ({', '.join(quote_literal(c) for c in customers)})"
+    return f"{ORG_ID_COLUMN} IN ({', '.join(quote_literal(t) for t in tenant_ids)})"
 
 
 def _rule_entries(definition: dict[str, Any]) -> list[dict[str, Any]]:
@@ -233,7 +218,7 @@ def compile_hunt_queries(
 
     Returns:
         The statements, in the hunt's own rule order. Empty when nothing compiled,
-        the hunt naming no customer among the reasons.
+        among the reasons a hunt naming no customer or one with no stored tenant ids.
 
     Raises:
         ValueError: ``max_detections`` is below 1, which would write nothing at all.
@@ -243,13 +228,20 @@ def compile_hunt_queries(
     entries = _rule_entries(definition)
     if not entries:
         return []
-    customers = hunt_customers(definition)
-    if not customers:
+    tenant_ids, unresolved = hunt_tenant_ids(definition)
+    if unresolved:
+        logger.error(
+            "hunt names customers the engine did not resolve to tenant ids, so it runs nothing",
+            hunt_id=hunt_id,
+            customers=unresolved,
+        )
+        return []
+    if not tenant_ids:
         logger.error(
             "hunt names no customers, so it reads no org and runs nothing", hunt_id=hunt_id
         )
         return []
-    tenant_condition = _tenant_condition(customers)
+    tenant_condition = _tenant_condition(tenant_ids)
     directory = Path(rules_dir)
     schema = HuntResultSchema()
     rewriter = RuleRewriter()
@@ -280,7 +272,7 @@ def compile_hunt_queries(
 
         # A rule YAML can also be committed straight into the deploy repo, so the
         # API's refusal is not the only gate the condition passes.
-        refusal = refuse_offbox_calls(where) or refuse_bracket_escape(where)
+        refusal = refuse_rule_condition(where)
         if refusal is not None:
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' refused: {refusal}")
             continue

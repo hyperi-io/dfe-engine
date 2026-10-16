@@ -22,6 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from common.hunt_files import resolved_customers
 from dulwich.repo import Repo
 
 from dfe_engine.gitcrud import GitCrud
@@ -37,7 +38,7 @@ from dfe_engine.hunts.rule_registry import RuleNotFoundError, RuleRegistry
 HUNT_CONFIG = {
     "display_name": "Certutil Abuse",
     "schedule": {"mode": "rate", "interval": "5m"},
-    "customers": ["acme"],
+    **resolved_customers("acme"),
     "rules": [{"rule_name": "certutil"}],
     "global_source_table_name": "dfe.main",
     "global_target_table_name": "dfe.detection",
