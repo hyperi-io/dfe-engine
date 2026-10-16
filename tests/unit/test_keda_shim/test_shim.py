@@ -18,9 +18,53 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
+from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 
 from dfe_engine.keda_shim.shim import QueryShim, _ch_client
 from dfe_engine.settings import DFESettings
+
+# Each message is the text clickhouse-connect raises for that failure against a live server.
+_QUERY_ERRORS = [
+    pytest.param(
+        DatabaseError(
+            "Received ClickHouse exception, code: 159, server response: Code: 159. "
+            "DB::Exception: Timeout exceeded: elapsed 5000.5 ms, maximum: 5000 ms. "
+            "(TIMEOUT_EXCEEDED)"
+        ),
+        id="query-timeout",
+    ),
+    pytest.param(
+        DatabaseError(
+            "Received ClickHouse exception, code: 81, server response: Code: 81. "
+            "DB::Exception: Database otel does not exist. (UNKNOWN_DATABASE)"
+        ),
+        id="unknown-database",
+    ),
+    pytest.param(
+        DatabaseError(
+            "Received ClickHouse exception, code: 241, server response: Code: 241. "
+            "DB::Exception: Query memory limit exceeded. (MEMORY_LIMIT_EXCEEDED)"
+        ),
+        id="memory-limit",
+    ),
+    pytest.param(ValueError("cannot convert float NaN to integer"), id="unreadable-answer"),
+]
+_LOST_CONNECTION = OperationalError(
+    "Error HTTPConnectionPool(host='clickhouse', port=8123): Max retries exceeded with url: /"
+)
+_CONNECTION_ERRORS = [
+    pytest.param(_LOST_CONNECTION, id="driver-transport"),
+    pytest.param(ConnectionResetError("Connection reset by peer"), id="socket-reset"),
+    pytest.param(TimeoutError("timed out"), id="socket-timeout"),
+]
+_SERVICES = [
+    "dfe-receiver",
+    "dfe-loader",
+    "dfe-archiver",
+    "dfe-transform-vrl",
+    "dfe-transform-vector",
+    "dfe-transform-elastic",
+]
 
 
 class _FakeResult:
@@ -254,9 +298,9 @@ def test_cold_hold_is_the_querys_own_value_not_zero(tmp_path):
     assert shim._cache == {}
 
 
-def test_every_client_a_failed_query_discards_is_closed():
+def test_every_client_a_lost_connection_discards_is_closed():
     """A TLS client dropped unclosed keeps its pool and socket for the life of the process."""
-    factory = _CountingFactory(error=RuntimeError("CH down"))
+    factory = _CountingFactory(error=_LOST_CONNECTION)
     shim = QueryShim(DFESettings(env="test"), client_factory=factory)
 
     for _ in range(50):
@@ -264,6 +308,66 @@ def test_every_client_a_failed_query_discards_is_closed():
 
     assert len(factory.built) == 50
     assert factory.open == []
+
+
+def test_one_client_serves_every_poll():
+    """Each build costs three server round trips, so a poll must not pay for one."""
+    factory = _CountingFactory()
+    shim = QueryShim(DFESettings(env="test"), client_factory=factory)
+
+    for _ in range(10):
+        for service in _SERVICES:
+            assert shim.run("pressure", {"service": service}) == 42
+        assert shim.run("backlog") == 42
+
+    assert len(factory.built) == 1
+    assert len(factory.built[0].calls) == 10 * (len(_SERVICES) + 1)
+
+
+@pytest.mark.parametrize("error", _QUERY_ERRORS)
+def test_a_query_error_keeps_the_client_and_holds_the_value(error):
+    """ClickHouse answered, so the link is sound and a rebuild would fix nothing."""
+    factory = _CountingFactory()
+    shim = QueryShim(DFESettings(env="test"), client_factory=factory)
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+    factory.built[0].error = error
+
+    for _ in range(20):
+        assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+
+    assert len(factory.built) == 1
+    assert factory.open == factory.built
+
+
+def test_an_unreadable_row_keeps_the_client_and_holds_the_value():
+    factory = _CountingFactory()
+    shim = QueryShim(DFESettings(env="test"), client_factory=factory)
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+    factory.built[0].rows = [[None]]
+
+    for _ in range(20):
+        assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+
+    assert len(factory.built) == 1
+    assert factory.open == factory.built
+
+
+@pytest.mark.parametrize("error", _CONNECTION_ERRORS)
+def test_a_lost_connection_rebuilds_the_client_once(error):
+    factory = _CountingFactory()
+    shim = QueryShim(DFESettings(env="test"), client_factory=factory)
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+    lost = factory.built[0]
+    lost.error = error
+
+    # The poll that meets the failure holds the last-good value, the next 20 share one new client.
+    for _ in range(21):
+        assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+
+    assert len(factory.built) == 2
+    assert lost.closed
+    assert factory.open == [factory.built[1]]
+    assert len(factory.built[1].calls) == 20
 
 
 def test_polls_racing_to_build_the_first_client_leave_one_open():

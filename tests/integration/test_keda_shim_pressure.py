@@ -23,7 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from dfe_engine.appmgmt.operations import SCALING_PRESSURE, OperationalReader
-from dfe_engine.keda_shim.shim import QueryShim
+from dfe_engine.keda_shim.shim import QueryShim, _ch_client
 from dfe_engine.schema.plan import render_one
 from dfe_engine.settings import DFESettings
 
@@ -45,6 +45,17 @@ def _shim(ch_client, db: str) -> QueryShim:
     settings = DFESettings(env="test")
     settings.clickhouse.data_database = db
     return QueryShim(settings, client_factory=lambda: ch_client)
+
+
+def _pod_settings(ch_params, db: str, **keda_shim) -> DFESettings:
+    """Settings that point the shim's own client at the test ClickHouse, as the pod's do."""
+    settings = DFESettings(env="test", keda_shim=keda_shim)
+    ch = settings.clickhouse
+    ch.host, ch.port = ch_params["host"], ch_params["port"]
+    ch.username, ch.password = ch_params["username"], ch_params["password"]
+    ch.secure = ch_params["secure"]
+    ch.data_database = db
+    return settings
 
 
 def _write(
@@ -172,13 +183,7 @@ def test_a_poll_answers_while_another_poll_is_still_in_flight(
         "    sql: SELECT toUInt32(7 + sleep(2)) AS overlap_marker\n",
         encoding="utf-8",
     )
-    settings = DFESettings(env="test", keda_shim={"query_config": str(catalogue)})
-    ch = settings.clickhouse
-    ch.host, ch.port = ch_params["host"], ch_params["port"]
-    ch.username, ch.password = ch_params["username"], ch_params["password"]
-    ch.secure = ch_params["secure"]
-    ch.data_database = gauge_db
-    shim = QueryShim(settings)
+    shim = QueryShim(_pod_settings(ch_params, gauge_db, query_config=str(catalogue)))
     _write(ch_client, gauge_db, 80, resource=_pod("dfe-receiver-a"))
 
     with ThreadPoolExecutor(max_workers=1) as pool:
@@ -186,3 +191,24 @@ def test_a_poll_answers_while_another_poll_is_still_in_flight(
         _wait_running(ch_client, "overlap_marker")
         assert shim.run("pressure", {"service": _SERVICE}) == 80
         assert slow.result(timeout=30) == 7
+
+
+def test_a_clickhouse_error_keeps_the_pods_client(ch_params, ch_client, gauge_db):
+    """A missing table is ClickHouse answering, so the pod holds the value on the client it has."""
+    settings = _pod_settings(ch_params, gauge_db)
+    built = []
+
+    def build():
+        built.append(_ch_client(settings))
+        return built[-1]
+
+    shim = QueryShim(settings, client_factory=build)
+    _write(ch_client, gauge_db, 80, resource=_pod("dfe-receiver-a"))
+    assert shim.run("pressure", {"service": _SERVICE}) == 80
+
+    ch_client.command(f"DROP TABLE `{gauge_db}`.otel_metrics_gauge SYNC")
+    for _ in range(5):
+        assert shim.run("pressure", {"service": _SERVICE}) == 80
+
+    assert len(built) == 1
+    built[0].close()
