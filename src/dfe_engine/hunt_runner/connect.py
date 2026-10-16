@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         hunt_runner/connect.py
-#  Purpose:      Wait out a ClickHouse that is down, or does not know the runner's user yet
+#  Purpose:      Wait out a ClickHouse that is down, full, or does not know the runner's user yet
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -11,7 +11,9 @@ The engine mints ``dfe_hunt_runner`` in its CH RBAC reconcile, and retries that
 reconcile in the background when ClickHouse was down at its own boot. Until the
 user exists the runner's login is refused, which is the same wait as a refused
 connection: the runner backs off and tries again rather than crash-looping its
-pod. Anything else -- a bad config, a missing table -- still surfaces.
+pod. A server out of memory or query slots is a wait too, because the statements
+these guards cover are the runner's own small ones, never a hunt's query. Anything
+else -- a bad config, a missing table -- still surfaces.
 """
 
 import math
@@ -21,22 +23,28 @@ from scalo.logger import logger
 from scalo.resilience import ReconnectingResilience, ResilienceConfig
 
 from dfe_engine.backoff import jittered_sleep
-from dfe_engine.clickhouse.errors import is_connection_error, is_identity_error
+from dfe_engine.clickhouse.errors import is_connection_error, is_identity_error, parse_code
 from dfe_engine.settings import ClickHouseResilienceSettings
 
 from .metrics import HuntRunnerMetrics
+
+# MEMORY_LIMIT_EXCEEDED, TOO_MANY_SIMULTANEOUS_QUERIES, CANNOT_SCHEDULE_TASK.
+_CAPACITY_CODES = frozenset({241, 202, 439})
 
 
 def unavailable_reason(exc: BaseException) -> str | None:
     """Why ClickHouse could not be used, when waiting can fix it; None otherwise.
 
     Returns:
-        ``connection`` for an outage, ``authentication`` for a refused user.
+        ``connection`` for an outage, ``authentication`` for a refused user,
+        ``capacity`` for a server out of memory or query slots.
     """
     if is_connection_error(exc):
         return "connection"
     if is_identity_error(exc):
         return "authentication"
+    if parse_code(exc) in _CAPACITY_CODES:
+        return "capacity"
     return None
 
 

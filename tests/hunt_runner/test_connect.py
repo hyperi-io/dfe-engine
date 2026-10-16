@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/hunt_runner/test_connect.py
-#  Purpose:      The runner waits out a refused login or an outage instead of exiting
+#  Purpose:      The runner waits out a refused login, an outage or a full server instead of exiting
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -24,6 +24,10 @@ _AUTH_FAILED = (
     "Code: 516. DB::Exception: dfe_hunt_runner: Authentication failed. (AUTHENTICATION_FAILED)"
 )
 _UNKNOWN_TABLE = "Code: 60. DB::Exception: Unknown table expression identifier. (UNKNOWN_TABLE)"
+_OUT_OF_MEMORY = (
+    "Code: 241. DB::Exception: (total) memory limit exceeded: would use 5.27 GiB, "
+    "current RSS: 6.52 GiB, maximum: 6.40 GiB. (MEMORY_LIMIT_EXCEEDED)"
+)
 
 _FAST = ClickHouseResilienceSettings(wait_initial=0.01, wait_max=0.04, wait_multiplier=2.0)
 
@@ -65,13 +69,48 @@ class _Attempts:
             "authentication",
         ),
         (ConnectionRefusedError("[Errno 111] Connection refused"), "connection"),
+        (Exception(_OUT_OF_MEMORY), "capacity"),
+        (
+            Exception(
+                "Code: 202. DB::Exception: Too many simultaneous queries. "
+                "(TOO_MANY_SIMULTANEOUS_QUERIES)"
+            ),
+            "capacity",
+        ),
         (Exception(_UNKNOWN_TABLE), None),
         (ValueError("bad config"), None),
     ],
-    ids=["auth-failed", "unknown-user", "outage", "unknown-table", "bad-config"],
+    ids=[
+        "auth-failed",
+        "unknown-user",
+        "outage",
+        "out-of-memory",
+        "no-query-slot",
+        "unknown-table",
+        "bad-config",
+    ],
 )
-def test_only_an_outage_or_a_refused_user_is_worth_waiting_out(error, reason):
+def test_only_a_wait_that_can_end_is_waited_out(error, reason):
     assert unavailable_reason(error) == reason
+
+
+def test_a_server_out_of_memory_at_connect_is_waited_out_not_fatal():
+    """A runner whose session init hits the server's total memory limit must not exit."""
+    manager = _manager()
+    attempts = _Attempts([Exception(_OUT_OF_MEMORY)] * 2)
+    waits: list[float] = []
+
+    result = connect_when_available(
+        attempts,
+        resilience=_FAST,
+        metrics=HuntRunnerMetrics(manager),
+        user="dfe_hunt_runner",
+        sleep=waits.append,
+    )
+
+    assert result == "connected"
+    assert waits == [0.01, 0.02]
+    assert _unavailable(manager) == {("connect", "capacity"): 2.0}
 
 
 def test_a_refused_login_is_retried_with_back_off_until_the_user_exists():
