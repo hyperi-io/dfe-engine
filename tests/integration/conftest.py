@@ -50,8 +50,12 @@ import secrets
 import subprocess
 import time
 import warnings
+from typing import NoReturn
 
 import pytest
+
+from tests.support.clickhouse_cleanup import drop_database_and_policies
+from tests.support.producer_contract import in_ci
 
 # Current ClickHouse LTS line, and the version dfe-infra actually deploys
 # (versions.yaml). LTS ships twice a year with a year of support, so 25.8 is the
@@ -78,6 +82,17 @@ _FERRETDB_USER = "dfe"
 
 def _truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _unavailable(reason: str) -> NoReturn:
+    """Skip a test whose backing service could not be had, or fail it in CI.
+
+    A CI run that cannot reach ClickHouse and reports its tests skipped reads as green
+    and tested nothing, so there it fails, as the testing standard requires.
+    """
+    if in_ci():
+        pytest.fail(reason, pytrace=False)
+    pytest.skip(reason)
 
 
 def _cluster_params() -> dict | None:
@@ -261,7 +276,7 @@ def _start_or_join_shared(
             return
         except subprocess.SubprocessError, FileNotFoundError:
             time.sleep(0.5)  # lost the create race; loop and join the winner
-    pytest.skip(f"docker host '{spec}' cannot start or join the shared ClickHouse '{name}'")
+    _unavailable(f"docker host '{spec}' cannot start or join the shared ClickHouse '{name}'")
 
 
 def _spin_ch_on_docker(spec: str, *, keep: bool, test: str):
@@ -302,7 +317,7 @@ def _spin_ch_on_docker(spec: str, *, keep: bool, test: str):
         try:
             _run(run_cmd, timeout=240)  # first image pull can be slow
         except (subprocess.SubprocessError, FileNotFoundError) as exc:
-            pytest.skip(f"docker host '{spec}' cannot start ClickHouse: {exc}")
+            _unavailable(f"docker host '{spec}' cannot start ClickHouse: {exc}")
 
     def teardown() -> None:
         if keep:
@@ -318,7 +333,7 @@ def _spin_ch_on_docker(spec: str, *, keep: bool, test: str):
         port = int(out.splitlines()[-1].rsplit(":", 1)[-1])
     except (subprocess.SubprocessError, ValueError, IndexError) as exc:
         teardown()
-        pytest.skip(f"could not resolve the ClickHouse port on '{spec}': {exc}")
+        _unavailable(f"could not resolve the ClickHouse port on '{spec}': {exc}")
 
     params = {
         "host": _reach_address(spec),
@@ -369,12 +384,14 @@ def ch_params(request):
     if tier == "cluster":
         params = _cluster_params()
         if params is None:
-            pytest.skip("DFE_TEST_TIER=cluster but no CH cluster configured (.env / DFE_TEST_CH_*)")
+            _unavailable(
+                "DFE_TEST_TIER=cluster but no CH cluster configured (.env / DFE_TEST_CH_*)"
+            )
     else:
         if tier == "remote":
             spec = os.environ.get("DFE_TEST_DOCKER_HOST")
             if not spec:
-                pytest.skip("DFE_TEST_TIER=remote but DFE_TEST_DOCKER_HOST (user@host) is not set")
+                _unavailable("DFE_TEST_TIER=remote but DFE_TEST_DOCKER_HOST (user@host) is not set")
         else:
             spec = "local"
         params, teardown = _spin_ch_on_docker(
@@ -383,10 +400,10 @@ def ch_params(request):
 
     try:
         _connect_when_ready(clickhouse_connect, params).close()  # verify reachable
-    except Exception as exc:  # not reachable -> skip, do not error the suite
+    except Exception as exc:  # not reachable -> skip locally, fail in CI
         if teardown is not None:
             teardown()
-        pytest.skip(f"ClickHouse not reachable: {exc}")
+        _unavailable(f"ClickHouse not reachable: {exc}")
     try:
         yield params
     finally:
@@ -447,7 +464,7 @@ def late_clickhouse(request):
         try:
             _run(run_cmd, timeout=240)  # first image pull can be slow
         except (subprocess.SubprocessError, FileNotFoundError) as exc:
-            pytest.skip(f"local docker cannot start ClickHouse: {exc}")
+            _unavailable(f"local docker cannot start ClickHouse: {exc}")
         _connect_when_ready(clickhouse_connect, params).close()
         return params
 
@@ -534,7 +551,7 @@ def clickhouse_test_database(ch_client):
         yield db
     finally:
         try:
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`")
+            drop_database_and_policies(ch_client, db)
         except Exception:
             pass
 
@@ -635,7 +652,7 @@ def mongo_uri():
     try:
         _run(run_cmd, timeout=240)  # first image pull can be slow
     except (subprocess.SubprocessError, FileNotFoundError) as exc:
-        pytest.skip(f"docker host '{spec}' cannot start FerretDB: {exc}")
+        _unavailable(f"docker host '{spec}' cannot start FerretDB: {exc}")
 
     def teardown() -> None:
         try:
@@ -651,7 +668,7 @@ def mongo_uri():
     except Exception as exc:
         tail = _log_tail(docker, name).replace(password, "***")
         teardown()
-        pytest.skip(f"FerretDB on '{spec}' did not come up: {exc}; container log: {tail}")
+        _unavailable(f"FerretDB on '{spec}' did not come up: {exc}; container log: {tail}")
     try:
         yield uri
     finally:
