@@ -47,6 +47,7 @@ shape. Collapse onto KafkaAdmin once scalo grows that surface.
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from confluent_kafka import KafkaError, KafkaException
 from confluent_kafka.admin import (
     AdminClient,
     AlterConfigOpType,
@@ -76,6 +77,18 @@ def _unreachable(exc: Exception) -> str:
     """The reason recorded for a broker that could not be reached, its own text logged."""
     logger.warning("Kafka broker unreachable", error=str(exc))
     return BROKER_UNREACHABLE
+
+
+def _refused(exc: Exception) -> str:
+    """The reason recorded for a request the broker refused, naming its error code where it gave one.
+
+    The code is librdkafka's name for the error, such as ``POLICY_VIOLATION``, and
+    carries none of the broker's own text.
+    """
+    error = exc.args[0] if isinstance(exc, KafkaException) and exc.args else None
+    if not isinstance(error, KafkaError):
+        return BROKER_REFUSED
+    return f"the broker refused it ({error.name()}); the engine log has the reason"
 
 
 @dataclass
@@ -673,7 +686,7 @@ def ensure_topics(
                 f"(partitions={spec.partitions}, rf={spec.replication_factor})"
             )
         except Exception as exc:
-            result.failed.append((spec.name, BROKER_REFUSED))
+            result.failed.append((spec.name, _refused(exc)))
             logger.error(f"Kafka topic creation failed: {spec.name} - {exc}")
 
     return result
@@ -724,7 +737,7 @@ def remove_topics(
             result.removed.append(name)
             logger.info(f"Kafka topic deleted: {name}")
         except Exception as exc:
-            result.failed.append((name, BROKER_REFUSED))
+            result.failed.append((name, _refused(exc)))
             logger.error(f"Kafka topic deletion failed: {name} - {exc}")
 
     return result
@@ -851,7 +864,7 @@ def update_topics(
             # that would find that out is skipped.
             drifted = _config_drift(spec, admin.describe_config(spec.name)) if spec.config else {}
         except Exception as exc:
-            result.failed.append((spec.name, BROKER_REFUSED))
+            result.failed.append((spec.name, _refused(exc)))
             logger.error(f"Kafka topic could not be described: {spec.name} - {exc}")
             continue
 
@@ -877,7 +890,7 @@ def update_topics(
             try:
                 admin.alter_config(spec.name, drifted)
             except Exception as exc:
-                result.failed.append((spec.name, BROKER_REFUSED))
+                result.failed.append((spec.name, _refused(exc)))
                 logger.error(f"Kafka topic config alter failed: {spec.name} - {exc}")
                 continue
             logger.info(f"Kafka topic config altered: {spec.name} ({sorted(drifted)})")
@@ -890,7 +903,7 @@ def update_topics(
                 try:
                     admin.widen_partitions(spec.name, total=spec.partitions)
                 except Exception as exc:
-                    result.failed.append((spec.name, BROKER_REFUSED))
+                    result.failed.append((spec.name, _refused(exc)))
                     logger.error(f"Kafka topic partition widening failed: {spec.name} - {exc}")
                     continue
                 logger.info(

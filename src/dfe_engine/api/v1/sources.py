@@ -53,10 +53,12 @@ from dfe_engine.api.deps import (
     ttl_settings,
 )
 from dfe_engine.api.errors import (
+    TOPICS_NOT_CREATED,
     CoreResourceConflictErrorResponse,
     ErrorResponse,
     SourceCreateConflictResponse,
     SourceWriteConflictResponse,
+    TopicsNotCreatedErrorResponse,
     backend_failure,
     hide_backend_text,
     raise_exchange_http,
@@ -538,6 +540,29 @@ class TableEngineObject(BaseModel):
     )
 
 
+class CatalogueSchemaAvailability(BaseModel):
+    """Whether a catalogue entry's table schema layers resolve on this deployment."""
+
+    resolves: bool = Field(
+        description=(
+            "Whether the meta and derived schemas the entry's table composes from resolve "
+            "here. When not, a source created from it carries no schema, and the fetcher "
+            "intake refuses it (422) because a fetcher on its own topic needs one"
+        )
+    )
+    missing_layer: Literal["meta_schema", "derived_schema"] | None = Field(
+        default=None,
+        description="The first layer that does not resolve, or null when resolves is true",
+    )
+    missing_reference: str = Field(
+        default="",
+        description=(
+            "That layer's schema reference, such as derived/cisco_ios/log. Empty when "
+            "resolves is true, or when the app manifest names no schema layers at all"
+        ),
+    )
+
+
 class CatalogueEntryObject(BaseModel):
     """One source a deployed transform already handles, as the console lists it."""
 
@@ -561,6 +586,9 @@ class CatalogueEntryObject(BaseModel):
             "Source name this entry derives; empty when the entry's own name is not a "
             "legal source name and one must be supplied on create"
         ),
+    )
+    schema_layers: CatalogueSchemaAvailability = Field(
+        description="Whether the entry's table schema resolves here, and which layer does not"
     )
 
 
@@ -899,6 +927,7 @@ def create_source(
 )
 def list_catalogue(
     user: CurrentUser,
+    settings: Settings,
     pagination: PaginationParams = Depends(),
     intake: str | None = Query(
         None, description="Only entries that arrive this way (beats, receiver, fetcher)"
@@ -909,6 +938,9 @@ def list_catalogue(
 
     Empty when no catalogue is mounted, which is a deployment without one rather
     than an error: the app that ships the catalogue prints it from its own image.
+    Each entry says whether its table's schema layers resolve on this deployment,
+    and names the first one that does not, so a console can hold back an entry
+    the create would refuse.
     """
     catalogue = _source_catalogue()
     if catalogue is None:
@@ -925,22 +957,29 @@ def list_catalogue(
             },
         )
 
-    rows = [
-        _to_catalogue_object(entry)
-        for entry in catalogue.entries.values()
-        if intake is None or intake in entry.intakes
+    entries = [
+        entry for entry in catalogue.entries.values() if intake is None or intake in entry.intakes
     ]
     if search:
         needle = search.lower()
-        rows = [
-            row
-            for row in rows
-            if needle in row.name.lower()
-            or needle in row.package.lower()
-            or needle in row.data_stream.lower()
+        entries = [
+            entry
+            for entry in entries
+            if needle in entry.name.lower()
+            or needle in entry.package.lower()
+            or needle in entry.data_stream.lower()
         ]
-    rows.sort(key=lambda row: row.name)
-    return PaginatedResponse.from_list(rows, pagination.page, pagination.per_page)
+    entries.sort(key=lambda entry: entry.name)
+    # Resolving reads the schema files, so only the page served is resolved.
+    page = PaginatedResponse[str].from_list(
+        [entry.name for entry in entries], pagination.page, pagination.per_page
+    )
+    rows = [
+        _to_catalogue_object(catalogue, catalogue.entries[name], settings) for name in page.items
+    ]
+    return PaginatedResponse[CatalogueEntryObject](
+        items=rows, total=page.total, page=page.page, per_page=page.per_page
+    )
 
 
 @router.get(
@@ -1344,17 +1383,36 @@ def plan_source_deploy(
     return _plan_to_response(plan)
 
 
+class _TopicsNotCreatedError(Exception):
+    """A source riding the bus could not get its topics from the broker, so it must not deploy.
+
+    Attributes:
+        failed: Each topic not created, with the reason ``ensure_topics`` recorded.
+        ensured: The topics that were created or already existed.
+    """
+
+    def __init__(self, *, failed: list[tuple[str, str]], ensured: list[str]) -> None:
+        """Record what the broker refused and what it took."""
+        super().__init__(", ".join(name for name, _ in failed))
+        self.failed = failed
+        self.ensured = ensured
+
+
 def _ensure_source_topics(
     source: Any, settings: Any, version_id: str | None = None
 ) -> tuple[list[str], list[str], list[str]]:
     """Create the ``_land``/``_load`` topics this source needs.
 
-    Deliberately non-fatal: the schema is already live, and a brokerless profile
-    has no bus at all, where failing the deploy would be wrong. Failures are
-    reported on the response instead.
+    Fatal where the source rides the bus: its receiver answers 503 for every
+    record until the topic exists, so a deploy reporting success would be wrong.
+    Off the bus (a brokerless or direct deployment) no stage reads the topics,
+    and a failure is reported on the response instead.
 
     Blocking librdkafka calls run in here, so callers on the event loop hand it to
     a thread. ``version_id`` is the version being deployed, not the deployed one.
+
+    Raises:
+        _TopicsNotCreatedError: The source rides the bus and a topic was not created.
     """
     from dfe_engine.kafka.topics import (
         build_admin,
@@ -1389,6 +1447,12 @@ def _ensure_source_topics(
             f"Kafka topics not ensured for source '{source.source}': "
             f"{', '.join(f'{n} ({e})' for n, e in outcome.failed)}"
         )
+        declared = source.version(version_id).transport if version_id else source.transport
+        rides_bus = (declared or settings.transport.default) == "bus"
+        if settings.transport.bus_present and rides_bus:
+            raise _TopicsNotCreatedError(
+                failed=outcome.failed, ensured=outcome.created + outcome.existing
+            )
     stranded = stranded_source_topics(source, version_id=version_id, settings=settings, admin=admin)
     if stranded:
         logger.warning(
@@ -1453,9 +1517,25 @@ async def _execute_source_deploy(
 
     # Off the event loop: the admin calls block for their full timeout when no
     # broker answers, which is the norm on the Kafka-less profile.
-    topics_ensured, topics_failed, topics_stranded = await asyncio.to_thread(
-        _ensure_source_topics, source, settings, version_id
-    )
+    try:
+        topics_ensured, topics_failed, topics_stranded = await asyncio.to_thread(
+            _ensure_source_topics, source, settings, version_id
+        )
+    except _TopicsNotCreatedError as exc:
+        # The DDL and any topic created before the refusal changed state, so the attempt is audited.
+        audit_resource_change(
+            user.user_id,
+            "schema",
+            name,
+            "deploy_failed",
+            details={
+                "version": version_id,
+                "statements_applied": statements_applied,
+                "topics_ensured": exc.ensured,
+                "topics_failed": [topic for topic, _ in exc.failed],
+            },
+        )
+        raise _topics_not_created(name, exc.failed) from exc
 
     deploy_result = SchemaDeployResult(
         source_name=name,
@@ -1521,6 +1601,27 @@ async def _execute_source_deploy(
     return deploy_result
 
 
+def _topics_not_created(name: str, failed: list[tuple[str, str]]) -> HTTPException:
+    """The 502 for a deploy whose source rides the bus and did not get every topic.
+
+    Each reason is the one ``ensure_topics`` recorded, which names the broker's
+    error code and never its text.
+    """
+    named = ", ".join(f"{topic} ({reason})" for topic, reason in failed)
+    return HTTPException(
+        status_code=502,
+        detail={
+            "code": TOPICS_NOT_CREATED,
+            "message": (
+                f"Kafka topics not created for source '{name}', so it was not deployed: "
+                f"{named}. Its table is in place. Deploy again once the broker takes the topics"
+            ),
+            "source": name,
+            "topics": [{"topic": topic, "reason": reason} for topic, reason in failed],
+        },
+    )
+
+
 def _http_exception_message(exc: HTTPException) -> str:
     """A task-facing message from an HTTPException detail."""
     detail = exc.detail
@@ -1564,6 +1665,16 @@ async def _run_source_deploy_task(
 @router.post(
     "/{name}/deploy",
     response_model=SchemaDeployResult,
+    responses={
+        502: {
+            "model": TopicsNotCreatedErrorResponse | ErrorResponse,
+            "description": (
+                "A backing service refused the deploy: ClickHouse rejected the DDL, or "
+                "the source rides the bus and the broker did not create its topics "
+                "(code topics_not_created, naming each topic and the broker's error code)"
+            ),
+        },
+    },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
 async def deploy_source_schema(
@@ -1587,6 +1698,8 @@ async def deploy_source_schema(
     an existing one gains the columns it lacks and moves to the version's TTL, so a
     re-deploy changes only what differs. The engine and the type of an existing
     column are left as created. A schema that failed validation is never deployed.
+    A source on the bus transport whose Kafka topics the broker did not create is
+    not marked deployed either, and the call answers 502 naming each topic.
     """
     return await _execute_source_deploy(
         name=name,
@@ -2437,12 +2550,18 @@ def _source_catalogue() -> source_catalogue_module.SourceCatalogue | None:
 
 
 def _to_catalogue_object(
+    catalogue: source_catalogue_module.SourceCatalogue,
     entry: source_catalogue_module.CatalogueEntry,
+    settings: Any,
 ) -> CatalogueEntryObject:
     try:
         derived = entry.source_name()
     except ValueError:
         derived = ""
+    binding = catalogue.app.catalogue
+    resolution = source_catalogue_module.resolve_schema_layers(
+        entry, binding.schema_layers if binding else None, settings
+    )
     return CatalogueEntryObject(
         name=entry.name,
         package=entry.package,
@@ -2453,6 +2572,11 @@ def _to_catalogue_object(
         transforms=list(entry.transforms),
         beats=dict(entry.beats),
         source=derived,
+        schema_layers=CatalogueSchemaAvailability(
+            resolves=resolution.resolves,
+            missing_layer=resolution.missing_layer,
+            missing_reference=resolution.missing_reference,
+        ),
     )
 
 

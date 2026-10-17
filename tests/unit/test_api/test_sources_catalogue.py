@@ -104,6 +104,40 @@ class TestListCatalogue:
             "transforms": ["default"],
             "beats": {"module": "okta", "fileset": "system"},
             "source": "okta",
+            "schema_layers": {
+                "resolves": False,
+                "missing_layer": "meta_schema",
+                "missing_reference": "meta/elastic/ecs",
+            },
+        }
+
+    def test_an_entry_whose_layers_resolve_says_so(
+        self, client: TestClient, admin_headers: dict, api_settings, mounted
+    ):
+        _ship_layers(api_settings, "aws/cloudtrail")
+
+        resp = client.get("/api/v1/sources/catalogue?search=aws_cloudtrail", headers=admin_headers)
+
+        rows = {row["name"]: row for row in resp.json()["items"]}
+        assert rows["aws_cloudtrail"]["schema_layers"] == {
+            "resolves": True,
+            "missing_layer": None,
+            "missing_reference": "",
+        }
+
+    def test_an_entry_with_no_derived_schema_names_that_layer(
+        self, client: TestClient, admin_headers: dict, api_settings, mounted
+    ):
+        """The entry the create would refuse with 422, named before anyone tries."""
+        _ship_layers(api_settings, "aws/cloudtrail")
+
+        resp = client.get("/api/v1/sources/catalogue?search=okta", headers=admin_headers)
+
+        rows = {row["name"]: row for row in resp.json()["items"]}
+        assert rows["okta"]["schema_layers"] == {
+            "resolves": False,
+            "missing_layer": "derived_schema",
+            "missing_reference": "derived/okta/system",
         }
 
     def test_an_entry_whose_name_is_not_a_legal_source_name_says_so(
@@ -190,6 +224,27 @@ class TestCreateFromCatalogue:
         assert "needs a schema" in resp.json()["message"]
         assert (
             client.get("/api/v1/sources/aws-cloudtrail", headers=admin_headers).status_code == 404
+        )
+
+    @pytest.mark.parametrize("shipped", [True, False], ids=["layers-shipped", "no-layers"])
+    def test_the_listing_says_ahead_of_time_what_the_pulled_create_answers(
+        self, client: TestClient, admin_headers: dict, api_settings, mounted, shipped
+    ):
+        if shipped:
+            _ship_layers(api_settings, "aws/cloudtrail")
+        listed = client.get(
+            "/api/v1/sources/catalogue?search=aws_cloudtrail", headers=admin_headers
+        )
+        (row,) = [row for row in listed.json()["items"] if row["name"] == "aws_cloudtrail"]
+
+        resp = client.post(
+            "/api/v1/sources/from-catalogue/aws_cloudtrail",
+            json={"intake": "fetcher"},
+            headers=admin_headers,
+        )
+
+        assert (row["schema_layers"]["resolves"], resp.status_code) == (
+            (True, 201) if shipped else (False, 422)
         )
 
     def test_an_entry_is_built_on_ecs_and_the_layers_shipped_for_its_stream(

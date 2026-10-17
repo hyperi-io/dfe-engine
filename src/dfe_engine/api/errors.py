@@ -91,6 +91,38 @@ class CoreResourceConflictErrorResponse(BaseModel):
     context: CoreResourceConflictContext
 
 
+TOPICS_NOT_CREATED = "topics_not_created"
+
+
+class TopicNotCreated(BaseModel):
+    """One Kafka topic a source deploy needed and the broker did not create."""
+
+    topic: str = Field(description="The topic name")
+    reason: str = Field(
+        description="Why, naming the broker's error code where it gave one and never its text"
+    )
+
+
+class TopicsNotCreatedContext(BaseModel):
+    """Structured context for a source deploy refused because its topics were not created."""
+
+    source: str = Field(description="The source being deployed")
+    topics: list[TopicNotCreated] = Field(description="Every topic the broker did not create")
+
+
+class TopicsNotCreatedErrorResponse(BaseModel):
+    """502 when a source on the bus transport is deployed and the broker did not create its topics.
+
+    The source is not marked deployed. Its ClickHouse table is already in place,
+    and a later deploy re-runs both steps.
+    """
+
+    code: Literal["topics_not_created"] = "topics_not_created"
+    message: str = Field(description="Human-readable explanation, naming each topic and reason")
+    errors: list[FieldError] = Field(default_factory=list)
+    context: TopicsNotCreatedContext
+
+
 # Plain union, not discriminated: SourceNameConflictErrorResponse and
 # CoreResourceConflictErrorResponse both carry code "conflict", which
 # Field(discriminator="code") refuses to build a union over.
