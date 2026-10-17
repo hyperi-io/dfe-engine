@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""RBAC-from-gitops loader (round-trips the auth_sync write format)."""
+"""RBAC-from-gitops loader."""
 
 from __future__ import annotations
 
