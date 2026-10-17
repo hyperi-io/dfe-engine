@@ -22,7 +22,7 @@ release:
   helm:
     enabled: true
     contract: emit
-    library: "2.14.4"
+    library: "2.14.15"
 
 test:
   min_coverage: 70  # Current: 75%. Target: 80%. Ratchet up as coverage improves.
