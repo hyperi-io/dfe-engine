@@ -34,7 +34,13 @@ _OVERRIDE_PATHS = {
     "DFE_GITOPS_TOKEN": ("gitops", "token"),
 }
 _SEED_ACCOUNTS = "DFE_AUTH_LOCAL_SEED_ACCOUNTS"
-_HUNT_RUNNER_PASSWORD = "DFE_CLICKHOUSE_HUNT_RUNNER_PASSWORD"
+# Each app's own ClickHouse user: the secret group, its variable and the service role.
+_SERVICE_PASSWORDS = {
+    "hunt-runner": ("DFE_CLICKHOUSE_HUNT_RUNNER_PASSWORD", "hunt_runner"),
+    "loader": ("DFE_CLICKHOUSE_LOADER_PASSWORD", "loader"),
+    "query-reader": ("DFE_CLICKHOUSE_QUERY_READER_PASSWORD", "query_reader"),
+    "otel-writer": ("DFE_CLICKHOUSE_OTEL_WRITER_PASSWORD", "otel_writer"),
+}
 
 
 def _secret_env_vars() -> list[str]:
@@ -90,6 +96,9 @@ class TestContractWellFormed:
             "admin",
             "breakglass",
             "hunt-runner",
+            "loader",
+            "query-reader",
+            "otel-writer",
             "kafka",
             "gitops",
             "seed-accounts",
@@ -97,8 +106,18 @@ class TestContractWellFormed:
         assert [g.group_name for g in contract.secrets if g.optional] == ["seed-accounts"]
 
     def test_every_secret_env_var_has_a_reader(self) -> None:
-        expected = set(_OVERRIDE_PATHS) | {_SEED_ACCOUNTS, _HUNT_RUNNER_PASSWORD}
+        service = {env_var for env_var, _ in _SERVICE_PASSWORDS.values()}
+        expected = set(_OVERRIDE_PATHS) | {_SEED_ACCOUNTS} | service
         assert set(_secret_env_vars()) == expected
+
+    @pytest.mark.parametrize("group", sorted(_SERVICE_PASSWORDS))
+    def test_each_app_password_group_feeds_its_service_role(self, group: str) -> None:
+        """The chart names one Secret per app, and the engine adopts it for that app's user."""
+        env_var, _ = _SERVICE_PASSWORDS[group]
+        [found] = [g for g in engine_deployment_contract().secrets if g.group_name == group]
+        assert [(e.env_var, e.key_name, e.secret_key) for e in found.env_vars] == [
+            (env_var, "password", "password")
+        ]
 
     @pytest.mark.parametrize("env_var", sorted(_OVERRIDE_PATHS))
     def test_secret_env_var_reaches_the_settings(
@@ -120,13 +139,15 @@ class TestContractWellFormed:
         monkeypatch.setenv(_SEED_ACCOUNTS, json.dumps(accounts))
         assert _get_env_overrides()["auth"]["local"]["seed_accounts"] == accounts
 
-    def test_hunt_runner_password_reaches_the_settings(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize("group", sorted(_SERVICE_PASSWORDS))
+    def test_each_app_password_reaches_the_settings(
+        self, group: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from dfe_engine.settings import provided_service_password
 
-        monkeypatch.setenv(_HUNT_RUNNER_PASSWORD, "probe-hunt-runner")
-        assert provided_service_password("hunt_runner") == "probe-hunt-runner"
+        env_var, role = _SERVICE_PASSWORDS[group]
+        monkeypatch.setenv(env_var, f"probe-{group}")
+        assert provided_service_password(role) == f"probe-{group}"
 
     def test_contract_no_keda(self) -> None:
         # dfe-engine is the control plane -- HPA on CPU is sufficient, no KEDA.

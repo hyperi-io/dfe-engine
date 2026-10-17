@@ -388,6 +388,7 @@ class TestDefaultServiceRoles:
             "loader",
             "query_reader",
             "hunt_runner",
+            "otel_writer",
             "otel_reader",
         }
 
@@ -395,14 +396,20 @@ class TestDefaultServiceRoles:
         by_name = {r.name: r for r in DEFAULT_SERVICE_ROLES}
         assert by_name["loader"].mint_user is True
         assert by_name["query_reader"].mint_user is True
+        assert by_name["otel_writer"].mint_user is True
         # otel_reader is composed onto group users, never a minted user of its own.
         # hunt_runner's flag is the dfe-schemas catalogue's, and moves with its version.
         assert by_name["otel_reader"].mint_user is False
 
+    def test_otel_writer_writes_the_otel_tables_alone(self):
+        """The collector's user: a table-prefix grant, so it can write no data table."""
+        roles = resolve_grant_databases(DEFAULT_SERVICE_ROLES, "dfe")
+        writer = {r.name: r for r in roles}["otel_writer"]
+        assert [g for g in writer.grants if g.startswith("INSERT")] == ["INSERT ON dfe.otel_*"]
+        assert "SELECT ON dfe.*" not in writer.grants
+
     def test_otel_reader_reads_the_otel_database(self):
-        # The otel tables live in the one DFE database. ClickHouse GRANT has no
-        # table-name wildcard, so the read is db-wide rather than a `dfe.otel_*`
-        # prefix.
+        # The otel tables live in the one DFE database, and the read is db-wide.
         roles = resolve_grant_databases(DEFAULT_SERVICE_ROLES, "dfe")
         otel = {r.name: r for r in roles}["otel_reader"]
         assert otel.grants == ["SELECT ON dfe.*"]

@@ -518,8 +518,9 @@ def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str,
             exc,
             event="CH RBAC reconcile: ClickHouse connection lost",
         ) from exc
-    # A full run covers every identity, so a startup retry still waiting stands down.
-    note_ch_rbac_reconciled(request.app.state)
+    # A full clean run covers every identity, so a startup retry still waiting stands down.
+    if not result.errors:
+        note_ch_rbac_reconciled(request.app.state)
     return {
         "statements": len(result.statements),
         "dropped": len(result.dropped),

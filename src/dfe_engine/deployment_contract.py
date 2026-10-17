@@ -114,9 +114,23 @@ def engine_deployment_contract() -> DeploymentContract:
                 group_name="breakglass",
                 env_vars=[_env("DFE_AUTH_BREAKGLASS_PASSWORD", "password", "breakglass-password")],
             ),
+            # Each app's own ClickHouse password, from the Secret its pod reads, so
+            # the engine creates the user on the value the app connects with.
             SecretGroupContract(
                 group_name="hunt-runner",
                 env_vars=[_env("DFE_CLICKHOUSE_HUNT_RUNNER_PASSWORD", "password", "password")],
+            ),
+            SecretGroupContract(
+                group_name="loader",
+                env_vars=[_env("DFE_CLICKHOUSE_LOADER_PASSWORD", "password", "password")],
+            ),
+            SecretGroupContract(
+                group_name="query-reader",
+                env_vars=[_env("DFE_CLICKHOUSE_QUERY_READER_PASSWORD", "password", "password")],
+            ),
+            SecretGroupContract(
+                group_name="otel-writer",
+                env_vars=[_env("DFE_CLICKHOUSE_OTEL_WRITER_PASSWORD", "password", "password")],
             ),
             SecretGroupContract(
                 group_name="kafka",

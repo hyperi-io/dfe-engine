@@ -12,12 +12,14 @@ service users the engine's workers connect as. A write asks for a run here and
 returns at once: the run happens on a background thread, one at a time, with a
 burst of writes folded into one run.
 
-A run that raises -- ClickHouse unreachable, say -- is logged with its cause,
-counted, and run again after a capped, jittered back-off until one gets through.
-Startup hands its own first run here too, so a boot that found ClickHouse down
-still provisions the service users once ClickHouse is back, without a restart. A
-reconcile that gets through some other way, the governance endpoint, stops the
-retry.
+A run that raises -- ClickHouse unreachable, say -- or leaves a statement failed
+is logged, counted, and run again after a capped, jittered back-off until one
+applies everything: a refused GRANT is an app that cannot connect. Startup hands
+its own first run here too, so a boot that found ClickHouse down still provisions
+the service users once ClickHouse is back, without a restart. A clean reconcile
+some other way, the governance endpoint, stops the retry. The engine stays Ready
+throughout, so ``ch_rbac_reconcile_unconverged`` is where a run that has not got
+through shows.
 """
 
 import threading
@@ -32,6 +34,7 @@ from .reconciler import ReconcileResult
 
 RECONCILES = "ch_rbac_reconciles_total"
 RETRIES = "ch_rbac_reconcile_retries_total"
+UNCONVERGED = "ch_rbac_reconcile_unconverged"
 
 # The worker thread's name, which a test reads to see whether one is still running.
 WORKER_THREAD_NAME = "ch-rbac-reconcile"
@@ -40,7 +43,8 @@ ReconcileOutcome = Literal["ok", "partial", "failed"]
 """How a reconcile ended.
 
 - ``ok``: every statement applied.
-- ``partial``: it ran, and at least one statement failed; the rest applied.
+- ``partial``: it ran and at least one statement failed. The rest applied, and it
+  runs again after a back-off.
 - ``failed``: it raised -- ClickHouse unreachable, say -- and runs again after a back-off.
 """
 
@@ -80,7 +84,12 @@ class ReconcileMetrics:
         )
         self._retries = manager.counter(
             RETRIES,
-            "CH RBAC reconciles run again because the one before raised, by which reconcile",
+            "CH RBAC reconciles run again because the one before did not get through, by which reconcile",
+            ["reconcile"],
+        )
+        self._unconverged = manager.gauge(
+            UNCONVERGED,
+            "1 while the last CH RBAC reconcile raised or left a statement failed, 0 once one applied everything",
             ["reconcile"],
         )
 
@@ -90,8 +99,14 @@ class ReconcileMetrics:
             return
         self._reconciles.labels(outcome=outcome).inc()
 
+    def converged(self, reconcile: ReconcileKind, *, converged: bool) -> None:
+        """Record whether the last run of ``reconcile`` applied every statement."""
+        if self._manager is None:
+            return
+        self._unconverged.labels(reconcile=reconcile).set(0 if converged else 1)
+
     def retry(self, reconcile: ReconcileKind) -> None:
-        """Record a run started because the previous one raised."""
+        """Record a run started because the previous one did not get through."""
         if self._manager is None:
             return
         self._retries.labels(reconcile=reconcile).inc()
@@ -105,11 +120,10 @@ class ReconcileTrigger:
     flight gets exactly one more run after it, because that run may have read the
     stores before the write landed.
 
-    A run that raises is run again after ``retry_initial_seconds``, doubling up to
-    ``retry_max_seconds`` and jittered within the upper half of each wait, until one
-    gets through: the change it carried is still unapplied, and nothing else would
-    ask again. A partial run is not retried; its failed statements fail the same
-    way next time.
+    A run that raises or leaves a statement failed is run again after
+    ``retry_initial_seconds``, doubling up to ``retry_max_seconds`` and jittered
+    within the upper half of each wait, until one applies everything: the change it
+    carried is still unapplied, and nothing else would ask again.
 
     Args:
         run: the reconcile, returning its result; it runs on the trigger's thread.
@@ -143,11 +157,11 @@ class ReconcileTrigger:
         self._closed = threading.Event()
         # Cuts a wait short: close(), or a reconcile that got through elsewhere.
         self._wake = threading.Event()
-        # Runs in a row that raised, which sets the next wait.
+        # Runs in a row that did not get through, which sets the next wait.
         self._failures = 0
         # A change landed that no run has read yet.
         self._pending = False
-        # The last run raised and has not been run again.
+        # The last run did not get through and has not been run again.
         self._retry_pending = False
         # The worker thread is alive, settling or running.
         self._active = False
@@ -164,14 +178,14 @@ class ReconcileTrigger:
         self._start(self._settle)
 
     def run_now(self) -> bool:
-        """Run one reconcile on this thread, and retry it in the background if it raises.
+        """Run one reconcile on this thread, and retry it in the background if it did not get through.
 
         Startup calls this before anything else can request a run, so a healthy boot
         has its users before readiness. While a background run is in flight it asks
         for one more instead.
 
         Returns:
-            Whether the run got through.
+            Whether the run applied every statement.
         """
         with self._lock:
             busy = self._active or self._closed.is_set()
@@ -184,7 +198,7 @@ class ReconcileTrigger:
         return False
 
     def retry(self) -> None:
-        """Run again after the first back-off, for a reconcile that raised; never waits."""
+        """Run again after the first back-off, for a reconcile that did not get through. Never waits."""
         with self._lock:
             if self._closed.is_set():
                 return
@@ -197,13 +211,14 @@ class ReconcileTrigger:
         self._start(wait)
 
     def succeeded(self) -> None:
-        """Stand down a retry: a reconcile that ran outside the trigger got through.
+        """Stand down a retry: a reconcile that ran outside the trigger applied everything.
 
         A change that arrived since still gets its run.
         """
         with self._lock:
             self._failures = 0
             self._retry_pending = False
+        self._metrics.converged(self._reconcile, converged=True)
         self._wake.set()
 
     def wait_idle(self, timeout: float) -> bool:
@@ -241,7 +256,7 @@ class ReconcileTrigger:
             )
 
     def _backoff(self, failures: int) -> float:
-        """The jittered wait after ``failures`` runs in a row raised."""
+        """The jittered wait after ``failures`` runs in a row that did not get through."""
         nominal = min(self._retry_initial * 2 ** (failures - 1), self._retry_max)
         return jittered(nominal)
 
@@ -275,15 +290,16 @@ class ReconcileTrigger:
                 wait = self._backoff(self._failures)
 
     def _run_once(self, *, failures: int) -> bool:
-        """Run one reconcile and count how it ended; returns False when it raised.
+        """Run one reconcile and count how it ended. Returns False unless it applied everything.
 
         Args:
-            failures: runs in a row that raised before this one, for the log line.
+            failures: runs in a row that did not get through before this one, for the log line.
         """
         try:
             result = self._run()
         except Exception as exc:
             self._metrics.reconcile("failed")
+            self._metrics.converged(self._reconcile, converged=False)
             if failures == 0:
                 logger.exception(f"{self._what} reconcile failed; retrying with back-off")
             else:
@@ -293,7 +309,19 @@ class ReconcileTrigger:
                     error=str(exc),
                 )
             return False
-        self._metrics.reconcile("partial" if result.errors else "ok")
+        if result.errors:
+            self._metrics.reconcile("partial")
+            self._metrics.converged(self._reconcile, converged=False)
+            # Each error names its statement up to any password hash, never ClickHouse's text.
+            logger.warning(
+                f"{self._what} reconcile left statements failed, retrying with back-off",
+                failures=failures + 1,
+                failed_statements=len(result.errors),
+                errors=result.errors,
+            )
+            return False
+        self._metrics.reconcile("ok")
+        self._metrics.converged(self._reconcile, converged=True)
         if failures:
             logger.info(f"{self._what} reconcile got through", failed_attempts=failures)
         return True
@@ -333,6 +361,7 @@ __all__ = [
     "RETRY_MAX_SECONDS",
     "SETTLE_SECONDS",
     "TRIGGER_ATTRIBUTES",
+    "UNCONVERGED",
     "WORKER_THREAD_NAME",
     "ReconcileKind",
     "ReconcileMetrics",
