@@ -24,6 +24,7 @@ provider YAML keeps only the store PATH. A response carries the client id, the
 secret paths and the env var names, never a secret value.
 """
 
+import functools
 import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
@@ -607,19 +608,23 @@ def _moves_to_env(*, env: str, stored_env: str, stored_path: str, value: str) ->
     return (env != stored_env) or (bool(stored_path))
 
 
-def _refresh_rp(request: Request) -> None:
+async def _refresh_rp(request: Request) -> None:
     """Rebuild the relying party so this write takes effect on the login routes.
 
     The registry is read fresh from YAML on every call, but the RP snapshots the
     enabled providers and their resolved credentials when it is built. Without
     this rebuild a provider created here 404s on ``/auth/oidc/{name}/login``
-    until the process restarts. Cheap and non-raising - see
-    ``build_relying_party``.
+    until the process restarts. Non-raising - see ``build_relying_party``. The
+    rebuild reads each credential from the secret store, so it runs on a worker thread.
     """
     from dfe_engine.auth.oidc.rp import build_relying_party
 
-    request.app.state.oidc_rp = build_relying_party(
-        _get_registry(request), secrets=getattr(request.app.state, "dfe_secrets", None)
+    request.app.state.oidc_rp = await run_blocking(
+        functools.partial(
+            build_relying_party,
+            _get_registry(request),
+            secrets=getattr(request.app.state, "dfe_secrets", None),
+        )
     )
 
 
@@ -701,7 +706,7 @@ async def create_provider(
             detail={"code": "conflict", "message": f"OIDC provider '{body.name}' already exists"},
         )
 
-    _refresh_rp(request)
+    await _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", body.name, "created")
     return _provider_to_response(body.name, provider)
 
@@ -851,7 +856,7 @@ async def update_provider(
 
     provider = registry.update(name, **update_fields)
     # Picks up an enable/disable flip and a rotated client secret alike.
-    _refresh_rp(request)
+    await _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "updated")
     # Deleted only once the saved config no longer points at them, so a failed update never leaves the provider on a missing secret.
     await run_blocking(lambda: _delete_secrets(paths=stale_paths, request=request))
@@ -929,7 +934,7 @@ async def delete_provider(
     registry.delete(name)
     await run_blocking(lambda: _delete_stored_secrets(request, provider))
     # A detached provider must stop serving logins immediately, not at restart.
-    _refresh_rp(request)
+    await _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "deleted")
 
     return DetachResponse(
@@ -1041,13 +1046,20 @@ async def verify_login_config(
     checks: list[LoginConfigCheck] = []
 
     # Resolve each credential the way the RP does and report only whether it
-    # resolved - the value never enters the response.
+    # resolved - the value never enters the response. The store read blocks.
     for label, value, secret_path, env_name in (
         ("client_id", provider.client_id, "", provider.client_id_env),
         ("client_secret", "", provider.client_secret_path, provider.client_secret_env),
     ):
-        ok, detail = credential_check(
-            label, value=value, secret_path=secret_path, env_name=env_name, secrets=store
+        ok, detail = await run_blocking(
+            functools.partial(
+                credential_check,
+                label,
+                value=value,
+                secret_path=secret_path,
+                env_name=env_name,
+                secrets=store,
+            )
         )
         checks.append(LoginConfigCheck(name=label, ok=ok, detail=detail))
 

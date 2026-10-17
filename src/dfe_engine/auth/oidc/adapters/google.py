@@ -25,12 +25,12 @@ Cloud Identity resource name with its ``groups/`` prefix removed. Group files
 link on that id, never on the group email, which an admin can rename.
 """
 
-import asyncio
 import functools
 import json
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import (
@@ -162,7 +162,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 is never returned as an empty one: group sync would record it as a
                 directory with no groups.
         """
-        service = self._get_service()
+        service = await run_blocking(self._get_service)
         if service is None:
             groups = self._provider.groups
             if not (groups.service_account_json_path) and not (groups.service_account_json_env):
@@ -174,7 +174,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 raise DirectoryNotConfiguredError
             raise DirectoryCredentialError
 
-        raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
+        raw = await run_blocking(self._fetch_all_groups_sync, service)
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 
     async def test_connection(self) -> tuple[bool, str]:
@@ -191,6 +191,8 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "from Cloud Identity with the user's own token, so there is no "
                 "directory credential to test"
             )
+        # Runs first: it reads the service account from the store and keeps it for the checks below.
+        service = await run_blocking(self._get_service)
         service_account = self._service_account_json
         if service_account.unreadable:
             return False, unreadable_credential_message(
@@ -202,12 +204,11 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "'groups.service_account_json' to the provider API, or set the env var "
                 "named in groups.service_account_json_env"
             )
-        service = self._get_service()
         if service is None:
             return False, "Failed to build service from the configured service account JSON"
 
         try:
-            await asyncio.to_thread(self._probe_sync, service)
+            await run_blocking(self._probe_sync, service)
             return True, "OK"
         except Exception as exc:
             logger.warning(
@@ -347,12 +348,14 @@ class GoogleAdapter(OIDCGroupAdapter):
 
     async def _groups_with_service_account(self, *, user_key: str) -> list[GroupInfo]:
         """The user's groups from the Directory API, or [] when no service account answers."""
-        service = self._get_service()
+        service = await run_blocking(self._get_service)
         if service is None:
             return []
 
         try:
-            raw = await asyncio.to_thread(self._fetch_user_groups_sync, service, user_key)
+            raw = await run_blocking(
+                functools.partial(self._fetch_user_groups_sync, service, user_key)
+            )
         except Exception as exc:
             logger.warning(
                 "Google Admin SDK resolve_user_groups failed -- default deny",
@@ -369,7 +372,9 @@ class GoogleAdapter(OIDCGroupAdapter):
         """The service account JSON: the secret store first, then the env var.
 
         Resolved once per adapter, which serves one sync, one connection test or one
-        login, so an unreachable store is asked and logged once.
+        login, so an unreachable store is asked and logged once. The first access reads
+        the store, which blocks, so every caller reaches it through ``_get_service``
+        under ``run_blocking`` before reading it on the loop.
         """
         return resolve_credential(
             secret_path=self._provider.groups.service_account_json_path,
@@ -379,6 +384,9 @@ class GoogleAdapter(OIDCGroupAdapter):
 
     def _get_service(self) -> Any | None:
         """Build a Directory API client that acts as the service account itself.
+
+        Blocking: it reads the service account from the secret store and builds the
+        client, so async callers run it with ``run_blocking``.
 
         Returns:
             A googleapiclient Resource object, or None if no service account is
@@ -426,7 +434,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             return None
 
     # ------------------------------------------------------------------
-    # Synchronous helpers (called via asyncio.to_thread)
+    # Synchronous helpers (called via run_blocking)
     # ------------------------------------------------------------------
 
     def _fetch_all_groups_sync(self, service: Any) -> list[dict[str, Any]]:

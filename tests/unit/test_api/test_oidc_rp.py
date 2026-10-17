@@ -359,7 +359,7 @@ class _Req:
         self.app = app
 
 
-def test_reload_picks_up_provider_written_out_of_band(client, app):
+async def test_reload_picks_up_provider_written_out_of_band(client, app):
     """A provider written straight to the registry dir is usable without a restart."""
     from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
 
@@ -370,23 +370,23 @@ def test_reload_picks_up_provider_written_out_of_band(client, app):
         "gitops-added", OIDCProvider(type="generic", issuer="https://idp.example")
     )
 
-    rp = _reload_rp_if_provider_known(_Req(app), "gitops-added")
+    rp = await _reload_rp_if_provider_known(_Req(app), "gitops-added")
     assert rp is not None
     assert rp.has_provider("gitops-added")
     # Rebuilt in place, so the next request sees it too.
     assert app.state.oidc_rp is rp
 
 
-def test_reload_ignores_unknown_provider(client, app):
+async def test_reload_ignores_unknown_provider(client, app):
     """A bogus name does NOT rebuild - an unauthenticated caller cannot force churn."""
     from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
 
     before = app.state.oidc_rp
-    assert _reload_rp_if_provider_known(_Req(app), "no-such-provider") is None
+    assert await _reload_rp_if_provider_known(_Req(app), "no-such-provider") is None
     assert app.state.oidc_rp is before
 
 
-def test_reload_ignores_disabled_provider(client, app):
+async def test_reload_ignores_disabled_provider(client, app):
     """A disabled provider stays unusable - the reload is not an enable back door."""
     from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
 
@@ -394,7 +394,7 @@ def test_reload_ignores_disabled_provider(client, app):
         "switched-off",
         OIDCProvider(type="generic", issuer="https://idp.example", enabled=False),
     )
-    assert _reload_rp_if_provider_known(_Req(app), "switched-off") is None
+    assert await _reload_rp_if_provider_known(_Req(app), "switched-off") is None
 
 
 def test_login_still_404s_for_a_provider_that_was_never_configured(client):

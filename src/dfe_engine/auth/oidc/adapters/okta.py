@@ -20,6 +20,7 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import (
@@ -52,7 +53,7 @@ class OktaAdapter(OIDCGroupAdapter):
         if not directory_id:
             return []
 
-        base, headers = self._api_base_and_headers()
+        base, headers = await run_blocking(self._api_base_and_headers)
         if base is None or headers is None:
             # A token that is set but never sent finds no groups, so the login says why once.
             if base is not None and self._api_token.value:
@@ -102,7 +103,7 @@ class OktaAdapter(OIDCGroupAdapter):
                 A listing cut short is never returned: group sync would record
                 the groups read so far as the whole directory.
         """
-        base, headers = self._api_base_and_headers()
+        base, headers = await run_blocking(self._api_base_and_headers)
         if base is None or headers is None:
             if base is not None and self._api_token.value:
                 self._warn_unsendable_token(operation="list_all_groups")
@@ -138,7 +139,7 @@ class OktaAdapter(OIDCGroupAdapter):
                 "(use GET .../verify-login for OIDC login configuration)",
             )
 
-        base, headers = self._api_base_and_headers()
+        base, headers = await run_blocking(self._api_base_and_headers)
         if base is None:
             return False, "Okta domain not configured (groups.okta_domain)"
         if headers is None and self._api_token.value:
@@ -177,7 +178,9 @@ class OktaAdapter(OIDCGroupAdapter):
         """The Management API token: the secret store first, then the env var.
 
         Resolved once per adapter, which serves one sync, one connection test or one
-        login, so an unreachable store is asked and logged once.
+        login, so an unreachable store is asked and logged once. The first access reads
+        the store, which blocks, so every caller reaches it through
+        ``_api_base_and_headers`` under ``run_blocking`` before reading it on the loop.
         """
         return resolve_credential(
             secret_path=self._provider.groups.api_token_path,
@@ -186,6 +189,11 @@ class OktaAdapter(OIDCGroupAdapter):
         )
 
     def _api_base_and_headers(self) -> tuple[str | None, dict[str, str] | None]:
+        """Resolve the Management API origin and its request headers.
+
+        Blocking: it reads the API token from the secret store, so async callers run
+        it with ``run_blocking``.
+        """
         base = _normalize_okta_api_base(self._provider.groups.okta_domain)
         if not base:
             return None, None
