@@ -241,8 +241,9 @@ class OIDCGroupAdapter(ABC):
             The user's groups, or None when the directory gave no answer: not
             configured, not reached, refused, or a listing that could not be read
             whole. An empty list is the directory answering that the user is in
-            no group, so a failure is never returned as one. The RP counts a None
-            and keeps the ID token's groups. Never raises.
+            no group, so a failure is never returned as one. The RP takes any list
+            as the user's groups, and counts a None and keeps the last known
+            groups. Never raises.
 
         The default returns an empty list: providers without an admin directory
         API (generic) or that always deliver groups in-token have nothing to add.

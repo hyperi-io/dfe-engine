@@ -62,12 +62,12 @@ class LoginMetrics:
             return
         self._fallbacks = manager.counter(
             DIRECTORY_GROUPS_FALLBACKS,
-            "OIDC logins whose directory group lookup gave no answer, so the ID token's groups were used",
+            "OIDC logins whose directory group lookup gave no answer, so the last known groups held",
             ["provider"],
         )
 
     def directory_fallback(self, provider: str) -> None:
-        """Record a login that kept the ID token's groups because the directory gave no answer.
+        """Record a login that kept its last known groups because the directory gave no answer.
 
         Args:
             provider: The provider's registry name, so the label is bounded by the
@@ -108,6 +108,12 @@ class NormalizedIdentity(BaseModel):
     only a ``_claim_names`` pointer); the RP fills it by calling the directory
     API. A consumer that only reads ``groups`` need not care - this is a
     diagnostic flag so the enrichment path is observable in logs and tests."""
+
+    groups_unresolved: bool = False
+    """True when the directory gave no answer and the token carried no groups.
+
+    ``groups`` is then unknown rather than empty, so the login judges an existing
+    account on the groups it already stores instead of rewriting them to none."""
 
 
 def _has_group_overage(claims: dict[str, Any], claim_name: str) -> bool:
@@ -426,12 +432,12 @@ class OidcRelyingParty:
         (Entra ``oid``), falling back to email then ``sub`` (Google's lookups
         key a user on their email).
 
-        A directory that gives no answer keeps the groups the signed ID token
-        carries, counted and logged once, so a directory outage never locks every
-        user out. A token carrying no groups claim leaves the user with no groups,
-        the same as one in none, until the directory answers. On overage an answer
-        is authoritative even when empty (default deny). Otherwise a populated
-        token set is NOT stripped by an empty answer.
+        An answer is authoritative, an empty one included: the user is in no
+        directory group, whatever the token claimed. A directory that gives no
+        answer keeps the groups the signed ID token carries, counted and logged
+        once, so a directory outage never locks a user out. Where the token carries
+        none either, the identity is marked ``groups_unresolved`` and the login keeps
+        the account's stored groups.
         """
         from dfe_engine.auth.oidc.adapters import get_adapter
 
@@ -444,17 +450,19 @@ class OidcRelyingParty:
             fetched = None
             failure = describe_http_error(exc)
         if fetched is None:
+            unresolved = not identity.groups
             self._metrics.directory_fallback(provider_name)
             logger.warning(
-                "OIDC RP: directory group lookup gave no answer, using the ID token's groups",
+                "OIDC RP: directory group lookup gave no answer, keeping the last known groups",
                 operation="resolve_user_groups",
                 overflow=identity.groups_overflowed,
                 provider=provider.issuer,
                 provider_name=provider_name,
                 claimed_group_count=len(identity.groups),
+                kept="stored_groups" if unresolved else "token_groups",
                 **failure,
             )
-            return identity
+            return identity.model_copy(update={"groups_unresolved": unresolved})
         group_ids = [g.id for g in fetched if g.id]
         logger.info(
             "OIDC RP: resolved groups via directory",
@@ -462,9 +470,7 @@ class OidcRelyingParty:
             overflow=identity.groups_overflowed,
             group_count=len(group_ids),
         )
-        if identity.groups_overflowed or group_ids or not identity.groups:
-            return identity.model_copy(update={"groups": group_ids})
-        return identity
+        return identity.model_copy(update={"groups": group_ids})
 
 
 def build_relying_party(

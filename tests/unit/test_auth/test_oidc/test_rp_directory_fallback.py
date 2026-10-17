@@ -31,7 +31,7 @@ OKTA = OIDCProvider(
 )
 ENTRA = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
 OID = "00000000-0000-0000-0000-00000000b1g0"
-FALLBACK_EVENT = "OIDC RP: directory group lookup gave no answer, using the ID token's groups"
+FALLBACK_EVENT = "OIDC RP: directory group lookup gave no answer, keeping the last known groups"
 ACCESS_TOKEN = "login-access-token-4471"  # noqa: S105, RUF100 - a test token
 
 
@@ -79,15 +79,19 @@ class TestADirectoryThatGivesNoAnswer:
         finally:
             okta.stop()
 
-        assert identity.groups == ["dfe-admins", "soc"]
+        assert (identity.groups, identity.groups_unresolved) == (["dfe-admins", "soc"], False)
         assert okta.pages_requested == [0]
         assert _fallbacks(manager) == {"acme-okta": 1.0}
         (line,) = [event for event in audit_events if event["event"] == FALLBACK_EVENT]
-        assert (line["provider_name"], line["claimed_group_count"]) == ("acme-okta", 2)
+        assert (line["provider_name"], line["claimed_group_count"], line["kept"]) == (
+            "acme-okta",
+            2,
+            "token_groups",
+        )
         assert "jane@acme.test" not in json.dumps(line, default=str)
         assert ACCESS_TOKEN not in json.dumps(audit_events, default=str)
 
-    async def test_an_overage_token_with_no_groups_claim_gets_no_groups_not_a_refusal(
+    async def test_an_overage_token_with_no_groups_claim_is_marked_for_the_stored_groups(
         self, tmp_path, monkeypatch, audit_events
     ):
         graph = LocalGraph()
@@ -115,14 +119,49 @@ class TestADirectoryThatGivesNoAnswer:
         finally:
             graph.stop()
 
-        assert (identity.groups, identity.groups_overflowed) == ([], True)
+        assert (identity.groups, identity.groups_overflowed, identity.groups_unresolved) == (
+            [],
+            True,
+            True,
+        )
         assert graph.principals == [f"users/{OID}"]
         assert _fallbacks(manager) == {"acme-entra": 1.0}
         (line,) = [event for event in audit_events if event["event"] == FALLBACK_EVENT]
-        assert (line["overflow"], line["claimed_group_count"]) == (True, 0)
+        assert (line["overflow"], line["claimed_group_count"], line["kept"]) == (
+            True,
+            0,
+            "stored_groups",
+        )
 
 
 class TestADirectoryThatAnswers:
+    async def test_an_empty_answer_replaces_the_token_groups(self, tmp_path, monkeypatch):
+        """A directory that answers is the authority, so a user it puts in no group has none."""
+        okta = LocalOkta(pages=[[]])
+        okta.start()
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        monkeypatch.setattr(
+            "dfe_engine.auth.oidc.adapters.get_adapter",
+            lambda *_args, **_kwargs: okta_adapter(okta.base_url),
+        )
+        token = {
+            "userinfo": {
+                "email": "jane@acme.test",
+                "groups": ["dfe-admins"],
+                "name": "Jane",
+                "sub": "00u1jane",
+            },
+        }
+        try:
+            identity = await _rp(tmp_path, manager)._identity_from_token(
+                client=None, provider=OKTA, provider_name="acme-okta", token=token
+            )
+        finally:
+            okta.stop()
+
+        assert (identity.groups, identity.groups_unresolved) == ([], False)
+        assert _fallbacks(manager) == {}
+
     async def test_its_answer_is_used_and_nothing_is_counted(self, tmp_path, monkeypatch):
         okta = LocalOkta(pages=[[{"id": "00g1", "profile": {"name": "dfe-viewers"}}]])
         okta.start()

@@ -168,6 +168,7 @@ class JitProvisioner:
         email: str = "",
         name: str = "",
         groups: Sequence[Group] | None = None,
+        keep_stored_groups: bool = False,
     ) -> Account:
         """Create or update shadow account. Non-fatal on HyperDX failures.
 
@@ -176,6 +177,11 @@ class JitProvisioner:
         and reconciled on later logins when present. ``groups`` is every stored group
         when the caller has listed them for this request; otherwise the login lists
         them once, since each listing reads every group file.
+
+        ``keep_stored_groups`` is set when the IdP's directory gave no answer and the
+        token carried no groups, so ``oidc_groups`` is unknown rather than empty. An
+        existing account is then judged on its stored groups, which are not
+        rewritten, and no session of it is ended. A first login has none to keep.
 
         Raises:
             JitIdentityCollisionError: The asserted subject is in the API-key
@@ -188,7 +194,8 @@ class JitProvisioner:
                 first login leaves no account. An existing account records the
                 groups its IdP now asserts and has every session ended, as a
                 logout ends them, so no token issued for it reads or refreshes a
-                session. Nothing else is written.
+                session. With ``keep_stored_groups`` neither happens. Nothing else
+                is written.
             Exception: Any other error is the store failing to record the login,
                 never a refusal of the identity. A first login leaves no account.
         """
@@ -207,6 +214,8 @@ class JitProvisioner:
         if existing is not None:
             self._require_same_identity(existing, user_id, source_provider)
             self._require_available(existing, user_id, source_provider)
+            if keep_stored_groups:
+                oidc_groups = list(existing.groups)
             updates: dict[str, object] = {}
             if set(existing.groups) != set(oidc_groups):
                 added = [g for g in oidc_groups if g not in existing.groups]
@@ -215,11 +224,15 @@ class JitProvisioner:
                 audit_jit_groups_updated(user_id, added, removed)
             listed = self._groups.list() if groups is None else groups
             if not self._holds_a_role(key, oidc_groups, existing.source_provider, listed):
-                if updates:
-                    self._accounts.update(key, groups=oidc_groups)
-                # A token issued before the refusal must neither read nor refresh a session.
-                self._accounts.end_sessions(key)
-                audit_account_change(user_id, key, "sessions_ended", {"reason": "no_role_granted"})
+                # Groups the directory never answered for say nothing new, so no session ends on them.
+                if not keep_stored_groups:
+                    if updates:
+                        self._accounts.update(key, groups=oidc_groups)
+                    # A token issued before the refusal must neither read nor refresh a session.
+                    self._accounts.end_sessions(key)
+                    audit_account_change(
+                        user_id, key, "sessions_ended", {"reason": "no_role_granted"}
+                    )
                 self._refuse_without_role(user_id, source_provider)
             updates.update(last_login_at=now, oidc_id=source_provider, subject=user_id)
             if wanted_email and existing.email != wanted_email:
@@ -253,11 +266,12 @@ class JitProvisioner:
             self._require_same_identity(raced, user_id, source_provider)
             self._require_available(raced, user_id, source_provider)
             race_updates: dict[str, object] = {
-                "groups": oidc_groups,
                 "last_login_at": now,
                 "oidc_id": source_provider,
                 "subject": user_id,
             }
+            if not keep_stored_groups:
+                race_updates["groups"] = oidc_groups
             if wanted_email:
                 race_updates["email"] = wanted_email
             if wanted_name:
