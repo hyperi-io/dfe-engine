@@ -1,19 +1,22 @@
 #  Project:      dfe-engine
 #  File:         tests/support/racing_stores.py
-#  Purpose:      A real account store that loses the race between its lookup and its create
+#  Purpose:      Real stores that lose the race between their lookup and their create
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""A real account store that sees an account another request created a moment too late.
+"""Real stores that see a record another replica created a moment too late.
 
 Every operation but the one missed lookup is the store's own, so the create that
-follows meets the account on disk exactly as it would on a second replica.
+follows meets the record exactly as it would on a second replica.
 """
 
 from pathlib import Path
 
+from scalo.secrets.exceptions import SecretNotFoundError
+
 from dfe_engine.auth.accounts import Account, AccountStore
+from dfe_engine.secrets import DfeSecrets
 
 
 class RacingAccountStore(AccountStore):
@@ -33,3 +36,22 @@ class RacingAccountStore(AccountStore):
             self._blind_to = ""
             return None
         return super().get(username)
+
+
+class RacingSecrets(DfeSecrets):
+    """A real secret store whose first read of one path misses.
+
+    What a replica sees when another mints the same secret between its own read
+    and its create.
+    """
+
+    def __init__(self, *args, blind_to: str, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._blind_to = blind_to
+
+    def get(self, path: str) -> str:
+        """Miss *blind_to* once, then answer every read from the store."""
+        if path == self._blind_to:
+            self._blind_to = ""
+            raise SecretNotFoundError(path, "racing")
+        return super().get(path)

@@ -32,9 +32,10 @@ from typing import TYPE_CHECKING, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
-from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
+from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action, secrets_store
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -57,7 +58,6 @@ from dfe_engine.names import StoreName
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
-    from dfe_engine.secrets import DfeSecrets
 
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 
@@ -466,23 +466,9 @@ def _get_registry(request: Request):
     return registry
 
 
-def _secrets(request: Request) -> DfeSecrets:
-    """The DfeSecrets seam provider credentials are written to and read from."""
-    store = getattr(request.app.state, "dfe_secrets", None)
-    if store is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "secrets_unavailable",
-                "message": "no secrets backend is configured; set DFE_SECRETS_PROVIDER",
-            },
-        )
-    return store
-
-
 def _store_secret(*, field: str, name: str, request: Request, value: str) -> None:
     """Write one provider secret through the seam, at the path the provider records."""
-    _secrets(request).put(provider_secret_path(field=field, provider_name=name), value)
+    secrets_store(request).put(provider_secret_path(field=field, provider_name=name), value)
 
 
 def _group_config(
@@ -696,10 +682,15 @@ async def create_provider(
         )
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
 
-    _store_group_secrets(groups=body.groups, name=body.name, request=request)
+    await run_blocking(
+        lambda: _store_group_secrets(groups=body.groups, name=body.name, request=request)
+    )
     if body.client_secret:
-        _store_secret(
-            field="client_secret", name=body.name, request=request, value=body.client_secret
+        secret = body.client_secret
+        await run_blocking(
+            lambda: _store_secret(
+                field="client_secret", name=body.name, request=request, value=secret
+            )
         )
 
     try:
@@ -850,16 +841,20 @@ async def update_provider(
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
 
     if body.client_secret:
-        _store_secret(field="client_secret", name=name, request=request, value=body.client_secret)
+        secret = body.client_secret
+        await run_blocking(
+            lambda: _store_secret(field="client_secret", name=name, request=request, value=secret)
+        )
     if body.groups is not None:
-        _store_group_secrets(groups=body.groups, name=name, request=request)
+        groups = body.groups
+        await run_blocking(lambda: _store_group_secrets(groups=groups, name=name, request=request))
 
     provider = registry.update(name, **update_fields)
     # Picks up an enable/disable flip and a rotated client secret alike.
     _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "updated")
     # Deleted only once the saved config no longer points at them, so a failed update never leaves the provider on a missing secret.
-    _delete_secrets(paths=stale_paths, request=request)
+    await run_blocking(lambda: _delete_secrets(paths=stale_paths, request=request))
     return _provider_to_response(name, provider)
 
 
@@ -932,7 +927,7 @@ async def delete_provider(
         )
 
     registry.delete(name)
-    _delete_stored_secrets(request, provider)
+    await run_blocking(lambda: _delete_stored_secrets(request, provider))
     # A detached provider must stop serving logins immediately, not at restart.
     _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "deleted")
