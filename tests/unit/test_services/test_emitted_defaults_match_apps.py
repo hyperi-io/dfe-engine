@@ -39,10 +39,10 @@ class TestArchiverDefaults:
     """dfe-archiver crates/core/src/config.rs."""
 
     def test_routing_splits_per_org(self):
-        """RoutingConfig::default, dfe-archiver 3d04ac4."""
+        """RoutingConfig::default: expression mode, with the fields left to the app."""
         routing = ArchiverConfig().routing
         assert routing.mode == "expression"
-        assert routing.expression_fields == ["org_id"]
+        assert routing.expression_fields is None
 
     def test_path_template_omits_topic(self):
         """The per-topic writers prepend it; a template carrying it doubles it."""
@@ -60,7 +60,7 @@ class TestArchiverDefaults:
         """What an operator who touched nothing actually gets written."""
         emitted = generate_template("archiver", profile="default")
         assert emitted["routing"]["mode"] == "expression"
-        assert emitted["routing"]["expression_fields"] == ["org_id"]
+        assert "expression_fields" not in emitted["routing"]
         assert emitted["archive"]["path_template"] == "{year}/{month}/{day}/{hour}"
 
 
@@ -130,6 +130,47 @@ class TestArchiverRollInterval:
     def test_a_non_positive_value_is_refused(self, bad: int):
         with pytest.raises(ValueError, match="greater than 0"):
             ArchiverConfig.model_validate({"archive": {"roll_interval_secs": bad}})
+
+
+class TestArchiverExpressionFields:
+    """dfe-archiver #127: unset is [org_id] on kafka and [_source, org_id] on grpc.
+
+    So the engine writes the fields only when an operator set them.
+    """
+
+    def test_an_untouched_config_dumps_without_them(self):
+        assert "expression_fields" not in ArchiverConfig().model_dump(mode="json")["routing"]
+
+    def test_an_operator_value_is_kept(self):
+        config = ArchiverConfig.model_validate({"routing": {"expression_fields": ["_source"]}})
+        assert config.model_dump(mode="json")["routing"]["expression_fields"] == ["_source"]
+
+    def test_an_operator_empty_list_is_kept(self):
+        """Empty is a value, not unset: the archiver refuses it in expression mode."""
+        config = ArchiverConfig.model_validate({"routing": {"expression_fields": []}})
+        assert config.model_dump(mode="json")["routing"]["expression_fields"] == []
+
+    @pytest.mark.parametrize("profile", ["default", "production", "k8s"])
+    def test_emitted_template_omits_them(self, profile: str):
+        emitted = generate_template("archiver", profile=profile)
+        assert "expression_fields" not in emitted["routing"]
+
+    def test_a_saved_config_round_trips_without_them(self, tmp_path):
+        """The /services path: validate the operator's dict, dump the model, write YAML."""
+        registry = ServiceConfigRegistry(config_directory=tmp_path, writable=True)
+        try:
+            registry.save_config("archiver", {"routing": {"default_segment": "x"}}, "unset")
+            registry.save_config(
+                "archiver", {"routing": {"expression_fields": ["_source", "org_id"]}}, "set"
+            )
+            unset = yaml_load(tmp_path / "archiver-unset.yaml")["routing"]
+            written = yaml_load(tmp_path / "archiver-set.yaml")["routing"]
+            read_back = registry.get_config("archiver", "set").routing.expression_fields
+        finally:
+            registry.close()
+        assert "expression_fields" not in unset
+        assert written["expression_fields"] == ["_source", "org_id"]
+        assert read_back == ["_source", "org_id"]
 
 
 class TestLoaderClickHouseDefaults:

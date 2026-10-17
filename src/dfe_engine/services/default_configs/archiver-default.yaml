@@ -32,7 +32,6 @@ memory:
 
 routing:
   mode: topic
-  expression_fields: []
   default_segment: unknown
 
 compression:

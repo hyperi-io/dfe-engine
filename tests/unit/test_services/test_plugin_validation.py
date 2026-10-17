@@ -686,6 +686,15 @@ class TestValidateArchiverRouting:
         errors, _ = run_archiver_validation(config)
         assert not any("expression" in e.lower() for e in errors)
 
+    def test_expression_mode_with_unset_fields_passes(self):
+        """Unset is the app's per-transport default, not a missing list."""
+        config = ArchiverConfig()
+        config.kafka.brokers = ["localhost:9092"]
+        config.routing.mode = "expression"
+        assert config.routing.expression_fields is None
+        errors, _ = run_archiver_validation(config)
+        assert not any("expression" in e.lower() for e in errors)
+
 
 # ---------------------------------------------------------------------------
 # _validate_fetcher — validation logic

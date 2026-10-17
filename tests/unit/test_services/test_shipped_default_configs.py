@@ -88,6 +88,13 @@ def test_no_shipped_archiver_config_pins_the_roll_interval(name: str, text: str)
     assert "roll_interval_secs" not in archive, f"{name} pins archive.roll_interval_secs"
 
 
+@pytest.mark.parametrize(("name", "text"), _ARCHIVER, ids=[n for n, _ in _ARCHIVER])
+def test_no_shipped_archiver_config_pins_the_expression_fields(name: str, text: str):
+    # dfe-archiver #127 picks the fields from the transport; a pin overrides that.
+    routing = (yaml_load_string(text) or {})["routing"]
+    assert "expression_fields" not in routing, f"{name} pins routing.expression_fields"
+
+
 @pytest.mark.parametrize(("name", "text"), _LOADER, ids=[n for n, _ in _LOADER])
 @pytest.mark.parametrize("field", ["group", "client_id", "topics"])
 def test_every_shipped_loader_config_consumes_as_the_loader_does(name: str, text: str, field: str):

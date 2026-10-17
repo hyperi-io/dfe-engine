@@ -62,7 +62,8 @@ def _validate_archiver(config: Any, errors: list[str], warnings: list[str]) -> N
                 "but sasl_mechanism is not set"
             )
 
-    if config.routing.mode == "expression" and not config.routing.expression_fields:
+    # Unset is the app's own per-transport default. Only an explicit empty list is refused.
+    if config.routing.mode == "expression" and config.routing.expression_fields == []:
         errors.append("routing.mode is 'expression' but no expression_fields configured")
 
 
