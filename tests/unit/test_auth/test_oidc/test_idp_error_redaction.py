@@ -25,15 +25,12 @@ import pytest
 from authlib.integrations.base_client import MismatchingStateError, OAuthError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from google.auth.credentials import AnonymousCredentials
 from google.auth.exceptions import RefreshError
-from googleapiclient.discovery import build
 
 from dfe_engine.auth.groups import GroupStore
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
-from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
+from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import fill_from_userinfo_endpoint
 from dfe_engine.auth.oidc.sync import sync_provider
@@ -45,6 +42,8 @@ from dfe_engine.http_errors import (
 from tests.support.refusing_api import refusing_api
 from tests.unit.test_auth.factories import make_oauth_client
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
+from tests.unit.test_auth.test_oidc.local_directory import AppTokenEntra
+from tests.unit.test_auth.test_oidc.local_directory_api import LocalDirectoryGoogle
 from tests.unit.test_auth.test_oidc.local_graph import TENANT, LocalGraph
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
 from tests.unit.test_auth.test_oidc.local_okta import LocalOkta, okta_adapter
@@ -243,13 +242,6 @@ GRAPH_NOT_FOUND = {
 }
 
 
-class _AppTokenEntra(EntraAdapter):
-    """Entra with its client-credentials token already in hand, so no MSAL call is made."""
-
-    def _get_token(self) -> str | None:
-        return "app-token"
-
-
 def _entra_adapter(base_url: str) -> EntraAdapter:
     """An Entra adapter with no user token that reads Graph at ``base_url`` with an app token."""
     provider = OIDCProvider(
@@ -257,7 +249,7 @@ def _entra_adapter(base_url: str) -> EntraAdapter:
         issuer="https://login.microsoftonline.com/test-tenant/v2.0",
         groups=GroupResolutionConfig(mode="api"),
     )
-    adapter = _AppTokenEntra(provider)
+    adapter = AppTokenEntra(provider)
     adapter.GRAPH_BASE = base_url
     return adapter
 
@@ -357,23 +349,6 @@ DIRECTORY_NOT_FOUND = {
 }
 
 
-class _LocalDirectoryGoogle(GoogleAdapter):
-    """Google whose Directory API client is built against a local stand-in."""
-
-    def __init__(self, provider: OIDCProvider, *, base_url: str) -> None:
-        super().__init__(provider)
-        self._service = build(
-            "admin",
-            "directory_v1",
-            cache_discovery=False,
-            client_options={"api_endpoint": f"{base_url}/"},
-            credentials=AnonymousCredentials(),
-        )
-
-    def _get_service(self) -> Any | None:
-        return self._service
-
-
 def _directory_adapter(base_url: str) -> GoogleAdapter:
     """A Google adapter with no user token whose service account reads the Directory API at ``base_url``."""
     provider = OIDCProvider(
@@ -381,7 +356,7 @@ def _directory_adapter(base_url: str) -> GoogleAdapter:
         issuer="https://accounts.google.com",
         groups=GroupResolutionConfig(service_account_json_env="DFE_TEST_IDP_SA_JSON"),
     )
-    return _LocalDirectoryGoogle(provider, base_url=base_url)
+    return LocalDirectoryGoogle(provider, base_url=base_url)
 
 
 TOKEN_REFUSED = {
@@ -560,42 +535,30 @@ class TestGoogleCloudIdentity:
 # ---------------------------------------------------------------------------
 
 
-class _RaisingDirectory(OIDCGroupAdapter):
-    """A directory whose listing makes a real call and lets the refusal propagate."""
-
-    def __init__(self, provider: OIDCProvider, *, url: str) -> None:
-        super().__init__(provider)
-        self._url = url
-
-    async def list_all_groups(self) -> list[GroupInfo]:
-        async with httpx.AsyncClient() as client:
-            response = await client.get(self._url)
-            response.raise_for_status()
-        return []
-
-    async def test_connection(self) -> tuple[bool, str]:
-        return True, "unused"
-
-
 class TestSync:
     async def test_a_failed_listing_records_no_provider_text(
         self, tmp_path, audit_events: list[dict]
     ) -> None:
-        provider = OIDCProvider(
-            type="generic",
-            issuer="https://sso.example.com",
-            groups=GroupResolutionConfig(mode="api"),
-        )
-        registry = OIDCProviderRegistry(tmp_path / "oidc")
-        registry.create("sso", provider)
-        with refusing_api(403, {"errorCode": "E0000006", "errorSummary": SENTINEL}) as server:
-            adapter = _RaisingDirectory(provider, url=f"{server.base_url}/users/{SENTINEL}/groups")
+        """The refusal body and the paging cursor the provider handed out both carry the sentinel."""
+        okta = LocalOkta(pages=_numbered_okta_pages(2), next_query=f"&after={SENTINEL}")
+        okta.fail_page = 1
+        okta.fail_status = 403
+        okta.fail_body = {"errorCode": "E0000006", "errorSummary": SENTINEL}
+        okta.start()
+        registry = _sync_registry(tmp_path)
+        try:
             result = await sync_provider(
-                "sso", registry, GroupStore(tmp_path / "groups"), adapter=adapter
+                "sso",
+                registry,
+                GroupStore(tmp_path / "groups"),
+                adapter=okta_adapter(okta.base_url),
             )
+        finally:
+            okta.stop()
 
         stored = registry.get("sso")
         assert stored is not None
+        assert okta.pages_requested == [0, 1]
         assert_no_sentinel(result["error"])
         assert_no_sentinel(logged(audit_events))
         assert stored.sync_error == result["error"]

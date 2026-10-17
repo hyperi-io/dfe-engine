@@ -46,6 +46,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
+from tests.support.clickhouse_cleanup import drop_database_and_policies
 
 pytestmark = pytest.mark.integration
 
@@ -119,7 +120,7 @@ def stack(ch_params, ch_client, monkeypatch, tmp_path):
     finally:
         _registries.clear()
         ClickHouseManager.reset_instance()
-        ch_client.command(f"DROP DATABASE IF EXISTS `{database}` SYNC")
+        drop_database_and_policies(ch_client, database)
 
 
 def _live_ttl_days(ch_client, database: str, table: str) -> int | None:
@@ -233,3 +234,23 @@ def test_the_next_boot_renders_the_override_so_nothing_reads_as_drift(ch_client,
     assert settings.clickhouse.default_ttl_days == 45
     assert not report.refused, [outcome.describe() for outcome in report.refused]
     assert _live_ttl_days(ch_client, stack.database, "main") == 45
+
+
+def test_a_plan_from_the_deployment_settings_reads_the_override_as_drift(ch_client, stack):
+    """`dfe schema plan` and `apply` build from the deployment settings, which know no console value."""
+    put = stack.client.put(URL, headers=stack.headers, json={"default_ttl_days": 45})
+    assert put.status_code == 200, put.text
+    plan = build_plan(settings=stack.client.app.state.settings, client=ch_client)
+
+    planned = apply_plan(ch_client, plan, dry_run=True)
+
+    assert any(
+        f"{stack.database}.main" in outcome.describe() and "TTL is 45 days" in outcome.describe()
+        for outcome in planned.refused
+    ), [outcome.describe() for outcome in planned.refused]
+    assert _live_ttl_days(ch_client, stack.database, "main") == 45
+
+    forced = apply_plan(ch_client, plan, allow_drift=True)
+
+    assert not forced.refused, [outcome.describe() for outcome in forced.refused]
+    assert _live_ttl_days(ch_client, stack.database, "main") == 90

@@ -33,6 +33,7 @@ from dfe_engine.settings import (
     LocalAuthSettings,
     SecretsSettings,
 )
+from tests.support.clickhouse_cleanup import drop_database_and_policies
 
 pytestmark = pytest.mark.integration
 
@@ -97,7 +98,7 @@ def stack(ch_params, ch_client, tmp_path):
     finally:
         _registries.clear()
         ClickHouseManager.reset_instance()
-        ch_client.command(f"DROP DATABASE IF EXISTS `{database}` SYNC")
+        drop_database_and_policies(ch_client, database)
 
 
 def _raw(stack, headers: dict[str, str], sql: str):

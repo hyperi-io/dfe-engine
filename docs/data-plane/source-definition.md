@@ -57,6 +57,9 @@ match:
 # A source is ONE connector type across as many connections as it likes -- one
 # schema per source is what keeps its table one shape -- so a second type is
 # refused on the write and again when the fetcher config is composed.
+# `topic: own` needs a schema (meta_schema, derived_schema or additional_fields),
+# because a source with none can never deploy. The write is refused until the
+# topic is `main` or a schema is defined.
 # fetcher:
 #   source_type: okta                   # A family the deployed fetcher ships (apps.yaml source_types)
 #   topic: own                          # own: this source's topic and table | main: the shared main topic and table

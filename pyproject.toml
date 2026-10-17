@@ -83,16 +83,18 @@ dependencies = [
     # Scheduling
     "croniter>=6.2.2",
     # HTTP clients
+    # 0.28.1 (2024-12) is the latest stable. 1.0 is dev-only on PyPI (dev6, 2026-08-31) and upstream is active.
+    # Imported by the dfe CLI client (cli/auto/client.py) and required by scalo's http extra.
     "httpx>=0.28.1",
     "requests>=2.34.2",
     "urllib3>=2.7.0",
     # Templating
+    # 3.1.6 (2025-03) is the latest release. Imported by pipeline/pipeline.py and required by pysigma.
     "Jinja2>=3.1.6",
     # Sigma rules
     # Held below 2.0 for GA: the Sigma translation core, upgraded post-GA with its backends.
     "pysigma>=1.4.0,<2",
     # Utilities
-    "python-dateutil>=2.9.0",
     "tabulate>=0.10.0",
     "pyparsing>=3.3.2",
     "platformdirs>=4.13.0",
@@ -106,6 +108,8 @@ dependencies = [
     # authlib's HTTP client imports httpx2 first and warns on every start when it falls back to httpx.
     "httpx2>=2.13.1",
     # Signs the OIDC RP session cookie (SessionMiddleware / Authlib OAuth state+nonce)
+    # Starlette's SessionMiddleware imports it and does not require it, so this is the only thing that installs it.
+    # 2.2.0 (2024-04) is the latest release, and pallets/itsdangerous last committed 2025-06.
     "itsdangerous>=2.2.0",
     # Held on 0.6 for GA: later 0.x minors change the SCIM models' API.
     "scim2-models>=0.6.12,<0.7",
@@ -125,11 +129,12 @@ dependencies = [
     "starlette>=1.8.0",
     # Floor 50: GHSA PKCS#7 Bleichenbacher oracle, vulnerable >=44,<50.
     "cryptography>=50.0.0",
-    "uvicorn[standard]>=0.52.1",
+    "uvicorn[standard]>=0.54.0",
     # Must stay >=2.14.0: CVE-2026-102274, one malformed JWK aborts parsing of the whole JWK Set.
     "PyJWT[crypto]>=2.15.1",
     "sse-starlette>=3.4.5",
     # Transitive override: diskcache pulled in by pySigma for MITRE ATT&CK caching.
+    # 5.6.3 (2023-08) is the latest release and the repo's last commit is 2024-03, so it is unmaintained.
     # CVE-2025-69872 (unsafe pickle, CVSS 9.8): no upstream fix — maintainer unresponsive
     # since Aug 2023, community PR #359 unreviewed. The irony: a security tool's dependency
     # chain introduces a critical CVE. Accepted risk — dfe-engine never imports diskcache
@@ -177,13 +182,13 @@ dev = [
     "pytest-benchmark>=5.2.3",
     "pytest-xdist>=3.8.0",
     "coverage>=7.14.3",
-    "defusedxml>=0.7.1",
     "moto[s3,secretsmanager]>=5.2.4",
     "werkzeug>=3.1.9",
     "ruff>=0.17.0",
     "Faker>=40.43.0",
     "types-requests>=2.33.0.20261006",
     "python-dotenv>=1.2.2",
+    # 2.4.0 (2025-05) is the latest release and the repo is active (commit 2026-10-15).
     "pytest-timeout>=2.4.0",
 ]
 

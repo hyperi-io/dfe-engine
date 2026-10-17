@@ -7,7 +7,6 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import os
-from typing import Any
 
 import pytest
 from scalo.logger import logger
@@ -23,6 +22,10 @@ from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCPr
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import OidcRelyingParty
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
+from tests.unit.test_auth.test_oidc.local_directory_api import (
+    LocalDirectoryApi,
+    LocalDirectoryGoogle,
+)
 from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 # ---------------------------------------------------------------------------
@@ -300,61 +303,36 @@ class TestServiceAccountFailuresLogNoText:
         assert line["error_type"] == error_type
 
 
-class _EndlessDirectory:
-    """A Directory API client whose group listing names a next page until ``pages`` have been served."""
-
-    def __init__(self, *, pages: int) -> None:
-        self.pages = pages
-        self.served = 0
-
-    def groups(self) -> _EndlessDirectory:
-        return self
-
-    def list(self, **_kwargs: Any) -> _EndlessDirectory:
-        return self
-
-    def execute(self) -> dict[str, Any]:
-        self.served += 1
-        page: dict[str, Any] = {
-            "groups": [{"id": f"g{self.served}", "name": f"group {self.served}"}]
-        }
-        if self.served < self.pages:
-            page["nextPageToken"] = str(self.served)
-        return page
+@pytest.fixture
+def endless_directory():
+    """A Directory API that names a next page on each of ten pages."""
+    directory = LocalDirectoryApi(pages=10)
+    directory.start()
+    yield directory
+    directory.stop()
 
 
 class TestDirectoryListingPageLimit:
-    def test_a_listing_still_paging_at_the_limit_is_abandoned(self):
+    def test_a_listing_still_paging_at_the_limit_is_abandoned(self, endless_directory):
         adapter = GoogleAdapter(_make_provider())
         adapter.MAX_LISTING_PAGES = 3
-        directory = _EndlessDirectory(pages=10)
 
         with pytest.raises(DirectoryPageLimitError):
-            adapter._fetch_all_groups_sync(directory)
-        assert directory.served == 3
-
-
-class _EndlessDirectoryGoogle(GoogleAdapter):
-    """Google whose service account reads a Directory API that keeps naming a next page."""
-
-    def __init__(self, provider: OIDCProvider, *, directory: _EndlessDirectory) -> None:
-        super().__init__(provider)
-        self._directory = directory
-
-    def _get_service(self) -> Any | None:
-        return self._directory
+            adapter._fetch_all_groups_sync(endless_directory.service())
+        assert endless_directory.served == 3
 
 
 class TestLoginLookupPageLimit:
-    async def test_a_user_lookup_still_paging_at_the_limit_is_default_deny(self, audit_events):
-        directory = _EndlessDirectory(pages=10)
-        adapter = _EndlessDirectoryGoogle(_make_provider(), directory=directory)
+    async def test_a_user_lookup_still_paging_at_the_limit_is_default_deny(
+        self, endless_directory, audit_events
+    ):
+        adapter = LocalDirectoryGoogle(_make_provider(), base_url=endless_directory.base_url)
         adapter.MAX_LOGIN_PAGES = 3
 
         groups = await adapter.resolve_user_groups("user@example.com")
 
         assert groups == []
-        assert directory.served == 3
+        assert endless_directory.served == 3
         (line,) = [e for e in audit_events if e.get("operation") == "resolve_user_groups"]
         assert line["error_type"] == "DirectoryPageLimitError"
 

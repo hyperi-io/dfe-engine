@@ -341,11 +341,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.policy_store = PolicyStore(gitcrud) if gitcrud is not None else None
 
     # Bootstrap OIDC provider registry
-    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry, ProviderMetrics
 
     oidc_dir = auth_dir / "oidc-providers"
     oidc_dir.mkdir(parents=True, exist_ok=True)
-    app.state.oidc_provider_registry = OIDCProviderRegistry(oidc_dir)
+    app.state.oidc_provider_registry = OIDCProviderRegistry(
+        oidc_dir, metrics=ProviderMetrics(app.state.metrics_manager)
+    )
 
     # Build the OIDC relying party from the enabled providers. The engine is the
     # RP + single token issuer: it terminates the IdP login and re-mints its own

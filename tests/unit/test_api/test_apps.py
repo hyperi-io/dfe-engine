@@ -57,6 +57,7 @@ def _define_fetcher_source(client, headers, name: str):
         "/api/v1/sources",
         json={
             "source": name,
+            "schema": {"meta_schema": "meta/syslog"},
             "fetcher": {"source_type": "crates_io", "config": {"crates": ["dfe-fetcher"]}},
         },
         headers=headers,

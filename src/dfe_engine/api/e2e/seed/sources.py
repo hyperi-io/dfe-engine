@@ -41,6 +41,8 @@ _MATCH_FIELD = "tags.collector.type"
 # A public-registry family: it needs no credentials, so the stanza is inert data.
 _FETCHER_TYPE = "crates_io"
 _FETCHER_CONFIG = {"crates": ["dfe-fetcher"], "interval_secs": 3600}
+# A fetcher on its own topic is refused without a schema, because deploy refuses one too.
+_FETCHER_META_SCHEMA = "meta/syslog"
 
 
 class Sources(Seed):
@@ -138,7 +140,7 @@ class Sources(Seed):
                 if fetched
                 else None,
                 header=SourceHeader(),
-                schema_config=SourceSchema(),
+                schema_config=SourceSchema(meta_schema=_FETCHER_META_SCHEMA if fetched else None),
                 transform=transform,
             ),
             created_by=SEED_ACTOR,

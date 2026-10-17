@@ -6,7 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import asyncio
 import json
+import threading
 
 import pytest
 from prometheus_client.parser import text_string_to_metric_families
@@ -17,58 +19,32 @@ from dfe_engine.api.deps import _resolve_roles_from_groups
 from dfe_engine.auth.bootstrap import bootstrap_auth
 from dfe_engine.auth.groups import GROUPS_SKIPPED, GroupMetrics, GroupStore
 from dfe_engine.auth.membership import linked_groups, linked_providers
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
-from dfe_engine.auth.oidc.adapters.okta import _group_info_from_okta
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import (
     NO_DIRECTORY_MESSAGE,
     NOT_CONFIGURED_MESSAGE,
+    STORE_FAILURE_MESSAGE,
     SYNC_GROUPS_SKIPPED,
     SyncMetrics,
     _safe_name,
     sync_provider,
 )
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
+from tests.support.event_loop import ticks_while_held
+from tests.support.failing_stores import CreateFailingGroupStore, HeldGroupStore
+from tests.unit.test_auth.test_oidc.local_directory import (
+    failing_graph_directory,
+    graph_directory,
+    okta_directory,
+)
 from tests.unit.test_auth.test_oidc.refusing_store import PolicyRefusingSecretStore
 from tests.unit.test_auth.test_oidc.sync_cases import (
     SYNC_IDENTIFIER_COLLISION_CASES,
     SyncIdentifierCollisionCase,
 )
 from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
-
-# ---------------------------------------------------------------------------
-# Fake adapter — dependency injection, not mocking
-# ---------------------------------------------------------------------------
-
-
-class FakeAdapter(OIDCGroupAdapter):
-    """Concrete adapter that returns a fixed list of GroupInfo for testing."""
-
-    def __init__(self, provider: OIDCProvider, groups: list[GroupInfo]) -> None:
-        super().__init__(provider)
-        self._groups = groups
-
-    async def list_all_groups(self) -> list[GroupInfo]:
-        return self._groups
-
-    async def test_connection(self) -> tuple[bool, str]:
-        return (True, "fake")
-
-
-class ErrorAdapter(OIDCGroupAdapter):
-    """Adapter that always raises on list_all_groups."""
-
-    def __init__(self, provider: OIDCProvider) -> None:
-        super().__init__(provider)
-
-    async def list_all_groups(self) -> list[GroupInfo]:
-        raise RuntimeError("connection refused")
-
-    async def test_connection(self) -> tuple[bool, str]:
-        return (False, "connection refused")
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -141,7 +117,7 @@ class TestSyncCreatesNewGroups:
             ),
             GroupInfo(id="g2", name="operators", email="", description="Ops team"),
         ]
-        adapter = FakeAdapter(api_provider, groups)
+        adapter = graph_directory(api_provider, groups)
 
         result = await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
@@ -159,7 +135,7 @@ class TestSyncCreatesNewGroups:
         provider_registry.create("test-sso", api_provider)
 
         groups = [GroupInfo(id="g1", name="admins", email="admins@example.com")]
-        adapter = FakeAdapter(api_provider, groups)
+        adapter = graph_directory(api_provider, groups)
 
         asyncio.run(sync_provider("test-sso", provider_registry, group_store, adapter=adapter))
 
@@ -174,7 +150,7 @@ class TestSyncCreatesNewGroups:
         provider_registry.create("test-sso", api_provider)
 
         groups = [GroupInfo(id="g1", name="My Operators", email="")]
-        adapter = FakeAdapter(api_provider, groups)
+        adapter = graph_directory(api_provider, groups)
 
         await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
@@ -187,7 +163,7 @@ class TestSyncCreatesNewGroups:
         provider_registry.create("test-sso", api_provider)
 
         groups = [GroupInfo(id="group-abc-123", name="", email="")]
-        adapter = FakeAdapter(api_provider, groups)
+        adapter = graph_directory(api_provider, groups)
 
         await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
@@ -199,7 +175,7 @@ class TestSyncCreatesNewGroups:
         provider_registry.create("test-sso", api_provider)
 
         groups = [GroupInfo(id="g1", name="devs", email="devs@example.com")]
-        adapter = FakeAdapter(api_provider, groups)
+        adapter = graph_directory(api_provider, groups)
 
         await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
@@ -231,7 +207,7 @@ class TestSyncUpdatesTheGroupsLinkedToIt:
                 description="New description from provider",
             )
         ]
-        adapter = FakeAdapter(api_provider, groups)
+        adapter = graph_directory(api_provider, groups)
 
         result = await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
@@ -256,7 +232,7 @@ class TestSyncUpdatesTheGroupsLinkedToIt:
             GroupInfo(id="g1", name="Security Operators", email=""),
             GroupInfo(id="g2", name="ops", email="ops@example.com"),
         ]
-        adapter = FakeAdapter(api_provider, groups)
+        adapter = graph_directory(api_provider, groups)
         await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
         again = await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
@@ -292,7 +268,7 @@ class TestSyncUpdatesTheGroupsLinkedToIt:
             "test-sso",
             provider_registry,
             group_store,
-            adapter=FakeAdapter(api_provider, renamed),
+            adapter=graph_directory(api_provider, renamed),
             bindings=bindings,
         )
 
@@ -326,12 +302,12 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
     @staticmethod
     def _entra(provider, tmp_path, monkeypatch, attacker):
         # An Entra security group has no mail, so its displayName names it.
-        return FakeAdapter(provider, [GroupInfo(id=attacker, name="DFE Admins", email="")])
+        return graph_directory(provider, [GroupInfo(id=attacker, name="DFE Admins", email="")])
 
     @staticmethod
     def _okta(provider, tmp_path, monkeypatch, attacker):
         item = {"id": attacker, "profile": {"name": "DFE Admins", "description": ""}}
-        return FakeAdapter(provider, [_group_info_from_okta(item)])
+        return okta_directory([item])
 
     @staticmethod
     def _mock_directory(provider, tmp_path, monkeypatch, attacker):
@@ -378,7 +354,10 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         groups = [GroupInfo(id=self.ATTACKER, name="SOC", email="soc@example.com")]
 
         result = await sync_provider(
-            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=graph_directory(api_provider, groups),
         )
 
         assert result["groups_skipped"] == 1
@@ -396,7 +375,10 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         groups = [GroupInfo(id=self.ATTACKER, name="SOC Team", email="")]
 
         result = await sync_provider(
-            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=graph_directory(api_provider, groups),
         )
 
         assert (result["updated"], result["groups_skipped"]) == (0, 1)
@@ -415,7 +397,10 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         groups = [GroupInfo(id="g-soc", name="SOC Team", email="", description="New")]
 
         result = await sync_provider(
-            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=graph_directory(api_provider, groups),
         )
 
         assert (result["updated"], result["groups_skipped"]) == (1, 0)
@@ -438,7 +423,7 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
             "okta",
             provider_registry,
             group_store,
-            adapter=FakeAdapter(api_provider, groups),
+            adapter=graph_directory(api_provider, groups),
             metrics=SyncMetrics(manager),
         )
 
@@ -484,7 +469,7 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         groups = [GroupInfo(email="", id="SOC Analysts", name="SOC Analysts")]
 
         result = await sync_provider(
-            adapter=FakeAdapter(groups=groups, provider=api_provider),
+            adapter=graph_directory(api_provider, groups),
             group_store=group_store,
             metrics=SyncMetrics(manager),
             provider_name="okta",
@@ -529,7 +514,7 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
             syncing,
             provider_registry,
             group_store,
-            adapter=FakeAdapter(api_provider, groups),
+            adapter=graph_directory(api_provider, groups),
             bindings=bindings,
         )
 
@@ -553,7 +538,7 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
             "entra",
             provider_registry,
             group_store,
-            adapter=FakeAdapter(api_provider, groups),
+            adapter=graph_directory(api_provider, groups),
             metrics=SyncMetrics(manager),
             bindings={SCIM_SOURCE_PROVIDER: "okta"},
         )
@@ -573,7 +558,10 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         groups = [GroupInfo(id="", name="DFE Admins", email="")]
 
         result = await sync_provider(
-            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=graph_directory(api_provider, groups),
         )
 
         assert (result["updated"], result["groups_skipped"]) == (0, 1)
@@ -592,7 +580,7 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
                 "test-sso",
                 provider_registry,
                 group_store,
-                adapter=FakeAdapter(api_provider, groups),
+                adapter=graph_directory(api_provider, groups),
             )
         finally:
             logger.remove(handler)
@@ -629,7 +617,7 @@ class TestSyncNeverCreatesAGroupCrossingTheNamespaces:
         groups = [GroupInfo(email="", id=case["group_id"], name=case["group_name"])]
 
         result = await sync_provider(
-            adapter=FakeAdapter(groups=groups, provider=api_provider),
+            adapter=graph_directory(api_provider, groups),
             group_store=group_store,
             metrics=SyncMetrics(manager),
             provider_name="test-sso",
@@ -674,7 +662,7 @@ class TestSyncOverAGroupFileThatDoesNotLoad:
                 "test-sso",
                 provider_registry,
                 group_store,
-                adapter=FakeAdapter(api_provider, groups),
+                adapter=graph_directory(api_provider, groups),
                 metrics=SyncMetrics(manager),
             )
         finally:
@@ -701,6 +689,196 @@ class TestSyncOverAGroupFileThatDoesNotLoad:
         ]
         assert skipped == [1.0]
         assert _sync_skips(manager) == {"stored_unloadable": 1.0}
+
+
+class TestSyncWritesRunOffTheEventLoop:
+    """Each group is a file read, write and fsync, which must not stall the API's other requests."""
+
+    async def test_a_slow_store_does_not_block_the_event_loop(self, tmp_path, api_provider):
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        arrived, gate = threading.Event(), threading.Event()
+        group_store = HeldGroupStore(tmp_path / "groups", arrived=arrived, gate=gate)
+        groups = [GroupInfo(id="g1", name="admins", email="admins@example.com")]
+
+        sync = asyncio.create_task(
+            sync_provider(
+                "test-sso",
+                provider_registry,
+                group_store,
+                adapter=graph_directory(api_provider, groups),
+            )
+        )
+        ticks = await ticks_while_held(arrived=arrived, gate=gate)
+        result = await sync
+
+        # The event loop ran while the create was held: the test opened the gate, the wait did not time out.
+        assert group_store.gate_opened_by_test == [True]
+        assert ticks >= 5
+        assert (result["created"], result["status"]) == (1, "ok")
+        assert threading.get_ident() not in group_store.create_threads
+
+    async def test_two_syncs_of_one_provider_apply_one_after_the_other(
+        self, tmp_path, api_provider
+    ):
+        """Applied side by side each would create the group, where one run should find the other's."""
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        arrived, gate = threading.Event(), threading.Event()
+        group_store = HeldGroupStore(tmp_path / "groups", arrived=arrived, gate=gate)
+        groups = [GroupInfo(id="g1", name="admins", email="admins@example.com")]
+
+        def sync() -> asyncio.Task:
+            return asyncio.create_task(
+                sync_provider(
+                    "test-sso",
+                    provider_registry,
+                    group_store,
+                    adapter=graph_directory(api_provider, groups),
+                )
+            )
+
+        first = sync()
+        while not arrived.is_set():
+            await asyncio.sleep(0.005)
+        second = sync()
+        # Long enough for the second apply to reach the store if nothing kept it out.
+        await asyncio.sleep(0.5)
+        creates_while_held = len(group_store.create_threads)
+        gate.set()
+        results = [await first, await second]
+
+        assert creates_while_held == 1
+        assert sorted((r["created"], r["updated"]) for r in results) == [(0, 1), (1, 0)]
+
+
+class TestSyncOverAGroupTheStoreCannotWrite:
+    """One group the store cannot write must not end the sync or leave the provider unstamped."""
+
+    # U+0085 survives no YAML round trip, so the store refuses to write it.
+    _UNWRITABLE = "a\x85b"
+
+    async def test_a_description_yaml_cannot_carry_is_skipped_and_the_rest_sync(
+        self, tmp_path, api_provider
+    ):
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        group_store = GroupStore(tmp_path / "groups")
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        groups = [
+            GroupInfo(id="g1", name="admins", email="admins@example.com"),
+            GroupInfo(id="g2", name="bad", email="bad@example.com", description=self._UNWRITABLE),
+            GroupInfo(id="g3", name="ops", email="ops@example.com"),
+        ]
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=graph_directory(api_provider, groups),
+            metrics=SyncMetrics(manager),
+        )
+
+        provider = provider_registry.get("test-sso")
+        assert provider is not None
+        assert [g.name for g in group_store.list()] == ["admins-example.com", "ops-example.com"]
+        assert (result["created"], result["groups_skipped"], result["status"]) == (2, 1, "partial")
+        assert result["error"] is None
+        assert provider.last_sync_at
+        assert provider.last_sync_status == (
+            "partial: 1 of 3 groups skipped, the store could not write them"
+        )
+        assert _sync_skips(manager) == {"write_failed": 1.0}
+
+    async def test_a_linked_group_whose_update_cannot_be_written_is_skipped(
+        self, tmp_path, api_provider
+    ):
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        group_store = GroupStore(tmp_path / "groups")
+        group_store.create("admins", roles=["admin"], source_id="g1", source_provider="test-sso")
+        group_store.create("ops", roles=["ops"], source_id="g2", source_provider="test-sso")
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        groups = [
+            GroupInfo(id="g1", name="admins", description=self._UNWRITABLE),
+            GroupInfo(id="g2", name="ops", description="Operators"),
+        ]
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=graph_directory(api_provider, groups),
+            metrics=SyncMetrics(manager),
+        )
+
+        ops = group_store.get("ops")
+        assert ops is not None
+        assert (result["updated"], result["groups_skipped"], ops.description) == (1, 1, "Operators")
+        assert _sync_skips(manager) == {"write_failed": 1.0}
+
+    async def test_a_volume_that_refuses_one_create_skips_that_group(self, tmp_path, api_provider):
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        group_store = CreateFailingGroupStore(
+            tmp_path / "groups",
+            error=OSError(28, "No space left on device"),
+            fail_on="bad-example.com",
+        )
+        groups = [
+            GroupInfo(id="g1", name="admins", email="admins@example.com"),
+            GroupInfo(id="g2", name="bad", email="bad@example.com"),
+            GroupInfo(id="g3", name="ops", email="ops@example.com"),
+        ]
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=graph_directory(api_provider, groups),
+        )
+
+        assert [g.name for g in group_store.list()] == ["admins-example.com", "ops-example.com"]
+        assert (result["created"], result["groups_skipped"], result["status"]) == (2, 1, "partial")
+
+    async def test_any_other_store_failure_ends_the_run_recorded_as_an_error(
+        self, audit_events, tmp_path, api_provider
+    ):
+        """The failure is neither a group's own nor a write, so the run stops, keeps its tally and stamps."""
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        group_store = CreateFailingGroupStore(
+            tmp_path / "groups",
+            error=RuntimeError("store-sentinel-4417"),
+            fail_on="bad-example.com",
+        )
+        groups = [
+            GroupInfo(id="g1", name="admins", email="admins@example.com"),
+            GroupInfo(id="g2", name="bad", email="bad@example.com"),
+            GroupInfo(id="g3", name="ops", email="ops@example.com"),
+        ]
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=graph_directory(api_provider, groups),
+        )
+
+        provider = provider_registry.get("test-sso")
+        assert provider is not None
+        # The group created before the failure is reported, so the caller still reconciles it.
+        assert (result["status"], result["created"], result["error"]) == (
+            "error",
+            1,
+            STORE_FAILURE_MESSAGE,
+        )
+        assert [g.name for g in group_store.list()] == ["admins-example.com"]
+        assert provider.last_sync_at
+        assert (provider.last_sync_status, provider.sync_error) == ("error", STORE_FAILURE_MESSAGE)
+        (line,) = [e for e in audit_events if e["event"] == "OIDC group sync failed"]
+        assert line["error_type"] == "RuntimeError"
+        assert "store-sentinel-4417" not in json.dumps(audit_events, default=str)
 
 
 def _sync_skips(manager) -> dict[str, float]:
@@ -736,7 +914,7 @@ class TestSyncOverAGroupWhoseIdentifierMakesNoName:
             "test-sso",
             provider_registry,
             group_store,
-            adapter=FakeAdapter(api_provider, groups),
+            adapter=graph_directory(api_provider, groups),
             metrics=SyncMetrics(manager),
         )
 
@@ -759,7 +937,9 @@ class TestSyncRefusesAGroupWithNoId:
 
     @classmethod
     def _fake(cls, provider, tmp_path, monkeypatch):
-        return FakeAdapter(provider, [GroupInfo(id="", name=name, email="") for name in cls.NAMES])
+        return graph_directory(
+            provider, [GroupInfo(id="", name=name, email="") for name in cls.NAMES]
+        )
 
     @classmethod
     def _okta(cls, provider, tmp_path, monkeypatch):
@@ -768,7 +948,7 @@ class TestSyncRefusesAGroupWithNoId:
             {"id": f"00g{index}", "profile": {"description": name}}
             for index, name in enumerate(cls.NAMES)
         ]
-        return FakeAdapter(provider, [_group_info_from_okta(item) for item in items])
+        return okta_directory(items)
 
     @classmethod
     def _mock_directory(cls, provider, tmp_path, monkeypatch):
@@ -814,7 +994,7 @@ class TestSyncUpdatesProviderStatus:
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
 
-        adapter = FakeAdapter(api_provider, [])
+        adapter = graph_directory(api_provider, [])
         await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
         updated_provider = provider_registry.get("test-sso")
@@ -826,7 +1006,7 @@ class TestSyncUpdatesProviderStatus:
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
 
-        adapter = FakeAdapter(api_provider, [])
+        adapter = graph_directory(api_provider, [])
         await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
         updated_provider = provider_registry.get("test-sso")
@@ -841,7 +1021,7 @@ class TestSyncUpdatesProviderStatus:
         provider = api_provider.model_copy(update={"sync_error": "previous error"})
         provider_registry.create("test-sso", provider)
 
-        adapter = FakeAdapter(provider, [])
+        adapter = graph_directory(provider, [])
         await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
         updated_provider = provider_registry.get("test-sso")
@@ -911,20 +1091,29 @@ class TestSyncSkipsNonApiMode:
         assert group_store.list() == []
 
 
+_DIRECTORY_FAILED = "The directory API failed on the provider's side (HTTP 500); retry shortly"
+
+
+def _failing_directory(provider):
+    """A directory whose listing answers a 500."""
+    return failing_graph_directory(
+        provider, body={"error": {"code": "InternalServerError"}}, status=500
+    )
+
+
 class TestSyncHandlesAdapterError:
     async def test_adapter_error_returns_error_dict(self, registries, api_provider):
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
 
-        error_adapter = ErrorAdapter(api_provider)
         result = await sync_provider(
-            "test-sso", provider_registry, group_store, adapter=error_adapter
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=_failing_directory(api_provider),
         )
 
-        # A RuntimeError carries no socket error, so nothing says the API was unreachable.
-        assert result["error"] == (
-            "The directory API gave no usable answer; the engine log has the reason"
-        )
+        assert result["error"] == _DIRECTORY_FAILED
         assert result["skipped"] is None
         assert result["created"] == 0
         assert result["total"] == 0
@@ -934,23 +1123,29 @@ class TestSyncHandlesAdapterError:
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
 
-        error_adapter = ErrorAdapter(api_provider)
-        await sync_provider("test-sso", provider_registry, group_store, adapter=error_adapter)
+        await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=_failing_directory(api_provider),
+        )
 
         updated_provider = provider_registry.get("test-sso")
         assert updated_provider is not None
         assert updated_provider.last_sync_status == "error"
-        assert updated_provider.sync_error == (
-            "The directory API gave no usable answer; the engine log has the reason"
-        )
+        assert updated_provider.sync_error == _DIRECTORY_FAILED
         assert updated_provider.last_sync_at != ""
 
     async def test_adapter_error_does_not_create_groups(self, registries, api_provider):
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
 
-        error_adapter = ErrorAdapter(api_provider)
-        await sync_provider("test-sso", provider_registry, group_store, adapter=error_adapter)
+        await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=_failing_directory(api_provider),
+        )
 
         assert group_store.list() == []
 
@@ -1017,7 +1212,7 @@ class TestSyncWithNoDirectoryCredential:
         provider_registry.create("test-sso", unconfigured)
         await sync_provider("test-sso", provider_registry, group_store)
 
-        adapter = FakeAdapter(api_provider, [GroupInfo(id="g1", name="admins")])
+        adapter = graph_directory(api_provider, [GroupInfo(id="g1", name="admins")])
         await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
         stored = provider_registry.get("test-sso")
@@ -1149,7 +1344,7 @@ class TestSyncEmptyGroupList:
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
 
-        adapter = FakeAdapter(api_provider, [])
+        adapter = graph_directory(api_provider, [])
         result = await sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
 
         assert result["created"] == 0

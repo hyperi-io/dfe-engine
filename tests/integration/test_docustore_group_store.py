@@ -24,14 +24,21 @@ from dfe_engine.auth.groups import (
     GroupExistsError,
     GroupMetrics,
 )
-from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import sync_provider
 from dfe_engine.auth.protected_accounts import ProtectedAccountError
 from dfe_engine.store.documents import DocuStore
+from tests.unit.test_auth.test_oidc.local_directory import graph_directory, stop_directories
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture(autouse=True)
+def stopped_directories():
+    """Stop the local Graph service a sync test started as its directory."""
+    yield
+    stop_directories()
 
 
 @pytest.fixture
@@ -336,7 +343,7 @@ class TestTheProviderIdsAGroupCarries:
         )
         registry = OIDCProviderRegistry(tmp_path / "oidc")
         registry.create("entra", provider)
-        adapter = _Directory(provider, [GroupInfo(id=self.GUID, name="Analysts")])
+        adapter = graph_directory(provider, [GroupInfo(id=self.GUID, name="Analysts")])
 
         result = await sync_provider("entra", registry, store, adapter=adapter)
 
@@ -354,7 +361,7 @@ class TestTheProviderIdsAGroupCarries:
         )
         registry = OIDCProviderRegistry(tmp_path / "oidc")
         registry.create("entra", provider)
-        adapter = _Directory(provider, [GroupInfo(id=self.GUID, name="DFE Admins")])
+        adapter = graph_directory(provider, [GroupInfo(id=self.GUID, name="DFE Admins")])
 
         result = await sync_provider("entra", registry, store, adapter=adapter)
 
@@ -362,20 +369,6 @@ class TestTheProviderIdsAGroupCarries:
         got = store.get(RECOVERY_GROUP)
         assert (got.source_provider, got.source_id) == ("", "")
         assert self.GUID not in store.by_source_id()
-
-
-class _Directory(OIDCGroupAdapter):
-    """A provider directory holding a fixed list of groups."""
-
-    def __init__(self, provider: OIDCProvider, groups: list[GroupInfo]) -> None:
-        super().__init__(provider)
-        self._groups = groups
-
-    async def list_all_groups(self) -> list[GroupInfo]:
-        return self._groups
-
-    async def test_connection(self) -> tuple[bool, str]:
-        return (True, "fixed directory")
 
 
 class TestProtectedNameFloor:

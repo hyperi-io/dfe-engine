@@ -108,6 +108,7 @@ def _deploy_fetcher(client, headers, instance: str):
         instance,
         {
             "source": instance,
+            "schema": {"meta_schema": "meta/syslog"},
             "fetcher": {"source_type": "crates_io", "config": {"crates": ["dfe-fetcher"]}},
         },
     )
