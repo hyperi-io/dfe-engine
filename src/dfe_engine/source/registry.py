@@ -55,6 +55,7 @@ from dfe_engine.yaml_utils import yaml_dump
 
 if TYPE_CHECKING:
     from dfe_engine.gitcrud.engine import GitCrud
+    from dfe_engine.source.deployment import SourceDeploymentStore
 
 _SOURCES_CLASS = "sources"
 
@@ -515,15 +516,7 @@ class SourceRegistry:
 
         invalidate_version = draft_build_version_to_invalidate(existing, updated)
         if invalidate_version is not None:
-            store = deployment_store
-            if store is None:
-                try:
-                    from dfe_engine.settings import get_settings
-                    from dfe_engine.source.deployment import SourceDeploymentStore
-
-                    store = SourceDeploymentStore.from_settings(get_settings())
-                except Exception:
-                    store = None
+            store = self._resolve_deployment_store(deployment_store)
             if store is not None and store.load_build(source_name, invalidate_version) is not None:
                 store.delete_build(source_name, invalidate_version, source=updated)
 
@@ -547,14 +540,60 @@ class SourceRegistry:
         msg = description or f"source: deploy {source_name} version {version_id}"
         return self.save_source(updated, created_by=created_by, description=msg)
 
+    @staticmethod
+    def _resolve_deployment_store(
+        store: SourceDeploymentStore | None,
+    ) -> SourceDeploymentStore | None:
+        """The store to read or clear: the one given, else the one the settings name.
+
+        None when the settings cannot be loaded, which callers treat as no records to
+        touch.
+        """
+        if store is not None:
+            return store
+        try:
+            from dfe_engine.settings import get_settings
+            from dfe_engine.source.deployment import SourceDeploymentStore
+
+            return SourceDeploymentStore.from_settings(get_settings())
+        except Exception:
+            return None
+
+    def _forget_deployment_records(
+        self, source_name: str, store: SourceDeploymentStore | None
+    ) -> None:
+        """Remove a deleted source's build, plan and deploy records.
+
+        Left behind, they are read as the history of the next source to take the name,
+        which then reports itself deployed before it ever was. A failure is logged and
+        not raised: the source is already gone, and raising here would skip the topic
+        and app cleanup the caller does next.
+        """
+        records = self._resolve_deployment_store(store)
+        if records is None:
+            logger.warning(
+                f"Source {source_name!r} deleted but its build records were not cleared: "
+                "the deployment settings could not be loaded, so a later source of that "
+                "name will report itself already deployed"
+            )
+            return
+        try:
+            records.delete_source_records(source_name)
+        except Exception as exc:
+            logger.warning(
+                f"Source {source_name!r} deleted but its build records remain, so a later "
+                f"source of that name will report itself already deployed: {exc}"
+            )
+
     def delete_source(
         self,
         source_name: str,
         created_by: str | None = None,
         *,
         core_reconcile: bool = False,
+        deployment_store: SourceDeploymentStore | None = None,
     ) -> None:
-        """Delete a source definition.
+        """Delete a source definition and its build, plan and deploy records.
 
         Removes the YAML file and commits the deletion if git-aware.
 
@@ -563,7 +602,9 @@ class SourceRegistry:
             created_by: Username/identity of who deleted it (gitcrud commit
                 attribution, same as save).
             core_reconcile: Engine-only. Permits removing a core source the
-                settings no longer name. No request path sets it.
+                landing table no longer names. No request path sets it.
+            deployment_store: Where the source's records live. Defaults to the store
+                the loaded settings name.
 
         Raises:
             SourceCoreResourceError: The stored source is engine-owned.
@@ -580,6 +621,7 @@ class SourceRegistry:
         if not deleted:
             logger.warning(f"Source does not exist: {source_name!r}")
             return
+        self._forget_deployment_records(source_name, deployment_store)
         logger.info(f"Deleted source {source_name!r}")
 
     def list_sources(self, enabled_only: bool = False) -> list[dict[str, Any]]:
@@ -985,7 +1027,7 @@ class SourceRegistry:
         items: list[tuple[str, str]] = []
         for resource in sorted(builtins_dir.iterdir()):
             # The landing definition is the engine's own: seed_core_sources fills
-            # its name from clickhouse.landing_table, which this path cannot.
+            # its name from the manifest, which this path does not.
             if not resource.name.endswith(".yaml") or resource.name == LANDING_SOURCE_FILE:
                 continue
 

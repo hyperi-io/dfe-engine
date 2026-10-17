@@ -29,7 +29,6 @@ ClickHouse:
   never a config file (see provided_service_password)
 - DFE_CLICKHOUSE_DATABASE (legacy: CLICKHOUSE_DATABASE) -> clickhouse.database
 - DFE_CLICKHOUSE_DATA_DATABASE (legacy: CLICKHOUSE_DATA_DATABASE) -> clickhouse.data_database
-- DFE_CLICKHOUSE_LANDING_TABLE (legacy: CLICKHOUSE_LANDING_TABLE) -> clickhouse.landing_table
 - DFE_CLICKHOUSE_SECURE (legacy: CLICKHOUSE_SECURE) -> clickhouse.secure (true/false)
 - DFE_CLICKHOUSE_VERIFY (legacy: CLICKHOUSE_VERIFY) -> clickhouse.verify (true/false)
 - DFE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
@@ -263,10 +262,6 @@ class ClickHouseSettings(BaseModel):
             "against one database while DFE tables are qualified against another -- "
             "read it via `effective_data_database`, never directly."
         ),
-    )
-    landing_table: str = Field(
-        default="main",
-        description="Catch-all table where un-split source data lands (DFE_CLICKHOUSE_LANDING_TABLE)",
     )
     default_table_profile: str = Field(
         default="timeseries",
@@ -2280,8 +2275,6 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["database"] = val
     if val := _get_env("DFE_CLICKHOUSE_DATA_DATABASE", "CLICKHOUSE_DATA_DATABASE"):
         overrides["clickhouse"]["data_database"] = val
-    if val := _get_env("DFE_CLICKHOUSE_LANDING_TABLE", "CLICKHOUSE_LANDING_TABLE"):
-        overrides["clickhouse"]["landing_table"] = val
     if val := _get_env("DFE_DEFAULT_TABLE_PROFILE"):
         overrides["clickhouse"]["default_table_profile"] = val
     if val := _get_env("DFE_CLICKHOUSE_BOOTSTRAP_TABLES"):

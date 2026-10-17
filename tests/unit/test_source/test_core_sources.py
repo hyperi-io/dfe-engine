@@ -13,30 +13,33 @@ from types import SimpleNamespace
 
 import pytest
 
-from dfe_engine.schema.core_schema import landing_table_ddl
+from dfe_engine.schema.core_schema import landing_table_ddl, landing_table_name
+from dfe_engine.settings import load_clickhouse_settings
 from dfe_engine.source.core_sources import (
     LANDING_SOURCE_FILE,
     SOURCES_SUBDIR,
+    _record_built_and_deployed,
     seed_core_sources,
 )
 from dfe_engine.source.deployment import SourceDeploymentStore
+from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceCoreResourceError, SourceRegistry
 from dfe_engine.yaml_utils import yaml_dump
 from tests.support.core_sources import LANDING_DEFINITION, write_landing_definition
 
 
-def _settings(*, root: Path, seeded: bool = True, table: str = "main") -> SimpleNamespace:
+def _settings(*, root: Path, seeded: bool = True, clickhouse=None) -> SimpleNamespace:
     """Settings the seed reads, with the definition written where the schema seed puts it."""
     schemas_dir = root / "schemas"
     if seeded:
         write_landing_definition(schemas_dir=schemas_dir)
     return SimpleNamespace(
-        clickhouse=SimpleNamespace(
+        clickhouse=clickhouse
+        or SimpleNamespace(
             default_engine="MergeTree",
             default_table_profile="timeseries",
             default_ttl_days=0,
             effective_data_database="dfe",
-            landing_table=table,
         ),
         schemas=SimpleNamespace(schemas_dir=str(schemas_dir)),
         source=SimpleNamespace(
@@ -46,6 +49,16 @@ def _settings(*, root: Path, seeded: bool = True, table: str = "main") -> Simple
             sources_dir=str(root / "sources"),
         ),
     )
+
+
+def _store_stale_core_source(registry: SourceRegistry, settings, name: str) -> None:
+    """Store a core source under *name* with its build and deploy records.
+
+    An engine that named the landing source after a setting left exactly this behind.
+    """
+    stale = Source.model_validate({**LANDING_DEFINITION, "source": name, "display_name": name})
+    registry.save_source(stale, created_by="engine", core_reconcile=True)
+    _record_built_and_deployed(stale, settings, tables_bootstrapped=True)
 
 
 @pytest.fixture
@@ -81,16 +94,26 @@ class TestSeeding:
         assert stored.resource_type == "core"
         assert stored.description == LANDING_DEFINITION["description"]
 
-    def test_the_name_comes_from_the_landing_table_setting(self, registry, tmp_path):
-        # The shipped file carries no `source`, so nothing is hard-coded to `main`.
-        settings = _settings(root=tmp_path, table="catchall")
+    def test_the_name_comes_from_the_manifest(self, registry, tmp_path):
+        # The shipped file carries no `source`: the name is the table the bootstrap creates.
+        seed_core_sources(registry=registry, settings=_settings(root=tmp_path))
 
-        seed_core_sources(registry=registry, settings=settings)
+        name = landing_table_name()
+        stored = registry.get_source(name)
+        assert stored.source == name
+        assert stored.display_name == name
+        assert stored.table_name == name
 
-        stored = registry.get_source("catchall")
-        assert stored.source == "catchall"
-        assert stored.display_name == "catchall"
-        assert stored.table_name == "catchall"
+    def test_a_stale_landing_table_env_does_not_rename_it(self, registry, tmp_path, monkeypatch):
+        # A developer .env or an old deploy config that still sets the variable must not
+        # point the source at a table the manifest never creates.
+        monkeypatch.setenv("DFE_CLICKHOUSE_LANDING_TABLE", "default")
+        settings = _settings(root=tmp_path, clickhouse=load_clickhouse_settings())
+
+        changed = seed_core_sources(registry=registry, settings=settings)
+
+        assert changed == [landing_table_name()]
+        assert not registry.source_exists("default")
 
     def test_it_declares_no_origin(self, registry, tmp_path):
         seed_core_sources(registry=registry, settings=_settings(root=tmp_path))
@@ -121,16 +144,15 @@ class TestSeeding:
         assert changed == []
         assert not (registry.source_exists("main"))
 
-    def test_a_renamed_landing_table_replaces_the_stale_source(self, registry, tmp_path):
-        seed_core_sources(registry=registry, settings=_settings(root=tmp_path))
+    def test_a_core_source_under_another_name_is_replaced(self, registry, tmp_path):
+        settings = _settings(root=tmp_path)
+        _store_stale_core_source(registry, settings, "default")
 
-        changed = seed_core_sources(
-            registry=registry, settings=_settings(root=tmp_path, table="landing")
-        )
+        changed = seed_core_sources(registry=registry, settings=settings)
 
-        assert changed == ["main", "landing"]
-        assert registry.source_exists("landing")
-        assert not (registry.source_exists("main"))
+        assert changed == ["default", "main"]
+        assert registry.source_exists("main")
+        assert not (registry.source_exists("default"))
 
     def test_it_records_the_source_as_built_and_deployed(self, registry, tmp_path):
         # The table exists once the bootstrap has run, so reporting the source as never
@@ -178,22 +200,20 @@ class TestSeeding:
         assert store.load_build(source.source, source.current) is not None
         assert store.load_deploy(source.source, source.current) is None
 
-    def test_a_rename_takes_the_stale_build_records_with_it(self, registry, tmp_path):
+    def test_a_replaced_core_source_takes_its_build_records_with_it(self, registry, tmp_path):
         # Left behind, they would make the next source of that name report itself
         # deployed before it ever was.
-        seed_core_sources(
-            registry=registry, settings=_settings(root=tmp_path), tables_bootstrapped=True
-        )
+        settings = _settings(root=tmp_path)
+        _store_stale_core_source(registry, settings, "default")
 
-        settings = _settings(root=tmp_path, table="landing")
         seed_core_sources(registry=registry, settings=settings, tables_bootstrapped=True)
 
         store = SourceDeploymentStore.from_settings(settings)
         current = LANDING_DEFINITION["current"]
 
-        assert store.load_build("main", current) is None
-        assert store.load_deploy("main", current) is None
-        assert store.load_deploy("landing", current) is not None
+        assert store.load_build("default", current) is None
+        assert store.load_deploy("default", current) is None
+        assert store.load_deploy("main", current) is not None
 
     def test_a_changed_definition_replaces_the_stored_one(self, registry, tmp_path):
         # An engine upgrade re-seeds the schemas tree; a stored core source that never
