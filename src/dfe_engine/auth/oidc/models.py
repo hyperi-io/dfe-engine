@@ -245,6 +245,22 @@ class OIDCProvider(BaseModel):
             self.scopes = _DEFAULT_SCOPES[self.type]
         return self
 
+    @model_validator(mode="after")  # noqa: V105
+    def _a_generic_provider_has_no_directory_to_enrich_from(self) -> Self:
+        """Refuse a generic provider that reads its users' groups from a directory at login.
+
+        A generic provider has no directory API, so every login would read no groups and,
+        a directory answer being authoritative, lose the ones its token carries. The
+        provider API refuses this too, and a provider file written past it must not load.
+        """
+        groups = self.groups
+        if self.type == "generic" and groups.mode == "api" and groups.enrich_on_login:
+            raise ValueError(
+                "a 'generic' provider has no directory API, so groups.enrich_on_login "
+                "cannot be set with groups.mode 'api'"
+            )
+        return self
+
 
 # ---------------------------------------------------------------------------
 # Group information returned from provider APIs
