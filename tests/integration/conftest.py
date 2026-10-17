@@ -50,6 +50,10 @@ import secrets
 import subprocess
 import time
 import warnings
+from collections.abc import Iterator
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -565,6 +569,60 @@ def otel_db(ch_client, clickhouse_test_database):
         for statement in render_one(object_id, data_database=db).statements:
             ch_client.command(statement)
     return db
+
+
+@pytest.fixture
+def stack(
+    ch_client: Any, ch_params: dict, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> Iterator[SimpleNamespace]:
+    """The engine API over a real ClickHouse carrying the core tables at a 90-day default.
+
+    Yields ``client`` (a TestClient), ``crud``, ``database`` and the admin's ``headers``. Teardown drops the database and the row policies its deploys left, which outlive it.
+    """
+    import uuid
+
+    from fastapi.testclient import TestClient
+
+    from dfe_engine.api.app import create_app
+    from dfe_engine.api.deps import _registries, create_access_token
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.gitcrud import GitCrud, default_registry
+    from dfe_engine.gitops.repo import GitopsRepo
+    from dfe_engine.schema.phase import apply_plan
+    from dfe_engine.schema.plan import build_plan
+    from tests.support.engine_stack import ADMIN_PASSWORD, api_settings, drop_row_policies
+
+    database = f"dfe_engine_api_{uuid.uuid4().hex[:8]}"
+    settings = api_settings(ch_params=ch_params, database=database, tmp_path=tmp_path)
+    # The build and plan routes read the process settings rather than the app's.
+    monkeypatch.setattr("dfe_engine.settings._settings", settings)
+    ClickHouseManager.reset_instance()
+    report = apply_plan(client=ch_client, plan=build_plan(client=ch_client, settings=settings))
+    assert not (report.refused), [outcome.describe() for outcome in report.refused]
+    app = create_app(settings=settings)
+    token = create_access_token(
+        data={"org_id": "test-org", "roles": ["admin"], "sub": "admin"}, settings=settings
+    )
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            # Off the issued password, which refuses every other call until changed.
+            app.state.account_store.reset_password(new_password=ADMIN_PASSWORD, username="admin")
+            crud = GitCrud(
+                registry=default_registry(),
+                repo=GitopsRepo(local_path=str(tmp_path / "deploy"), push=False),
+            )
+            app.state.gitcrud = crud
+            yield SimpleNamespace(
+                client=client,
+                crud=crud,
+                database=database,
+                headers={"Authorization": f"Bearer {token}"},
+            )
+    finally:
+        _registries.clear()
+        ClickHouseManager.reset_instance()
+        drop_row_policies(client=ch_client, database=database)
+        ch_client.command(f"DROP DATABASE IF EXISTS `{database}` SYNC")
 
 
 def _mongo_when_ready(uri: str, timeout: float = 180.0, delay: float = 1.0) -> None:

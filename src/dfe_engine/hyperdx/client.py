@@ -61,7 +61,7 @@ _TIMEOUT_SECONDS = 5.0
 _RETRIES = 1
 # After a failure the breaker re-probes once this window elapses, so a fork
 # that boots after the engine recovers without an engine restart.
-_RETRY_AFTER_SECONDS = 60.0
+RETRY_AFTER_SECONDS = 60.0
 
 
 class HyperDXClient:
@@ -265,7 +265,7 @@ class HyperDXClient:
                 return response.json()
         except Exception as exc:
             self._connected = False
-            self._retry_at = time.monotonic() + _RETRY_AFTER_SECONDS
+            self._retry_at = time.monotonic() + RETRY_AFTER_SECONDS
             # The exception text names the request URL, so the log carries the class and the status.
             logger.warning(
                 "HyperDX call failed (non-fatal)", op=op, **describe_http_error(exc), **log_fields

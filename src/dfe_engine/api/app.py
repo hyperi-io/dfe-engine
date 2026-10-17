@@ -111,18 +111,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     from dfe_engine.gitcrud.retention import effective_settings
 
     source_registry = get_source_registry_optional()
-    try:
-        deployed_candidates = source_registry.get_all_sources() if source_registry else []
-    except Exception as exc:  # the core tables still bootstrap without the source list
-        logger.warning("sources unreadable; their TTL is left to the next start", error=str(exc))
-        deployed_candidates = []
     # The admin's default TTL override, so the boot renders what the console set.
     ttl_settings = effective_settings(settings, gitcrud)
+    # Each pass reads the registry when it runs, so a retried pass sees later deploys and an unreadable registry fails only the source passes, never the boot.
+    # Without a registry no source write ever rebuilds all_sources, so boot builds it over the landing table alone (`tuple` loads no sources).
     run_schema_pass = functools.partial(
         bootstrap_clickhouse,
-        settings=ttl_settings,
-        sources=deployed_candidates,
+        load_sources=source_registry.get_all_sources if source_registry is not None else tuple,
         metrics=app.state.schema_metrics,
+        settings=ttl_settings,
     )
     schema_state = run_schema_pass()
     tables_bootstrapped = schema_state.converged
@@ -403,6 +400,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
 
+        # In the background, because HyperDX may boot after the engine and startup must not wait on it.
+        from dfe_engine.hyperdx.all_sources import AllSourcesRegistration
+
+        registration = AllSourcesRegistration(
+            client=app.state.hyperdx_client,
+            database=settings.clickhouse.effective_data_database,
+        )
+        app.state.all_sources_registration = asyncio.create_task(
+            registration.run(), name="hyperdx-all-sources"
+        )
+
     # Reconciles the seeded quota tiers + service roles + per-org roles/row
     # policies on _org_id into ClickHouse, plus one CH user per RBAC group
     # holding that group's org role. On by default: these policies ARE the tenant
@@ -568,6 +576,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if gitops_consolidation is not None:
         gitops_consolidation.cancel()
         await asyncio.gather(gitops_consolidation, return_exceptions=True)
+    all_sources_registration = getattr(app.state, "all_sources_registration", None)
+    if all_sources_registration is not None:
+        all_sources_registration.cancel()
+        await asyncio.gather(all_sources_registration, return_exceptions=True)
     from dfe_engine.governance.ch import TRIGGER_ATTRIBUTES
 
     for attribute in TRIGGER_ATTRIBUTES:

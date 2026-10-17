@@ -65,6 +65,13 @@ class CoreSchemaTargets:
         )
 
 
+def landing_table_name(*, data_database: str) -> str:
+    """The landing table's name as the manifest declares it, which the schema phase creates whatever ``clickhouse.landing_table`` says."""
+    from dfe_engine.schema.plan import object_names
+
+    return object_names(LANDING_TABLE_ID, data_database=data_database)[LANDING_TABLE_ID]
+
+
 def landing_table_ddl(settings: Any) -> str:
     """The landing table's CREATE TABLE, exactly as the phase applies it.
 

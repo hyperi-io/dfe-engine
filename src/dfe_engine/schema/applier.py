@@ -258,6 +258,19 @@ class LiveTable:
         return self.engine
 
 
+def live_columns(*, client: Any, database: str, table: str) -> dict[str, str]:
+    """Every column type of ``database.table`` by column name, empty when the table is absent; raises SchemaApplyError when ClickHouse cannot be read."""
+    try:
+        rows = client.query(
+            "SELECT name, type FROM system.columns WHERE database = {db:String} "
+            "AND table = {tbl:String}",
+            parameters={"db": database, "tbl": table},
+        ).result_rows
+    except Exception as exc:
+        raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
+    return {str(name): str(ch_type) for name, ch_type in rows}
+
+
 def live_tables(client: Any, database: str) -> dict[str, LiveTable]:
     """Every table in *database* by name, in one ``system.tables`` read.
 
@@ -275,6 +288,19 @@ def live_tables(client: Any, database: str) -> dict[str, LiveTable]:
         str(name): LiveTable(engine=str(engine), ttl=ttl_from_engine_full(str(full)))
         for name, engine, full in rows
     }
+
+
+def tables_with_column(*, client: Any, column: str, database: str) -> frozenset[str]:
+    """The tables in *database* that carry a column named *column*, in one ``system.columns`` read; raises SchemaApplyError when ClickHouse cannot be read."""
+    try:
+        rows = client.query(
+            "SELECT DISTINCT table FROM system.columns WHERE database = {db:String} "
+            "AND name = {col:String}",
+            parameters={"col": column, "db": database},
+        ).result_rows
+    except Exception as exc:
+        raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
+    return frozenset(str(table) for (table,) in rows)
 
 
 def read_engine_full(client: Any, database: str, table: str) -> str:
@@ -580,12 +606,7 @@ class SchemaApplier:
         Raises:
             SchemaApplyError: ClickHouse could not be read.
         """
-        rows = self._select(
-            "SELECT name, type FROM system.columns WHERE database = {db:String} "
-            "AND table = {tbl:String}",
-            {"db": database, "tbl": table},
-        )
-        live = {str(name): str(ch_type) for name, ch_type in rows}
+        live = live_columns(client=self._client, database=database, table=table)
         return tuple(
             col.name
             for col in columns

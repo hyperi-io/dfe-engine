@@ -24,6 +24,7 @@ The module skips when the ``helm`` binary is absent. A digest or chart it cannot
 skips the test locally and fails it in CI.
 """
 
+import base64
 import re
 import shutil
 import subprocess
@@ -203,6 +204,15 @@ def env_of(objects: list[dict]) -> dict[str, str]:
     return {e["name"]: e["value"] for e in container(objects)["env"] if "value" in e}
 
 
+def _files_in(*, configmap: dict) -> dict[str, str]:
+    """A ConfigMap's files as text, whether the chart renders them as `data` or as base64 `binaryData`."""
+    encoded = configmap.get("binaryData") or {}
+    decoded = {
+        key: base64.b64decode(s=value).decode(encoding="utf-8") for key, value in encoded.items()
+    }
+    return {**(configmap.get("data") or {}), **decoded}
+
+
 # ── the contract ──────────────────────────────────────────────
 
 
@@ -267,7 +277,7 @@ class TestOverlayRendersThroughTheChart:
             charts, service, overlay_with_files(service, "edge", {name: body}), "edge", tmp_path
         )
         configmaps = {o["metadata"]["name"]: o for o in objects if o["kind"] == "ConfigMap"}
-        assert configmaps[f"{app.telemetry_name}-transforms"]["data"] == {name: body}
+        assert _files_in(configmap=configmaps[f"{app.telemetry_name}-transforms"]) == {name: body}
         mounts = {m["mountPath"] for m in container(objects)["volumeMounts"]}
         assert catalogue.file_set(service, "transforms").mount_path in mounts
 

@@ -17,7 +17,7 @@ docs/superpowers/specs/2026-07-01-ch-org-rbac-quota-tiers-design.md.
 
 import hashlib
 import secrets as _stdlib_secrets
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -558,13 +558,21 @@ class ChRbacReconciler:
         return result
 
 
-def fence_tables(admin_client: Any, *, tiers: list[Any] | None = None, database: str = "") -> int:
+def fence_tables(
+    admin_client: Any,
+    *,
+    database: str = "",
+    tables: Collection[str] | None = None,
+    tiers: list[Any] | None = None,
+) -> int:
     """Re-apply the tenant row policies alone, and report how many statements ran.
 
     Sources create their table one-per-source at deploy time, and the tier grant is
     database-wide, so a new table is readable the instant it exists; only its row
     policy waits for a reconcile. Running this on deploy closes that window. Mints
     nothing and touches no user, so it is cheap enough to run every time.
+
+    ``tables`` limits the policies to those tables of the reconciler's database; None fences every table discovered. The tenant role and its system grants are applied either way, since a policy names the role.
     """
     reconciler = ChRbacReconciler(admin_client, database=database or None)
     resolved = resolve_grant_databases(list(tiers or DEFAULT_TIERS), reconciler._database)
@@ -575,6 +583,10 @@ def fence_tables(admin_client: Any, *, tiers: list[Any] | None = None, database:
         for t in reconciler.discover_tenant_reachable_tables(_tenant_granted_dbs(resolved))
         if t not in org_set
     ]
+    if tables is not None:
+        wanted = {(reconciler._database, name) for name in tables}
+        org_tables = [t for t in org_tables if t in wanted]
+        deny_tables = [t for t in deny_tables if t in wanted]
 
     applied = 0
     for stmt in render_tenant_axis(org_tables, deny_tables):

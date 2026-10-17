@@ -369,6 +369,35 @@ async def _sync_hyperdx_source(
     return len(teams), None
 
 
+async def _rebuild_all_sources(*, registry: Any, settings: Any, sources: list[str]) -> None:
+    """Rebuild the all_sources Merge table off the event loop after a write to *sources*. Never raises."""
+    from dfe_engine.clickhouse.all_sources import try_rebuild_all_sources
+
+    await run_blocking(
+        functools.partial(
+            try_rebuild_all_sources,
+            changed=sources,
+            load_sources=registry.get_all_sources,
+            settings=settings,
+        )
+    )
+
+
+async def _register_hyperdx_all_sources(*, database: str, request: Request) -> None:
+    """Point HyperDX at the all_sources Merge table on every team. Never raises."""
+    client = getattr(request.app.state, "hyperdx_client", None)
+    if client is None:
+        return
+
+    from dfe_engine.http_errors import describe_http_error
+    from dfe_engine.hyperdx.all_sources import register_all_sources
+
+    try:
+        await register_all_sources(client=client, database=database)
+    except Exception as exc:
+        logger.warning("HyperDX all_sources source not registered", **describe_http_error(exc=exc))
+
+
 async def _remove_hyperdx_source(request: Request, name: str) -> None:
     """Drop the HyperDX source for a DFE source that is going away. Never raises."""
     client = getattr(request.app.state, "hyperdx_client", None)
@@ -1449,6 +1478,7 @@ async def _execute_source_deploy(
     if isinstance(applied, SchemaDeployResult):
         return applied
     source, version_id, result, views, statements_applied, db, ttl_change = applied
+    await _rebuild_all_sources(registry=registry, settings=settings, sources=[name])
 
     # Off the event loop: the admin calls block for their full timeout when no
     # broker answers, which is the norm on the Kafka-less profile.
@@ -1490,6 +1520,7 @@ async def _execute_source_deploy(
     hyperdx_teams, hyperdx_error = await _sync_hyperdx_source(
         request, source, db, [col.name for col in result.columns]
     )
+    await _register_hyperdx_all_sources(database=db, request=request)
 
     deploy_result = deploy_result.model_copy(
         update={
@@ -2111,6 +2142,8 @@ async def delete_source(
     )
     await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
     await _remove_hyperdx_source(request, name)
+    # The table stays in ClickHouse; leaving the registry is what takes it out of all_sources.
+    await _rebuild_all_sources(registry=registry, settings=settings, sources=[name])
 
 
 def _delete_stored_source(name: str, user: Any, registry: Any) -> Source:
@@ -2183,6 +2216,8 @@ async def bulk_action(
         if body.action == "delete":
             for name in succeeded:
                 await _remove_hyperdx_source(request, name)
+            # Once for the batch: each rebuild reads the whole registry.
+            await _rebuild_all_sources(registry=registry, settings=settings, sources=succeeded)
     return result
 
 

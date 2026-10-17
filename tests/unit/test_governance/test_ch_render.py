@@ -302,6 +302,13 @@ class TestRenderPinnedUser:
         with pytest.raises(ValueError):
             render_pinned_user("dfe_org_x", "h", tier_role="dfe_t_role", org_ids=["a,b"])
 
+    def test_empty_org_id_is_rejected(self):
+        # An empty id would pin '' and match every row whose _org_id defaulted to empty.
+        with pytest.raises(ValueError):
+            render_pinned_user(
+                org_ids=["", "acme"], pw_hash="h", tier_role="dfe_t_role", user="dfe_org_x"
+            )
+
     def test_password_is_reasserted_via_alter(self):
         """Regression: CREATE USER IF NOT EXISTS sets a password only at first
         create, so an existing user keeps a stale hash while the stored secret

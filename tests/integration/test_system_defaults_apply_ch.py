@@ -19,39 +19,12 @@ the values when that version is deployed. A deployed version that already carrie
 the values has its table brought to them by apply itself.
 """
 
-import shutil
-import uuid
-from pathlib import Path
-from types import SimpleNamespace
-
-import dfe_schemas
 import pytest
-from fastapi.testclient import TestClient
 from scalo.logger import logger
 
-from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
-from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitcrud.table_defaults import commit_patch
-from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.schema.phase import apply_plan
-from dfe_engine.schema.plan import build_plan
 from dfe_engine.schema.schema_loader import SchemaLoader
-from dfe_engine.settings import (
-    APISettings,
-    AuthSettings,
-    ClickHouseResilienceSettings,
-    ClickHouseSettings,
-    DFESettings,
-    HuntsSettings,
-    KafkaSettings,
-    LocalAuthSettings,
-    SchemasSettings,
-    SecretsSettings,
-    ServicesSettings,
-    SourceSettings,
-)
+from tests.support.engine_stack import deploy_source
 
 pytestmark = pytest.mark.integration
 
@@ -62,75 +35,6 @@ REBUILD = "needs a table rebuild; applies to new tables only"
 REFUSED = "ClickHouse could not be read or refused the change; the engine log has why"
 # A schema already on the deployment's table defaults, so apply pins nothing new on it.
 ON_THE_DEFAULTS = {"meta_schema": "meta/syslog", "ttl_days": 90, "engine": "MergeTree"}
-
-
-def _settings(tmp_path: Path, ch_params: dict, database: str) -> DFESettings:
-    for sub in ("sources", "services", "rules", "hunts", "auth", "secrets"):
-        (tmp_path / sub).mkdir()
-    # A copy of the shipped tree, so the build reads real definitions and nothing
-    # this test does can write into the installed package.
-    schemas_dir = tmp_path / "schemas"
-    shutil.copytree(Path(dfe_schemas.__file__).parent / "data", schemas_dir)
-    return DFESettings(
-        config_dir=str(tmp_path),
-        clickhouse=ClickHouseSettings(
-            host=ch_params["host"],
-            port=ch_params["port"],
-            username=ch_params["username"],
-            password=ch_params["password"],
-            secure=False,
-            data_database=database,
-            default_ttl_days=90,
-            bootstrap_tables=False,
-            resilience=ClickHouseResilienceSettings(budget_seconds=5.0),
-        ),
-        kafka=KafkaSettings(ensure_topics=False),
-        source=SourceSettings(sources_dir=str(tmp_path / "sources")),
-        services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
-        schemas=SchemasSettings(schemas_dir=str(schemas_dir)),
-        hunts=HuntsSettings(rules_dir=str(tmp_path / "rules"), hunt_dir=str(tmp_path / "hunts")),
-        auth=AuthSettings(
-            enabled=True,
-            auth_dir=str(tmp_path / "auth"),
-            local=LocalAuthSettings(admin_password="test-admin-pw"),
-        ),
-        secrets=SecretsSettings(provider="file", path=str(tmp_path / "secrets")),
-        api=APISettings(jwt_secret="test-secret-key-for-unit-tests-hmac32"),
-    )
-
-
-@pytest.fixture
-def stack(ch_params, ch_client, monkeypatch, tmp_path):
-    """The engine API over a real ClickHouse carrying the core tables at a 90-day default."""
-    database = f"dfe_defaults_{uuid.uuid4().hex[:8]}"
-    settings = _settings(tmp_path, ch_params, database)
-    # The build and plan routes read the process settings rather than the app's.
-    monkeypatch.setattr("dfe_engine.settings._settings", settings)
-    ClickHouseManager.reset_instance()
-    report = apply_plan(ch_client, build_plan(settings=settings, client=ch_client))
-    assert not report.refused, [outcome.describe() for outcome in report.refused]
-    app = create_app(settings=settings)
-    token = create_access_token(
-        data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]}, settings=settings
-    )
-    try:
-        with TestClient(app, raise_server_exceptions=False) as client:
-            # Off the issued password, which refuses every other call until changed.
-            app.state.account_store.reset_password("admin", "test-admin-pw")
-            gc = GitCrud(
-                GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry()
-            )
-            app.state.gitcrud = gc
-            yield SimpleNamespace(
-                client=client,
-                crud=gc,
-                database=database,
-                headers={"Authorization": f"Bearer {token}"},
-            )
-    finally:
-        _registries.clear()
-        ClickHouseManager.reset_instance()
-        ch_client.command(f"DROP DATABASE IF EXISTS `{database}` SYNC")
 
 
 def _table(ch_client, database: str, table: str) -> tuple[str, str]:
@@ -160,25 +64,6 @@ def _columns(ch_client, database: str, table: str) -> dict[str, str]:
     return {str(name): str(ch_type) for name, ch_type in rows}
 
 
-def _deploy_source(
-    stack, name: str, *, header: dict | None = None, schema: dict | None = None
-) -> None:
-    created = stack.client.post(
-        "/api/v1/sources",
-        headers=stack.headers,
-        json={
-            "source": name,
-            "display_name": name,
-            "enabled": True,
-            "match": {"field": "tags.collector.type", "value": name},
-            "header": header or {"type": "timeseries", "version": "1.0.0"},
-            "schema": schema or {"meta_schema": "meta/syslog"},
-        },
-    )
-    assert created.status_code in (200, 201), created.text
-    _deploy(stack, name)
-
-
 def _deploy(stack, name: str) -> dict:
     resp = stack.client.post(f"/api/v1/sources/{name}/deploy", headers=stack.headers)
     assert resp.status_code == 200, resp.text
@@ -204,7 +89,9 @@ def _patch(stack, body: dict) -> None:
 
 def test_apply_pins_a_new_version_and_its_deploy_moves_the_ttl(ch_client, stack):
     db = stack.database
-    _deploy_source(stack, "syslog-ttl", schema={"meta_schema": "meta/syslog", "ttl_days": 90})
+    deploy_source(
+        name="syslog-ttl", schema={"meta_schema": "meta/syslog", "ttl_days": 90}, stack=stack
+    )
     # The default reconcile leaves a table whose source pins its own TTL alone.
     _patch(stack, {"ttl_days": 91})
     assert _live_ttl_days(ch_client, db, "syslog-ttl") == 90
@@ -239,7 +126,9 @@ def test_apply_pins_a_new_version_and_its_deploy_moves_the_ttl(ch_client, stack)
 def test_drift_reads_the_ttl_the_table_runs_not_the_one_the_source_stores(ch_client, stack):
     db = stack.database
     _patch(stack, {"ttl_days": 91})
-    _deploy_source(stack, "syslog-moved", schema={"meta_schema": "meta/syslog", "ttl_days": 91})
+    deploy_source(
+        name="syslog-moved", schema={"meta_schema": "meta/syslog", "ttl_days": 91}, stack=stack
+    )
     ch_client.command(
         f"ALTER TABLE `{db}`.`syslog-moved` MODIFY TTL _timestamp_load + INTERVAL 90 DAY"
     )
@@ -252,7 +141,9 @@ def test_drift_reads_the_ttl_the_table_runs_not_the_one_the_source_stores(ch_cli
 
 def test_deploying_the_applied_header_adds_its_columns_to_the_table(ch_client, stack):
     db = stack.database
-    _deploy_source(stack, "syslog-minimal", header={"type": "minimal", "version": "1.0.0"})
+    deploy_source(
+        header={"type": "minimal", "version": "1.0.0"}, name="syslog-minimal", stack=stack
+    )
     before = set(_columns(ch_client, db, "syslog-minimal"))
     header = {col.name for col in SchemaLoader.load_profile("timeseries", profile_version="1.0.0")}
     missing = header - before
@@ -272,7 +163,7 @@ def test_deploying_the_applied_header_adds_its_columns_to_the_table(ch_client, s
 
 def test_an_engine_change_needs_a_rebuild_and_stays_drift(ch_client, stack):
     db = stack.database
-    _deploy_source(stack, "syslog-engine")
+    deploy_source(name="syslog-engine", stack=stack)
     _patch(stack, {"engine": "ReplacingMergeTree"})
     staged = _apply(stack, "syslog-engine")
     assert staged["updated"] == [{"source": "syslog-engine", "version": "2.0.0"}]
@@ -299,7 +190,7 @@ def test_an_engine_change_needs_a_rebuild_and_stays_drift(ch_client, stack):
 
 def test_an_existing_header_column_keeps_its_nullability(ch_client, stack):
     db = stack.database
-    _deploy_source(stack, "syslog-nullable", schema=ON_THE_DEFAULTS)
+    deploy_source(name="syslog-nullable", schema=ON_THE_DEFAULTS, stack=stack)
     # The header declares _uuid Nullable(UUID); the table now holds it non-nullable.
     ch_client.command(f"ALTER TABLE `{db}`.`syslog-nullable` MODIFY COLUMN `_uuid` UUID")
     retyped = {"_uuid"}
@@ -319,7 +210,7 @@ def test_an_existing_header_column_keeps_its_nullability(ch_client, stack):
 
 def test_plan_and_dry_run_show_the_ttl_move_and_that_it_deletes_rows(ch_client, stack):
     db = stack.database
-    _deploy_source(stack, "syslog-plan")
+    deploy_source(name="syslog-plan", stack=stack)
     # Stored without the reconcile a PATCH runs, so the table keeps its 90 days.
     commit_patch(stack.crud, actor="test", ttl_days=30)
 
@@ -343,8 +234,10 @@ def test_plan_and_dry_run_show_the_ttl_move_and_that_it_deletes_rows(ch_client, 
 
 
 def test_a_header_named_by_its_registry_path_is_not_drift(ch_client, stack):
-    _deploy_source(
-        stack, "syslog-path", header={"type": "common-header/timeseries", "version": "1.0.0"}
+    deploy_source(
+        header={"type": "common-header/timeseries", "version": "1.0.0"},
+        name="syslog-path",
+        stack=stack,
     )
 
     assert "syslog-path" not in _drift(stack)
@@ -354,8 +247,8 @@ def test_one_table_clickhouse_refuses_does_not_hide_the_others(ch_client, stack)
     db = stack.database
     _patch(stack, {"ttl_days": 91})
     schema = {**ON_THE_DEFAULTS, "ttl_days": 91}
-    _deploy_source(stack, "syslog-good", schema=schema)
-    _deploy_source(stack, "syslog-bad", schema=schema)
+    deploy_source(name="syslog-good", schema=schema, stack=stack)
+    deploy_source(name="syslog-bad", schema=schema, stack=stack)
     ch_client.command(
         f"ALTER TABLE `{db}`.`syslog-good` MODIFY TTL _timestamp_load + INTERVAL 90 DAY"
     )
@@ -394,7 +287,7 @@ def test_one_table_clickhouse_refuses_does_not_hide_the_others(ch_client, stack)
 
 def test_a_redeploy_moves_an_existing_tables_ttl(ch_client, stack):
     db = stack.database
-    _deploy_source(stack, "syslog-redeploy")
+    deploy_source(name="syslog-redeploy", stack=stack)
     assert _live_ttl_days(ch_client, db, "syslog-redeploy") == 90
     # Stored without the reconcile a PATCH runs, so only the deploy can move the table.
     commit_patch(stack.crud, actor="test", ttl_days=60)
