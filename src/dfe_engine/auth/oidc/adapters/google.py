@@ -25,7 +25,6 @@ Cloud Identity resource name with its ``groups/`` prefix removed. Group files
 link on that id, never on the group email, which an admin can rename.
 """
 
-import asyncio
 import functools
 import json
 from typing import TYPE_CHECKING, Any
@@ -175,7 +174,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 raise DirectoryNotConfiguredError
             raise DirectoryCredentialError
 
-        raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
+        raw = await run_blocking(self._fetch_all_groups_sync, service)
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 
     async def test_connection(self) -> tuple[bool, str]:
@@ -209,7 +208,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             return False, "Failed to build service from the configured service account JSON"
 
         try:
-            await asyncio.to_thread(self._probe_sync, service)
+            await run_blocking(self._probe_sync, service)
             return True, "OK"
         except Exception as exc:
             logger.warning(
@@ -354,7 +353,9 @@ class GoogleAdapter(OIDCGroupAdapter):
             return []
 
         try:
-            raw = await asyncio.to_thread(self._fetch_user_groups_sync, service, user_key)
+            raw = await run_blocking(
+                functools.partial(self._fetch_user_groups_sync, service, user_key)
+            )
         except Exception as exc:
             logger.warning(
                 "Google Admin SDK resolve_user_groups failed -- default deny",
@@ -433,7 +434,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             return None
 
     # ------------------------------------------------------------------
-    # Synchronous helpers (called via asyncio.to_thread)
+    # Synchronous helpers (called via run_blocking)
     # ------------------------------------------------------------------
 
     def _fetch_all_groups_sync(self, service: Any) -> list[dict[str, Any]]:
