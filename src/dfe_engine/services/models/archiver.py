@@ -156,10 +156,11 @@ class ArchiverRoutingConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Pinned to dfe-archiver RoutingConfig::default (3d04ac4); the emitted config
-    # is a full document, so the archiver never falls back to its own default.
     mode: str = Field(default="expression", description="topic or expression")
-    expression_fields: list[str] = Field(default_factory=lambda: ["org_id"])
+    # Omitted from the dump when unset: the archiver's default depends on its
+    # transport (kafka [org_id], grpc [_source, org_id]), and any value written
+    # here overrides it.
+    expression_fields: list[str] | None = Field(default=None, exclude_if=lambda v: v is None)
     default_segment: str = "unknown"
 
     @field_validator("mode")
