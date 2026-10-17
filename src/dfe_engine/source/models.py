@@ -552,6 +552,11 @@ def manifest_max_message_bytes() -> int:
     return int(_topic_policy().defaults["max_message_bytes"])
 
 
+def manifest_replication_factor() -> int:
+    """The replication factor the dfe-schemas topic manifest gives a landing topic."""
+    return int(_topic_policy().defaults["landing"]["replication_factor"])
+
+
 SOURCE_LABEL_FIELD = "_source"
 """The field every producer stamps with the label a record belongs to.
 

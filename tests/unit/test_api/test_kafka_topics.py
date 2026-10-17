@@ -98,6 +98,22 @@ class TestStatus:
         assert response.status_code == 200, response.text
         assert "filebeat_land" in recorded["status"]
 
+    def test_the_wanted_factor_follows_the_bus(
+        self, client, admin_headers, source, recorded, monkeypatch
+    ):
+        """Status compares against what a deploy creates, not the unset setting."""
+
+        class _Bus:
+            def node_count(self, **_kwargs) -> int:
+                return 6
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", lambda **_kwargs: _Bus())
+
+        response = client.get(f"{BASE}?source={source}", headers=admin_headers)
+
+        assert response.status_code == 200, response.text
+        assert {t["desired_replication_factor"] for t in response.json()["topics"]} == {3}
+
     def test_an_unknown_source_is_a_404(self, client, admin_headers, recorded):
         response = client.get(f"{BASE}?source=nope", headers=admin_headers)
 
