@@ -57,7 +57,11 @@ from confluent_kafka.admin import (
 )
 from scalo.logger import logger
 
-from dfe_engine.source.models import manifest_max_message_bytes, transformed_topic
+from dfe_engine.source.models import (
+    manifest_max_message_bytes,
+    manifest_replication_factor,
+    transformed_topic,
+)
 
 if TYPE_CHECKING:
     from dfe_engine.settings import DFESettings
@@ -440,6 +444,24 @@ def broker_count(
     return nodes
 
 
+def source_replication_factor(
+    settings: DFESettings,
+    *,
+    admin: TopicAdmin | None = None,
+) -> int:
+    """The replication factor every source's ``_land`` and ``_load`` topics are created at.
+
+    The configured factor where one is set, used as given. Unset takes the manifest's
+    landing factor clamped to :func:`broker_count`, the clamp the bootstrap set gets:
+    Confluent Cloud and Redpanda Cloud refuse a topic below 3 replicas, and an
+    in-cluster broker set loses a one-replica topic with its broker.
+    """
+    configured = settings.kafka.topic_replication_factor
+    if configured is not None:
+        return configured
+    return min(manifest_replication_factor(), broker_count(settings=settings, admin=admin))
+
+
 def topic_max_message_bytes(settings: DFESettings) -> int:
     """The ``max.message.bytes`` every topic DFE creates carries, bootstrap and source alike.
 
@@ -473,23 +495,31 @@ def deployment_topic_config(settings: DFESettings) -> dict[str, str]:
 
 
 def specs_for_sources(
-    sources: list[Source], settings: DFESettings
+    sources: list[Source],
+    settings: DFESettings,
+    *,
+    admin: TopicAdmin | None = None,
 ) -> tuple[list[TopicSpec], dict[str, str]]:
     """Every source's topic specs, de-duplicated, plus the source that owns each.
 
     Sources share a topic only by name collision, which the registry already
     refuses, so the first owner wins and the duplicate is dropped rather than
     ensured twice.
+
+    Blocking where the replication factor is unset, since the bus is asked its
+    size, so a caller on the event loop hands it to a thread.
     """
-    ks = settings.kafka
+    if not sources:
+        return [], {}
     config = deployment_topic_config(settings)
+    replication_factor = source_replication_factor(settings, admin=admin)
     specs: list[TopicSpec] = []
     owners: dict[str, str] = {}
     for source in sources:
         for spec in source_topic_specs(
             source,
-            partitions=ks.topic_partitions,
-            replication_factor=ks.topic_replication_factor,
+            partitions=settings.kafka.topic_partitions,
+            replication_factor=replication_factor,
             config=config,
         ):
             if not spec.name or spec.name in owners:
@@ -513,7 +543,7 @@ def ensure_all_source_topics(
     """
     if not topics_managed_at_startup(settings):
         return TopicEnsureResult()
-    specs, _ = specs_for_sources(sources, settings)
+    specs, _ = specs_for_sources(sources, settings, admin=admin)
     return ensure_topics(specs, admin=admin, settings=settings)
 
 

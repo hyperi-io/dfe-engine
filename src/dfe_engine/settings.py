@@ -735,13 +735,16 @@ class KafkaSettings(BaseModel):
             "controller metadata across the cluster."
         ),
     )
-    topic_replication_factor: int = Field(
-        default=1,
+    topic_replication_factor: int | None = Field(
+        default=None,
         ge=1,
         le=10,
         description=(
-            "Replication factor for topics DFE creates. 1 suits a single-broker "
-            "dev cluster; raise it to match a real broker count."
+            "Replication factor for each source's _land and _load topics "
+            "(DFE_KAFKA_TOPIC_REPLICATION_FACTOR), used as given when set. Unset "
+            "takes the dfe-schemas landing default clamped to the brokers the bus "
+            "reports, so a managed broker that refuses fewer than 3 replicas gets 3 "
+            "and a one-broker dev cluster gets 1."
         ),
     )
     topic_retention_ms: int | None = Field(

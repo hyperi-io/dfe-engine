@@ -49,7 +49,7 @@ two in different places.
 | Setting | Effect |
 |---|---|
 | `kafka.topic_partitions` | Partition count for topics DFE creates. A converge widens an existing topic to it. |
-| `kafka.topic_replication_factor` | Replication factor for topics DFE creates. A converge reports a difference and changes nothing. |
+| `kafka.topic_replication_factor` | Replication factor for topics DFE creates. Unset takes the dfe-schemas landing default (3) clamped to the broker count the bus reports, so a managed broker that refuses fewer than 3 replicas gets 3. A converge reports a difference and changes nothing. |
 | `kafka.topic_retention_ms` | `retention.ms` on the topics DFE creates and converges. Unset leaves the broker default. |
 | `kafka.topic_cleanup_policy` | `cleanup.policy`, same. |
 | `kafka.topic_compression_type` | `compression.type` on the topics DFE creates and converges. Default `producer`: the broker stores each batch in the codec its producer chose (zstd level 3 across DFE) and never recompresses it. Empty leaves the broker default. |

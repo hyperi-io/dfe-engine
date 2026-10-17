@@ -131,6 +131,60 @@ class TestReporting:
         assert seen["names"] == ["syslog_land"]
 
 
+class _Bus:
+    """A bus of a given size that holds no topics yet."""
+
+    def __init__(self, brokers: int) -> None:
+        self.brokers = brokers
+
+    def node_count(self, **_kwargs) -> int:
+        return self.brokers
+
+    def list_topic_names(self, **_kwargs) -> set[str]:
+        return set()
+
+
+class TestReplicationFactor:
+    """A managed broker refuses a topic below 3 replicas, so unset must not mean 1."""
+
+    def _deploy(self, monkeypatch, settings, *, brokers: int) -> dict:
+        seen: dict = {"admins": 0}
+
+        def _build_admin(**_kwargs):
+            seen["admins"] += 1
+            return _Bus(brokers)
+
+        def _ensure(specs, **kw):
+            seen["factors"] = {s.name: s.replication_factor for s in specs}
+            return TopicEnsureResult(created=[s.name for s in specs])
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", _build_admin)
+        monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _ensure)
+        _ensure_source_topics(_source(), settings)
+        return seen
+
+    def test_unset_creates_at_three_on_a_managed_broker(self, monkeypatch):
+        seen = self._deploy(monkeypatch, _settings(), brokers=6)
+
+        assert seen["factors"] == {"filebeat_land": 3, "filebeat_load": 3}
+
+    def test_unset_on_one_broker_asks_for_one(self, monkeypatch):
+        seen = self._deploy(monkeypatch, _settings(), brokers=1)
+
+        assert seen["factors"] == {"filebeat_land": 1, "filebeat_load": 1}
+
+    def test_a_configured_factor_is_honoured_as_given(self, monkeypatch):
+        seen = self._deploy(monkeypatch, _settings(topic_replication_factor=2), brokers=6)
+
+        assert seen["factors"] == {"filebeat_land": 2, "filebeat_load": 2}
+
+    def test_one_admin_reads_the_size_and_runs_the_deploy(self, monkeypatch):
+        # A second admin is a second full timeout when the broker does not answer.
+        seen = self._deploy(monkeypatch, _settings(), brokers=6)
+
+        assert seen["admins"] == 1
+
+
 class TestDeployIsNeverFailedByTopics:
     @pytest.mark.parametrize(
         "outcome",

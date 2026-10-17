@@ -1360,6 +1360,7 @@ def _ensure_source_topics(
         build_admin,
         deployment_topic_config,
         ensure_topics,
+        source_replication_factor,
         source_topic_specs,
         stranded_source_topics,
         topics_managed,
@@ -1368,8 +1369,8 @@ def _ensure_source_topics(
     if not topics_managed(settings):
         return [], [], []
 
-    # One admin for both passes. Each builds its own otherwise, and an unreachable
-    # broker then costs two full librdkafka timeouts on the request path.
+    # One admin for every pass. Each builds its own otherwise, and an unreachable
+    # broker then costs another full librdkafka timeout on the request path.
     try:
         admin = build_admin(settings=settings)
     except Exception:
@@ -1378,7 +1379,7 @@ def _ensure_source_topics(
     specs = source_topic_specs(
         source,
         partitions=settings.kafka.topic_partitions,
-        replication_factor=settings.kafka.topic_replication_factor,
+        replication_factor=source_replication_factor(settings, admin=admin),
         config=deployment_topic_config(settings),
         version_id=version_id,
     )
