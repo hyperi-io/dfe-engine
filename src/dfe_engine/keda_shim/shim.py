@@ -31,6 +31,7 @@ import clickhouse_connect
 from scalo.logger import logger
 
 from dfe_engine import scaling_pressure
+from dfe_engine.clickhouse.errors import is_connection_error
 from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
 from dfe_engine.settings import DFESettings
 from dfe_engine.yaml_utils import deep_merge, yaml_load
@@ -124,7 +125,11 @@ class QueryShim:
         return current
 
     def _client_drop(self, client: Any) -> None:
-        """Close a client whose query failed, so the next poll builds a fresh one."""
+        """Close a client whose connection failed, so the next poll builds a fresh one.
+
+        Only a connection error calls this. A query error leaves the link sound, and
+        every build costs three round trips to ClickHouse.
+        """
         with self._client_lock:
             if self._client is client:
                 self._client = None
@@ -223,10 +228,9 @@ class QueryShim:
                 self._cache[cache_key] = value
             return value
         except Exception as exc:  # fail-safe: a metric failure must NEVER reach KEDA
-            # Drop a possibly-broken client so the next poll rebuilds it. Last-good
-            # freezes scaling at current; no last-good holds at the conservative
-            # cold_hold (min). Either way, a broken metric never scales UP.
-            if client is not None:
+            # Holding last-good (or cold_hold with none) means a broken metric never scales UP.
+            reconnect = client is not None and is_connection_error(exc)
+            if reconnect:
                 self._client_drop(client)
             cached = self._cache.get(cache_key)
             held = cached if cached is not None else cold_hold
@@ -236,6 +240,7 @@ class QueryShim:
                 params=params,
                 held=held,
                 had_cache=cached is not None,
+                reconnect=reconnect,
                 error=str(exc),
             )
             return held

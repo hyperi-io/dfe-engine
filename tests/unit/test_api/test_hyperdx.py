@@ -39,10 +39,11 @@ def _settings(tmp_path):
     )
 
 
-def _request(orgs):
+def _request(orgs, settings=None):
     # The scope-aware query:execute gate (moved into the handler) resolves via
     # is_action_allowed, which reads settings.auth.enabled + role_config off
-    # app.state - provide both so the gate can evaluate.
+    # app.state - provide both so the gate can evaluate. The handler reads the
+    # password from the app's shared store, built here from *settings*.
     from dfe_engine.auth.roles import RoleConfig
 
     reg = SimpleNamespace(list=lambda: orgs)
@@ -50,6 +51,7 @@ def _request(orgs):
         org_registry=reg,
         settings=SimpleNamespace(auth=SimpleNamespace(enabled=True)),
         role_config=RoleConfig.load_builtin(),
+        dfe_secrets=build_secrets(settings.secrets) if settings is not None else None,
     )
     return SimpleNamespace(app=SimpleNamespace(state=state))
 
@@ -60,7 +62,7 @@ async def test_org_viewer_gets_only_its_own_org_connection(tmp_path):
     store.put("ch/orgs/acme", "acme-pw")
     store.put("ch/orgs/nerk", "nerk-pw")
     user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=["acme"])
-    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])])
+    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])], settings)
 
     conn = await hyperdx_connection(req, user, settings)
 
@@ -87,7 +89,7 @@ async def test_org_viewer_with_org_scoped_grant_passes_the_gate(tmp_path):
         org_ids=["acme"],
         grants=[ScopedGrant(role="org_viewer", scope=Scope(type="org", id="acme"))],
     )
-    req = _request([_org("acme", ["acme"])])
+    req = _request([_org("acme", ["acme"])], settings)
 
     conn = await hyperdx_connection(req, user, settings)
 
@@ -100,7 +102,7 @@ async def test_platform_role_gets_the_unrestricted_reader(tmp_path):
     store = build_secrets(settings.secrets)
     store.put("ch/service/query_reader", "qr-pw")
     user = AuthContext(user_id="u", roles=["data_analyst"], org_ids=[])
-    req = _request([_org("acme", ["acme"])])
+    req = _request([_org("acme", ["acme"])], settings)
 
     conn = await hyperdx_connection(req, user, settings)
 
@@ -115,7 +117,7 @@ async def test_a_system_query_role_beside_org_viewer_reads_unrestricted(tmp_path
     store.put("ch/service/query_reader", "qr-pw")
     store.put("ch/orgs/acme", "acme-pw")
     user = AuthContext(user_id="u", roles=["org_viewer", "data_analyst"], org_ids=["acme"])
-    req = _request([_org("acme", ["acme"])])
+    req = _request([_org("acme", ["acme"])], settings)
 
     conn = await hyperdx_connection(req, user, settings)
 
@@ -129,7 +131,7 @@ async def test_a_system_role_that_runs_no_query_does_not_read_unrestricted(tmp_p
     store.put("ch/service/query_reader", "qr-pw")
     store.put("ch/orgs/acme", "acme-pw")
     user = AuthContext(user_id="u", roles=["org_viewer", "infra_admin"], org_ids=["acme"])
-    req = _request([_org("acme", ["acme"])])
+    req = _request([_org("acme", ["acme"])], settings)
 
     conn = await hyperdx_connection(req, user, settings)
 
@@ -152,7 +154,7 @@ async def test_an_org_scoped_caller_gets_its_org_user_whatever_else_it_holds(tmp
         org_ids=["acme"],
         grants=[ScopedGrant(role="org_viewer", scope=acme), ScopedGrant(role=other, scope=acme)],
     )
-    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])])
+    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])], settings)
 
     conn = await hyperdx_connection(req, user, settings)
 
@@ -171,7 +173,7 @@ async def test_a_system_scope_data_analyst_grant_reads_unrestricted(tmp_path):
         org_ids=[],
         grants=[ScopedGrant(role="data_analyst", scope=Scope())],
     )
-    req = _request([_org("acme", ["acme"])])
+    req = _request([_org("acme", ["acme"])], settings)
 
     conn = await hyperdx_connection(req, user, settings)
 
@@ -194,7 +196,7 @@ async def test_a_caller_with_no_query_execute_anywhere_is_refused(tmp_path):
             ScopedGrant(role="infra_viewer", scope=Scope(type="org", id="acme")),
         ],
     )
-    req = _request([_org("acme", ["acme"])])
+    req = _request([_org("acme", ["acme"])], settings)
 
     with pytest.raises(HTTPException) as exc:
         await hyperdx_connection(req, user, settings)
@@ -204,7 +206,7 @@ async def test_a_caller_with_no_query_execute_anywhere_is_refused(tmp_path):
 async def test_caller_with_no_resolvable_org_is_refused(tmp_path):
     settings = _settings(tmp_path)
     user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=[])
-    req = _request([_org("acme", ["acme"])])
+    req = _request([_org("acme", ["acme"])], settings)
 
     with pytest.raises(HTTPException) as exc:
         await hyperdx_connection(req, user, settings)
@@ -214,7 +216,7 @@ async def test_caller_with_no_resolvable_org_is_refused(tmp_path):
 async def test_caller_spanning_two_separate_orgs_fails_closed(tmp_path):
     settings = _settings(tmp_path)
     user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=["acme", "nerk"])
-    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])])
+    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])], settings)
 
     with pytest.raises(HTTPException) as exc:
         await hyperdx_connection(req, user, settings)
@@ -227,7 +229,7 @@ async def test_org_with_many_ids_still_resolves_to_one_connection(tmp_path):
     store = build_secrets(settings.secrets)
     store.put("ch/orgs/span", "span-pw")
     user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=["t1", "t2"])
-    req = _request([_org("span", ["t1", "t2"])])
+    req = _request([_org("span", ["t1", "t2"])], settings)
 
     conn = await hyperdx_connection(req, user, settings)
 
@@ -238,11 +240,23 @@ async def test_org_with_many_ids_still_resolves_to_one_connection(tmp_path):
 async def test_org_without_a_credential_is_503(tmp_path):
     settings = _settings(tmp_path)
     user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=["acme"])
-    req = _request([_org("acme", ["acme"])])
+    req = _request([_org("acme", ["acme"])], settings)
 
     with pytest.raises(HTTPException) as exc:
         await hyperdx_connection(req, user, settings)
     assert exc.value.status_code == 503
+
+
+async def test_the_password_comes_from_the_apps_shared_store(tmp_path):
+    """The handler reads the store the app built at startup, never one it builds from settings."""
+    shared = _settings(tmp_path / "shared")
+    build_secrets(shared.secrets).put("ch/orgs/acme", "shared-pw")
+    settings = _settings(tmp_path / "per-request")
+    user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=["acme"])
+
+    conn = await hyperdx_connection(_request([_org("acme", ["acme"])], shared), user, settings)
+
+    assert conn.password == "shared-pw"
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +305,7 @@ async def test_the_identity_is_the_username_the_connection_hands_over(tmp_path, 
     store = build_secrets(settings.secrets)
     store.put("ch/service/query_reader", "qr-pw")
     store.put("ch/orgs/acme", "acme-pw")
-    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])])
+    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])], settings)
 
     conn = await hyperdx_connection(req, user, settings)
 
@@ -321,7 +335,7 @@ async def test_the_identity_is_the_username_the_connection_hands_over(tmp_path, 
 )
 async def test_a_caller_the_connection_refuses_has_no_identity(tmp_path, user):
     settings = _settings(tmp_path)
-    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])])
+    req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])], settings)
 
     with pytest.raises(HTTPException) as exc:
         await hyperdx_connection(req, user, settings)

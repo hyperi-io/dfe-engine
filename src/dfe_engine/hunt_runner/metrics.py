@@ -162,7 +162,8 @@ class HuntRunnerMetrics:
 
         Args:
             stage: ``connect`` at startup, or ``tick`` once running.
-            reason: ``connection`` for an outage, ``authentication`` for a refused user.
+            reason: ``connection`` for an outage, ``authentication`` for a refused user,
+                ``capacity`` for a server out of memory or query slots.
         """
         if self._manager is None:
             return

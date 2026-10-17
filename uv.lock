@@ -696,7 +696,7 @@ requires-dist = [
     { name = "confluent-kafka", specifier = ">=2.16.0" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "dfe-schemas", specifier = ">=0.2.11,<1" },
+    { name = "dfe-schemas", specifier = ">=0.2.12,<1" },
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "dulwich", specifier = ">=1.2.7" },
     { name = "faker", specifier = ">=40.43.0" },
@@ -724,7 +724,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.13,<3" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.14,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.22.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -739,7 +739,7 @@ dev = [
     { name = "coverage", specifier = ">=7.14.3" },
     { name = "defusedxml", specifier = ">=0.7.1" },
     { name = "faker", specifier = ">=40.43.0" },
-    { name = "moto", extras = ["s3"], specifier = ">=5.2.4" },
+    { name = "moto", extras = ["s3", "secretsmanager"], specifier = ">=5.2.4" },
     { name = "pytest", specifier = ">=9.1.1" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "pytest-benchmark", specifier = ">=5.2.3" },
@@ -754,14 +754,14 @@ dev = [
 
 [[package]]
 name = "dfe-schemas"
-version = "0.2.11"
+version = "0.2.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b2/b9/cf0225654f8defdedd57fe503a8edf4e786c2293a1b53959fed80ddbf000/dfe_schemas-0.2.11.tar.gz", hash = "sha256:5cd0cd1d4dc9e64b78b2415269db3882038205ed5c20249e051f68ca5e14f5dc", size = 1138443, upload-time = "2026-10-13T06:25:43.801Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bd/ba/624bda77a49fa3639859daa6cd1d4fd332991893c624ad1e070627842c21/dfe_schemas-0.2.12.tar.gz", hash = "sha256:96123cc0f7408988adfd8fed45b8ca738a1ff8826f1632b6de27f78f1c4fec49", size = 1138626, upload-time = "2026-10-16T21:28:49.692Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2e/52/2f2687ad46d37a2fa4e247fc25fc5987d39a8dd0bb82d8d258c25e00e19b/dfe_schemas-0.2.11-py3-none-any.whl", hash = "sha256:7ca135a9f65ff85fdf0a4778f2bc84ed752adb6492dcf557c7c313431bc0b31a", size = 2164748, upload-time = "2026-10-13T06:25:41.925Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/ac/f6c97cb151ea81701f4d97c29dbe6242d853837311d51e900e2ad73b6a30/dfe_schemas-0.2.12-py3-none-any.whl", hash = "sha256:380d32ee7ae6ec8ca0029edd38aeec6f23a32c9f356cd1a6d792c4da81709d40", size = 2164734, upload-time = "2026-10-16T21:28:47.292Z" },
 ]
 
 [[package]]
@@ -2325,7 +2325,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.31.13"
+version = "2.31.14"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2343,9 +2343,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9d/0c/d691428fb9625981de6318892b7bd84dd86423c76712a553a1fbb28aa7e1/scalo-2.31.13.tar.gz", hash = "sha256:0262888dcb78e8b22b3464bf70d142b687322f81e2d57f569744d5a58ab8192c", size = 362078, upload-time = "2026-10-14T21:42:47.582Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/6a/07c83a26611b4fc03bb7e2a806f17333b283c1a0cf2ef07b23266cb6f293/scalo-2.31.14.tar.gz", hash = "sha256:ed0831023a17adc0d2d723529cca8b5ae4ca9e0d9e4f1f0b8b1ab65543097c85", size = 363846, upload-time = "2026-10-15T12:57:16.072Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/67/6f/05b4acd21fe1a9d7982cf9e252e52f2d27551ee01f24586ac32c4c5781ff/scalo-2.31.13-py3-none-any.whl", hash = "sha256:ee9bcc00a45c6ffbb262148d187348044fb167cbab928f7f84d43049fbd74342", size = 434420, upload-time = "2026-10-14T21:42:45.406Z" },
+    { url = "https://files.pythonhosted.org/packages/75/4e/da6062fb896edb470b38a9cb1d1f9422d4b8b3fba60de56c54c45d501e15/scalo-2.31.14-py3-none-any.whl", hash = "sha256:4d630a671918906ccbd25cd5cf57860f6555928069cf80117116f0aed560f40c", size = 436227, upload-time = "2026-10-15T12:57:13.911Z" },
 ]
 
 [package.optional-dependencies]

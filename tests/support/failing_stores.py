@@ -15,7 +15,7 @@ from typing import Any
 from scalo.secrets import SecretsManager
 
 from dfe_engine.auth.accounts import Account, AccountStore
-from dfe_engine.secrets import DfeSecrets
+from dfe_engine.secrets import DfeSecrets, SecretNameHeldError
 
 
 class DeleteFailingSecrets(DfeSecrets):
@@ -24,6 +24,14 @@ class DeleteFailingSecrets(DfeSecrets):
     def delete(self, path: str) -> None:
         """Fail the delete, leaving the secret in place."""
         raise ConnectionError("the secrets backend did not answer")
+
+
+class NameHeldSecrets(DfeSecrets):
+    """A file-backed secret store whose writes meet a name a deleted secret still holds."""
+
+    def put(self, path: str, value: str) -> None:
+        """Refuse the write as a secret inside its recovery window refuses it."""
+        raise SecretNameHeldError("aws", f"acme/dfe/test/engine/{path}", 7)
 
 
 class StampFailingAccountStore(AccountStore):
@@ -40,3 +48,9 @@ def make_delete_failing_secrets(*, root: str) -> DeleteFailingSecrets:
     """Build a DeleteFailingSecrets over the file secret store at *root*."""
     manager = SecretsManager.from_config({"cache": {"enabled": False}})
     return DeleteFailingSecrets(manager=manager, provider="file", root=root)
+
+
+def make_name_held_secrets(*, root: str) -> NameHeldSecrets:
+    """Build a NameHeldSecrets over the file secret store at *root*."""
+    manager = SecretsManager.from_config({"cache": {"enabled": False}})
+    return NameHeldSecrets(manager=manager, provider="file", root=root)
