@@ -36,6 +36,7 @@ from dfe_engine.api.deps import (
     _get_client_ip,
     account_for_session_subject,
     provider_bindings,
+    refuse_unknown_orgs,
     require_action,
     secrets_store,
 )
@@ -183,6 +184,12 @@ async def _persist_password(
 
 # -- Request / Response models --------------------------------
 
+_ORG_DESCRIPTION = (
+    "The registered org the account belongs to, which its sessions carry as org_id. "
+    "Empty binds it to none, so it reads no org-bound view. The binding grants nothing "
+    "itself: such a view also needs the org among those its groups grant."
+)
+
 
 class CreateAccountRequest(BaseModel):
     """What a console sends to create an account.
@@ -205,6 +212,7 @@ class CreateAccountRequest(BaseModel):
     groups: list[str] = Field(default_factory=list, description="Group memberships")
     phone: str = Field(default="", description="Contact phone")
     name: str = Field(default="", description="Display name")
+    org: str = Field(default="", description=_ORG_DESCRIPTION)
 
     @field_validator("password")
     @classmethod
@@ -219,6 +227,7 @@ class UpdateAccountRequest(BaseModel):
     email: str | None = Field(None, min_length=1, description="Contact email")
     phone: str | None = Field(None, description="Contact phone")
     name: str | None = Field(None, description="Display name")
+    org: str | None = Field(None, description=f"Replace the org binding. {_ORG_DESCRIPTION}")
 
 
 class UpdateOwnAccountRequest(BaseModel):
@@ -321,6 +330,7 @@ class AccountResponse(BaseModel):
     email: str
     phone: str = ""
     name: str = ""
+    org: str = Field(default="", description=_ORG_DESCRIPTION)
     external: bool = Field(
         description="True when the account authenticates through an identity provider",
     )
@@ -366,6 +376,7 @@ def _account_response(request: Request, account: Account, groups: list[Group]) -
         email=account.email,
         phone=account.phone,
         name=account.name,
+        org=account.org,
         external=account.external,
         oidc_id=account.oidc_id,
         password_change_required=account.password_change_required,
@@ -517,6 +528,7 @@ async def create_account(
     )
     if store.get(body.username) is not None:
         raise conflict
+    refuse_unknown_orgs(request, [body.org])
     groups = group_store.list()
     created = Account(groups=body.groups, password_hash="", username=body.username)
     held_after = groups_held_after(
@@ -531,13 +543,16 @@ async def create_account(
     # It hashes the password, so it runs off the event loop.
     try:
         account = await run_blocking(
-            store.create,
-            body.username,
-            body.password,
-            groups=body.groups,
-            email=body.email,
-            phone=body.phone,
-            name=body.name,
+            functools.partial(
+                store.create,
+                body.username,
+                body.password,
+                groups=body.groups,
+                email=body.email,
+                phone=body.phone,
+                name=body.name,
+                org=body.org,
+            )
         )
     except AccountExistsError as exc:
         raise conflict from exc
@@ -559,7 +574,9 @@ async def create_account(
         summary="create account",
         actor=user.user_id,
     )
-    audit_account_change(user.user_id, account.username, "created", {"groups": body.groups})
+    audit_account_change(
+        user.user_id, account.username, "created", {"groups": body.groups, "org": body.org}
+    )
     return _account_response(request, account, group_store.list())
 
 
@@ -786,6 +803,9 @@ async def update_account(
         update_fields["enabled"] = body.enabled
     if body.blocked is not None:
         update_fields["blocked"] = body.blocked
+    if body.org is not None:
+        refuse_unknown_orgs(request, [body.org])
+        update_fields["org"] = body.org
     if body.groups is not None:
         # The group files decide membership, so diff against them: re-sending a list repairs drift.
         listed_in = {g.name for g in group_store.list() if username in g.members}
@@ -809,7 +829,7 @@ async def update_account(
     )
     # Field names only for the contact fields: their values are personal data.
     details: dict[str, object] = {"fields": sorted(update_fields)}
-    for name in ("groups", "enabled", "blocked"):
+    for name in ("groups", "enabled", "blocked", "org"):
         if name in update_fields:
             details[name] = update_fields[name]
     audit_account_change(user.user_id, account.username, "updated", details)

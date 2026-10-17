@@ -112,7 +112,7 @@ def test_a_hunt_runs_as_the_runner_user(runner_world, ch_client, tmp_path):
     rule_id = f"{hunt}_rule"
     org = f"org-{uuid.uuid4().hex[:8]}"
     write_rule(tmp_path / "rules", rule_id, f"_org_id = '{org}'")
-    write_hunt(tmp_path / "hunts", hunt, rule_id, db)
+    write_hunt(tmp_path / "hunts", hunt, rule_id, db, customers=[org])
     specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
 
     fire = current_fire(hunt, 60, int(time.time()))

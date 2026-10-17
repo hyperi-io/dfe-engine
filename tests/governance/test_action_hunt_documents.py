@@ -95,6 +95,19 @@ REFUSED = {
         ("rules", "certutil", "where_clause", EXFIL),
         "may not call url()",
     ),
+    "rule where_clause reads another org": (
+        (
+            "rules",
+            "certutil",
+            "where_clause",
+            "process_name IN (SELECT process_name FROM dfe.main WHERE _org_id = 'globex')",
+        ),
+        "may not hold a SELECT",
+    ),
+    "rule where_clause reads a table after IN": (
+        ("rules", "certutil", "where_clause", "process_name IN (dfe.main)"),
+        "may not name a table after IN",
+    ),
 }
 
 
@@ -229,6 +242,49 @@ def test_an_action_creating_a_hunt_is_held_to_the_same_validation(store, crud):
         store.invoke("tune", actor="bob")
     with pytest.raises(ResourceNotFoundError):
         crud.get("hunts", "new_hunt")
+
+
+LOOKUP = "process_name IN (SELECT ioc FROM threat.iocs)"
+
+
+def test_an_action_may_point_a_rule_at_a_listed_lookup_database(crud):
+    store = ActionStore(crud, lookup_databases=("threat",))
+    store.save(_action(("rules", "certutil", "where_clause", LOOKUP)), actor="admin")
+
+    assert store.invoke("tune", actor="bob").changed is True
+    assert crud.get("rules", "certutil")["where_clause"] == LOOKUP
+
+
+@pytest.mark.parametrize(
+    "where",
+    [LOOKUP.replace("threat", "intel"), "process_name IN intel.iocs", "process_name IN dfe.main"],
+    ids=["unlisted subquery", "unlisted table", "data database table"],
+)
+def test_an_action_pointing_a_rule_past_the_listed_databases_is_refused(crud, where):
+    store = ActionStore(crud, lookup_databases=("threat",))
+    before = crud.get("rules", "certutil")
+    store.save(_action(("rules", "certutil", "where_clause", where)), actor="admin")
+
+    with pytest.raises(ValueError, match="rules/certutil: "):
+        store.invoke("tune", actor="bob")
+
+    assert crud.get("rules", "certutil") == before
+
+
+def test_an_action_pointing_a_rule_at_a_lookup_is_refused_with_none_listed(store, crud):
+    store.save(_action(("rules", "certutil", "where_clause", LOOKUP)), actor="admin")
+
+    with pytest.raises(ValueError, match="may not hold a SELECT"):
+        store.invoke("tune", actor="bob")
+
+
+def test_an_action_may_set_a_hunts_tenant_ids_directly(store, crud):
+    """Governance is the operator's own deploy-repo write, so its tenant ids are taken as given."""
+    tenant_ids = {"org_a": ["tenant-a1", "tenant-a2"]}
+    store.save(_action(("hunts", "windows_hunt", "customer_tenant_ids", tenant_ids)), "admin")
+
+    assert store.invoke("tune", actor="bob").changed is True
+    assert crud.get("hunts", "windows_hunt")["customer_tenant_ids"] == tenant_ids
 
 
 def test_other_classes_are_not_checked_as_hunts(store, crud):

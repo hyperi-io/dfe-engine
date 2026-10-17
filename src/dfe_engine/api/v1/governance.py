@@ -87,7 +87,8 @@ def _gitcrud(request: Request) -> GitCrud:
 
 
 def _actions(request: Request) -> ActionStore:
-    return ActionStore(_gitcrud(request))
+    lookups = request.app.state.settings.hunts.lookup_databases
+    return ActionStore(_gitcrud(request), lookup_databases=lookups)
 
 
 def _policies(request: Request) -> PolicyStore:

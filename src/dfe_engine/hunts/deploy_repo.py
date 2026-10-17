@@ -24,6 +24,7 @@ their DirectoryConfigStore over the shared config volume the docker runner reads
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
@@ -36,6 +37,7 @@ from dfe_engine.gitcrud.routing import (
     pr_branch_name,
     route_write,
 )
+from dfe_engine.yaml_utils import yaml_load_string
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -48,6 +50,27 @@ if TYPE_CHECKING:
 # Both classes are hunt-domain artefacts, so both commit under the standard's
 # `hunt` type (gitcrud/commit_policy.ALLOWED_TYPES).
 _COMMIT_TYPE = "hunt"
+
+
+@dataclass(frozen=True, slots=True)
+class PendingDoc:
+    """A doc as a review branch would leave it, and as the branch's merge base held it."""
+
+    branch: str
+    name: str
+    doc: dict[str, Any]
+    base: dict[str, Any]
+
+
+def _mapping(raw: str | None) -> dict[str, Any]:
+    """A branch file's YAML mapping, empty when absent or not a mapping the runner could load."""
+    if raw is None:
+        return {}
+    try:
+        doc = yaml_load_string(raw)
+    except Exception:  # an unparsable hunt is one the runner refuses, so it holds no ids
+        return {}
+    return doc if isinstance(doc, dict) else {}
 
 
 class DeployRepoStore:
@@ -88,6 +111,27 @@ class DeployRepoStore:
         except ResourceNotFoundError, CommitPolicyError:
             return None
 
+    def pending(self) -> list[PendingDoc]:
+        """Each doc a review branch not yet merged changes, beside its merge-base doc.
+
+        Raises:
+            GitopsRemoteError: The deploy repo's review branches could not be fetched.
+        """
+        cls = self._crud.resource_class(self._cls_name)
+        docs = []
+        for change in self._crud.repo.review_branch_files(cls.directory):
+            if not change.name.endswith(cls.suffix):
+                continue
+            docs.append(
+                PendingDoc(
+                    branch=change.branch,
+                    name=change.name.removesuffix(cls.suffix),
+                    doc=_mapping(change.content),
+                    base=_mapping(change.base_content),
+                )
+            )
+        return docs
+
     def put(self, name: str, doc: dict[str, Any], *, actor: str) -> WriteOutcome:
         """Write one doc verbatim and commit it, routed by posture.
 
@@ -102,6 +146,31 @@ class DeployRepoStore:
             return self._crud.put(self._cls_name, name, doc, actor, message, branch=branch)
 
         return self._route(name, summary, actor, _write)
+
+    def put_many(
+        self, docs: dict[str, dict[str, Any]], *, actor: str, scope: str, summary: str
+    ) -> WriteOutcome:
+        """Write several docs verbatim in ONE commit, routed by posture as one change.
+
+        A production+team posture puts the whole change on one review branch, so the
+        docs land together or not at all.
+
+        Args:
+            docs: Each resource's whole doc, by name.
+            actor: Who made the change.
+            scope: What the commit subject names the change by, such as ``org-acme``.
+            summary: The commit subject's summary.
+
+        Returns:
+            Where the change landed.
+        """
+        message = self._message(scope, summary, actor)
+        items = [(self._cls_name, name, doc) for name, doc in docs.items()]
+
+        def _write(branch: str):
+            return self._crud.put_many(items, actor, message, branch=branch)
+
+        return self._route(scope, summary, actor, _write)
 
     def delete(self, name: str, *, actor: str) -> WriteOutcome | None:
         """Remove one resource and commit it; None when it was not there."""

@@ -12,7 +12,9 @@ from dfe_engine.hunts.rule_guard import (
     match_everything,
     preview_settings,
     preview_sql,
+    refuse_condition_escape,
     refuse_offbox_calls,
+    refuse_rule_condition,
     volume_verdict,
 )
 from dfe_engine.hunts.rule_rewriter import RuleRewriter
@@ -126,6 +128,158 @@ def test_an_empty_condition_has_nothing_to_refuse():
 )
 def test_a_condition_using_the_in_operator_is_not_refused(where):
     assert refuse_offbox_calls(where) is None
+
+
+# -- a condition that reads another table ---------------------------------------
+
+# ClickHouse reads each of these from another table: a lone name after IN is a
+# table, bracketed or not, unless a column of that name shadows it.
+READS_ANOTHER_TABLE = {
+    "in subquery": "_source IN (SELECT ioc FROM threat.iocs)",
+    "global not in subquery": "_source GLOBAL NOT IN (SELECT ioc FROM threat.iocs)",
+    "exists": "EXISTS (SELECT 1 FROM dfe.main WHERE _org_id = 'globex')",
+    "scalar subquery": "severity = (SELECT any(severity) FROM dfe.main)",
+    "lower-case select": "_source in (select ioc from threat.iocs)",
+    "in table": "_source IN threat.iocs",
+    "in bare table": "_source IN iocs",
+    "in bracketed table": "_source IN (threat.iocs)",
+    "in doubly bracketed table": "_source IN ((iocs))",
+    "in quoted table": "_source NOT IN (`threat`.`ioc-list`)",
+    "in keyword-named table": "_source IN (default.iocs)",
+}
+
+# Each of these reads only its own row.
+STAYS_IN_THE_ROW = [
+    "severity IN ('high', 'critical')",
+    "severity NOT IN ('low')",
+    "port IN (22, 3389)",
+    "lower(severity) IN (lower('HIGH'), 'critical')",
+    "msg = 'IN threat.iocs' -- SELECT in a comment",
+    "msg = 'select * from x'",
+    "`select` = 1",
+]
+
+
+@pytest.mark.parametrize("where", READS_ANOTHER_TABLE.values(), ids=list(READS_ANOTHER_TABLE))
+def test_a_condition_reading_another_table_is_refused(where):
+    message = refuse_condition_escape(where)
+
+    assert message is not None
+    assert message.startswith("A rule's detection condition may not ")
+
+
+@pytest.mark.parametrize("where", STAYS_IN_THE_ROW)
+def test_a_condition_over_its_own_row_is_not_refused(where):
+    assert refuse_condition_escape(where) is None
+    assert refuse_rule_condition(where) is None
+
+
+def test_the_rule_condition_check_refuses_an_offbox_call_first():
+    message = refuse_rule_condition("in(_source, dfe.main)")
+
+    assert message is not None
+    assert "may not call in()" in message
+
+
+# -- a lookup in a shared reference database -------------------------------------
+
+LOOKUPS = ("threat",)
+
+# Each reads only tables of a listed database, which carries no org's rows.
+LISTED_LOOKUPS = {
+    "in subquery": "_source IN (SELECT ioc FROM threat.iocs)",
+    "not in subquery with a filter": (
+        "_source NOT IN (SELECT ioc FROM threat.iocs WHERE kind = 'domain')"
+    ),
+    "global not in subquery": "_source GLOBAL NOT IN (SELECT ioc FROM threat.iocs)",
+    "lower-case select": "_source in (select ioc from threat.iocs)",
+    "quoted names": '_source IN (SELECT ioc FROM `threat`."iocs")',
+    "a call in the select list": "lower(_source) IN (SELECT lower(ioc) FROM threat.iocs)",
+    "a FROM inside a call": "_source IN (SELECT trim(BOTH ' ' FROM ioc) FROM threat.iocs)",
+    "a lookup inside a lookup": (
+        "_source IN (SELECT ioc FROM threat.iocs WHERE feed IN (SELECT name FROM threat.feeds))"
+    ),
+    "in table": "_source IN threat.iocs",
+    "in bracketed table": "_source IN (threat.iocs)",
+    "not in doubly bracketed table": "_source NOT IN ((threat.iocs))",
+    "beside a real condition": "severity = 'high' AND _source IN threat.iocs",
+}
+
+# Each reads, or could read, a database the list does not name.
+UNLISTED_LOOKUPS = {
+    "subquery on the data database": "_source IN (SELECT _source FROM dfe.main)",
+    "table in the data database": "_source IN dfe.main",
+    "bracketed table in the data database": "_source IN (dfe.main)",
+    "unqualified subquery table": "_source IN (SELECT ioc FROM iocs)",
+    "unqualified table": "_source IN iocs",
+    "union into the data database": (
+        "_source IN (SELECT ioc FROM threat.iocs UNION ALL SELECT _source FROM dfe.main)"
+    ),
+    "union after a filter": (
+        "_source IN (SELECT ioc FROM threat.iocs WHERE 1 UNION ALL SELECT _source FROM dfe.main)"
+    ),
+    "a clause after the filter": "_source IN (SELECT ioc FROM threat.iocs WHERE 1 LIMIT 5)",
+    "join": "_source IN (SELECT ioc FROM threat.iocs JOIN dfe.main USING (ioc))",
+    "aliased join": (
+        "_source IN (SELECT i.ioc FROM threat.iocs AS i JOIN dfe.main AS m ON i.ioc = m._source)"
+    ),
+    "comma join": "_source IN (SELECT ioc FROM threat.iocs, dfe.main)",
+    "subquery in FROM": "_source IN (SELECT ioc FROM (SELECT _source AS ioc FROM dfe.main))",
+    "FROM before SELECT": "_source IN (FROM dfe.main SELECT _source)",
+    "WITH": "_source IN (WITH t AS (SELECT _source FROM dfe.main) SELECT * FROM t)",
+    "unlisted subquery inside a lookup": (
+        "_source IN (SELECT ioc FROM threat.iocs WHERE ioc IN (SELECT _source FROM dfe.main))"
+    ),
+    "unlisted table inside a lookup": (
+        "_source IN (SELECT ioc FROM threat.iocs WHERE ioc IN dfe.main)"
+    ),
+    "SETTINGS": "_source IN (SELECT ioc FROM threat.iocs SETTINGS max_threads = 1)",
+    "FINAL": "_source IN (SELECT ioc FROM threat.iocs FINAL)",
+    "scalar subquery": "severity = (SELECT any(severity) FROM threat.iocs)",
+    "exists": "EXISTS (SELECT 1 FROM threat.iocs)",
+    "doubly bracketed subquery": "_source IN ((SELECT ioc FROM threat.iocs))",
+    "escaped database name": "_source IN `\\x74hreat`.iocs",
+    "string spelling the database": "_source IN ($$threat$$.iocs)",
+    "a three-part name": "_source IN threat.iocs.ioc",
+    "closes the bracket it runs in": "_source IN (SELECT ioc FROM threat.iocs WHERE 1) OR (1 = 1",
+}
+
+
+@pytest.mark.parametrize("where", LISTED_LOOKUPS.values(), ids=list(LISTED_LOOKUPS))
+def test_a_lookup_in_a_listed_database_is_not_refused(where):
+    assert refuse_condition_escape(where, lookup_databases=LOOKUPS) is None
+    assert refuse_rule_condition(where, lookup_databases=LOOKUPS) is None
+
+
+@pytest.mark.parametrize("where", LISTED_LOOKUPS.values(), ids=list(LISTED_LOOKUPS))
+def test_a_lookup_is_refused_when_no_database_is_listed(where):
+    message = refuse_condition_escape(where)
+
+    assert message is not None
+    assert message.startswith("A rule's detection condition may not ")
+
+
+@pytest.mark.parametrize("where", UNLISTED_LOOKUPS.values(), ids=list(UNLISTED_LOOKUPS))
+def test_a_lookup_past_the_listed_databases_is_refused(where):
+    message = refuse_rule_condition(where, lookup_databases=LOOKUPS)
+
+    assert message is not None
+    assert message.startswith("A rule's detection condition ")
+
+
+def test_the_refusal_names_the_database_and_the_list():
+    message = refuse_condition_escape(
+        "_source IN (SELECT _source FROM dfe.main)", lookup_databases=("threat", "geo")
+    )
+
+    assert message is not None
+    assert "dfe" in message
+    assert "threat, geo" in message
+
+
+@pytest.mark.parametrize("where", STAYS_IN_THE_ROW)
+def test_a_condition_over_its_own_row_still_passes_with_lookups_listed(where):
+    assert refuse_rule_condition(where, lookup_databases=LOOKUPS) is None
 
 
 def test_a_presence_check_names_the_column_every_event_has():
@@ -278,6 +432,32 @@ def test_the_preview_counts_the_window_and_the_matches_under_its_own_names():
         "    )\n"
         ")"
     )
+
+
+def test_a_fenced_preview_counts_only_the_orgs_it_is_held_to():
+    sql = preview_sql(
+        "dfe", "main", "_timestamp_load", "severity = 'high'", 60, tenant_ids=["acme-1", "o'b"]
+    )
+
+    window = "`_timestamp_load` >= now() - INTERVAL 60 MINUTE"
+    fence = "_org_id IN ('acme-1', 'o''b')"
+    assert sql == (
+        "SELECT\n"
+        f"    (SELECT count() FROM `dfe`.`main` WHERE {window} AND {fence}) AS dfe_total,\n"
+        "    count() AS dfe_matched\n"
+        "FROM (\n"
+        "    SELECT `_timestamp_load`\n"
+        "    FROM `dfe`.`main`\n"
+        f"    WHERE {window} AND {fence} AND (\n"
+        "severity = 'high'\n"
+        "    )\n"
+        ")"
+    )
+
+
+def test_a_preview_held_to_no_org_is_refused_rather_than_run():
+    with pytest.raises(ValueError, match="no org"):
+        preview_sql("dfe", "main", "_timestamp_load", "severity = 'high'", 60, tenant_ids=[])
 
 
 def test_the_preview_throws_at_its_bounds_rather_than_breaking_off():

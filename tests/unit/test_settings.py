@@ -11,6 +11,7 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    HuntsSettings,
     load_settings,
     reset_settings,
 )
@@ -750,6 +751,14 @@ _LIST_SETTINGS = [
         id="hunts.alert_channels",
     ),
     pytest.param(
+        "hunts.lookup_databases",
+        "DFE_HUNTS_LOOKUP_DATABASES",
+        "threat, geo",
+        None,
+        ["threat", "geo"],
+        id="hunts.lookup_databases",
+    ),
+    pytest.param(
         "auth.local.seed_accounts",
         "DFE_AUTH_LOCAL_SEED_ACCOUNTS",
         '[{"username": "from-env"}]',
@@ -771,6 +780,7 @@ _LIST_SETTINGS = [
 _FILE_LISTS = {
     "api.cors_origins": (["https://file.example"], None, ["https://file.example"]),
     "hunts.alert_channels": (["json://file.example"], None, ["json://file.example"]),
+    "hunts.lookup_databases": (["intel"], None, ["intel"]),
     "auth.local.seed_accounts": ([{"username": "from-file"}], "username", ["from-file"]),
     "orgs.seed_orgs": ([{"name": "from-file"}], "name", ["from-file"]),
     "deployment.admin_links": (
@@ -815,6 +825,73 @@ class TestListsAcrossLayers:
     def test_an_env_list_replaces_the_shipped_default(self, monkeypatch):
         monkeypatch.setenv("DFE_API_CORS_ORIGINS", "https://a.example,https://b.example")
         assert load_settings().api.cors_origins == ["https://a.example", "https://b.example"]
+
+
+class TestLookupDatabases:
+    """The shared reference databases a rule may look values up in: none unless listed."""
+
+    def test_no_database_is_listed_by_default(self):
+        assert load_settings().hunts.lookup_databases == []
+
+    def test_a_repeated_name_is_listed_once(self):
+        assert HuntsSettings(lookup_databases=["threat", "geo", "threat"]).lookup_databases == [
+            "threat",
+            "geo",
+        ]
+
+    @pytest.mark.parametrize(
+        "name", ["", "threat intel", "threat.iocs", "`threat`", "1threat", "thr'eat"]
+    )
+    def test_a_name_that_is_not_a_plain_database_name_is_refused(self, name):
+        with pytest.raises(ValidationError, match="lookup database"):
+            HuntsSettings(lookup_databases=[name])
+
+    @pytest.mark.parametrize(
+        "name", ["system", "SYSTEM", "information_schema", "INFORMATION_SCHEMA"]
+    )
+    def test_a_clickhouse_catalogue_is_refused(self, name):
+        """ClickHouse's own databases describe every org's tables and queries."""
+        with pytest.raises(ValidationError, match="ClickHouse's own"):
+            HuntsSettings(lookup_databases=[name])
+
+    def test_the_data_database_is_refused(self, monkeypatch):
+        """Every org's rows are in it, so a lookup there reads them all."""
+        monkeypatch.setenv("DFE_CLICKHOUSE_DATA_DATABASE", "telemetry")
+        monkeypatch.setenv("DFE_HUNTS_LOOKUP_DATABASES", "threat,telemetry")
+
+        with pytest.raises(ValidationError, match="telemetry"):
+            load_settings()
+
+
+class TestHuntDir:
+    """One directory, which the engine's hunt registry and the hunt runner both read as is."""
+
+    def test_surrounding_space_is_dropped(self):
+        assert HuntsSettings(hunt_dir="  /config/hunts \n").hunt_dir == "/config/hunts"
+
+    def test_a_list_of_directories_is_refused(self, monkeypatch):
+        """The engine read only the first and the runner none, so a list ran no hunt."""
+        monkeypatch.setenv("DFE_HUNTS_DIR", "/config/hunts,/extra/hunts")
+
+        with pytest.raises(ValidationError, match="one directory"):
+            load_settings()
+
+    def test_the_engine_writes_where_the_runner_reads(self, tmp_path):
+        from dfe_engine.api.deps import (
+            bootstrap_registries,
+            get_hunt_config_registry_optional,
+            shutdown_registries,
+        )
+        from dfe_engine.hunt_runner.spec_loader import load_specs
+
+        settings = DFESettings(env="test", hunts=HuntsSettings(hunt_dir=f" {tmp_path / 'hunts'} "))
+        bootstrap_registries(settings)
+        try:
+            get_hunt_config_registry_optional().save("windows_hunt", {"cron": "*/5 * * * *"})
+        finally:
+            shutdown_registries()
+
+        assert set(load_specs(settings.hunts.hunt_dir)) == {"windows_hunt"}
 
 
 class TestTransportAvailability:

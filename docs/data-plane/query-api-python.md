@@ -12,7 +12,7 @@ This document specifies how to consume the DFE Query API from Python application
 The Query API provides a **secure, label-based interface** for querying multiple datasources (ClickHouse, PostgreSQL, Prometheus). Key security features:
 
 - **No raw SQL from clients** - Queries are referenced by label, SQL is defined server-side
-- **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
+- **Mandatory tenant isolation** - `_org_id` injected from the org the session's account or API key is bound to, cannot be overridden
 - **Role-based access control** - Queries can require specific roles/permissions
 - **Parameter validation** - All parameters validated against server-side schemas
 - **Native JSON responses** - dict rows via clickhouse-connect, no Arrow/pyarrow dependency
@@ -92,7 +92,7 @@ df = result.to_pandas()
 
 1. **Query labels, not SQL** - Clients reference pre-defined queries by label
 2. **Server-side SQL** - SQL templates stored in registry, clients cannot modify
-3. **Automatic tenant isolation** - `_org_id` extracted from JWT and injected
+3. **Automatic tenant isolation** - `_org_id` taken from the session's bound org and injected
 4. **Parameter validation** - All params validated against schema before execution
 5. **Role-based access** - Queries can require specific roles/permissions
 

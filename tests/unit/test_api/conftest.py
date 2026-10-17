@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.orgs.registry import OrgRegistry
+from dfe_engine.query.executor import ViewExecutor
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -25,6 +27,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 from tests.support.core_sources import write_landing_definition
+from tests.unit.test_query.view_fakes import OneViewCatalog, RecordingClient, view_definition
 
 # The admin password these fixtures inject, as a deployment's secret store would.
 ADMIN_PASSWORD = "test-admin-pw"
@@ -88,6 +91,32 @@ def api_settings(tmp_path: Path, sigma_enabled: bool) -> DFESettings:
             jwt_expire_minutes=30,
         ),
     )
+
+
+# The org names the hunt tests send as customers.
+CUSTOMER_ORGS = ("org_a", "org_b", "test-org", "c", "acme")
+
+
+@pytest.fixture
+def customer_orgs(api_settings: DFESettings) -> tuple[str, ...]:
+    """Register the hunt tests' customer orgs, each declaring no tenant ids of its own.
+
+    The registry is files under ``config_dir``, so the app reads them whenever it starts.
+    """
+    registry = OrgRegistry(Path(api_settings.config_dir) / "orgs")
+    for name in CUSTOMER_ORGS:
+        registry.create(name)
+    return CUSTOMER_ORGS
+
+
+@pytest.fixture
+def reader(app, client: TestClient) -> RecordingClient:
+    """The tenant-isolated view ``analytics/events``, over a client recording what it binds."""
+    recording = RecordingClient()
+    app.state.view_executor = ViewExecutor(
+        restricted_client=recording, catalog=OneViewCatalog(view_definition()), database="dfe"
+    )
+    return recording
 
 
 @pytest.fixture

@@ -146,6 +146,9 @@ it.
 | [gitops-commit-standard.md](gitops-commit-standard.md) | machine-commit conventions for gitops repos |
 | [oidc-rbac-architecture.md](oidc-rbac-architecture.md) | OIDC + RBAC SSoT - auth model, the two RBAC planes, provider registry + adapters, management API, infra requirements, test emulation |
 | [rbac.md](rbac.md) | auth paths, RBAC model, multi-tenant ClickHouse, stores |
+| [rbac-sign-in.md](rbac-sign-in.md) | identity resolution, the sign-in allowlist, first login and password changes |
+| [rbac-groups.md](rbac-groups.md) | IdP group sync, linking a group to an IdP group, the checks on a link |
+| [rbac-engine-reads.md](rbac-engine-reads.md) | the engine's own ClickHouse reads and how they bind to a caller's orgs |
 | [idp-setup/](idp-setup/README.md) -- [google.md](idp-setup/google.md), [entra.md](idp-setup/entra.md), [okta.md](idp-setup/okta.md) | one-time setup for a customer's IdP admin -- sign-in client, groups, the values to send the operator |
 | [rbac-vocabulary.md](rbac-vocabulary.md) | SSoT for role + group names and terms across engine, ui, infra, deploy, schemas and test envs |
 | [synthetic-data.md](synthetic-data.md) | synthetic data generation - reference packs, lookalike scrub, standing demo streams |

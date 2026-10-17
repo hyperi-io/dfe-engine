@@ -60,6 +60,7 @@ from dfe_engine.schema.retention import CLICKHOUSE_REFUSED, apply_pinned_default
 from dfe_engine.services.schema.json_promotion_service import JsonPromotionError
 from dfe_engine.settings import SourceSettings
 from dfe_engine.source.registry import SourceNotFoundError
+from tests.unit.test_query.view_fakes import view_definition
 
 FAKE_HASH = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 SENTINEL = f"Code: 516. DB::Exception: ALTER USER dfe_org_acme IDENTIFIED WITH sha256_hash BY '{FAKE_HASH}'"
@@ -143,10 +144,15 @@ class TestQueries:
         self, app, client, viewer_headers, audit_events
     ):
         class _FailingExecutor:
+            def get_view(self, label: str):
+                return view_definition()
+
             def execute(self, **_kwargs):
                 raise ViewExecutionError(f"Failed to execute view 'x': {SENTINEL}")
 
         app.state.view_executor = _FailingExecutor()
+        # The view is held to the session's org, so the viewer's account is bound to one.
+        app.state.account_store.update("viewer", org="test-org")
 
         resp = client.post(
             "/api/v1/queries/views/analytics/events/execute", headers=viewer_headers, json={}

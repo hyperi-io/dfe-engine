@@ -147,6 +147,7 @@ class TestRulesListAndDetail:
         assert resp.status_code == 200
 
 
+@pytest.mark.usefixtures("customer_orgs")
 class TestRulesUpdateAndDelete:
     """PUT and DELETE /api/v1/rules/{name}."""
 

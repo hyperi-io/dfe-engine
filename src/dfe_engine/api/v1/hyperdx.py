@@ -46,6 +46,7 @@ from dfe_engine.api.deps import (
     Settings,
     is_action_allowed,
     reads_every_org,
+    registered_orgs,
     require_action,
     secrets_store,
 )
@@ -127,9 +128,7 @@ def _resolve_identity(request: Request, user) -> ConnectionIdentity | _Refusal:
         return ConnectionIdentity("platform", _PLATFORM_USERNAME, _PLATFORM_SECRET)
 
     # A held caller reads as exactly one registered org, resolved as every org-held read resolves it.
-    org_registry = getattr(request.app.state, "org_registry", None)
-    orgs = list(org_registry.list()) if org_registry is not None else []
-    matched = resolve_orgs(user.org_ids, orgs)
+    matched = resolve_orgs(user.org_ids, registered_orgs(request))
     if len(matched) != 1:
         return _Refusal("no_single_org", "caller does not resolve to exactly one org")
 

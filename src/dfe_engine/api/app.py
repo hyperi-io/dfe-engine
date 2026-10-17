@@ -154,6 +154,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         app.state.schema_retry.start()
 
+    # A rule may read a lookup database, so one holding an org's rows stops the start here.
+    from dfe_engine.governance.ch import ch_admin_client
+    from dfe_engine.hunts.lookups import refuse_tenant_lookups_if_reachable
+
+    refuse_tenant_lookups_if_reachable(
+        functools.partial(ch_admin_client, settings), settings.hunts.lookup_databases
+    )
+
     # Every carried source's topics, at boot rather than at its next deploy: a
     # deployment restored from its config repo otherwise has topics only for the
     # sources somebody happens to redeploy, and the rest produce into nothing.
@@ -388,10 +396,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.org_registry = OrgRegistry(Path(orgs_dir_str))
 
     # Ahead of the CH RBAC reconcile below, so a seeded org is fenced on this boot.
+    from dfe_engine.api.deps import get_hunt_config_registry_optional
     from dfe_engine.orgs.seed import seed_orgs
 
     try:
-        seed_orgs(registry=app.state.org_registry, seeds=settings.orgs.seed_orgs)
+        seed_orgs(
+            registry=app.state.org_registry,
+            seeds=settings.orgs.seed_orgs,
+            hunts=get_hunt_config_registry_optional(),
+        )
     except Exception as exc:  # a failed seed must never break startup
         logger.warning("organisations not seeded at startup", error=str(exc))
 
@@ -665,6 +678,11 @@ def create_app(
     from dfe_engine.auth.login_throttle import LoginThrottle
 
     app.state.login_throttle = LoginThrottle(settings.auth.login_throttle)
+
+    from dfe_engine.log_limit import LineLimit
+
+    # A refused token's reason is logged once a minute, and the counter takes every one.
+    app.state.bearer_refused_log = LineLimit(period_seconds=60)
 
     from dfe_engine.backing.observed import SizingCache
 

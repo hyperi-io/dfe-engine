@@ -37,11 +37,13 @@ from scalo.logger import logger
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryCredentialUnreadableError,
+    DirectoryForeignLinkError,
     DirectoryNotConfiguredError,
     DirectoryPageError,
     DirectoryPageLimitError,
     DirectoryTokenRequestError,
     OIDCGroupAdapter,
+    same_origin_link,
 )
 from dfe_engine.auth.oidc.credential_env import (
     ResolvedCredential,
@@ -281,7 +283,8 @@ class EntraAdapter(OIDCGroupAdapter):
     async def _page_groups(self, url: str, token: str) -> list[GroupInfo] | None:
         """Every page of one transitiveMemberOf listing, or None when Graph did not answer.
 
-        A listing still paging at :attr:`MAX_LOGIN_PAGES` is no answer either.
+        A listing still paging at :attr:`MAX_LOGIN_PAGES`, or linking its next page off
+        Graph's origin, is no answer either.
         """
         from scalo.http import AsyncHttpClient
 
@@ -317,6 +320,10 @@ class EntraAdapter(OIDCGroupAdapter):
                 url = data.get("@odata.nextLink", "")
                 if not url:
                     return groups
+                try:
+                    url = same_origin_link(str(url), directory_url=self.GRAPH_BASE)
+                except DirectoryForeignLinkError:
+                    return None
         logger.warning(
             "Entra resolve_user_groups: Graph still linked a next page at the page limit",
             operation="resolve_user_groups",
@@ -345,6 +352,7 @@ class EntraAdapter(OIDCGroupAdapter):
                 throttled the request or failed. Logged here with its status.
             DirectoryPageError: A page Graph served carried no ``value`` list.
             DirectoryPageLimitError: Graph still linked a next page at the page limit.
+            DirectoryForeignLinkError: Graph linked the next page off its own origin.
             Exception: Whatever the client raised on a page Graph did not serve. A
                 listing cut short is never returned: group sync would record the
                 groups read so far as the whole tenant.
@@ -395,6 +403,7 @@ class EntraAdapter(OIDCGroupAdapter):
                 url = data.get("@odata.nextLink")
                 if not url:
                     return groups
+                url = same_origin_link(str(url), directory_url=self.GRAPH_BASE)
         raise DirectoryPageLimitError(self.MAX_LISTING_PAGES)
 
     async def test_connection(self) -> tuple[bool, str]:

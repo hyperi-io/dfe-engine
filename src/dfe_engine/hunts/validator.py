@@ -50,9 +50,8 @@ class HuntValidator:
 
         HuntValidator._validate_yaml_structure(hunt_data)
         HuntValidator._validate_required_fields(hunt_data, checkpoint_timestamp_field)
-        customers = HuntValidator._validate_customers(hunt_data)
+        HuntValidator._validate_customers(hunt_data)
         HuntValidator._validate_rules(hunt_data, rules_dir, source_registry)
-        HuntValidator._validate_customer_filters(hunt_data, customers)
         HuntValidator._validate_scheduling_fields(hunt_data)
 
         logger.info("--- HUNT VALIDATOR COMPLETED ---")
@@ -158,12 +157,11 @@ class HuntValidator:
             raise ValueError(f"Invalid {label}: {exc}") from exc
 
     @staticmethod
-    def _validate_customers(hunt_data: dict) -> list:
-        """Validate customers list and return it."""
+    def _validate_customers(hunt_data: dict) -> None:
+        """Refuse a hunt whose customers are missing or not a list."""
         customers = hunt_data.get("customers")
         if not customers or not isinstance(customers, list):
             raise ValueError("Customers list is missing or invalid.")
-        return customers
 
     @staticmethod
     def _validate_rules(
@@ -219,28 +217,6 @@ class HuntValidator:
                 raise ValueError(
                     f"Invalid 'initial_checkpoint_lookback_minutes' value: {initial_checkpoint_lookback_minutes}. It should be a positive integer."
                 )
-
-    @staticmethod
-    def _validate_customer_filters(hunt_data: dict, customers: list) -> None:
-        """Validate customer filters configuration."""
-        customer_filters = hunt_data.get("customer_filters", {})
-        if not isinstance(customer_filters, dict):
-            raise ValueError("Customer filters should be a dictionary.")
-
-        for customer in customers:
-            if customer not in customer_filters:
-                logger.warning(f"Customer filters missing for customer: {customer}")
-                continue
-
-            if not isinstance(customer_filters[customer], dict):
-                raise ValueError(f"Filters for customer '{customer}' should be a dictionary.")
-
-            rules_filters = customer_filters[customer].get("rules", [])
-            for rule_filter in rules_filters:
-                if "name" not in rule_filter or "filter_clause" not in rule_filter:
-                    raise ValueError(
-                        f"Invalid rule filter structure for customer '{customer}': {rule_filter}"
-                    )
 
     @staticmethod
     def _validate_scheduling_fields(hunt_data: dict) -> None:

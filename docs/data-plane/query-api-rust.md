@@ -12,7 +12,7 @@ This document specifies how to consume the DFE Query API from Rust applications.
 The Query API provides a **secure, label-based interface** for querying multiple datasources. Key security features:
 
 - **No raw SQL from clients** - Queries are referenced by label, SQL is defined server-side
-- **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
+- **Mandatory tenant isolation** - `_org_id` injected from the org the session's account or API key is bound to, cannot be overridden
 - **Role-based access control** - Queries can require specific roles/permissions
 - **Native JSON wire format** - responses are a single JSON body, deserialized with `serde`
 

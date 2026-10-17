@@ -80,6 +80,8 @@ class APIKey(BaseModel):
     key_hash: str  # "sha384:{hex}" (CNSA); legacy "sha256:{hex}" still verifies
     enabled: bool = True
     groups: list[str] = Field(default_factory=list)
+    # The org the key's sessions are bound to, empty for none.
+    org: str = ""
     description: str = ""
     created_at: str = ""
     expires_at: str | None = None  # ISO-8601 UTC; None = never expires
@@ -119,6 +121,7 @@ class APIKeyStore:
         name: str,
         *,
         groups: builtins.list[str] | None = None,
+        org: str = "",
         description: str = "",
         expires_at: str | None = None,
     ) -> tuple[APIKey, str]:
@@ -127,6 +130,7 @@ class APIKeyStore:
         Args:
             name: Unique human-readable key name (used as filename stem).
             groups: RBAC groups to associate with the key.
+            org: The org the key's sessions are bound to, empty for none.
             description: Optional human-readable description.
             expires_at: Optional ISO-8601 expiry, normalised to UTC before
                 storage. None (the default) means the key never expires.
@@ -162,6 +166,7 @@ class APIKeyStore:
             key_hash=key_hash,
             enabled=True,
             groups=groups or [],
+            org=org,
             description=description,
             created_at=datetime.now(UTC).isoformat(),
             expires_at=expiry,
