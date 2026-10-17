@@ -6,7 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
+import asyncio
 import json
+import threading
 
 import pytest
 from prometheus_client.parser import text_string_to_metric_families
@@ -32,7 +34,8 @@ from dfe_engine.auth.oidc.sync import (
     sync_provider,
 )
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
-from tests.support.failing_stores import CreateFailingGroupStore
+from tests.support.event_loop import ticks_while_held
+from tests.support.failing_stores import CreateFailingGroupStore, HeldGroupStore
 from tests.unit.test_auth.test_oidc.refusing_store import PolicyRefusingSecretStore
 from tests.unit.test_auth.test_oidc.sync_cases import (
     SYNC_IDENTIFIER_COLLISION_CASES,
@@ -703,6 +706,67 @@ class TestSyncOverAGroupFileThatDoesNotLoad:
         ]
         assert skipped == [1.0]
         assert _sync_skips(manager) == {"stored_unloadable": 1.0}
+
+
+class TestSyncWritesRunOffTheEventLoop:
+    """Each group is a file read, write and fsync, which must not stall the API's other requests."""
+
+    async def test_a_slow_store_does_not_block_the_event_loop(self, tmp_path, api_provider):
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        arrived, gate = threading.Event(), threading.Event()
+        group_store = HeldGroupStore(tmp_path / "groups", arrived=arrived, gate=gate)
+        groups = [GroupInfo(id="g1", name="admins", email="admins@example.com")]
+
+        sync = asyncio.create_task(
+            sync_provider(
+                "test-sso",
+                provider_registry,
+                group_store,
+                adapter=FakeAdapter(api_provider, groups),
+            )
+        )
+        ticks = await ticks_while_held(arrived=arrived, gate=gate)
+        result = await sync
+
+        # The event loop ran while the create was held: the test opened the gate, the wait did not time out.
+        assert group_store.gate_opened_by_test == [True]
+        assert ticks >= 5
+        assert (result["created"], result["status"]) == (1, "ok")
+        assert threading.get_ident() not in group_store.create_threads
+
+    async def test_two_syncs_of_one_provider_apply_one_after_the_other(
+        self, tmp_path, api_provider
+    ):
+        """Applied side by side each would create the group, where one run should find the other's."""
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        arrived, gate = threading.Event(), threading.Event()
+        group_store = HeldGroupStore(tmp_path / "groups", arrived=arrived, gate=gate)
+        groups = [GroupInfo(id="g1", name="admins", email="admins@example.com")]
+
+        def sync() -> asyncio.Task:
+            return asyncio.create_task(
+                sync_provider(
+                    "test-sso",
+                    provider_registry,
+                    group_store,
+                    adapter=FakeAdapter(api_provider, groups),
+                )
+            )
+
+        first = sync()
+        while not arrived.is_set():
+            await asyncio.sleep(0.005)
+        second = sync()
+        # Long enough for the second apply to reach the store if nothing kept it out.
+        await asyncio.sleep(0.5)
+        creates_while_held = len(group_store.create_threads)
+        gate.set()
+        results = [await first, await second]
+
+        assert creates_while_held == 1
+        assert sorted((r["created"], r["updated"]) for r in results) == [(0, 1), (1, 0)]
 
 
 class TestSyncOverAGroupTheStoreCannotWrite:

@@ -15,8 +15,17 @@ from collections.abc import Iterator
 
 import pytest
 
+from dfe_engine.auth.oidc.adapters import entra as entra_module
 from tests.unit.test_auth.factories import make_local_idp
 from tests.unit.test_auth.test_oidc.local_idp import LocalIdp
+
+
+@pytest.fixture(autouse=True)
+def fresh_msal_applications() -> Iterator[None]:
+    """Forget the kept MSAL applications around each test, so one test's transport and token never answer another's."""
+    entra_module._confidential_client.cache_clear()
+    yield
+    entra_module._confidential_client.cache_clear()
 
 
 @pytest.fixture

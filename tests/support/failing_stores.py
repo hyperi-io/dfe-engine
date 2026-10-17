@@ -10,6 +10,7 @@
 Every other operation is the store's own, so a test sees exactly what the failure leaves.
 """
 
+import threading
 from typing import Any
 
 from scalo.secrets import SecretsManager
@@ -19,6 +20,7 @@ from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.secrets import DfeSecrets, SecretNameHeldError
+from tests.support.event_loop import HELD_SECONDS
 
 
 class DeleteFailingSecrets(DfeSecrets):
@@ -60,6 +62,30 @@ class CreateFailingGroupStore(GroupStore):
         """Raise the error for the one name; create every other group as the store does."""
         if name == self._fail_on:
             raise self._error
+        return super().create(name, *args, **fields)
+
+
+class HeldGroupStore(GroupStore):
+    """A group store whose creates wait for the test to open a gate, as a slow disk makes them wait.
+
+    ``arrived`` is set when a create reaches the store. ``gate_opened_by_test`` records, per
+    create, whether the test opened the gate or the wait timed out, and ``create_threads``
+    the thread each create ran on.
+    """
+
+    def __init__(self, groups_dir: Any, *, arrived: threading.Event, gate: threading.Event) -> None:
+        """Hold every create at ``gate``."""
+        super().__init__(groups_dir)
+        self.arrived = arrived
+        self.create_threads: list[int] = []
+        self.gate = gate
+        self.gate_opened_by_test: list[bool] = []
+
+    def create(self, name: str, *args: Any, **fields: Any) -> Group:
+        """Wait at the gate, then create the group as the store does."""
+        self.create_threads.append(threading.get_ident())
+        self.arrived.set()
+        self.gate_opened_by_test.append(self.gate.wait(timeout=HELD_SECONDS))
         return super().create(name, *args, **fields)
 
 

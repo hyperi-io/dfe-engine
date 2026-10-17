@@ -24,12 +24,15 @@ Usage::
     #  "skipped": None, "status": "ok"}
 """
 
+import functools
 import re
+import threading
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.auth.groups import GroupExistsError, identifier_holder
@@ -242,11 +245,16 @@ def _write_failed(
     tally.skips["write_failed"] += 1
 
 
+# Two syncs applying at once would each find the other's new group missing and race to create it.
+# SHORTCUT: one lock per process, so two engine replicas still apply at the same time. Move to a ClickHouse lease shaped like schema/lock.py when HPA deployments share a group store.
+_APPLY_LOCK = threading.Lock()
+
+
 def _apply_groups(
     *,
     group_store: GroupStore,
     metrics: SyncMetrics,
-    own_stamps: set[str],
+    own_stamps: frozenset[str],
     provider_name: str,
     remote_groups: list[GroupInfo],
     tally: _Tally,
@@ -255,7 +263,29 @@ def _apply_groups(
 
     A group the store cannot write is skipped as ``write_failed`` and the rest carry on.
     Any other store failure ends the run, with *tally* holding what was done before it.
+    Blocking: each group is a file read, write and fsync, so call it off the event loop.
     """
+    with _APPLY_LOCK:
+        _upsert_groups(
+            group_store=group_store,
+            metrics=metrics,
+            own_stamps=own_stamps,
+            provider_name=provider_name,
+            remote_groups=remote_groups,
+            tally=tally,
+        )
+
+
+def _upsert_groups(
+    *,
+    group_store: GroupStore,
+    metrics: SyncMetrics,
+    own_stamps: frozenset[str],
+    provider_name: str,
+    remote_groups: list[GroupInfo],
+    tally: _Tally,
+) -> None:
+    """The body of :func:`_apply_groups`, run under its lock."""
     # A directory rename changes the name a group is keyed on, never its id, so the link finds it.
     linked_by_id: dict[str, list[str]] = {}
     # The first stored group, by name, carrying each id under a provider that is not ours.
@@ -556,13 +586,16 @@ async def sync_provider(
     metrics = metrics if metrics is not None else SyncMetrics()
     tally = _Tally()
     try:
-        _apply_groups(
-            group_store=group_store,
-            metrics=metrics,
-            own_stamps=linked_providers([provider_name], bindings or {}),
-            provider_name=provider_name,
-            remote_groups=remote_groups,
-            tally=tally,
+        await run_blocking(
+            functools.partial(
+                _apply_groups,
+                group_store=group_store,
+                metrics=metrics,
+                own_stamps=linked_providers([provider_name], bindings or {}),
+                provider_name=provider_name,
+                remote_groups=remote_groups,
+                tally=tally,
+            )
         )
     except Exception as exc:
         # A failure the per-group handling does not cover still ends in a recorded run.

@@ -16,7 +16,10 @@ Tests that require a live Entra / Microsoft Graph endpoint are marked
 ``@pytest.mark.skip(reason="Needs Entra sandbox")``.
 """
 
+import asyncio
 import json
+import threading
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -33,6 +36,7 @@ from dfe_engine.auth.oidc.adapters.entra import EntraAdapter, graph_credentials
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import sync_provider
+from tests.support.event_loop import HELD_SECONDS, ticks_while_held
 from tests.unit.test_auth.test_oidc.entra_adapter_cases import (
     GRAPH_CREDENTIALS_CASES,
     GraphCredentialsCase,
@@ -360,6 +364,7 @@ class TestEntraUnreachable:
 
 
 _DISCOVERY_SUFFIX = "/v2.0/.well-known/openid-configuration"
+_TOKEN_SUFFIX = "/oauth2/v2.0/token"
 
 
 class _CannedEntra(BaseAdapter):
@@ -367,11 +372,27 @@ class _CannedEntra(BaseAdapter):
 
     MSAL reaches login.microsoftonline.com over https, which a loopback server cannot
     serve, so the answer is canned at the transport that MSAL's own HTTP client uses.
+    A 200 token request answers ``access_token``. ``arrived`` is set when a token request
+    reaches the transport, and the request then waits for ``gate`` before it answers,
+    recording in ``gate_opened_by_test`` whether the test opened it or the wait timed out.
     """
 
-    def __init__(self, *, token_status: int) -> None:
+    def __init__(
+        self,
+        *,
+        token_status: int,
+        access_token: str = "app-token",  # noqa: S107 - a canned answer, not a secret
+        arrived: threading.Event | None = None,
+        gate: threading.Event | None = None,
+    ) -> None:
         super().__init__()
+        self.access_token = access_token
+        self.arrived = arrived
+        self.gate = gate
         self.token_status = token_status
+        self.gate_opened_by_test: list[bool] = []
+        self.token_threads: list[int] = []
+        self.token_timeouts: list[Any] = []
         self.urls: list[str] = []
 
     def send(
@@ -391,16 +412,29 @@ class _CannedEntra(BaseAdapter):
         response.url = url
         if url.endswith(_DISCOVERY_SUFFIX):
             tenant_root = url.removesuffix(_DISCOVERY_SUFFIX)
-            body: dict[str, str] = {
+            body: dict[str, Any] = {
                 "authorization_endpoint": f"{tenant_root}/oauth2/v2.0/authorize",
                 "issuer": f"{tenant_root}/v2.0",
-                "token_endpoint": f"{tenant_root}/oauth2/v2.0/token",
+                "token_endpoint": f"{tenant_root}{_TOKEN_SUFFIX}",
             }
             response.status_code = 200
         else:
-            body = {"error": "temporarily_unavailable", "error_description": "throttled"}
+            self.token_threads.append(threading.get_ident())
+            self.token_timeouts.append(timeout)
+            if self.arrived is not None:
+                self.arrived.set()
+            if self.gate is not None:
+                self.gate_opened_by_test.append(self.gate.wait(timeout=HELD_SECONDS))
             response.status_code = self.token_status
-            response.headers["Retry-After"] = "1"
+            if self.token_status == 200:
+                body = {
+                    "access_token": self.access_token,
+                    "expires_in": 3600,
+                    "token_type": "Bearer",
+                }
+            else:
+                body = {"error": "temporarily_unavailable", "error_description": "throttled"}
+                response.headers["Retry-After"] = "1"
         response.headers["Content-Type"] = "application/json"
         response._content = json.dumps(body).encode("utf-8")
         return response
@@ -411,20 +445,34 @@ class _CannedEntra(BaseAdapter):
     @property
     def token_requests(self) -> int:
         """How many requests went to the token endpoint."""
-        return sum(url.endswith("/oauth2/v2.0/token") for url in self.urls)
+        return sum(url.endswith(_TOKEN_SUFFIX) for url in self.urls)
+
+    @property
+    def discovery_requests(self) -> int:
+        """How many requests went to the authority's discovery document."""
+        return sum(url.endswith(_DISCOVERY_SUFFIX) for url in self.urls)
 
 
-class _CannedEntraAdapter(EntraAdapter):
-    """Entra whose MSAL client talks through a canned transport."""
+@pytest.fixture
+def canned_entra(monkeypatch: pytest.MonkeyPatch) -> Callable[[_CannedEntra], None]:
+    """The function that points MSAL's HTTP at a canned transport for the test."""
 
-    def __init__(self, provider: OIDCProvider, *, transport: _CannedEntra) -> None:
-        super().__init__(provider)
-        self._transport = transport
+    def install(transport: _CannedEntra) -> None:
+        def client() -> Any:
+            session = requests.Session()
+            session.mount("https://", transport)
+            return entra_module._EntraHttpClient(session)
 
-    def _msal_http_client(self) -> Any:
-        session = requests.Session()
-        session.mount("https://", self._transport)
-        return entra_module._EntraHttpClient(session)
+        monkeypatch.setattr(entra_module, "_new_http_client", client)
+
+    return install
+
+
+@pytest.fixture
+def entra_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set the three env vars the test provider reads its Entra credentials from."""
+    for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
+        monkeypatch.setenv(name, "set")
 
 
 class TestEntraThrottlesOrFails:
@@ -439,15 +487,12 @@ class TestEntraThrottlesOrFails:
         ids=["throttled", "failing"],
     )
     async def test_the_connection_test_names_the_status_not_the_credential(
-        self, entra_unreachable, monkeypatch, status, words
+        self, canned_entra, entra_credentials, entra_unreachable, status, words
     ):
-        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
-            monkeypatch.setenv(name, "set")
         transport = _CannedEntra(token_status=status)
+        canned_entra(transport)
 
-        ok, message = await _CannedEntraAdapter(
-            _make_provider(), transport=transport
-        ).test_connection()
+        ok, message = await EntraAdapter(_make_provider()).test_connection()
 
         assert transport.token_requests == 1
         assert ok is False
@@ -455,17 +500,18 @@ class TestEntraThrottlesOrFails:
         assert "could not use the configured credential" not in message
 
     async def test_a_throttled_sync_is_a_failed_run_that_says_so(
-        self, entra_unreachable, monkeypatch, tmp_path
+        self, canned_entra, entra_credentials, entra_unreachable, tmp_path
     ):
-        for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
-            monkeypatch.setenv(name, "set")
         registry = OIDCProviderRegistry(tmp_path / "oidc")
         registry.create("entra", _make_provider())
         transport = _CannedEntra(token_status=429)
-        adapter = _CannedEntraAdapter(_make_provider(), transport=transport)
+        canned_entra(transport)
 
         result = await sync_provider(
-            "entra", registry, GroupStore(tmp_path / "groups"), adapter=adapter
+            "entra",
+            registry,
+            GroupStore(tmp_path / "groups"),
+            adapter=EntraAdapter(_make_provider()),
         )
 
         stored = registry.get("entra")
@@ -477,6 +523,61 @@ class TestEntraThrottlesOrFails:
             "Entra ID is throttling token requests (HTTP 429); retry shortly"
         )
         assert stored.sync_error == result["error"]
+
+
+class TestEntraTokenRequest:
+    """The token request is blocking HTTP, so it runs off the event loop and its client is kept."""
+
+    def test_a_second_adapter_for_the_same_registration_reuses_the_token(
+        self, canned_entra, entra_credentials
+    ):
+        transport = _CannedEntra(token_status=200)
+        canned_entra(transport)
+
+        first = EntraAdapter(_make_provider())._get_token()
+        second = EntraAdapter(_make_provider())._get_token()
+
+        assert (first, second) == ("app-token", "app-token")
+        assert (transport.discovery_requests, transport.token_requests) == (1, 1)
+
+    def test_a_rotated_secret_asks_entra_again(self, canned_entra, entra_credentials, monkeypatch):
+        transport = _CannedEntra(token_status=200)
+        canned_entra(transport)
+        EntraAdapter(_make_provider())._get_token()
+
+        monkeypatch.setenv("ENTRA_CLIENT_SECRET", "rotated")
+        EntraAdapter(_make_provider())._get_token()
+
+        assert (transport.discovery_requests, transport.token_requests) == (2, 2)
+
+    def test_a_token_request_has_a_deadline(self, canned_entra, entra_credentials):
+        """MSAL's own default waits for Entra without limit, which would hold a worker thread for good."""
+        transport = _CannedEntra(token_status=200)
+        canned_entra(transport)
+
+        EntraAdapter(_make_provider())._get_token()
+
+        assert transport.token_timeouts == [entra_module._MSAL_TIMEOUT_SECONDS]
+
+    async def test_a_slow_token_request_does_not_block_the_event_loop(
+        self, canned_entra, entra_credentials, graph
+    ):
+        arrived, gate = threading.Event(), threading.Event()
+        transport = _CannedEntra(token_status=200, arrived=arrived, gate=gate)
+        canned_entra(transport)
+        graph.pages["groups"] = [[ADMINS]]
+        adapter = EntraAdapter(_make_provider())
+        adapter.GRAPH_BASE = graph.base_url
+
+        listing = asyncio.create_task(adapter.list_all_groups())
+        ticks = await ticks_while_held(arrived=arrived, gate=gate)
+        groups = await listing
+
+        # The event loop ran while the request was held: the test opened the gate, the wait did not time out.
+        assert transport.gate_opened_by_test == [True]
+        assert ticks >= 5
+        assert [g.name for g in groups] == ["dfe-admins"]
+        assert threading.get_ident() not in transport.token_threads
 
 
 # ---------------------------------------------------------------------------

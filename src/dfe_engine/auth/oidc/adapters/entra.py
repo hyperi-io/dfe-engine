@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING, Any
 import msal
 import requests
 from requests.adapters import HTTPAdapter
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import (
@@ -118,12 +119,17 @@ def graph_credentials(*, provider: OIDCProvider, secrets: DfeSecrets | None) -> 
     )
 
 
+# Last resort: the longest a token request waits for Entra, so a hung endpoint frees its worker thread. MSAL ignores its own timeout setting when it is given a client, and requests waits without limit.
+_MSAL_TIMEOUT_SECONDS = 30
+
+
 class _EntraHttpClient:
     """The HTTP client MSAL reaches Entra through, raising for a throttled or failing answer.
 
     MSAL parses any token answer under 500 as the token response and keeps no status,
     so a 429 would come back as an error body that reads like a refused credential. A
     429 or a 5xx raises ``requests.HTTPError`` here instead, carrying the response.
+    Every request carries a deadline of :data:`_MSAL_TIMEOUT_SECONDS`.
     """
 
     def __init__(self, session: requests.Session) -> None:
@@ -132,11 +138,17 @@ class _EntraHttpClient:
 
     def get(self, url: str, **kwargs: Any) -> requests.Response:
         """GET ``url``, raising for a 429 or a 5xx."""
-        return self._checked(self._session.get(url, **kwargs))
+        return self._checked(self._session.get(url, **self._with_deadline(kwargs)))
 
     def post(self, url: str, **kwargs: Any) -> requests.Response:
         """POST to ``url``, raising for a 429 or a 5xx."""
-        return self._checked(self._session.post(url, **kwargs))
+        return self._checked(self._session.post(url, **self._with_deadline(kwargs)))
+
+    @staticmethod
+    def _with_deadline(kwargs: dict[str, Any]) -> dict[str, Any]:
+        if kwargs.get("timeout") is None:
+            return {**kwargs, "timeout": _MSAL_TIMEOUT_SECONDS}
+        return kwargs
 
     def close(self) -> None:
         """Close the session."""
@@ -147,6 +159,39 @@ class _EntraHttpClient:
         if response.status_code == 429 or response.status_code >= 500:
             response.raise_for_status()
         return response
+
+
+def _new_http_client() -> _EntraHttpClient:
+    """A client for one MSAL application, retrying once as MSAL's own default client does.
+
+    The Entra authority is always https, so only https gets the retrying adapter.
+    """
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(max_retries=1))
+    return _EntraHttpClient(session)
+
+
+# The app registrations whose MSAL application is kept: one per distinct tenant, client and secret.
+_MSAL_APPLICATIONS = 16
+
+
+@functools.lru_cache(maxsize=_MSAL_APPLICATIONS)
+def _confidential_client(
+    authority: str, client_id: str, client_secret: str
+) -> msal.ConfidentialClientApplication:
+    """The MSAL application for one app registration, built once and then reused.
+
+    Building one discovers the authority over HTTP, and its in-memory token cache
+    serves a repeat request without asking Entra again, so the application outlives
+    the adapter that asked for it. A rotated secret is a new key and builds a new
+    application. Blocking: building it reaches Entra, so call it off the event loop.
+    """
+    return msal.ConfidentialClientApplication(
+        authority=authority,
+        client_credential=client_secret,
+        client_id=client_id,
+        http_client=_new_http_client(),
+    )
 
 
 class EntraAdapter(OIDCGroupAdapter):
@@ -213,7 +258,7 @@ class EntraAdapter(OIDCGroupAdapter):
                 return groups
 
         try:
-            token = self._get_token()
+            token = await run_blocking(self._get_token)
         except Exception as exc:
             logger.warning(
                 "Entra resolve_user_groups: token request failed -- returning empty list",
@@ -305,7 +350,7 @@ class EntraAdapter(OIDCGroupAdapter):
                 groups read so far as the whole tenant.
         """
         try:
-            token = self._get_token()
+            token = await run_blocking(self._get_token)
         except Exception as exc:
             logger.warning(
                 "Entra list_all_groups: token request failed",
@@ -365,7 +410,7 @@ class EntraAdapter(OIDCGroupAdapter):
             each read differently, as they do in group sync.
         """
         try:
-            token = self._get_token()
+            token = await run_blocking(self._get_token)
         except Exception as exc:
             logger.warning(
                 "Entra test_connection: token request failed",
@@ -421,19 +466,11 @@ class EntraAdapter(OIDCGroupAdapter):
         """
         return graph_credentials(provider=self._provider, secrets=self._secrets)
 
-    def _msal_http_client(self) -> _EntraHttpClient:
-        """A fresh client for one token request, retrying once as MSAL's own default client does.
-
-        The Entra authority is always https, so only https gets the retrying adapter.
-        """
-        session = requests.Session()
-        session.mount("https://", HTTPAdapter(max_retries=1))
-        return _EntraHttpClient(session)
-
     def _get_token(self) -> str | None:
         """Acquire an OAuth2 access token via MSAL client credentials flow.
 
-        Credentials resolve through :func:`graph_credentials`.
+        Credentials resolve through :func:`graph_credentials`. Blocking: it reaches
+        Entra, so async callers run it with ``run_blocking``.
 
         Returns:
             The access token, or None when a credential is missing or Entra
@@ -451,12 +488,7 @@ class EntraAdapter(OIDCGroupAdapter):
 
         authority = f"https://login.microsoftonline.com/{credentials.tenant_id}"
         try:
-            app = msal.ConfidentialClientApplication(
-                authority=authority,
-                client_credential=credentials.client_secret,
-                client_id=credentials.client_id,
-                http_client=self._msal_http_client(),
-            )
+            app = _confidential_client(authority, credentials.client_id, credentials.client_secret)
             result = app.acquire_token_for_client(scopes=[self._GRAPH_SCOPE])
         except json.JSONDecodeError:
             # A token answer that is not JSON is Entra failing, not refusing the credentials.
