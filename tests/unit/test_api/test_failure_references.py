@@ -35,7 +35,12 @@ def warnings() -> Iterator[list]:
 
 
 def _logged(warnings: list, reference: str) -> list[dict]:
-    return [m.record["extra"] for m in warnings if m.record["extra"].get("reference") == reference]
+    """The lines carrying ``reference`` and the failure's text, so not the audit event naming it."""
+    return [
+        m.record["extra"]
+        for m in warnings
+        if m.record["extra"].get("reference") == reference and "error" in m.record["extra"]
+    ]
 
 
 class _FailingAdapter:

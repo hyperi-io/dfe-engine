@@ -658,6 +658,8 @@ Logins, denied authorisation decisions and admin changes are logged for complian
 | Org change | `org.{change}` | info |
 | Resource change | `resource.{type}.{change}` -- OIDC providers, sources, fieldmaps and other config resources | info |
 
+A refused bearer token emits `auth.login.denied` with `login_method: jwt`, the verifier's error class as `reason`, and the `reference` its 401 answer names. The verifier's own text goes to a `bearer token refused` line at most once a minute, the next one naming how many it held back, and `api_bearer_tokens_refused_total{reason}` counts every refusal.
+
 Every account, group, API key and role write through `/api/v1/auth` emits one event naming the actor (`admin_id`), the change and the target. Its `details` carry the roles, groups, members or permissions the write set, and the names of contact fields changed, never their values. No event carries a password, a hash, an attribute value or an API key's secret half.
 
 Events flow through the OTel pipeline → JSON → ClickHouse → HyperDX.

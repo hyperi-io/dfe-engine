@@ -22,6 +22,7 @@ WRITES_HELD = "api_writes_held_total"
 PASSWORD_CHANGE_REFUSALS = "api_password_change_refusals_total"  # noqa: S105, RUF100 - a metric name
 PASSWORD_FLOOR_REFUSALS = "api_password_floor_refusals_total"  # noqa: S105, RUF100 - a metric name
 SIGN_IN_THROTTLED = "api_sign_in_throttled_total"
+BEARER_TOKENS_REFUSED = "api_bearer_tokens_refused_total"  # noqa: S105, RUF100 - a metric name
 
 
 class ApiMetrics:
@@ -53,6 +54,11 @@ class ApiMetrics:
             SIGN_IN_THROTTLED,
             "Password checks refused unchecked because their username or address must wait",
             ["route"],
+        )
+        self._bearer_refused = manager.counter(
+            BEARER_TOKENS_REFUSED,
+            "Bearer tokens refused, by the verifier's error class, counted whatever the log shows",
+            ["reason"],
         )
 
     @property
@@ -99,8 +105,20 @@ class ApiMetrics:
             return
         self._sign_in_throttled.labels(route=route).inc()
 
+    def bearer_token_refused(self, reason: str) -> None:
+        """Record a bearer token the verifier refused.
+
+        Args:
+            reason: The verifier's error class, such as ``ExpiredSignatureError``, so the
+                label is bounded by the classes the library defines.
+        """
+        if self._manager is None:
+            return
+        self._bearer_refused.labels(reason=reason).inc()
+
 
 __all__ = [
+    "BEARER_TOKENS_REFUSED",
     "PASSWORD_CHANGE_REFUSALS",
     "PASSWORD_FLOOR_REFUSALS",
     "SIGN_IN_THROTTLED",

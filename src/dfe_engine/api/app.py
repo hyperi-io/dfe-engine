@@ -674,6 +674,11 @@ def create_app(
 
     app.state.login_throttle = LoginThrottle(settings.auth.login_throttle)
 
+    from dfe_engine.log_limit import LineLimit
+
+    # A refused token's reason is logged once a minute, and the counter takes every one.
+    app.state.bearer_refused_log = LineLimit(period_seconds=60)
+
     from dfe_engine.backing.observed import SizingCache
 
     app.state.observed_sizing = SizingCache()

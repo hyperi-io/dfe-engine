@@ -16,6 +16,7 @@ from scalo.logger import logger
 from starlette.routing import BaseRoute
 
 from dfe_engine.http_errors import failure_reference, referenced
+from dfe_engine.log_limit import LineLimit
 
 # -- Response models ------------------------------------------
 
@@ -132,7 +133,14 @@ SERVICE_UNAVAILABLE_MESSAGE = "Backing service is unreachable, retry shortly"
 GITOPS_UNAVAILABLE_MESSAGE = "The deploy repo is unreachable, retry after the Retry-After interval"
 
 
-def hide_backend_text(message: str, exc: BaseException, *, event: str, **fields: Any) -> str:
+def hide_backend_text(
+    message: str,
+    exc: BaseException,
+    *,
+    event: str,
+    limit: LineLimit | None = None,
+    **fields: Any,
+) -> str:
     """Log ``exc``'s text under ``event`` and return ``message`` for the caller in its place.
 
     A backend's own error text can carry statement fragments, user names and password
@@ -142,12 +150,16 @@ def hide_backend_text(message: str, exc: BaseException, *, event: str, **fields:
         message: What the caller is told instead.
         exc: The backend failure whose text is logged.
         event: The log line's message.
+        limit: Writes the line at most once a period, for an event any caller can repeat.
         **fields: Further structured fields for the log line.
 
     Returns:
         ``message``, unchanged.
     """
-    logger.warning(event, error=str(exc), **fields)
+    if limit is None:
+        logger.warning(event, error=str(exc), **fields)
+    else:
+        limit.warning(event, error=str(exc), **fields)
     return message
 
 
@@ -159,6 +171,8 @@ def backend_failure(
     *,
     event: str,
     headers: dict[str, str] | None = None,
+    reference: str = "",
+    limit: LineLimit | None = None,
     **fields: Any,
 ) -> HTTPException:
     """The HTTPException a route raises for a failure whose text is logged instead of sent.
@@ -173,13 +187,17 @@ def backend_failure(
         exc: The failure whose text is logged.
         event: The log line's message.
         headers: Response headers, such as a 401's ``WWW-Authenticate``.
+        reference: The reference to answer when another line already carries it. Empty
+            makes a fresh one.
+        limit: Writes the line at most once a period. A caller passing one logs the
+            reference on a line of its own, since a held-back line carries none.
         **fields: Further structured fields for the log line.
 
     Returns:
         The exception to raise, chained from ``exc`` by the caller.
     """
-    reference = failure_reference()
-    told = hide_backend_text(message, exc, event=event, reference=reference, **fields)
+    reference = reference or failure_reference()
+    told = hide_backend_text(message, exc, event=event, limit=limit, reference=reference, **fields)
     return HTTPException(
         status_code=status_code,
         detail={"code": code, "message": referenced(told, reference)},

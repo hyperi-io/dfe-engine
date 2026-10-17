@@ -21,6 +21,7 @@ from scalo.logger import logger
 from starlette.routing import BaseRoute
 
 from dfe_engine.api.errors import backend_failure
+from dfe_engine.api.metrics import ApiMetrics
 from dfe_engine.api.password_change import refuse_until_password_changed
 from dfe_engine.auth import AuthContext, AuthorizationError, Scope, ScopedGrant, authorize
 from dfe_engine.auth.api_keys import APIKeyStore
@@ -42,7 +43,7 @@ from dfe_engine.auth.models import platform_caller
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
-from dfe_engine.http_errors import describe_http_error
+from dfe_engine.http_errors import describe_http_error, failure_reference
 from dfe_engine.orgs.tenant_scope import resolve_orgs, tenant_ids_for
 from dfe_engine.secrets import DfeSecrets
 from dfe_engine.settings import DFESettings, is_dev_posture
@@ -759,7 +760,12 @@ async def get_current_user(request: Request) -> AuthContext:
         try:
             payload = request.app.state.jwt_authority.verify(token)
         except InvalidTokenError as e:
-            audit_login_denied("unknown", "jwt", client_ip, type(e).__name__)
+            # A caller can repeat this, so the reason line is rate-limited, not the audit line.
+            reason = type(e).__name__
+            reference = failure_reference()
+            audit_login_denied("unknown", "jwt", client_ip, reason, reference=reference)
+            metrics = getattr(request.app.state, "api_metrics", None) or ApiMetrics()
+            metrics.bearer_token_refused(reason)
             raise backend_failure(
                 status.HTTP_401_UNAUTHORIZED,
                 "unauthorized",
@@ -767,6 +773,8 @@ async def get_current_user(request: Request) -> AuthContext:
                 e,
                 event="bearer token refused",
                 headers={"WWW-Authenticate": "Bearer"},
+                reference=reference,
+                limit=getattr(request.app.state, "bearer_refused_log", None),
             ) from e
 
         jwt_user_id = payload.get("sub", "")
