@@ -369,6 +369,9 @@ class TestSeedSourceWithTransform:
         assert version["match"]["value"] == _SOURCE
         assert version["fetcher"] is None
         assert source["origin"] == "receiver"
+        # The console shows a source's Processing tab only once it has both.
+        assert version["schema"]["meta_schema"] == "meta/syslog"
+        assert source["deployed_version"] == source["current"]
 
         # The fetcher-based sibling carries the stanza its instance was compiled from.
         fetched = _get(appmgmt_client, f"{_SOURCES}/{_FETCHED}", headers)
