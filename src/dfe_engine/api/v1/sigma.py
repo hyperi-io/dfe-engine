@@ -24,7 +24,14 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
 
-from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    HuntConfigReg,
+    RuleReg,
+    refuse_unknown_orgs,
+    registered_orgs,
+    require_action,
+)
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams
 from dfe_engine.api.review import set_review_headers
 from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
@@ -955,8 +962,11 @@ class PropagateRequest(BaseModel):
         default="detection", description="global_target_table_name for a new hunt"
     )
     hunt_customers: list[str] = Field(
-        default_factory=lambda: ["default"],
-        description="customers for a new hunt (operator adjusts later via PUT /hunts)",
+        default_factory=list,
+        description=(
+            "Names of the registered orgs a new hunt reads (adjusted later via PUT "
+            "/hunts). A new hunt naming none runs nothing until it names one."
+        ),
     )
 
     @field_validator("hunt_target_table")
@@ -1047,6 +1057,7 @@ def _propagator(
         hunt_registry=hunts,
         actor=actor,
         database=request.app.state.settings.clickhouse.effective_data_database,
+        orgs=registered_orgs(request),
     )
 
 
@@ -1110,9 +1121,10 @@ async def propagate(
     A production+team run commits each generated rule and hunt to its own review
     branch rather than the branch the hunt runner syncs; the report carries every
     branch and PR, and ``X-DFE-Review-Required`` says so on a run that completed
-    inline.
+    inline. 422 ``unknown_org`` when ``hunt_customers`` names no registered org.
     """
     options = body or PropagateRequest()
+    refuse_unknown_orgs(request, options.hunt_customers)
     propagator = _propagator(request, rules, hunts, user.user_id)
     manager = _task_manager(request)
     info = manager.submit("sigma:propagate", _run_propagate, propagator, options)

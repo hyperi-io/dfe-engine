@@ -40,7 +40,7 @@ def test_a_hunt_created_through_the_api_writes_detections(ch_client, dfe_db, tmp
     marker = f"org-{uuid.uuid4().hex[:8]}"
 
     write_rule(tmp_path / "rules", rule_id, f"_org_id = '{marker}'")
-    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db)
+    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db, customers=[marker])
 
     fire = current_fire(hunt, _INTERVAL, int(time.time()))
     ch_client.command(
@@ -73,6 +73,117 @@ def test_a_hunt_created_through_the_api_writes_detections(ch_client, dfe_db, tmp
     assert rows[0][6] == marker
 
 
+def test_a_hunt_writes_only_the_matches_of_the_orgs_its_customers_name(ch_client, dfe_db, tmp_path):
+    """The rule matches every org's row, so only the hunt's customers fence what lands."""
+    hunt = f"api_hunt_{uuid.uuid4().hex[:8]}"
+    rule_id = f"{hunt}_rule"
+    tag = uuid.uuid4().hex[:8]
+    named, other = f"org-a-{tag}", f"org-b-{tag}"
+
+    write_rule(tmp_path / "rules", rule_id, f"endsWith(_org_id, '{tag}')")
+    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db, customers=[named])
+
+    fire = current_fire(hunt, _INTERVAL, int(time.time()))
+    ch_client.command(
+        f"INSERT INTO `{dfe_db}`.`main` (_timestamp_load, _timestamp, _org_id) VALUES "
+        f"(toDateTime64({fire - 1}, 3), toDateTime64({fire - 1}, 3), '{named}'), "
+        f"(toDateTime64({fire - 1}, 3), toDateTime64({fire - 1}, 3), '{other}')"
+    )
+
+    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord.ensure_schema()
+    specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
+    runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
+    assert runner.tick(fire + 1) == 1
+
+    rows = ch_client.query(
+        f"SELECT _org_id FROM `{dfe_db}`.detection WHERE hunt_name = {{h:String}}",
+        parameters={"h": hunt},
+    ).result_rows
+    assert [row[0] for row in rows] == [named]
+
+
+def test_a_hunt_for_an_org_with_tenant_ids_reads_those_ids_and_not_its_name(
+    ch_client, dfe_db, tmp_path
+):
+    """The console names the org, and the API stores the tenant ids the org's rows carry."""
+    hunt = f"api_hunt_{uuid.uuid4().hex[:8]}"
+    rule_id = f"{hunt}_rule"
+    tag = uuid.uuid4().hex[:8]
+    org, first, second, other = f"acme-{tag}", f"t1-{tag}", f"t2-{tag}", f"globex-{tag}"
+
+    write_rule(tmp_path / "rules", rule_id, f"endsWith(_org_id, '{tag}')")
+    write_hunt(
+        tmp_path / "hunts",
+        hunt,
+        rule_id,
+        dfe_db,
+        customers=[org],
+        tenant_ids={org: [first, second]},
+    )
+
+    fire = current_fire(hunt, _INTERVAL, int(time.time()))
+    values = ", ".join(
+        f"(toDateTime64({fire - 1}, 3), toDateTime64({fire - 1}, 3), '{tenant}')"
+        for tenant in (first, second, org, other)
+    )
+    ch_client.command(
+        f"INSERT INTO `{dfe_db}`.`main` (_timestamp_load, _timestamp, _org_id) VALUES {values}"
+    )
+
+    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord.ensure_schema()
+    specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
+    runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
+    assert runner.tick(fire + 1) == 1
+
+    rows = ch_client.query(
+        f"SELECT _org_id FROM `{dfe_db}`.detection WHERE hunt_name = {{h:String}}",
+        parameters={"h": hunt},
+    ).result_rows
+    assert sorted(row[0] for row in rows) == [first, second]
+
+
+def test_one_customer_with_no_stored_tenant_ids_stops_the_whole_hunt(ch_client, dfe_db, tmp_path):
+    """Running the resolved org alone would move the watermark past the other org's window."""
+    hunt = f"api_hunt_{uuid.uuid4().hex[:8]}"
+    rule_id = f"{hunt}_rule"
+    tag = uuid.uuid4().hex[:8]
+    resolved, deleted = f"org-a-{tag}", f"org-b-{tag}"
+
+    write_rule(tmp_path / "rules", rule_id, f"endsWith(_org_id, '{tag}')")
+    write_hunt(
+        tmp_path / "hunts",
+        hunt,
+        rule_id,
+        dfe_db,
+        customers=[resolved, deleted],
+        tenant_ids={resolved: [resolved]},
+    )
+
+    fire = current_fire(hunt, _INTERVAL, int(time.time()))
+    values = ", ".join(
+        f"(toDateTime64({fire - 1}, 3), toDateTime64({fire - 1}, 3), '{tenant}')"
+        for tenant in (resolved, deleted)
+    )
+    ch_client.command(
+        f"INSERT INTO `{dfe_db}`.`main` (_timestamp_load, _timestamp, _org_id) VALUES {values}"
+    )
+
+    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord.ensure_schema()
+    specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
+    runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
+    runner.tick(fire + 1)
+
+    rows = ch_client.query(
+        f"SELECT count() FROM `{dfe_db}`.detection WHERE hunt_name = {{h:String}}",
+        parameters={"h": hunt},
+    ).result_rows
+    assert rows[0][0] == 0
+    assert coord.get_watermark(hunt) is None
+
+
 def test_a_rule_name_with_a_quote_and_a_trailing_backslash_lands_verbatim(
     ch_client, dfe_db, tmp_path
 ):
@@ -83,7 +194,7 @@ def test_a_rule_name_with_a_quote_and_a_trailing_backslash_lands_verbatim(
     name = "Analyst's share C:\\Temp\\"
 
     write_rule(tmp_path / "rules", rule_id, f"_org_id = '{marker}'", name=name)
-    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db)
+    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db, customers=[marker])
 
     fire = current_fire(hunt, _INTERVAL, int(time.time()))
     ch_client.command(

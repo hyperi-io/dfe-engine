@@ -88,9 +88,16 @@ class TestAuthentication:
         assert auth.user_id == "viewer"
         assert auth.roles == ["data_viewer"]
 
-    def test_authenticate_populates_org_id(self, provider: LocalAuthProvider):
+    def test_an_account_bound_to_no_org_signs_in_with_none(self, provider: LocalAuthProvider):
         auth = provider.authenticate("admin", "admin-secret")
-        assert auth.org_id == "default"
+        assert auth.org_id == ""
+
+    def test_an_account_signs_in_with_the_org_it_is_bound_to(
+        self, provider: LocalAuthProvider, stores: tuple[AccountStore, GroupStore]
+    ):
+        stores[0].update("operator", org="acme")
+        auth = provider.authenticate("operator", "operator-secret")
+        assert auth.org_id == "acme"
 
     def test_authenticate_populates_request_metadata(self, provider: LocalAuthProvider):
         auth = provider.authenticate(

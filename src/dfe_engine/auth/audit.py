@@ -56,6 +56,8 @@ def audit_login_denied(
     auth_path: str,
     client_ip: str | None,
     reason: str,
+    *,
+    reference: str = "",
 ) -> None:
     """Emit an audit event for a failed or denied authentication attempt.
 
@@ -65,13 +67,16 @@ def audit_login_denied(
             logged as ``login_method``.
         client_ip: Client IP address, or None if unavailable.
         reason: Short machine-readable reason (e.g. ``invalid_key``, ``no_credentials``).
+        reference: The reference the refusal answered with, when it named one.
     """
+    fields = {"reference": reference} if reference else {}
     logger.warning(
         "auth.login.denied",
         user_id=user_id,
         login_method=auth_path,
         client_ip=client_ip,
         reason=reason,
+        **fields,
     )
 
 

@@ -14,6 +14,9 @@ All methods are async to allow network calls without blocking the event loop.
 
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
+
+from scalo.logger import logger
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
@@ -108,6 +111,60 @@ class DirectoryPageLimitError(Exception):
         self.pages = pages
 
 
+class DirectoryForeignLinkError(Exception):
+    """A directory linked its next page on another origin, so the link was not followed.
+
+    The next request would carry the directory credential, so it goes only to the
+    scheme, host and port the adapter was configured with.
+    """
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(url: str) -> tuple[str, str, int | None] | None:
+    """The scheme, host and port *url* names, or None when it names no plain absolute origin.
+
+    A URL carrying user info is refused too: the client would send it as a second credential.
+    """
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    if scheme not in _DEFAULT_PORTS or not parts.hostname or "@" in parts.netloc:
+        return None
+    return scheme, parts.hostname.lower(), port or _DEFAULT_PORTS[scheme]
+
+
+def same_origin_link(link: str, *, directory_url: str) -> str:
+    """Return *link* when it is on *directory_url*'s origin, else refuse it.
+
+    Args:
+        link: The next-page URL the directory answered with.
+        directory_url: Any URL on the directory API's own origin.
+
+    Returns:
+        *link*, unchanged.
+
+    Raises:
+        DirectoryForeignLinkError: The link names another scheme, host or port, or no
+            plain origin at all. Logged with both origins, never the link's path,
+            query or the credential.
+    """
+    linked = _origin(link)
+    expected = _origin(directory_url)
+    if linked is not None and linked == expected:
+        return link
+    logger.warning(
+        "directory linked its next page on another origin, so it was not followed",
+        directory_origin="{}://{}:{}".format(*expected) if expected else "",
+        linked_origin="{}://{}:{}".format(*linked) if linked else "",
+    )
+    raise DirectoryForeignLinkError
+
+
 class OIDCGroupAdapter(ABC):
     """Abstract OIDC group adapter.
 
@@ -150,6 +207,8 @@ class OIDCGroupAdapter(ABC):
                 access to the directory.  Group sync reports that as a failed run.
             DirectoryPageError: A page arrived without the listing's shape.
             DirectoryPageLimitError: The listing ran past :attr:`MAX_LISTING_PAGES`.
+            DirectoryForeignLinkError: A page linked the next on another origin
+                (:func:`same_origin_link`).
             Exception: Whatever the provider's API produced when a listing failed,
                 on any page. An empty or short list never means a failed one,
                 because group sync records what it is given as the whole directory.

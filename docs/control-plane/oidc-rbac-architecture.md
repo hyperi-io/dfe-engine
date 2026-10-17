@@ -43,7 +43,7 @@ auth, it augments it:
   When present it takes precedence, but the local and key paths stay live.
 - **Groups from both sources unify.** An OIDC group name that matches a local
   group file inherits that group's roles - OIDC and local groups are the same
-  mechanism (rbac.md section 2.1). One role model, two merged identity sources.
+  mechanism (rbac-sign-in.md section 2.1). One role model, two merged identity sources.
 
 The four auth paths, precedence, and the header-trust security precondition are
 detailed in rbac.md section 1.
@@ -155,7 +155,7 @@ never reads a short listing as the whole directory.
 
 ### Sync and control-plane independence
 
-`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id and their `source_provider` this provider, or one `auth.source_provider_bindings` joins to it), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act through the groups API or dfe-ui's group form (rbac.md section 4.4). A new group whose name is a stored group's `source_id` or whose id is a stored group's name is skipped as `name_taken` too, since an API key resolves an identifier by name, then by `source_id`. A file carrying the id under any other provider, whatever its name, is skipped as `provider_mismatch`, so a sync never moves a group between providers or creates a second group carrying the id. Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
+`auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id and their `source_provider` this provider, or one `auth.source_provider_bindings` joins to it), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act through the groups API or dfe-ui's group form (rbac-groups.md section 4.4). A new group whose name is a stored group's `source_id` or whose id is a stored group's name is skipped as `name_taken` too, since an API key resolves an identifier by name, then by `source_id`. A file carrying the id under any other provider, whatever its name, is skipped as `provider_mismatch`, so a sync never moves a group between providers or creates a second group carrying the id. Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
 
 **The OIDC auth flow does not depend on dfe-engine running.** Envoy (fallback
 path) keeps doing OIDC from a static CRD; group files on disk keep resolving

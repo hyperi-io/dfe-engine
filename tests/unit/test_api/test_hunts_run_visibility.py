@@ -17,6 +17,8 @@ import pytest
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 
+pytestmark = pytest.mark.usefixtures("customer_orgs")
+
 _HUNT = {
     "name": "visible_hunt",
     "display_name": "Visible Hunt",

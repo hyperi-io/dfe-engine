@@ -191,6 +191,83 @@ def test_organisation_seed_resets_existing(tmp_path, monkeypatch):
     assert org.org_ids == ["organisation"]
 
 
+def _hunts(tmp_path: Path, customers: list[str], stored: dict | None = None):
+    """A hunt registry holding ``windows_hunt``, naming ``customers`` with ``stored`` ids."""
+    from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+
+    hunts = HuntConfigRegistry(
+        hunts_directory=tmp_path / "hunts", writable=True, refresh_interval=0
+    )
+    hunts.save(
+        "windows_hunt",
+        {"cron": "*/5 * * * *", "customers": customers, "customer_tenant_ids": stored or {}},
+    )
+    return hunts
+
+
+def _organisations(tmp_path: Path, hunts):
+    from dfe_engine.api.e2e.seed.organisations import Organisations
+
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Organisations(
+        account_store=accounts, group_store=groups, org_registry=orgs, hunt_registry=hunts
+    )
+    return seeder, orgs
+
+
+class TestTheOrganisationSeedMovesTheHuntsNamingIt:
+    """The seeder writes orgs as the org routes do, so the hunts naming one follow it."""
+
+    def test_a_seeded_org_is_stored_in_the_hunts_naming_it(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DFE_ENV", "test")
+        hunts = _hunts(tmp_path, ["organisation"])
+        seeder, _orgs = _organisations(tmp_path, hunts)
+
+        assert seeder.seed_organisation() is True
+
+        assert hunts.get("windows_hunt")["customer_tenant_ids"] == {
+            "organisation": ["organisation"]
+        }
+
+    def test_a_reset_org_restores_its_ids_in_the_hunts_naming_it(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DFE_ENV", "test")
+        hunts = _hunts(tmp_path, ["organisation"], {"organisation": ["stale"]})
+        seeder, orgs = _organisations(tmp_path, hunts)
+        orgs.create("organisation", org_ids=["stale"])
+
+        assert seeder.seed_organisation() is False
+
+        assert hunts.get("windows_hunt")["customer_tenant_ids"] == {
+            "organisation": ["stale", "organisation"]
+        }
+
+    def test_deleting_every_org_takes_each_out_of_its_hunts(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("DFE_ENV", "test")
+        hunts = _hunts(tmp_path, ["organisation"])
+        seeder, orgs = _organisations(tmp_path, hunts)
+        seeder.seed_organisation()
+
+        seeder.delete_all()
+
+        assert orgs.list() == []
+        assert hunts.get("windows_hunt")["customer_tenant_ids"] == {}
+
+    def test_a_seed_taking_an_id_a_hunt_reads_for_another_org_is_refused(
+        self, tmp_path, monkeypatch
+    ):
+        from fastapi import HTTPException
+
+        monkeypatch.setenv("DFE_ENV", "test")
+        hunts = _hunts(tmp_path, ["gone"], {"gone": ["organisation"]})
+        seeder, orgs = _organisations(tmp_path, hunts)
+
+        with pytest.raises(HTTPException) as refused:
+            seeder.seed_organisation()
+
+        assert refused.value.status_code == 409
+        assert orgs.get("organisation") is None
+
+
 def test_reset_all_recreates_break_glass_admin(tmp_path, monkeypatch):
     """reset_all must leave a loginable break-glass admin (delete_all removes every account)."""
     from dfe_engine.api.e2e.seed import Seed

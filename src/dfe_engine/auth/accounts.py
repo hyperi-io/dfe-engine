@@ -121,6 +121,13 @@ class Account(BaseModel):
     email: str = ""
     phone: str = ""
     name: str = ""
+    org: str = ""
+    """The registered org the account belongs to, which its sessions carry as ``org_id``.
+
+    Empty binds it to no org, as the bootstrap admin and break-glass accounts are,
+    and as every account written before the field is: such a session reads no
+    org-bound view. A binding grants nothing itself, because a view also needs the
+    org among those the account's groups grant or a platform role."""
     created_at: str = ""
     updated_at: str = ""
     attributes: dict[str, Any] = Field(default_factory=dict)
@@ -204,6 +211,7 @@ class AccountStore:
         email: str = "",
         phone: str = "",
         name: str = "",
+        org: str = "",
         change_required: bool = False,
     ) -> Account:
         """Create a new account.
@@ -215,6 +223,7 @@ class AccountStore:
             email: Optional contact email.
             phone: Optional contact phone.
             name: Optional display name (distinct from ``username``).
+            org: The registered org the account belongs to, empty for none.
             change_required: The password is issued, not the owner's own, so the
                 owner must replace it before the API serves them.
 
@@ -237,6 +246,7 @@ class AccountStore:
             email=email,
             phone=phone,
             name=name,
+            org=org,
             change_required=change_required,
         )
         try:
@@ -307,8 +317,8 @@ class AccountStore:
         """Update mutable fields on an existing account.
 
         Permitted fields: ``enabled``, ``blocked``, ``disabled_at``,
-        ``blocked_at``, ``groups``, ``email``, ``phone``, ``name``, plus the
-        external-identity stamps. Updating ``username`` or ``password_hash``
+        ``blocked_at``, ``groups``, ``email``, ``phone``, ``name``, ``org``, plus
+        the external-identity stamps. Updating ``username`` or ``password_hash``
         directly is not permitted (use :meth:`reset_password` to change the
         password). Re-enabling or unblocking always clears the matching
         ``*_at`` field. Disabling or blocking always writes a new stamp.
@@ -532,6 +542,7 @@ _UPDATABLE_FIELDS = (
     "email",
     "phone",
     "name",
+    "org",
 )
 
 
@@ -567,6 +578,7 @@ class DocuStoreAccountStore:
         email: str = "",
         phone: str = "",
         name: str = "",
+        org: str = "",
         change_required: bool = False,
     ) -> Account:
         """Create a new account. Raises AccountExistsError if taken, InvalidNameError if invalid.
@@ -583,6 +595,7 @@ class DocuStoreAccountStore:
             email=email,
             phone=phone,
             name=name,
+            org=org,
             change_required=change_required,
         )
         if not self._c.insert(account):
@@ -811,6 +824,7 @@ def _new_account(
     email: str,
     phone: str,
     name: str,
+    org: str,
     change_required: bool,
 ) -> Account:
     """The record both stores write for a new account."""
@@ -824,6 +838,7 @@ def _new_account(
         email=email,
         phone=phone,
         name=name,
+        org=org,
         created_at=now,
         updated_at=now,
         password_change_required=change_required,

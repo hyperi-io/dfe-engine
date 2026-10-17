@@ -72,7 +72,8 @@ def _handler_for(*, graph: LocalGraph) -> type[BaseHTTPRequestHandler]:
                 ]
             page: dict[str, Any] = {"value": value}
             if index + 1 < len(pages):
-                page["@odata.nextLink"] = f"{graph.base_url}/{principal}{suffix}?page={index + 1}"
+                base = graph.next_base or graph.base_url
+                page["@odata.nextLink"] = f"{base}/{principal}{suffix}?page={index + 1}"
             self._reply(body=page, status=200)
 
         def log_message(self, format: str, *args: object) -> None:
@@ -90,7 +91,8 @@ class LocalGraph:
     instead. ``limited`` names principals answered the way Graph answers a token
     that may not read the groups: each object with only its id, the rest null.
     ``fail_page`` maps a principal to the page index that answers 400.
-    ``requests`` records the principal and Authorization of each call.
+    ``next_base``, when set, is the origin each ``@odata.nextLink`` names instead of
+    this server's own. ``requests`` records the principal and Authorization of each call.
     """
 
     def __init__(self) -> None:
@@ -98,6 +100,7 @@ class LocalGraph:
         self.refuse: dict[str, tuple[int, dict[str, Any]]] = {}
         self.limited: set[str] = set()
         self.fail_page: dict[str, int] = {}
+        self.next_base: str | None = None
         self.requests: list[dict[str, Any]] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(graph=self))
         self._thread = threading.Thread(daemon=True, target=self._server.serve_forever)

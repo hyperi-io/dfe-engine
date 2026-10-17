@@ -15,10 +15,17 @@ as AccountStore).
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from typing import Annotated
+
+from pydantic import BaseModel, Field, StringConstraints
 
 # The name is a filename stem, so it may not carry a path separator or start with a dot.
 ORG_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
+
+# Only what breaks the tenant fence is refused: empty, a comma, a control char, edge space.
+TENANT_ID_PATTERN = r"^[^\s,\x00-\x1f\x7f](?:[^,\x00-\x1f\x7f]*[^\s,\x00-\x1f\x7f])?$"
+
+TenantId = Annotated[str, StringConstraints(pattern=TENANT_ID_PATTERN)]
 
 
 class Org(BaseModel):
@@ -38,7 +45,7 @@ class Org(BaseModel):
 
     name: str
     display_name: str = ""
-    org_ids: list[str] = Field(default_factory=list)
+    org_ids: list[TenantId] = Field(default_factory=list)
     enabled: bool = True
     hyperdx_team_id: str = ""
     hyperdx_team_api_key_env: str = ""

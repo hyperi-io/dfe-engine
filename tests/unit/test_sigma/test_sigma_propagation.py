@@ -24,6 +24,7 @@ from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.hunts.deploy_repo import DeployRepoStore
 from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
 from dfe_engine.hunts.rule_registry import RuleRegistry
+from dfe_engine.orgs.models import Org
 from dfe_engine.sigma.catalog import (
     RULES_CLASS,
     SigmaCatalogStore,
@@ -95,7 +96,7 @@ def _import_and_select(env, yaml_text: str, rule_id: str) -> None:
     env.selection.select(rule_id, actor="tester")
 
 
-def _propagator(env) -> SigmaPropagator:
+def _propagator(env, orgs: list | None = None) -> SigmaPropagator:
     return SigmaPropagator(
         catalog=env.catalog,
         selection=env.selection,
@@ -104,6 +105,7 @@ def _propagator(env) -> SigmaPropagator:
         hunt_registry=env.hunts,
         actor="tester",
         database="dfe",
+        orgs=orgs,
     )
 
 
@@ -350,6 +352,29 @@ def test_propagate_creates_per_source_hunt_including_binding(env):
     assert hunt["cron"] == "*/5 * * * *"
     assert hunt["customers"] == ["acme"]
     assert hunt["global_source_table_name"] == "dfe.windows-audit_sigma"
+
+
+def test_a_new_hunt_stores_the_tenant_ids_its_customers_resolve_to(env):
+    _add_windows_source(env)
+    _import_and_select(env, _rule_yaml(), _ID)
+    orgs = [Org(name="acme", org_ids=["acme-1", "acme-2"]), Org(name="globex")]
+
+    _propagator(env, orgs).propagate(hunt_customers=["acme", "globex"])
+
+    hunt = env.hunts.get(sigma_hunt_name("windows-audit"))
+    assert hunt["customer_tenant_ids"] == {"acme": ["acme-1", "acme-2"], "globex": ["globex"]}
+
+
+def test_a_new_hunt_naming_no_customer_reads_no_org(env):
+    """Not the rows tagged ``default``: a hunt with no customers runs nothing."""
+    _add_windows_source(env)
+    _import_and_select(env, _rule_yaml(), _ID)
+
+    _propagator(env).propagate()
+
+    hunt = env.hunts.get(sigma_hunt_name("windows-audit"))
+    assert hunt["customers"] == []
+    assert hunt["customer_tenant_ids"] == {}
 
 
 def test_propagate_preserves_existing_hunt_rules_and_overrides(env):

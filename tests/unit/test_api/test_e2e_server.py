@@ -223,6 +223,22 @@ def test_e2e_seed_dfe_admin_resets_existing_password(tmp_path):
         _registries.clear()
 
 
+def test_the_organisation_seed_moves_the_hunts_naming_the_org(tmp_path):
+    from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+    settings = _settings(tmp_path, e2e_server=True)
+    hunt = tmp_path / "hunts" / "windows_hunt.yaml"
+    yaml_dump({"cron": "*/5 * * * *", "customers": ["organisation"]}, hunt)
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            _seed(client, "seed_organisation")
+
+        assert yaml_load(hunt)["customer_tenant_ids"] == {"organisation": ["organisation"]}
+    finally:
+        _registries.clear()
+
+
 @pytest.fixture
 def appmgmt_client(tmp_path):
     """An e2e-server process with a real deploy repo and a Kubernetes deploy target.

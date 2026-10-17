@@ -41,16 +41,31 @@ source's label as its name, and both parts are backtick-quoted. A source named
 without a database is read from the data database the caller passes. A hunt
 left with NOTHING to run is a hard failure in the worker rather than a silent
 clean run.
+
+Every statement reads only the rows whose ``_org_id`` is one of the tenant ids
+the hunt's ``customers`` resolved to (:mod:`~dfe_engine.hunts.customers`), as its
+own conjunct beside the window and the rule, so a hunt for one tenant never writes
+another's matches. A hunt naming no customer, or one the engine did not resolve,
+compiles to nothing. A rule whose brackets do not balance, or that reads another
+table, is dropped, since either would reach rows past that conjunct. The one table
+a rule may read is a lookup database's, which ``hunts.lookup_databases`` lists as
+holding no org's rows.
 """
 
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
 from scalo.logger import logger
 
-from dfe_engine.clickhouse.quoting import plain_source_name, plain_table_name, quote_identifier
-from dfe_engine.hunts.hunt_output import HuntResultSchema, matching_rows
-from dfe_engine.hunts.rule_guard import refuse_offbox_calls
+from dfe_engine.clickhouse.quoting import (
+    plain_source_name,
+    plain_table_name,
+    quote_identifier,
+)
+from dfe_engine.hunts.customers import hunt_tenant_ids
+from dfe_engine.hunts.hunt_output import HuntResultSchema, matching_rows, tenant_condition
+from dfe_engine.hunts.rule_guard import refuse_rule_condition
 from dfe_engine.hunts.rule_names import RuleNameError, rule_file
 from dfe_engine.hunts.rule_rewriter import RuleRewriter, strip_time_placeholder
 from dfe_engine.hunts.validator import rule_source
@@ -139,14 +154,21 @@ def _detection_clause(payload: dict[str, Any], rewriter: RuleRewriter) -> tuple[
     return where, source_db, source_table
 
 
-def _count_sql(source_db: str, source_table: str, where: str) -> str:
+def _count_sql(source_db: str, source_table: str, where: str, tenant_condition: str) -> str:
     """Every match in the window, plus what the summary row is stamped with.
 
     The rule runs in the same subquery the INSERT reads, so none of the count's
     aliases is in scope for it. The org is named only when every match shares one,
-    because the count spans tenants.
+    because the count spans the hunt's customers.
     """
-    matched = matching_rows(source_db, source_table, _COUNT_COLUMNS, where, WINDOW_TOKEN)
+    matched = matching_rows(
+        source_db,
+        source_table,
+        _COUNT_COLUMNS,
+        where,
+        WINDOW_TOKEN,
+        tenant_condition=tenant_condition,
+    )
     return (
         f"SELECT\n"
         f"    count() AS {MATCHED},\n"
@@ -173,6 +195,7 @@ def compile_hunt_queries(
     default_target: str = "",
     default_database: str = "",
     max_detections: int = MAX_DETECTIONS_PER_RUN,
+    lookup_databases: Collection[str] = (),
 ) -> list[HuntStatement]:
     """Compile every rule the hunt names into one capped INSERT ... SELECT each.
 
@@ -186,9 +209,12 @@ def compile_hunt_queries(
             data database. Empty leaves such a rule with no source.
         max_detections: Detection rows each rule may write in one run, already cut
             to the ceiling by :func:`detection_cap`.
+        lookup_databases: ``hunts.lookup_databases``, the databases a rule's
+            condition may look values up in.
 
     Returns:
-        The statements, in the hunt's own rule order. Empty when nothing compiled.
+        The statements, in the hunt's own rule order. Empty when nothing compiled,
+        among the reasons a hunt naming no customer or one with no stored tenant ids.
 
     Raises:
         ValueError: ``max_detections`` is below 1, which would write nothing at all.
@@ -198,6 +224,20 @@ def compile_hunt_queries(
     entries = _rule_entries(definition)
     if not entries:
         return []
+    tenant_ids, unresolved = hunt_tenant_ids(definition)
+    if unresolved:
+        logger.error(
+            "hunt names customers the engine did not resolve to tenant ids, so it runs nothing",
+            hunt_id=hunt_id,
+            customers=unresolved,
+        )
+        return []
+    if not tenant_ids:
+        logger.error(
+            "hunt names no customers, so it reads no org and runs nothing", hunt_id=hunt_id
+        )
+        return []
+    fence = tenant_condition(tenant_ids)
     directory = Path(rules_dir)
     schema = HuntResultSchema()
     rewriter = RuleRewriter()
@@ -228,9 +268,9 @@ def compile_hunt_queries(
 
         # A rule YAML can also be committed straight into the deploy repo, so the
         # API's refusal is not the only gate the condition passes.
-        offbox = refuse_offbox_calls(where)
-        if offbox is not None:
-            logger.error(f"hunt {hunt_id}: rule '{rule_name}' refused: {offbox}")
+        refusal = refuse_rule_condition(where, lookup_databases=lookup_databases)
+        if refusal is not None:
+            logger.error(f"hunt {hunt_id}: rule '{rule_name}' refused: {refusal}")
             continue
 
         source = (
@@ -276,13 +316,14 @@ def compile_hunt_queries(
             hunt_name=hunt_id,
             severity=severity,
             timestamp_placeholder=WINDOW_TOKEN,
+            tenant_condition=fence,
         )
         statements.append(
             HuntStatement(
                 sql=f"{insert}\nLIMIT {max_detections}",
                 rule_id=rule_name,
                 cap=max_detections,
-                count_sql=_count_sql(source_db, source_table, where),
+                count_sql=_count_sql(source_db, source_table, where, fence),
                 summary_sql=_summary_sql(schema, target_db, target_table),
                 summary_params={
                     "dfe_rule_id": rule_name,

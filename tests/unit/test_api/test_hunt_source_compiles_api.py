@@ -14,10 +14,14 @@ database is read from the data database, the one the runner's CLI resolves.
 
 from pathlib import Path
 
+import pytest
+
 from dfe_engine.hunt_runner import cli
 from dfe_engine.hunt_runner.spec_loader import load_specs
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleRegistry
+
+pytestmark = pytest.mark.usefixtures("customer_orgs")
 
 _HUNT = {
     "display_name": "Certutil Abuse",

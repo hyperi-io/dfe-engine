@@ -24,6 +24,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.clickhouse.quoting import BARE_REFERENCE, column_reference, quote_identifier
 from dfe_engine.query.catalog import RESERVED_PARAMS, ViewCatalog
 from dfe_engine.query.models import (
@@ -99,12 +100,18 @@ class ViewExecutor:
         params: dict[str, Any] | None,
         auth: AuthContext,
         options: QueryOptions | None = None,
+        *,
+        role_config: RoleConfig | None = None,
     ) -> QueryResult:
-        """Execute a parameterized view and return results."""
+        """Execute a parameterized view and return results.
+
+        ``role_config`` is the deployment's live role definitions, which a custom
+        role's grants are read from. None reads the built-in roles only.
+        """
         view_def = self._catalog.get_view(label)
         options = options or QueryOptions()
 
-        self._check_authorization(view_def, auth)
+        self._check_authorization(view_def, auth, role_config)
 
         final_params = self._build_params(view_def, params or {}, auth, options)
         limit = self._resolve_limit(options)
@@ -158,7 +165,9 @@ class ViewExecutor:
         """Get a specific view definition."""
         return self._catalog.get_view(label)
 
-    def _check_authorization(self, view_def: ViewDefinition, auth: AuthContext) -> None:
+    def _check_authorization(
+        self, view_def: ViewDefinition, auth: AuthContext, role_config: RoleConfig | None
+    ) -> None:
         from dfe_engine.auth import authorize
         from dfe_engine.settings import get_settings
 
@@ -168,6 +177,7 @@ class ViewExecutor:
             "query:execute",
             view_def.label,
             enabled=settings.auth.enabled,
+            role_config=role_config,
         )
         if not result.allowed:
             raise AuthorizationError(f"View '{view_def.label}': access denied ({result.reason})")

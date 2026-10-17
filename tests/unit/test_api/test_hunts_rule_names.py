@@ -12,6 +12,8 @@ from dfe_engine.api.deps import get_hunt_config_registry
 from dfe_engine.api.v1.rules import RuleCreateRequest
 from dfe_engine.names import validate_rule_name
 
+pytestmark = pytest.mark.usefixtures("customer_orgs")
+
 _HUNT = {
     "display_name": "Certutil Abuse",
     "cron": "*/5 * * * *",

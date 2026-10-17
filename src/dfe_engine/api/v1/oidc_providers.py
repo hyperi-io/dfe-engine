@@ -54,7 +54,12 @@ from dfe_engine.auth.oidc.models import SyncStatus
 from dfe_engine.auth.oidc.sync import SyncOutcome
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
-from dfe_engine.http_errors import describe_http_error, http_failure_message
+from dfe_engine.http_errors import (
+    describe_http_error,
+    failure_reference,
+    http_failure_message,
+    referenced,
+)
 from dfe_engine.names import StoreName
 
 if TYPE_CHECKING:
@@ -1090,13 +1095,17 @@ async def verify_login_config(
                     LoginConfigCheck(name="discovery", ok=True, detail="discovery reachable")
                 )
         except Exception as exc:
+            reference = failure_reference()
             logger.warning(
                 "OIDC verify-login: discovery failed",
                 operation="discovery",
                 provider=name,
+                reference=reference,
                 **describe_http_error(exc),
             )
-            detail = http_failure_message(exc, service="The issuer's discovery endpoint")
+            detail = referenced(
+                http_failure_message(exc, service="The issuer's discovery endpoint"), reference
+            )
             checks.append(LoginConfigCheck(name="discovery", ok=False, detail=detail))
 
     return LoginConfigResponse(ok=all(c.ok for c in checks), checks=checks)

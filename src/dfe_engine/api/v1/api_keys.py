@@ -12,9 +12,12 @@ POST   /api/v1/auth/api-keys                       -> Create key (returns full k
 GET    /api/v1/auth/api-keys                       -> List keys (short tokens only)
 DELETE /api/v1/auth/api-keys/{short_token}          -> Revoke key
 
-All endpoints require admin role (org:write).
-The full key is ONLY returned in the create response -- it cannot be
-recovered from stored metadata.
+Each route needs api_key:read, api_key:write or api_key:delete, and a key may
+carry only the roles its creator could hand out. The full key is ONLY returned
+in the create response -- it cannot be recovered from stored metadata.
+
+A key's ``org`` binds its sessions to one registered org, the way an account's
+does. Empty binds none, and a view held to one org then refuses the key.
 
 A key's ``expires_at`` is the caller's, else ``auth.api_key_default_ttl_days``
 from now, and none only when that setting is 0. Once it passes, the key stops
@@ -27,7 +30,7 @@ from typing import TYPE_CHECKING
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, refuse_unknown_orgs, require_action
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -49,9 +52,16 @@ router = APIRouter(prefix="/api-keys", tags=["API Keys"])
 # -- Request / Response models --------------------------------
 
 
+_ORG_DESCRIPTION = (
+    "The org the key's sessions are bound to: a registered org's name, or empty for "
+    "none. A view held to one org runs only for a key bound to an org its groups grant."
+)
+
+
 class CreateAPIKeyRequest(BaseModel):
     name: StoreName = Field(description="Unique human-readable key name")
     groups: list[str] = Field(default_factory=list, description="RBAC group memberships")
+    org: str = Field("", description=_ORG_DESCRIPTION)
     description: str = Field("", description="Optional description")
     expires_at: str | None = Field(
         None,
@@ -70,6 +80,7 @@ class APIKeyResponse(BaseModel):
     short_token: str
     enabled: bool
     groups: list[str]
+    org: str = Field("", description=_ORG_DESCRIPTION)
     description: str
     created_at: str
     expires_at: str | None = Field(None, description="ISO-8601 UTC expiry, or null if never")
@@ -92,6 +103,7 @@ def _response_fields(key_meta: APIKey) -> dict:
         "short_token": key_meta.short_token,
         "enabled": key_meta.enabled,
         "groups": key_meta.groups,
+        "org": key_meta.org,
         "description": key_meta.description,
         "created_at": key_meta.created_at,
         "expires_at": key_meta.expires_at,
@@ -113,7 +125,10 @@ async def create_api_key(
     user: CurrentUser,
     request: Request,
 ):
-    """Create a new API key (admin only). Returns the full key exactly once."""
+    """Create a new API key. Returns the full key exactly once.
+
+    422 ``unknown_org`` when ``org`` names no registered org.
+    """
     from dfe_engine.auth.api_keys import APIKeyStore
 
     store: APIKeyStore = request.app.state.api_key_store
@@ -125,6 +140,7 @@ async def create_api_key(
     # The key's session takes every role its groups carry, so minting it hands them out.
     for group in groups_named(body.groups, request.app.state.group_store.list()):
         check_role_assignment(request, user, group.roles, scope_of(group))
+    refuse_unknown_orgs(request, [body.org])
     expires_at = body.expires_at
     ttl_days = request.app.state.settings.auth.api_key_default_ttl_days
     if expires_at is None and ttl_days > 0:
@@ -133,6 +149,7 @@ async def create_api_key(
         key_meta, full_key = store.create(
             body.name,
             groups=body.groups,
+            org=body.org,
             description=body.description,
             expires_at=expires_at,
         )
@@ -147,7 +164,7 @@ async def create_api_key(
         key_meta.name,
         key_meta.short_token,
         "created",
-        {"groups": key_meta.groups, "expires_at": key_meta.expires_at},
+        {"groups": key_meta.groups, "org": key_meta.org, "expires_at": key_meta.expires_at},
     )
     return APIKeyCreatedResponse(**_response_fields(key_meta), full_key=full_key)
 
@@ -165,7 +182,7 @@ async def list_api_keys(
     sort_by: str | None = Query(None, description="Sort field (name, created_at, expires_at)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List API keys (admin only), paginated. No key hashes or full keys returned."""
+    """List API keys, paginated. No key hashes or full keys returned."""
     from dfe_engine.auth.api_keys import APIKeyStore
 
     store: APIKeyStore = request.app.state.api_key_store
@@ -186,7 +203,7 @@ async def revoke_api_key(
     user: CurrentUser,
     request: Request,
 ):
-    """Revoke (delete) an API key by short token (admin only)."""
+    """Revoke (delete) an API key by short token."""
     from dfe_engine.auth.api_keys import APIKeyStore
 
     store: APIKeyStore = request.app.state.api_key_store

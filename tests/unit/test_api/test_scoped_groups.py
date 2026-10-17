@@ -129,12 +129,13 @@ class TestOrgLocalAdmin:
         assert resp.status_code == 403
 
     def test_cannot_modify_system_group(self, scoped_setup, api_settings):
+        """A system group is invisible to an org admin, so it answers as a missing one."""
         resp = scoped_setup.put(
             f"{GROUPS}/dfe-viewers",
             json={"roles": ["admin"]},
             headers=_headers(api_settings, "orgadmin"),
         )
-        assert resp.status_code == 403
+        assert resp.status_code == 404
 
     def test_org_wildcard_does_not_reach_system_endpoints(self, scoped_setup, api_settings):
         resp = scoped_setup.post(

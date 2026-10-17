@@ -36,6 +36,8 @@ def _install(app, params: list[ViewParameter]) -> None:
         catalog=OneViewCatalog(view_definition(params)),
         database="dfe",
     )
+    # The view is held to the session's org, so the admin account is bound to one.
+    app.state.account_store.update("admin", org="test-org")
 
 
 @pytest.fixture

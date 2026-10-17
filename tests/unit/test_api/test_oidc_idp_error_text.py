@@ -131,6 +131,26 @@ class TestVerifyLogin:
         assert "HTTP 404" in discovery["detail"]
         assert _status_logged(audit_events, "discovery", 404)
 
+    def test_a_discovery_failure_answers_with_a_reference_its_log_line_carries(
+        self, app, client, admin_headers, audit_events
+    ):
+        """The answer is generic, so the reference is what joins it to the logged reason."""
+        with refusing_api(500, {"error": "server_error", "error_description": SENTINEL}) as server:
+            app.state.oidc_provider_registry.create(
+                "vl-referenced", OIDCProvider(type="generic", issuer=server.base_url)
+            )
+            resp = client.get(
+                "/api/v1/auth/oidc-providers/vl-referenced/verify-login", headers=admin_headers
+            )
+
+        discovery = next(c for c in resp.json()["checks"] if c["name"] == "discovery")
+        (line,) = [e for e in audit_events if e.get("operation") == "discovery"]
+        reference = line.get("reference", "")
+        assert len(reference) >= 8, line
+        assert f"reference {reference}" in discovery["detail"]
+        assert SENTINEL_LOCAL_PART not in resp.text
+        assert SENTINEL_LOCAL_PART not in json.dumps(line, default=str)
+
     def test_a_discovery_answer_that_is_not_json_is_not_called_unreachable(
         self, app, client, admin_headers, audit_events
     ):

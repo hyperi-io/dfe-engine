@@ -22,6 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from common.hunt_files import resolved_customers
 from dulwich.repo import Repo
 
 from dfe_engine.gitcrud import GitCrud
@@ -37,6 +38,7 @@ from dfe_engine.hunts.rule_registry import RuleNotFoundError, RuleRegistry
 HUNT_CONFIG = {
     "display_name": "Certutil Abuse",
     "schedule": {"mode": "rate", "interval": "5m"},
+    **resolved_customers("acme"),
     "rules": [{"rule_name": "certutil"}],
     "global_source_table_name": "dfe.main",
     "global_target_table_name": "dfe.detection",
@@ -123,7 +125,10 @@ class TestHuntsLandWhereTheRunnerLooks:
         assert spec.interval_seconds == 300
         assert spec.target_table == "dfe.detection"
         assert len(spec.queries) == 1
-        assert "WHERE {window} AND (\nprocess_name = 'certutil.exe'\n    )" in spec.queries[0].sql
+        assert (
+            "WHERE {window} AND _org_id IN ('acme') AND (\nprocess_name = 'certutil.exe'\n    )"
+            in spec.queries[0].sql
+        )
 
     def test_a_rule_compiles_off_the_synced_rules_directory(self, rules, crud):
         rules.save(RULE)
@@ -245,7 +250,7 @@ class TestCommitMessages:
 
     def test_a_second_save_commits_as_an_update(self, hunts, crud):
         hunts.save("windows_hunt", dict(HUNT_CONFIG), created_by="kaz")
-        hunts.save("windows_hunt", {**HUNT_CONFIG, "customers": ["acme"]}, created_by="kaz")
+        hunts.save("windows_hunt", {**HUNT_CONFIG, "customers": ["globex"]}, created_by="kaz")
         assert _head_message(crud).startswith("hunt(windows_hunt): update")
 
     def test_a_delete_commits_as_a_delete(self, hunts, crud):

@@ -149,7 +149,7 @@ def test_a_fire_a_peer_finishes_mid_tick_is_not_run_again(ch_client, dfe_db, tmp
     rule_id = f"{hunt}_rule"
     org = f"org-{uuid.uuid4().hex[:8]}"
     write_rule(tmp_path / "rules", rule_id, f"_org_id = '{org}'")
-    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db)
+    write_hunt(tmp_path / "hunts", hunt, rule_id, dfe_db, customers=[org])
     specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
 
     fire = current_fire(hunt, 60, int(time.time()))

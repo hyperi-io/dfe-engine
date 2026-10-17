@@ -65,6 +65,7 @@ Hunts:
 - DFE_HUNTS_ALERT_DESTINATIONS_DIR -> hunts.alert_destinations_dir
 - DFE_HUNTS_MAX_DETECTIONS_PER_RUN -> hunts.max_detections_per_run
 - DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING -> hunts.max_detections_per_run_ceiling
+- DFE_HUNTS_LOOKUP_DATABASES -> hunts.lookup_databases (comma-separated)
 - DFE_DETECTION_GUARD_ENABLED -> hunts.detection_guard.enabled (true/false)
 - DFE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES -> hunts.detection_guard.preview_window_minutes
 - DFE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS -> hunts.detection_guard.preview_timeout_seconds
@@ -103,7 +104,6 @@ Auth (local):
 - DFE_AUTH_LOCAL_ADMIN_PASSWORD -> auth.local.admin_password
 - DFE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
 - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
-- DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
 - DFE_AUTH_BREAKGLASS_PASSWORD -> auth.local.breakglass_password
 - DFE_RECOVERY_EMAIL -> auth.local.recovery_email
 - DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH -> auth.local.admin_password_secret_path
@@ -157,7 +157,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .names import MAX_NAME_LENGTH
-from .orgs.models import ORG_NAME_PATTERN
+from .orgs.models import ORG_NAME_PATTERN, TenantId
 from .transport import SourceTransport
 from .yaml_utils import yaml_load
 
@@ -358,6 +358,12 @@ class ClickHouseSettings(BaseModel):
 MAX_DETECTIONS_PER_RUN = 1000
 MAX_DETECTIONS_PER_RUN_CEILING = 10_000
 
+# A plain database name, the only shape the rule guard compares a lookup's database against.
+LOOKUP_DATABASE_PATTERN = r"[A-Za-z_][A-Za-z0-9_-]*"
+
+# ClickHouse's own databases describe every org's tables and queries, so none is a lookup.
+_CLICKHOUSE_CATALOGUES = frozenset({"system", "information_schema"})
+
 
 class DetectionGuardSettings(BaseModel):
     """Alert-volume preview a rule gets when it is created or updated.
@@ -471,7 +477,14 @@ class HuntsSettings(BaseModel):
     cron_task_timeout: int = Field(
         default=300, description="Scheduler timeout in seconds (-1 = no timeout)"
     )
-    hunt_dir: str = Field(default="", description="Directory containing hunt YAML configs")
+    hunt_dir: str = Field(
+        default="",
+        description=(
+            "The one directory holding hunt YAML, which the engine's hunt registry writes "
+            "with gitops off and the hunt runner reads. A comma-separated list is refused. "
+            "DFE_HUNTS_DIR."
+        ),
+    )
     rules_dir: str = Field(
         default="",
         description="YAML directory for API-managed detection rules (DirectoryConfigStore SSoT)",
@@ -566,6 +579,48 @@ class HuntsSettings(BaseModel):
         default_factory=DetectionGuardSettings,
         description="Alert-volume preview on rule create and update",
     )
+    lookup_databases: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Shared reference databases a rule may look values up in, as "
+            "IN (SELECT <columns> FROM <db>.<table> [WHERE <condition>]) or IN <db>.<table>. "
+            "The hunt runner's ClickHouse user reads every org, so a listed database must "
+            "hold no org's rows. The hunt runner refuses to start, or stops at its next "
+            "reload, while one of its tables has an _org_id column or is not a plain store "
+            "of its own rows, as a view is. The engine refuses to start on one when "
+            "ClickHouse answers at its start, and starts with the check unrun when it does not. "
+            "The hunt runner's role needs SELECT on each. Empty refuses every lookup. "
+            "DFE_HUNTS_LOOKUP_DATABASES (comma-separated)."
+        ),
+    )
+
+    @field_validator("hunt_dir")  # noqa: V105
+    @classmethod
+    def _hunt_dir_is_one_directory(cls, value: str) -> str:
+        directory = value.strip()
+        if "," in directory:
+            raise ValueError(
+                f"hunts.hunt_dir {directory!r} must name one directory, which the engine "
+                "and the hunt runner both read"
+            )
+        return directory
+
+    @field_validator("lookup_databases")  # noqa: V105
+    @classmethod
+    def _lookup_databases_are_plain_names(cls, value: list[str]) -> list[str]:
+        names = [name.strip() for name in value]
+        for name in names:
+            if re.fullmatch(LOOKUP_DATABASE_PATTERN, name) is None:
+                raise ValueError(
+                    f"lookup database {name!r} is not a plain database name "
+                    "(letters, digits, '_' and '-', not starting with a digit)"
+                )
+            if name.lower() in _CLICKHOUSE_CATALOGUES:
+                raise ValueError(
+                    f"lookup database {name!r} is one of ClickHouse's own, which describe "
+                    "every org's tables and queries"
+                )
+        return list(dict.fromkeys(names))
 
 
 class ArtifactorySettings(BaseModel):
@@ -1381,7 +1436,6 @@ class LocalAuthSettings(BaseModel):
     """
 
     enabled: bool = Field(default=False, description="Seed built-in local accounts")
-    org_id: str = Field(default="default", description="Org id for the seeded accounts")
     admin_name: str = Field(default="", description="Bootstrap admin username")
     admin_password: str = Field(default="", description="Bootstrap admin password")
     operator_password: str = Field(default="", description="Bootstrap operator password")
@@ -2074,7 +2128,7 @@ class SeedOrg(BaseModel):
 
     name: str = Field(description="Org name, the registry identifier", pattern=ORG_NAME_PATTERN)
     display_name: str = Field(default="", description="Human-readable label")
-    org_ids: list[str] = Field(
+    org_ids: list[TenantId] = Field(
         default_factory=list,
         description="Tenant IDs for ClickHouse row-level security",
     )
@@ -2163,6 +2217,17 @@ class DFESettings(BaseModel):
             "(seed-admin). DFE_E2E_SERVER. Refused in a production posture."
         ),
     )
+
+    @model_validator(mode="after")  # noqa: V105
+    def _data_database_is_no_lookup(self) -> DFESettings:
+        # Every org's rows are in the data database, so a lookup there reads them all.
+        data = self.clickhouse.effective_data_database
+        if data in self.hunts.lookup_databases:
+            raise ValueError(
+                f"hunts.lookup_databases lists {data!r}, the data database, which holds "
+                "every org's rows"
+            )
+        return self
 
     @model_validator(mode="after")
     def _dev_cors_origins(self) -> DFESettings:
@@ -2386,6 +2451,8 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["max_detections_per_run_ceiling"] = int(val)
     if val := _get_env("DFE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
         overrides["hunts"]["default_max_sample_events"] = int(val)
+    if val := _get_env("DFE_HUNTS_LOOKUP_DATABASES"):
+        overrides["hunts"]["lookup_databases"] = [d.strip() for d in val.split(",") if d.strip()]
 
     guard: dict[str, Any] = {}
     if val := _get_env("DFE_DETECTION_GUARD_ENABLED"):
@@ -2677,8 +2744,6 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("local", {})["operator_password"] = val
     if val := _get_env("DFE_AUTH_LOCAL_VIEWER_PASSWORD"):
         overrides["auth"].setdefault("local", {})["viewer_password"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
-        overrides["auth"].setdefault("local", {})["org_id"] = val
     if val := _get_env("DFE_AUTH_BREAKGLASS_PASSWORD"):
         overrides["auth"].setdefault("local", {})["breakglass_password"] = val
     if val := _get_env("DFE_RECOVERY_EMAIL"):

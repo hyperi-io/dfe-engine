@@ -58,7 +58,8 @@ class LocalAuthProvider:
             user_agent: Optional client user agent string.
 
         Returns:
-            AuthContext with roles resolved from group memberships.
+            AuthContext with roles resolved from group memberships, and the org the
+            account is bound to as its ``org_id`` (empty for none).
 
         Raises:
             AuthenticationError: If username unknown, account disabled,
@@ -88,7 +89,7 @@ class LocalAuthProvider:
         roles = self._groups.resolve_roles_for_member(username)
 
         return AuthContext(
-            org_id="default",
+            org_id=account.org,
             user_id=username,
             roles=roles,
             groups=account.groups,

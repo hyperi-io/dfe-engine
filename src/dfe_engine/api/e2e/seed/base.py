@@ -22,6 +22,7 @@ from dfe_engine.orgs.registry import OrgRegistry
 if TYPE_CHECKING:
     from dfe_engine.gitcrud import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
+    from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
     from dfe_engine.settings import DFESettings
     from dfe_engine.source.registry import SourceRegistry
 
@@ -36,7 +37,9 @@ class Seed:
     repo, the source registry and the settings are optional, because the auth and
     setup scripts predate them and must keep working on a process with gitops
     off; the app-management scripts ask for them explicitly and raise a named
-    error when the deployment does not have them.
+    error when the deployment does not have them. The hunt registry is optional
+    as the org routes take it, and an org seeder moves the hunts naming an org
+    whenever there is one.
     """
 
     def __init__(
@@ -51,6 +54,7 @@ class Seed:
         settings: DFESettings | None = None,
         forge: ForgeProvider | None = None,
         metrics: SeedMetrics | None = None,
+        hunt_registry: HuntConfigRegistry | None = None,
     ) -> None:
         resolved = (env if env is not None else os.environ.get("DFE_ENV", "")).strip().lower()
         if resolved != _TEST_ENV:
@@ -58,6 +62,7 @@ class Seed:
         self._account_store = account_store
         self._group_store = group_store
         self._org_registry = org_registry
+        self._hunt_registry = hunt_registry
         self._gitcrud = gitcrud
         self._source_registry = source_registry
         self._settings = settings
@@ -77,6 +82,7 @@ class Seed:
             settings=self._settings,
             forge=self._forge,
             metrics=self._metrics,
+            hunt_registry=self._hunt_registry,
         )
 
     def _attach_seeders(self, env: str) -> None:

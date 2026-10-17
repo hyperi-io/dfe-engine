@@ -5,8 +5,8 @@ Two interchangeable backends behind one registry surface:
 - **deploy repo** (when gitops is on): the deploy repo's ``config/hunts`` is the
   SSoT and every mutation is one gitcrud commit, because that is the directory
   the k8s hunt runner git-syncs. Pass ``deploy_repo=DeployRepoStore(...)``.
-- **DirectoryConfigStore**: ``hunts.hunt_dir`` (first path when comma-separated)
-  as SSoT -- the shared config volume the docker hunt runner reads.
+- **DirectoryConfigStore**: ``hunts.hunt_dir`` as SSoT -- the shared config volume
+  the docker hunt runner reads.
 
 Each hunt is stored as ``{name}.yaml``. The ``display_name`` field inside the YAML is the
 label used by the hunt engine at runtime (legacy YAML may use ``name`` instead).
@@ -15,19 +15,57 @@ label used by the hunt engine at runtime (legacy YAML may use ``name`` instead).
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
+from dfe_engine.hunts.customers import customer_tenant_ids, with_org_tenant_ids
 from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from dfe_engine.gitcrud.routing import WriteOutcome
     from dfe_engine.hunts.deploy_repo import DeployRepoStore
 
 _DISPLAY_NAME_WORD = re.compile(r"[a-zA-Z0-9]+")
+
+
+@dataclass(frozen=True, slots=True)
+class HeldTenantIds:
+    """Tenant ids a hunt reads for an org, on main or once a review branch merges."""
+
+    hunt: str
+    org: str
+    tenant_ids: list[str]
+    branch: str | None = None
+
+
+def _held_for_others(
+    hunt: str,
+    doc: dict[str, Any],
+    base: dict[str, Any] | None,
+    org: str,
+    wanted: set[str],
+    branch: str | None,
+) -> list[HeldTenantIds]:
+    """The ids of ``wanted`` that ``doc`` holds for an org other than ``org``.
+
+    With a ``base``, only the ids ``doc`` adds to it count, because a merge brings a
+    branch's changes and leaves the rest as main has them.
+    """
+    before = customer_tenant_ids(base) if base is not None else {}
+    held = []
+    for holder, ids in customer_tenant_ids(doc).items():
+        if holder == org:
+            continue
+        added = set(ids) - set(before.get(holder, []))
+        if hit := sorted(added & wanted):
+            held.append(HeldTenantIds(hunt=hunt, org=holder, tenant_ids=hit, branch=branch))
+    return held
 
 
 def default_display_name(hunt_name: str) -> str:
@@ -265,6 +303,96 @@ class HuntConfigRegistry:
             commit_msg = f"{commit_msg} (by {created_by})"
 
         return self._put_raw(name, payload, created_by=created_by, message=commit_msg)
+
+    def save_many(
+        self,
+        configs: dict[str, dict[str, Any]],
+        *,
+        created_by: str,
+        scope: str,
+        summary: str,
+    ) -> WriteOutcome | None:
+        """Persist several hunt configs as one change, and return the git routing outcome.
+
+        On the deploy repo they are ONE commit, routed by posture as one change. The
+        directory backend writes each file as :meth:`save` does, and returns None.
+
+        Args:
+            configs: Each hunt's whole config, by name.
+            created_by: Who made the change.
+            scope: What the commit subject names the change by.
+            summary: The commit subject's summary.
+        """
+        payloads = {name: strip_identity_fields_from_yaml(c) for name, c in configs.items()}
+        if self._deploy is not None:
+            outcome = self._deploy.put_many(
+                payloads, actor=created_by, scope=scope, summary=summary
+            )
+            logger.info(f"Saved hunt configs {sorted(payloads)} -> deploy repo config/hunts")
+            return outcome
+        for name, payload in payloads.items():
+            message = f"hunt({scope}): {summary} {name} (by {created_by})"
+            self._put_raw(name, payload, created_by=created_by, message=message)
+        return None
+
+    def store_org_tenant_ids(
+        self, org: str, tenant_ids: list[str] | None, *, created_by: str
+    ) -> tuple[list[str], WriteOutcome | None]:
+        """Store ``org``'s tenant ids afresh in every hunt naming it, as one change.
+
+        Args:
+            org: The org created, updated or deleted.
+            tenant_ids: Its tenant ids now, or None for a deleted org
+                (:func:`~dfe_engine.hunts.customers.with_org_tenant_ids`).
+            created_by: Who changed the org.
+
+        Returns:
+            The hunts rewritten, sorted, and where the change landed: None when no
+            hunt changed or off gitops.
+        """
+        changed: dict[str, dict[str, Any]] = {}
+        for name in self._names():
+            stored = self._get_raw(name)
+            if stored is None:
+                continue
+            updated = with_org_tenant_ids(dict(stored), org, tenant_ids)
+            if updated is not None:
+                changed[name] = updated
+        if not changed:
+            return [], None
+        outcome = self.save_many(
+            changed, created_by=created_by, scope=f"org-{org}", summary="store tenant ids"
+        )
+        return sorted(changed), outcome
+
+    def tenant_id_holders(self, org: str, tenant_ids: Iterable[str]) -> list[HeldTenantIds]:
+        """Every hunt that reads one of ``tenant_ids`` for an org other than ``org``.
+
+        A hunt on main reads what it stores. A review branch not yet merged counts for
+        the ids it adds, since merging it gives the hunt those ids.
+
+        Args:
+            org: The org about to declare ``tenant_ids``.
+            tenant_ids: Its tenant ids once written.
+
+        Returns:
+            Each hunt and the org it holds the ids for, main first, then by branch.
+
+        Raises:
+            GitopsRemoteError: The deploy repo's review branches could not be fetched.
+        """
+        wanted = set(tenant_ids)
+        held: list[HeldTenantIds] = []
+        for name in self._names():
+            stored = self._get_raw(name)
+            if stored is not None:
+                held += _held_for_others(name, dict(stored), None, org, wanted, None)
+        if self._deploy is not None:
+            for change in self._deploy.pending():
+                held += _held_for_others(
+                    change.name, change.doc, change.base, org, wanted, change.branch
+                )
+        return held
 
     def delete(self, name: str, created_by: str | None = None) -> WriteOutcome | None:
         """Remove one hunt config; returns the git routing outcome, None off gitops."""

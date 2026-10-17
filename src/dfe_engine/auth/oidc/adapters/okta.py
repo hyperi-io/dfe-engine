@@ -30,6 +30,7 @@ from dfe_engine.auth.oidc.adapters.base import (
     DirectoryPageError,
     DirectoryPageLimitError,
     OIDCGroupAdapter,
+    same_origin_link,
 )
 from dfe_engine.auth.oidc.credential_env import (
     ResolvedCredential,
@@ -75,6 +76,7 @@ class OktaAdapter(OIDCGroupAdapter):
                     url = _next_url_from_link_header(getattr(response, "headers", {}).get("link"))
                     if not url:
                         return groups
+                    url = same_origin_link(url, directory_url=base)
             raise DirectoryPageLimitError(self.MAX_LOGIN_PAGES)
         except Exception as exc:
             logger.warning(
@@ -99,6 +101,7 @@ class OktaAdapter(OIDCGroupAdapter):
                 cannot carry, so it is never sent.
             DirectoryPageError: A page Okta served was not a list of groups.
             DirectoryPageLimitError: Okta still linked a next page at the page limit.
+            DirectoryForeignLinkError: Okta linked the next page off its own origin.
             Exception: Whatever the client raised on a page Okta did not serve.
                 A listing cut short is never returned: group sync would record
                 the groups read so far as the whole directory.
@@ -127,6 +130,7 @@ class OktaAdapter(OIDCGroupAdapter):
                 url = _next_url_from_link_header(getattr(response, "headers", {}).get("link"))
                 if not url:
                     return groups
+                url = same_origin_link(url, directory_url=base)
         raise DirectoryPageLimitError(self.MAX_LISTING_PAGES)
 
     async def test_connection(self) -> tuple[bool, str]:

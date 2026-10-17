@@ -13,6 +13,8 @@ Uses the shared conftest fixtures (client, admin_headers, viewer_headers).
 
 from __future__ import annotations
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # POST /api/v1/orgs
 # ---------------------------------------------------------------------------
@@ -319,6 +321,45 @@ class TestUpdateOrg:
             headers=viewer_headers,
         )
         assert resp.status_code == 403
+
+
+# An empty id matches every untenanted row, and a comma splits the ClickHouse pin.
+_FENCE_BREAKING_IDS = ["", " acme", "a,b", "acme\n"]
+
+
+class TestTenantIdShape:
+    @pytest.mark.parametrize("tenant", _FENCE_BREAKING_IDS)
+    def test_create_refuses_a_fence_breaking_tenant_id(self, client, admin_headers, tenant):
+        resp = client.post(
+            "/api/v1/orgs", json={"name": "acme", "org_ids": [tenant]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 422
+        assert client.get("/api/v1/orgs/acme", headers=admin_headers).status_code == 404
+
+    @pytest.mark.parametrize("tenant", _FENCE_BREAKING_IDS)
+    def test_update_refuses_a_fence_breaking_tenant_id(self, client, admin_headers, tenant):
+        client.post(
+            "/api/v1/orgs", json={"name": "acme", "org_ids": ["t-acme-1"]}, headers=admin_headers
+        )
+
+        resp = client.put(
+            "/api/v1/orgs/acme", json={"org_ids": ["t-acme-1", tenant]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 422
+        stored = client.get("/api/v1/orgs/acme", headers=admin_headers).json()
+        assert stored["org_ids"] == ["t-acme-1"]
+
+    def test_a_tenant_id_a_source_sends_verbatim_is_accepted(self, client, admin_headers):
+        tenants = ["Acme Corp", "aws:123456789012", "3f2a9c1e-7b4d-4e8a-9f0e-2c6d1b8a5e3f"]
+
+        resp = client.post(
+            "/api/v1/orgs", json={"name": "acme", "org_ids": tenants}, headers=admin_headers
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["org_ids"] == tenants
 
 
 # ---------------------------------------------------------------------------

@@ -23,7 +23,9 @@ group:write holder manages only that org's groups. Visibility follows
 the same rule, plus members always see the groups they belong to --
 org-local groups are never listed outside their org.
 
-A group's ``source_id`` and ``source_provider`` link it to an IdP group: a login asserting that id takes the group's roles, so setting or moving the link needs the role rights adding a member does. No two groups may carry one id; no group's name may be another group's id either, since an API key resolves a group identifier by name first, then by id.
+A group's ``source_id`` and ``source_provider`` link it to an IdP group: a login asserting that id takes the group's roles, so setting or moving the link needs the role rights adding a member does. No two groups may carry one id, and no group's name may be another group's id either, since an API key resolves a group identifier by name first, then by id. A provider id therefore names one group across every org, so setting or changing a link needs group:write system-wide.
+
+A group the caller cannot see answers every route as a missing one, and a caller that cannot see every group is told only that a name is not available, so no answer says a group outside its scope exists.
 
 A membership change is mirrored onto a local account's ``groups`` list, never onto an IdP-owned account's, which holds what its IdP asserts.
 """
@@ -42,6 +44,7 @@ from dfe_engine.api.deps import (
     check_action,
     groups_granting,
     is_action_allowed,
+    live_role_config,
     provider_bindings,
     require_action,
 )
@@ -51,7 +54,7 @@ from dfe_engine.api.pagination import (
     apply_search,
     apply_sort,
 )
-from dfe_engine.auth import AuthorizationError, Scope, ScopedGrant
+from dfe_engine.auth import AuthorizationError, RoleConfig, Scope
 from dfe_engine.auth.audit import audit_group_change, audit_permission_denied
 from dfe_engine.auth.groups import (
     Group,
@@ -60,6 +63,7 @@ from dfe_engine.auth.groups import (
     source_id_holder,
     validate_group_scope,
 )
+from dfe_engine.auth.models import ungrantable_roles
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
@@ -179,6 +183,47 @@ def _visible(request: Request, user, group: Group, member: str | None, held: set
     if group.name in held:
         return True
     return is_action_allowed(request, user, scopes_dict["group_read"], scope=scope_of(group))
+
+
+def _not_found(name: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={"code": "not_found", "message": f"Group '{name}' not found"},
+    )
+
+
+def _visible_group(request: Request, user, name: str) -> Group:
+    """The stored group *name* when the session sees it (:func:`_visible`).
+
+    Raises:
+        HTTPException: The 404 a missing group answers, for one outside the caller's scope too.
+    """
+    group = request.app.state.group_store.get(name)
+    if group is None or not _visible(
+        request, user, group, _member_name(request, user), _held(request, user)
+    ):
+        raise _not_found(name)
+    return group
+
+
+def _refuse_link_below_system_scope(request: Request, user) -> None:
+    """Refuse a link change from a caller without group:write system-wide.
+
+    A provider id names one group across every org, so an org-scoped writer that could
+    set one could take an id a system group needs, and read in a refusal whether
+    another org already holds it.
+
+    Raises:
+        AuthorizationError: 403 before any other group is looked at.
+    """
+    if is_action_allowed(request, user, scopes_dict["group_write"]):
+        return
+    reason = (
+        "linking a group to an identity provider needs group:write system-wide, "
+        "since a provider id names one group across every org"
+    )
+    audit_permission_denied(user.user_id, scopes_dict["group_write"], user.roles, reason)
+    raise AuthorizationError(reason)
 
 
 def _response(group: Group) -> GroupResponse:
@@ -324,10 +369,11 @@ def check_role_assignment(request: Request, user, roles: Iterable[str], scope: S
 
     Giving a group a role or taking one away, adding a member or removing one, and
     changing the provider id an IdP login resolves the group by all change who
-    holds its roles. Each needs role-management permission (role:write) at the
-    group's scope, or holding every one of those roles at a scope covering the
-    group's. Without this a group:write holder could make itself admin, or strip
-    admin from everyone else, and an admin of one org could act as another's.
+    holds its roles. Each needs the caller to hold every permission those roles
+    grant, at a scope covering the group's (:func:`~dfe_engine.auth.models.ungrantable_roles`).
+    role:write defines roles and hands none out. Without this a group:write holder
+    could make itself admin, or strip admin from everyone else, and an admin of one
+    org could act as another's.
 
     Args:
         request: The request, for the role configuration and auth settings.
@@ -338,17 +384,12 @@ def check_role_assignment(request: Request, user, roles: Iterable[str], scope: S
     Raises:
         AuthorizationError: 403 naming the roles the caller may not hand out or take away.
     """
-    wanted = sorted(set(roles))
-    if not wanted:
+    if not request.app.state.settings.auth.enabled:
         return
-    if is_action_allowed(request, user, scopes_dict["role_write"], scope=scope):
-        return
-    # Bare role names, with no scoped grants, mean system-wide, as authorize() reads them.
-    grants = user.grants or [ScopedGrant(role=name) for name in user.roles]
-    held = {grant.role for grant in grants if grant.scope.covers(scope)}
-    missing = [role for role in wanted if role not in held]
+    role_config = live_role_config(request) or RoleConfig.load_builtin()
+    missing = ungrantable_roles(user, roles, scope, role_config=role_config)
     if missing:
-        reason = f"cannot grant or remove role(s) you do not hold: {missing}; requires role:write"
+        reason = f"cannot grant or remove role(s) granting more than you hold: {missing}"
         audit_permission_denied(user.user_id, scopes_dict["role_write"], user.roles, reason)
         raise AuthorizationError(reason)
 
@@ -422,6 +463,8 @@ async def create_group(
 
     target = Group(name=body.name, scope=body.scope)
     check_action(request, user, scopes_dict["group_write"], scope=scope_of(target))
+    if body.source_id or body.source_provider:
+        _refuse_link_below_system_scope(request, user)
     check_role_assignment(request, user, body.roles, scope_of(target))
 
     org = target.scope_org
@@ -446,9 +489,20 @@ async def create_group(
     )
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    _refuse_identifier_collision(
-        groups=store.list(), name=body.name, source_id=body.source_id, target=body.name
+    # Names are unique across every org, so a caller that cannot see every group learns only this.
+    unavailable = HTTPException(
+        status_code=409,
+        detail={"code": "conflict", "message": f"Group name '{body.name}' is not available"},
     )
+    sees_every_group = is_action_allowed(request, user, scopes_dict["group_read"])
+    try:
+        _refuse_identifier_collision(
+            groups=store.list(), name=body.name, source_id=body.source_id, target=body.name
+        )
+    except HTTPException as exc:
+        if sees_every_group:
+            raise
+        raise unavailable from exc
     # create() decides, not get(): get() reports a stored group that does not load as absent.
     try:
         group = store.create(
@@ -461,6 +515,8 @@ async def create_group(
             source_provider=body.source_provider,
         )
     except GroupExistsError as exc:
+        if not sees_every_group:
+            raise unavailable from exc
         raise HTTPException(
             status_code=409,
             detail={"code": "conflict", "message": f"Group '{body.name}' already exists"},
@@ -516,17 +572,7 @@ async def get_group(
     request: Request,
 ):
     """Get a single group by name (404 when not visible to the caller)."""
-    from dfe_engine.auth.groups import GroupStore
-
-    store: GroupStore = request.app.state.group_store
-    group = store.get(name)
-    member = _member_name(request, user)
-    if group is None or not _visible(request, user, group, member, _held(request, user)):
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
-    return _response(group)
+    return _response(_visible_group(request, user, name))
 
 
 @router.put("/{name}", response_model=GroupResponse)
@@ -543,12 +589,7 @@ async def update_group(
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    existing = store.get(name)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+    existing = _visible_group(request, user, name)
     check_action(request, user, scopes_dict["group_write"], scope=scope_of(existing))
     changes_members = body.members is not None and set(body.members) != set(existing.members)
     source_id = existing.source_id if body.source_id is None else body.source_id
@@ -559,6 +600,8 @@ async def update_group(
         before=existing, source_id=source_id, source_provider=source_provider
     )
     changes_link = (changes_source_id) or (changes_source_provider)
+    if changes_link:
+        _refuse_link_below_system_scope(request, user)
     if (body.roles is not None) or (changes_members) or (changes_link):
         # Members and linked logins keep, gain or lose the roles before and after; a role removed counts too.
         roles_after = body.roles if body.roles is not None else existing.roles
@@ -638,12 +681,7 @@ async def add_member(
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    existing = store.get(name)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+    existing = _visible_group(request, user, name)
     check_action(request, user, scopes_dict["group_add_member"], scope=scope_of(existing))
     if body.username not in existing.members:
         # The new member takes every role the group carries.
@@ -657,10 +695,7 @@ async def add_member(
     audit_group_change(user.user_id, name, "member_added", {"member": body.username})
     group = store.get(name)
     if group is None:  # deleted concurrently between the mutation and re-fetch
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+        raise _not_found(name)
     return _response(group)
 
 
@@ -678,12 +713,7 @@ async def remove_member(
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    existing = store.get(name)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+    existing = _visible_group(request, user, name)
     check_action(request, user, scopes_dict["group_remove_member"], scope=scope_of(existing))
     if username in existing.members:
         # The member loses every role the group carries.
@@ -700,10 +730,7 @@ async def remove_member(
     audit_group_change(user.user_id, name, "member_removed", {"member": username})
     group = store.get(name)
     if group is None:  # deleted concurrently between the mutation and re-fetch
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+        raise _not_found(name)
     return _response(group)
 
 
@@ -717,12 +744,7 @@ async def delete_group(
     from dfe_engine.auth.groups import GroupStore
 
     store: GroupStore = request.app.state.group_store
-    existing = store.get(name)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+    existing = _visible_group(request, user, name)
     check_action(request, user, scopes_dict["group_delete"], scope=scope_of(existing))
     if (existing.members) or (existing.source_id):
         # Its members and every login its source ID answers lose the roles it carries.

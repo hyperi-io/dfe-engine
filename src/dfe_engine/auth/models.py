@@ -9,7 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from dfe_engine.auth.roles import RoleConfig
+from dfe_engine.auth.roles import RoleConfig, permission_covers
 
 
 class AuthenticationError(Exception):
@@ -135,7 +135,10 @@ class AuthContext(BaseModel):
     and cannot be overridden by clients.
     """
 
-    org_id: str = Field(default="default", description="Primary tenant org ID")
+    org_id: str = Field(
+        default="",
+        description="The org the session's account is bound to, empty when it is bound to none",
+    )
     user_id: str = Field(..., description="User ID")
     email: str | None = Field(
         default=None,
@@ -175,11 +178,91 @@ def platform_caller(
     Returns:
         A copy of ``user`` with those grants and their roles, or None when it holds none.
     """
-    grants = user.grants or [ScopedGrant(role=name) for name in user.roles]
-    platform = platform_grants(grants, role_config=role_config)
+    platform = platform_grants(held_grants(user), role_config=role_config)
     if not platform:
         return None
     return user.model_copy(update={"roles": [grant.role for grant in platform], "grants": platform})
+
+
+def held_grants(user: AuthContext) -> list[ScopedGrant]:
+    """The grants ``authorize()`` reads for ``user``: its scoped grants, else its roles system-wide.
+
+    Args:
+        user: The caller's auth context.
+
+    Returns:
+        The caller's grants.
+    """
+    return user.grants or [ScopedGrant(role=name) for name in user.roles]
+
+
+def ungrantable_permissions(
+    user: AuthContext,
+    permissions: Iterable[str],
+    scope: Scope,
+    *,
+    across_orgs: bool,
+    role_config: RoleConfig,
+) -> list[str]:
+    """The ``permissions`` the caller holds through no grant covering ``scope``.
+
+    A write handing out a permission, or taking it away from whoever holds it, may
+    do so only for one the caller holds where the write lands. A permission bound to
+    read across orgs counts only when the caller reads across orgs with it too.
+
+    Args:
+        user: The caller's auth context.
+        permissions: The permission patterns the write hands out or takes away.
+        scope: Where the write binds them.
+        across_orgs: Whether the write binds them across orgs, so only
+            :func:`platform_grants` count.
+        role_config: The role definitions ``authorize()`` reads.
+
+    Returns:
+        The patterns the caller does not hold, each once, in their given order.
+    """
+    grants = held_grants(user)
+    if across_orgs:
+        grants = platform_grants(grants, role_config=role_config)
+    covering = [grant.role for grant in grants if grant.scope.covers(scope)]
+    held = role_config.resolve_permissions(covering)
+    missing = [p for p in permissions if not any(permission_covers(h, p) for h in held)]
+    return list(dict.fromkeys(missing))
+
+
+def ungrantable_roles(
+    user: AuthContext, roles: Iterable[str], scope: Scope, *, role_config: RoleConfig
+) -> list[str]:
+    """The ``roles`` the caller may not bind at ``scope``, sorted.
+
+    A role is grantable when the caller holds every permission it grants at a scope
+    covering ``scope`` (:func:`ungrantable_permissions`). A system-scope binding of a
+    platform role reads every org, so it needs platform grants. A role the
+    definitions do not declare can be declared as anything later, so only a caller
+    holding ``*`` there may bind it.
+
+    Args:
+        user: The caller's auth context.
+        roles: The role names the write binds or unbinds.
+        scope: The scope the roles bind at.
+        role_config: The role definitions ``authorize()`` reads.
+
+    Returns:
+        The roles the caller may not hand out or take away.
+    """
+    refused = []
+    for role in sorted(set(roles)):
+        definition = role_config.roles.get(role)
+        permissions = ["*"] if definition is None else definition.permissions
+        across_orgs = scope.type == "system" and (
+            definition is None or is_platform_role(role, role_config)
+        )
+        missing = ungrantable_permissions(
+            user, permissions, scope, across_orgs=across_orgs, role_config=role_config
+        )
+        if missing:
+            refused.append(role)
+    return refused
 
 
 class AuthzRequest(BaseModel):

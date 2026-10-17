@@ -22,6 +22,8 @@ from dfe_engine.hunts.deploy_repo import DeployRepoStore
 from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
 from dfe_engine.hunts.rule_registry import RuleRegistry
 
+pytestmark = pytest.mark.usefixtures("customer_orgs")
+
 _ID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
 _BINDING = f"sigma_windows-audit_{_ID.replace('-', '')}"
 
@@ -134,6 +136,7 @@ def test_propagate_generates_binding_and_hunt(client, app, admin_headers, tmp_pa
     hunt = client.get("/api/v1/hunts/sigma_hunt_windows-audit", headers=admin_headers).json()
     assert [r["rule_name"] for r in hunt["rules"]] == [_BINDING]
     assert hunt["customers"] == ["acme"]
+    assert hunt["customer_tenant_ids"] == {"acme": ["acme"]}
 
     # bindings list + get
     listing = client.get("/api/v1/sigma/bindings", headers=admin_headers).json()
@@ -284,6 +287,40 @@ def test_propagate_in_dev_carries_no_review_header(client, app, admin_headers, t
     assert resp.status_code == 200, resp.text
     assert "X-DFE-Review-Required" not in resp.headers
     assert resp.json()["report"]["review_required"] is False
+
+
+def test_a_hunt_propagated_with_no_customers_reads_no_org(client, app, admin_headers, tmp_path):
+    """Not the rows tagged ``default``: it runs nothing until it names a customer."""
+    _wire_gitcrud(app, tmp_path)
+    _add_windows_source()
+    _seed_selected(client, admin_headers, tmp_path)
+
+    resp = client.post("/api/v1/sigma/propagate", headers=admin_headers)
+
+    assert resp.status_code == 200, resp.text
+    hunt = client.get("/api/v1/hunts/sigma_hunt_windows-audit", headers=admin_headers)
+    assert hunt.status_code == 200, hunt.text
+    assert hunt.json()["customers"] == []
+    assert hunt.json()["customer_tenant_ids"] == {}
+
+
+def test_propagate_refuses_a_customer_naming_no_registered_org(
+    client, app, admin_headers, tmp_path
+):
+    _wire_gitcrud(app, tmp_path)
+    _add_windows_source()
+    _seed_selected(client, admin_headers, tmp_path)
+
+    resp = client.post(
+        "/api/v1/sigma/propagate", json={"hunt_customers": ["ghost"]}, headers=admin_headers
+    )
+
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["code"] == "unknown_org"
+    assert (
+        client.get("/api/v1/hunts/sigma_hunt_windows-audit", headers=admin_headers).status_code
+        == 404
+    )
 
 
 def test_propagate_no_selection_is_empty_report(client, app, admin_headers, tmp_path):

@@ -40,6 +40,7 @@ from dfe_engine.auth.membership import linked_providers
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryCredentialUnreadableError,
+    DirectoryForeignLinkError,
     DirectoryNotConfiguredError,
     DirectoryPageError,
     DirectoryPageLimitError,
@@ -130,6 +131,12 @@ def _listing_failure_message(exc: BaseException) -> str:
             return (
                 f"{_DIRECTORY_API} answered a listing page that was not a list of groups; "
                 "the engine log has the reason"
+            )
+        case DirectoryForeignLinkError():
+            return (
+                f"{_DIRECTORY_API} linked its next listing page on another origin, so the "
+                "listing was abandoned before the credential left the directory's host. "
+                "The engine log names both origins"
             )
         case _:
             return http_failure_message(exc, service=_DIRECTORY_API)

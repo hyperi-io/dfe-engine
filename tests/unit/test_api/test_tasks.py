@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import time
 
+import pytest
+
 
 class TestTasksRouter:
     """GET/POST /api/v1/tasks endpoints."""
@@ -40,6 +42,7 @@ class TestTasksRouter:
         assert resp.status_code == 404
 
 
+@pytest.mark.usefixtures("customer_orgs")
 class TestHuntsRouter:
     """GET/POST /api/v1/hunts endpoints."""
 

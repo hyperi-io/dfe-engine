@@ -34,9 +34,6 @@ def setup_paths(tmp_path) -> dict:
                 "checkpoint_timestamp_field": "timestamp",
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
-                },
                 "name": "test_hunt",
             },
             "Hunt configuration validated successfully.",
@@ -50,9 +47,6 @@ def setup_paths(tmp_path) -> dict:
                 "checkpoint_timestamp_field": "timestamp",
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
-                },
                 "name": "test_hunt",
             },
             "Invalid 'log_buffer' value: 60. It should be a positive integer.",
@@ -65,9 +59,6 @@ def setup_paths(tmp_path) -> dict:
                 "checkpoint_timestamp_field": "timestamp",
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
-                },
                 "name": "test_hunt",
             },
             "Hunt configuration validated successfully.",
@@ -81,9 +72,6 @@ def setup_paths(tmp_path) -> dict:
                 "checkpoint_timestamp_field": "timestamp",
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
-                },
                 "name": "test_hunt",
             },
             "Invalid 'global_target_table_name'. It should be a non-empty string.",
@@ -96,9 +84,6 @@ def setup_paths(tmp_path) -> dict:
                 "checkpoint_timestamp_field": "timestamp",
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
-                },
                 "name": "test_hunt",
             },
             "Invalid 'global_source_table_name'. It should be a non-empty string.",
@@ -112,9 +97,6 @@ def setup_paths(tmp_path) -> dict:
                 "checkpoint_timestamp_field": "timestamp",
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
-                },
                 "name": "test_hunt",
             },
             "Invalid 'global_source_table_name'. It should be a non-empty string.",
@@ -127,9 +109,6 @@ def setup_paths(tmp_path) -> dict:
                 "global_source_table_name": "source_logs",
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
-                },
                 "name": "test_hunt",
             },
             "Invalid 'checkpoint_timestamp_field'. It should be a non-empty string.",
@@ -143,9 +122,6 @@ def setup_paths(tmp_path) -> dict:
                 "checkpoint_timestamp_field": "",
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
-                },
                 "name": "test_hunt",
             },
             "Invalid 'checkpoint_timestamp_field'. It should be a non-empty string.",
@@ -159,9 +135,6 @@ def setup_paths(tmp_path) -> dict:
                 "checkpoint_timestamp_field": "timestamp",
                 "rules": [{"rule_name": "rule1", "initial_checkpoint_lookback_minutes": 60}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": ""}]}
-                },
                 "name": "test_hunt",
             },
             "Comma-separated cron expressions are not supported",
@@ -175,9 +148,6 @@ def setup_paths(tmp_path) -> dict:
                 "checkpoint_timestamp_field": "timestamp",
                 "rules": [{"rule_name": "rule1", "initial_checkpoint_lookback_minutes": 60}],
                 "customers": ["customer1"],
-                "customer_filters": {
-                    "customer1": {"rules": [{"name": "rule1", "filter_clause": ""}]}
-                },
                 "name": "test_hunt",
             },
             "Invalid cron format",

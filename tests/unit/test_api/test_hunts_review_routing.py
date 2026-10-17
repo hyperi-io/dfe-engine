@@ -25,6 +25,8 @@ from dfe_engine.hunts.deploy_repo import DeployRepoStore
 from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
 from dfe_engine.hunts.rule_registry import RuleRegistry
 
+pytestmark = pytest.mark.usefixtures("customer_orgs")
+
 _HUNT = {
     "display_name": "Certutil Abuse",
     "cron": "*/5 * * * *",

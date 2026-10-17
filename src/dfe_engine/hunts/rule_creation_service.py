@@ -54,6 +54,7 @@ from .rule_guard import (
     match_everything,
     preview_settings,
     preview_sql,
+    refuse_condition_escape,
     refuse_offbox_calls,
     source_label,
     unmeasured_warning,
@@ -250,6 +251,10 @@ _EXPLAIN_PREFIX = "EXPLAIN AST "
 _CH_POSITION_RE = re.compile(r"failed at position (\d+)")
 
 _OFFBOX_FIX = "A rule matches rows of its own source table; take the call out of the SQL."
+_ESCAPE_FIX = (
+    "A rule matches rows of its own source table; compare against a list of values, "
+    "not another table."
+)
 
 
 def _syntax_error(message: str) -> SqlValidationError:
@@ -344,6 +349,8 @@ class RuleCreationService:
         self,
         request: RuleCreateRequest,
         rule_id: str,
+        *,
+        tenant_ids: list[str] | None = None,
     ) -> RuleCreateResult:
         """Full pipeline: sanitize -> validate -> Rule.from_create -> guards -> AI stub.
 
@@ -355,6 +362,9 @@ class RuleCreationService:
         Args:
             request: Rule creation request with SQL and/or CEL filter.
             rule_id: Unique rule identifier.
+            tenant_ids: The orgs the preview counts, by the tenant ids their rows
+                carry. None counts every org, and an empty list leaves the rule
+                unmeasured.
 
         Returns:
             RuleCreateResult with rule, validation errors, the match-everything
@@ -403,8 +413,17 @@ class RuleCreationService:
         # transpiled CEL filter reaches without passing through the SQL check above.
         if not sql_errors:
             offbox = refuse_offbox_calls(rule.where_clause)
+            escape = (
+                None
+                if offbox is not None
+                else refuse_condition_escape(
+                    rule.where_clause, lookup_databases=self._hunts.lookup_databases
+                )
+            )
             if offbox is not None:
                 sql_errors = [SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX)]
+            elif escape is not None:
+                sql_errors = [SqlValidationError(message=escape, suggestion=_ESCAPE_FIX)]
 
         # Phase 4: a rule the API will refuse is neither judged nor measured further.
         refused = bool(sql_errors or rule.validate_rule())
@@ -418,7 +437,7 @@ class RuleCreationService:
         measurable = not refused and matches_everything is None
         if measurable and rule.source_db and rule.source_table:
             if guard.enabled or request.estimate_cost:
-                cost_estimate = self._preview_volume(rule, request.cost_window_minutes)
+                cost_estimate = self._preview_volume(rule, request.cost_window_minutes, tenant_ids)
             if guard.enabled and cost_estimate is not None:
                 rule.warnings.extend(cost_estimate.warnings)
             if not request.estimate_cost:
@@ -466,6 +485,8 @@ class RuleCreationService:
            refused as the HyperDX sanitiser refuses it
         8. No call that reads outside the row (``url``, ``s3``, a dictionary) or
            sends it to another service (the ``ai*`` functions)
+        9. A condition that reads no other table: no subquery, no ``IN <table>``,
+           except a lookup in one of ``hunts.lookup_databases``
         """
         errors: list[SqlValidationError] = []
         trimmed = sql.strip()
@@ -558,6 +579,13 @@ class RuleCreationService:
                 for clause in parsed.ignored_clauses
                 if clause in REFUSED_CLAUSES
             )
+            escape = refuse_condition_escape(
+                parsed.where_clause,
+                subject="A rule's condition",
+                lookup_databases=self._hunts.lookup_databases,
+            )
+            if escape is not None:
+                errors.append(SqlValidationError(message=escape, suggestion=_ESCAPE_FIX))
 
         return errors
 
@@ -612,12 +640,14 @@ class RuleCreationService:
 
         return ClickHouseManager.get_instance().get_clickhouse_client()
 
-    def _preview_volume(self, rule: Rule, window_minutes: int | None) -> CostEstimate:
+    def _preview_volume(
+        self, rule: Rule, window_minutes: int | None, tenant_ids: list[str] | None
+    ) -> CostEstimate:
         """Count what the rule matches over the lookback window and band the result.
 
         A preview that cannot finish -- timed out, over its row budget, ClickHouse
         unreachable or refusing -- comes back UNMEASURED with a warning saying so,
-        never as a rule that matches nothing.
+        never as a rule that matches nothing. So does one held to no org.
         """
         guard = self._hunts.detection_guard
         window = guard.preview_window_minutes
@@ -631,6 +661,8 @@ class RuleCreationService:
             )
             return CostEstimate(window_minutes=window, warnings=[unmeasured_warning(reason)])
 
+        if tenant_ids is not None and not tenant_ids:
+            return unmeasured("it may count no org's rows for this rule")
         client = self._query_client()
         if client is None:
             return unmeasured("no ClickHouse is configured")
@@ -641,6 +673,7 @@ class RuleCreationService:
             self._hunts.checkpoint_timestamp_field,
             rule.where_clause,
             window,
+            tenant_ids=tenant_ids,
         )
         started = time.monotonic()
         try:

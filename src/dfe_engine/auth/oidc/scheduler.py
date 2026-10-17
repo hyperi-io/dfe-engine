@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.sync import SyncMetrics, SyncOutcome, sync_provider
-from dfe_engine.http_errors import describe_http_error
+from dfe_engine.http_errors import describe_failure
 
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore
@@ -108,8 +108,8 @@ class OidcSyncScheduler:
                 secrets=self._secrets,
             )
         except Exception as exc:
-            # One provider's failure must not stop the others; its class is logged, never its text.
-            return "error", describe_http_error(exc)
+            # One provider's failure must not stop the others: its class and frames are logged, never its text.
+            return "error", describe_failure(exc)
         if result.get("created") and self._on_groups_created is not None:
             self._on_groups_created()
         # The sync's own error message names no user or URL, so it is safe to log.
@@ -126,10 +126,10 @@ class OidcSyncScheduler:
                 await self.run_once(now=datetime.now(UTC))
             except Exception as exc:
                 if not (self._tick_failing):
-                    # A provider file's validation text quotes its values, so neither it nor a traceback is logged.
+                    # A provider file's validation text quotes its values, so only the frames say where.
                     logger.error(
                         "OIDC scheduled group sync tick failed; retrying every tick",
-                        **describe_http_error(exc),
+                        **describe_failure(exc),
                     )
                 self._tick_failing = True
             else:

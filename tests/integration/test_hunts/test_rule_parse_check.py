@@ -48,16 +48,25 @@ def test_clickhouse_parses_the_in_call_and_the_rule_is_still_refused(ch_client, 
     ]
 
 
-@pytest.mark.parametrize(
-    "condition",
-    ["_source IN (SELECT ioc FROM threat.iocs)", "severity IN ('high', 'critical')"],
-)
-def test_a_rule_using_the_in_operator_is_parsed_and_accepted(ch_client, no_sqlglot, condition):
+def test_a_rule_using_the_in_operator_over_values_is_parsed_and_accepted(ch_client, no_sqlglot):
     errors = RuleCreationService(ch_client=ch_client).validate_sql(
-        f"SELECT * FROM dfe.main WHERE {condition}"
+        "SELECT * FROM dfe.main WHERE severity IN ('high', 'critical')"
     )
 
     assert errors == []
+
+
+@pytest.mark.parametrize(
+    "condition", ["_source IN (SELECT ioc FROM threat.iocs)", "_source IN (threat.iocs)"]
+)
+def test_clickhouse_parses_a_lookup_and_the_rule_is_still_refused(ch_client, no_sqlglot, condition):
+    sql = f"SELECT * FROM dfe.main WHERE {condition}"
+    ch_client.command(f"EXPLAIN AST {sql}")
+
+    errors = RuleCreationService(ch_client=ch_client).validate_sql(sql)
+
+    assert len(errors) == 1
+    assert errors[0].message.startswith("A rule's condition may not")
 
 
 @pytest.mark.parametrize("client_fixture", ["ch_client", "manager_client"])
