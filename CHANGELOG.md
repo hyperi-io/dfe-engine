@@ -3,6 +3,26 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.45](https://github.com/hyperi-io/dfe-engine/compare/v1.22.44...v1.22.45) (2026-10-17)
+
+### Bug Fixes
+
+* **appmgmt:** mirror the loader sasl mechanism and fetcher ceiling from apps.yaml ([#899](https://github.com/hyperi-io/dfe-engine/issues/899)) ([e28ec33](https://github.com/hyperi-io/dfe-engine/commit/e28ec333bb45fffea97bc4ff0da47f983d6fe13f))
+* **deps:** update ghcr.io/astral-sh/uv:python3.14-trixie-slim Docker digest to 112f897 ([#897](https://github.com/hyperi-io/dfe-engine/issues/897)) ([ee18476](https://github.com/hyperi-io/dfe-engine/commit/ee1847658c149abf08c0e866fbf73c6c32201d58))
+* **deps:** update github-actions ([#860](https://github.com/hyperi-io/dfe-engine/issues/860)) ([acff194](https://github.com/hyperi-io/dfe-engine/commit/acff194de20ca03164525bdd91202f93a221d688))
+* drop rbac_source, offload OIDC secret reads ([#907](https://github.com/hyperi-io/dfe-engine/issues/907)) ([a4cd856](https://github.com/hyperi-io/dfe-engine/commit/a4cd856558e342d0c22aba12d912418b7fb13565))
+* hunt runner waits out a full ClickHouse ([#901](https://github.com/hyperi-io/dfe-engine/issues/901)) ([ae9d6b6](https://github.com/hyperi-io/dfe-engine/commit/ae9d6b691878c70fb13bdc0ba6367610fcb99496))
+* keep the keda shim client on query errors ([#903](https://github.com/hyperi-io/dfe-engine/issues/903)) ([8501ced](https://github.com/hyperi-io/dfe-engine/commit/8501ced98759a59c62784277e67b4640e04971ad))
+* landing name, source delete, HyperDX breaker ([#905](https://github.com/hyperi-io/dfe-engine/issues/905)) ([5030900](https://github.com/hyperi-io/dfe-engine/commit/50309005750e2958223efe7838fffda183052d69))
+* leave archiver expression_fields unset ([#904](https://github.com/hyperi-io/dfe-engine/issues/904)) ([947f54e](https://github.com/hyperi-io/dfe-engine/commit/947f54e88b7b0952dcc5b1ea026b5b03ae830475))
+* list transform SASL mechanism as deployed ([#911](https://github.com/hyperi-io/dfe-engine/issues/911)) ([8277230](https://github.com/hyperi-io/dfe-engine/commit/8277230e019ea788f0522b35cf047404bd694e8c))
+* rebuild on scalo 2.31.17 ([c8f9dc5](https://github.com/hyperi-io/dfe-engine/commit/c8f9dc52a877460af37ecfdcaca17342eae3e7d3))
+* remaining engine defects from the GA sweep ([#906](https://github.com/hyperi-io/dfe-engine/issues/906)) ([9178b1b](https://github.com/hyperi-io/dfe-engine/commit/9178b1bc15d1a0e0aeb373148c411548e0e1c4b3))
+* **security:** close escalation and tenancy gaps ([#900](https://github.com/hyperi-io/dfe-engine/issues/900)) ([a5a4f29](https://github.com/hyperi-io/dfe-engine/commit/a5a4f2993d7dcdd1376bf81dee046cd0a81c6eb5)), closes [#842](https://github.com/hyperi-io/dfe-engine/issues/842) [#843](https://github.com/hyperi-io/dfe-engine/issues/843) [#762](https://github.com/hyperi-io/dfe-engine/issues/762) [#764](https://github.com/hyperi-io/dfe-engine/issues/764) [#417](https://github.com/hyperi-io/dfe-engine/issues/417) [#399](https://github.com/hyperi-io/dfe-engine/issues/399) [#417](https://github.com/hyperi-io/dfe-engine/issues/417) [#417](https://github.com/hyperi-io/dfe-engine/issues/417) [#417](https://github.com/hyperi-io/dfe-engine/issues/417) [#417](https://github.com/hyperi-io/dfe-engine/issues/417) [#764](https://github.com/hyperi-io/dfe-engine/issues/764) [#399](https://github.com/hyperi-io/dfe-engine/issues/399) [#399](https://github.com/hyperi-io/dfe-engine/issues/399)
+* **security:** read each app's CH password ([#909](https://github.com/hyperi-io/dfe-engine/issues/909)) ([b83ad93](https://github.com/hyperi-io/dfe-engine/commit/b83ad931e64552a7fb82c17bbd18c085f2f61bdb))
+* size source topics to the broker count ([#908](https://github.com/hyperi-io/dfe-engine/issues/908)) ([bdaeb64](https://github.com/hyperi-io/dfe-engine/commit/bdaeb6495f50a01e0d1601e912eaefd85957a329))
+* take dfe-schemas 0.2.12 ([#902](https://github.com/hyperi-io/dfe-engine/issues/902)) ([a23e382](https://github.com/hyperi-io/dfe-engine/commit/a23e382e76ca01480cd33f537c4e298365649a8a))
+
 ## [1.22.44](https://github.com/hyperi-io/dfe-engine/compare/v1.22.43...v1.22.44) (2026-10-15)
 
 ### Bug Fixes
