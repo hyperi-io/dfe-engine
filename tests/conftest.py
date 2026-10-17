@@ -305,11 +305,17 @@ def _enclosing_repository(path: Path) -> Path | None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Refuse a run whose temp roots sit inside a git repository.
+    """Cap the HTTP client loggers, and refuse a run whose temp roots sit inside a git repository.
+
+    ``log_cli_level`` prints INFO, so without the engine's cap every request URL a
+    test sends, a user's login in a directory lookup included, lands in the run's log.
 
     scalo's DirectoryConfigStore walks up to the nearest repository, so every
     registry write under such a root commits onto that repository's branch.
     """
+    from dfe_engine.api import cap_http_client_loggers
+
+    cap_http_client_loggers()
     basetemp = config.option.basetemp
     pytest_root = os.environ.get("PYTEST_DEBUG_TEMPROOT") or tempfile.gettempdir()
     roots = [

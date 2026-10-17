@@ -20,6 +20,7 @@ The other console scripts on the engine image are plain Typer apps, so they call
 :func:`init_scalo_logger` to get the logger ServiceApp gives the daemon.
 """
 
+import logging
 import os
 
 from scalo.cli import CommonArgs
@@ -29,6 +30,22 @@ from dfe_engine.api.app import create_app
 
 # scalo reads its knobs and cascade keys as DFE_API_<KEY>, so every process on the image uses this.
 ENV_PREFIX = "DFE_API"
+
+# Each writes every request URL whole at INFO, and a directory lookup's URL carries the user's login.
+HTTP_CLIENT_LOGGERS = ("httpx", "httpcore", "httpx2", "httpcore2")
+
+
+def cap_http_client_loggers() -> None:
+    """Raise the HTTP client loggers to WARNING, leaving one already set higher alone.
+
+    scalo's ``setup()`` caps ``httpx`` and ``httpcore`` but not ``httpx2``, the
+    transport Authlib's OIDC client sends with, and a process that never runs
+    ``setup()`` caps neither.
+    """
+    for name in HTTP_CLIENT_LOGGERS:
+        library_logger = logging.getLogger(name)
+        if library_logger.level < logging.WARNING:
+            library_logger.setLevel(logging.WARNING)
 
 
 def init_scalo_logger(service_name: str, *, otel_tracing: bool) -> None:
@@ -58,6 +75,7 @@ def init_scalo_logger(service_name: str, *, otel_tracing: bool) -> None:
     )
     config = args.load_config(ENV_PREFIX)
     args.init_logger(config=config, service_name=service_name, otel_tracing=otel_tracing)
+    cap_http_client_loggers()
 
 
 class _DfeEngineApp:
@@ -102,6 +120,8 @@ class _DfeEngineApp:
                 from dfe_engine.api.server import DaemonServer
                 from dfe_engine.settings import load_settings
 
+                # ServiceApp's logger init has run by now and left httpx2 uncapped.
+                cap_http_client_loggers()
                 settings = load_settings()
                 # Share ServiceApp's OWN HealthManager -- the instance scalo's
                 # observability server serves on 9090 /readyz. Without this the
@@ -142,4 +162,10 @@ def run_dev_server() -> None:
     _DfeEngineApp()._make_app().cli()
 
 
-__all__ = ["ENV_PREFIX", "create_app", "init_scalo_logger", "run_dev_server"]
+__all__ = [
+    "ENV_PREFIX",
+    "cap_http_client_loggers",
+    "create_app",
+    "init_scalo_logger",
+    "run_dev_server",
+]
