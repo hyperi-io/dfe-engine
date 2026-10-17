@@ -23,9 +23,11 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
+from dfe_engine.schema.core_schema import landing_table_name
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
+    ClickHouseSettings,
     DFESettings,
     LocalAuthSettings,
     SchemasSettings,
@@ -323,7 +325,7 @@ class TestDiscoverJsonPaths:
 
     def test_no_meta_schema_discovers_against_catchall(self, app, client, admin_headers):
         db = app.state.settings.clickhouse.effective_data_database
-        landing = app.state.settings.clickhouse.landing_table
+        landing = landing_table_name()
         ch = _DiscoveryClient([("user.id", "Int64")])
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
         resp = client.get(f"/api/v1/schemas/{NOMETA_SOURCE}/json-paths", headers=admin_headers)
@@ -351,18 +353,19 @@ class TestDiscoverJsonPaths:
         )
         assert params["match_value"] == NOMETA_SOURCE
 
-    def test_the_app_s_database_and_landing_table_are_queried(self, app, client, admin_headers):
-        clickhouse = app.state.settings.clickhouse
-        clickhouse.data_database = "tenant_data"
-        clickhouse.landing_table = "inbox"
+    def test_the_app_s_database_and_the_manifest_s_landing_table_are_queried(
+        self, app, client, admin_headers
+    ):
+        app.state.settings.clickhouse.data_database = "tenant_data"
+        landing = landing_table_name()
         ch = _DiscoveryClient()
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
 
         resp = client.get(f"/api/v1/schemas/{NOMETA_SOURCE}/json-paths", headers=admin_headers)
 
         assert resp.status_code == 200, resp.text
-        assert resp.json()["table"] == "tenant_data.inbox"
-        assert "FROM `tenant_data`.`inbox`" in ch.calls[0][0]
+        assert resp.json()["table"] == f"tenant_data.{landing}"
+        assert f"FROM `tenant_data`.`{landing}`" in ch.calls[0][0]
 
     def test_default_version_with_meta_schema_uses_own_table(self, app, client, admin_headers):
         db = app.state.settings.clickhouse.effective_data_database
@@ -378,7 +381,7 @@ class TestDiscoverJsonPaths:
 
     def test_version_param_selects_catchall_version(self, app, client, admin_headers):
         db = app.state.settings.clickhouse.effective_data_database
-        landing = app.state.settings.clickhouse.landing_table
+        landing = landing_table_name()
         ch = _DiscoveryClient()
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
         # v1.0.0 has no meta_schema -> catch-all landing table.
@@ -451,7 +454,7 @@ class TestSampleRows:
 
     def test_no_meta_schema_filters_by_match(self, app, client, admin_headers):
         db = app.state.settings.clickhouse.effective_data_database
-        landing = app.state.settings.clickhouse.landing_table
+        landing = landing_table_name()
         ch = _SampleClient(columns=["_json"], rows=[({"user": {"id": 1}},)])
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
         resp = client.get(f"/api/v1/schemas/{NOMETA_SOURCE}/sample-rows", headers=admin_headers)
@@ -486,7 +489,7 @@ class TestSampleRows:
 
     def test_meta_schema_undeployed_samples_landing(self, app, client, admin_headers):
         db = app.state.settings.clickhouse.effective_data_database
-        landing = app.state.settings.clickhouse.landing_table
+        landing = landing_table_name()
         ch = _SampleClient(existing_tables={(db, PROMO_SOURCE)})
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
         resp = client.get(f"/api/v1/schemas/{PROMO_SOURCE}/sample-rows", headers=admin_headers)
@@ -808,7 +811,7 @@ class TestPromoteField:
     def test_promote_auto_type_queries_landing_when_table_missing(
         self, app, client: TestClient, admin_headers
     ):
-        landing = app.state.settings.clickhouse.landing_table
+        landing = landing_table_name()
         db = app.state.settings.clickhouse.effective_data_database
         ch = _DiscoveryClient([("user.email", "String")])
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
@@ -821,13 +824,63 @@ class TestPromoteField:
         assert params.get("match_value") == PROMO_SOURCE
 
 
+class TestAConfigStillNamingAnotherLandingTable:
+    """A deployment config carrying the retired ``clickhouse.landing_table`` moves nothing.
+
+    The bootstrap creates the table the manifest names, so a read from the old key
+    would query a table that does not exist.
+    """
+
+    @pytest.fixture
+    def settings(self, tmp_path: Path) -> DFESettings:
+        return make_api_settings(tmp_path).model_copy(
+            update={"clickhouse": ClickHouseSettings.model_validate({"landing_table": "inbox"})}
+        )
+
+    def test_json_paths_query_the_manifest_s_table(self, app, client, admin_headers):
+        db = app.state.settings.clickhouse.effective_data_database
+        ch = _DiscoveryClient()
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+
+        resp = client.get(f"/api/v1/schemas/{NOMETA_SOURCE}/json-paths", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["table"] == f"{db}.main"
+        assert f"FROM `{db}`.`main`" in ch.calls[0][0]
+
+    def test_sample_rows_read_the_manifest_s_table(self, app, client, admin_headers):
+        db = app.state.settings.clickhouse.effective_data_database
+        ch = _SampleClient()
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+
+        resp = client.get(f"/api/v1/schemas/{NOMETA_SOURCE}/sample-rows", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert f"FROM `{db}`.`main`" in ch.calls[-1][0]
+
+    def test_a_promotion_discovers_on_the_manifest_s_table(self, app, client, admin_headers):
+        db = app.state.settings.clickhouse.effective_data_database
+        ch = _DiscoveryClient([("user.email", "String")])
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+
+        resp = _promote(client, admin_headers, {"json_path": "user.email"}, dry_run=True)
+
+        assert resp.status_code == 200, resp.text
+        discovery_sql = next(sql for sql, _ in ch.calls if "JSONDynamicPathsWithTypes" in sql)
+        assert f"FROM `{db}`.`main`" in discovery_sql
+
+    def test_the_landing_source_is_the_one_the_manifest_names(self, client, admin_headers):
+        assert client.get("/api/v1/sources/main", headers=admin_headers).status_code == 200
+        assert client.get("/api/v1/sources/inbox", headers=admin_headers).status_code == 404
+
+
 class TestPromoteFieldOnLandingSource:
     """The landing source's columns are the fixed common header: nothing promotes into it."""
 
     def test_promote_is_refused_and_writes_nothing(
         self, settings: DFESettings, client: TestClient, admin_headers
     ):
-        landing = settings.clickhouse.landing_table
+        landing = landing_table_name()
         resp = client.post(
             f"/api/v1/schemas/{landing}/promote-field",
             json={"json_path": "user.email", "data_type": "string", "schema_path": SCHEMA_PATH},
@@ -847,7 +900,7 @@ class TestPromoteFieldOnLandingSource:
         self, settings: DFESettings, client: TestClient, admin_headers
     ):
         resp = client.post(
-            f"/api/v1/schemas/{settings.clickhouse.landing_table}/promote-field",
+            f"/api/v1/schemas/{landing_table_name()}/promote-field",
             json={"json_path": "user.email", "data_type": "string", "schema_path": SCHEMA_PATH},
             headers=admin_headers,
             params={"dry_run": True},
@@ -860,7 +913,7 @@ class TestPromoteFieldOnLandingSource:
         self, settings: DFESettings, client: TestClient, admin_headers
     ):
         """Naming a core meta-schema would otherwise fork it to ``meta/<landing>_core_tpl``."""
-        landing = settings.clickhouse.landing_table
+        landing = landing_table_name()
         fork_file = Path(settings.schemas.schemas_dir) / "meta" / f"{landing}_core_tpl.yaml"
 
         resp = client.post(
@@ -883,7 +936,7 @@ class TestPromoteFieldOnLandingSource:
         self, app, settings: DFESettings, client: TestClient, admin_headers
     ):
         db = app.state.settings.clickhouse.effective_data_database
-        landing = settings.clickhouse.landing_table
+        landing = landing_table_name()
         app.dependency_overrides[get_clickhouse_client] = lambda: _DiscoveryClient()
 
         resp = client.get(f"/api/v1/schemas/{landing}/json-paths", headers=admin_headers)
@@ -898,7 +951,7 @@ class TestPromoteFieldOnLandingSource:
         app.dependency_overrides[get_clickhouse_client] = lambda: _SampleClient()
 
         resp = client.get(
-            f"/api/v1/schemas/{settings.clickhouse.landing_table}/sample-rows",
+            f"/api/v1/schemas/{landing_table_name()}/sample-rows",
             headers=admin_headers,
         )
 

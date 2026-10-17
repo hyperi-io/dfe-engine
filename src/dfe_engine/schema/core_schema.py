@@ -14,11 +14,14 @@ applied by :mod:`dfe_engine.schema.phase`, so adding a table is a manifest edit
 and never an engine release.
 
 What is left is the deployment's side of that: which database the objects land
-in, the landing table's name and profile, and the retention a time-series table
-gets when it declares none. All of them land in ONE database,
+in, the landing table's profile, and the retention a time-series table gets when
+it declares none. All of them land in ONE database,
 ``clickhouse.data_database`` (default ``dfe``), telemetry included -- org
 isolation is by row policy, not by splitting databases (see
 :mod:`dfe_engine.governance.ch.models`).
+
+The landing table's name is not among them: :func:`landing_table_name` reads it
+from the manifest and no setting moves it.
 
 The SOC2 audit trail is not among them: it is structured log events through the
 OTel pipeline, with no table behind it (see :mod:`dfe_engine.auth.audit`).
@@ -37,10 +40,9 @@ LANDING_TABLE_ID = "data.main"
 
 @dataclass(frozen=True)
 class CoreSchemaTargets:
-    """Where the core schema lands: the DFE database, landing table and profile."""
+    """Where the core schema lands: the DFE database and the landing table's profile."""
 
     database: str
-    landing_table: str = "main"
     profile: str = "timeseries"
     # Retention for a time-series table that declares none; 0 removes its TTL, None leaves it alone.
     default_ttl_days: int | None = None
@@ -59,10 +61,20 @@ class CoreSchemaTargets:
         """
         return cls(
             database=ch.effective_data_database,
-            landing_table=ch.landing_table,
             profile=ch.default_table_profile,
             default_ttl_days=ch.default_ttl_days,
         )
+
+
+def landing_table_name() -> str:
+    """The landing table's name, as the dfe-schemas manifest declares it.
+
+    This is the name the bootstrap creates, so every reader and writer takes it from
+    here and never from a setting or a literal.
+    """
+    from dfe_engine.schema.plan import object_names
+
+    return object_names(LANDING_TABLE_ID)[LANDING_TABLE_ID]
 
 
 def landing_table_ddl(settings: Any) -> str:

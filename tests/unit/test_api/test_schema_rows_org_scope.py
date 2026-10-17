@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
+from dfe_engine.schema.core_schema import landing_table_name
 from dfe_engine.settings import DFESettings
 from tests.support.accounts import admin_on_its_own_password
 from tests.support.held_callers import caller_in_group, define_role
@@ -103,8 +104,7 @@ def tenant(app, client, settings) -> TestClient:
 
 
 def _landing(settings: DFESettings) -> str:
-    clickhouse = settings.clickhouse
-    return f"`{clickhouse.effective_data_database}`.`{clickhouse.landing_table}`"
+    return f"`{settings.clickhouse.effective_data_database}`.`{landing_table_name()}`"
 
 
 def test_sample_rows_binds_the_held_callers_tenant_ids(tenant, ch, settings):

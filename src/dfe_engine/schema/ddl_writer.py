@@ -46,7 +46,6 @@ class DDLFileWriter:
         topology: str = "single",
         resolver: EngineResolver | None = None,
         database: str = "{db}",
-        landing_table: str = "main",
     ) -> None:
         """Initialise the writer.
 
@@ -66,15 +65,12 @@ class DDLFileWriter:
                      to read the database's engine, and "{db}" matches no database,
                      so a Replicated/Shared target would be misread as a plain one
                      and wrongly get ON CLUSTER (it replicates on its own).
-            landing_table: Name of the catch-all landing table. A LIVE caller must
-                     pass the resolved ``clickhouse.landing_table`` setting, so the
-                     table this writer emits is the one the query paths read.
         """
         self._registry = registry or TypeRegistry.default()
         self._ddl_gen = DDLGenerator(self._registry, resolver=resolver)
         self._topology = topology
         self._database = database
-        self._landing_table = landing_table
+        self._landing_table = load_table_name(LANDING_REF)
 
     @staticmethod
     def _profile_version(profile_name: str) -> str:

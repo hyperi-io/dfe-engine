@@ -2,6 +2,7 @@
 
 import pytest
 
+from dfe_engine.schema.core_schema import landing_table_name
 from dfe_engine.schema.ddl_writer import DDLFileWriter
 from tests.unit.test_schema.conftest import requires_schemas
 
@@ -189,13 +190,13 @@ class TestTargetDatabase:
         assert "CREATE TABLE IF NOT EXISTS `dfe`.`main`" in ddl
         assert "`{db}`.`main`" not in ddl
 
-    def test_landing_table_name_reaches_the_ddl(self):
-        # The name is env-driven (DFE_CLICKHOUSE_LANDING_TABLE); a live caller
-        # passes the resolved setting, so the table this emits is the one the
-        # query paths read.
-        ddl = DDLFileWriter(database="dfe", landing_table="parked").generate_default_table()
-        assert "CREATE TABLE IF NOT EXISTS `dfe`.`parked`" in ddl
-        assert "`dfe`.`main`" not in ddl
+    def test_landing_table_name_is_the_manifests(self):
+        # The writer takes no name: it emits the table the bootstrap creates, which
+        # is also the one the query paths read.
+        writer = DDLFileWriter(database="dfe")
+        ddl = writer.generate_default_table()
+        assert f"CREATE TABLE IF NOT EXISTS `dfe`.`{landing_table_name()}`" in ddl
+        assert writer.default_table_spec().name == landing_table_name()
 
     def test_real_database_reaches_detection_ddl(self):
         ddl = DDLFileWriter(database="dfe_hunts").generate_detection_table()

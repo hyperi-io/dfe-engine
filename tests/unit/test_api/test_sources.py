@@ -10,6 +10,8 @@ from dfe_engine.api.deps import _registries
 from dfe_engine.api.v1.sources import _raise_save_validation_http
 from dfe_engine.appmgmt import catalogue
 from dfe_engine.kafka.topics import TopicRemoveResult
+from dfe_engine.settings import DFESettings
+from dfe_engine.source.deployment import SchemaDeployResult, SourceDeploymentStore
 from dfe_engine.source.registry import SourceValidationError
 
 
@@ -17,6 +19,24 @@ def _removed(seen: list[str], names: list[str]) -> TopicRemoveResult:
     """Record what a delete asked the broker to remove, and report it as done."""
     seen.extend(names)
     return TopicRemoveResult(removed=list(names))
+
+
+def _record_deploy(settings: DFESettings, name: str) -> SourceDeploymentStore:
+    """Give the stored source *name* an applied deploy record, and return the store it is in."""
+    store = SourceDeploymentStore.from_settings(settings)
+    source = _registries["source"].get_source(name)
+    store.save_deploy(
+        SchemaDeployResult(
+            source_name=name,
+            version=source.current,
+            dry_run=False,
+            applied=True,
+            create_table=f"CREATE TABLE {name}",
+        ),
+        source,
+    )
+    assert store.load_deploy_document(name) is not None
+    return store
 
 
 class TestListSources:
@@ -1097,6 +1117,24 @@ class TestDeleteSource:
         resp = client.delete("/api/v1/sources/nonexistent", headers=admin_headers)
         assert resp.status_code == 404
 
+    def test_a_recreated_source_starts_with_no_deploy_history(
+        self,
+        client: TestClient,
+        admin_headers: dict,
+        api_settings: DFESettings,
+        sample_source: dict,
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        store = _record_deploy(api_settings, "test-source")
+
+        assert (
+            client.delete("/api/v1/sources/test-source", headers=admin_headers).status_code == 204
+        )
+        recreated = client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+
+        assert recreated.status_code == 201, recreated.text
+        assert store.load_deploy_document("test-source") is None
+
     def test_delete_viewer_forbidden(
         self, client: TestClient, viewer_headers: dict, admin_headers: dict, sample_source: dict
     ):
@@ -1264,6 +1302,29 @@ class TestBulkAction:
         data = resp.json()
         assert set(data["succeeded"]) == {"bulk_a", "bulk_c"}
         assert data["failed"] == []
+
+    def test_bulk_delete_clears_each_sources_deploy_history(
+        self, client: TestClient, admin_headers: dict, api_settings: DFESettings
+    ):
+        stores = []
+        for name in ["bulk-x", "bulk-y"]:
+            client.post(
+                "/api/v1/sources",
+                json={"source": name, "match": {"field": "tags.collector.type", "value": name}},
+                headers=admin_headers,
+            )
+            stores.append((name, _record_deploy(api_settings, name)))
+
+        resp = client.post(
+            "/api/v1/sources/bulk",
+            json={"action": "delete", "sources": ["bulk-x", "bulk-y"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["failed"] == []
+        for name, store in stores:
+            assert store.load_deploy_document(name) is None
 
     def test_bulk_disable_and_enable(self, client: TestClient, admin_headers: dict):
         client.post(

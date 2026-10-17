@@ -2096,7 +2096,9 @@ async def delete_source(
     An engine-owned source -- the landing table's own -- is refused with 409
     ``conflict``, the same answer PUT and PATCH give.
     """
-    source = await run_blocking(functools.partial(_delete_stored_source, name, user, registry))
+    source = await run_blocking(
+        functools.partial(_delete_stored_source, name, user, registry, settings)
+    )
     # Off the event loop: the admin calls block for their full timeout when no
     # broker answers, which is the norm on the Kafka-less profile.
     topics_removed, topics_failed = await asyncio.to_thread(_remove_source_topics, source, settings)
@@ -2113,8 +2115,8 @@ async def delete_source(
     await _remove_hyperdx_source(request, name)
 
 
-def _delete_stored_source(name: str, user: Any, registry: Any) -> Source:
-    """Delete one source from the registry and return it as it was, or 404."""
+def _delete_stored_source(name: str, user: Any, registry: Any, settings: Any) -> Source:
+    """Delete one source and its deployment records and return it as it was, or 404."""
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
@@ -2126,7 +2128,11 @@ def _delete_stored_source(name: str, user: Any, registry: Any) -> Source:
             },
         ) from None
     try:
-        registry.delete_source(name, created_by=git_author(user))
+        registry.delete_source(
+            name,
+            created_by=git_author(user),
+            deployment_store=SourceDeploymentStore.from_settings(settings),
+        )
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     return source
@@ -2169,7 +2175,7 @@ async def bulk_action(
         return _submit_bulk_deploys(body, user, registry, settings, request)
 
     succeeded, failed, deleted = await run_blocking(
-        functools.partial(_apply_bulk, body, action_to_state, user, registry)
+        functools.partial(_apply_bulk, body, action_to_state, user, registry, settings)
     )
 
     result = BulkActionResponse(action=body.action, succeeded=succeeded, failed=failed)
@@ -2270,12 +2276,17 @@ def _submit_bulk_deploys(
 
 
 def _apply_bulk(
-    body: BulkActionRequest, action_to_state: dict[str, str], user: Any, registry: Any
+    body: BulkActionRequest,
+    action_to_state: dict[str, str],
+    user: Any,
+    registry: Any,
+    settings: Any,
 ) -> tuple[list[str], list[dict[str, str]], list[Source]]:
     """Apply a bulk action source by source, returning the names done, the failures and the deleted."""
     succeeded: list[str] = []
     failed: list[dict[str, str]] = []
     deleted: list[Source] = []
+    records = SourceDeploymentStore.from_settings(settings)
     for item in body.sources:
         name = item.source
         try:
@@ -2283,7 +2294,7 @@ def _apply_bulk(
                 # Read before the delete, for the topics it owns. A name with no
                 # stored source still deletes, as it did before it had topics.
                 stored = registry.get_source(name) if registry.source_exists(name) else None
-                registry.delete_source(name, created_by=git_author(user))
+                registry.delete_source(name, created_by=git_author(user), deployment_store=records)
                 if stored is not None:
                     deleted.append(stored)
             else:
