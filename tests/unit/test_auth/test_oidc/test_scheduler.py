@@ -20,6 +20,7 @@ from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.scheduler import sync_is_due
+from tests.support.failing_stores import StampFailingProviderRegistry
 from tests.unit.test_auth.factories import (
     make_group_store,
     make_oidc_provider,
@@ -275,8 +276,10 @@ class TestOidcSyncScheduler:
             assert stored.last_sync_status == "not_configured"
 
         async def test_holds_a_failed_provider_back_for_its_interval(
-            self, broken_directory: None, group_store: GroupStore, registry: OIDCProviderRegistry
+            self, directory: None, group_store: GroupStore, tmp_path: Path
         ):
+            """A run that cannot stamp the provider leaves it due, so the scheduler holds it back."""
+            registry = StampFailingProviderRegistry(tmp_path / "unstampable")
             registry.create(name="mock-dir", provider=_mock_directory_provider())
             scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
 
@@ -293,10 +296,11 @@ class TestOidcSyncScheduler:
         async def test_a_failed_run_logs_the_failures_class_not_its_text(
             self,
             audit_events: list[dict],
-            broken_directory: None,
+            directory: None,
             group_store: GroupStore,
-            registry: OIDCProviderRegistry,
+            tmp_path: Path,
         ):
+            registry = StampFailingProviderRegistry(tmp_path / "unstampable")
             registry.create(name="mock-dir", provider=_mock_directory_provider())
             scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
 
@@ -304,8 +308,25 @@ class TestOidcSyncScheduler:
 
             (line,) = [e for e in audit_events if e["event"] == "OIDC scheduled group sync failing"]
             assert "error" not in line
-            assert line["error_type"]
-            assert str(group_store._dir) not in json.dumps(line, default=str)
+            assert line["error_type"] == "OSError"
+            assert "No space left" not in json.dumps(line, default=str)
+
+        async def test_a_group_the_store_cannot_write_leaves_the_provider_stamped_and_partial(
+            self, broken_directory: None, group_store: GroupStore, registry: OIDCProviderRegistry
+        ):
+            registry.create(name="mock-dir", provider=_mock_directory_provider())
+            scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
+            # The sync stamps last_sync_at from the real clock, so the ticks count from it.
+            start = datetime.now(UTC)
+
+            first = await scheduler.run_once(now=start)
+            next_tick = await scheduler.run_once(now=start + timedelta(minutes=1))
+
+            stored = registry.get("mock-dir")
+            assert stored is not None
+            assert (first, next_tick) == ({"mock-dir": "partial"}, {})
+            assert stored.last_sync_at
+            assert stored.last_sync_status.startswith("partial: 1 of 1 groups skipped")
 
         async def test_a_google_provider_with_no_service_account_is_its_own_outcome(
             self, group_store: GroupStore, registry: OIDCProviderRegistry

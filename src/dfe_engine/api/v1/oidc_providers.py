@@ -370,8 +370,8 @@ class SyncResponse(BaseModel):
         "name, a name held by a stored group that does not load, a name held by a stored "
         "group not linked to that provider group, a name another group carries as its "
         "source_id or an id another group has as its name, a stored group carrying the id but linked "
-        "to another provider, or no id to link a group by. Each is counted on "
-        "auth_oidc_sync_groups_skipped_total{reason}.",
+        "to another provider, no id to link a group by, or a group the store could not "
+        "write. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
     )
     error: str | None
     skipped: str | None = Field(
@@ -383,8 +383,8 @@ class SyncResponse(BaseModel):
     )
     status: SyncOutcome = Field(
         description="How the sync ended: ok, partial (some groups skipped), error (the "
-        "listing failed, or the secret store holding its credential did not answer or "
-        "refused access), "
+        "listing failed, the secret store holding its credential did not answer or "
+        "refused access, or the group store failed part way), "
         "not_configured (no directory credential), user_token (no directory to sync, "
         "which is a Google provider's default and not a fault) or skipped (disabled or "
         "not in api mode). Key on this, never on the text of error or skipped.",

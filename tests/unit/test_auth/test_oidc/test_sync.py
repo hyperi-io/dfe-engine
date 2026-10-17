@@ -25,12 +25,14 @@ from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import (
     NO_DIRECTORY_MESSAGE,
     NOT_CONFIGURED_MESSAGE,
+    STORE_FAILURE_MESSAGE,
     SYNC_GROUPS_SKIPPED,
     SyncMetrics,
     _safe_name,
     sync_provider,
 )
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
+from tests.support.failing_stores import CreateFailingGroupStore
 from tests.unit.test_auth.test_oidc.refusing_store import PolicyRefusingSecretStore
 from tests.unit.test_auth.test_oidc.sync_cases import (
     SYNC_IDENTIFIER_COLLISION_CASES,
@@ -701,6 +703,129 @@ class TestSyncOverAGroupFileThatDoesNotLoad:
         ]
         assert skipped == [1.0]
         assert _sync_skips(manager) == {"stored_unloadable": 1.0}
+
+
+class TestSyncOverAGroupTheStoreCannotWrite:
+    """One group the store cannot write must not end the sync or leave the provider unstamped."""
+
+    # U+0085 survives no YAML round trip, so the store refuses to write it.
+    _UNWRITABLE = "a\x85b"
+
+    async def test_a_description_yaml_cannot_carry_is_skipped_and_the_rest_sync(
+        self, tmp_path, api_provider
+    ):
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        group_store = GroupStore(tmp_path / "groups")
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        groups = [
+            GroupInfo(id="g1", name="admins", email="admins@example.com"),
+            GroupInfo(id="g2", name="bad", email="bad@example.com", description=self._UNWRITABLE),
+            GroupInfo(id="g3", name="ops", email="ops@example.com"),
+        ]
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=FakeAdapter(api_provider, groups),
+            metrics=SyncMetrics(manager),
+        )
+
+        provider = provider_registry.get("test-sso")
+        assert provider is not None
+        assert [g.name for g in group_store.list()] == ["admins-example.com", "ops-example.com"]
+        assert (result["created"], result["groups_skipped"], result["status"]) == (2, 1, "partial")
+        assert result["error"] is None
+        assert provider.last_sync_at
+        assert provider.last_sync_status == (
+            "partial: 1 of 3 groups skipped, the store could not write them"
+        )
+        assert _sync_skips(manager) == {"write_failed": 1.0}
+
+    async def test_a_linked_group_whose_update_cannot_be_written_is_skipped(
+        self, tmp_path, api_provider
+    ):
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        group_store = GroupStore(tmp_path / "groups")
+        group_store.create("admins", roles=["admin"], source_id="g1", source_provider="test-sso")
+        group_store.create("ops", roles=["ops"], source_id="g2", source_provider="test-sso")
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        groups = [
+            GroupInfo(id="g1", name="admins", description=self._UNWRITABLE),
+            GroupInfo(id="g2", name="ops", description="Operators"),
+        ]
+
+        result = await sync_provider(
+            "test-sso",
+            provider_registry,
+            group_store,
+            adapter=FakeAdapter(api_provider, groups),
+            metrics=SyncMetrics(manager),
+        )
+
+        ops = group_store.get("ops")
+        assert ops is not None
+        assert (result["updated"], result["groups_skipped"], ops.description) == (1, 1, "Operators")
+        assert _sync_skips(manager) == {"write_failed": 1.0}
+
+    async def test_a_volume_that_refuses_one_create_skips_that_group(self, tmp_path, api_provider):
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        group_store = CreateFailingGroupStore(
+            tmp_path / "groups",
+            error=OSError(28, "No space left on device"),
+            fail_on="bad-example.com",
+        )
+        groups = [
+            GroupInfo(id="g1", name="admins", email="admins@example.com"),
+            GroupInfo(id="g2", name="bad", email="bad@example.com"),
+            GroupInfo(id="g3", name="ops", email="ops@example.com"),
+        ]
+
+        result = await sync_provider(
+            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+        )
+
+        assert [g.name for g in group_store.list()] == ["admins-example.com", "ops-example.com"]
+        assert (result["created"], result["groups_skipped"], result["status"]) == (2, 1, "partial")
+
+    async def test_any_other_store_failure_ends_the_run_recorded_as_an_error(
+        self, audit_events, tmp_path, api_provider
+    ):
+        """The failure is neither a group's own nor a write, so the run stops, keeps its tally and stamps."""
+        provider_registry = OIDCProviderRegistry(tmp_path / "oidc")
+        provider_registry.create("test-sso", api_provider)
+        group_store = CreateFailingGroupStore(
+            tmp_path / "groups",
+            error=RuntimeError("store-sentinel-4417"),
+            fail_on="bad-example.com",
+        )
+        groups = [
+            GroupInfo(id="g1", name="admins", email="admins@example.com"),
+            GroupInfo(id="g2", name="bad", email="bad@example.com"),
+            GroupInfo(id="g3", name="ops", email="ops@example.com"),
+        ]
+
+        result = await sync_provider(
+            "test-sso", provider_registry, group_store, adapter=FakeAdapter(api_provider, groups)
+        )
+
+        provider = provider_registry.get("test-sso")
+        assert provider is not None
+        # The group created before the failure is reported, so the caller still reconciles it.
+        assert (result["status"], result["created"], result["error"]) == (
+            "error",
+            1,
+            STORE_FAILURE_MESSAGE,
+        )
+        assert [g.name for g in group_store.list()] == ["admins-example.com"]
+        assert provider.last_sync_at
+        assert (provider.last_sync_status, provider.sync_error) == ("error", STORE_FAILURE_MESSAGE)
+        (line,) = [e for e in audit_events if e["event"] == "OIDC group sync failed"]
+        assert line["error_type"] == "RuntimeError"
+        assert "store-sentinel-4417" not in json.dumps(audit_events, default=str)
 
 
 def _sync_skips(manager) -> dict[str, float]:

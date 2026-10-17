@@ -15,6 +15,9 @@ from typing import Any
 from scalo.secrets import SecretsManager
 
 from dfe_engine.auth.accounts import Account, AccountStore
+from dfe_engine.auth.groups import Group, GroupStore
+from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.secrets import DfeSecrets, SecretNameHeldError
 
 
@@ -42,6 +45,32 @@ class StampFailingAccountStore(AccountStore):
         if "source_provider" in fields:
             raise OSError(28, "No space left on device")
         return super().update(username, allow_protected=allow_protected, **fields)
+
+
+class CreateFailingGroupStore(GroupStore):
+    """A group store whose create fails for one group name with the error it was built to raise."""
+
+    def __init__(self, groups_dir: Any, *, error: Exception, fail_on: str) -> None:
+        """Fail the create of group ``fail_on`` with ``error``."""
+        super().__init__(groups_dir)
+        self._error = error
+        self._fail_on = fail_on
+
+    def create(self, name: str, *args: Any, **fields: Any) -> Group:
+        """Raise the error for the one name; create every other group as the store does."""
+        if name == self._fail_on:
+            raise self._error
+        return super().create(name, *args, **fields)
+
+
+class StampFailingProviderRegistry(OIDCProviderRegistry):
+    """A provider registry on a volume that cannot take the sync stamp."""
+
+    def update(self, name: str, **fields: object) -> OIDCProvider:
+        """Fail any update carrying ``last_sync_at``; apply every other update."""
+        if "last_sync_at" in fields:
+            raise OSError(28, "No space left on device")
+        return super().update(name, **fields)
 
 
 def make_delete_failing_secrets(*, root: str) -> DeleteFailingSecrets:
