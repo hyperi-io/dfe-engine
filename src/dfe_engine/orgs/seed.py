@@ -37,8 +37,8 @@ def seed_orgs(
     """Create each seed the registry lacks, unless a hunt reads one of its ids for another org.
 
     A hunt counts on main or on a review branch not yet merged, as on the org routes. A
-    seed the forge cannot check is skipped with a warning, so a down forge never holds
-    up startup, and the next boot seeds it.
+    seed the forge cannot check within ``gitops.read`` is skipped with a warning, so a
+    down forge never holds up startup, and the next boot seeds it.
 
     Args:
         registry: The org registry.
@@ -54,7 +54,7 @@ def seed_orgs(
             continue
         try:
             held = (
-                hunts.tenant_id_holders(seed.name, org_tenant_ids(seed))
+                hunts.tenant_id_holders(seed.name, org_tenant_ids(seed), bound="read")
                 if hunts is not None
                 else []
             )

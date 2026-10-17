@@ -924,6 +924,31 @@ class TestTransportAvailability:
             TransportSettings(default="bus", bus_present=False)
 
 
+class TestBrokerlessLocalE2e:
+    """A local e2e engine with no broker is told how to run without one."""
+
+    def test_the_e2e_example_names_settings_that_skip_the_broker(self, monkeypatch):
+        """Uncommented as written, they load and leave the startup nothing to wait on a broker for."""
+        import re
+        from pathlib import Path
+
+        from dfe_engine.schema.phase import _topics_skipped
+        from dfe_engine.settings import DFESettings, _get_env_overrides
+
+        example = Path(__file__).resolve().parents[2] / ".env.e2e.example"
+        documented = dict(
+            re.findall(r"^# (DFE_TRANSPORT_[A-Z_]+)=(\S+)", example.read_text("utf-8"), flags=re.M)
+        )
+        assert set(documented) == {"DFE_TRANSPORT_BUS_PRESENT", "DFE_TRANSPORT_DEFAULT"}
+        for name, value in documented.items():
+            monkeypatch.setenv(name, value)
+
+        settings = DFESettings(env="test", transport=_get_env_overrides()["transport"])
+
+        assert settings.transport.bus_present is False
+        assert _topics_skipped(settings) == "this deployment carries no bus"
+
+
 class TestTransportMesh:
     """The deployment's half of a pool address: whether, and where."""
 
@@ -1018,11 +1043,22 @@ class TestGitopsMode:
         assert pack.interval_seconds == 60.5
 
     def test_write_timeout_is_longer_than_the_read_bound(self):
-        from dfe_engine.gitops.repo import REMOTE_HEAD_TIMEOUT_SECONDS
-        from dfe_engine.settings import GitopsWriteSettings
+        from dfe_engine.settings import GitopsReadSettings, GitopsWriteSettings
 
         timeout = GitopsWriteSettings.model_fields["timeout_seconds"].default
-        assert timeout > REMOTE_HEAD_TIMEOUT_SECONDS
+        assert timeout > GitopsReadSettings.model_fields["timeout_seconds"].default
+
+    def test_the_read_bound_defaults_to_three_seconds(self):
+        from dfe_engine.settings import GitopsSettings
+
+        assert GitopsSettings().read.timeout_seconds == 3.0
+
+    def test_the_read_bound_comes_from_the_environment(self, monkeypatch):
+        from dfe_engine.settings import GitopsSettings, _get_env_overrides
+
+        monkeypatch.setenv("DFE_GITOPS_READ_TIMEOUT_SECONDS", "1.5")
+        read = GitopsSettings(**_get_env_overrides()["gitops"]).read
+        assert read.timeout_seconds == 1.5
 
 
 class TestIsDevPosture:
