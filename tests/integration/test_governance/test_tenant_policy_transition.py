@@ -124,3 +124,22 @@ def test_a_table_that_loses_org_id_is_denied_again(ch_client, ch_params, world):
     fence_tables(ch_client, tiers=[world["tier"]], database=db)
 
     assert _filter(ch_client, db) == "0"
+
+
+def test_the_fence_leaves_a_database_no_tier_grants_alone(ch_client, world):
+    """A server shared with other deployments keeps their tables' policies as they were."""
+    db = world["db"]
+    other = f"{db}_other"
+    ch_client.command(f"CREATE DATABASE {other}")
+    ch_client.command(
+        f"CREATE TABLE {other}.{TABLE} (payload String, _org_id String) "
+        "ENGINE = MergeTree ORDER BY payload"
+    )
+    ch_client.command(f"ALTER TABLE {db}.{TABLE} ADD COLUMN _org_id String")
+    try:
+        fence_tables(ch_client, tiers=[world["tier"]], database=db)
+
+        assert "_org_id" in (_filter(ch_client, db) or "")
+        assert _filter(ch_client, other) is None
+    finally:
+        ch_client.command(f"DROP DATABASE IF EXISTS {other}")

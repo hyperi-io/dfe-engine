@@ -222,13 +222,19 @@ class ChRbacReconciler:
 
     # ---- discovery -------------------------------------------------------
 
-    def discover_org_id_tables(self) -> list[tuple[str, str]]:
-        """(db, table) for every table carrying an ``_org_id`` column."""
+    def discover_org_id_tables(self, dbs: list[str] | None = None) -> list[tuple[str, str]]:
+        """(db, table) for every table carrying an ``_org_id`` column.
+
+        Args:
+            dbs: Only the tables in these databases. ``None`` takes every database
+                bar the system ones, which is what a full reconcile wants.
+        """
         rows = self._client.query(
             "SELECT database, table FROM system.columns "
             "WHERE name = '_org_id' AND database NOT IN {skip:Array(String)} "
+            "AND ({scoped:UInt8} = 0 OR database IN {dbs:Array(String)}) "
             "GROUP BY database, table ORDER BY database, table",
-            parameters={"skip": _SKIP_DBS},
+            parameters={"skip": _SKIP_DBS, "scoped": int(dbs is not None), "dbs": dbs or []},
         ).result_rows
         return [(r[0], r[1]) for r in rows]
 
@@ -572,15 +578,18 @@ def fence_tables(admin_client: Any, *, tiers: list[Any] | None = None, database:
     database-wide, so a new table is readable the instant it exists; only its row
     policy waits for a reconcile. Running this on deploy closes that window. Mints
     nothing and touches no user, so it is cheap enough to run every time.
+
+    It reaches only the databases the tiers grant, since a table anywhere else is
+    not one a tenant can read, so a server shared with other deployments keeps
+    their tables' policies as they were. A full reconcile covers every database.
     """
     reconciler = ChRbacReconciler(admin_client, database=database or None)
     resolved = resolve_grant_databases(list(tiers or DEFAULT_TIERS), reconciler._database)
-    org_tables = reconciler.discover_org_id_tables()
+    granted = _tenant_granted_dbs(resolved)
+    org_tables = reconciler.discover_org_id_tables(granted)
     org_set = set(org_tables)
     deny_tables = [
-        t
-        for t in reconciler.discover_tenant_reachable_tables(_tenant_granted_dbs(resolved))
-        if t not in org_set
+        t for t in reconciler.discover_tenant_reachable_tables(granted) if t not in org_set
     ]
 
     applied = 0

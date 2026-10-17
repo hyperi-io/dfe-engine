@@ -51,7 +51,7 @@ def sync_is_due(*, now: datetime, provider: OIDCProvider) -> bool:
 class OidcSyncScheduler:
     """Syncs every api-mode provider whose interval has passed, checking once a tick.
 
-    Every engine replica runs its own loop. Two replicas syncing one provider write the same groups, so a double run mostly costs duplicate directory API calls. A run that fails is held back for one sync interval, because a failure after the directory listing leaves ``last_sync_at`` unstamped and the provider would otherwise be listed again every tick.
+    Every engine replica runs its own loop. Two replicas syncing one provider write the same groups, so a double run mostly costs duplicate directory API calls. A run that fails is held back for one sync interval, because a run that raises before it can stamp ``last_sync_at`` leaves the provider due and it would otherwise be listed again every tick.
     """
 
     # SHORTCUT: one loop per replica, move to a ClickHouse lease shaped like schema/lock.py when HPA deployments share a group store.

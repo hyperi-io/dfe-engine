@@ -52,6 +52,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
+from tests.support.clickhouse_cleanup import drop_database_and_policies
 
 pytestmark = pytest.mark.integration
 
@@ -130,7 +131,7 @@ def stack(ch_params, ch_client, monkeypatch, tmp_path):
     finally:
         _registries.clear()
         ClickHouseManager.reset_instance()
-        ch_client.command(f"DROP DATABASE IF EXISTS `{database}` SYNC")
+        drop_database_and_policies(ch_client, database)
 
 
 def _table(ch_client, database: str, table: str) -> tuple[str, str]:

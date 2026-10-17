@@ -166,6 +166,24 @@ class TestOktaLinksOnTheGroupName:
         assert okta.pages_requested == [0]
 
 
+class TestOktaLoginLookupThatFailsPartWay:
+    """A page Okta did not serve is no answer, never the groups read before it."""
+
+    async def test_a_page_that_is_not_a_list_returns_no_groups_and_says_why(self, audit_events):
+        okta = LocalOkta(pages=[[SOC_GROUP], [SOC_GROUP], [SOC_GROUP]])
+        okta.malformed_page = 1
+        okta.start()
+        try:
+            groups = await okta_adapter(okta.base_url).resolve_user_groups("jane@example.com")
+        finally:
+            okta.stop()
+
+        assert groups == []
+        assert okta.pages_requested == [0, 1]
+        (line,) = [e for e in audit_events if e["event"].startswith("Okta resolve_user_groups")]
+        assert line["error_type"] == "DirectoryPageError"
+
+
 class TestOktaApiTokenResolution:
     """The Groups API token resolves through the secret store before the env."""
 

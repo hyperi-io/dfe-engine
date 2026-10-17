@@ -43,7 +43,12 @@ class OktaAdapter(OIDCGroupAdapter):
     """Okta Groups API adapter."""
 
     async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
-        """List groups for a user (Okta user id or login)."""
+        """List groups for a user (Okta user id or login).
+
+        Fails open: a failed call, a page that is not a list of groups or a listing
+        still paging at :attr:`MAX_LOGIN_PAGES` returns ``[]`` and logs, never the
+        groups read before it.
+        """
         if not directory_id:
             return []
 
@@ -63,9 +68,9 @@ class OktaAdapter(OIDCGroupAdapter):
                 for _page in range(self.MAX_LOGIN_PAGES):
                     response = await client.get(url, headers=headers)
                     data = response.json()
-                    if isinstance(data, list):
-                        for item in data:
-                            groups.append(_group_info_from_okta(item))
+                    if not isinstance(data, list):
+                        raise DirectoryPageError
+                    groups.extend(_group_info_from_okta(item) for item in data)
                     url = _next_url_from_link_header(getattr(response, "headers", {}).get("link"))
                     if not url:
                         return groups
