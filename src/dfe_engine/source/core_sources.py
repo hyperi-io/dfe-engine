@@ -39,32 +39,19 @@ def _drop_stale_core_sources(registry: SourceRegistry, settings: Any, *, keep: s
     table. The ClickHouse table itself is left alone: reclaiming an
     operator's data is not this path's call.
     """
+    from dfe_engine.source.deployment import SourceDeploymentStore
+
+    store = SourceDeploymentStore.from_settings(settings)
     dropped = []
     for name in registry.core_source_names():
         if name == keep:
             continue
-        registry.delete_source(name, created_by="engine", core_reconcile=True)
-        _forget_build_and_deploy(name=name, settings=settings)
+        registry.delete_source(
+            name, created_by="engine", core_reconcile=True, deployment_store=store
+        )
         dropped.append(name)
         logger.info(f"Removed core source {name!r}: no longer the landing table")
     return dropped
-
-
-def _forget_build_and_deploy(*, name: str, settings: Any) -> None:
-    """Drop a removed source's build, plan and deploy records.
-
-    Left behind, they outlive the source they describe, and the next source to take
-    that name inherits them -- reporting itself deployed before it ever was.
-    """
-    from dfe_engine.source.deployment import SourceDeploymentStore
-
-    try:
-        SourceDeploymentStore.from_settings(settings).delete_source_records(name)
-    except Exception as exc:
-        logger.warning(
-            f"core source {name!r} removed but its build records remain, so a later "
-            f"source of that name will report itself already deployed: {exc}"
-        )
 
 
 def _landing_definition(settings: Any) -> Source | None:

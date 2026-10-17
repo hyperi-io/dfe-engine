@@ -58,6 +58,7 @@ from dfe_engine.schema.applier import SchemaApplyError
 from dfe_engine.schema.manifest_applier import ManifestApplyError
 from dfe_engine.schema.retention import CLICKHOUSE_REFUSED, apply_pinned_defaults
 from dfe_engine.services.schema.json_promotion_service import JsonPromotionError
+from dfe_engine.settings import SourceSettings
 from dfe_engine.source.registry import SourceNotFoundError
 
 FAKE_HASH = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
@@ -417,7 +418,8 @@ class TestSources:
         )
         user = AuthContext(user_id="admin")
 
-        _, failed, _ = sources_module._apply_bulk(body, {}, user, _Registry())
+        settings = SimpleNamespace(source=SourceSettings())
+        _, failed, _ = sources_module._apply_bulk(body, {}, user, _Registry(), settings)
 
         by_source = {entry["source"]: entry for entry in failed}
         assert by_source["gone"]["error"] == "Source 'gone' not found"
