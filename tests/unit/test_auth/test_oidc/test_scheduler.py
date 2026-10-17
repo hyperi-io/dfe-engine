@@ -332,14 +332,12 @@ class TestOidcSyncScheduler:
         async def test_a_failed_run_logs_where_it_failed_and_not_what_it_said(
             self,
             audit_events: list[dict],
+            directory: None,
             group_store: GroupStore,
-            monkeypatch: pytest.MonkeyPatch,
-            registry: OIDCProviderRegistry,
             tmp_path: Path,
         ):
-            """A group store fault is found by its frames, because its text can quote store paths and values."""
-            groups = [{"description": "sentinel-desc-4411\x85", "id": "g-ops", "name": "operators"}]
-            _write_directory(groups=groups, monkeypatch=monkeypatch, tmp_path=tmp_path)
+            """A storage fault is found by its frames, because its text can quote store paths and values."""
+            registry = StampFailingProviderRegistry(tmp_path / "unstampable")
             registry.create(name="mock-dir", provider=_mock_directory_provider())
             scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
 
@@ -351,7 +349,7 @@ class TestOidcSyncScheduler:
             assert all(re.fullmatch(r"[\w.-]+\.py:\d+ [\w<>.-]+", frame) for frame in frames)
             assert not frames[-1].startswith("scheduler.py:")
             logged = json.dumps(line, default=str)
-            assert "sentinel-desc-4411" not in logged
+            assert "No space left" not in logged
             assert str(tmp_path) not in logged
 
         async def test_a_google_provider_with_no_service_account_is_its_own_outcome(
