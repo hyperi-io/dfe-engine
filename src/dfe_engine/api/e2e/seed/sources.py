@@ -41,31 +41,43 @@ _MATCH_FIELD = "tags.collector.type"
 # A public-registry family: it needs no credentials, so the stanza is inert data.
 _FETCHER_TYPE = "crates_io"
 _FETCHER_CONFIG = {"crates": ["dfe-fetcher"], "interval_secs": 3600}
-# A fetcher on its own topic is refused without a schema, because deploy refuses one too.
-_FETCHER_META_SCHEMA = "meta/syslog"
+# Deploy refuses an own-topic source with no schema, and the console hides Processing without one.
+_META_SCHEMA = "meta/syslog"
 
 
 class Sources(Seed):
     """Create or reset source definitions in the source registry."""
 
     def seed_source(self, name: str = SEED_SOURCE_NAME) -> bool:
-        """Seed a receiver-based source with the match rule the routing compiles from.
+        """Seed a deployed receiver-based source with the match rule the routing compiles from.
 
         Returns True when created, False when it was already defined.
         """
-        return self._ensure_source(name)
+        return self._ensure_deployed_source(name)
 
     def seed_fetcher_source(self, name: str = SEED_FETCHER_SOURCE_NAME) -> bool:
-        """Seed a fetcher-based source, marked deployed so its instance is due.
+        """Seed a deployed fetcher-based source, so its fetcher instance is due.
 
         Returns True when created.
         """
-        created = self._ensure_source(name, fetched=True)
+        return self._ensure_deployed_source(name, fetched=True)
+
+    def _ensure_deployed_source(self, name: str, *, fetched: bool = False) -> bool:
+        """Create the source on its own table and mark its first version deployed.
+
+        The deploy route marks the version once its DDL has applied, and no seed
+        reaches ClickHouse, so the seed marks it through the same registry call.
+
+        Returns True when created.
+        """
+        created = self._ensure_source(name, fetched=fetched, meta_schema=_META_SCHEMA)
         if created:
-            # The reconcile deploys a fetcher instance only for a deployed source,
-            # and no seed reaches ClickHouse, so the version is marked by hand.
-            self._require_source_registry().set_deployed_version(
-                name, "1.0.0", created_by=SEED_ACTOR, description=f"e2e: deploy {name}"
+            registry = self._require_source_registry()
+            registry.set_deployed_version(
+                name,
+                registry.get_source(name).current,
+                created_by=SEED_ACTOR,
+                description=f"e2e: deploy {name}",
             )
         return created
 
@@ -101,6 +113,7 @@ class Sources(Seed):
         name: str,
         *,
         fetched: bool = False,
+        meta_schema: str | None = None,
         transform: SourceTransform | None = None,
         display_name: str = "Seed Source",
     ) -> bool:
@@ -140,7 +153,7 @@ class Sources(Seed):
                 if fetched
                 else None,
                 header=SourceHeader(),
-                schema_config=SourceSchema(meta_schema=_FETCHER_META_SCHEMA if fetched else None),
+                schema_config=SourceSchema(meta_schema=meta_schema),
                 transform=transform,
             ),
             created_by=SEED_ACTOR,

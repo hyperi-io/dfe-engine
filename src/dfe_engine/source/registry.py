@@ -876,10 +876,10 @@ class SourceRegistry:
             return
         if SchemaBuilderV2.version_snapshot_has_schema_files(version):
             return
+        # The console shows this message as it stands, so it names the console's own fields.
         raise SourceValidationError(
             f"source {source.source!r}: a fetcher on its own topic needs a schema or it can "
-            "never be deployed. Set the fetcher topic to 'main' to land on the shared table, "
-            "or define a schema (meta_schema, derived_schema or additional_fields)"
+            "never be deployed. Set its Topic to 'Shared table', or give it a Meta Schema"
         )
 
     @staticmethod
