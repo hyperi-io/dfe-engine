@@ -114,22 +114,23 @@ class TestOidcSyncScheduler:
     async def test_a_failing_tick_logs_the_failures_class_not_its_text(
         self,
         audit_events: list[dict],
+        directory: None,
         group_store: GroupStore,
         registry: OIDCProviderRegistry,
-        tmp_path: Path,
     ):
-        """The validation text quotes the provider file's values, and a traceback would carry it too."""
+        """A tick fails here when the groups-created hook raises, and the text it carries stays out of the log."""
 
         def failed() -> bool:
             return any(
                 e["event"].startswith("OIDC scheduled group sync tick failed") for e in audit_events
             )
 
-        (tmp_path / "oidc-providers" / "broken.yaml").write_text(
-            "type: sentinel-type-7731\n", encoding="utf-8"
-        )
+        def refuse() -> None:
+            raise RuntimeError("tick-sentinel-7731")
+
+        registry.create(name="mock-dir", provider=_mock_directory_provider())
         scheduler = make_oidc_sync_scheduler(
-            group_store=group_store, registry=registry, tick_seconds=0.01
+            group_store=group_store, on_groups_created=refuse, registry=registry, tick_seconds=0.01
         )
         task = asyncio.create_task(scheduler.run_forever())
         logged = await _wait_for(condition=failed)
@@ -144,34 +145,77 @@ class TestOidcSyncScheduler:
             if e["event"].startswith("OIDC scheduled group sync tick failed")
         ]
         assert "exception" not in line
-        assert line["error_type"] == "ValidationError"
-        assert "sentinel-type-7731" not in json.dumps(audit_events, default=str)
+        assert line["error_type"] == "RuntimeError"
+        assert "tick-sentinel-7731" not in json.dumps(audit_events, default=str)
 
     async def test_run_forever_survives_a_failing_tick(
+        self,
+        directory: None,
+        group_store: GroupStore,
+        monkeypatch: pytest.MonkeyPatch,
+        registry: OIDCProviderRegistry,
+        tmp_path: Path,
+    ):
+        def synced() -> bool:
+            return group_store.get(name="viewers") is not None
+
+        def refuse_once() -> None:
+            calls.append("created")
+            if len(calls) == 1:
+                raise RuntimeError("the hook failed")
+
+        calls: list[str] = []
+        # The first provider's sync creates groups and the hook raises, which fails that tick.
+        registry.create(name="mock-dir", provider=_mock_directory_provider())
+        second = tmp_path / "second.json"
+        second.write_text(
+            json.dumps({"groups": [{"id": "g-v", "name": "viewers"}]}), encoding="utf-8"
+        )
+        monkeypatch.setenv(f"{DIRECTORY_ENV}_SECOND", str(second))
+        scheduler = make_oidc_sync_scheduler(
+            group_store=group_store,
+            on_groups_created=refuse_once,
+            registry=registry,
+            tick_seconds=0.01,
+        )
+        task = asyncio.create_task(scheduler.run_forever())
+        await _wait_for(condition=lambda: len(calls) == 1)
+        registry.create(
+            name="second-dir",
+            provider=make_oidc_provider(
+                groups={
+                    "directory_backend": "mock",
+                    "mock_directory_env": f"{DIRECTORY_ENV}_SECOND",
+                    "mode": "api",
+                }
+            ),
+        )
+        ran = await _wait_for(condition=synced)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert (ran, calls) == (True, ["created", "created"])
+
+    async def test_a_provider_file_that_does_not_load_leaves_the_others_syncing(
         self,
         directory: None,
         group_store: GroupStore,
         registry: OIDCProviderRegistry,
         tmp_path: Path,
     ):
-        def synced() -> bool:
-            return group_store.get(name="operators") is not None
-
-        # A provider file that does not validate makes every registry listing raise.
-        broken = tmp_path / "oidc-providers" / "broken.yaml"
-        broken.write_text("type: not-a-provider-type\n", encoding="utf-8")
-        scheduler = make_oidc_sync_scheduler(
-            group_store=group_store, registry=registry, tick_seconds=0.01
-        )
-        task = asyncio.create_task(scheduler.run_forever())
-        await asyncio.sleep(0.1)
-        broken.unlink()
+        """One malformed file once failed every tick for every provider."""
         registry.create(name="mock-dir", provider=_mock_directory_provider())
-        ran = await _wait_for(condition=synced)
-        task.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await task
-        assert ran is True
+        (tmp_path / "oidc-providers" / "broken.yaml").write_text(
+            "type: not-a-provider-type\n", encoding="utf-8"
+        )
+        scheduler = make_oidc_sync_scheduler(group_store=group_store, registry=registry)
+
+        outcomes = await scheduler.run_once(now=NOW)
+
+        assert (outcomes, group_store.get(name="operators") is not None) == (
+            {"mock-dir": "partial"},
+            True,
+        )
 
     class TestRunOnce:
         async def test_syncs_a_due_provider(

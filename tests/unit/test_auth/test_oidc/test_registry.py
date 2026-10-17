@@ -7,12 +7,16 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import inspect
+import json
 import typing
 
 import pytest
+from prometheus_client.parser import text_string_to_metric_families
+from pydantic import ValidationError
+from scalo.metrics import create_metrics
 
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
-from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+from dfe_engine.auth.oidc.registry import PROVIDERS_SKIPPED, OIDCProviderRegistry, ProviderMetrics
 from dfe_engine.yaml_utils import yaml_load
 
 
@@ -146,6 +150,86 @@ class TestOIDCProviderRegistryList:
         registry.create("google", _make_google_provider())
         results = registry.list()
         assert len(results) == 2
+
+
+UNLOADABLE_PROVIDER_FILES = [
+    pytest.param("invalid", b"type: not-a-provider-type\n", id="a-type-the-model-refuses"),
+    pytest.param("invalid", b"- generic\n- google\n", id="a-list-at-the-top"),
+    pytest.param("unreadable", b"type: [generic\nissuer: : :\n", id="yaml-that-does-not-parse"),
+    pytest.param("unreadable", b"\xff\xfe type: generic\n", id="bytes-that-are-not-utf-8"),
+]
+
+
+def _skips(manager) -> dict[str, float]:
+    """The registry's skip counter by reason, as the engine's /metrics serves it."""
+    return {
+        sample.labels["reason"]: sample.value
+        for family in text_string_to_metric_families(manager.metrics_text)
+        for sample in family.samples
+        if sample.name == PROVIDERS_SKIPPED
+    }
+
+
+class TestAProviderFileThatDoesNotLoad:
+    """One bad file must not take the listing, and so every other provider, down with it."""
+
+    @pytest.mark.parametrize(("reason", "content"), UNLOADABLE_PROVIDER_FILES)
+    def test_it_is_left_out_and_counted_while_the_others_list(self, tmp_path, reason, content):
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        registry = OIDCProviderRegistry(tmp_path / "oidc", metrics=ProviderMetrics(manager))
+        registry.create("alpha", _make_generic_provider())
+        registry.create("zulu", _make_generic_provider())
+        (tmp_path / "oidc" / "middle.yaml").write_bytes(content)
+
+        names = [name for name, _ in registry.list()]
+
+        assert names == ["alpha", "zulu"]
+        assert _skips(manager) == {reason: 1.0}
+
+    def test_get_still_raises_for_the_file_named(self, tmp_path):
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        (tmp_path / "oidc" / "middle.yaml").write_text("type: nope\n", encoding="utf-8")
+
+        with pytest.raises(ValidationError):
+            registry.get("middle")
+
+    def test_it_is_reported_once_until_it_loads_clean(self, tmp_path, audit_events):
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        registry = OIDCProviderRegistry(tmp_path / "oidc", metrics=ProviderMetrics(manager))
+        middle = tmp_path / "oidc" / "middle.yaml"
+        middle.write_text("type: nope\n", encoding="utf-8")
+
+        registry.list()
+        registry.list()
+        middle.write_text("type: generic\nissuer: https://sso.example.com\n", encoding="utf-8")
+        assert [name for name, _ in registry.list()] == ["middle"]
+        middle.write_text("type: nope\n", encoding="utf-8")
+        registry.list()
+
+        reports = [e for e in audit_events if e["event"].startswith("OIDC provider file skipped")]
+        assert len(reports) == 2
+        assert _skips(manager) == {"invalid": 2.0}
+
+    def test_the_log_names_the_file_and_the_failure_class_never_its_values(
+        self, tmp_path, audit_events
+    ):
+        """The validation text quotes the file's values, and a traceback would carry it too."""
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        (tmp_path / "oidc" / "middle.yaml").write_text(
+            "type: sentinel-type-7731\n", encoding="utf-8"
+        )
+
+        registry.list()
+
+        (line,) = [e for e in audit_events if e["event"].startswith("OIDC provider file skipped")]
+        assert (line["file"], line["reason"], line["error_type"]) == (
+            "middle.yaml",
+            "invalid",
+            "ValidationError",
+        )
+        assert "exception" not in line
+        assert "error" not in line
+        assert "sentinel-type-7731" not in json.dumps(audit_events, default=str)
 
 
 class TestOIDCProviderRegistryUpdate:
