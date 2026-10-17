@@ -68,15 +68,22 @@ if TYPE_CHECKING:
     from dfe_engine.settings import DFESettings
     from dfe_engine.source.models import Source
 
-# A reason recorded here reaches API callers, so the broker's own text goes to the log.
+# A reason recorded here reaches API callers, so broker and config text goes to the log.
 BROKER_UNREACHABLE = "broker unreachable; the engine log has the reason"
 BROKER_REFUSED = "the broker refused it; the engine log has the reason"
+KAFKA_CONFIG_REJECTED = "kafka config rejected; the engine log has the reason"
 
 
 def _unreachable(exc: Exception) -> str:
     """The reason recorded for a broker that could not be reached, its own text logged."""
     logger.warning("Kafka broker unreachable", error=str(exc))
     return BROKER_UNREACHABLE
+
+
+def _config_rejected(exc: Exception) -> str:
+    """The reason recorded for a kafka config the credential contract refused, its own text logged."""
+    logger.warning("Kafka config rejected", error=str(exc))
+    return KAFKA_CONFIG_REJECTED
 
 
 def _refused(exc: Exception) -> str:
@@ -662,7 +669,8 @@ def ensure_topics(
     except KafkaContractError as exc:
         # A rejected credential shape is a config fault, not an unreachable broker.
         # Reporting it as the latter sends the operator to the wrong place.
-        result.failed = [(spec.name, f"kafka config rejected: {exc}") for spec in specs]
+        reason = _config_rejected(exc)
+        result.failed = [(spec.name, reason) for spec in specs]
         return result
     except Exception as exc:
         reason = _unreachable(exc)
@@ -721,7 +729,8 @@ def remove_topics(
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
     except KafkaContractError as exc:
-        result.failed = [(name, f"kafka config rejected: {exc}") for name in names]
+        reason = _config_rejected(exc)
+        result.failed = [(name, reason) for name in names]
         return result
     except Exception as exc:
         reason = _unreachable(exc)
@@ -777,7 +786,7 @@ def topic_status(
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
     except KafkaContractError as exc:
-        result.error = f"kafka config rejected: {exc}"
+        result.error = _config_rejected(exc)
         return result
     except Exception as exc:
         result.error = _unreachable(exc)
@@ -847,7 +856,8 @@ def update_topics(
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
     except KafkaContractError as exc:
-        result.failed = [(spec.name, f"kafka config rejected: {exc}") for spec in specs]
+        reason = _config_rejected(exc)
+        result.failed = [(spec.name, reason) for spec in specs]
         return result
     except Exception as exc:
         reason = _unreachable(exc)
