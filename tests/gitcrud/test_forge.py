@@ -16,6 +16,7 @@ import json
 import threading
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any
 
 import pytest
 
@@ -191,8 +192,8 @@ class TestSplitRepoUrl:
 
 
 class TestBuildForge:
-    def _gs(self, **kw) -> GitopsSettings:
-        base = {
+    def _gs(self, **kw: Any) -> GitopsSettings:
+        base: dict[str, Any] = {
             "enabled": True,
             "push": True,
             "repo_url": "https://git.example.com/acme/deploy.git",

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import secrets
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -294,14 +295,28 @@ def _admin(client: TestClient) -> dict[str, str]:
     return headers
 
 
-def _get(client: TestClient, path: str, headers: dict[str, str]) -> dict | list:
+def _get_json(client: TestClient, path: str, headers: dict[str, str]) -> Any:
     resp = client.get(path, headers=headers)
     assert resp.status_code == 200, resp.text
     return resp.json()
 
 
+def _get(client: TestClient, path: str, headers: dict[str, str]) -> dict[str, Any]:
+    """The JSON object a route answers, failing the test on any other shape."""
+    body = _get_json(client, path, headers)
+    assert isinstance(body, dict), body
+    return body
+
+
+def _get_list(client: TestClient, path: str, headers: dict[str, str]) -> list[Any]:
+    """The JSON array a route answers, failing the test on any other shape."""
+    body = _get_json(client, path, headers)
+    assert isinstance(body, list), body
+    return body
+
+
 def _instances(client: TestClient, headers: dict[str, str], service: str) -> list[str]:
-    listed = _get(client, _APPS, headers)
+    listed = _get_list(client, _APPS, headers)
     by_service = {entry["service"]: entry for entry in listed}
     return by_service[service]["instances"]
 
@@ -393,7 +408,7 @@ class TestSeedSourceWithTransform:
         _seed(appmgmt_client, "seed_source_with_transform")
         headers = _admin(appmgmt_client)
 
-        listed = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
+        listed = _get_list(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
         assert [f["name"] for f in listed] == [f"{_SOURCE}.vrl"]
 
         found = _get(
@@ -429,7 +444,7 @@ class TestSeedSourceWithTransform:
         assert _operator_sources(appmgmt_client, headers) == [_FETCHED, _SOURCE]
         assert _instances(appmgmt_client, headers, _VRL) == [_SOURCE]
         assert _instances(appmgmt_client, headers, "dfe-fetcher") == [_FETCHED]
-        files = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
+        files = _get_list(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
         assert [f["name"] for f in files] == [f"{_SOURCE}.vrl"]
 
     def test_reset_all_removes_the_source_and_its_instances(self, appmgmt_client):
@@ -499,7 +514,7 @@ class TestSeedLibraryArtefact:
         _seed(appmgmt_client, "seed_library_artefact")
         headers = _admin(appmgmt_client)
 
-        assert [a["name"] for a in _get(appmgmt_client, _LIB, headers)] == [_ARTIFACT]
+        assert [a["name"] for a in _get_list(appmgmt_client, _LIB, headers)] == [_ARTIFACT]
 
         found = _get(appmgmt_client, f"{_LIB}/{_ARTIFACT}", headers)
         assert found["kind"] == "vrl"
@@ -509,7 +524,7 @@ class TestSeedLibraryArtefact:
         assert found["group"] == "seed"
         assert found["labels"] == {"team": "platform", "tier": "gold"}
 
-        versions = _get(appmgmt_client, f"{_LIB}/{_ARTIFACT}/versions", headers)
+        versions = _get_list(appmgmt_client, f"{_LIB}/{_ARTIFACT}/versions", headers)
         assert [v["version"] for v in versions] == [1, 2]
         assert versions[0]["digest"] != versions[1]["digest"]
 
@@ -524,12 +539,14 @@ class TestSeedLibraryArtefact:
         _seed(appmgmt_client, "seed_library_artefact")
         headers = _admin(appmgmt_client)
 
-        usage = _get(appmgmt_client, f"{_LIB}/{_ARTIFACT}/usage", headers)
+        usage = _get_list(appmgmt_client, f"{_LIB}/{_ARTIFACT}/usage", headers)
         assert len(usage) == 1
         assert (usage[0]["service"], usage[0]["instance"]) == (_VRL, _SOURCE)
         assert usage[0]["name"] == "seed_library.vrl"
 
-        links = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms/links", headers)
+        links = _get_list(
+            appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms/links", headers
+        )
         assert len(links) == 1
         # Pinned behind the current version, so the page has a real outdated signal
         # without the resolved content having drifted from what it was linked to.
@@ -544,7 +561,7 @@ class TestSeedLibraryArtefact:
         _seed(appmgmt_client, "seed_library_artefact")
         headers = _admin(appmgmt_client)
 
-        listed = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
+        listed = _get_list(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
         assert sorted(f["name"] for f in listed) == ["seed_library.vrl", f"{_SOURCE}.vrl"]
 
         found = _get(
@@ -563,15 +580,15 @@ class TestSeedLibraryArtefact:
         assert found["versions"] == [1, 2]
         assert found["current"] == 2
         assert found["tags"] == {"stable": 1}
-        assert len(_get(appmgmt_client, f"{_LIB}/{_ARTIFACT}/usage", headers)) == 1
-        assert [a["name"] for a in _get(appmgmt_client, _LIB, headers)] == [_ARTIFACT]
+        assert len(_get_list(appmgmt_client, f"{_LIB}/{_ARTIFACT}/usage", headers)) == 1
+        assert [a["name"] for a in _get_list(appmgmt_client, _LIB, headers)] == [_ARTIFACT]
 
     def test_reset_all_removes_the_artefact(self, appmgmt_client):
         _seed(appmgmt_client, "seed_library_artefact")
         _seed(appmgmt_client, "reset_all")
         headers = _admin(appmgmt_client)
 
-        assert _get(appmgmt_client, _LIB, headers) == []
+        assert _get_list(appmgmt_client, _LIB, headers) == []
         assert appmgmt_client.get(f"{_LIB}/{_ARTIFACT}", headers=headers).status_code == 404
 
 
@@ -866,19 +883,19 @@ class TestResetClearsRunState:
         self._raise_node_count(appmgmt_client, headers)
 
         # It really is declared before the reset, or the test proves nothing.
-        declared = {s["service"]: s for s in _get(appmgmt_client, _BACKING, headers)}
+        declared = {s["service"]: s for s in _get_list(appmgmt_client, _BACKING, headers)}
         assert declared["clickhouse"]["replicas"]["value"] == 5
         assert declared["clickhouse"]["replicas"]["source"] is not None
 
         _seed(appmgmt_client, "reset_all")
 
         headers = _admin(appmgmt_client)
-        after = {s["service"]: s for s in _get(appmgmt_client, _BACKING, headers)}
+        after = {s["service"]: s for s in _get_list(appmgmt_client, _BACKING, headers)}
         for service in after.values():
             for field in ("mode", "storage_model", "replicas", "storage_size", "storage_class"):
                 assert service[field]["value"] is None, f"{service['service']}.{field}"
                 assert service[field]["source"] is None
-        assert _get(appmgmt_client, f"{_BACKING}/overlays", headers) == []
+        assert _get_list(appmgmt_client, f"{_BACKING}/overlays", headers) == []
 
     def test_the_auto_merge_flag_does_not_survive_reset_all(self, appmgmt_client):
         """Absent reads as off, which is the posture a fresh deployment starts in."""
@@ -946,7 +963,7 @@ class TestSeedManagedBacking:
         _seed(managed_client, "seed_managed_backing")
         headers = _admin(managed_client)
 
-        listed = {s["service"]: s for s in _get(managed_client, _BACKING, headers)}
+        listed = {s["service"]: s for s in _get_list(managed_client, _BACKING, headers)}
 
         kafka, ch = listed["kafka"], listed["clickhouse"]
         assert (kafka["managed_by"], kafka["provider"], kafka["tier"], kafka["region"]) == (
@@ -997,7 +1014,7 @@ class TestSeedManagedBacking:
         _seed(managed_client, "reset_all")
         headers = _admin(managed_client)
 
-        listed = {s["service"]: s for s in _get(managed_client, _BACKING, headers)}
+        listed = {s["service"]: s for s in _get_list(managed_client, _BACKING, headers)}
         assert (listed["kafka"]["managed_by"], listed["kafka"]["provider"]) == ("dfe", None)
         assert listed["clickhouse"]["provider"] == "clickhouse-cloud"
 
@@ -1016,7 +1033,7 @@ class TestSeedManagedBacking:
         _seed(managed_client, "reset_all")
         headers = _admin(managed_client)
 
-        for service in _get(managed_client, _BACKING, headers):
+        for service in _get_list(managed_client, _BACKING, headers):
             assert service["managed_by"] == "dfe", service["service"]
 
     def test_the_seed_writes_nothing_to_the_deploy_repo(self, managed_client):
