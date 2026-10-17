@@ -5,8 +5,8 @@ Two interchangeable backends behind one registry surface:
 - **deploy repo** (when gitops is on): the deploy repo's ``config/hunts`` is the
   SSoT and every mutation is one gitcrud commit, because that is the directory
   the k8s hunt runner git-syncs. Pass ``deploy_repo=DeployRepoStore(...)``.
-- **DirectoryConfigStore**: ``hunts.hunt_dir`` (first path when comma-separated)
-  as SSoT -- the shared config volume the docker hunt runner reads.
+- **DirectoryConfigStore**: ``hunts.hunt_dir`` as SSoT -- the shared config volume
+  the docker hunt runner reads.
 
 Each hunt is stored as ``{name}.yaml``. The ``display_name`` field inside the YAML is the
 label used by the hunt engine at runtime (legacy YAML may use ``name`` instead).
@@ -365,9 +365,7 @@ class HuntConfigRegistry:
         )
         return sorted(changed), outcome
 
-    def tenant_id_holders(
-        self, org: str, tenant_ids: Iterable[str], *, include_review: bool = True
-    ) -> list[HeldTenantIds]:
+    def tenant_id_holders(self, org: str, tenant_ids: Iterable[str]) -> list[HeldTenantIds]:
         """Every hunt that reads one of ``tenant_ids`` for an org other than ``org``.
 
         A hunt on main reads what it stores. A review branch not yet merged counts for
@@ -376,7 +374,6 @@ class HuntConfigRegistry:
         Args:
             org: The org about to declare ``tenant_ids``.
             tenant_ids: Its tenant ids once written.
-            include_review: Read the review branches too, which fetches the deploy repo.
 
         Returns:
             Each hunt and the org it holds the ids for, main first, then by branch.
@@ -390,7 +387,7 @@ class HuntConfigRegistry:
             stored = self._get_raw(name)
             if stored is not None:
                 held += _held_for_others(name, dict(stored), None, org, wanted, None)
-        if include_review and self._deploy is not None:
+        if self._deploy is not None:
             for change in self._deploy.pending():
                 held += _held_for_others(
                     change.name, change.doc, change.base, org, wanted, change.branch

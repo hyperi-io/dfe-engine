@@ -41,6 +41,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_name
 from dfe_engine.hunts.customers import hunt_customers, hunt_tenant_ids
 from dfe_engine.hunts.rule_guard import refuse_direct_query
 from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
@@ -182,7 +183,8 @@ def load_specs(
     The hunt_id is the filename STEM (identity is the filename, never an in-file id).
     A missing directory returns an empty dict (logged at debug). Each file is wrapped
     in try/except so one malformed hunt is skipped (logged) without breaking the load
-    of the rest. Anchored and non-positive-interval hunts are skipped too.
+    of the rest. Anchored and non-positive-interval hunts are skipped too, and so is a
+    stem gitcrud refuses as a name, because the engine's hunt registry never reads it.
 
     Args:
         hunt_dir: Directory of hunt YAML files (``hunts.hunt_dir``).
@@ -204,6 +206,15 @@ def load_specs(
     specs: dict[str, HuntSpec] = {}
     for path in sorted(directory.glob("*.yaml")):
         stem = path.stem
+        try:
+            validate_name(stem)
+        except CommitPolicyError:
+            logger.warning(
+                "skipping hunt: the engine's hunt registry refuses its file name, so no "
+                "org change would reach its stored tenant ids",
+                hunt_id=stem,
+            )
+            continue
         try:
             definition = yaml_load(path)
             if not isinstance(definition, dict):

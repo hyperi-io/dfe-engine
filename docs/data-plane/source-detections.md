@@ -67,7 +67,9 @@ correlation is expressed. How the runner scales is
 
 A hunt's `customers` are org names. The engine resolves each to the org's tenant ids when it saves the hunt and stores them as `customer_tenant_ids`, and the runner reads only rows whose `_org_id` is one of them. Every org create, update and delete stores that org's tenant ids afresh in each hunt naming it, as one deploy-repo change, before the org itself is written. A deleted org keeps its name in `customers` and loses its stored ids, so the hunt fails every fire as `unknown_customers` and holds its watermark until someone edits it. A hunt carrying a direct `query` instead of `rules` is trusted SQL from the operator-controlled deploy repo, and no customer holds it.
 
-In production+team the hunt change waits on review while the org is written at once. So an org create or update is refused with 409 `tenant_id_held` when it takes a tenant id a hunt reads for another org, on main or on an unmerged review branch. Merge or delete that branch, or edit the hunt, to release the id. The startup seed skips such an org, reading main only.
+In production+team the hunt change waits on review while the org is written at once. So an org create or update is refused with 409 `tenant_id_held` when it takes a tenant id a hunt reads for another org, on main or on an unmerged review branch. Merge or delete that branch, or edit the hunt, to release the id. A squash merge leaves the branch behind, so turn on the forge's auto-delete of merged head branches. The startup seed skips such an org, and one the forge cannot check, until the next boot.
+
+Accepted residual: the runner keeps the hunts it loaded until its next reload (`--reload-every` ticks of `hunts.runner_poll_seconds`, 20 x 15 s = 300 s at the defaults, plus `huntRunner.gitSync.period` on Kubernetes), so a tenant id deleted and given to a new org inside that window can fire once on the old org's hunt.
 
 ## Lookup databases
 

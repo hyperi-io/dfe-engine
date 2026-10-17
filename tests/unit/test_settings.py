@@ -863,6 +863,37 @@ class TestLookupDatabases:
             load_settings()
 
 
+class TestHuntDir:
+    """One directory, which the engine's hunt registry and the hunt runner both read as is."""
+
+    def test_surrounding_space_is_dropped(self):
+        assert HuntsSettings(hunt_dir="  /config/hunts \n").hunt_dir == "/config/hunts"
+
+    def test_a_list_of_directories_is_refused(self, monkeypatch):
+        """The engine read only the first and the runner none, so a list ran no hunt."""
+        monkeypatch.setenv("DFE_HUNTS_DIR", "/config/hunts,/extra/hunts")
+
+        with pytest.raises(ValidationError, match="one directory"):
+            load_settings()
+
+    def test_the_engine_writes_where_the_runner_reads(self, tmp_path):
+        from dfe_engine.api.deps import (
+            bootstrap_registries,
+            get_hunt_config_registry_optional,
+            shutdown_registries,
+        )
+        from dfe_engine.hunt_runner.spec_loader import load_specs
+
+        settings = DFESettings(env="test", hunts=HuntsSettings(hunt_dir=f" {tmp_path / 'hunts'} "))
+        bootstrap_registries(settings)
+        try:
+            get_hunt_config_registry_optional().save("windows_hunt", {"cron": "*/5 * * * *"})
+        finally:
+            shutdown_registries()
+
+        assert set(load_specs(settings.hunts.hunt_dir)) == {"windows_hunt"}
+
+
 class TestTransportAvailability:
     """What a deployment can carry a source on: the one transport it was stood up with."""
 

@@ -85,6 +85,23 @@ def _hunts(tmp_path, stored: dict):
     return hunts
 
 
+_IDS = "customer_tenant_ids"
+_HUNT = {"cron": "*/5 * * * *", "rules": ["certutil"]}
+
+
+def _under_review(tmp_path):
+    """A hunt registry on a local deploy repo whose every hunt write waits on review."""
+    from dfe_engine.gitcrud import GitCrud, default_registry
+    from dfe_engine.gitops.repo import GitopsRepo
+    from dfe_engine.hunts.deploy_repo import DeployRepoStore
+    from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+
+    crud = GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry())
+    crud.put("hunts", "seed", {**_HUNT, "customers": ["globex"]}, "seed")
+    store = DeployRepoStore(crud, "hunts", environment="production", mode="team")
+    return HuntConfigRegistry(deploy_repo=store)
+
+
 class TestASeedBesideTheHunts:
     """The seed creates absent orgs and rewrites no hunt."""
 
@@ -106,3 +123,43 @@ class TestASeedBesideTheHunts:
         assert seed_orgs(registry=registry, seeds=seeds, hunts=hunts) == ["globex"]
 
         assert registry.get("newcorp") is None
+
+    def test_a_seed_a_pending_review_gives_another_org_is_not_created(self, registry, tmp_path):
+        """In production+team the hunt waits on a review branch, and merging it would read t1."""
+        hunts = _under_review(tmp_path)
+        hunts.save("windows_hunt", {**_HUNT, "customers": ["gone"], _IDS: {"gone": ["t1"]}})
+        seeds = [SeedOrg(name="newcorp", org_ids=["t1"]), SeedOrg(name="globex")]
+
+        assert seed_orgs(registry=registry, seeds=seeds, hunts=hunts) == ["globex"]
+
+        assert registry.get("newcorp") is None
+
+    def test_a_seed_the_forge_cannot_check_waits_for_the_next_boot(
+        self, registry, tmp_path, monkeypatch
+    ):
+        from dfe_engine.gitops.repo import GitopsUnavailableError
+        from dfe_engine.orgs import seed as seed_module
+
+        warnings: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            seed_module.logger,
+            "warning",
+            lambda message, **fields: warnings.append((message, fields)),
+        )
+        answers: list[Exception | list] = [GitopsUnavailableError("forge down"), []]
+
+        class _Hunts:
+            def tenant_id_holders(self, *_args, **_kwargs) -> list:
+                answer = answers.pop(0)
+                if isinstance(answer, Exception):
+                    raise answer
+                return answer
+
+        seeds = [SeedOrg(name="newcorp", org_ids=["t1"]), SeedOrg(name="globex")]
+
+        assert seed_orgs(registry=registry, seeds=seeds, hunts=_Hunts()) == ["globex"]
+
+        assert registry.get("newcorp") is None
+        [(message, fields)] = warnings
+        assert "not seeded" in message
+        assert fields["org"] == "newcorp"

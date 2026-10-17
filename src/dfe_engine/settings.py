@@ -477,7 +477,14 @@ class HuntsSettings(BaseModel):
     cron_task_timeout: int = Field(
         default=300, description="Scheduler timeout in seconds (-1 = no timeout)"
     )
-    hunt_dir: str = Field(default="", description="Directory containing hunt YAML configs")
+    hunt_dir: str = Field(
+        default="",
+        description=(
+            "The one directory holding hunt YAML, which the engine's hunt registry writes "
+            "with gitops off and the hunt runner reads. A comma-separated list is refused. "
+            "DFE_HUNTS_DIR."
+        ),
+    )
     rules_dir: str = Field(
         default="",
         description="YAML directory for API-managed detection rules (DirectoryConfigStore SSoT)",
@@ -586,6 +593,17 @@ class HuntsSettings(BaseModel):
             "DFE_HUNTS_LOOKUP_DATABASES (comma-separated)."
         ),
     )
+
+    @field_validator("hunt_dir")  # noqa: V105
+    @classmethod
+    def _hunt_dir_is_one_directory(cls, value: str) -> str:
+        directory = value.strip()
+        if "," in directory:
+            raise ValueError(
+                f"hunts.hunt_dir {directory!r} must name one directory, which the engine "
+                "and the hunt runner both read"
+            )
+        return directory
 
     @field_validator("lookup_databases")  # noqa: V105
     @classmethod

@@ -239,3 +239,48 @@ def test_a_direct_query_is_run_uncapped_and_the_load_says_so(tmp_path: Path):
     lines = [m for m in captured if "detection cap does not apply" in m]
     assert len(lines) == 1
     assert lines[0].record["extra"]["hunt_id"] == "hand_written"
+
+
+_RATE = 'schedule:\n  mode: rate\n  interval: "1m"\n'
+_QUERY = 'query: "INSERT INTO dfe.detection SELECT * FROM dfe.main WHERE {window}"\n'
+
+
+def test_a_hunt_file_the_registry_cannot_name_is_skipped_and_logged(tmp_path: Path):
+    for name in ("bad hunt", "a..b", "ok_hunt"):
+        _write(tmp_path, name, _RATE + _QUERY)
+    captured: list = []
+    handler_id = logger.add(captured.append, level="WARNING")
+    try:
+        specs = load_specs(tmp_path)
+    finally:
+        logger.remove(handler_id)
+
+    assert set(specs) == {"ok_hunt"}
+    skipped = sorted(m.record["extra"]["hunt_id"] for m in captured if "skipping hunt" in m)
+    assert skipped == ["a..b", "bad hunt"]
+
+
+def test_the_runner_runs_only_the_hunts_the_registry_reads(tmp_path: Path):
+    """A hunt file committed by hand under a name gitcrud refuses is invisible to the
+    registry, so the org routes' tenant id check cannot see it either."""
+    from dfe_engine.gitcrud import GitCrud, default_registry
+    from dfe_engine.gitops.repo import GitopsRepo
+    from dfe_engine.hunts.deploy_repo import DeployRepoStore
+    from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+
+    repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
+    crud = GitCrud(repo, default_registry())
+    stored = "customers: [gone]\ncustomer_tenant_ids: {gone: [t1]}\nrules: [certutil]\n"
+    repo.publish(
+        {f"config/hunts/{name}.yaml": _RATE + stored for name in ("bad hunt", "ok_hunt")},
+        "hand-committed hunts",
+    )
+    registry = HuntConfigRegistry(
+        deploy_repo=DeployRepoStore(crud, "hunts", environment="dev", mode="solo")
+    )
+
+    run = set(load_specs(tmp_path / "deploy" / "config" / "hunts"))
+    read = {row["name"] for row in registry.list_hunts()}
+
+    assert run == read == {"ok_hunt"}
+    assert [h.hunt for h in registry.tenant_id_holders("newcorp", ["t1"])] == ["ok_hunt"]

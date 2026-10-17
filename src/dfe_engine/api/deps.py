@@ -152,7 +152,7 @@ def bootstrap_registries(
             deploy_repo=deploy_store(gitcrud, "rules", settings=settings, forge=forge),
         )
 
-    hunt_dir = settings.hunts.hunt_dir.split(",")[0].strip()
+    hunt_dir = settings.hunts.hunt_dir
     if gitcrud is not None or hunt_dir:
         from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
 
