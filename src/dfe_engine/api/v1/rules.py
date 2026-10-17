@@ -10,13 +10,21 @@ POST   /api/v1/rules/validate     -> Validate SQL/CEL without creating
 
 import functools
 import re
-from typing import Literal
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from scalo.concurrency import run_blocking
 
-from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    HuntConfigReg,
+    OptionalHuntConfigReg,
+    RuleReg,
+    Settings,
+    held_tenant_ids,
+    require_action,
+)
 from dfe_engine.api.errors import ErrorCode, ErrorResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
@@ -24,7 +32,8 @@ from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
-from dfe_engine.hunts.hunt_config_registry import default_display_name
+from dfe_engine.hunts.customers import hunt_tenant_ids
+from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError, default_display_name
 from dfe_engine.hunts.rule_creation_service import CostEstimate
 from dfe_engine.hunts.rule_guard import source_label
 from dfe_engine.hunts.rule_registry import RuleNotFoundError
@@ -235,13 +244,17 @@ def create_rule(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    request: Request,
     response: Response,
+    hunts: OptionalHuntConfigReg,
 ):
     """Create a new hunt rule via RuleCreationService.
 
     The service sanitizes the SQL, applies CEL->SQL transpilation,
     validates column references, and optionally estimates query cost. A rule
-    whose SQL the hunt runner could not compile is refused with 422.
+    whose SQL the hunt runner could not compile is refused with 422. The cost
+    preview counts only the orgs the hunts running the rule read, cut to the orgs
+    its author may read.
 
     A production+team write is routed to a review branch instead of the branch the
     runner git-syncs, and the ``X-DFE-Review-Required`` header says so.
@@ -277,7 +290,8 @@ def create_rule(
         cost_window_minutes=body.cost_window_minutes,
     )
 
-    result = service.create_rule(svc_request, body.name)
+    fence = _preview_tenant_ids(request, user, hunts, body.name, body.hunt_name)
+    result = service.create_rule(svc_request, body.name, tenant_ids=fence)
     _refuse_uncompilable(result)
     _refuse_matches_everything(result)
     outcome = registry.save(
@@ -300,7 +314,9 @@ async def create_rule_from_hyperdx(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    request: Request,
     response: Response,
+    hunts: OptionalHuntConfigReg,
 ):
     """Create a hunt rule from the SQL a HyperDX view renders to.
 
@@ -311,7 +327,9 @@ async def create_rule_from_hyperdx(
     ``org_viewer`` has neither this grant nor the UI button.
     """
     return await run_blocking(
-        functools.partial(_create_rule_from_sql, body, user, settings, registry, response)
+        functools.partial(
+            _create_rule_from_sql, body, user, settings, registry, request, response, hunts
+        )
     )
 
 
@@ -320,7 +338,9 @@ def _create_rule_from_sql(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    request: Request,
     response: Response,
+    hunts: OptionalHuntConfigReg,
 ) -> RuleFromHyperdxResponse:
     """The deploy-repo and ClickHouse half of ``create_rule_from_hyperdx``, on a worker thread."""
     from dfe_engine.hunts.rule_creation_service import (
@@ -344,7 +364,8 @@ def _create_rule_from_sql(
         source=body.source,
     )
 
-    result = service.create_rule(svc_request, rule_id)
+    fence = _preview_tenant_ids(request, user, hunts, rule_id, body.hunt_name)
+    result = service.create_rule(svc_request, rule_id, tenant_ids=fence)
     _refuse_uncompilable(result)
     _refuse_matches_everything(result)
     outcome = registry.save(
@@ -426,7 +447,9 @@ def update_rule(
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
+    request: Request,
     response: Response,
+    hunts: OptionalHuntConfigReg,
 ):
     """Replace a detection rule (re-runs creation pipeline, preserves created_at).
 
@@ -466,7 +489,8 @@ def update_rule(
         estimate_cost=body.estimate_cost,
         cost_window_minutes=body.cost_window_minutes,
     )
-    result = service.create_rule(svc_request, name)
+    fence = _preview_tenant_ids(request, user, hunts, name, effective_hunt)
+    result = service.create_rule(svc_request, name, tenant_ids=fence)
     _refuse_uncompilable(result)
     _refuse_matches_everything(result)
     updated = result.rule.model_copy(
@@ -519,6 +543,45 @@ def delete_rule(
 
 
 # -- Helpers --------------------------------------------------
+
+
+def _preview_tenant_ids(
+    request: Request, user: CurrentUser, hunts: Any, rule: str, hunt_name: str | None
+) -> list[str] | None:
+    """The orgs a rule write's volume preview counts, or None for every org.
+
+    A rule a hunt runs, or names as its hunt, is counted over those hunts' customers,
+    as the compiled statements read them. Every rule is held to the orgs its author
+    may read as well, so a count never reports another org's rows.
+
+    Args:
+        request: The request, for the role definitions and the org registry.
+        user: The rule's author.
+        hunts: The hunt registry, or None where the deployment carries none.
+        rule: The rule's name.
+        hunt_name: The hunt the rule names as its own, if any.
+
+    Returns:
+        The tenant ids, sorted, or None when the author reads every org and no hunt
+        runs the rule.
+    """
+    readable = held_tenant_ids(request, user, scopes_dict["rule_write"])
+    running = set(hunts.hunt_names_referencing_rule(rule)) if hunts is not None else set()
+    if hunt_name:
+        running.add(hunt_name)
+    hunt_ids: set[str] | None = None
+    for hunt in sorted(running):
+        try:
+            definition = hunts.get(hunt) if hunts is not None else None
+        except HuntConfigNotFoundError:
+            continue
+        if definition is not None:
+            hunt_ids = (hunt_ids or set()) | set(hunt_tenant_ids(definition)[0])
+    if hunt_ids is None:
+        return readable
+    if readable is None:
+        return sorted(hunt_ids)
+    return sorted(hunt_ids & set(readable))
 
 
 def _sql_errors_for_original_sql(settings: Settings, original_sql: str) -> list[SqlValidationError]:

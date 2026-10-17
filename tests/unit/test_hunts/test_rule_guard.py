@@ -434,6 +434,32 @@ def test_the_preview_counts_the_window_and_the_matches_under_its_own_names():
     )
 
 
+def test_a_fenced_preview_counts_only_the_orgs_it_is_held_to():
+    sql = preview_sql(
+        "dfe", "main", "_timestamp_load", "severity = 'high'", 60, tenant_ids=["acme-1", "o'b"]
+    )
+
+    window = "`_timestamp_load` >= now() - INTERVAL 60 MINUTE"
+    fence = "_org_id IN ('acme-1', 'o''b')"
+    assert sql == (
+        "SELECT\n"
+        f"    (SELECT count() FROM `dfe`.`main` WHERE {window} AND {fence}) AS dfe_total,\n"
+        "    count() AS dfe_matched\n"
+        "FROM (\n"
+        "    SELECT `_timestamp_load`\n"
+        "    FROM `dfe`.`main`\n"
+        f"    WHERE {window} AND {fence} AND (\n"
+        "severity = 'high'\n"
+        "    )\n"
+        ")"
+    )
+
+
+def test_a_preview_held_to_no_org_is_refused_rather_than_run():
+    with pytest.raises(ValueError, match="no org"):
+        preview_sql("dfe", "main", "_timestamp_load", "severity = 'high'", 60, tenant_ids=[])
+
+
 def test_the_preview_throws_at_its_bounds_rather_than_breaking_off():
     settings = preview_settings(DetectionGuardSettings(preview_timeout_seconds=2.5))
 

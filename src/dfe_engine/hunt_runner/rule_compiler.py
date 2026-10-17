@@ -62,15 +62,13 @@ from dfe_engine.clickhouse.quoting import (
     plain_source_name,
     plain_table_name,
     quote_identifier,
-    quote_literal,
 )
 from dfe_engine.hunts.customers import hunt_tenant_ids
-from dfe_engine.hunts.hunt_output import HuntResultSchema, matching_rows
+from dfe_engine.hunts.hunt_output import HuntResultSchema, matching_rows, tenant_condition
 from dfe_engine.hunts.rule_guard import refuse_rule_condition
 from dfe_engine.hunts.rule_names import RuleNameError, rule_file
 from dfe_engine.hunts.rule_rewriter import RuleRewriter, strip_time_placeholder
 from dfe_engine.hunts.validator import rule_source
-from dfe_engine.orgs.available_ids import ORG_ID_COLUMN
 from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
 from dfe_engine.yaml_utils import yaml_load
 
@@ -124,14 +122,6 @@ def detection_cap(configured: int, ceiling: int) -> int:
         )
         return ceiling
     return configured
-
-
-def _tenant_condition(tenant_ids: list[str]) -> str:
-    """The conjunct holding a read to *tenant_ids*, as quoted literals.
-
-    Literals, not a bind slot: binding would parse the rule's own text for placeholders.
-    """
-    return f"{ORG_ID_COLUMN} IN ({', '.join(quote_literal(t) for t in tenant_ids)})"
 
 
 def _rule_entries(definition: dict[str, Any]) -> list[dict[str, Any]]:
@@ -247,7 +237,7 @@ def compile_hunt_queries(
             "hunt names no customers, so it reads no org and runs nothing", hunt_id=hunt_id
         )
         return []
-    tenant_condition = _tenant_condition(tenant_ids)
+    fence = tenant_condition(tenant_ids)
     directory = Path(rules_dir)
     schema = HuntResultSchema()
     rewriter = RuleRewriter()
@@ -326,14 +316,14 @@ def compile_hunt_queries(
             hunt_name=hunt_id,
             severity=severity,
             timestamp_placeholder=WINDOW_TOKEN,
-            tenant_condition=tenant_condition,
+            tenant_condition=fence,
         )
         statements.append(
             HuntStatement(
                 sql=f"{insert}\nLIMIT {max_detections}",
                 rule_id=rule_name,
                 cap=max_detections,
-                count_sql=_count_sql(source_db, source_table, where, tenant_condition),
+                count_sql=_count_sql(source_db, source_table, where, fence),
                 summary_sql=_summary_sql(schema, target_db, target_table),
                 summary_params={
                     "dfe_rule_id": rule_name,

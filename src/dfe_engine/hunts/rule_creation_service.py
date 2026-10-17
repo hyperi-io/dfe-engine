@@ -349,6 +349,8 @@ class RuleCreationService:
         self,
         request: RuleCreateRequest,
         rule_id: str,
+        *,
+        tenant_ids: list[str] | None = None,
     ) -> RuleCreateResult:
         """Full pipeline: sanitize -> validate -> Rule.from_create -> guards -> AI stub.
 
@@ -360,6 +362,9 @@ class RuleCreationService:
         Args:
             request: Rule creation request with SQL and/or CEL filter.
             rule_id: Unique rule identifier.
+            tenant_ids: The orgs the preview counts, by the tenant ids their rows
+                carry. None counts every org, and an empty list leaves the rule
+                unmeasured.
 
         Returns:
             RuleCreateResult with rule, validation errors, the match-everything
@@ -432,7 +437,7 @@ class RuleCreationService:
         measurable = not refused and matches_everything is None
         if measurable and rule.source_db and rule.source_table:
             if guard.enabled or request.estimate_cost:
-                cost_estimate = self._preview_volume(rule, request.cost_window_minutes)
+                cost_estimate = self._preview_volume(rule, request.cost_window_minutes, tenant_ids)
             if guard.enabled and cost_estimate is not None:
                 rule.warnings.extend(cost_estimate.warnings)
             if not request.estimate_cost:
@@ -635,12 +640,14 @@ class RuleCreationService:
 
         return ClickHouseManager.get_instance().get_clickhouse_client()
 
-    def _preview_volume(self, rule: Rule, window_minutes: int | None) -> CostEstimate:
+    def _preview_volume(
+        self, rule: Rule, window_minutes: int | None, tenant_ids: list[str] | None
+    ) -> CostEstimate:
         """Count what the rule matches over the lookback window and band the result.
 
         A preview that cannot finish -- timed out, over its row budget, ClickHouse
         unreachable or refusing -- comes back UNMEASURED with a warning saying so,
-        never as a rule that matches nothing.
+        never as a rule that matches nothing. So does one held to no org.
         """
         guard = self._hunts.detection_guard
         window = guard.preview_window_minutes
@@ -654,6 +661,8 @@ class RuleCreationService:
             )
             return CostEstimate(window_minutes=window, warnings=[unmeasured_warning(reason)])
 
+        if tenant_ids is not None and not tenant_ids:
+            return unmeasured("it may count no org's rows for this rule")
         client = self._query_client()
         if client is None:
             return unmeasured("no ClickHouse is configured")
@@ -664,6 +673,7 @@ class RuleCreationService:
             self._hunts.checkpoint_timestamp_field,
             rule.where_clause,
             window,
+            tenant_ids=tenant_ids,
         )
         started = time.monotonic()
         try:

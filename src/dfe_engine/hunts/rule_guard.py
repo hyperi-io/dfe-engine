@@ -27,7 +27,7 @@ plain-language warnings the UI shows beside the saved rule.
 """
 
 import re
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -44,7 +44,7 @@ from ..clickhouse.function_guard import (
 )
 from ..clickhouse.quoting import quote_identifier
 from ..settings import LOOKUP_DATABASE_PATTERN, DetectionGuardSettings
-from .hunt_output import matching_rows
+from .hunt_output import matching_rows, tenant_condition
 from .rule_model import Rule
 
 # Header columns every DFE event carries, so a presence check on one narrows nothing.
@@ -273,7 +273,13 @@ _MATCHED = "dfe_matched"
 
 
 def preview_sql(
-    source_db: str, source_table: str, time_column: str, where: str, window_minutes: int
+    source_db: str,
+    source_table: str,
+    time_column: str,
+    where: str,
+    window_minutes: int,
+    *,
+    tenant_ids: Sequence[str] | None = None,
 ) -> str:
     """The count the volume preview runs: every event in the window, and the matches.
 
@@ -287,17 +293,26 @@ def preview_sql(
         time_column: The load-time column the hunt runner windows on.
         where: The rule's detection WHERE, time window already removed.
         window_minutes: Lookback window length.
+        tenant_ids: The orgs both counts are held to, by the tenant ids their rows
+            carry, with the runner's own conjunct. None counts every org.
 
     Returns:
         One SELECT returning ``dfe_total`` and ``dfe_matched``.
+
+    Raises:
+        ValueError: If ``tenant_ids`` is empty, since the counts would read nothing.
     """
     column = quote_identifier(time_column)
     window = f"{column} >= now() - INTERVAL {int(window_minutes)} MINUTE"
+    fence = tenant_condition(tenant_ids) if tenant_ids is not None else ""
+    in_window = f"{window} AND {fence}" if fence else window
     source = f"{quote_identifier(source_db)}.{quote_identifier(source_table)}"
-    matched = matching_rows(source_db, source_table, (column,), where, window)
+    matched = matching_rows(
+        source_db, source_table, (column,), where, window, tenant_condition=fence
+    )
     return (
-        f"SELECT\n"  # noqa: S608 - quoted source and column; an integer window; the rule itself
-        f"    (SELECT count() FROM {source} WHERE {window}) AS {_TOTAL},\n"
+        f"SELECT\n"  # noqa: S608 - quoted source and column; an integer window; quoted tenant ids; the rule itself
+        f"    (SELECT count() FROM {source} WHERE {in_window}) AS {_TOTAL},\n"
         f"    count() AS {_MATCHED}\n"
         f"FROM {matched}"
     )

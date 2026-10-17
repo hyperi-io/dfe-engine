@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from scalo.logger import logger
 
 from ..clickhouse.quoting import quote_identifier, quote_literal
+from ..orgs.available_ids import ORG_ID_COLUMN
 from ..schema.schema_loader import SchemaLoader
 
 # Common header columns to copy from source -> hunt results.
@@ -108,6 +109,19 @@ RESULTS_TABLE_COLUMNS: frozenset[str] = (
     | frozenset(dc.name for dc in HUNT_DETECTION_COLUMNS)
     | frozenset({"_json"})
 )
+
+
+def tenant_condition(tenant_ids: Sequence[str]) -> str:
+    """The conjunct holding a read to ``tenant_ids``, as quoted literals.
+
+    Literals, not a bind slot: binding would parse the rule's own text for placeholders.
+
+    Raises:
+        ValueError: If ``tenant_ids`` is empty, since the read would match nothing.
+    """
+    if not tenant_ids:
+        raise ValueError("a read held to no org would match nothing")
+    return f"{ORG_ID_COLUMN} IN ({', '.join(quote_literal(t) for t in tenant_ids)})"
 
 
 def matching_rows(
