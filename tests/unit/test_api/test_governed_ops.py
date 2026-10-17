@@ -530,3 +530,29 @@ class TestChRbacReconcileEndpoint:
     def test_viewer_forbidden(self, client, viewer_headers):
         resp = client.post("/api/v1/governance/ch-rbac/reconcile", headers=viewer_headers)
         assert resp.status_code == 403
+
+    @pytest.mark.parametrize(
+        ("errors", "stood_down"),
+        [([], True), (["GRANT INSERT ON dfe.otel_* failed"], False)],
+        ids=["clean", "partial"],
+    )
+    def test_only_a_clean_run_stands_the_startup_retry_down(
+        self, client, app, admin_headers, monkeypatch, errors, stood_down
+    ):
+        """A run that left a statement failed has not provisioned what the retry waits for."""
+        import dfe_engine.governance.ch as ch
+        from dfe_engine.governance.ch import ReconcileResult
+
+        monkeypatch.setattr(ch, "ch_admin_client", lambda settings: object())
+        monkeypatch.setattr(
+            ch, "reconcile_from_stores", lambda *a, **k: ReconcileResult(errors=list(errors))
+        )
+        noted: list[bool] = []
+        trigger = app.state.ch_rbac_reconcile
+        monkeypatch.setattr(trigger, "succeeded", lambda: noted.append(True))
+
+        resp = client.post("/api/v1/governance/ch-rbac/reconcile", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["errors"] == errors
+        assert noted == ([True] if stood_down else [])
