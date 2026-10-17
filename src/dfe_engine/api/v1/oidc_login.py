@@ -29,6 +29,7 @@ These endpoints are deliberately unauthenticated - they ARE the login. Unknown
 or disabled providers return 404.
 """
 
+import functools
 import time
 from datetime import timedelta
 from typing import TYPE_CHECKING, Literal, NoReturn
@@ -37,6 +38,7 @@ from urllib.parse import urlencode, urlsplit
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.api.deps import (
@@ -139,7 +141,7 @@ class OidcCallbackResponse(BaseModel):
     groups: list[str] = Field(default_factory=list, description="Resolved group identifiers")
 
 
-def _reload_rp_if_provider_known(request: Request, provider: str):
+async def _reload_rp_if_provider_known(request: Request, provider: str):
     """Rebuild the RP when the registry knows an enabled provider the RP does not.
 
     The provider-CRUD endpoints rebuild the RP on every write, but that only
@@ -152,6 +154,9 @@ def _reload_rp_if_provider_known(request: Request, provider: str):
     Costs a single stat + one small YAML parse for the NAMED provider (no
     directory walk), so an unauthenticated caller spamming bogus names buys
     itself a failed stat and nothing more.
+
+    The rebuild reads each enabled provider's credentials from the secret store, so it
+    runs on a worker thread.
 
     Returns the rebuilt RP, or None if the registry does not vindicate the miss.
     """
@@ -172,17 +177,21 @@ def _reload_rp_if_provider_known(request: Request, provider: str):
     from dfe_engine.auth.oidc.rp import build_relying_party
 
     logger.info("OIDC RP stale - rebuilding for a provider added since startup", provider=provider)
-    request.app.state.oidc_rp = build_relying_party(
-        registry, secrets=getattr(request.app.state, "dfe_secrets", None)
+    request.app.state.oidc_rp = await run_blocking(
+        functools.partial(
+            build_relying_party,
+            registry,
+            secrets=getattr(request.app.state, "dfe_secrets", None),
+        )
     )
     return request.app.state.oidc_rp
 
 
-def _rp_or_404(request: Request, provider: str):
+async def _rp_or_404(request: Request, provider: str):
     """Resolve the relying party and assert the provider is registered."""
     rp = getattr(request.app.state, "oidc_rp", None)
     if rp is None or not rp.has_provider(provider):
-        rp = _reload_rp_if_provider_known(request, provider)
+        rp = await _reload_rp_if_provider_known(request, provider)
     if rp is None or not rp.has_provider(provider):
         raise HTTPException(
             status_code=404,
@@ -219,7 +228,7 @@ async def oidc_login(
     ),
 ) -> RedirectResponse | OidcLoginResponse:
     """Begin OIDC auth-code flow: 302 to the IdP, or JSON authorize URL for SPAs."""
-    rp = _rp_or_404(request, provider)
+    rp = await _rp_or_404(request, provider)
     if return_to:
         request.session[_RETURN_TO_SESSION_KEY] = validate_return_to(
             return_to, _origin(str(request.base_url)), settings.api.cors_origins
@@ -276,7 +285,7 @@ async def oidc_callback(
     """
     # Spent before the provider check, so a 404 leaves no return_to behind either.
     return_to = request.session.pop(_RETURN_TO_SESSION_KEY, None)
-    rp = _rp_or_404(request, provider)
+    rp = await _rp_or_404(request, provider)
     try:
         return await _complete_login(provider, request, settings, rp, return_to)
     except HTTPException as exc:
