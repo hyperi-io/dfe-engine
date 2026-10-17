@@ -266,7 +266,7 @@ class TestEntra:
         finally:
             graph.stop()
 
-        assert groups == []
+        assert groups is None
         assert graph.principals == [f"users/{SENTINEL}"]
         assert_no_sentinel(logged(audit_events))
         line = failure_line(audit_events, "resolve_user_groups")
@@ -312,7 +312,7 @@ class TestOkta:
         with refusing_api(404, OKTA_NOT_FOUND) as server:
             groups = await okta_adapter(server.base_url).resolve_user_groups(SENTINEL)
 
-        assert groups == []
+        assert groups is None
         assert server.paths == [f"/users/{SENTINEL}/groups?limit=200"]
         assert_no_sentinel(logged(audit_events))
         line = failure_line(audit_events, "resolve_user_groups")
@@ -403,7 +403,7 @@ class TestGoogleDirectory:
         with refusing_api(404, DIRECTORY_NOT_FOUND) as server:
             groups = await _directory_adapter(server.base_url).resolve_user_groups(SENTINEL)
 
-        assert groups == []
+        assert groups is None
         # googleapiclient percent-encodes the address, a form the log scrubber does not recognise.
         assert "userKey=idp.sentinel.7f3a%40example.com" in server.paths[0]
         assert_no_sentinel(logged(audit_events))
@@ -521,7 +521,7 @@ class TestGoogleCloudIdentity:
         finally:
             server.stop()
 
-        assert groups == []
+        assert groups is None
         assert_no_sentinel(logged(audit_events))
         line = failure_line(audit_events, "searchDirectGroups")
         assert (line["status"], line["code"]) == (
@@ -826,7 +826,7 @@ class TestSyncSkipsAGroupWithNoId:
 class TestLoginLookupPageLimit:
     """A user lookup still paging at the limit is the login path's failure, never an endless wait."""
 
-    async def test_an_okta_user_lookup_still_paging_at_the_limit_is_default_deny(
+    async def test_an_okta_user_lookup_still_paging_at_the_limit_is_no_answer(
         self, audit_events: list[dict]
     ) -> None:
         okta = LocalOkta(pages=_numbered_okta_pages(6))
@@ -838,12 +838,12 @@ class TestLoginLookupPageLimit:
         finally:
             okta.stop()
 
-        assert groups == []
+        assert groups is None
         assert okta.pages_requested == [0, 1, 2]
         line = failure_line(audit_events, "resolve_user_groups")
         assert line["error_type"] == "DirectoryPageLimitError"
 
-    async def test_a_graph_user_lookup_still_paging_at_the_limit_is_default_deny(
+    async def test_a_graph_user_lookup_still_paging_at_the_limit_is_no_answer(
         self, audit_events: list[dict]
     ) -> None:
         graph = LocalGraph()
@@ -858,7 +858,7 @@ class TestLoginLookupPageLimit:
         finally:
             graph.stop()
 
-        assert groups == []
+        assert groups is None
         assert graph.principals == ["users/u1", "users/u1", "users/u1"]
         assert failure_line(audit_events, "resolve_user_groups")["pages"] == 3
 

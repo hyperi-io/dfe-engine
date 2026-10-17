@@ -175,20 +175,20 @@ class TestGetTokenMissingCredentials:
 
 
 # ---------------------------------------------------------------------------
-# resolve_user_groups (the >200 overage enrichment) — empty when no credentials
+# resolve_user_groups (the >200 overage enrichment) -- no answer when no credentials
 # ---------------------------------------------------------------------------
 
 
 class TestResolveUserGroupsNoCredentials:
-    async def test_returns_empty_list_when_no_credentials(self, monkeypatch):
+    async def test_answers_nothing_when_no_credentials(self, monkeypatch):
         monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
         monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
         monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
 
         adapter = EntraAdapter(_make_provider())
-        # Fail-open: no token -> no groups (default deny), never raises.
+        # No token is no answer, never an empty one, and never raises.
         result = await adapter.resolve_user_groups("some-user-oid")
-        assert result == []
+        assert result is None
 
     async def test_empty_directory_id_short_circuits(self, monkeypatch):
         monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
@@ -330,7 +330,7 @@ class TestSecretStoreDidNotAnswer:
 
         with pytest.raises(DirectoryCredentialError):
             await adapter.list_all_groups()
-        assert await adapter.resolve_user_groups("some-user-oid") == []
+        assert await adapter.resolve_user_groups("some-user-oid") is None
 
     async def test_the_connection_test_names_the_secret_store(self):
         adapter = EntraAdapter(_stored_secret_provider(), secrets=UnreachableSecretStore())
@@ -360,7 +360,7 @@ class TestEntraUnreachable:
         assert "could not use the configured credential" not in message
         (line,) = [e for e in audit_events if e.get("operation") == "token"]
         assert line["transport_failure"] == "connection_refused"
-        assert await adapter.resolve_user_groups("some-user-oid") == []
+        assert await adapter.resolve_user_groups("some-user-oid") is None
 
 
 _DISCOVERY_SUFFIX = "/v2.0/.well-known/openid-configuration"
@@ -645,6 +645,7 @@ class TestOverageUserToken:
         graph.pages["me"] = [[ADMINS, VIEWERS]]
         groups = await _overage_adapter(graph).resolve_user_groups(OID)
 
+        assert groups is not None
         assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
         assert graph.principals == ["me"]
         assert graph.requests[0]["authorization"] == "Bearer user-token"
@@ -654,6 +655,7 @@ class TestOverageUserToken:
         graph.pages[f"users/{OID}"] = [[VIEWERS]]
         groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
 
+        assert groups is not None
         assert [g.name for g in groups] == ["dfe-viewers"]
         assert graph.principals == ["me", f"users/{OID}"]
         assert graph.requests[1]["authorization"] == "Bearer app-token"
@@ -670,18 +672,20 @@ class TestOverageUserToken:
             OID
         )
 
+        assert groups is not None
         assert [g.name for g in groups] == ["dfe-admins"]
         assert graph.principals == [f"users/{OID}"]
 
-    async def test_refused_everywhere_is_default_deny(self, graph):
+    async def test_refused_everywhere_is_no_answer(self, graph):
         graph.refuse["me"] = (403, SCOPE_REFUSED)
         graph.refuse[f"users/{OID}"] = (403, SCOPE_REFUSED)
-        assert await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID) == []
+        assert await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID) is None
 
     async def test_every_page_is_read(self, graph):
         graph.pages["me"] = [[ADMINS], [VIEWERS]]
         groups = await _overage_adapter(graph).resolve_user_groups(OID)
 
+        assert groups is not None
         assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
         assert graph.principals == ["me", "me"]
 
@@ -698,6 +702,7 @@ class TestOverageUserToken:
         graph.limited.add("me")
         groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
 
+        assert groups is not None
         assert [g.id for g in groups] == [ADMINS["id"], VIEWERS["id"]]
         assert [g.name for g in groups] == ["", ""]
         assert graph.principals == ["me"]
@@ -708,5 +713,6 @@ class TestOverageUserToken:
         graph.pages[f"users/{OID}"] = [[ADMINS, VIEWERS]]
         groups = await _overage_adapter(graph, app_token="app-token").resolve_user_groups(OID)
 
+        assert groups is not None
         assert [g.name for g in groups] == ["dfe-admins", "dfe-viewers"]
         assert graph.principals == ["me", "me", f"users/{OID}"]

@@ -182,6 +182,7 @@ async def _reload_rp_if_provider_known(request: Request, provider: str):
             build_relying_party,
             registry,
             secrets=getattr(request.app.state, "dfe_secrets", None),
+            metrics=getattr(request.app.state, "oidc_login_metrics", None),
         )
     )
     return request.app.state.oidc_rp

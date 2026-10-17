@@ -224,7 +224,7 @@ class OIDCGroupAdapter(ABC):
             human-readable status or error description.
         """
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | None:
         """Return the groups *directory_id* belongs to, fetched from the provider.
 
         This is the enrichment call the Relying Party uses when a token does NOT
@@ -237,10 +237,15 @@ class OIDCGroupAdapter(ABC):
         ``oid``, not the pairwise ``sub``), because that is what the directory API
         keys on.
 
+        Returns:
+            The user's groups, or None when the directory gave no answer: not
+            configured, not reached, refused, or a listing that could not be read
+            whole. An empty list is the directory answering that the user is in
+            no group, so a failure is never returned as one. The RP counts a None
+            and keeps the ID token's groups. Never raises.
+
         The default returns an empty list: providers without an admin directory
-        API (generic) or that always deliver groups in-token have nothing to add,
-        and returning ``[]`` fails safe (no groups -> default deny, never an
-        accidental grant). Adapters that CAN enumerate a user's groups override
-        this.
+        API (generic) or that always deliver groups in-token have nothing to add.
+        Adapters that CAN enumerate a user's groups override this.
         """
         return []

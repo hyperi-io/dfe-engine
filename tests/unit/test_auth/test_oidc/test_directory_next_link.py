@@ -103,7 +103,7 @@ class TestOkta:
         groups, raised = await _outcome(okta_adapter(okta.base_url).resolve_user_groups("jane"))
 
         assert foreign_okta.authorizations == []
-        assert (groups, raised) == ([], None)
+        assert (groups, raised) == (None, None)
 
     async def test_the_same_host_on_another_port_is_another_origin(self, okta: LocalOkta):
         port = int(okta.base_url.rsplit(":", 1)[1])

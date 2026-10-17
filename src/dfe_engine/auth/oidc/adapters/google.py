@@ -95,7 +95,7 @@ class GoogleAdapter(OIDCGroupAdapter):
     """Google Workspace groups: Cloud Identity as the user, else the Directory API as a service account.
 
     Every method but ``list_all_groups`` fails closed: missing credentials or a
-    refused call yield no groups, never an exception. ``list_all_groups`` is not on
+    refused call yield no answer (None), never an exception. ``list_all_groups`` is not on
     the login path and raises when no service account is configured, when the one
     configured does not build a client and when the Directory API refuses it.
     """
@@ -117,7 +117,7 @@ class GoogleAdapter(OIDCGroupAdapter):
     # Public async interface
     # ------------------------------------------------------------------
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | None:
         """Return the groups the user with email *directory_id* belongs to.
 
         Asks Cloud Identity with the user's own access token first. Only when
@@ -126,8 +126,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         answers with no groups is the answer: it does not fall through.
 
         Returns:
-            The user's groups keyed by directory id, or ``[]`` (default deny)
-            when no path could answer.
+            The user's groups keyed by directory id, or None when no path could answer.
         """
         if not directory_id:
             return []
@@ -346,11 +345,11 @@ class GoogleAdapter(OIDCGroupAdapter):
     # Directory API, as the service account
     # ------------------------------------------------------------------
 
-    async def _groups_with_service_account(self, *, user_key: str) -> list[GroupInfo]:
-        """The user's groups from the Directory API, or [] when no service account answers."""
+    async def _groups_with_service_account(self, *, user_key: str) -> list[GroupInfo] | None:
+        """The user's groups from the Directory API, or None when no service account answers."""
         service = await run_blocking(self._get_service)
         if service is None:
-            return []
+            return None
 
         try:
             raw = await run_blocking(
@@ -358,12 +357,12 @@ class GoogleAdapter(OIDCGroupAdapter):
             )
         except Exception as exc:
             logger.warning(
-                "Google Admin SDK resolve_user_groups failed -- default deny",
+                "Google Admin SDK resolve_user_groups failed",
                 operation="resolve_user_groups",
                 provider=self._provider.issuer,
                 **describe_http_error(exc),
             )
-            return []
+            return None
 
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 

@@ -44,6 +44,39 @@ if TYPE_CHECKING:
 # Claims a userinfo response may fill; groups stay ID-token-only because they decide roles.
 _USERINFO_FILL_CLAIMS = ("email", "name", "preferred_username")
 
+DIRECTORY_GROUPS_FALLBACKS = "auth_oidc_login_directory_fallbacks_total"
+
+
+class LoginMetrics:
+    """The OIDC login's instruments, or a no-op set when no backend is wired.
+
+    Args:
+        manager: a scalo ``MetricsManager`` (anything exposing ``counter``). ``None``
+            means no backend, and every record method returns without doing anything.
+    """
+
+    def __init__(self, manager: Any | None = None) -> None:
+        """Register the counter on *manager*, or nothing when there is none."""
+        self._manager = manager
+        if manager is None:
+            return
+        self._fallbacks = manager.counter(
+            DIRECTORY_GROUPS_FALLBACKS,
+            "OIDC logins whose directory group lookup gave no answer, so the ID token's groups were used",
+            ["provider"],
+        )
+
+    def directory_fallback(self, provider: str) -> None:
+        """Record a login that kept the ID token's groups because the directory gave no answer.
+
+        Args:
+            provider: The provider's registry name, so the label is bounded by the
+                providers configured.
+        """
+        if self._manager is None:
+            return
+        self._fallbacks.labels(provider=provider).inc()
+
 
 class UserinfoSubjectMismatchError(ValueError):
     """The userinfo response names a different subject from the ID token."""
@@ -239,10 +272,15 @@ class OidcRelyingParty:
     """
 
     def __init__(
-        self, registry: OIDCProviderRegistry, *, secrets: DfeSecrets | None = None
+        self,
+        registry: OIDCProviderRegistry,
+        *,
+        secrets: DfeSecrets | None = None,
+        metrics: LoginMetrics | None = None,
     ) -> None:
         self._oauth = OAuth()
         self._secrets = secrets
+        self._metrics = metrics if metrics is not None else LoginMetrics()
         # Only providers we actually registered (enabled + non-empty issuer).
         self._providers: dict[str, OIDCProvider] = {}
         for name, provider in registry.list():
@@ -335,10 +373,12 @@ class OidcRelyingParty:
         provider = self._providers[provider_name]  # KeyError if unknown - caller guards
         client = self._client(provider_name)
         token = await client.authorize_access_token(request)
-        return await self._identity_from_token(client=client, provider=provider, token=token)
+        return await self._identity_from_token(
+            client=client, provider=provider, provider_name=provider_name, token=token
+        )
 
     async def _identity_from_token(
-        self, *, client: Any, provider: OIDCProvider, token: dict[str, Any]
+        self, *, client: Any, provider: OIDCProvider, provider_name: str, token: dict[str, Any]
     ) -> NormalizedIdentity:
         """The identity a validated token response names, its groups read from the directory where the token carries none."""
         # Authlib parses + validates the id_token and exposes its claims here.
@@ -353,7 +393,11 @@ class OidcRelyingParty:
         # in the token at all (google-workspace, enrich_on_login).
         if needs_directory_groups(identity=identity, provider=provider):
             identity = await self._enrich_groups_from_directory(
-                provider, identity, userinfo, access_token=str(token.get("access_token") or "")
+                provider,
+                identity,
+                userinfo,
+                access_token=str(token.get("access_token") or ""),
+                provider_name=provider_name,
             )
         return identity
 
@@ -364,6 +408,7 @@ class OidcRelyingParty:
         userinfo: dict[str, Any],
         *,
         access_token: str = "",
+        provider_name: str,
     ) -> NormalizedIdentity:
         """Fetch the user's groups from the provider directory API.
 
@@ -381,22 +426,33 @@ class OidcRelyingParty:
         (Entra ``oid``), falling back to email then ``sub`` (Google's lookups
         key a user on their email).
 
-        Fails safe: on overage the fetched set is authoritative even when empty
-        (default deny); otherwise a populated token set is NOT stripped by a
-        transient empty fetch.
+        A directory that gives no answer keeps the groups the signed ID token
+        carries, counted and logged once, so a directory outage never locks every
+        user out. A token carrying no groups claim leaves the user with no groups,
+        the same as one in none, until the directory answers. On overage an answer
+        is authoritative even when empty (default deny). Otherwise a populated
+        token set is NOT stripped by an empty answer.
         """
         from dfe_engine.auth.oidc.adapters import get_adapter
 
         directory_id = str(userinfo.get("oid") or identity.email or identity.subject)
+        failure: dict[str, Any] = {}
         try:
             adapter = get_adapter(provider, access_token=access_token, secrets=self._secrets)
             fetched = await adapter.resolve_user_groups(directory_id)
-        except Exception as exc:  # pragma: no cover - defensive; adapters fail open
+        except Exception as exc:
+            fetched = None
+            failure = describe_http_error(exc)
+        if fetched is None:
+            self._metrics.directory_fallback(provider_name)
             logger.warning(
-                "OIDC RP: directory group enrichment failed",
+                "OIDC RP: directory group lookup gave no answer, using the ID token's groups",
                 operation="resolve_user_groups",
+                overflow=identity.groups_overflowed,
                 provider=provider.issuer,
-                **describe_http_error(exc),
+                provider_name=provider_name,
+                claimed_group_count=len(identity.groups),
+                **failure,
             )
             return identity
         group_ids = [g.id for g in fetched if g.id]
@@ -412,7 +468,10 @@ class OidcRelyingParty:
 
 
 def build_relying_party(
-    registry: OIDCProviderRegistry, *, secrets: DfeSecrets | None = None
+    registry: OIDCProviderRegistry,
+    *,
+    secrets: DfeSecrets | None = None,
+    metrics: LoginMetrics | None = None,
 ) -> OidcRelyingParty | None:
     """Build an RP over the registry's CURRENT contents, or None if it cannot be built.
 
@@ -429,7 +488,7 @@ def build_relying_party(
     with malformed config must not take a CRUD write down with it.
     """
     try:
-        return OidcRelyingParty(registry, secrets=secrets)
+        return OidcRelyingParty(registry, secrets=secrets, metrics=metrics)
     except Exception as exc:
         # The text can quote a provider file's values, so the log takes the class and status only.
         logger.warning("OIDC relying party unavailable", **describe_http_error(exc))

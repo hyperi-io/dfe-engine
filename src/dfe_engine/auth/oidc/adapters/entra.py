@@ -13,7 +13,7 @@ Graph API: with the user's own login token where it can, otherwise with the
 app registration's own credentials and its admin-consented application
 permission.
 
-Credentials resolve through :func:`graph_credentials`. ``resolve_user_groups`` and ``test_connection`` fail open, returning fallbacks rather than raising; ``list_all_groups`` raises.
+Credentials resolve through :func:`graph_credentials`. ``resolve_user_groups`` and ``test_connection`` never raise: the lookup answers None and the test a failure message. ``list_all_groups`` raises.
 
 Usage::
 
@@ -199,8 +199,8 @@ def _confidential_client(
 class EntraAdapter(OIDCGroupAdapter):
     """Entra ID group adapter using the Microsoft Graph API.
 
-    ``resolve_user_groups`` and ``test_connection`` fail open -- missing
-    credentials or API errors log a warning and return an unfriendly fallback
+    ``resolve_user_groups`` and ``test_connection`` never raise -- missing
+    credentials or API errors log a warning and return None or a failure message
     rather than propagating exceptions.  This keeps authentication working even
     when the group resolution API is unreachable.  ``list_all_groups`` is not on
     the login path and raises when the credentials are not configured or cannot be
@@ -228,7 +228,7 @@ class EntraAdapter(OIDCGroupAdapter):
     # Public interface
     # ------------------------------------------------------------------
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | None:
         """Enumerate a user's group memberships via Graph transitiveMemberOf.
 
         This is the >200 group OVERAGE path: when a user is in too many groups,
@@ -246,8 +246,8 @@ class EntraAdapter(OIDCGroupAdapter):
         ``directory_id`` MUST be the Entra object id (the ``oid`` claim), not the
         pairwise ``sub`` - Graph keys ``/users/{id}`` on the object id.
 
-        Fails open: no token or an API error returns ``[]`` (default deny), never
-        raises, so an enrichment outage cannot break login or over-grant.
+        No token or an API error returns None, the directory giving no answer,
+        and never raises, so an enrichment outage cannot break login or over-grant.
         """
         if not directory_id:
             return []
@@ -263,22 +263,21 @@ class EntraAdapter(OIDCGroupAdapter):
             token = await run_blocking(self._get_token)
         except Exception as exc:
             logger.warning(
-                "Entra resolve_user_groups: token request failed -- returning empty list",
+                "Entra resolve_user_groups: token request failed",
                 operation="token",
                 provider=self._provider.issuer,
                 **describe_http_error(exc),
             )
-            return []
+            return None
         if token is None:
             logger.warning(
-                "Entra resolve_user_groups: no token available -- returning empty list",
+                "Entra resolve_user_groups: no token available",
                 provider=self._provider.issuer,
             )
-            return []
-        groups = await self._page_groups(
+            return None
+        return await self._page_groups(
             f"{self.GRAPH_BASE}/users/{directory_id}/{self._GROUP_QUERY}", token
         )
-        return groups or []
 
     async def _page_groups(self, url: str, token: str) -> list[GroupInfo] | None:
         """Every page of one transitiveMemberOf listing, or None when Graph did not answer.

@@ -148,8 +148,8 @@ ONLY place the remaining quirks live:
 Identity Groups API with the user's own login token; the Admin SDK Directory API
 as an optional service account), `entra` (Microsoft Graph), `okta` (Groups API). Contract:
 `list_all_groups`, `resolve_user_groups`, `test_connection`. The two a login can
-reach are failsafe - `resolve_user_groups` returns empty on a credential or API
-failure rather than raising, so auth keeps working if group resolution degrades.
+reach are failsafe - `resolve_user_groups` answers None on a credential or API
+failure rather than raising, and the login keeps the ID token's groups.
 `list_all_groups` serves the sync only and raises when a page fails, so the sync
 never reads a short listing as the whole directory.
 

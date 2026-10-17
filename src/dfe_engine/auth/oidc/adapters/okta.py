@@ -44,12 +44,12 @@ from dfe_engine.http_errors import describe_http_error, http_failure_message
 class OktaAdapter(OIDCGroupAdapter):
     """Okta Groups API adapter."""
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | None:
         """List groups for a user (Okta user id or login).
 
-        Fails open: a failed call, a page that is not a list of groups or a listing
-        still paging at :attr:`MAX_LOGIN_PAGES` returns ``[]`` and logs, never the
-        groups read before it.
+        No answer is None: a domain or token not configured, a failed call, a page
+        that is not a list of groups or a listing still paging at
+        :attr:`MAX_LOGIN_PAGES` logs and returns None, never the groups read before it.
         """
         if not directory_id:
             return []
@@ -59,7 +59,7 @@ class OktaAdapter(OIDCGroupAdapter):
             # A token that is set but never sent finds no groups, so the login says why once.
             if base is not None and self._api_token.value:
                 self._warn_unsendable_token(operation="resolve_user_groups")
-            return []
+            return None
 
         from scalo.http import AsyncHttpClient
 
@@ -80,12 +80,12 @@ class OktaAdapter(OIDCGroupAdapter):
             raise DirectoryPageLimitError(self.MAX_LOGIN_PAGES)
         except Exception as exc:
             logger.warning(
-                "Okta resolve_user_groups failed -- default deny",
+                "Okta resolve_user_groups failed",
                 operation="resolve_user_groups",
                 provider=self._provider.issuer,
                 **describe_http_error(exc),
             )
-            return []
+            return None
 
     async def list_all_groups(self) -> list[GroupInfo]:
         """List all Okta groups (paginated).

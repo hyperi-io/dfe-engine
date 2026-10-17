@@ -17,8 +17,8 @@ enrichment call) runs offline and reproducibly.
 
 It is selected by ``GroupResolutionConfig.directory_backend == "mock"``. The
 fixture path comes from the env var named in ``mock_directory_env`` (default
-``DFE_OIDC_MOCK_DIRECTORY``). A sign-in's lookup fails open: a missing or
-malformed fixture yields no groups (default deny) rather than a crash mid-login.
+``DFE_OIDC_MOCK_DIRECTORY``). A sign-in's lookup never raises: a missing or
+malformed fixture is no answer, as a live directory that could not be reached is.
 The listing does not, as the live adapters' does not, so group sync never
 records a fixture it could not read as a directory with no groups.
 
@@ -148,8 +148,10 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
             out.append(self._by_id.get(gid) or GroupInfo(id=gid, name=gid))
         return out
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
-        """The overage / enrichment call: this user's group memberships."""
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | None:
+        """The overage / enrichment call: this user's group memberships, or None when no fixture loaded."""
+        if self._load_error:
+            return None
         return self._groups_for(directory_id)
 
     async def list_all_groups(self) -> list[GroupInfo]:
