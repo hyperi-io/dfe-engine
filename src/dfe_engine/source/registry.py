@@ -759,6 +759,7 @@ class SourceRegistry:
             self._validate_match_operator(source, candidate_match)
             self._validate_fetcher_routes(source, candidate_version)
             self._validate_fetcher_types(source, candidate_version)
+            self._validate_fetcher_schema(source, candidate_version)
             self._validate_engine_arguments(source, candidate_version)
             self._validate_flow(source)
             self._validate_instance_room(source)
@@ -858,6 +859,28 @@ class SourceRegistry:
             require_one_type(source.source, {fetcher.source_type: fetcher.config}, get_settings())
         except MixedConnectorTypesError as exc:
             raise SourceValidationError(str(exc)) from exc
+
+    @staticmethod
+    def _validate_fetcher_schema(source: Source, version: SourceVersion | None) -> None:
+        """A fetcher on its own topic needs a schema, or it saves and can never go live.
+
+        Deploy refuses a version with no schema files, and a version is marked deployed
+        without one only when its records land on the shared ``main`` topic. A fetcher
+        source on its own topic with none would therefore save, then never deploy, and
+        its fetcher instance would never be created.
+        """
+        # Lazy import: the schema builder imports the source models this module serves.
+        from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+
+        if version is None or version.fetcher is None or version.fetcher.topic != "own":
+            return
+        if SchemaBuilderV2.version_snapshot_has_schema_files(version):
+            return
+        raise SourceValidationError(
+            f"source {source.source!r}: a fetcher on its own topic needs a schema or it can "
+            "never be deployed. Set the fetcher topic to 'main' to land on the shared table, "
+            "or define a schema (meta_schema, derived_schema or additional_fields)"
+        )
 
     @staticmethod
     def _validate_engine_arguments(source: Source, version: SourceVersion | None) -> None:
