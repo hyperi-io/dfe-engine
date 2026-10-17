@@ -8,10 +8,9 @@ authored in dfe-schemas under ``sources/`` and reaches the deployment the way
 every other schema resource does, through the image-baked seed tree that
 ``bootstrap.ensure_storage`` copies into the schemas directory.
 
-The definition carries no ``source`` name. The engine fills it from
-``clickhouse.landing_table``, the setting that also names the table the
-ClickHouse bootstrap creates, so a deployment that renames its landing table
-cannot end up with a source pointing at the old one.
+The definition carries no ``source`` name. The engine fills it from the landing
+table's name in the dfe-schemas manifest, the same name the ClickHouse bootstrap
+creates the table under, so the source and the table cannot disagree.
 """
 
 from pathlib import Path
@@ -19,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
 
+from dfe_engine.schema.core_schema import landing_table_name
 from dfe_engine.source.models import Source
 from dfe_engine.yaml_utils import yaml_load
 
@@ -29,14 +29,14 @@ SOURCES_SUBDIR = "sources"
 """Where dfe-schemas keeps its source definitions, under the schemas root."""
 
 LANDING_SOURCE_FILE = "main.yaml"
-"""The landing table's definition. Its stored name comes from the settings."""
+"""The landing table's definition. Its stored name comes from the manifest."""
 
 
 def _drop_stale_core_sources(registry: SourceRegistry, settings: Any, *, keep: str) -> list[str]:
     """Remove every core source but *keep*, and the build records it leaves behind.
 
-    A core source the settings no longer name fronts a table that is no longer the
-    landing table. The ClickHouse table itself is left alone: reclaiming an
+    A core source under any other name fronts a table that is not the landing
+    table. The ClickHouse table itself is left alone: reclaiming an
     operator's data is not this path's call.
     """
     dropped = []
@@ -80,7 +80,7 @@ def _landing_definition(settings: Any) -> Source | None:
     if not (path.is_file()):
         return None
 
-    table = settings.clickhouse.landing_table
+    table = landing_table_name()
     doc = yaml_load(path) or {}
     # resource_type is forced, not read: the whole point of this source is that no
     # API write path may touch it, and a shipped file that omitted the marker would

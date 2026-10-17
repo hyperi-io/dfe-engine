@@ -985,7 +985,7 @@ class SourceRegistry:
         items: list[tuple[str, str]] = []
         for resource in sorted(builtins_dir.iterdir()):
             # The landing definition is the engine's own: seed_core_sources fills
-            # its name from clickhouse.landing_table, which this path cannot.
+            # its name from the manifest, which this path does not.
             if not resource.name.endswith(".yaml") or resource.name == LANDING_SOURCE_FILE:
                 continue
 

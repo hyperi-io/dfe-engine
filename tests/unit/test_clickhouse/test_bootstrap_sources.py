@@ -48,7 +48,6 @@ def _settings() -> SimpleNamespace:
             default_table_profile="timeseries",
             default_ttl_days=0,
             effective_data_database="dfe",
-            landing_table="main",
             topology="single",
         ),
         schemas=SimpleNamespace(schemas_dir=""),

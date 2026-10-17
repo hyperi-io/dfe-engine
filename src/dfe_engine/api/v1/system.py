@@ -58,6 +58,7 @@ from dfe_engine.gitcrud.table_defaults import (
 from dfe_engine.gitcrud.table_defaults import resolve as resolve_defaults
 from dfe_engine.gitops.pins import UI_COMPONENT, component_overrides, load_pins, stack_version
 from dfe_engine.schema.applier import LiveTable, SchemaApplyError, live_tables
+from dfe_engine.schema.core_schema import landing_table_name
 from dfe_engine.schema.retention import (
     LiveStatus,
     SourceLiveOutcome,
@@ -1199,7 +1200,7 @@ def get_default_drift(
     gc = _optional_gitcrud(request)
     ttl = resolve_state(gc, settings)
     table = resolve_defaults(gc, settings)
-    landing = settings.clickhouse.landing_table
+    landing = landing_table_name()
     sources = [source for source in registry.get_all_sources() if source.source != landing]
     tables = _deployed_tables(settings, sources)
     found: list[SourceDefaultDrift] = []
