@@ -1744,6 +1744,28 @@ class GitopsWriteSettings(BaseModel):
     )
 
 
+class GitopsReadSettings(BaseModel):
+    """How long a deploy-repo read waits on the forge before it answers from the clone.
+
+    Every API read pays a ref advertisement and may pay a fetch behind it, both under
+    the tree lock, so a forge that drops packets rather than refusing them must not
+    hold a request, or every reader behind it, for the OS connect timeout. A read
+    waits up to ``timeout_seconds`` on any one connect or read and is not retried.
+    The startup org seed's review-branch check takes the same bound, so a down forge
+    cannot hold startup.
+
+    Environment variables:
+    - DFE_GITOPS_READ_TIMEOUT_SECONDS -> gitops.read.timeout_seconds
+    """
+
+    # The cascade's last rung: a config file or DFE_GITOPS_READ_TIMEOUT_SECONDS overrides it.
+    timeout_seconds: float = Field(
+        default=3.0,
+        gt=0.0,
+        description="Connect and per-read timeout for a deploy-repo read, seconds.",
+    )
+
+
 class GitopsPackSettings(BaseModel):
     """When the deploy-repo clone packs its objects, and how often it checks.
 
@@ -1803,6 +1825,7 @@ class GitopsSettings(BaseModel):
     - DFE_GITOPS_MODE -> gitops.mode
     - DFE_GITOPS_FORGE_PROVIDER -> gitops.forge_provider (review-PR seam)
     - DFE_GITOPS_FORGE_API_BASE -> gitops.forge_api_base
+    - DFE_GITOPS_READ_* -> gitops.read (see GitopsReadSettings)
     - DFE_GITOPS_WRITE_* -> gitops.write (see GitopsWriteSettings)
     - DFE_GITOPS_PACK_* -> gitops.pack (see GitopsPackSettings)
     """
@@ -1840,6 +1863,7 @@ class GitopsSettings(BaseModel):
             "Forgejo/GitHub Enterprise). Empty = derive from repo_url."
         ),
     )
+    read: GitopsReadSettings = Field(default_factory=GitopsReadSettings)
     write: GitopsWriteSettings = Field(default_factory=GitopsWriteSettings)
     pack: GitopsPackSettings = Field(default_factory=GitopsPackSettings)
 
@@ -2830,6 +2854,8 @@ def _get_env_overrides() -> dict:
         overrides["gitops"]["forge_provider"] = val.strip().lower()
     if val := _get_env("DFE_GITOPS_FORGE_API_BASE"):
         overrides["gitops"]["forge_api_base"] = val
+    if val := _get_env("DFE_GITOPS_READ_TIMEOUT_SECONDS"):
+        overrides["gitops"].setdefault("read", {})["timeout_seconds"] = float(val)
     if val := _get_env("DFE_GITOPS_WRITE_TIMEOUT_SECONDS"):
         overrides["gitops"].setdefault("write", {})["timeout_seconds"] = float(val)
     if val := _get_env("DFE_GITOPS_WRITE_BUDGET_SECONDS"):

@@ -17,7 +17,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
@@ -365,7 +365,13 @@ class HuntConfigRegistry:
         )
         return sorted(changed), outcome
 
-    def tenant_id_holders(self, org: str, tenant_ids: Iterable[str]) -> list[HeldTenantIds]:
+    def tenant_id_holders(
+        self,
+        org: str,
+        tenant_ids: Iterable[str],
+        *,
+        bound: Literal["read", "write"] = "write",
+    ) -> list[HeldTenantIds]:
         """Every hunt that reads one of ``tenant_ids`` for an org other than ``org``.
 
         A hunt on main reads what it stores. A review branch not yet merged counts for
@@ -374,6 +380,8 @@ class HuntConfigRegistry:
         Args:
             org: The org about to declare ``tenant_ids``.
             tenant_ids: Its tenant ids once written.
+            bound: How the review-branch fetch waits on the forge
+                (``GitopsRepo.review_branch_files``).
 
         Returns:
             Each hunt and the org it holds the ids for, main first, then by branch.
@@ -388,7 +396,7 @@ class HuntConfigRegistry:
             if stored is not None:
                 held += _held_for_others(name, dict(stored), None, org, wanted, None)
         if self._deploy is not None:
-            for change in self._deploy.pending():
+            for change in self._deploy.pending(bound=bound):
                 held += _held_for_others(
                     change.name, change.doc, change.base, org, wanted, change.branch
                 )

@@ -25,7 +25,7 @@ their DirectoryConfigStore over the shared config volume the docker runner reads
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from scalo.logger import logger
 
@@ -111,15 +111,18 @@ class DeployRepoStore:
         except ResourceNotFoundError, CommitPolicyError:
             return None
 
-    def pending(self) -> list[PendingDoc]:
+    def pending(self, *, bound: Literal["read", "write"] = "write") -> list[PendingDoc]:
         """Each doc a review branch not yet merged changes, beside its merge-base doc.
+
+        Args:
+            bound: How the fetch waits on the forge (``GitopsRepo.review_branch_files``).
 
         Raises:
             GitopsRemoteError: The deploy repo's review branches could not be fetched.
         """
         cls = self._crud.resource_class(self._cls_name)
         docs = []
-        for change in self._crud.repo.review_branch_files(cls.directory):
+        for change in self._crud.repo.review_branch_files(cls.directory, bound=bound):
             if not change.name.endswith(cls.suffix):
                 continue
             docs.append(

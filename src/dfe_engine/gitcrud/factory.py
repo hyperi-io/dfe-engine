@@ -42,6 +42,7 @@ def build_gitcrud(gs: GitopsSettings, metrics_manager: Any | None = None) -> Git
         author_name=gs.author_name,
         author_email=gs.author_email,
         metrics=GitopsMetrics(metrics_manager),
+        read=gs.read,
         write=gs.write,
         pack=gs.pack,
     )

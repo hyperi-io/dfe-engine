@@ -38,11 +38,11 @@ from scalo.metrics import create_metrics
 from dfe_engine.gitops import repo as repo_module
 from dfe_engine.gitops.metrics import WRITE_BREAKER, WRITE_RETRIES, GitopsMetrics
 from dfe_engine.gitops.repo import GitopsRemoteError, GitopsRepo, GitopsUnavailableError
-from dfe_engine.settings import GitopsWriteSettings
+from dfe_engine.settings import GitopsReadSettings, GitopsWriteSettings
 from tests.support.loopback import CountingListener, stop_server
 
 # Longer than the read bound, so a write held to it fails.
-_SLOW_ADVERTISEMENT_SECONDS = repo_module.REMOTE_HEAD_TIMEOUT_SECONDS + 1.0
+_SLOW_ADVERTISEMENT_SECONDS = GitopsReadSettings().timeout_seconds + 1.0
 
 type Environ = dict[str, object]
 

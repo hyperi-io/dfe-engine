@@ -41,6 +41,7 @@ from dfe_engine.schema.manifest_applier import (
     log_report,
 )
 from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, SchemaPlan, SchemaPlanError, build_plan
+from dfe_engine.startup_stop import stoppable_wait
 
 if TYPE_CHECKING:
     from dfe_engine.kafka.topics import TopicAdmin, TopicSpec
@@ -228,17 +229,19 @@ def _connect(settings: DFESettings, *, wait_seconds: float) -> Any:
     from dfe_engine.settings import get_clickhouse_config
 
     deadline = time.monotonic() + max(wait_seconds, 0.0)
-    while True:
-        try:
-            manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
-            client = manager.get_clickhouse_client()
-            client.command("SELECT 1")
-            return client
-        except Exception as exc:
-            if time.monotonic() >= deadline:
-                raise ManifestApplyError(f"ClickHouse did not answer: {exc}") from exc
-            logger.info("waiting for ClickHouse before the schema apply", error=str(exc))
-            time.sleep(min(5.0, max(wait_seconds / 10.0, 1.0)))
+    # Nothing is written until this returns, so a stop may end it here.
+    with stoppable_wait():
+        while True:
+            try:
+                manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
+                client = manager.get_clickhouse_client()
+                client.command("SELECT 1")
+                return client
+            except Exception as exc:
+                if time.monotonic() >= deadline:
+                    raise ManifestApplyError(f"ClickHouse did not answer: {exc}") from exc
+                logger.info("waiting for ClickHouse before the schema apply", error=str(exc))
+                time.sleep(min(5.0, max(wait_seconds / 10.0, 1.0)))
 
 
 def apply_plan(
@@ -436,21 +439,23 @@ def require_dead_letter_topics(
     if not specs:
         return []
     deadline = time.monotonic() + max(wait_seconds, 0.0)
-    while True:
-        result = ensure_topics(specs, admin=admin, settings=settings)
-        if result.ok:
-            return sorted(result.created + result.existing)
-        if time.monotonic() >= deadline:
-            missing = "; ".join(f"{name}: {error}" for name, error in result.failed)
-            raise DeadLetterPathError(
-                f"dead-letter topic(s) are not on the broker, so a dead letter would be "
-                f"lost: {missing}"
+    # A topic create is all-or-nothing and the next start repeats it, so a stop may end it here.
+    with stoppable_wait():
+        while True:
+            result = ensure_topics(specs, admin=admin, settings=settings)
+            if result.ok:
+                return sorted(result.created + result.existing)
+            if time.monotonic() >= deadline:
+                missing = "; ".join(f"{name}: {error}" for name, error in result.failed)
+                raise DeadLetterPathError(
+                    f"dead-letter topic(s) are not on the broker, so a dead letter would be "
+                    f"lost: {missing}"
+                )
+            logger.info(
+                "waiting for the broker to hold the dead-letter topics",
+                missing=[name for name, _ in result.failed],
             )
-        logger.info(
-            "waiting for the broker to hold the dead-letter topics",
-            missing=[name for name, _ in result.failed],
-        )
-        time.sleep(min(5.0, max(wait_seconds / 10.0, 1.0)))
+            time.sleep(min(5.0, max(wait_seconds / 10.0, 1.0)))
 
 
 def run_bootstrap(

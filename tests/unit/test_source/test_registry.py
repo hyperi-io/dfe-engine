@@ -274,10 +274,12 @@ class TestList:
         with pytest.raises(SourceValidationError) as refusal:
             registry.save_source(schemaless)
 
+        # The console's own labels, since the console shows this message as it stands.
         message = str(refusal.value)
         assert "'okta-audit'" in message
-        assert "topic to 'main'" in message
-        assert "meta_schema, derived_schema or additional_fields" in message
+        assert "Topic to 'Shared table'" in message
+        assert "Meta Schema" in message
+        assert "meta_schema" not in message
 
     def test_the_default_topic_is_its_own_so_it_is_refused_too(self, registry: SourceRegistry):
         bare = Source.model_validate({"source": "okta-audit", "fetcher": {"source_type": "okta"}})

@@ -6,7 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
+import socket
+import time
+from collections.abc import Iterator
 
 import pytest
 
@@ -163,3 +165,61 @@ class TestASeedBesideTheHunts:
         [(message, fields)] = warnings
         assert "not seeded" in message
         assert fields["org"] == "newcorp"
+
+
+# Far apart, so the check is told by which of the two it waited.
+_READ_SECONDS = 0.5
+_WRITE_SECONDS = 10.0
+_READ_BOUND_SECONDS = 5.0
+
+
+@pytest.fixture
+def silent_forge(monkeypatch) -> Iterator[str]:
+    """A URL whose listener completes the handshake and then never answers."""
+    for name in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}/deploy.git"
+    finally:
+        listener.close()
+
+
+def test_a_forge_that_never_answers_holds_the_seed_for_the_read_bound_only(
+    registry, tmp_path, silent_forge
+):
+    """The check runs before the engine serves anything, so a write's budget here holds startup."""
+    from dulwich import porcelain
+    from support.deploy_remote import seeded_remote
+
+    from dfe_engine.gitcrud import GitCrud, default_registry
+    from dfe_engine.gitops.repo import GitopsRepo
+    from dfe_engine.hunts.deploy_repo import DeployRepoStore
+    from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+    from dfe_engine.settings import GitopsReadSettings, GitopsWriteSettings
+
+    remote, branch = seeded_remote(tmp_path)
+    porcelain.clone(str(remote), str(tmp_path / "deploy"), branch=branch.encode())
+    clone = GitopsRepo(
+        local_path=str(tmp_path / "deploy"),
+        repo_url=silent_forge,
+        branch=branch,
+        push=True,
+        read=GitopsReadSettings(timeout_seconds=_READ_SECONDS),
+        write=GitopsWriteSettings(timeout_seconds=_WRITE_SECONDS, budget_seconds=0.0),
+    )
+    store = DeployRepoStore(
+        GitCrud(clone, default_registry()), "hunts", environment="production", mode="team"
+    )
+    hunts = HuntConfigRegistry(deploy_repo=store)
+
+    started = time.monotonic()
+    created = seed_orgs(
+        registry=registry, seeds=[SeedOrg(name="newcorp", org_ids=["t1"])], hunts=hunts
+    )
+
+    assert time.monotonic() - started < _READ_BOUND_SECONDS
+    assert created == []
+    assert registry.get("newcorp") is None

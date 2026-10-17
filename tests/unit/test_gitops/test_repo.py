@@ -13,11 +13,12 @@ from dulwich import porcelain
 
 from dfe_engine.gitops import repo as repo_module
 from dfe_engine.gitops.repo import GitopsRemoteError, GitopsRepo, PublishResult
-from dfe_engine.settings import GitopsWriteSettings
+from dfe_engine.settings import GitopsReadSettings, GitopsWriteSettings
 
 # The hanging-forge tests must fail on the timeout, not on the machine being slow.
 _HANG_TIMEOUT_SECONDS = 1.0
 _HANG_BOUND_SECONDS = 10.0
+_HANG_READ = GitopsReadSettings(timeout_seconds=_HANG_TIMEOUT_SECONDS)
 
 
 def _bare_remote(tmp_path: Path) -> str:
@@ -281,7 +282,6 @@ def black_holed_forge(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """
     for name in ("http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY"):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setattr(repo_module, "REMOTE_HEAD_TIMEOUT_SECONDS", _HANG_TIMEOUT_SECONDS)
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
@@ -296,7 +296,11 @@ def test_remote_head_gives_up_on_a_forge_that_never_answers(
 ) -> None:
     """Unbounded, this blocks for the OS connect timeout with the request open."""
     repo = GitopsRepo(
-        local_path=str(tmp_path / "a"), repo_url=black_holed_forge, branch="main", push=True
+        local_path=str(tmp_path / "a"),
+        repo_url=black_holed_forge,
+        branch="main",
+        push=True,
+        read=_HANG_READ,
     )
 
     started = time.monotonic()
@@ -311,7 +315,7 @@ def _clone_then_point_at(tmp_path: Path, url: str) -> GitopsRepo:
     remote, branch = _seeded_remote(tmp_path)
     work = tmp_path / "a"
     porcelain.clone(remote, str(work), branch=branch.encode())
-    return GitopsRepo(local_path=str(work), repo_url=url, branch=branch, push=True)
+    return GitopsRepo(local_path=str(work), repo_url=url, branch=branch, push=True, read=_HANG_READ)
 
 
 def test_refresh_serves_this_clone_when_the_forge_stops_answering(
