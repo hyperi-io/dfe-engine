@@ -28,6 +28,9 @@ from dfe_engine.governance.ch import (
 )
 from dfe_engine.governance.ch.trigger import RECONCILES, RETRIES
 
+# The gauge an operator alerts on, by the name the scrape carries.
+UNCONVERGED = "ch_rbac_reconcile_unconverged"
+
 _SETTLE = 0.2
 _WAIT = 10.0
 
@@ -276,12 +279,35 @@ def test_note_reconciled_stands_down_whichever_trigger_the_app_carries() -> None
     assert recorder.calls == 1
 
 
-def test_a_reconcile_with_failed_statements_is_counted_partial_and_not_retried() -> None:
-    # Its failed statements fail the same way on the next run.
+def _unconverged(manager) -> dict[str, float]:
+    found: dict[str, float] = {}
+    for family in text_string_to_metric_families(manager.metrics_text):
+        for sample in family.samples:
+            if sample.name == UNCONVERGED:
+                found[sample.labels["reconcile"]] = sample.value
+    return found
+
+
+class _PartialThenClean:
+    """A reconcile whose first ``partial_runs`` runs leave a statement failed."""
+
+    def __init__(self, partial_runs: int) -> None:
+        self.calls = 0
+        self._partial_runs = partial_runs
+
+    def __call__(self) -> ReconcileResult:
+        self.calls += 1
+        if self.calls <= self._partial_runs:
+            return ReconcileResult(errors=["GRANT INSERT ON dfe.otel_* failed"])
+        return ReconcileResult()
+
+
+def test_a_reconcile_with_failed_statements_is_counted_partial_and_retried() -> None:
+    """A GRANT the server refused leaves an app unable to connect, so it is run again."""
     manager = _manager()
-    recorder = _Recorder(errors=["GRANT ...: denied"])
+    reconcile = _PartialThenClean(partial_runs=2)
     trigger = ReconcileTrigger(
-        recorder,
+        reconcile,
         metrics=ReconcileMetrics(manager),
         settle_seconds=_SETTLE,
         retry_initial_seconds=0.05,
@@ -289,8 +315,66 @@ def test_a_reconcile_with_failed_statements_is_counted_partial_and_not_retried()
 
     trigger.request()
     assert trigger.wait_idle(_WAIT)
-    assert _outcomes(manager) == {"partial": 1.0}
-    assert recorder.calls == 1
+    assert reconcile.calls == 3
+    assert _outcomes(manager) == {"partial": 2.0, "ok": 1.0}
+    assert _retries(manager) == {"rbac": 2.0}
+
+
+def test_a_startup_run_with_failed_statements_did_not_get_through() -> None:
+    manager = _manager()
+    reconcile = _PartialThenClean(partial_runs=1)
+    trigger = ReconcileTrigger(
+        reconcile,
+        metrics=ReconcileMetrics(manager),
+        reconcile="service_roles",
+        retry_initial_seconds=0.05,
+    )
+
+    assert trigger.run_now() is False
+    assert trigger.wait_idle(_WAIT)
+    assert reconcile.calls == 2
+    assert _retries(manager) == {"service_roles": 1.0}
+
+
+def test_the_unconverged_gauge_holds_while_statements_keep_failing() -> None:
+    """The engine stays Ready, so the gauge is where a refused GRANT shows."""
+    manager = _manager()
+    trigger = ReconcileTrigger(
+        _PartialThenClean(partial_runs=10**6),
+        metrics=ReconcileMetrics(manager),
+        reconcile="service_roles",
+        retry_initial_seconds=_WAIT * 6,
+    )
+
+    assert trigger.run_now() is False
+    assert _unconverged(manager) == {"service_roles": 1.0}
+    assert trigger.close(_WAIT)
+
+
+def test_the_unconverged_gauge_clears_once_a_run_applies_everything() -> None:
+    manager = _manager()
+    trigger = ReconcileTrigger(
+        _PartialThenClean(partial_runs=1),
+        metrics=ReconcileMetrics(manager),
+        retry_initial_seconds=0.05,
+    )
+
+    assert trigger.run_now() is False
+    assert trigger.wait_idle(_WAIT)
+    assert _unconverged(manager) == {"rbac": 0.0}
+
+
+def test_a_raised_reconcile_reads_as_unconverged_too() -> None:
+    manager = _manager()
+    recorder = _Recorder()
+    recorder.raise_next = ConnectionRefusedError("clickhouse is down")
+    trigger = ReconcileTrigger(
+        recorder, metrics=ReconcileMetrics(manager), retry_initial_seconds=_WAIT * 6
+    )
+
+    assert trigger.run_now() is False
+    assert _unconverged(manager) == {"rbac": 1.0}
+    assert trigger.close(_WAIT)
 
 
 def test_a_reconcile_against_an_unreachable_clickhouse_is_counted_failed() -> None:
