@@ -15,6 +15,7 @@ from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryNotConfiguredError,
     DirectoryPageLimitError,
+    LookupFailure,
     NoDirectoryListingError,
 )
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
@@ -180,11 +181,11 @@ class TestGetServiceMissingCredentials:
 
 class TestResolveUserGroupsMissingCredentials:
     async def test_answers_nothing_when_no_credentials(self) -> None:
-        # No token and no service account is no answer, never an empty one, and never raises.
+        # No token and no service account is a refusal, never an outage, and never raises.
         provider = _make_provider(service_account_json_env="")
         adapter = GoogleAdapter(provider)
         result = await adapter.resolve_user_groups("user@example.com")
-        assert result is None
+        assert result is LookupFailure.REFUSED
 
     async def test_empty_user_key_short_circuits(self) -> None:
         provider = _make_provider(service_account_json_env="")
@@ -262,7 +263,8 @@ class TestSecretStoreDidNotAnswer:
 
         with pytest.raises(DirectoryCredentialError):
             await adapter.list_all_groups()
-        assert await adapter.resolve_user_groups("user@example.com") is None
+        # The secret store not answering is an outage, so the login keeps its last groups.
+        assert await adapter.resolve_user_groups("user@example.com") is LookupFailure.OUTAGE
 
     async def test_the_connection_test_names_the_secret_store(self):
         adapter = GoogleAdapter(
@@ -331,7 +333,7 @@ class TestLoginLookupPageLimit:
 
         groups = await adapter.resolve_user_groups("user@example.com")
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert endless_directory.served == 3
         (line,) = [e for e in audit_events if e.get("operation") == "resolve_user_groups"]
         assert line["error_type"] == "DirectoryPageLimitError"
@@ -346,7 +348,7 @@ class TestLoginLookupPageLimit:
 
         groups = await adapter.resolve_user_groups("alice@example.com")
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert cloud_identity.methods == [TRANSITIVE] * 3
         (line,) = [
             e
@@ -423,7 +425,7 @@ class TestCloudIdentityUserToken:
         ]
         groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
 
-        assert groups is not None
+        assert isinstance(groups, list)
         assert [group.id for group in groups] == [ADMINS_ID, NESTED_PARENT_ID]
         assert cloud_identity.methods == [TRANSITIVE]
 
@@ -433,7 +435,7 @@ class TestCloudIdentityUserToken:
         cloud_identity.pages[DIRECT] = [[_relation(VIEWERS_ID, "dfe-viewers")]]
         groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
 
-        assert groups is not None
+        assert isinstance(groups, list)
         assert [group.id for group in groups] == [VIEWERS_ID]
         assert cloud_identity.methods == [TRANSITIVE, DIRECT]
 
@@ -455,7 +457,7 @@ class TestCloudIdentityUserToken:
 
         groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
 
-        assert groups is not None
+        assert isinstance(groups, list)
         assert [group.id for group in groups] == [ADMINS_ID, VIEWERS_ID]
         direct = cloud_identity.requests[1]
         assert (direct["method"], direct["params"]["query"]) == (
@@ -475,7 +477,7 @@ class TestCloudIdentityUserToken:
         finally:
             logger.remove(handler)
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert [(w.get("status"), w.get("operation")) for w in warnings] == [(403, DIRECT)]
         assert warnings[0]["code"] == "PERMISSION_DENIED;ACCESS_TOKEN_SCOPE_INSUFFICIENT"
 
@@ -483,7 +485,7 @@ class TestCloudIdentityUserToken:
         cloud_identity.refuse[TRANSITIVE] = (401, {"error": {"status": "UNAUTHENTICATED"}})
         groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert cloud_identity.methods == [TRANSITIVE]
 
     async def test_a_result_without_a_group_resource_name_is_dropped(self, cloud_identity):
@@ -492,7 +494,7 @@ class TestCloudIdentityUserToken:
         ]
         cloud_identity.pages[TRANSITIVE] = [[*malformed, _relation(VIEWERS_ID, "dfe-viewers")]]
         groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
-        assert groups is not None
+        assert isinstance(groups, list)
         assert [group.id for group in groups] == [VIEWERS_ID]
 
     async def test_no_groups_is_an_answer_not_a_failure(self, cloud_identity):
@@ -502,7 +504,10 @@ class TestCloudIdentityUserToken:
     async def test_a_non_json_answer_is_no_answer(self, cloud_identity):
         cloud_identity.garble.add(TRANSITIVE)
         adapter = _token_adapter(cloud_identity)
-        assert await adapter._groups_with_user_token(email="alice@example.com") is None
+        assert (
+            await adapter._groups_with_user_token(email="alice@example.com")
+            is LookupFailure.REFUSED
+        )
 
     async def test_a_page_that_is_not_a_json_object_is_no_answer(self, cloud_identity):
         """The pages before it are not the user's groups, so the lookup answers nothing."""
@@ -514,26 +519,29 @@ class TestCloudIdentityUserToken:
 
         groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert cloud_identity.methods == [TRANSITIVE, TRANSITIVE]
 
     async def test_a_refusal_is_no_answer(self, cloud_identity):
         cloud_identity.refuse[TRANSITIVE] = (401, {})
         adapter = _token_adapter(cloud_identity)
-        assert await adapter._groups_with_user_token(email="alice@example.com") is None
+        assert (
+            await adapter._groups_with_user_token(email="alice@example.com")
+            is LookupFailure.REFUSED
+        )
 
     async def test_stops_at_the_page_limit_and_answers_nothing(self, cloud_identity):
         cloud_identity.pages[TRANSITIVE] = [
             [_relation(f"0{index:014d}", f"g{index}")] for index in range(60)
         ]
         groups = await _token_adapter(cloud_identity).resolve_user_groups("alice@example.com")
-        assert (groups, len(cloud_identity.requests)) == (None, 50)
+        assert (groups, len(cloud_identity.requests)) == (LookupFailure.REFUSED, 50)
 
     async def test_without_a_token_nothing_is_asked(self, cloud_identity):
         groups = await _token_adapter(cloud_identity, token="").resolve_user_groups(
             "alice@example.com"
         )
-        assert (groups, cloud_identity.requests) == (None, [])
+        assert (groups, cloud_identity.requests) == (LookupFailure.REFUSED, [])
 
     async def test_the_login_token_reaches_the_lookup(self, cloud_identity, tmp_path, monkeypatch):
         monkeypatch.setattr(GoogleAdapter, "CLOUD_IDENTITY_BASE", cloud_identity.base_url)

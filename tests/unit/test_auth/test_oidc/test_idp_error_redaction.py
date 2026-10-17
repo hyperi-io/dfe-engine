@@ -28,6 +28,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from google.auth.exceptions import RefreshError
 
 from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.oidc.adapters.base import LookupFailure
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -266,7 +267,7 @@ class TestEntra:
         finally:
             graph.stop()
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert graph.principals == [f"users/{SENTINEL}"]
         assert_no_sentinel(logged(audit_events))
         line = failure_line(audit_events, "resolve_user_groups")
@@ -312,7 +313,7 @@ class TestOkta:
         with refusing_api(404, OKTA_NOT_FOUND) as server:
             groups = await okta_adapter(server.base_url).resolve_user_groups(SENTINEL)
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert server.paths == [f"/users/{SENTINEL}/groups?limit=200"]
         assert_no_sentinel(logged(audit_events))
         line = failure_line(audit_events, "resolve_user_groups")
@@ -403,7 +404,7 @@ class TestGoogleDirectory:
         with refusing_api(404, DIRECTORY_NOT_FOUND) as server:
             groups = await _directory_adapter(server.base_url).resolve_user_groups(SENTINEL)
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         # googleapiclient percent-encodes the address, a form the log scrubber does not recognise.
         assert "userKey=idp.sentinel.7f3a%40example.com" in server.paths[0]
         assert_no_sentinel(logged(audit_events))
@@ -521,7 +522,7 @@ class TestGoogleCloudIdentity:
         finally:
             server.stop()
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert_no_sentinel(logged(audit_events))
         line = failure_line(audit_events, "searchDirectGroups")
         assert (line["status"], line["code"]) == (
@@ -838,7 +839,7 @@ class TestLoginLookupPageLimit:
         finally:
             okta.stop()
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert okta.pages_requested == [0, 1, 2]
         line = failure_line(audit_events, "resolve_user_groups")
         assert line["error_type"] == "DirectoryPageLimitError"
@@ -858,7 +859,7 @@ class TestLoginLookupPageLimit:
         finally:
             graph.stop()
 
-        assert groups is None
+        assert groups is LookupFailure.REFUSED
         assert graph.principals == ["users/u1", "users/u1", "users/u1"]
         assert failure_line(audit_events, "resolve_user_groups")["pages"] == 3
 

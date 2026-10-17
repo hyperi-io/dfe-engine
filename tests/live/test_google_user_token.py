@@ -118,7 +118,7 @@ async def _resolve(email: str) -> tuple[list[GroupInfo], list[dict[str, Any]]]:
     finally:
         logger.remove(sink)
     refusals = [(warning.get("operation"), warning.get("status")) for warning in warnings]
-    assert groups is not None, f"Cloud Identity gave no answer: {refusals}"
+    assert isinstance(groups, list), f"Cloud Identity gave no answer ({groups}): {refusals}"
     return groups, warnings
 
 

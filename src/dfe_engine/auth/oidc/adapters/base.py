@@ -13,14 +13,58 @@ All methods are async to allow network calls without blocking the event loop.
 """
 
 from abc import ABC, abstractmethod
+from enum import StrEnum
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from scalo.logger import logger
 
+from dfe_engine.http_errors import is_outage
+
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
     from dfe_engine.secrets import DfeSecrets
+
+
+class LookupFailure(StrEnum):
+    """Why a login's directory group lookup returned no groups list."""
+
+    OUTAGE = "outage"
+    """The directory could not answer: no response, a timeout, a 429 or a 5xx."""
+
+    REFUSED = "refused"
+    """The directory answered without the user's groups: a 401 or 403, a missing scope or
+    credential, any other 4xx, or a body that is not a whole listing."""
+
+
+def lookup_failure(exc: BaseException) -> LookupFailure:
+    """The failure *exc* is, by :func:`~dfe_engine.http_errors.is_outage`."""
+    return LookupFailure.OUTAGE if is_outage(exc) else LookupFailure.REFUSED
+
+
+def missing_credential(*, unreadable: bool, refused: bool) -> LookupFailure:
+    """The failure a lookup with no usable directory credential is.
+
+    An outage only when the secret store holding the credential did not answer. One it
+    refused, or a credential never configured, is a refusal.
+    """
+    return LookupFailure.OUTAGE if unreadable and not refused else LookupFailure.REFUSED
+
+
+def first_answer(*attempts: list[GroupInfo] | LookupFailure) -> list[GroupInfo] | LookupFailure:
+    """The first groups list among *attempts*, else an outage when any attempt was one.
+
+    A lookup that tries the user's token and then an app credential answers from
+    whichever path answered. Only an outage on a path that could have answered keeps
+    the login's last known groups, so a refusal on one path never hides an outage on
+    another, nor the reverse.
+    """
+    for attempt in attempts:
+        if not isinstance(attempt, LookupFailure):
+            return attempt
+    if LookupFailure.OUTAGE in attempts:
+        return LookupFailure.OUTAGE
+    return LookupFailure.REFUSED
 
 
 class DirectoryNotConfiguredError(Exception):
@@ -224,7 +268,7 @@ class OIDCGroupAdapter(ABC):
             human-readable status or error description.
         """
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | None:
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | LookupFailure:
         """Return the groups *directory_id* belongs to, fetched from the provider.
 
         This is the enrichment call the Relying Party uses when a token does NOT
@@ -238,12 +282,12 @@ class OIDCGroupAdapter(ABC):
         keys on.
 
         Returns:
-            The user's groups, or None when the directory gave no answer: not
-            configured, not reached, refused, or a listing that could not be read
-            whole. An empty list is the directory answering that the user is in
-            no group, so a failure is never returned as one. The RP takes any list
-            as the user's groups, and counts a None and keeps the last known
-            groups. Never raises.
+            The user's groups, else why there are none: :attr:`LookupFailure.OUTAGE`
+            when the directory could not answer, :attr:`LookupFailure.REFUSED` when it
+            answered without them. The RP takes a list as the user's groups and judges
+            a refusal as no directory groups. Only an outage keeps the last known
+            groups, so a user cannot keep them by declining a consent scope. Never
+            raises.
 
         The default returns an empty list: providers without an admin directory
         API (generic) or that always deliver groups in-token have nothing to add.

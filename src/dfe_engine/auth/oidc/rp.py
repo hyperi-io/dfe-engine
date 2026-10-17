@@ -45,6 +45,7 @@ if TYPE_CHECKING:
 _USERINFO_FILL_CLAIMS = ("email", "name", "preferred_username")
 
 DIRECTORY_GROUPS_FALLBACKS = "auth_oidc_login_directory_fallbacks_total"
+DIRECTORY_GROUPS_REFUSALS = "auth_oidc_login_directory_refusals_total"
 
 
 class LoginMetrics:
@@ -56,18 +57,23 @@ class LoginMetrics:
     """
 
     def __init__(self, manager: Any | None = None) -> None:
-        """Register the counter on *manager*, or nothing when there is none."""
+        """Register the counters on *manager*, or nothing when there is none."""
         self._manager = manager
         if manager is None:
             return
         self._fallbacks = manager.counter(
             DIRECTORY_GROUPS_FALLBACKS,
-            "OIDC logins whose directory group lookup gave no answer, so the last known groups held",
+            "OIDC logins whose directory could not answer the group lookup, so the last known groups held",
+            ["provider"],
+        )
+        self._refusals = manager.counter(
+            DIRECTORY_GROUPS_REFUSALS,
+            "OIDC logins whose directory refused the group lookup, so they held no directory groups",
             ["provider"],
         )
 
     def directory_fallback(self, provider: str) -> None:
-        """Record a login that kept its last known groups because the directory gave no answer.
+        """Record a login that kept its last known groups because the directory could not answer.
 
         Args:
             provider: The provider's registry name, so the label is bounded by the
@@ -76,6 +82,17 @@ class LoginMetrics:
         if self._manager is None:
             return
         self._fallbacks.labels(provider=provider).inc()
+
+    def directory_refused(self, provider: str) -> None:
+        """Record a login judged on no directory groups because the directory refused the lookup.
+
+        Args:
+            provider: The provider's registry name, so the label is bounded by the
+                providers configured.
+        """
+        if self._manager is None:
+            return
+        self._refusals.labels(provider=provider).inc()
 
 
 class UserinfoSubjectMismatchError(ValueError):
@@ -433,13 +450,16 @@ class OidcRelyingParty:
         key a user on their email).
 
         An answer is authoritative, an empty one included: the user is in no
-        directory group, whatever the token claimed. A directory that gives no
-        answer keeps the groups the signed ID token carries, counted and logged
+        directory group, whatever the token claimed. So is a refusal (a 401 or 403,
+        a missing scope or credential), which the login judges on no directory
+        groups, so a user cannot keep any by declining a consent scope. Only an
+        outage keeps the groups the signed ID token carries, counted and logged
         once, so a directory outage never locks a user out. Where the token carries
         none either, the identity is marked ``groups_unresolved`` and the login keeps
         the account's stored groups.
         """
         from dfe_engine.auth.oidc.adapters import get_adapter
+        from dfe_engine.auth.oidc.adapters.base import LookupFailure, lookup_failure
 
         directory_id = str(userinfo.get("oid") or identity.email or identity.subject)
         failure: dict[str, Any] = {}
@@ -447,13 +467,13 @@ class OidcRelyingParty:
             adapter = get_adapter(provider, access_token=access_token, secrets=self._secrets)
             fetched = await adapter.resolve_user_groups(directory_id)
         except Exception as exc:
-            fetched = None
+            fetched = lookup_failure(exc)
             failure = describe_http_error(exc)
-        if fetched is None:
+        if fetched is LookupFailure.OUTAGE:
             unresolved = not identity.groups
             self._metrics.directory_fallback(provider_name)
             logger.warning(
-                "OIDC RP: directory group lookup gave no answer, keeping the last known groups",
+                "OIDC RP: directory could not answer the group lookup, keeping the last known groups",
                 operation="resolve_user_groups",
                 overflow=identity.groups_overflowed,
                 provider=provider.issuer,
@@ -463,6 +483,18 @@ class OidcRelyingParty:
                 **failure,
             )
             return identity.model_copy(update={"groups_unresolved": unresolved})
+        if isinstance(fetched, LookupFailure):
+            self._metrics.directory_refused(provider_name)
+            logger.warning(
+                "OIDC RP: directory refused the group lookup, judging the login on no directory groups",
+                operation="resolve_user_groups",
+                overflow=identity.groups_overflowed,
+                provider=provider.issuer,
+                provider_name=provider_name,
+                claimed_group_count=len(identity.groups),
+                **failure,
+            )
+            return identity.model_copy(update={"groups": []})
         group_ids = [g.id for g in fetched if g.id]
         logger.info(
             "OIDC RP: resolved groups via directory",

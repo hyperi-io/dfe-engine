@@ -23,6 +23,7 @@ from dfe_engine.auth.oidc.adapters import get_adapter
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryNotConfiguredError,
+    LookupFailure,
 )
 from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -72,7 +73,7 @@ async def test_mock_loads_groups_and_members(tmp_path, monkeypatch):
     assert {g.name for g in all_groups} == {"dfe-admins", "dfe-viewers"}
 
     resolved = await adapter.resolve_user_groups("user-oid")
-    assert resolved is not None
+    assert isinstance(resolved, list)
     assert sorted(g.id for g in resolved) == ["g-admins", "g-viewers"]
 
     ok, msg = await adapter.test_connection()
@@ -94,7 +95,7 @@ async def test_a_missing_fixture_fails_the_listing_and_the_login_lookup_open(tmp
     adapter = get_adapter(_mock_provider())
     with pytest.raises(DirectoryCredentialError):
         await adapter.list_all_groups()
-    assert await adapter.resolve_user_groups("anyone") is None
+    assert await adapter.resolve_user_groups("anyone") is LookupFailure.REFUSED
     ok, msg = await adapter.test_connection()
     assert ok is False
     assert "not loaded" in msg
@@ -144,7 +145,7 @@ async def test_a_malformed_fixture_is_a_failed_listing_not_a_crash(tmp_path, mon
 
     with pytest.raises(DirectoryCredentialError):
         await adapter.list_all_groups()
-    assert await adapter.resolve_user_groups("anyone") is None
+    assert await adapter.resolve_user_groups("anyone") is LookupFailure.REFUSED
     ok, msg = await adapter.test_connection()
     assert ok is False
     assert "not loaded" in msg

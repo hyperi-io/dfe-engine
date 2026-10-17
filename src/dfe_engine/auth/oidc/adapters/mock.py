@@ -18,7 +18,7 @@ enrichment call) runs offline and reproducibly.
 It is selected by ``GroupResolutionConfig.directory_backend == "mock"``. The
 fixture path comes from the env var named in ``mock_directory_env`` (default
 ``DFE_OIDC_MOCK_DIRECTORY``). A sign-in's lookup never raises: a missing or
-malformed fixture is no answer, as a live directory that could not be reached is.
+malformed fixture is a refusal, as a live directory with no credential is.
 The listing does not, as the live adapters' does not, so group sync never
 records a fixture it could not read as a directory with no groups.
 
@@ -51,6 +51,7 @@ from scalo.logger import logger
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryNotConfiguredError,
+    LookupFailure,
     OIDCGroupAdapter,
 )
 from dfe_engine.auth.oidc.models import GroupInfo
@@ -148,10 +149,10 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
             out.append(self._by_id.get(gid) or GroupInfo(id=gid, name=gid))
         return out
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | None:
-        """The overage / enrichment call: this user's group memberships, or None when no fixture loaded."""
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | LookupFailure:
+        """The overage / enrichment call: this user's group memberships, refused when no fixture loaded."""
         if self._load_error:
-            return None
+            return LookupFailure.REFUSED
         return self._groups_for(directory_id)
 
     async def list_all_groups(self) -> list[GroupInfo]:

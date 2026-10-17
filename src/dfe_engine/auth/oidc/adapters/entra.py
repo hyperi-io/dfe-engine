@@ -13,7 +13,7 @@ Graph API: with the user's own login token where it can, otherwise with the
 app registration's own credentials and its admin-consented application
 permission.
 
-Credentials resolve through :func:`graph_credentials`. ``resolve_user_groups`` and ``test_connection`` never raise: the lookup answers None and the test a failure message. ``list_all_groups`` raises.
+Credentials resolve through :func:`graph_credentials`. ``resolve_user_groups`` and ``test_connection`` never raise: the lookup answers a ``LookupFailure`` and the test a failure message. ``list_all_groups`` raises.
 
 Usage::
 
@@ -42,7 +42,11 @@ from dfe_engine.auth.oidc.adapters.base import (
     DirectoryPageError,
     DirectoryPageLimitError,
     DirectoryTokenRequestError,
+    LookupFailure,
     OIDCGroupAdapter,
+    first_answer,
+    lookup_failure,
+    missing_credential,
     same_origin_link,
 )
 from dfe_engine.auth.oidc.credential_env import (
@@ -200,7 +204,7 @@ class EntraAdapter(OIDCGroupAdapter):
     """Entra ID group adapter using the Microsoft Graph API.
 
     ``resolve_user_groups`` and ``test_connection`` never raise -- missing
-    credentials or API errors log a warning and return None or a failure message
+    credentials or API errors log a warning and return a ``LookupFailure`` or a failure message
     rather than propagating exceptions.  This keeps authentication working even
     when the group resolution API is unreachable.  ``list_all_groups`` is not on
     the login path and raises when the credentials are not configured or cannot be
@@ -228,7 +232,7 @@ class EntraAdapter(OIDCGroupAdapter):
     # Public interface
     # ------------------------------------------------------------------
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | None:
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | LookupFailure:
         """Enumerate a user's group memberships via Graph transitiveMemberOf.
 
         This is the >200 group OVERAGE path: when a user is in too many groups,
@@ -246,44 +250,55 @@ class EntraAdapter(OIDCGroupAdapter):
         ``directory_id`` MUST be the Entra object id (the ``oid`` claim), not the
         pairwise ``sub`` - Graph keys ``/users/{id}`` on the object id.
 
-        No token or an API error returns None, the directory giving no answer,
-        and never raises, so an enrichment outage cannot break login or over-grant.
+        Never raises, so an enrichment failure cannot break login or over-grant. When
+        no path answers, the result is an outage where either path was one, else a
+        refusal (:func:`first_answer`). No token for the app credentials is a refusal,
+        unless the secret store holding their secret did not answer.
         """
         if not directory_id:
             return []
 
+        by_user: list[GroupInfo] | LookupFailure = LookupFailure.REFUSED
         if self._access_token:
-            groups = await self._page_groups(
+            by_user = await self._page_groups(
                 f"{self.GRAPH_BASE}/me/{self._GROUP_QUERY}", self._access_token
             )
-            if groups is not None:
-                return groups
+            if not isinstance(by_user, LookupFailure):
+                return by_user
 
         try:
             token = await run_blocking(self._get_token)
         except Exception as exc:
+            failure = lookup_failure(exc)
             logger.warning(
                 "Entra resolve_user_groups: token request failed",
+                failure=failure,
                 operation="token",
                 provider=self._provider.issuer,
                 **describe_http_error(exc),
             )
-            return None
+            return first_answer(by_user, failure)
         if token is None:
             logger.warning(
                 "Entra resolve_user_groups: no token available",
                 provider=self._provider.issuer,
             )
-            return None
-        return await self._page_groups(
+            credentials = self._graph_credentials
+            no_token = missing_credential(
+                unreadable=credentials.secret_unreadable, refused=credentials.secret_refused
+            )
+            return first_answer(by_user, no_token)
+        by_app = await self._page_groups(
             f"{self.GRAPH_BASE}/users/{directory_id}/{self._GROUP_QUERY}", token
         )
+        return first_answer(by_user, by_app)
 
-    async def _page_groups(self, url: str, token: str) -> list[GroupInfo] | None:
-        """Every page of one transitiveMemberOf listing, or None when Graph did not answer.
+    async def _page_groups(self, url: str, token: str) -> list[GroupInfo] | LookupFailure:
+        """Every page of one transitiveMemberOf listing, else why Graph gave none.
 
-        A listing still paging at :attr:`MAX_LOGIN_PAGES`, or linking its next page off
-        Graph's origin, is no answer either.
+        A call that got no answer, a 429 or a 5xx is an outage. Any other failure is a
+        refusal, and so is a page that is not an object, a listing still paging at
+        :attr:`MAX_LOGIN_PAGES` or one linking its next page off Graph's origin.
         """
         from scalo.http import AsyncHttpClient
 
@@ -295,15 +310,17 @@ class EntraAdapter(OIDCGroupAdapter):
                     response = await client.get(url, headers=headers)
                     data = response.json()
                 except Exception as exc:
+                    failure = lookup_failure(exc)
                     logger.warning(
                         "Entra resolve_user_groups: API call failed",
+                        failure=failure,
                         operation="resolve_user_groups",
                         provider=self._provider.issuer,
                         **describe_http_error(exc),
                     )
-                    return None
+                    return failure
                 if not isinstance(data, dict):
-                    return None
+                    return LookupFailure.REFUSED
                 # A token that may not read a group still gets it, with only the id set and
                 # every other property null; the id is all role resolution keys on.
                 groups.extend(
@@ -322,14 +339,14 @@ class EntraAdapter(OIDCGroupAdapter):
                 try:
                     url = same_origin_link(str(url), directory_url=self.GRAPH_BASE)
                 except DirectoryForeignLinkError:
-                    return None
+                    return LookupFailure.REFUSED
         logger.warning(
             "Entra resolve_user_groups: Graph still linked a next page at the page limit",
             operation="resolve_user_groups",
             pages=self.MAX_LOGIN_PAGES,
             provider=self._provider.issuer,
         )
-        return None
+        return LookupFailure.REFUSED
 
     async def list_all_groups(self) -> list[GroupInfo]:
         """List all groups in the tenant via Graph API.

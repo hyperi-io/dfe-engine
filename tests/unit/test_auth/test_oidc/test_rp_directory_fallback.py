@@ -1,15 +1,17 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_auth/test_oidc/test_rp_directory_fallback.py
-#  Purpose:      A login whose directory group lookup fails keeps the ID token's groups
+#  Purpose:      An outage keeps a login's last known groups, and a refusal gives it none
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""A login whose directory group lookup gives no answer keeps the signed ID token's groups.
+"""What the RP does with each kind of directory group lookup failure.
 
-Each case runs the RP's token handling against a real adapter pointed at the
-local Okta or Graph service, refusing the lookup, so the failure crosses the
-real protocol and the real adapter turns it into no answer.
+An outage (no answer, a 429, a 5xx) keeps the groups the signed ID token carries,
+else marks the identity for the account's stored ones. A refusal (a 401 or 403, a
+declined scope) is judged as no directory groups, so a user cannot keep groups by
+declining the scope the lookup needs. Each case runs the RP's token handling
+against a real adapter pointed at a local Okta, Graph or Cloud Identity service.
 """
 
 import json
@@ -17,10 +19,17 @@ import json
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.metrics import create_metrics
 
+from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
-from dfe_engine.auth.oidc.rp import DIRECTORY_GROUPS_FALLBACKS, LoginMetrics, OidcRelyingParty
-from tests.unit.test_auth.test_oidc.local_directory import AppTokenEntra
+from dfe_engine.auth.oidc.rp import (
+    DIRECTORY_GROUPS_FALLBACKS,
+    DIRECTORY_GROUPS_REFUSALS,
+    LoginMetrics,
+    OidcRelyingParty,
+)
+from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
+from tests.unit.test_auth.test_oidc.local_directory import AppTokenEntra, fast_http
 from tests.unit.test_auth.test_oidc.local_graph import LocalGraph
 from tests.unit.test_auth.test_oidc.local_okta import LocalOkta, okta_adapter
 
@@ -30,59 +39,75 @@ OKTA = OIDCProvider(
     groups=GroupResolutionConfig(enrich_on_login=True, mode="api", okta_domain="acme.okta.com"),
 )
 ENTRA = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
+GOOGLE = OIDCProvider(
+    type="google",
+    issuer="https://accounts.google.com",
+    groups=GroupResolutionConfig(enrich_on_login=True, mode="api"),
+)
 OID = "00000000-0000-0000-0000-00000000b1g0"
-FALLBACK_EVENT = "OIDC RP: directory group lookup gave no answer, keeping the last known groups"
+OUTAGE_EVENT = "OIDC RP: directory could not answer the group lookup, keeping the last known groups"
+REFUSAL_EVENT = (
+    "OIDC RP: directory refused the group lookup, judging the login on no directory groups"
+)
 ACCESS_TOKEN = "login-access-token-4471"  # noqa: S105, RUF100 - a test token
+SCOPE_REFUSED = {
+    "error": {"code": 403, "status": "PERMISSION_DENIED", "message": "insufficient scope"}
+}
+
+OKTA_TOKEN = {
+    "access_token": ACCESS_TOKEN,
+    "userinfo": {
+        "email": "jane@acme.test",
+        "groups": ["dfe-admins", "soc"],
+        "name": "Jane",
+        "sub": "00u1jane",
+    },
+}
 
 
-def _fallbacks(manager) -> dict[str, float]:
-    """The fallback counter, by provider, as the engine's /metrics serves it."""
+def _counted(manager, name: str) -> dict[str, float]:
+    """One login counter, by provider, as the engine's /metrics serves it."""
     return {
         sample.labels["provider"]: sample.value
         for family in text_string_to_metric_families(manager.metrics_text)
         for sample in family.samples
-        if sample.name == DIRECTORY_GROUPS_FALLBACKS
+        if sample.name == name
     }
+
+
+def _manager():
+    return create_metrics("test", backend="prometheus", enable_auto_update=False)
 
 
 def _rp(tmp_path, manager) -> OidcRelyingParty:
     return OidcRelyingParty(OIDCProviderRegistry(tmp_path / "reg"), metrics=LoginMetrics(manager))
 
 
-class TestADirectoryThatGivesNoAnswer:
-    async def test_okta_refusing_the_lookup_keeps_the_token_groups_counted_and_logged_once(
+class TestAnOutage:
+    async def test_okta_failing_keeps_the_token_groups_counted_and_logged_once(
         self, tmp_path, monkeypatch, audit_events
     ):
+        fast_http(monkeypatch)
         okta = LocalOkta(pages=[[]])
         okta.fail_page = 0
-        okta.fail_status = 403
-        okta.fail_body = {"errorCode": "E0000006", "errorSummary": "denied"}
+        okta.fail_status = 503
         okta.start()
-        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        manager = _manager()
         monkeypatch.setattr(
             "dfe_engine.auth.oidc.adapters.get_adapter",
             lambda *_args, **_kwargs: okta_adapter(okta.base_url),
         )
-        token = {
-            "access_token": ACCESS_TOKEN,
-            "userinfo": {
-                "email": "jane@acme.test",
-                "groups": ["dfe-admins", "soc"],
-                "name": "Jane",
-                "sub": "00u1jane",
-            },
-        }
         try:
             identity = await _rp(tmp_path, manager)._identity_from_token(
-                client=None, provider=OKTA, provider_name="acme-okta", token=token
+                client=None, provider=OKTA, provider_name="acme-okta", token=OKTA_TOKEN
             )
         finally:
             okta.stop()
 
         assert (identity.groups, identity.groups_unresolved) == (["dfe-admins", "soc"], False)
-        assert okta.pages_requested == [0]
-        assert _fallbacks(manager) == {"acme-okta": 1.0}
-        (line,) = [event for event in audit_events if event["event"] == FALLBACK_EVENT]
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {"acme-okta": 1.0}
+        assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {}
+        (line,) = [event for event in audit_events if event["event"] == OUTAGE_EVENT]
         assert (line["provider_name"], line["claimed_group_count"], line["kept"]) == (
             "acme-okta",
             2,
@@ -94,12 +119,13 @@ class TestADirectoryThatGivesNoAnswer:
     async def test_an_overage_token_with_no_groups_claim_is_marked_for_the_stored_groups(
         self, tmp_path, monkeypatch, audit_events
     ):
+        fast_http(monkeypatch)
         graph = LocalGraph()
-        graph.refuse[f"users/{OID}"] = (403, {"error": {"code": "Authorization_RequestDenied"}})
+        graph.refuse[f"users/{OID}"] = (503, {"error": {"code": "ServiceUnavailable"}})
         graph.start()
         adapter = AppTokenEntra(ENTRA)
         adapter.GRAPH_BASE = graph.base_url
-        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        manager = _manager()
         monkeypatch.setattr(
             "dfe_engine.auth.oidc.adapters.get_adapter", lambda *_args, **_kwargs: adapter
         )
@@ -124,9 +150,8 @@ class TestADirectoryThatGivesNoAnswer:
             True,
             True,
         )
-        assert graph.principals == [f"users/{OID}"]
-        assert _fallbacks(manager) == {"acme-entra": 1.0}
-        (line,) = [event for event in audit_events if event["event"] == FALLBACK_EVENT]
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {"acme-entra": 1.0}
+        (line,) = [event for event in audit_events if event["event"] == OUTAGE_EVENT]
         assert (line["overflow"], line["claimed_group_count"], line["kept"]) == (
             True,
             0,
@@ -134,56 +159,96 @@ class TestADirectoryThatGivesNoAnswer:
         )
 
 
-class TestADirectoryThatAnswers:
-    async def test_an_empty_answer_replaces_the_token_groups(self, tmp_path, monkeypatch):
-        """A directory that answers is the authority, so a user it puts in no group has none."""
+class TestARefusal:
+    async def test_okta_refusing_clears_the_token_groups(self, tmp_path, monkeypatch, audit_events):
         okta = LocalOkta(pages=[[]])
+        okta.fail_page = 0
+        okta.fail_status = 403
+        okta.fail_body = {"errorCode": "E0000006", "errorSummary": "denied"}
         okta.start()
-        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        manager = _manager()
         monkeypatch.setattr(
             "dfe_engine.auth.oidc.adapters.get_adapter",
             lambda *_args, **_kwargs: okta_adapter(okta.base_url),
         )
-        token = {
-            "userinfo": {
-                "email": "jane@acme.test",
-                "groups": ["dfe-admins"],
-                "name": "Jane",
-                "sub": "00u1jane",
-            },
-        }
         try:
             identity = await _rp(tmp_path, manager)._identity_from_token(
-                client=None, provider=OKTA, provider_name="acme-okta", token=token
+                client=None, provider=OKTA, provider_name="acme-okta", token=OKTA_TOKEN
             )
         finally:
             okta.stop()
 
         assert (identity.groups, identity.groups_unresolved) == ([], False)
-        assert _fallbacks(manager) == {}
+        assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {"acme-okta": 1.0}
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {}
+        (line,) = [event for event in audit_events if event["event"] == REFUSAL_EVENT]
+        assert (line["provider_name"], line["claimed_group_count"]) == ("acme-okta", 2)
 
-    async def test_its_answer_is_used_and_nothing_is_counted(self, tmp_path, monkeypatch):
-        okta = LocalOkta(pages=[[{"id": "00g1", "profile": {"name": "dfe-viewers"}}]])
+    async def test_a_google_user_declining_the_groups_scope_keeps_nothing(
+        self, tmp_path, monkeypatch
+    ):
+        """With no service account to ask instead, the user's own token is the only path."""
+        cloud_identity = LocalCloudIdentity()
+        cloud_identity.refuse["searchTransitiveGroups"] = (403, SCOPE_REFUSED)
+        cloud_identity.refuse["searchDirectGroups"] = (403, SCOPE_REFUSED)
+        cloud_identity.start()
+        adapter = GoogleAdapter(GOOGLE, access_token=ACCESS_TOKEN)
+        adapter.CLOUD_IDENTITY_BASE = cloud_identity.base_url
+        manager = _manager()
+        monkeypatch.setattr(
+            "dfe_engine.auth.oidc.adapters.get_adapter", lambda *_args, **_kwargs: adapter
+        )
+        token = {
+            "access_token": ACCESS_TOKEN,
+            "userinfo": {"email": "alice@acme.test", "name": "Alice", "sub": "1234567890"},
+        }
+        try:
+            identity = await _rp(tmp_path, manager)._identity_from_token(
+                client=None, provider=GOOGLE, provider_name="acme-google", token=token
+            )
+        finally:
+            cloud_identity.stop()
+
+        assert (identity.groups, identity.groups_unresolved) == ([], False)
+        assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {"acme-google": 1.0}
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {}
+
+
+class TestADirectoryThatAnswers:
+    async def test_an_empty_answer_replaces_the_token_groups(self, tmp_path, monkeypatch):
+        """A directory that answers is the authority, so a user it puts in no group has none."""
+        okta = LocalOkta(pages=[[]])
         okta.start()
-        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        manager = _manager()
         monkeypatch.setattr(
             "dfe_engine.auth.oidc.adapters.get_adapter",
             lambda *_args, **_kwargs: okta_adapter(okta.base_url),
         )
-        token = {
-            "userinfo": {
-                "email": "jane@acme.test",
-                "groups": ["dfe-admins"],
-                "name": "Jane",
-                "sub": "00u1jane",
-            },
-        }
         try:
             identity = await _rp(tmp_path, manager)._identity_from_token(
-                client=None, provider=OKTA, provider_name="acme-okta", token=token
+                client=None, provider=OKTA, provider_name="acme-okta", token=OKTA_TOKEN
+            )
+        finally:
+            okta.stop()
+
+        assert (identity.groups, identity.groups_unresolved) == ([], False)
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {}
+
+    async def test_its_answer_is_used_and_nothing_is_counted(self, tmp_path, monkeypatch):
+        okta = LocalOkta(pages=[[{"id": "00g1", "profile": {"name": "dfe-viewers"}}]])
+        okta.start()
+        manager = _manager()
+        monkeypatch.setattr(
+            "dfe_engine.auth.oidc.adapters.get_adapter",
+            lambda *_args, **_kwargs: okta_adapter(okta.base_url),
+        )
+        try:
+            identity = await _rp(tmp_path, manager)._identity_from_token(
+                client=None, provider=OKTA, provider_name="acme-okta", token=OKTA_TOKEN
             )
         finally:
             okta.stop()
 
         assert identity.groups == ["dfe-viewers"]
-        assert _fallbacks(manager) == {}
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {}
+        assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {}
