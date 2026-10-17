@@ -3809,7 +3809,7 @@
           "Organisations"
         ],
         "summary": "Create Org",
-        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, the lifecycle manager handles\nteam creation as part of org provisioning.  Failure is non-fatal.",
+        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, the lifecycle manager handles\nteam creation as part of org provisioning.  Failure is non-fatal.\n\nA hunt already naming the org, such as one whose org was deleted, has the new\norg's tenant ids stored first. A production+team posture routes that hunt\nchange to review, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "create_org_api_v1_orgs_post",
         "requestBody": {
           "required": true,
@@ -4141,7 +4141,7 @@
           "Organisations"
         ],
         "summary": "Update Org",
-        "description": "Update an organisation (admin only).",
+        "description": "Update an organisation (admin only).\n\nThe org's tenant ids are stored afresh in every hunt naming it before the org is\nwritten, which also repairs a hunt holding stale ones. A production+team posture\nroutes that hunt change to review, and the ``X-DFE-Review-Required`` header says\nso. An org's name is its identity, so it cannot be changed here.",
         "operationId": "update_org_api_v1_orgs__name__put",
         "parameters": [
           {
@@ -4217,7 +4217,7 @@
           "Organisations"
         ],
         "summary": "Delete Org",
-        "description": "Delete an organisation (admin only).",
+        "description": "Delete an organisation (admin only).\n\nEvery hunt naming the org loses its stored tenant ids first and keeps the name,\nso it fails as ``unknown_customers`` and holds its watermark until it is edited,\nrather than reading the rows the org left behind. A production+team posture\nroutes that hunt change to review, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "delete_org_api_v1_orgs__name__delete",
         "parameters": [
           {

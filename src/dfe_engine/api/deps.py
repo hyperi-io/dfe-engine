@@ -313,6 +313,11 @@ def get_hunt_config_registry():
     return reg
 
 
+def get_hunt_config_registry_optional():
+    """Optional HuntConfigRegistry (for an org change the hunts naming the org follow)."""
+    return _registries.get("hunt_configs")
+
+
 SchemaReg = Annotated[Any, Depends(get_schema_registry)]
 DerivedSchemaReg = Annotated[Any, Depends(get_derived_schema_registry)]
 SourceReg = Annotated[Any, Depends(get_source_registry)]
@@ -323,6 +328,7 @@ OptionalAlertDestRegistry = Annotated[Any | None, Depends(get_alert_destinations
 RuleReg = Annotated[Any, Depends(get_rule_registry)]
 OptionalRuleReg = Annotated[Any | None, Depends(get_rule_registry_optional)]
 HuntConfigReg = Annotated[Any, Depends(get_hunt_config_registry)]
+OptionalHuntConfigReg = Annotated[Any | None, Depends(get_hunt_config_registry_optional)]
 
 
 # -- ClickHouse client -----------------------------------------

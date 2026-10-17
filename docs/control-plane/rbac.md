@@ -607,6 +607,16 @@ A reconcile that raises, ClickHouse unreachable being the usual cause, is logged
 
 `create` and `update` both refuse a name or tenant id that collides with another org's name or tenant ids -- `409 conflict` naming the other org -- because a shared marker would let their pinned ClickHouse users read each other's rows. An org keeping its own name among its own tenant ids is not a collision.
 
+### 6.3 Hunts Follow Their Orgs
+
+A hunt stores the tenant ids each of its customer orgs resolved to, because the hunt runner reads the deploy repo and the org registry is not in it. `POST /api/v1/orgs`, and `PUT` and `DELETE` on `/api/v1/orgs/{name}`, store the org's tenant ids afresh in every hunt naming it, as one deploy-repo commit, before the org itself is written. A hunt write that fails leaves the org as it was, so the same request can be sent again, and a `PUT` with nothing changed repairs a hunt holding stale ids.
+
+- **Delete.** The hunt keeps the org's name and loses its ids, so it fails as `unknown_customers` and holds its watermark until someone edits it.
+- **Rename.** An org's name is its identity, so `PUT` cannot change it.
+- **Review.** A production+team posture puts the hunt change on one review branch, the org answer carries `X-DFE-Review-Required`, and the runner keeps the old ids until it is merged.
+
+Each hunt rewritten emits `resource.hunt.updated` naming the org.
+
 ---
 
 ## 7. HyperDX Integration

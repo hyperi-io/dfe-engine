@@ -44,6 +44,7 @@ import typer
 
 from dfe_engine.api import init_scalo_logger
 from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
+from dfe_engine.hunts.lookups import refuse_tenant_lookups
 from dfe_engine.settings import DFESettings, load_settings
 
 from . import metrics as runner_metrics
@@ -80,13 +81,14 @@ def _ch_params(settings: DFESettings) -> dict[str, Any]:
 
 
 def _spec_sources(settings: DFESettings, database: str) -> dict[str, Any]:
-    """The loader's rule inputs: rule YAML, the default tables, and the cap.
+    """The loader's rule inputs: rule YAML, the default tables, the cap and the lookups.
 
     A hunt names `rules`, so the loader has to read them to build its SQL. The
     default target is the core detection table in the resolved data database - never
     a hardcoded 'dfe' - used only when neither the rule entry nor the hunt names one.
     A source named without a database is read from that same data database. Every
-    compiled rule is capped at ``hunts.max_detections_per_run``, cut to its ceiling.
+    compiled rule is capped at ``hunts.max_detections_per_run``, cut to its ceiling,
+    and may look values up only in ``hunts.lookup_databases``.
     """
     hunts = settings.hunts
     return {
@@ -96,6 +98,7 @@ def _spec_sources(settings: DFESettings, database: str) -> dict[str, Any]:
         "max_detections": detection_cap(
             hunts.max_detections_per_run, hunts.max_detections_per_run_ceiling
         ),
+        "lookup_databases": tuple(hunts.lookup_databases),
     }
 
 
@@ -117,13 +120,18 @@ def _connect_coordinator(settings: DFESettings) -> tuple[Any, ChCoordinator]:
     """One attempt at a raw client whose coordination tables are in place.
 
     A client from a failed attempt is closed before the error goes on, so a retry
-    never leaves a pool behind.
+    never leaves a pool behind. A lookup database holding a table that can carry an
+    org's rows stops the runner here, before it fires anything.
+
+    Raises:
+        LookupDatabaseError: A listed lookup database holds such a table.
     """
     client, db = _build_ch(settings)
     try:
         # The hostname is the pod name under k8s: stable per process, distinct per pod.
         coord = ChCoordinator(client, database=db, worker_id=socket.gethostname())
         coord.ensure_schema()
+        refuse_tenant_lookups(client, settings.hunts.lookup_databases)
     except Exception:
         client.close()
         raise

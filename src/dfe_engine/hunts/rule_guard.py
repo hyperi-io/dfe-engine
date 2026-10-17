@@ -15,8 +15,9 @@ when the condition narrows anything at all, or cannot be read.
 a ClickHouse function reading outside the row or sending it to another service.
 ``refuse_condition_escape`` refuses one whose brackets do not balance or that reads
 another table, since it runs inside a bracket beside the window and the hunt's
-orgs. ``refuse_rule_condition`` applies both, wherever a rule's condition is saved
-or compiled.
+orgs, unless the table is in a lookup database the deployment lists as holding no
+org's rows. ``refuse_rule_condition`` applies both, wherever a rule's condition is
+saved or compiled.
 ``refuse_direct_query`` holds a hunt's hand-written ``query`` to that refusal and
 to one statement that reads, or inserts what it reads.
 
@@ -25,6 +26,8 @@ source table, and ``volume_verdict`` turns that count into a band and the
 plain-language warnings the UI shows beside the saved rule.
 """
 
+import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -40,7 +43,7 @@ from ..clickhouse.function_guard import (
     tokenize,
 )
 from ..clickhouse.quoting import quote_identifier
-from ..settings import DetectionGuardSettings
+from ..settings import LOOKUP_DATABASE_PATTERN, DetectionGuardSettings
 from .hunt_output import matching_rows
 from .rule_model import Rule
 
@@ -346,7 +349,10 @@ def refuse_offbox_calls(where: str, *, subject: str = "A rule's detection condit
 
 
 def refuse_condition_escape(
-    where: str, *, subject: str = "A rule's detection condition"
+    where: str,
+    *,
+    subject: str = "A rule's detection condition",
+    lookup_databases: Collection[str] = (),
 ) -> str | None:
     """Say why a condition would read rows past the bracket it runs in, or None when it cannot.
 
@@ -357,9 +363,14 @@ def refuse_condition_escape(
     is not pinned to an org. Brackets and keywords inside a string or a comment are
     not read.
 
+    A database in ``lookup_databases`` carries no org's rows, so a rule may read one
+    of its tables after IN: ``x IN db.t``, ``x IN (db.t)``, or
+    ``x IN (SELECT <columns> FROM db.t [WHERE <condition>])`` (:func:`_lookup_refusal`).
+
     Args:
         where: The rule's detection WHERE, as it will run.
         subject: What the message names the SQL as.
+        lookup_databases: ``hunts.lookup_databases``, the databases a lookup may read.
 
     Returns:
         The refusal message, or None when the condition stays inside its bracket.
@@ -368,15 +379,25 @@ def refuse_condition_escape(
         tokens = tokenize(where, subject=subject)
     except CallNotPermittedError as exc:
         return str(exc)
-    if any(token.token_type is TokenType.SELECT for token in tokens):
-        return f"{subject} may not hold a SELECT, which reads rows outside the hunt's orgs"
+    lookups = tuple(lookup_databases)
+    for index, token in enumerate(tokens):
+        if token.token_type is TokenType.SELECT:
+            refusal = _lookup_refusal(where, tokens, index, lookups, subject)
+            if refusal is not None:
+                return refusal
     depth = 0
     for index, token in enumerate(tokens):
-        if token.token_type is TokenType.IN and _in_takes_a_table(tokens, index):
-            return (
-                f"{subject} may not name a table after IN, which reads its rows: "
-                "use IN with a bracketed list of values"
-            )
+        if (
+            token.token_type is TokenType.IN
+            and not _in_takes_a_select(tokens, index)
+            and _in_takes_a_table(tokens, index)
+        ):
+            table_db = _lookup_table_database(where, tokens, index)
+            if table_db is None or table_db not in lookups:
+                return (
+                    f"{subject} may not name a table after IN, which reads its rows: "
+                    f"use IN with a bracketed list of values{_lookup_hint(lookups)}"
+                )
         if token.token_type is TokenType.L_PAREN:
             depth += 1
         elif token.token_type is TokenType.R_PAREN:
@@ -386,6 +407,194 @@ def refuse_condition_escape(
     if depth:
         return f"{subject} leaves {depth} bracket(s) open"
     return None
+
+
+def _lookup_hint(lookups: tuple[str, ...]) -> str:
+    """The end of a refusal, naming what a lookup may read when any database is listed."""
+    if not lookups:
+        return ""
+    return f", or a table of a lookup database ({', '.join(lookups)})"
+
+
+# Clause words a lookup subquery may not carry, read only outside its brackets.
+_LOOKUP_CLAUSE_WORDS = frozenset(
+    {
+        "ARRAY",
+        "CROSS",
+        "EXCEPT",
+        "FINAL",
+        "FORMAT",
+        "FROM",
+        "FULL",
+        "GROUP",
+        "HAVING",
+        "INNER",
+        "INTERSECT",
+        "INTO",
+        "JOIN",
+        "LEFT",
+        "LIMIT",
+        "OFFSET",
+        "ORDER",
+        "PASTE",
+        "PREWHERE",
+        "QUALIFY",
+        "RIGHT",
+        "SAMPLE",
+        "SELECT",
+        "SETTINGS",
+        "UNION",
+        "WHERE",
+        "WINDOW",
+        "WITH",
+    }
+)
+
+# Clause words that are also function names, so ``left(x, 3)`` is a call and not a join.
+_CALLABLE_CLAUSE_WORDS = frozenset({"ARRAY", "FORMAT", "LEFT", "RIGHT"})
+
+
+def _starts_a_clause(where: str, tokens: list[Token], position: int) -> bool:
+    """Whether the token at ``position`` is a clause word, not a string, quoted name or call."""
+    token = tokens[position]
+    written = where[token.start : token.end + 1].split()
+    word = written[0].upper() if written else ""
+    if word not in _LOOKUP_CLAUSE_WORDS:
+        return False
+    following = tokens[position + 1 : position + 2]
+    called = bool(following) and following[0].token_type is TokenType.L_PAREN
+    return not (called and word in _CALLABLE_CLAUSE_WORDS)
+
+
+_LOOKUP_NAME = re.compile(LOOKUP_DATABASE_PATTERN)
+
+_QUOTES = ("`", '"')
+
+
+def _plain_name(where: str, token: Token) -> str | None:
+    r"""The name a token spells, when the SQL writes it plainly or plainly quoted, else None.
+
+    An escape inside a quoted name, such as ``\x74``, is refused rather than read, so
+    no reading of it can name a database other than the one compared.
+    """
+    raw = where[token.start : token.end + 1]
+    quoted = {f"{quote}{token.text}{quote}" for quote in _QUOTES}
+    if raw != token.text and raw not in quoted:
+        return None
+    return token.text if _LOOKUP_NAME.fullmatch(token.text) else None
+
+
+def _qualified_table(where: str, tokens: list[Token], start: int) -> str | None:
+    """The database of ``<db>.<table>`` written at ``start``, or None for any other shape."""
+    parts = tokens[start : start + 3]
+    if len(parts) < 3 or parts[1].token_type is not TokenType.DOT:
+        return None
+    database, table = _plain_name(where, parts[0]), _plain_name(where, parts[2])
+    if database is None or table is None:
+        return None
+    following = tokens[start + 3 : start + 4]
+    if following and following[0].token_type in (TokenType.DOT, TokenType.L_PAREN):
+        return None
+    return database
+
+
+def _in_takes_a_select(tokens: list[Token], index: int) -> bool:
+    """Whether the IN at ``index`` takes ``(SELECT``, which :func:`_lookup_refusal` judges."""
+    following = tokens[index + 1 : index + 3]
+    return (
+        len(following) == 2
+        and following[0].token_type is TokenType.L_PAREN
+        and following[1].token_type is TokenType.SELECT
+    )
+
+
+def _lookup_table_database(where: str, tokens: list[Token], index: int) -> str | None:
+    """The database the IN at ``index`` reads a table of, as ``IN db.t`` or ``IN ((db.t))``.
+
+    None when what follows IN is not one ``<db>.<table>`` inside as many closing
+    brackets as it opened.
+    """
+    opened = index + 1
+    while opened < len(tokens) and tokens[opened].token_type is TokenType.L_PAREN:
+        opened += 1
+    brackets = opened - index - 1
+    database = _qualified_table(where, tokens, opened)
+    closing = tokens[opened + 3 : opened + 3 + brackets]
+    if database is None or len(closing) < brackets:
+        return None
+    if any(token.token_type is not TokenType.R_PAREN for token in closing):
+        return None
+    return database
+
+
+# The one subquery a lookup may be, as a refusal names it.
+_LOOKUP_SHAPE = "IN (SELECT <columns> FROM <db>.<table> [WHERE <condition>])"
+
+
+def _closing_bracket(tokens: list[Token], opened: int) -> int | None:
+    """The index of the bracket closing the one at ``opened``, or None when none does."""
+    depth = 0
+    for index in range(opened, len(tokens)):
+        if tokens[index].token_type is TokenType.L_PAREN:
+            depth += 1
+        elif tokens[index].token_type is TokenType.R_PAREN:
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def _lookup_refusal(
+    where: str, tokens: list[Token], index: int, lookups: tuple[str, ...], subject: str
+) -> str | None:
+    """Why the SELECT at ``index`` may not run, or None for a lookup in a listed database.
+
+    A lookup is ``IN (SELECT <columns> FROM <db>.<table> [WHERE <condition>])`` with
+    ``<db>`` listed. Anything else after its FROM, a second FROM or any clause word
+    outside its own brackets could read another table, so it is refused. A SELECT
+    nested inside it is judged on its own, and so is an IN naming a table.
+    """
+    if not lookups:
+        return f"{subject} may not hold a SELECT, which reads rows outside the hunt's orgs"
+    shape = (
+        f"{subject} may hold a SELECT only as {_LOOKUP_SHAPE} "
+        f"on a lookup database ({', '.join(lookups)})"
+    )
+    opened = index - 1
+    if opened < 1 or tokens[opened].token_type is not TokenType.L_PAREN:
+        return shape
+    if tokens[opened - 1].token_type is not TokenType.IN:
+        return shape
+    closed = _closing_bracket(tokens, opened)
+    if closed is None:
+        return f"{subject} leaves a SELECT's bracket open"
+    body = tokens[index + 1 : closed]
+    depth = 0
+    clauses: list[int] = []
+    for position, token in enumerate(body):
+        if token.token_type is TokenType.L_PAREN:
+            depth += 1
+        elif token.token_type is TokenType.R_PAREN:
+            depth -= 1
+        elif depth == 0 and _starts_a_clause(where, body, position):
+            clauses.append(position)
+    if not clauses or body[clauses[0]].token_type is not TokenType.FROM or clauses[0] == 0:
+        return shape
+    database = _qualified_table(where, body, clauses[0] + 1)
+    if database is None:
+        return shape
+    if database not in lookups:
+        return (
+            f"{subject} may not read database {database}, which is not a lookup database "
+            f"({', '.join(lookups)})"
+        )
+    after_table = clauses[0] + 4
+    if len(clauses) == 1 and after_table == len(body):
+        return None
+    filtered = len(clauses) == 2 and clauses[1] == after_table
+    if filtered and body[after_table].token_type is TokenType.WHERE:
+        return None
+    return shape
 
 
 _NAME_TOKENS = frozenset({TokenType.VAR, TokenType.IDENTIFIER, TokenType.DOT})
@@ -420,7 +629,10 @@ def _in_takes_a_table(tokens: list[Token], index: int) -> bool:
 
 
 def refuse_rule_condition(
-    where: str, *, subject: str = "A rule's detection condition"
+    where: str,
+    *,
+    subject: str = "A rule's detection condition",
+    lookup_databases: Collection[str] = (),
 ) -> str | None:
     """Say why a rule's condition may not run, or None when it may.
 
@@ -430,6 +642,7 @@ def refuse_rule_condition(
     Args:
         where: The rule's detection WHERE, as it will run.
         subject: What the message names the SQL as.
+        lookup_databases: ``hunts.lookup_databases``, the databases a lookup may read.
 
     Returns:
         The first refusal message, or None.
@@ -437,7 +650,7 @@ def refuse_rule_condition(
     if not where.strip():
         return None
     return refuse_offbox_calls(where, subject=subject) or refuse_condition_escape(
-        where, subject=subject
+        where, subject=subject, lookup_databases=lookup_databases
     )
 
 

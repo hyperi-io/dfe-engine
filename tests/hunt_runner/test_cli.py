@@ -30,7 +30,7 @@ from typer.testing import CliRunner
 from dfe_engine.api import _DfeEngineApp
 from dfe_engine.clickhouse.tls import ClickHouseCaCertUnreadable
 from dfe_engine.hunt_runner import cli
-from dfe_engine.settings import DFESettings
+from dfe_engine.settings import DFESettings, HuntsSettings
 
 runner = CliRunner()
 
@@ -171,7 +171,14 @@ def test_spec_sources_carry_the_configured_detection_cap():
         "default_target": "tenant_a.detection",
         "default_database": "tenant_a",
         "max_detections": 250,
+        "lookup_databases": (),
     }
+
+
+def test_spec_sources_carry_the_configured_lookup_databases():
+    settings = DFESettings(env="test", hunts=HuntsSettings(lookup_databases=["threat", "geo"]))
+
+    assert cli._spec_sources(settings, "dfe")["lookup_databases"] == ("threat", "geo")
 
 
 def test_a_cap_above_its_ceiling_is_cut_to_the_ceiling():

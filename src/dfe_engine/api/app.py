@@ -154,6 +154,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         app.state.schema_retry.start()
 
+    # A rule may read a lookup database, so one holding an org's rows stops the start here.
+    from dfe_engine.governance.ch import ch_admin_client
+    from dfe_engine.hunts.lookups import refuse_tenant_lookups_if_reachable
+
+    refuse_tenant_lookups_if_reachable(
+        functools.partial(ch_admin_client, settings), settings.hunts.lookup_databases
+    )
+
     # Every carried source's topics, at boot rather than at its next deploy: a
     # deployment restored from its config repo otherwise has topics only for the
     # sources somebody happens to redeploy, and the rest produce into nothing.

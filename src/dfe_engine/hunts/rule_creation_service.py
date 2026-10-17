@@ -408,7 +408,13 @@ class RuleCreationService:
         # transpiled CEL filter reaches without passing through the SQL check above.
         if not sql_errors:
             offbox = refuse_offbox_calls(rule.where_clause)
-            escape = None if offbox is not None else refuse_condition_escape(rule.where_clause)
+            escape = (
+                None
+                if offbox is not None
+                else refuse_condition_escape(
+                    rule.where_clause, lookup_databases=self._hunts.lookup_databases
+                )
+            )
             if offbox is not None:
                 sql_errors = [SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX)]
             elif escape is not None:
@@ -474,7 +480,8 @@ class RuleCreationService:
            refused as the HyperDX sanitiser refuses it
         8. No call that reads outside the row (``url``, ``s3``, a dictionary) or
            sends it to another service (the ``ai*`` functions)
-        9. A condition that reads no other table: no subquery, no ``IN <table>``
+        9. A condition that reads no other table: no subquery, no ``IN <table>``,
+           except a lookup in one of ``hunts.lookup_databases``
         """
         errors: list[SqlValidationError] = []
         trimmed = sql.strip()
@@ -567,7 +574,11 @@ class RuleCreationService:
                 for clause in parsed.ignored_clauses
                 if clause in REFUSED_CLAUSES
             )
-            escape = refuse_condition_escape(parsed.where_clause, subject="A rule's condition")
+            escape = refuse_condition_escape(
+                parsed.where_clause,
+                subject="A rule's condition",
+                lookup_databases=self._hunts.lookup_databases,
+            )
             if escape is not None:
                 errors.append(SqlValidationError(message=escape, suggestion=_ESCAPE_FIX))
 

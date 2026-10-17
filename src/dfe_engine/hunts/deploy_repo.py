@@ -103,6 +103,31 @@ class DeployRepoStore:
 
         return self._route(name, summary, actor, _write)
 
+    def put_many(
+        self, docs: dict[str, dict[str, Any]], *, actor: str, scope: str, summary: str
+    ) -> WriteOutcome:
+        """Write several docs verbatim in ONE commit, routed by posture as one change.
+
+        A production+team posture puts the whole change on one review branch, so the
+        docs land together or not at all.
+
+        Args:
+            docs: Each resource's whole doc, by name.
+            actor: Who made the change.
+            scope: What the commit subject names the change by, such as ``org-acme``.
+            summary: The commit subject's summary.
+
+        Returns:
+            Where the change landed.
+        """
+        message = self._message(scope, summary, actor)
+        items = [(self._cls_name, name, doc) for name, doc in docs.items()]
+
+        def _write(branch: str):
+            return self._crud.put_many(items, actor, message, branch=branch)
+
+        return self._route(scope, summary, actor, _write)
+
     def delete(self, name: str, *, actor: str) -> WriteOutcome | None:
         """Remove one resource and commit it; None when it was not there."""
         if self.get(name) is None:

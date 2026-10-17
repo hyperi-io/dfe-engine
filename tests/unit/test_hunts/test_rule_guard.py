@@ -181,6 +181,107 @@ def test_the_rule_condition_check_refuses_an_offbox_call_first():
     assert "may not call in()" in message
 
 
+# -- a lookup in a shared reference database -------------------------------------
+
+LOOKUPS = ("threat",)
+
+# Each reads only tables of a listed database, which carries no org's rows.
+LISTED_LOOKUPS = {
+    "in subquery": "_source IN (SELECT ioc FROM threat.iocs)",
+    "not in subquery with a filter": (
+        "_source NOT IN (SELECT ioc FROM threat.iocs WHERE kind = 'domain')"
+    ),
+    "global not in subquery": "_source GLOBAL NOT IN (SELECT ioc FROM threat.iocs)",
+    "lower-case select": "_source in (select ioc from threat.iocs)",
+    "quoted names": '_source IN (SELECT ioc FROM `threat`."iocs")',
+    "a call in the select list": "lower(_source) IN (SELECT lower(ioc) FROM threat.iocs)",
+    "a FROM inside a call": "_source IN (SELECT trim(BOTH ' ' FROM ioc) FROM threat.iocs)",
+    "a lookup inside a lookup": (
+        "_source IN (SELECT ioc FROM threat.iocs WHERE feed IN (SELECT name FROM threat.feeds))"
+    ),
+    "in table": "_source IN threat.iocs",
+    "in bracketed table": "_source IN (threat.iocs)",
+    "not in doubly bracketed table": "_source NOT IN ((threat.iocs))",
+    "beside a real condition": "severity = 'high' AND _source IN threat.iocs",
+}
+
+# Each reads, or could read, a database the list does not name.
+UNLISTED_LOOKUPS = {
+    "subquery on the data database": "_source IN (SELECT _source FROM dfe.main)",
+    "table in the data database": "_source IN dfe.main",
+    "bracketed table in the data database": "_source IN (dfe.main)",
+    "unqualified subquery table": "_source IN (SELECT ioc FROM iocs)",
+    "unqualified table": "_source IN iocs",
+    "union into the data database": (
+        "_source IN (SELECT ioc FROM threat.iocs UNION ALL SELECT _source FROM dfe.main)"
+    ),
+    "union after a filter": (
+        "_source IN (SELECT ioc FROM threat.iocs WHERE 1 UNION ALL SELECT _source FROM dfe.main)"
+    ),
+    "a clause after the filter": "_source IN (SELECT ioc FROM threat.iocs WHERE 1 LIMIT 5)",
+    "join": "_source IN (SELECT ioc FROM threat.iocs JOIN dfe.main USING (ioc))",
+    "aliased join": (
+        "_source IN (SELECT i.ioc FROM threat.iocs AS i JOIN dfe.main AS m ON i.ioc = m._source)"
+    ),
+    "comma join": "_source IN (SELECT ioc FROM threat.iocs, dfe.main)",
+    "subquery in FROM": "_source IN (SELECT ioc FROM (SELECT _source AS ioc FROM dfe.main))",
+    "FROM before SELECT": "_source IN (FROM dfe.main SELECT _source)",
+    "WITH": "_source IN (WITH t AS (SELECT _source FROM dfe.main) SELECT * FROM t)",
+    "unlisted subquery inside a lookup": (
+        "_source IN (SELECT ioc FROM threat.iocs WHERE ioc IN (SELECT _source FROM dfe.main))"
+    ),
+    "unlisted table inside a lookup": (
+        "_source IN (SELECT ioc FROM threat.iocs WHERE ioc IN dfe.main)"
+    ),
+    "SETTINGS": "_source IN (SELECT ioc FROM threat.iocs SETTINGS max_threads = 1)",
+    "FINAL": "_source IN (SELECT ioc FROM threat.iocs FINAL)",
+    "scalar subquery": "severity = (SELECT any(severity) FROM threat.iocs)",
+    "exists": "EXISTS (SELECT 1 FROM threat.iocs)",
+    "doubly bracketed subquery": "_source IN ((SELECT ioc FROM threat.iocs))",
+    "escaped database name": "_source IN `\\x74hreat`.iocs",
+    "string spelling the database": "_source IN ($$threat$$.iocs)",
+    "a three-part name": "_source IN threat.iocs.ioc",
+    "closes the bracket it runs in": "_source IN (SELECT ioc FROM threat.iocs WHERE 1) OR (1 = 1",
+}
+
+
+@pytest.mark.parametrize("where", LISTED_LOOKUPS.values(), ids=list(LISTED_LOOKUPS))
+def test_a_lookup_in_a_listed_database_is_not_refused(where):
+    assert refuse_condition_escape(where, lookup_databases=LOOKUPS) is None
+    assert refuse_rule_condition(where, lookup_databases=LOOKUPS) is None
+
+
+@pytest.mark.parametrize("where", LISTED_LOOKUPS.values(), ids=list(LISTED_LOOKUPS))
+def test_a_lookup_is_refused_when_no_database_is_listed(where):
+    message = refuse_condition_escape(where)
+
+    assert message is not None
+    assert message.startswith("A rule's detection condition may not ")
+
+
+@pytest.mark.parametrize("where", UNLISTED_LOOKUPS.values(), ids=list(UNLISTED_LOOKUPS))
+def test_a_lookup_past_the_listed_databases_is_refused(where):
+    message = refuse_rule_condition(where, lookup_databases=LOOKUPS)
+
+    assert message is not None
+    assert message.startswith("A rule's detection condition ")
+
+
+def test_the_refusal_names_the_database_and_the_list():
+    message = refuse_condition_escape(
+        "_source IN (SELECT _source FROM dfe.main)", lookup_databases=("threat", "geo")
+    )
+
+    assert message is not None
+    assert "dfe" in message
+    assert "threat, geo" in message
+
+
+@pytest.mark.parametrize("where", STAYS_IN_THE_ROW)
+def test_a_condition_over_its_own_row_still_passes_with_lookups_listed(where):
+    assert refuse_rule_condition(where, lookup_databases=LOOKUPS) is None
+
+
 def test_a_presence_check_names_the_column_every_event_has():
     assert match_everything("notEmpty(_json) = 1", "dfe.main") == (
         "This rule matches every event in dfe.main: its condition is true whenever "

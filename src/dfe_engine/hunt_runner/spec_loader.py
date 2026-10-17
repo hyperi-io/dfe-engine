@@ -35,6 +35,7 @@ single INSERT INTO a table from a SELECT. It runs as a user that may write, so
 ClickHouse cannot be asked to refuse either.
 """
 
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +112,7 @@ def _build_spec(
     default_target: str,
     default_database: str,
     max_detections: int,
+    lookup_databases: Collection[str],
 ) -> HuntSpec | None:
     """Build one HuntSpec from a parsed hunt def, or None if it must be skipped.
 
@@ -150,6 +152,7 @@ def _build_spec(
             default_target=default_target,
             default_database=default_database,
             max_detections=max_detections,
+            lookup_databases=lookup_databases,
         )
         customers = hunt_customers(definition)
         _, unresolved = hunt_tenant_ids(definition)
@@ -172,6 +175,7 @@ def load_specs(
     default_target: str = "",
     default_database: str = "",
     max_detections: int = MAX_DETECTIONS_PER_RUN,
+    lookup_databases: Collection[str] = (),
 ) -> dict[str, HuntSpec]:
     """Load every *.yaml hunt def in hunt_dir into HuntSpec objects keyed by hunt_id.
 
@@ -189,6 +193,8 @@ def load_specs(
         default_database: Database a compiled rule's unqualified source table is
             read from (the data database).
         max_detections: Detection rows each compiled rule may write in one run.
+        lookup_databases: ``hunts.lookup_databases``, the databases a compiled
+            rule's condition may look values up in.
     """
     directory = Path(hunt_dir)
     if not directory.is_dir():
@@ -204,7 +210,13 @@ def load_specs(
                 logger.warning(f"skipping hunt {stem}: not a YAML mapping")
                 continue
             spec = _build_spec(
-                definition, stem, rules_dir, default_target, default_database, max_detections
+                definition,
+                stem,
+                rules_dir,
+                default_target,
+                default_database,
+                max_detections,
+                lookup_databases,
             )
             if spec is not None:
                 specs[stem] = spec

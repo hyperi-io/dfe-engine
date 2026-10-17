@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
+from dfe_engine.hunts.customers import with_org_tenant_ids
 from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump
 
 if TYPE_CHECKING:
@@ -265,6 +266,67 @@ class HuntConfigRegistry:
             commit_msg = f"{commit_msg} (by {created_by})"
 
         return self._put_raw(name, payload, created_by=created_by, message=commit_msg)
+
+    def save_many(
+        self,
+        configs: dict[str, dict[str, Any]],
+        *,
+        created_by: str,
+        scope: str,
+        summary: str,
+    ) -> WriteOutcome | None:
+        """Persist several hunt configs as one change, and return the git routing outcome.
+
+        On the deploy repo they are ONE commit, routed by posture as one change. The
+        directory backend writes each file as :meth:`save` does, and returns None.
+
+        Args:
+            configs: Each hunt's whole config, by name.
+            created_by: Who made the change.
+            scope: What the commit subject names the change by.
+            summary: The commit subject's summary.
+        """
+        payloads = {name: strip_identity_fields_from_yaml(c) for name, c in configs.items()}
+        if self._deploy is not None:
+            outcome = self._deploy.put_many(
+                payloads, actor=created_by, scope=scope, summary=summary
+            )
+            logger.info(f"Saved hunt configs {sorted(payloads)} -> deploy repo config/hunts")
+            return outcome
+        for name, payload in payloads.items():
+            message = f"hunt({scope}): {summary} {name} (by {created_by})"
+            self._put_raw(name, payload, created_by=created_by, message=message)
+        return None
+
+    def store_org_tenant_ids(
+        self, org: str, tenant_ids: list[str] | None, *, created_by: str
+    ) -> tuple[list[str], WriteOutcome | None]:
+        """Store ``org``'s tenant ids afresh in every hunt naming it, as one change.
+
+        Args:
+            org: The org created, updated or deleted.
+            tenant_ids: Its tenant ids now, or None for a deleted org
+                (:func:`~dfe_engine.hunts.customers.with_org_tenant_ids`).
+            created_by: Who changed the org.
+
+        Returns:
+            The hunts rewritten, sorted, and where the change landed: None when no
+            hunt changed or off gitops.
+        """
+        changed: dict[str, dict[str, Any]] = {}
+        for name in self._names():
+            stored = self._get_raw(name)
+            if stored is None:
+                continue
+            updated = with_org_tenant_ids(dict(stored), org, tenant_ids)
+            if updated is not None:
+                changed[name] = updated
+        if not changed:
+            return [], None
+        outcome = self.save_many(
+            changed, created_by=created_by, scope=f"org-{org}", summary="store tenant ids"
+        )
+        return sorted(changed), outcome
 
     def delete(self, name: str, created_by: str | None = None) -> WriteOutcome | None:
         """Remove one hunt config; returns the git routing outcome, None off gitops."""

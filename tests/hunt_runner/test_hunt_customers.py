@@ -164,6 +164,41 @@ class TestTheStatementIsHeldToTheResolvedTenantIds:
 
         assert compiled == []
 
+    @pytest.mark.parametrize(
+        "where",
+        [
+            "process_name IN (SELECT ioc FROM threat.iocs)",
+            "process_name NOT IN (SELECT ioc FROM threat.iocs WHERE kind = 'process')",
+            "process_name IN threat.iocs",
+            "process_name IN (threat.iocs)",
+        ],
+        ids=["in-subquery", "not-in-filtered-subquery", "in-table", "in-bracketed-table"],
+    )
+    def test_a_rule_reading_a_listed_lookup_database_compiles(self, tmp_path: Path, where):
+        _save_rule(tmp_path / "rules", "certutil", where)
+
+        (statement,) = compile_hunt_queries(
+            _hunt(**resolved_customers("acme")),
+            "windows_hunt",
+            rules_dir=tmp_path / "rules",
+            lookup_databases=("threat",),
+        )
+
+        assert where in statement.sql
+        assert "_org_id IN ('acme')" in statement.sql
+
+    def test_a_rule_reading_an_unlisted_database_compiles_to_nothing(self, tmp_path: Path):
+        _save_rule(tmp_path / "rules", "certutil", "process_name IN (SELECT ioc FROM intel.iocs)")
+
+        compiled = compile_hunt_queries(
+            _hunt(**resolved_customers("acme")),
+            "windows_hunt",
+            rules_dir=tmp_path / "rules",
+            lookup_databases=("threat",),
+        )
+
+        assert compiled == []
+
     def test_a_bracket_inside_a_string_or_a_comment_is_not_counted(self, tmp_path: Path):
         _save_rule(tmp_path / "rules", "certutil", "msg = ')' -- (unbalanced in a comment")
 

@@ -65,6 +65,7 @@ Hunts:
 - DFE_HUNTS_ALERT_DESTINATIONS_DIR -> hunts.alert_destinations_dir
 - DFE_HUNTS_MAX_DETECTIONS_PER_RUN -> hunts.max_detections_per_run
 - DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING -> hunts.max_detections_per_run_ceiling
+- DFE_HUNTS_LOOKUP_DATABASES -> hunts.lookup_databases (comma-separated)
 - DFE_DETECTION_GUARD_ENABLED -> hunts.detection_guard.enabled (true/false)
 - DFE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES -> hunts.detection_guard.preview_window_minutes
 - DFE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS -> hunts.detection_guard.preview_timeout_seconds
@@ -357,6 +358,12 @@ class ClickHouseSettings(BaseModel):
 MAX_DETECTIONS_PER_RUN = 1000
 MAX_DETECTIONS_PER_RUN_CEILING = 10_000
 
+# A plain database name, the only shape the rule guard compares a lookup's database against.
+LOOKUP_DATABASE_PATTERN = r"[A-Za-z_][A-Za-z0-9_-]*"
+
+# ClickHouse's own databases describe every org's tables and queries, so none is a lookup.
+_CLICKHOUSE_CATALOGUES = frozenset({"system", "information_schema"})
+
 
 class DetectionGuardSettings(BaseModel):
     """Alert-volume preview a rule gets when it is created or updated.
@@ -565,6 +572,35 @@ class HuntsSettings(BaseModel):
         default_factory=DetectionGuardSettings,
         description="Alert-volume preview on rule create and update",
     )
+    lookup_databases: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Shared reference databases a rule may look values up in, as "
+            "IN (SELECT <columns> FROM <db>.<table> [WHERE <condition>]) or IN <db>.<table>. "
+            "The hunt runner's ClickHouse user reads every org, so a listed database must "
+            "hold no org's rows: the engine and the hunt runner refuse to start while one "
+            "of its tables has an _org_id column or reads another table, as a view does. "
+            "The hunt runner's role needs SELECT on each. Empty refuses every lookup. "
+            "DFE_HUNTS_LOOKUP_DATABASES (comma-separated)."
+        ),
+    )
+
+    @field_validator("lookup_databases")  # noqa: V105
+    @classmethod
+    def _lookup_databases_are_plain_names(cls, value: list[str]) -> list[str]:
+        names = [name.strip() for name in value]
+        for name in names:
+            if re.fullmatch(LOOKUP_DATABASE_PATTERN, name) is None:
+                raise ValueError(
+                    f"lookup database {name!r} is not a plain database name "
+                    "(letters, digits, '_' and '-', not starting with a digit)"
+                )
+            if name.lower() in _CLICKHOUSE_CATALOGUES:
+                raise ValueError(
+                    f"lookup database {name!r} is one of ClickHouse's own, which describe "
+                    "every org's tables and queries"
+                )
+        return list(dict.fromkeys(names))
 
 
 class ArtifactorySettings(BaseModel):
@@ -2162,6 +2198,17 @@ class DFESettings(BaseModel):
         ),
     )
 
+    @model_validator(mode="after")  # noqa: V105
+    def _data_database_is_no_lookup(self) -> DFESettings:
+        # Every org's rows are in the data database, so a lookup there reads them all.
+        data = self.clickhouse.effective_data_database
+        if data in self.hunts.lookup_databases:
+            raise ValueError(
+                f"hunts.lookup_databases lists {data!r}, the data database, which holds "
+                "every org's rows"
+            )
+        return self
+
     @model_validator(mode="after")
     def _dev_cors_origins(self) -> DFESettings:
         # A production console's origin is the deployment's own; localhost is a dev server.
@@ -2384,6 +2431,8 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["max_detections_per_run_ceiling"] = int(val)
     if val := _get_env("DFE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
         overrides["hunts"]["default_max_sample_events"] = int(val)
+    if val := _get_env("DFE_HUNTS_LOOKUP_DATABASES"):
+        overrides["hunts"]["lookup_databases"] = [d.strip() for d in val.split(",") if d.strip()]
 
     guard: dict[str, Any] = {}
     if val := _get_env("DFE_DETECTION_GUARD_ENABLED"):

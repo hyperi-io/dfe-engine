@@ -22,7 +22,7 @@ validates one, since the hunt runner compiles it straight off the deploy repo.
 import builtins
 import copy
 import functools
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -219,9 +219,10 @@ class InvokeResult:
 class ActionStore:
     """CRUD defined actions (gitops ``actions`` class) and invoke them."""
 
-    def __init__(self, crud: GitCrud) -> None:
-        """Keep the deploy-repo client the definitions are read and written through."""
+    def __init__(self, crud: GitCrud, *, lookup_databases: Collection[str] = ()) -> None:
+        """Keep the deploy-repo client and the databases a rule may look values up in."""
         self._crud = crud
+        self._lookup_databases = tuple(lookup_databases)
 
     def list(self) -> builtins.list[str]:
         """List the stored action definitions by name."""
@@ -435,7 +436,9 @@ class ActionStore:
             elif cls == RULE_CLASS:
                 HuntValidator.validate_rule_source(doc, "the rule")
                 # The runner compiles the stored WHERE unchecked; refuse it here as the rules API does at save.
-                where_refusal = refuse_rule_condition(str(doc.get("where_clause") or ""))
+                where_refusal = refuse_rule_condition(
+                    str(doc.get("where_clause") or ""), lookup_databases=self._lookup_databases
+                )
                 if where_refusal is not None:
                     return where_refusal
         except ValueError as exc:

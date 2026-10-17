@@ -380,7 +380,7 @@ def validate_rule_sql(
     from dfe_engine.hunts.rule_creation_service import RuleCreationService
     from dfe_engine.settings import get_clickhouse_config
 
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings))
+    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
     errors = service.validate_sql(body.sql)
 
     return SqlValidationResponse(
@@ -527,7 +527,7 @@ def _sql_errors_for_original_sql(settings: Settings, original_sql: str) -> list[
     from dfe_engine.hunts.rule_creation_service import RuleCreationService
     from dfe_engine.settings import get_clickhouse_config
 
-    service = RuleCreationService(ch_config=get_clickhouse_config(settings))
+    service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
     return _map_sql_errors(service.validate_sql(original_sql))
 
 

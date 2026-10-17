@@ -47,9 +47,12 @@ the hunt's ``customers`` resolved to (:mod:`~dfe_engine.hunts.customers`), as it
 own conjunct beside the window and the rule, so a hunt for one tenant never writes
 another's matches. A hunt naming no customer, or one the engine did not resolve,
 compiles to nothing. A rule whose brackets do not balance, or that reads another
-table, is dropped, since either would reach rows past that conjunct.
+table, is dropped, since either would reach rows past that conjunct. The one table
+a rule may read is a lookup database's, which ``hunts.lookup_databases`` lists as
+holding no org's rows.
 """
 
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -202,6 +205,7 @@ def compile_hunt_queries(
     default_target: str = "",
     default_database: str = "",
     max_detections: int = MAX_DETECTIONS_PER_RUN,
+    lookup_databases: Collection[str] = (),
 ) -> list[HuntStatement]:
     """Compile every rule the hunt names into one capped INSERT ... SELECT each.
 
@@ -215,6 +219,8 @@ def compile_hunt_queries(
             data database. Empty leaves such a rule with no source.
         max_detections: Detection rows each rule may write in one run, already cut
             to the ceiling by :func:`detection_cap`.
+        lookup_databases: ``hunts.lookup_databases``, the databases a rule's
+            condition may look values up in.
 
     Returns:
         The statements, in the hunt's own rule order. Empty when nothing compiled,
@@ -272,7 +278,7 @@ def compile_hunt_queries(
 
         # A rule YAML can also be committed straight into the deploy repo, so the
         # API's refusal is not the only gate the condition passes.
-        refusal = refuse_rule_condition(where)
+        refusal = refuse_rule_condition(where, lookup_databases=lookup_databases)
         if refusal is not None:
             logger.error(f"hunt {hunt_id}: rule '{rule_name}' refused: {refusal}")
             continue
