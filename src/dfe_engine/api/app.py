@@ -396,10 +396,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.org_registry = OrgRegistry(Path(orgs_dir_str))
 
     # Ahead of the CH RBAC reconcile below, so a seeded org is fenced on this boot.
+    from dfe_engine.api.deps import get_hunt_config_registry_optional
     from dfe_engine.orgs.seed import seed_orgs
 
     try:
-        seed_orgs(registry=app.state.org_registry, seeds=settings.orgs.seed_orgs)
+        seed_orgs(
+            registry=app.state.org_registry,
+            seeds=settings.orgs.seed_orgs,
+            hunts=get_hunt_config_registry_optional(),
+        )
     except Exception as exc:  # a failed seed must never break startup
         logger.warning("organisations not seeded at startup", error=str(exc))
 

@@ -88,8 +88,9 @@ class OrgRegistry:
 
         Raises:
             ValueError: If the name is not a valid org name, an org with this name
-                already exists, or the name or any tenant id collides with another
-                org's name or tenant ids.
+                already exists, the name or any tenant id collides with another
+                org's name or tenant ids, or a tenant id does not match
+                ``TENANT_ID_PATTERN``.
         """
         if re.fullmatch(ORG_NAME_PATTERN, name) is None:
             raise ValueError(f"Invalid org name: {name!r}")
@@ -154,7 +155,7 @@ class OrgRegistry:
         Raises:
             KeyError: If no org with *name* exists.
             ValueError: If the update's tenant ids collide with another org's
-                name or tenant ids.
+                name or tenant ids, or one does not match ``TENANT_ID_PATTERN``.
         """
         path = self._path(name)
         if not path.exists():
@@ -183,7 +184,7 @@ class OrgRegistry:
             update_dict["ch_password_env"] = fields["ch_password_env"]
 
         update_dict["updated_at"] = _now()
-        org = org.model_copy(update=update_dict)
+        org = Org.model_validate({**org.model_dump(), **update_dict})
         self._write(path, org)
         self._changed(name)
         return org

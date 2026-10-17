@@ -39,6 +39,30 @@ def hunt_customers(definition: dict[str, Any]) -> list[str]:
     return list(dict.fromkeys(named))
 
 
+def customer_tenant_ids(definition: dict[str, Any]) -> dict[str, list[str]]:
+    """Each customer's stored tenant ids, as the hunt runner reads them.
+
+    Args:
+        definition: The parsed hunt YAML.
+
+    Returns:
+        One entry per customer, in their given order, holding its non-blank stored
+        ids stripped. Empty for a customer whose entry is missing, empty or not a list
+        of strings, and an entry for an org the hunt does not name is left out.
+    """
+    stored = definition.get(CUSTOMER_TENANT_IDS)
+    resolved = stored if isinstance(stored, dict) else {}
+    held: dict[str, list[str]] = {}
+    for customer in hunt_customers(definition):
+        entry = resolved.get(customer)
+        held[customer] = (
+            [i.strip() for i in entry if isinstance(i, str) and i.strip()]
+            if isinstance(entry, list)
+            else []
+        )
+    return held
+
+
 def hunt_tenant_ids(definition: dict[str, Any]) -> tuple[list[str], list[str]]:
     """The ``_org_id`` values a hunt reads, and the customers with none stored.
 
@@ -50,17 +74,9 @@ def hunt_tenant_ids(definition: dict[str, Any]) -> tuple[list[str], list[str]]:
         customers whose ``customer_tenant_ids`` entry is missing, empty or not a
         list of strings, in their given order.
     """
-    stored = definition.get(CUSTOMER_TENANT_IDS)
-    resolved = stored if isinstance(stored, dict) else {}
     tenant_ids: set[str] = set()
     unresolved: list[str] = []
-    for customer in hunt_customers(definition):
-        entry = resolved.get(customer)
-        ids = (
-            [i.strip() for i in entry if isinstance(i, str) and i.strip()]
-            if isinstance(entry, list)
-            else []
-        )
+    for customer, ids in customer_tenant_ids(definition).items():
         if ids:
             tenant_ids.update(ids)
         else:

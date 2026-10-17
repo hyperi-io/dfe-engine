@@ -281,3 +281,137 @@ class TestTheDeployRepoTakesOneChange:
         assert resp.status_code == 204
         assert resp.headers["X-DFE-Review-Required"] == "true"
         assert deploy_repo.head_revision() == head
+
+
+def _under_review(client, admin_headers, deploy_repo) -> None:
+    """``windows_hunt`` reads acme's ``acme-1``, and every hunt change now waits on review."""
+    _rebind(deploy_repo, environment="dev", mode="solo")
+    _create_hunt(client, admin_headers, "windows_hunt", ["acme"])
+    _rebind(deploy_repo, environment="production", mode="team")
+
+
+def _review_branches(crud: GitCrud) -> list[bytes]:
+    from dulwich.repo import Repo
+
+    with Repo(str(crud.repo_path)) as repo:
+        return sorted(ref for ref in repo.get_refs() if ref.startswith(b"refs/heads/dfe/"))
+
+
+class TestATenantIdAHuntStillReadsForAnotherOrg:
+    """In production+team the org is written while its hunts' rewrite waits on review.
+
+    So a deleted or changed org's ids stay in its hunts on main, or arrive there when a
+    review merges, and an org taking them would have its rows read under the old name.
+    """
+
+    def test_a_deleted_orgs_ids_still_on_main_are_refused_to_a_new_org(
+        self, client, admin_headers, deploy_repo, orgs
+    ):
+        _under_review(client, admin_headers, deploy_repo)
+        assert client.delete(f"{ORGS}/acme", headers=admin_headers).status_code == 204
+        assert deploy_repo.get("hunts", "windows_hunt")["customer_tenant_ids"] == {
+            "acme": ["acme-1"]
+        }
+
+        resp = client.post(
+            ORGS, json={"name": "newcorp", "org_ids": ["acme-1"]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "tenant_id_held"
+        assert "windows_hunt" in resp.json()["message"]
+        assert resp.json()["context"]["held"] == [
+            {"hunt": "windows_hunt", "org": "acme", "tenant_ids": ["acme-1"], "branch": None}
+        ]
+        assert client.get(f"{ORGS}/newcorp", headers=admin_headers).status_code == 404
+
+    def test_an_update_taking_a_held_id_is_refused(self, client, admin_headers, deploy_repo, orgs):
+        _under_review(client, admin_headers, deploy_repo)
+        assert client.delete(f"{ORGS}/acme", headers=admin_headers).status_code == 204
+
+        resp = client.put(f"{ORGS}/globex", json={"org_ids": ["acme-1"]}, headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "tenant_id_held"
+        assert client.get(f"{ORGS}/globex", headers=admin_headers).json()["org_ids"] == []
+
+    def test_an_id_only_a_pending_review_adds_is_refused(
+        self, client, admin_headers, deploy_repo, orgs
+    ):
+        _under_review(client, admin_headers, deploy_repo)
+        assert client.put(
+            f"{ORGS}/acme", json={"org_ids": ["acme-1", "acme-2"]}, headers=admin_headers
+        ).is_success
+        # Main never took acme-2, so this lands at once and leaves the review open.
+        assert client.put(
+            f"{ORGS}/acme", json={"org_ids": ["acme-1"]}, headers=admin_headers
+        ).is_success
+        (branch,) = _review_branches(deploy_repo)
+
+        resp = client.post(
+            ORGS, json={"name": "newcorp", "org_ids": ["acme-2"]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["context"]["held"] == [
+            {
+                "hunt": "windows_hunt",
+                "org": "acme",
+                "tenant_ids": ["acme-2"],
+                "branch": branch.removeprefix(b"refs/heads/").decode(),
+            }
+        ]
+
+    def test_deleting_the_review_branch_releases_what_it_carried(
+        self, client, admin_headers, deploy_repo, orgs
+    ):
+        from dulwich import porcelain
+
+        _under_review(client, admin_headers, deploy_repo)
+        client.put(f"{ORGS}/acme", json={"org_ids": ["acme-1", "acme-2"]}, headers=admin_headers)
+        client.put(f"{ORGS}/acme", json={"org_ids": ["acme-1"]}, headers=admin_headers)
+        (branch,) = _review_branches(deploy_repo)
+        porcelain.branch_delete(str(deploy_repo.repo_path), branch.removeprefix(b"refs/heads/"))
+
+        resp = client.post(
+            ORGS, json={"name": "newcorp", "org_ids": ["acme-2"]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 201, resp.text
+
+    def test_the_org_itself_may_take_back_its_own_ids(
+        self, client, admin_headers, deploy_repo, orgs
+    ):
+        _under_review(client, admin_headers, deploy_repo)
+        assert client.delete(f"{ORGS}/acme", headers=admin_headers).status_code == 204
+
+        resp = client.post(
+            ORGS, json={"name": "acme", "org_ids": ["acme-1"]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 201, resp.text
+
+    def test_a_review_counts_only_for_the_ids_it_adds(
+        self, client, admin_headers, deploy_repo, orgs
+    ):
+        _under_review(client, admin_headers, deploy_repo)
+        client.put(f"{ORGS}/acme", json={"org_ids": ["acme-1", "acme-2"]}, headers=admin_headers)
+
+        held = _registries["hunt_configs"].tenant_id_holders("newcorp", ["acme-1", "acme-2"])
+
+        assert [(h.tenant_ids, h.branch is None) for h in held] == [
+            (["acme-1"], True),
+            (["acme-2"], False),
+        ]
+
+    def test_an_id_no_hunt_reads_is_free_while_a_review_waits(
+        self, client, admin_headers, deploy_repo, orgs
+    ):
+        _under_review(client, admin_headers, deploy_repo)
+        assert client.delete(f"{ORGS}/acme", headers=admin_headers).status_code == 204
+
+        resp = client.post(
+            ORGS, json={"name": "newcorp", "org_ids": ["newcorp-1"]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 201, resp.text

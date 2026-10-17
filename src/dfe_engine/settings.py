@@ -157,7 +157,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .names import MAX_NAME_LENGTH
-from .orgs.models import ORG_NAME_PATTERN
+from .orgs.models import ORG_NAME_PATTERN, TenantId
 from .transport import SourceTransport
 from .yaml_utils import yaml_load
 
@@ -578,8 +578,10 @@ class HuntsSettings(BaseModel):
             "Shared reference databases a rule may look values up in, as "
             "IN (SELECT <columns> FROM <db>.<table> [WHERE <condition>]) or IN <db>.<table>. "
             "The hunt runner's ClickHouse user reads every org, so a listed database must "
-            "hold no org's rows: the engine and the hunt runner refuse to start while one "
-            "of its tables has an _org_id column or reads another table, as a view does. "
+            "hold no org's rows. The hunt runner refuses to start, or stops at its next "
+            "reload, while one of its tables has an _org_id column or is not a plain store "
+            "of its own rows, as a view is. The engine refuses to start on one when "
+            "ClickHouse answers at its start, and starts with the check unrun when it does not. "
             "The hunt runner's role needs SELECT on each. Empty refuses every lookup. "
             "DFE_HUNTS_LOOKUP_DATABASES (comma-separated)."
         ),
@@ -2108,7 +2110,7 @@ class SeedOrg(BaseModel):
 
     name: str = Field(description="Org name, the registry identifier", pattern=ORG_NAME_PATTERN)
     display_name: str = Field(default="", description="Human-readable label")
-    org_ids: list[str] = Field(
+    org_ids: list[TenantId] = Field(
         default_factory=list,
         description="Tenant IDs for ClickHouse row-level security",
     )

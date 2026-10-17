@@ -7689,7 +7689,7 @@
           "Rules"
         ],
         "summary": "Create Rule",
-        "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL->SQL transpilation,\nvalidates column references, and optionally estimates query cost. A rule\nwhose SQL the hunt runner could not compile is refused with 422.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL->SQL transpilation,\nvalidates column references, and optionally estimates query cost. A rule\nwhose SQL the hunt runner could not compile is refused with 422. The cost\npreview counts only the orgs the hunts running the rule read, cut to the orgs\nits author may read.\n\nA production+team write is routed to a review branch instead of the branch the\nrunner git-syncs, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "create_rule_api_v1_rules_post",
         "requestBody": {
           "required": true,
@@ -26489,7 +26489,8 @@
           },
           "org_ids": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[^\\s,\\x00-\\x1f\\x7f](?:[^,\\x00-\\x1f\\x7f]*[^\\s,\\x00-\\x1f\\x7f])?$"
             },
             "type": "array",
             "title": "Org Ids",
@@ -31149,7 +31150,8 @@
           },
           "org_ids": {
             "items": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[^\\s,\\x00-\\x1f\\x7f](?:[^,\\x00-\\x1f\\x7f]*[^\\s,\\x00-\\x1f\\x7f])?$"
             },
             "type": "array",
             "title": "Org Ids"
@@ -40405,7 +40407,8 @@
             "anyOf": [
               {
                 "items": {
-                  "type": "string"
+                  "type": "string",
+                  "pattern": "^[^\\s,\\x00-\\x1f\\x7f](?:[^,\\x00-\\x1f\\x7f]*[^\\s,\\x00-\\x1f\\x7f])?$"
                 },
                 "type": "array"
               },

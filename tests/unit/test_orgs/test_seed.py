@@ -70,3 +70,39 @@ class TestSeedOrgs:
 
         assert STEP_ORGANISATIONS in state.completed_steps
         assert STEP_ORGANISATIONS not in state.pending_steps
+
+
+def _hunts(tmp_path, stored: dict):
+    from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+
+    hunts = HuntConfigRegistry(
+        hunts_directory=tmp_path / "hunts", writable=True, refresh_interval=0
+    )
+    hunts.save(
+        "windows_hunt",
+        {"cron": "*/5 * * * *", "customers": sorted(stored), "customer_tenant_ids": stored},
+    )
+    return hunts
+
+
+class TestASeedBesideTheHunts:
+    """The seed creates absent orgs and rewrites no hunt."""
+
+    def test_a_hunt_naming_a_seeded_org_stays_refused_until_it_is_edited(self, registry, tmp_path):
+        """A deleted org's hunt holds no ids for it, and the seed adds none, so it reads nothing."""
+        from dfe_engine.hunt_runner.spec_loader import load_specs
+
+        _hunts(tmp_path, {"acme": []})
+
+        assert seed_orgs(registry=registry, seeds=[SeedOrg(name="acme")]) == ["acme"]
+
+        spec = load_specs(tmp_path / "hunts")["windows_hunt"]
+        assert spec.unresolved_customers == ["acme"]
+
+    def test_a_seed_a_hunt_still_reads_for_another_org_is_not_created(self, registry, tmp_path):
+        hunts = _hunts(tmp_path, {"gone": ["t1"]})
+        seeds = [SeedOrg(name="newcorp", org_ids=["t1"]), SeedOrg(name="globex")]
+
+        assert seed_orgs(registry=registry, seeds=seeds, hunts=hunts) == ["globex"]
+
+        assert registry.get("newcorp") is None

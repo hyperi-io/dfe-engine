@@ -20,7 +20,10 @@ Read endpoints require org:read.
 
 A hunt stores the tenant ids each customer org resolved to, so every create, update
 and delete stores the org's tenant ids afresh in each hunt naming it, as one
-deploy-repo change, before the org itself is written.
+deploy-repo change, before the org itself is written. A create or update is refused
+a tenant id a hunt still reads for another org, on main or on a review branch not yet
+merged, because in production+team the org is written while its hunts' rewrite waits
+on review.
 """
 
 import functools
@@ -55,7 +58,7 @@ from dfe_engine.gitcrud.routing import WriteOutcome
 from dfe_engine.orgs.available_ids import DEFAULT_LIMIT, OrgIdDiscoveryError
 from dfe_engine.orgs.available_ids import available_org_ids as discover_available_org_ids
 from dfe_engine.orgs.lifecycle import OrgLifecycleManager
-from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org
+from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org, TenantId
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids
 
@@ -69,7 +72,7 @@ router = APIRouter(prefix="/orgs", tags=["Organisations"], dependencies=[WRITE_T
 class CreateOrgRequest(BaseModel):
     name: str = Field(description="Unique org name (used as identifier)", pattern=ORG_NAME_PATTERN)
     display_name: str = Field(default="", description="Human-readable label")
-    org_ids: list[str] = Field(
+    org_ids: list[TenantId] = Field(
         default_factory=list,
         description="Tenant IDs for ClickHouse row-level security",
     )
@@ -77,7 +80,7 @@ class CreateOrgRequest(BaseModel):
 
 class UpdateOrgRequest(BaseModel):
     display_name: str | None = Field(None, description="Human-readable label")
-    org_ids: list[str] | None = Field(None, description="Tenant IDs")
+    org_ids: list[TenantId] | None = Field(None, description="Tenant IDs")
     enabled: bool | None = Field(None, description="Enable or disable the org")
 
 
@@ -145,7 +148,8 @@ def _create_hunts_first(
     """Refuse a taken name or a collision, then store the new org's tenant ids in its hunts.
 
     Raises:
-        HTTPException: 409 ``conflict`` for a name taken or a tenant id another org holds.
+        HTTPException: 409 ``conflict`` for a name taken or a tenant id another org holds,
+            or 409 ``tenant_id_held`` for one a hunt still reads for another org.
     """
     if registry.get(body.name) is not None:
         raise HTTPException(
@@ -161,7 +165,9 @@ def _create_hunts_first(
                 "message": f"Org '{body.name}' collides with tenant-fenced org '{other.name}'",
             },
         )
-    return _store_hunt_tenant_ids(hunts, body.name, org_tenant_ids(body), actor)
+    tenant_ids = org_tenant_ids(body)
+    refuse_held_tenant_ids(hunts, body.name, tenant_ids)
+    return store_hunt_tenant_ids(hunts, body.name, tenant_ids, actor)
 
 
 @router.get(
@@ -291,8 +297,8 @@ def _update_org(
     """Store the org's tenant ids in its hunts, then write the org.
 
     Raises:
-        HTTPException: 404 ``not_found``, or 409 ``conflict`` for a tenant id another
-            org holds.
+        HTTPException: 404 ``not_found``, 409 ``conflict`` for a tenant id another org
+            holds, or 409 ``tenant_id_held`` for one a hunt still reads for another org.
     """
     existing = registry.get(name)
     if existing is None:
@@ -321,7 +327,10 @@ def _update_org(
         update_fields["enabled"] = body.enabled
 
     after = existing.model_copy(update=update_fields)
-    outcome = _store_hunt_tenant_ids(hunts, name, org_tenant_ids(after), actor)
+    tenant_ids = org_tenant_ids(after)
+    if body.org_ids is not None:
+        refuse_held_tenant_ids(hunts, name, tenant_ids)
+    outcome = store_hunt_tenant_ids(hunts, name, tenant_ids, actor)
     org = registry.update(name, **update_fields) if update_fields else existing
     return org, outcome
 
@@ -368,13 +377,53 @@ def _delete_hunts_first(
             status_code=404,
             detail={"code": "not_found", "message": f"Org '{name}' not found"},
         )
-    return _store_hunt_tenant_ids(hunts, name, None, actor)
+    return store_hunt_tenant_ids(hunts, name, None, actor)
 
 
 # -- Helpers -----------------------------------------------------------------
 
 
-def _store_hunt_tenant_ids(
+def refuse_held_tenant_ids(hunts: Any, org: str, tenant_ids: list[str]) -> None:
+    """Refuse ``org`` a tenant id a hunt still reads for another org, on main or in review.
+
+    A hunt holding a deleted or changed org's ids until its rewrite is merged would
+    otherwise read the next org's rows under the old org's name.
+
+    Args:
+        hunts: The hunt registry, or None where the deployment carries none.
+        org: The org being created or updated.
+        tenant_ids: Its tenant ids once written.
+
+    Raises:
+        HTTPException: 409 ``tenant_id_held`` naming each hunt.
+    """
+    if hunts is None:
+        return
+    held = hunts.tenant_id_holders(org, tenant_ids)
+    if not held:
+        return
+    where = ", ".join(
+        f"hunt '{h.hunt}' reads {', '.join(h.tenant_ids)} for org '{h.org}' "
+        + (f"once review branch '{h.branch}' merges" if h.branch else "on main")
+        for h in held
+    )
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "tenant_id_held",
+            "message": (
+                f"Org '{org}' cannot take a tenant id a hunt still reads for another org: "
+                f"{where}. Merge or close that review, or edit the hunt, first"
+            ),
+            "held": [
+                {"hunt": h.hunt, "org": h.org, "tenant_ids": h.tenant_ids, "branch": h.branch}
+                for h in held
+            ],
+        },
+    )
+
+
+def store_hunt_tenant_ids(
     hunts: Any, org: str, tenant_ids: list[str] | None, actor: str
 ) -> WriteOutcome | None:
     """Store ``org``'s tenant ids afresh in every hunt naming it, as one change.

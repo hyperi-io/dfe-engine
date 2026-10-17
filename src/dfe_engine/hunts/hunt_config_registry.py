@@ -15,20 +15,57 @@ label used by the hunt engine at runtime (legacy YAML may use ``name`` instead).
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
-from dfe_engine.hunts.customers import with_org_tenant_ids
+from dfe_engine.hunts.customers import customer_tenant_ids, with_org_tenant_ids
 from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
     from dfe_engine.gitcrud.routing import WriteOutcome
     from dfe_engine.hunts.deploy_repo import DeployRepoStore
 
 _DISPLAY_NAME_WORD = re.compile(r"[a-zA-Z0-9]+")
+
+
+@dataclass(frozen=True, slots=True)
+class HeldTenantIds:
+    """Tenant ids a hunt reads for an org, on main or once a review branch merges."""
+
+    hunt: str
+    org: str
+    tenant_ids: list[str]
+    branch: str | None = None
+
+
+def _held_for_others(
+    hunt: str,
+    doc: dict[str, Any],
+    base: dict[str, Any] | None,
+    org: str,
+    wanted: set[str],
+    branch: str | None,
+) -> list[HeldTenantIds]:
+    """The ids of ``wanted`` that ``doc`` holds for an org other than ``org``.
+
+    With a ``base``, only the ids ``doc`` adds to it count, because a merge brings a
+    branch's changes and leaves the rest as main has them.
+    """
+    before = customer_tenant_ids(base) if base is not None else {}
+    held = []
+    for holder, ids in customer_tenant_ids(doc).items():
+        if holder == org:
+            continue
+        added = set(ids) - set(before.get(holder, []))
+        if hit := sorted(added & wanted):
+            held.append(HeldTenantIds(hunt=hunt, org=holder, tenant_ids=hit, branch=branch))
+    return held
 
 
 def default_display_name(hunt_name: str) -> str:
@@ -327,6 +364,38 @@ class HuntConfigRegistry:
             changed, created_by=created_by, scope=f"org-{org}", summary="store tenant ids"
         )
         return sorted(changed), outcome
+
+    def tenant_id_holders(
+        self, org: str, tenant_ids: Iterable[str], *, include_review: bool = True
+    ) -> list[HeldTenantIds]:
+        """Every hunt that reads one of ``tenant_ids`` for an org other than ``org``.
+
+        A hunt on main reads what it stores. A review branch not yet merged counts for
+        the ids it adds, since merging it gives the hunt those ids.
+
+        Args:
+            org: The org about to declare ``tenant_ids``.
+            tenant_ids: Its tenant ids once written.
+            include_review: Read the review branches too, which fetches the deploy repo.
+
+        Returns:
+            Each hunt and the org it holds the ids for, main first, then by branch.
+
+        Raises:
+            GitopsRemoteError: The deploy repo's review branches could not be fetched.
+        """
+        wanted = set(tenant_ids)
+        held: list[HeldTenantIds] = []
+        for name in self._names():
+            stored = self._get_raw(name)
+            if stored is not None:
+                held += _held_for_others(name, dict(stored), None, org, wanted, None)
+        if include_review and self._deploy is not None:
+            for change in self._deploy.pending():
+                held += _held_for_others(
+                    change.name, change.doc, change.base, org, wanted, change.branch
+                )
+        return held
 
     def delete(self, name: str, created_by: str | None = None) -> WriteOutcome | None:
         """Remove one hunt config; returns the git routing outcome, None off gitops."""

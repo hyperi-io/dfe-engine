@@ -24,6 +24,7 @@ their DirectoryConfigStore over the shared config volume the docker runner reads
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
@@ -36,6 +37,7 @@ from dfe_engine.gitcrud.routing import (
     pr_branch_name,
     route_write,
 )
+from dfe_engine.yaml_utils import yaml_load_string
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -48,6 +50,27 @@ if TYPE_CHECKING:
 # Both classes are hunt-domain artefacts, so both commit under the standard's
 # `hunt` type (gitcrud/commit_policy.ALLOWED_TYPES).
 _COMMIT_TYPE = "hunt"
+
+
+@dataclass(frozen=True, slots=True)
+class PendingDoc:
+    """A doc as a review branch would leave it, and as the branch's merge base held it."""
+
+    branch: str
+    name: str
+    doc: dict[str, Any]
+    base: dict[str, Any]
+
+
+def _mapping(raw: str | None) -> dict[str, Any]:
+    """A branch file's YAML mapping, empty when absent or not a mapping the runner could load."""
+    if raw is None:
+        return {}
+    try:
+        doc = yaml_load_string(raw)
+    except Exception:  # an unparsable hunt is one the runner refuses, so it holds no ids
+        return {}
+    return doc if isinstance(doc, dict) else {}
 
 
 class DeployRepoStore:
@@ -87,6 +110,27 @@ class DeployRepoStore:
             return self._crud.get(self._cls_name, name)
         except ResourceNotFoundError, CommitPolicyError:
             return None
+
+    def pending(self) -> list[PendingDoc]:
+        """Each doc a review branch not yet merged changes, beside its merge-base doc.
+
+        Raises:
+            GitopsRemoteError: The deploy repo's review branches could not be fetched.
+        """
+        cls = self._crud.resource_class(self._cls_name)
+        docs = []
+        for change in self._crud.repo.review_branch_files(cls.directory):
+            if not change.name.endswith(cls.suffix):
+                continue
+            docs.append(
+                PendingDoc(
+                    branch=change.branch,
+                    name=change.name.removesuffix(cls.suffix),
+                    doc=_mapping(change.content),
+                    base=_mapping(change.base_content),
+                )
+            )
+        return docs
 
     def put(self, name: str, doc: dict[str, Any], *, actor: str) -> WriteOutcome:
         """Write one doc verbatim and commit it, routed by posture.
