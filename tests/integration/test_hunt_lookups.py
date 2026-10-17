@@ -10,8 +10,8 @@
 The lookup here is a list of tenant markers, so a match proves ClickHouse read the
 lookup table, and the second org's row in it proves the hunt's own orgs still fence
 what lands. The startup check runs against what this server actually holds: a
-reference table passes, and a table with ``_org_id`` or a view over the landing
-table does not.
+reference table on each kept engine passes, and a table with ``_org_id``, a view over
+the landing table, or a ``Set`` or ``Join`` table does not.
 """
 
 import time
@@ -132,6 +132,38 @@ def test_a_listed_database_holding_a_view_over_the_landing_table_is_refused(
     )
 
     with pytest.raises(LookupDatabaseError, match=rf"{lookup_db}\.everything is a View table"):
+        refuse_tenant_lookups(ch_client, [lookup_db])
+
+
+@pytest.mark.parametrize(
+    "engine",
+    [
+        "MergeTree ORDER BY ioc",
+        "ReplacingMergeTree ORDER BY ioc",
+        "Memory",
+        "Log",
+        "TinyLog",
+        "StripeLog",
+        "EmbeddedRocksDB PRIMARY KEY ioc",
+    ],
+)
+def test_a_table_answering_from_its_own_rows_passes_the_check(ch_client, lookup_db, engine):
+    ch_client.command(f"CREATE TABLE `{lookup_db}`.kept (ioc String) ENGINE = {engine}")
+    ch_client.command(f"INSERT INTO `{lookup_db}`.kept VALUES ('x')")
+
+    assert ch_client.query(f"SELECT ioc FROM `{lookup_db}`.kept").result_rows == [("x",)]
+    refuse_tenant_lookups(ch_client, [lookup_db])
+
+
+@pytest.mark.parametrize(
+    ("engine", "name"),
+    [("Set", "Set"), ("Join(ANY, LEFT, ioc)", "Join")],
+    ids=["Set", "Join"],
+)
+def test_a_set_or_join_table_is_refused(ch_client, lookup_db, engine, name):
+    ch_client.command(f"CREATE TABLE `{lookup_db}`.packed (ioc String) ENGINE = {engine}")
+
+    with pytest.raises(LookupDatabaseError, match=rf"{lookup_db}\.packed is a {name} table"):
         refuse_tenant_lookups(ch_client, [lookup_db])
 
 

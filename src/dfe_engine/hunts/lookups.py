@@ -10,10 +10,13 @@
 ``hunts.lookup_databases`` lets a rule's condition read another table, because a
 listed database is shared reference data such as threat-intel indicators. The hunt
 runner's ClickHouse user reads every org, so a listed database holding a table with
-an ``_org_id`` column, or a table that reads rows it does not hold (a view, a
-``Merge``, a ``Distributed``), would answer a rule from every org. The engine and
-the hunt runner refuse to start while one does, and the check sees only the tables
-the connecting user can see, which are the ones it could read.
+an ``_org_id`` column, or a table on any engine but a plain store of its own rows (a
+view, a ``Merge``, a ``Distributed``, a ``Set``), could answer a rule from every org.
+
+The hunt runner refuses to start while one does, and stops at the reload that first
+finds one. The engine refuses to start when ClickHouse answers at its start, and
+starts with the check unrun, logging a warning, when it does not. The check sees only
+the tables the connecting user can see, which are the ones it could read.
 """
 
 from collections.abc import Callable, Collection
@@ -24,10 +27,8 @@ from scalo.logger import logger
 from dfe_engine.http_errors import describe_failure
 from dfe_engine.orgs.available_ids import ORG_ID_COLUMN
 
-# Engines that keep their own rows beside the MergeTree family, which every *MergeTree name is.
-_ROW_HOLDING_ENGINES = frozenset(
-    {"EmbeddedRocksDB", "Join", "KeeperMap", "Log", "Memory", "Set", "StripeLog", "TinyLog"}
-)
+# Plain stores of their own rows beside the MergeTree family, which every *MergeTree name is.
+_ROW_HOLDING_ENGINES = frozenset({"EmbeddedRocksDB", "Log", "Memory", "StripeLog", "TinyLog"})
 
 
 class LookupDatabaseError(RuntimeError):
@@ -35,7 +36,7 @@ class LookupDatabaseError(RuntimeError):
 
 
 def _holds_its_own_rows(engine: str) -> bool:
-    """Whether a table on ``engine`` answers only from rows written into it."""
+    """Whether ``engine`` is a plain store a rule may read, answering from rows written into it."""
     return engine.endswith("MergeTree") or engine in _ROW_HOLDING_ENGINES
 
 
@@ -48,8 +49,8 @@ def tenant_reachable_tables(client: Any, databases: Collection[str]) -> list[str
 
     Returns:
         One ``<db>.<table> ...`` line per table carrying an ``_org_id`` column or on an
-        engine that reads rows it does not hold, in database and table order. Empty
-        when there is nothing listed or nothing to refuse.
+        engine that is not a plain store of its own rows, in database and table order.
+        Empty when there is nothing listed or nothing to refuse.
     """
     listed = list(databases)
     if not listed:
@@ -67,7 +68,7 @@ def tenant_reachable_tables(client: Any, databases: Collection[str]) -> list[str
     ).result_rows
     found = [f"{db}.{table} has an {ORG_ID_COLUMN} column" for db, table in with_org]
     found += [
-        f"{db}.{name} is a {engine} table, which reads rows it does not hold"
+        f"{db}.{name} is a {engine} table, not a plain store of its own rows"
         for db, name, engine in tables
         if not _holds_its_own_rows(engine)
     ]

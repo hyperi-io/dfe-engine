@@ -29,14 +29,15 @@ Two commands, matching the two ways the runner is driven:
       for claims; kill one and its lease expires and is reclaimed - the coordination
       is entirely in ClickHouse, so the loop here owns nothing but cadence + signals.
 
-The runner is held in a mutable one-element cell so ``on_reload`` can rebuild it
-from freshly loaded specs WITHOUT the daemon loop knowing specs exist - the loop
-stays agnostic (it only calls the tick and the reload callbacks it was handed).
+The runner is held in a ``_ReloadingRunner`` so ``on_reload`` can rebuild it from
+freshly loaded specs WITHOUT the daemon loop knowing specs exist - the loop stays
+agnostic (it only calls the tick and the reload callbacks it was handed).
 """
 
 import signal
 import socket
 import time
+from collections.abc import Callable
 from typing import Any
 
 import clickhouse_connect
@@ -138,6 +139,37 @@ def _connect_coordinator(settings: DFESettings) -> tuple[Any, ChCoordinator]:
     return client, coord
 
 
+class _ReloadingRunner:
+    """The current runner, rebuilt on each reload, whose next tick rechecks the lookups first.
+
+    The recheck runs inside the tick, so the tick guard skips a tick ClickHouse cannot
+    answer and the recheck waits for the next one, firing nothing in between. A table
+    that turned unsafe ends the process, as it does at the connect.
+
+    Args:
+        build: builds a runner from freshly loaded specs.
+        check: raises :class:`LookupDatabaseError` while a lookup database is unsafe.
+    """
+
+    def __init__(self, build: Callable[[], HuntRunner], check: Callable[[], None]) -> None:
+        self._build = build
+        self._check = check
+        self._runner = build()
+        self._unchecked = False
+
+    def tick(self, now: int) -> int:
+        """Recheck the lookups if a reload left them unchecked, then tick the runner."""
+        if self._unchecked:
+            self._check()
+            self._unchecked = False
+        return self._runner.tick(now)
+
+    def reload(self) -> None:
+        """Swap in a runner from freshly loaded specs, the lookups unchecked until the next tick."""
+        self._runner = self._build()
+        self._unchecked = True
+
+
 @app.command("materialise")
 def materialise() -> None:
     """Publish the deterministic ``hunt_schedule`` table KEDA scales on (one-shot).
@@ -169,8 +201,9 @@ def run(
     Repeats one runner tick (due -> claim -> execute, all via ClickHouse) on the
     poll interval. Every ``reload_every`` ticks it reloads hunt specs from gitops
     and rebuilds the runner in place, so a hunt added/removed in git is picked up
-    without a restart. A stop flag flipped by SIGTERM/SIGINT drains promptly (the
-    daemon re-checks it right after each tick, before sleeping).
+    without a restart, and rechecks the lookup databases before it fires again. A
+    stop flag flipped by SIGTERM/SIGINT drains promptly (the daemon re-checks it
+    right after each tick, before sleeping).
 
     The poll interval defaults to the setting rather than a literal, because the API
     quotes that setting back to whoever queues an ad-hoc run as the wait to expect.
@@ -205,10 +238,9 @@ def run(
             failures=failures,
         )
 
-    # The runner lives in a one-element cell so on_reload can swap in a runner built
-    # from freshly loaded specs. The daemon loop only ever calls cell[0].tick, so it
-    # never needs to know specs (or a rebuild) exist.
-    cell: list[HuntRunner] = [_build_runner()]
+    runners = _ReloadingRunner(
+        _build_runner, lambda: refuse_tenant_lookups(ch, settings.hunts.lookup_databases)
+    )
 
     # SIGTERM (k8s pod stop) and SIGINT (local ctrl-c) both flip one stop flag; the
     # daemon owns the drain (checks the flag after each tick and before sleeping).
@@ -220,16 +252,13 @@ def run(
     signal.signal(signal.SIGTERM, _request_stop)
     signal.signal(signal.SIGINT, _request_stop)
 
-    def _reload() -> None:
-        cell[0] = _build_runner()
-
     ticks = run_loop(
-        tick=TickGuard(lambda now: cell[0].tick(now), metrics=obs),
+        tick=TickGuard(runners.tick, metrics=obs),
         should_stop=lambda: stop["flag"],
         clock=time.time,
         sleep=time.sleep,
         poll_seconds=poll_seconds,
-        on_reload=_reload,
+        on_reload=runners.reload,
         reload_every=reload_every,
     )
     typer.echo(f"hunt-runner stopped after {ticks} tick(s)")

@@ -14,6 +14,8 @@ mocking one - the settings->params split keeps it honest):
   2. ``_ch_params`` maps the ClickHouse settings to the raw-client kwargs - a pure
      settings->dict mapping, so a field rename fails here instead of silently at
      connect time.
+  3. ``run`` rechecks the lookup databases after each reload, before it fires again,
+     driven past its connect with fakes.
 
 Executing ``run``/``materialise`` end-to-end needs a real CH; that is the Phase A
 local-CH test, deliberately not attempted here.
@@ -30,6 +32,7 @@ from typer.testing import CliRunner
 from dfe_engine.api import _DfeEngineApp
 from dfe_engine.clickhouse.tls import ClickHouseCaCertUnreadable
 from dfe_engine.hunt_runner import cli
+from dfe_engine.hunts.lookups import LookupDatabaseError
 from dfe_engine.settings import DFESettings, HuntsSettings
 
 runner = CliRunner()
@@ -187,3 +190,71 @@ def test_a_cap_above_its_ceiling_is_cut_to_the_ceiling():
     settings.hunts.max_detections_per_run_ceiling = 10_000
 
     assert cli._spec_sources(settings, "dfe")["max_detections"] == 10_000
+
+
+class _Ran(Exception):
+    """Ends the run command's loop at the fake runner's fourth tick."""
+
+
+class _Metrics:
+    def clickhouse_unavailable(self, *, stage: str, reason: str) -> None:
+        pass
+
+
+@pytest.fixture
+def run_events(monkeypatch) -> list[str]:
+    """Wire ``run`` to fakes past its connect, recording each runner tick in order."""
+    events: list[str] = []
+
+    class _Runner:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def tick(self, _now: int) -> int:
+            events.append("tick")
+            if events.count("tick") == 4:
+                raise _Ran
+            return 0
+
+    settings = DFESettings(env="test", hunts=HuntsSettings(lookup_databases=["intel"]))
+    monkeypatch.setattr(cli, "init_scalo_logger", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(cli, "load_settings", lambda: settings)
+    monkeypatch.setattr(cli.runner_metrics, "create", _Metrics)
+    monkeypatch.setattr(cli, "connect_when_available", lambda *_args, **_kwargs: ("ch", "coord"))
+    monkeypatch.setattr(cli, "HuntWorker", lambda *_args, **_kwargs: "worker")
+    monkeypatch.setattr(cli, "load_specs", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(cli, "HuntRunner", _Runner)
+    monkeypatch.setattr(cli.signal, "signal", lambda *_args: None)
+    return events
+
+
+def test_a_lookup_table_turning_unsafe_stops_the_runner_at_its_next_reload(run_events, monkeypatch):
+    def _refuse(client, databases) -> None:
+        run_events.append(f"check {client} {','.join(databases)}")
+        raise LookupDatabaseError("intel.sightings has an _org_id column")
+
+    monkeypatch.setattr(cli, "refuse_tenant_lookups", _refuse)
+
+    result = runner.invoke(cli.app, ["run", "--poll", "0", "--reload-every", "1"])
+
+    assert isinstance(result.exception, LookupDatabaseError)
+    assert run_events == ["tick", "check ch intel"]
+
+
+def test_a_reload_check_clickhouse_cannot_answer_fires_nothing_until_it_passes(
+    run_events, monkeypatch
+):
+    answers: list[Exception | None] = [ConnectionError("refused"), None, None, None]
+
+    def _refuse(_client, _databases) -> None:
+        answer = answers.pop(0)
+        run_events.append("check" if answer is None else "check down")
+        if answer is not None:
+            raise answer
+
+    monkeypatch.setattr(cli, "refuse_tenant_lookups", _refuse)
+
+    result = runner.invoke(cli.app, ["run", "--poll", "0", "--reload-every", "1"])
+
+    assert isinstance(result.exception, _Ran)
+    assert run_events == ["tick", "check down", "check", "tick", "check", "tick", "check", "tick"]
