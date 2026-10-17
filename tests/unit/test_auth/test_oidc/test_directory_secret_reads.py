@@ -28,10 +28,10 @@ from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.secrets import DfeSecrets
 from tests.support.event_loop import ticks_while_held
+from tests.support.slow_store import SlowSecretStore
 from tests.unit.test_auth.test_oidc.local_directory_api import LocalDirectoryApi, directory_service
 from tests.unit.test_auth.test_oidc.local_graph import TENANT, LocalGraph
 from tests.unit.test_auth.test_oidc.local_okta import LocalOkta
-from tests.unit.test_auth.test_oidc.slow_store import SlowSecretStore
 
 USER = "00000000-0000-4000-8000-0000000000aa"
 OKTA_GROUP = {"id": "00g1soc", "profile": {"name": "SOC Analysts", "description": "SOC"}}

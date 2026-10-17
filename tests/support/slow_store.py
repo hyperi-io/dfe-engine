@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         tests/unit/test_auth/test_oidc/slow_store.py
+#  File:         tests/support/slow_store.py
 #  Purpose:      A secret store whose read waits at a gate, as a slow OpenBao does
 #  Language:     Python
 #
