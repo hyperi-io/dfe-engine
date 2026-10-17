@@ -146,11 +146,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     if schema_state.transient:
         from dfe_engine.clickhouse.bootstrap import SchemaRetry
+        from dfe_engine.governance.ch import request_ch_rbac_reconcile
+
+        def schema_converged() -> None:
+            seed_core(tables_bootstrapped=True)
+            # A reconcile that got through before this pass found no projection tables to fill.
+            request_ch_rbac_reconcile(app.state)
 
         app.state.schema_retry = SchemaRetry(
             run_schema_pass,
             resilience=settings.clickhouse.resilience,
-            on_converged=functools.partial(seed_core, tables_bootstrapped=True),
+            on_converged=schema_converged,
         )
         app.state.schema_retry.start()
 

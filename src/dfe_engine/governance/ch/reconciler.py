@@ -26,14 +26,18 @@ from scalo.secrets.exceptions import SecretAlreadyExistsError
 
 from dfe_engine.clickhouse.errors import is_connection_error
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
+from dfe_engine.schema.require import SchemaNotAppliedError, require_objects
 
 from .models import (
     DB,
     DEFAULT_SERVICE_ROLES,
     DEFAULT_TIERS,
     GROUP_USER_PREFIX,
+    META_ORGS_ID,
+    META_TIERS_ID,
     group_of_user,
     group_secret_path,
+    meta_projection,
     org_user_name,
     tenant_policy_name,
 )
@@ -392,6 +396,26 @@ class ChRbacReconciler:
                 continue
             result.forgotten.append(f"group/{group}")
 
+    def _materialise(self, orgs: list[Any], tiers: list[Any]) -> list[str]:
+        """The projection DML, or none while the projection tables are not on the server.
+
+        The schema phase creates them, and it may be off or not yet converged. A write
+        into a missing table fails the same way on every run, so rendering it would
+        hold the reconcile unconverged and retrying after every user and grant applied.
+        """
+        database, _orgs, _tiers = meta_projection()
+        try:
+            require_objects(
+                self._client,
+                database=database,
+                object_ids=(META_ORGS_ID, META_TIERS_ID),
+                what="the governance projection",
+            )
+        except SchemaNotAppliedError as exc:
+            logger.warning("governance projection skipped", reason=str(exc))
+            return []
+        return render_materialise(orgs, tiers)
+
     # ---- pure render -----------------------------------------------------
 
     @staticmethod
@@ -523,7 +547,7 @@ class ChRbacReconciler:
             existing_group_users=existing_group_users,
             bindings=bindings,
         )
-        materialise = render_materialise(orgs, tiers)
+        materialise = self._materialise(orgs, tiers)
 
         failed = self._apply(stmts + drops + materialise, result)
         self._forget_dropped_groups(
