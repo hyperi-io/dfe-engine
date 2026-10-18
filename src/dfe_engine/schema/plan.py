@@ -359,6 +359,19 @@ def single_node_statement(object_id: str, *, data_database: str = "dfe") -> str:
     return render_one(object_id, data_database=data_database).statements[0]
 
 
+def data_table_names(*, data_database: str) -> frozenset[str]:
+    """The names of the tables the core manifest declares in the data database, read from the cached manifest and never from the server."""
+    # Positional, as every other caller passes it, so the lru_cache serves them all one entry.
+    manifest = _manifest(core_schemas_root())
+    table_ids = [
+        obj.id
+        for obj in manifest.by_kind(kind="table")
+        if obj.database is not None
+        and manifest.database_name(key=obj.database, data_database=data_database) == data_database
+    ]
+    return frozenset(object_names(*table_ids, data_database=data_database).values())
+
+
 def object_names(*object_ids: str, data_database: str = "dfe") -> dict[str, str]:
     """Manifest id to the object's real name, for a caller that only needs the name.
 

@@ -21,8 +21,13 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from fastapi import FastAPI, Request
 
-from dfe_engine.api.v1.sources import _remove_hyperdx_source, _sync_hyperdx_source
+from dfe_engine.api.v1.sources import (
+    _register_hyperdx_all_sources,
+    _remove_hyperdx_source,
+    _sync_hyperdx_source,
+)
 from dfe_engine.hyperdx.sources import (
     ensure_source,
     list_sources_by_team,
@@ -30,67 +35,21 @@ from dfe_engine.hyperdx.sources import (
     source_spec,
     timestamp_column,
 )
+from tests.unit.test_hyperdx.fake_hyperdx import HUMAN_TEAMS, Exploding, FakeHyperDX
 
 # The default `timeseries` header profile; `passthrough` is the one without an
 # event-time column at all.
 TIMESERIES_COLUMNS = ["_timestamp_load", "_timestamp", "_uuid", "_org_id", "_source", "_json"]
 PASSTHROUGH_COLUMNS = ["_timestamp_load", "_uuid", "_org_id", "_json"]
 
-# Two human teams plus the engine's own service team, which has no connection.
-HUMAN_TEAMS = ["dfe-admins", "customer-acme"]
-SERVICE_TEAM = "dfe"
+ALL_SOURCES_NOT_REGISTERED = "HyperDX all_sources source not registered"
 
 
-class FakeHyperDX:
-    """The fork's ``/dfe/sources`` surface in memory, with the client's failure contract.
-
-    The real client is non-fatal: every call returns None rather than raising, so
-    ``reachable=False`` is what an unreachable HyperDX looks like to a caller.
-    """
-
-    def __init__(self, *, reachable: bool = True, owned: bool = True) -> None:
-        self.reachable = reachable
-        # False stands for the fork's 409: the name belongs to its seeded set.
-        self.owned = owned
-        self.sources: dict[str, dict[str, Any]] = {}
-        self.puts = 0
-        self.deletes = 0
-
-    async def put_dfe_source(self, name: str, spec: dict[str, Any]) -> dict[str, Any] | None:
-        if not self.reachable or not self.owned:
-            return None
-        self.puts += 1
-        self.sources[name] = spec
-        return {"name": name, "written": list(HUMAN_TEAMS), "skipped": [SERVICE_TEAM]}
-
-    async def delete_dfe_source(self, name: str) -> dict[str, Any] | None:
-        if not self.reachable:
-            return None
-        self.deletes += 1
-        removed = HUMAN_TEAMS if self.sources.pop(name, None) is not None else []
-        return {"name": name, "removed": list(removed)}
-
-    async def list_dfe_sources(self) -> dict[str, Any] | None:
-        if not self.reachable:
-            return None
-        return {
-            "teams": [
-                {
-                    "team": f"id-{team}",
-                    "teamName": team,
-                    "sources": [
-                        {"id": f"{team}-{name}", "name": name, "from": spec["from"]}
-                        for name, spec in self.sources.items()
-                    ],
-                }
-                for team in HUMAN_TEAMS
-            ]
-        }
-
-
-def request_with(client: Any) -> SimpleNamespace:
-    """A stand-in for the FastAPI request the router helpers read state off."""
-    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(hyperdx_client=client)))
+def request_with(client: Any) -> Request:
+    """A request on an app whose state holds *client* as its HyperDX client, which is all the router helpers read."""
+    application = FastAPI()
+    application.state.hyperdx_client = client
+    return Request(scope={"app": application, "type": "http"})
 
 
 def dfe_source(name: str) -> SimpleNamespace:
@@ -216,6 +175,20 @@ class TestEnsureSource:
             is None
         )
 
+    async def test_an_explicit_timestamp_wins_over_the_columns(self):
+        client = FakeHyperDX()
+
+        await ensure_source(
+            client=client,
+            columns=TIMESERIES_COLUMNS,
+            database="dfe",
+            name="all_sources",
+            table="all_sources",
+            timestamp="_timestamp_load",
+        )
+
+        assert client.sources["all_sources"]["timestampValueExpression"] == "_timestamp_load"
+
     async def test_no_timestamp_column_never_reaches_the_fork(self):
         client = FakeHyperDX()
 
@@ -283,16 +256,6 @@ class TestListSourcesByTeam:
 # ---------------------------------------------------------------------------
 
 
-class Exploding:
-    """A client that raises rather than returning the non-fatal None."""
-
-    async def put_dfe_source(self, name, spec):
-        raise RuntimeError("connection refused")
-
-    async def delete_dfe_source(self, name):
-        raise RuntimeError("connection refused")
-
-
 class TestRouterHelpers:
     async def test_deploy_reports_how_many_teams_carry_the_source(self):
         client = FakeHyperDX()
@@ -335,6 +298,27 @@ class TestRouterHelpers:
 
     async def test_delete_without_hyperdx(self):
         await _remove_hyperdx_source(request_with(None), "filebeat")
+
+    async def test_register_all_sources_points_every_team_at_the_merge_table(self):
+        client = FakeHyperDX()
+
+        await _register_hyperdx_all_sources(database="dfe", request=request_with(client=client))
+
+        assert list(client.sources) == ["all_sources"]
+
+    async def test_register_all_sources_survives_a_raising_client(self, audit_events: list[dict]):
+        await _register_hyperdx_all_sources(
+            database="dfe", request=request_with(client=Exploding())
+        )
+
+        assert [
+            entry for entry in audit_events if entry["event"] == ALL_SOURCES_NOT_REGISTERED
+        ] == [{"event": ALL_SOURCES_NOT_REGISTERED, "error_type": "RuntimeError"}]
+
+    async def test_register_all_sources_without_hyperdx(self, audit_events: list[dict]):
+        await _register_hyperdx_all_sources(database="dfe", request=request_with(client=None))
+
+        assert [entry["event"] for entry in audit_events] == []
 
 
 @pytest.mark.parametrize("columns", [TIMESERIES_COLUMNS, PASSTHROUGH_COLUMNS])
