@@ -10,10 +10,12 @@ from pathlib import Path
 
 import pytest
 from dulwich import porcelain
+from dulwich.refs import Ref
 
 from dfe_engine.gitops import repo as repo_module
 from dfe_engine.gitops.repo import GitopsRemoteError, GitopsRepo, PublishResult
 from dfe_engine.settings import GitopsReadSettings, GitopsWriteSettings
+from tests.support.present import present
 
 # The hanging-forge tests must fail on the timeout, not on the machine being slow.
 _HANG_TIMEOUT_SECONDS = 1.0
@@ -346,6 +348,18 @@ def test_read_remote_file_gives_up_on_a_forge_that_never_answers(
     assert time.monotonic() - started < _HANG_BOUND_SECONDS
 
 
+def test_read_remote_file_reads_a_file_and_finds_no_file_at_a_directory(tmp_path: Path) -> None:
+    """A directory path is absent as a file, so the read answers None rather than raising."""
+    remote, branch = _seeded_remote(tmp_path)
+    repo = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
+    repo.ensure()
+    assert repo.publish({"config/hunts/h.yaml": "h: 1\n"}, message="hunt").pushed is True
+
+    assert repo.read_remote_file("config/hunts/h.yaml") == "h: 1\n"
+    assert repo.read_remote_file("config/hunts") is None
+    assert repo.read_remote_file("config/missing.yaml") is None
+
+
 def test_ensure_gives_up_cloning_from_a_forge_that_never_answers(
     tmp_path: Path, black_holed_forge: str
 ) -> None:
@@ -435,7 +449,7 @@ def test_a_refused_ref_raises_instead_of_reporting_a_successful_push(tmp_path: P
         [branch_ref, branch_ref + b":HEAD"],
         errstream=io.BytesIO(),
     )
-    assert result.ref_status[b"HEAD"] is not None
+    assert present(result.ref_status)[Ref(b"HEAD")] is not None
 
     with pytest.raises(GitopsRemoteError, match="refused"):
         repo._raise_on_refused(result)

@@ -36,8 +36,6 @@ manifest edit. The registry here maps a declared compiler NAME to the function
 that implements it - a new app reusing an existing compiler needs no code at all.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -47,7 +45,8 @@ from scalo.logger import logger
 from dfe_engine.gitcrud.engine import del_path, get_path, set_path
 from dfe_engine.source.alignment import require_one_type
 from dfe_engine.source.models import Source
-from dfe_engine.source.registry import SourceNotFoundError, SourceRegistry
+from dfe_engine.source.reader import SourceReader
+from dfe_engine.source.registry import SourceNotFoundError
 
 from . import catalogue
 from .catalogue import AppDescriptor, CatalogueError
@@ -136,7 +135,7 @@ def reaches_apps(target: DeployTarget, *, writes_app_config: bool) -> bool:
     return True
 
 
-def _bound_source(registry: SourceRegistry, instance: str | None) -> Source:
+def _bound_source(registry: SourceReader, instance: str | None) -> Source:
     """The source an instance-scoped block compiles from."""
     if not instance:
         raise RoutingNotApplicableError("an instance-scoped app is named for its source")
@@ -191,7 +190,7 @@ def into_blocks(app: AppDescriptor, values: dict[str, object]) -> dict[str, Any]
 
 
 def _receiver(
-    app: AppDescriptor, registry: SourceRegistry, settings: Any, instance: str | None
+    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
 ) -> dict[str, Any]:
     from dfe_engine.services.source_routing import (
         compile_receiver_destinations,
@@ -209,7 +208,7 @@ def _receiver(
 
 
 def _loader(
-    app: AppDescriptor, registry: SourceRegistry, settings: Any, instance: str | None
+    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
 ) -> dict[str, Any]:
     from dfe_engine.schema.derived_registry import derived_reference_root
     from dfe_engine.services.source_routing import compile_loader_capture, compile_loader_routing
@@ -240,7 +239,7 @@ def _loader(
 
 
 def _archiver(
-    app: AppDescriptor, registry: SourceRegistry, settings: Any, instance: str | None
+    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
 ) -> dict[str, Any]:
     from dfe_engine.services.source_routing import compile_archiver_topics
 
@@ -248,7 +247,7 @@ def _archiver(
 
 
 def _fetcher_route(
-    flow: SourceFlow, route: Any, registry: SourceRegistry, settings: Any
+    flow: SourceFlow, route: Any, registry: SourceReader, settings: Any
 ) -> tuple[str, dict[str, Any], dict[str, Any]]:
     """One route: which fetched records go to ANOTHER source's landing, and where.
 
@@ -301,7 +300,7 @@ def _fetcher_route(
 
 
 def _fetcher(
-    app: AppDescriptor, registry: SourceRegistry, settings: Any, instance: str | None
+    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
 ) -> dict[str, Any]:
     """What this fetcher instance polls, and where the records it pulls are sent.
 
@@ -351,7 +350,7 @@ def _fetcher(
 
 
 def _transform(
-    app: AppDescriptor, registry: SourceRegistry, settings: Any, instance: str | None
+    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
 ) -> dict[str, Any]:
     """One transform instance's input and output, for the source it is named for.
 
@@ -389,7 +388,7 @@ def _transform(
     return blocks
 
 
-Compiler = Callable[[AppDescriptor, SourceRegistry, Any, str | None], dict[str, Any]]
+Compiler = Callable[[AppDescriptor, SourceReader, Any, str | None], dict[str, Any]]
 
 # Named because callers outside the compile path select the loading stage by it.
 LOADER_COMPILER = "loader"
@@ -410,7 +409,7 @@ def compilers() -> list[str]:
 
 def compile_for(
     app: AppDescriptor,
-    registry: SourceRegistry,
+    registry: SourceReader,
     settings: Any,
     *,
     instance: str | None = None,
@@ -442,7 +441,7 @@ def compile_for(
 def status(
     app: AppDescriptor,
     doc: dict,
-    registry: SourceRegistry,
+    registry: SourceReader,
     settings: Any,
     *,
     instance: str | None = None,
@@ -478,7 +477,7 @@ def apply(app: AppDescriptor, doc: dict, compiled: dict[str, Any]) -> None:
 def sync(
     app: AppDescriptor,
     doc: dict,
-    registry: SourceRegistry,
+    registry: SourceReader,
     settings: Any,
     *,
     instance: str | None = None,
@@ -495,7 +494,7 @@ def sync(
 
 
 def instances_needing_sync(
-    apps: list[tuple[AppInstance, dict]], registry: SourceRegistry, settings: Any
+    apps: list[tuple[AppInstance, dict]], registry: SourceReader, settings: Any
 ) -> list[tuple[AppInstance, RoutingStatus]]:
     """Every instance whose overlay routing disagrees with the sources.
 

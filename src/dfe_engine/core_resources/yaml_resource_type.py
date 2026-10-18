@@ -1,7 +1,6 @@
 #  Purpose:      Read resource_type from on-disk YAML config dicts
 #  License:      BUSL-1.1
-
-from __future__ import annotations
+"""Read ``resource_type`` from on-disk YAML config dicts."""
 
 from typing import Any, Literal
 
@@ -18,4 +17,5 @@ def resource_type_from_config(config: dict[str, Any] | None) -> ResourceType:
 
 
 def config_is_core(config: dict[str, Any] | None) -> bool:
+    """Whether *config* declares a core resource."""
     return resource_type_from_config(config) == "core"

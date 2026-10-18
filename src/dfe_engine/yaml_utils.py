@@ -6,8 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2025 HYPERI PTY LIMITED
 
-"""
-YAML and data utilities for dfe-engine.
+"""YAML and data utilities for dfe-engine.
 
 Provides YAML operations via ruamel.yaml (YAML 1.2, preserves comments)
 and a recursive deep-merge for dict/list/set composition.
@@ -74,8 +73,7 @@ def _rt() -> YAML:
 
 
 def yaml_load(source: str | Path) -> Any:
-    """
-    Load YAML from a file path.
+    """Load YAML from a file path.
 
     Args:
         source: Path to the YAML file
@@ -93,8 +91,7 @@ def yaml_load(source: str | Path) -> Any:
 
 
 def yaml_load_string(content: str) -> Any:
-    """
-    Load YAML from a string.
+    """Load YAML from a string.
 
     Args:
         content: YAML string content
@@ -209,8 +206,7 @@ def contained_yaml_file(directory: str | Path, name: str) -> Path | None:
 
 
 def yaml_dump(data: Any, dest: str | Path) -> None:
-    """
-    Dump data to a YAML file, ATOMICALLY, refusing YAML that does not read back.
+    """Dump data to a YAML file, ATOMICALLY, refusing YAML that does not read back.
 
     The text is read back and compared with *data* before anything touches the
     destination. It then goes to a temp file in the destination directory that
@@ -247,8 +243,7 @@ def yaml_dump(data: Any, dest: str | Path) -> None:
 
 
 def yaml_dump_string(data: Any, *, target: str | None = None) -> str:
-    """
-    Dump data to a YAML string that reads back as the data.
+    """Dump data to a YAML string that reads back as the data.
 
     Args:
         data: Data to serialize
@@ -285,10 +280,10 @@ def block_scalar_safe(text: str) -> bool:
 
 
 def literal_block(text: str) -> LiteralScalarString | str:
-    """Emit ``text`` as a ``|`` block scalar where that is safe, else unchanged.
+    r"""Emit ``text`` as a ``|`` block scalar where that is safe, else unchanged.
 
     A block scalar keeps a file body readable in a diff instead of collapsing it
-    into one quoted line of ``\\n`` escapes. Content the block form would corrupt
+    into one quoted line of ``\n`` escapes. Content the block form would corrupt
     is returned as a plain string so the emitter quotes it instead: correctness
     outranks the nicer diff, and forcing the block form on unsafe content lets a
     file body break out of its own scalar and forge sibling keys.

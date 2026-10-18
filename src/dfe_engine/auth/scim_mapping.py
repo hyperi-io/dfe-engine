@@ -6,10 +6,11 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Pure, unit-testable mappers between the engine's local identity model
-(:class:`dfe_engine.auth.accounts.Account`,
-:class:`dfe_engine.auth.groups.Group`) and the SCIM 2.0 wire schema provided
-by ``scim2-models``.
+"""Pure mappers between the engine's local identity model and the SCIM 2.0 wire schema.
+
+The local model is :class:`dfe_engine.auth.accounts.Account` and
+:class:`dfe_engine.auth.groups.Group`, and the wire schema is the one ``scim2-models``
+provides.
 
 This layer is ADDITIVE: SCIM is a second face over the SAME gitops-backed
 account/group stores. The mappers never touch a store - they translate values
@@ -28,10 +29,9 @@ Identity conventions:
 SCIM face so downstream tooling can tell IdP-owned records apart.
 """
 
-from __future__ import annotations
-
 import secrets
 from datetime import datetime
+from typing import TypedDict
 
 from scim2_models import Group as ScimGroup
 from scim2_models import GroupMember, GroupMembership, Meta
@@ -75,7 +75,8 @@ def account_to_scim_user(
         A populated SCIM ``User`` (password never emitted).
     """
     member_of = account.groups if groups is None else groups
-    user = ScimUser(
+    # scim2-models fills `schemas` from `__schema__` in a before-validator ty cannot see.
+    user = ScimUser(  # ty: ignore[missing-argument]
         id=account.username,
         user_name=account.username,
         active=account.enabled,
@@ -141,7 +142,8 @@ def group_to_scim_group(group: Group, *, location: str | None = None) -> ScimGro
     Returns:
         A populated SCIM ``Group`` with member references.
     """
-    scim_group = ScimGroup(
+    # scim2-models fills `schemas` from `__schema__` in a before-validator ty cannot see.
+    scim_group = ScimGroup(  # ty: ignore[missing-argument]
         id=group.name,
         display_name=group.name,
         external_id=group.source_id or None,
@@ -151,7 +153,16 @@ def group_to_scim_group(group: Group, *, location: str | None = None) -> ScimGro
     return scim_group
 
 
-def scim_group_to_group_fields(group: ScimGroup) -> dict[str, object]:
+class ScimGroupFields(TypedDict):
+    """The writable engine-group fields a SCIM group carries."""
+
+    name: str | None
+    members: list[str]
+    source_id: str
+    source_provider: str
+
+
+def scim_group_to_group_fields(group: ScimGroup) -> ScimGroupFields:
     """Extract the writable engine-group fields from a SCIM :class:`Group`.
 
     Args:
@@ -162,7 +173,7 @@ def scim_group_to_group_fields(group: ScimGroup) -> dict[str, object]:
         ``source_provider``. ``roles`` is not set by SCIM (IdPs do not manage
         DFE role bindings) - the caller supplies an empty default.
     """
-    members = [m.value for m in (group.members or []) if m.value]
+    members = [value for m in (group.members or []) if (value := m.value)]
     return {
         "name": group.display_name,
         "members": members,

@@ -14,23 +14,9 @@ that column. Hints are applied in priority order: ``static`` > ``values`` >
 ``templates`` > ``provider`` > ``minimum``/``maximum`` range.
 """
 
-from __future__ import annotations
-
-from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-
-class SyntheticDataMode(StrEnum):
-    """How events are produced.
-
-    - ``schema`` - reference pack driven by a dfe-schemas meta schema.
-    - ``sample`` - lookalike of a logreducer-reduced sample (later stage).
-    """
-
-    SCHEMA = "schema"
-    SAMPLE = "sample"
 
 
 class ColumnHints(BaseModel):

@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import asyncio
 
 import pytest
@@ -86,7 +84,7 @@ class TestRunStandingStream:
             return {"emitted": request.count, "sent": 0, "failed": 0}
 
         svc = service()
-        svc.run_stream = fake_run_stream  # type: ignore[method-assign]
+        svc.run_stream = fake_run_stream  # ty: ignore[invalid-assignment]  # the test replaces this service's stream segment
         request = StreamRequest(
             schema_ref="meta/syslog",
             receiver_url="http://127.0.0.1:9/ingest",
@@ -112,7 +110,7 @@ class TestRunStandingStream:
             raise RuntimeError("receiver refused")
 
         svc = service()
-        svc.run_stream = failing_run_stream  # type: ignore[method-assign]
+        svc.run_stream = failing_run_stream  # ty: ignore[invalid-assignment]  # the test replaces this service's stream segment
         request = StreamRequest(schema_ref="meta/syslog", receiver_url="http://127.0.0.1:9/ingest")
         task = asyncio.get_running_loop().create_task(
             run_standing_stream(svc, request, retry_seconds=0.01)

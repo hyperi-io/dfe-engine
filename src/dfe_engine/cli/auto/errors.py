@@ -22,11 +22,9 @@ failure; we render it as ``Error (<code>): <message>``. ``--debug`` re-raises so
 the full traceback prints.
 """
 
-from __future__ import annotations
-
 import sys
 from enum import IntEnum
-from typing import Any
+from typing import IO, Any, override
 
 import click
 import httpx
@@ -40,6 +38,8 @@ DECODING_ERRORS = (httpx.DecodingError, httpx2.DecodingError)
 
 
 class ExitCode(IntEnum):
+    """The exit codes the CLI returns."""
+
     OK = 0
     USAGE = 2
     VALIDATION = 252
@@ -60,9 +60,12 @@ class DfeCliError(click.ClickException):
     def __init__(self, message: str, exit_code_value: ExitCode = ExitCode.GENERAL) -> None:
         super().__init__(message)
         self.message = message
-        self.exit_code = int(exit_code_value)
+        # click types exit_code as a ClassVar, but reads it from the raised instance.
+        self.exit_code = int(exit_code_value)  # ty: ignore[invalid-attribute-access]
 
-    def show(self, file: object = None) -> None:  # override: no extra "Error: " prefix
+    @override
+    def show(self, file: IO[Any] | None = None) -> None:
+        """Print the message alone, without click's ``Error:`` prefix."""
         click.echo(self.message, file=file or sys.stderr)
 
 
@@ -157,6 +160,7 @@ def handle(exc: BaseException, *, debug: bool = False, emit: Any = None) -> int:
 
 
 def cli_message(exc: DfeCliError) -> str:
+    """The error's message, with an ``Error:`` prefix unless it has one."""
     msg: Any = exc.message
     if not str(msg).startswith("Error"):
         return f"Error: {msg}"

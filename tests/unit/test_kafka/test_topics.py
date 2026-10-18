@@ -129,7 +129,7 @@ class _SizeCounter(TopicAdmin):
 
 def _main_lander(name="aws-cloudtrail", *, transform=False) -> Source:
     """A fetcher source whose records land on the shared topic it does not own."""
-    return Source(
+    return Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         source=name,
         fetcher=SourceFetcher(source_type="aws", topic="main"),
         transform=SourceTransform(engine="vector") if transform else None,
@@ -137,7 +137,7 @@ def _main_lander(name="aws-cloudtrail", *, transform=False) -> Source:
 
 
 def _source(name="filebeat", *, transform=True) -> Source:
-    return Source(
+    return Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         source=name,
         match=SourceMatch(field="f", value="v"),
         transform=SourceTransform(engine="vector") if transform else None,
@@ -774,7 +774,7 @@ class TestTopicAdminAdapter:
         topic = NewTopic("t", num_partitions=6, replication_factor=3)
         assert (topic.topic, topic.num_partitions, topic.replication_factor) == ("t", 6, 3)
         with pytest.raises(TypeError):
-            NewTopic("t", partitions=6)
+            NewTopic("t", partitions=6)  # ty: ignore[unknown-argument]  # the refused keyword is the point of the test
 
     def test_create_passes_the_config_through(self, monkeypatch):
         admin, created = self._admin(monkeypatch)
@@ -922,19 +922,20 @@ class TestStrandedSourceTopics:
     def test_a_leftover_load_topic_is_reported(self):
         assert stranded_source_topics(
             _source("syslog", transform=False),
-            admin=self._Admin(["syslog_land", "syslog_load"]),
+            admin=self._Admin(["syslog_land", "syslog_load"]),  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
         ) == ["syslog_load"]
 
     def test_nothing_is_stranded_when_the_version_still_transforms(self):
         assert (
-            stranded_source_topics(_source(), admin=self._Admin(["filebeat_land", "filebeat_load"]))
+            stranded_source_topics(_source(), admin=self._Admin(["filebeat_land", "filebeat_load"]))  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
             == []
         )
 
     def test_nothing_is_stranded_when_the_broker_never_had_one(self):
         assert (
             stranded_source_topics(
-                _source("syslog", transform=False), admin=self._Admin(["syslog_land"])
+                _source("syslog", transform=False),
+                admin=self._Admin(["syslog_land"]),  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
             )
             == []
         )
@@ -946,7 +947,7 @@ class TestStrandedSourceTopics:
             def list_topic_names(self):
                 raise RuntimeError("no broker")
 
-        assert stranded_source_topics(_source("syslog", transform=False), admin=_Broken()) is None
+        assert stranded_source_topics(_source("syslog", transform=False), admin=_Broken()) is None  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
 
     def test_a_main_landing_source_is_judged_on_the_shared_base(self):
         """scalo suppresses ``<base>_land``, and for this source the base is ``main``.
@@ -955,7 +956,8 @@ class TestStrandedSourceTopics:
         it loading -- and every other source landing on ``main`` with it.
         """
         assert stranded_source_topics(
-            _main_lander(), admin=self._Admin(["main_land", "main_load"])
+            _main_lander(),
+            admin=self._Admin(["main_land", "main_load"]),  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
         ) == ["main_load"]
 
     def test_a_main_landing_source_is_not_stranded_by_its_own_load_topic(self):
@@ -966,7 +968,8 @@ class TestStrandedSourceTopics:
         """
         assert (
             stranded_source_topics(
-                _main_lander(), admin=self._Admin(["main_land", "aws-cloudtrail_load"])
+                _main_lander(),
+                admin=self._Admin(["main_land", "aws-cloudtrail_load"]),  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
             )
             == []
         )

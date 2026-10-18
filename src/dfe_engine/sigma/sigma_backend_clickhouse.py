@@ -1,3 +1,5 @@
+"""pySigma backend that converts Sigma rules to ClickHouse SQL."""
+
 import ipaddress
 from typing import Any, ClassVar
 
@@ -13,7 +15,14 @@ from sigma.conversion.deferred import DeferredQueryExpression
 from sigma.conversion.state import ConversionState
 from sigma.processing.pipeline import ProcessingPipeline
 from sigma.rule import SigmaRule
-from sigma.types import SigmaCIDRExpression, SigmaCompareExpression, SigmaNull, SigmaString
+from sigma.types import (
+    SigmaBool,
+    SigmaCIDRExpression,
+    SigmaCompareExpression,
+    SigmaNull,
+    SigmaRegularExpression,
+    SigmaString,
+)
 
 from ..clickhouse.quoting import column_reference as sql_field
 from ..source.type_registry import current_use_case
@@ -40,11 +49,11 @@ class SqlBackend(TextQueryBackend):
     """ClickHouse backend for translating Sigma rules to SQL-like queries."""
 
     name: ClassVar[str] = "clickhouse backend"
-    formats: dict[str, str] = {
+    formats: ClassVar[dict[str, str]] = {
         "default": "Plain ClickHouse queries",
     }
-    requires_pipeline: bool = False
-    precedence: ClassVar[tuple[ConditionItem, ConditionItem, ConditionItem]] = (
+    requires_pipeline: ClassVar[bool] = False
+    precedence: ClassVar[tuple[type[ConditionItem], type[ConditionItem], type[ConditionItem]]] = (
         ConditionNOT,
         ConditionAND,
         ConditionOR,
@@ -122,8 +131,6 @@ class SqlBackend(TextQueryBackend):
     deferred_separator: ClassVar[str] = "\n| "
     deferred_only_query: ClassVar[str] = "*"
 
-    last_processing_pipeline: ClassVar[ProcessingPipeline | None] = None
-
     def __init__(
         self,
         processing_pipeline: ProcessingPipeline | None = None,
@@ -148,10 +155,10 @@ class SqlBackend(TextQueryBackend):
             return False
 
     def _escape_value(self, value: str) -> str:
-        """Escape a value for a single-quoted ClickHouse string literal.
+        r"""Escape a value for a single-quoted ClickHouse string literal.
 
         Backslash MUST be doubled BEFORE the quote: ClickHouse honours C-style
-        backslash escapes in string literals, so a lone ``\\'`` would otherwise
+        backslash escapes in string literals, so a lone ``\'`` would otherwise
         break out of the literal (F-SIGMA-ESCAPING, same class of bug proven live
         for the row-policy predicate). Wildcards (``*``/``%``) are deliberately
         left untouched - they are literal-safe and their LIKE semantics are
@@ -348,6 +355,8 @@ class SqlBackend(TextQueryBackend):
         self, cond: ConditionFieldEqualsValueExpression, state: ConversionState
     ) -> str:
         """Handle boolean values in field-equals-value expressions."""
+        if not isinstance(cond.value, SigmaBool):
+            raise TypeError(f"Expected SigmaBool for cond.value, got {type(cond.value)}")
         field = self.escape_and_quote_field(cond.field)
         value = self.bool_values[cond.value.boolean]
         return f"{field} = {value}"
@@ -358,8 +367,8 @@ class SqlBackend(TextQueryBackend):
         """Handle regular expressions in field-equals-value expressions."""
         field = self.escape_and_quote_field(cond.field)
 
-        if hasattr(cond.value, "regexp"):
-            return self._create_match_expression(field, cond.value.regexp)
+        if isinstance(cond.value, SigmaRegularExpression):
+            return self._create_match_expression(field, str(cond.value.regexp))
 
         # cond.value is already a regex - do NOT regex-escape its meta-chars; only
         # the SQL-literal escaping applies, and _create_match_expression routes the
@@ -390,21 +399,33 @@ class SqlBackend(TextQueryBackend):
 
         return self._create_cidr_expression(field, cidr_str)
 
-    def convert_value_str(
-        self, s: SigmaString, state: ConversionState, no_quote: bool = True
-    ) -> str:
+    def convert_value_str(self, s: SigmaString, state: ConversionState) -> str:
         """Convert a SigmaString to a ClickHouse-compatible string."""
         raw_str = str(s)
         s = SigmaString(raw_str)
         converted = s.convert(self.wildcard_multi, self.wildcard_single, self.filter_chars)
+        return self._escape_value(converted)
 
-        converted = self._escape_value(converted)
+    def _convert_operand(self, cond: Any, state: ConversionState) -> str:
+        """Convert one operand of a boolean condition, refusing the deferred form this backend never emits.
 
-        if no_quote:
-            return converted
+        Raises:
+            TypeError: The operand converted to a deferred expression, which the boolean
+                converters answer as an unsupported operator.
+        """
+        converted = self.convert_condition(cond, state)
+        if not isinstance(converted, str):
+            raise TypeError(
+                f"deferred expression {type(converted).__name__} in a boolean condition"
+            )
+        return converted
 
-        if self.decide_string_quoting(converted):
-            return f"'{converted}'"
+    @staticmethod
+    def _grouped(converted: str) -> str:
+        """Wrap a compound operand in parentheses unless it already is wrapped."""
+        if " AND " in converted or " OR " in converted:
+            if not (converted.startswith("(") and converted.endswith(")")):
+                return f"({converted})"
         return converted
 
     def _handle_list_values(
@@ -450,13 +471,7 @@ class SqlBackend(TextQueryBackend):
     ) -> str | DeferredQueryExpression:
         """Convert AND condition with proper parentheses balancing."""
         try:
-            converted_args = []
-            for arg in cond.args:
-                converted = self.convert_condition(arg, state)
-                if " AND " in converted or " OR " in converted:
-                    if not (converted.startswith("(") and converted.endswith(")")):
-                        converted = f"({converted})"
-                converted_args.append(converted)
+            converted_args = [self._grouped(self._convert_operand(arg, state)) for arg in cond.args]
 
             result = f" {self.and_token} ".join(converted_args)
 
@@ -472,41 +487,28 @@ class SqlBackend(TextQueryBackend):
     ) -> str | DeferredQueryExpression:
         """Convert OR condition with proper parentheses balancing."""
         try:
-            if all(isinstance(arg, ConditionFieldEqualsValueExpression) for arg in cond.args):
-                if len(cond.args) > 0 and all(arg.field == cond.args[0].field for arg in cond.args):
-                    base_field, modifier = self._get_base_field_and_modifier(cond.args[0].field)
-                    field = self.escape_and_quote_field(base_field)
-                    values = []
+            field_args = [
+                arg for arg in cond.args if isinstance(arg, ConditionFieldEqualsValueExpression)
+            ]
+            same_field = all(arg.field == field_args[0].field for arg in field_args)
+            if field_args and len(field_args) == len(cond.args) and same_field:
+                base_field, modifier = self._get_base_field_and_modifier(field_args[0].field)
+                field = self.escape_and_quote_field(base_field)
+                values = []
 
-                    for arg in cond.args:
-                        values.append(
-                            self._handle_field_value_expression(
-                                field, arg.value, modifier, base_field
-                            )
-                        )
+                for arg in field_args:
+                    values.append(
+                        self._handle_field_value_expression(field, arg.value, modifier, base_field)
+                    )
 
-                    return f"({' OR '.join(values)})"
+                return f"({' OR '.join(values)})"
+
+            converted_args = [self._grouped(self._convert_operand(arg, state)) for arg in cond.args]
 
             condition_str = str(cond)
             if condition_str.startswith("1 of filter_"):
-                converted_args = []
-                for arg in cond.args:
-                    converted = self.convert_condition(arg, state)
-                    if " AND " in converted or " OR " in converted:
-                        if not (converted.startswith("(") and converted.endswith(")")):
-                            converted = f"({converted})"
-                    converted_args.append(converted)
-
                 filter_result = f"({' OR '.join(converted_args)})"
                 return filter_result
-
-            converted_args = []
-            for arg in cond.args:
-                converted = self.convert_condition(arg, state)
-                if " AND " in converted or " OR " in converted:
-                    if not (converted.startswith("(") and converted.endswith(")")):
-                        converted = f"({converted})"
-                converted_args.append(converted)
 
             result = f" {self.or_token} ".join(converted_args)
 
@@ -524,7 +526,7 @@ class SqlBackend(TextQueryBackend):
         """Convert NOT condition with proper parentheses balancing."""
         arg = cond.args[0]
         try:
-            converted = self.convert_condition(arg, state)
+            converted = self._convert_operand(arg, state)
 
             if not (converted.startswith("(") and converted.endswith(")")):
                 converted = f"({converted})"

@@ -14,8 +14,6 @@ the class level - never per file or per field (see docs/architecture.md, "Govern
 Ops").
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -69,6 +67,7 @@ class ResourceClass:
 
     @property
     def is_bundle(self) -> bool:
+        """Whether this class stores each resource in the bundle layout."""
         return self.layout is Layout.BUNDLE
 
     def action(self, verb: str) -> str:

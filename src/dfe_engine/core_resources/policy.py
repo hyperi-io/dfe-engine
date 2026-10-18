@@ -1,7 +1,6 @@
 #  Purpose:      Detect core (non-editable) resources for API write guards
 #  License:      BUSL-1.1
-
-from __future__ import annotations
+"""Detect the core resources an API write must not change."""
 
 import json
 from typing import TYPE_CHECKING, Any
@@ -22,6 +21,7 @@ MUTATION_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def core_resource_conflict_message() -> str:
+    """The message a write to a core resource is refused with."""
     return CORE_RESOURCE_MUTATION_MESSAGE
 
 
@@ -29,6 +29,7 @@ def schema_registry_path_is_core(
     schema_path: str,
     registry: SchemaRegistry | None = None,
 ) -> bool:
+    """Whether *schema_path* names a core schema in *registry*."""
     if registry is None:
         return False
     from dfe_engine.schema.registry import SchemaValidationError, canonical_schema_path
@@ -46,6 +47,7 @@ def schema_registry_path_is_core(
 
 
 def role_name_is_core(name: str, role_store: RoleStore | None) -> bool:
+    """Whether *name* is a core role."""
     if role_store is None:
         return False
     role = role_store.get(name)
@@ -57,6 +59,7 @@ def fieldmap_target_is_core(
     source: str | None,
     registry: FieldMapRegistry | None,
 ) -> bool:
+    """Whether the field map for *standard* and *source* is a core one."""
     if registry is None or not standard:
         return False
     src = source if source not in (None, "", DEFAULT_MAP_NAME) else None
@@ -70,6 +73,7 @@ def fieldmap_target_is_core(
 
 
 def parse_fieldmap_post_body(body: bytes) -> tuple[str | None, str | None]:
+    """The standard and source a field map POST body names, lower-cased."""
     if not body:
         return None, None
     try:

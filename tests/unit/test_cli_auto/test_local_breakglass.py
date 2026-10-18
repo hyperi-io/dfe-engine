@@ -22,6 +22,8 @@ from pathlib import Path
 import pytest
 from click.testing import CliRunner
 from dulwich import porcelain
+from dulwich.objects import Commit
+from dulwich.refs import Ref
 from dulwich.repo import Repo
 
 from dfe_engine.cli.auto.local import local_group
@@ -116,7 +118,9 @@ def _run(repo: Path, args: list[str], **kwargs):
 
 def _head_message(repo: Path) -> str:
     with Repo(str(repo)) as r:
-        return r[r.head()].message.decode()
+        head = r[r.head()]
+        assert isinstance(head, Commit)
+        return head.message.decode()
 
 
 # --- read commits ------------------------------------------------------------
@@ -433,6 +437,20 @@ def test_revert_undoes_a_commit(repo: Path):
     assert "revert" in msg.splitlines()[0]
 
 
+def test_revert_refuses_an_object_that_is_not_a_commit(repo: Path):
+    """A tree id is a real object but not a commit, so it is refused by name, not traced."""
+    with Repo(str(repo)) as r:
+        head = r[r.head()]
+        assert isinstance(head, Commit)
+        tree_sha = head.tree.decode()
+
+    rev = _run(repo, ["revert", tree_sha, "--reason", "wrong id", "--yes", "--no-push"])
+
+    assert rev.exit_code != 0
+    assert f"not a commit: {tree_sha}" in rev.output
+    assert isinstance(rev.exception, SystemExit)
+
+
 def test_rm_deletes_resource(repo: Path):
     result = _run(
         repo,
@@ -487,7 +505,7 @@ def _break_glass_set(repo: Path, value: str) -> None:
 
 def _remote_head(bare: Path, branch: str) -> bytes:
     with Repo(str(bare)) as r:
-        return r.refs[f"refs/heads/{branch}".encode()]
+        return r.refs[Ref(f"refs/heads/{branch}".encode())]
 
 
 def test_push_lands_break_glass_commits_on_the_remote(repo: Path, remote: tuple[Path, str]):

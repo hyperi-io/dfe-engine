@@ -1,3 +1,5 @@
+"""Build every ingestion pipeline a DFE config lists."""
+
 from pathlib import Path
 
 from scalo.logger import logger
@@ -5,23 +7,17 @@ from scalo.logger import logger
 from .pipeline import Pipeline
 
 
-class PipelineBuilderException(Exception):
-    """Custom exception class for PipelineBuilder errors."""
-
-    def __init__(self, message: str):
-        self.message = message
-        super().__init__(self.message)
-
-
 class PipelineBuilder:
+    """Builds every ingestion pipeline a DFE config lists."""
+
     def __init__(
         self,
         dfe_config: dict,
-        ingestion_output_path: Path = None,
-        ingestion_pipeline_template_path: Path = None,
+        ingestion_output_path: str | Path | None = None,
+        ingestion_pipeline_template_path: str | Path | None = None,
         logger=None,
         # Optional extra configuration for ingestion pipelines
-        extra_config: dict = None,
+        extra_config: dict | None = None,
     ):
         if extra_config is None:
             extra_config = {}
@@ -35,6 +31,7 @@ class PipelineBuilder:
         self.extra_config = extra_config
 
     def build(self):
+        """Render and write each pipeline the config lists."""
         for pipeline_name, pipeline_config in self.dfe_config.get(
             "ingestion_pipelines", {}
         ).items():

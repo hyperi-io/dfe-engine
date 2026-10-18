@@ -5,12 +5,12 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""ClickHouse reads for the sampler.
+r"""ClickHouse reads for the sampler.
 
 All reads select ``toString(_json)`` as the first (and only) column so the
 result is a list of raw event strings - the shape both the parsed-row path and
 logreducer want. ``target`` arrives already quoted by the service (e.g.
-``\\`db\\`.\\`events\\```); it is interpolated, not bound, because ClickHouse
+``\`db\`.\`events\```); it is interpolated, not bound, because ClickHouse
 cannot bind table names. ``filter`` must pass :func:`filter_predicate`, and what
 is interpolated is the predicate rendered from its parse tree, not the caller's
 text. Every read runs with :func:`read_settings`, so ClickHouse itself refuses

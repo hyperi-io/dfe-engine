@@ -443,10 +443,9 @@ class ChRbacReconciler:
         org_hashes: dict[str, str],
         deny_tables: list[tuple[str, str]] | None = None,
     ) -> list[str]:
-        """Full ordered DDL (spec 7): tiers -> service roles -> tenant axis ->
-        org users -> group users. Pure given the discovered ``org_tables`` and the
-        minted ``*_hashes``.
+        """Full ordered DDL (spec 7), pure given ``org_tables`` and the minted ``*_hashes``.
 
+        The order is tiers -> service roles -> tenant axis -> org users -> group users.
         Resolves ``{db}`` in the grants, so calling this directly on the seeds
         renders the same DDL ``reconcile`` applies.
         """

@@ -245,7 +245,7 @@ def _no_clickhouse_bootstrap_hang(request):
     # so patching the module attribute is picked up when the app starts up. The
     # stand-in returns the phase's own state shape, unknown, which is what a
     # deployment with the bootstrap switched off reports.
-    _chb.bootstrap_clickhouse = lambda *a, **k: SchemaBootstrapState()
+    _chb.bootstrap_clickhouse = lambda *a, **k: SchemaBootstrapState()  # ty: ignore[invalid-assignment]  # the guard swaps in a stand-in for the session
     try:
         yield
     finally:
@@ -277,7 +277,7 @@ def _no_kafka_broker_calls(request):
         raise RuntimeError("unit tests do not talk to a Kafka broker (conftest guard)")
 
     original = _kt.AdminClient
-    _kt.AdminClient = _refuse
+    _kt.AdminClient = _refuse  # ty: ignore[invalid-assignment]  # the guard swaps in a stand-in for the session
     try:
         yield
     finally:
@@ -310,8 +310,8 @@ def _no_ch_rbac_reconcile_against_a_real_clickhouse(request):
         raise RuntimeError("unit tests do not reconcile against a ClickHouse (conftest guard)")
 
     originals = (_ch_rbac.ch_admin_client, _ch_rbac_bootstrap.ch_admin_client)
-    _ch_rbac.ch_admin_client = _refuse
-    _ch_rbac_bootstrap.ch_admin_client = _refuse
+    _ch_rbac.ch_admin_client = _refuse  # ty: ignore[invalid-assignment]  # the guard swaps in a stand-in for the session
+    _ch_rbac_bootstrap.ch_admin_client = _refuse  # ty: ignore[invalid-assignment]  # the guard swaps in a stand-in for the session
     try:
         yield
     finally:

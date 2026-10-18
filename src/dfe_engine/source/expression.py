@@ -95,11 +95,6 @@ class ExprValidationResult:
         """Alias for source_field -- the primary field name."""
         return self.source_field
 
-    @property
-    def directive_type(self) -> str | None:
-        """Alias for directive for API consistency."""
-        return self.directive
-
 
 # ---------------------------------------------------------------------------
 # Validator

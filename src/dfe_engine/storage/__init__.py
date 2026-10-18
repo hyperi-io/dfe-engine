@@ -1,5 +1,4 @@
-"""
-Storage abstraction module for DFE Engine.
+"""Storage abstraction module for DFE Engine.
 
 Provides a unified interface for accessing files from different storage backends:
 - Local filesystem (for on-prem/Rancher deployments with PVC mounts)

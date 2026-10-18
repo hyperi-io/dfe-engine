@@ -14,8 +14,6 @@ RESOLVED on import -- the definition ships with dfe-schemas, so writing a copy
 would fork it and stop the deployment tracking upstream.
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from scalo.logger import logger
@@ -145,8 +143,9 @@ def apply_meta_schema_export(
     # an operator's schema, and only dfe-schemas declares a core one.
     meta = MetaSchema(
         resource_type="custom",
-        current=document.current,
-        versions=document.versions,
+        # MetaSchemaExport's validator refuses a custom document without either.
+        current=document.current,  # ty: ignore[invalid-argument-type]
+        versions=document.versions,  # ty: ignore[invalid-argument-type]
         path=canonical,
     )
     result = MetaSchemaImportResult(

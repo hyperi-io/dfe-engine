@@ -83,4 +83,5 @@ def _make_plugin() -> ServicePlugin:
 
 
 def plugin() -> ServicePlugin:
+    """The fetcher plugin, loaded through the ``dfe_engine.services`` entry point."""
     return _make_plugin()

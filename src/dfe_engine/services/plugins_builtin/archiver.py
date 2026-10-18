@@ -97,4 +97,5 @@ def _make_plugin() -> ServicePlugin:
 
 
 def plugin() -> ServicePlugin:
+    """The archiver plugin, loaded through the ``dfe_engine.services`` entry point."""
     return _make_plugin()

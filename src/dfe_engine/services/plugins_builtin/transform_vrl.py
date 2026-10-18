@@ -89,4 +89,5 @@ def _make_plugin() -> ServicePlugin:
 
 
 def plugin() -> ServicePlugin:
+    """The transform-vrl plugin, loaded through the ``dfe_engine.services`` entry point."""
     return _make_plugin()

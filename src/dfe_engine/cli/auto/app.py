@@ -15,10 +15,8 @@ groups are mounted alongside. An unknown subcommand triggers a difflib
 "did you mean 'X'?" hint.
 """
 
-from __future__ import annotations
-
 import difflib
-from typing import Any
+from typing import Any, override
 
 import click
 
@@ -36,6 +34,7 @@ _FORMATS = ("json", "yaml", "table", "value", "text")
 class DfeGroup(HelpGroup):
     """Root group: help-on-no-args (exit 0) + a did-you-mean hint on typos."""
 
+    @override
     def resolve_command(
         self, ctx: click.Context, args: list[str]
     ) -> tuple[str | None, click.Command | None, list[str]]:

@@ -85,7 +85,7 @@ def test_a_hunt_whose_offset_falls_between_ticks_still_runs_every_interval():
     coord = _WatermarkCoordinator()
     worker = _CountingWorker()
     spec = HuntSpec(hunt_id=hunt_id, interval_seconds=60, queries=["SELECT 1"])
-    runner = HuntRunner(coord, worker, {hunt_id: spec}, cap=8)
+    runner = HuntRunner(coord, worker, {hunt_id: spec}, cap=8)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
     base = 1_789_027_260
     ticks = [base + minute * 60 + phase for minute in range(3) for phase in (0, 15, 30, 45)]
     for now in ticks:
@@ -237,7 +237,7 @@ def test_a_tick_beats_before_it_claims_anything():
 
 def test_a_tick_with_nothing_due_still_beats():
     coord = _RecordingCoordinator()
-    runner = HuntRunner(coord, _CountingWorker(), {}, cap=8, poll_seconds=15.0)
+    runner = HuntRunner(coord, _CountingWorker(), {}, cap=8, poll_seconds=15.0)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
     assert runner.tick(1000) == 0
     assert coord.beats == [(1000, 15.0)]
 
@@ -260,7 +260,7 @@ class _FailingWorker:
 def test_a_tick_publishes_the_backlog_the_shim_scales_on(manager):
     coord = _RecordingCoordinator()
     coord.backlog = 4
-    runner = HuntRunner(coord, _CountingWorker(), {}, cap=8, metrics=HuntRunnerMetrics(manager))
+    runner = HuntRunner(coord, _CountingWorker(), {}, cap=8, metrics=HuntRunnerMetrics(manager))  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
     runner.tick(1000)
 
@@ -270,7 +270,7 @@ def test_a_tick_publishes_the_backlog_the_shim_scales_on(manager):
 def test_a_runner_with_no_metrics_backend_does_not_query_the_backlog():
     """The backlog is another ClickHouse round trip per tick; nothing reads it here."""
     coord = _RecordingCoordinator()
-    runner = HuntRunner(coord, _CountingWorker(), {}, cap=8)
+    runner = HuntRunner(coord, _CountingWorker(), {}, cap=8)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
     runner.tick(1000)
 
@@ -567,6 +567,6 @@ def test_a_hunt_that_leaves_the_specs_is_forgotten():
     runner.tick(now)
     assert failures.retry_at("h") is not None
 
-    HuntRunner(_RecordingCoordinator(), worker, {}, failures=failures)
+    HuntRunner(_RecordingCoordinator(), worker, {}, failures=failures)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
     assert failures.retry_at("h") is None

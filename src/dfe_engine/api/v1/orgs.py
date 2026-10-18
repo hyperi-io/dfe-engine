@@ -70,6 +70,8 @@ router = APIRouter(prefix="/orgs", tags=["Organisations"], dependencies=[WRITE_T
 
 
 class CreateOrgRequest(BaseModel):
+    """Body for creating an org."""
+
     name: str = Field(description="Unique org name (used as identifier)", pattern=ORG_NAME_PATTERN)
     display_name: str = Field(default="", description="Human-readable label")
     org_ids: list[TenantId] = Field(
@@ -79,12 +81,16 @@ class CreateOrgRequest(BaseModel):
 
 
 class UpdateOrgRequest(BaseModel):
+    """Body for updating an org, where an omitted field keeps its value."""
+
     display_name: str | None = Field(None, description="Human-readable label")
     org_ids: list[TenantId] | None = Field(None, description="Tenant IDs")
     enabled: bool | None = Field(None, description="Enable or disable the org")
 
 
 class OrgResponse(BaseModel):
+    """An org as the API returns it."""
+
     name: str
     display_name: str
     org_ids: list[str]
@@ -94,6 +100,8 @@ class OrgResponse(BaseModel):
 
 
 class AvailableOrgIdsResponse(BaseModel):
+    """The ``_org_id`` values found in the data database."""
+
     database: str = Field(description="Data database the ids were read from")
     org_ids: list[str] = Field(
         default_factory=list,

@@ -39,6 +39,7 @@ class ArchiverKafkaConfig(BaseModel):
     @field_validator("security_protocol")
     @classmethod
     def validate_security_protocol(cls, v: str) -> str:
+        """Refuse a security protocol other than PLAINTEXT, SASL_PLAINTEXT, SSL or SASL_SSL."""
         allowed = {"PLAINTEXT", "SASL_PLAINTEXT", "SSL", "SASL_SSL"}
         if v.upper() not in allowed:
             msg = f"Invalid security_protocol: {v}. Allowed: {', '.join(sorted(allowed))}"
@@ -166,6 +167,7 @@ class ArchiverRoutingConfig(BaseModel):
     @field_validator("mode")
     @classmethod
     def validate_mode(cls, v: str) -> str:
+        """Refuse a routing mode other than topic or expression."""
         allowed = {"topic", "expression"}
         if v.lower() not in allowed:
             msg = f"Invalid routing mode: {v}. Allowed: {', '.join(sorted(allowed))}"
@@ -190,6 +192,7 @@ class CompressionConfig(BaseModel):
     @field_validator("codec")
     @classmethod
     def validate_codec(cls, v: str) -> str:
+        """Refuse a codec other than none, zstd, lz4, snappy or gzip."""
         allowed = {"none", "zstd", "lz4", "snappy", "gzip"}
         if v.lower() not in allowed:
             msg = f"Invalid codec: {v}. Allowed: {', '.join(sorted(allowed))}"

@@ -59,6 +59,8 @@ _ORG_DESCRIPTION = (
 
 
 class CreateAPIKeyRequest(BaseModel):
+    """Body for creating an API key."""
+
     name: StoreName = Field(description="Unique human-readable key name")
     groups: list[str] = Field(default_factory=list, description="RBAC group memberships")
     org: str = Field("", description=_ORG_DESCRIPTION)

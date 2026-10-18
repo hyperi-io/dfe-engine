@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import json
 
 import pytest
@@ -17,6 +15,7 @@ from dfe_engine.services.schema.elastic_schema_service import (
     ElasticSchemaConversionError,
     ElasticSchemaService,
 )
+from tests.support.present import present
 
 MINIMAL_BEAT_TEMPLATE = {
     "template": {
@@ -121,7 +120,7 @@ def test_subtree_selection_none_imports_everything() -> None:
 
 def test_document_root_not_object_raises() -> None:
     with pytest.raises(ElasticSchemaConversionError, match="Document root"):
-        ElasticSchemaService.template_dict_to_columns([])  # type: ignore[arg-type]
+        ElasticSchemaService.template_dict_to_columns([])  # ty: ignore[invalid-argument-type]  # the refused root is the point of the test
 
 
 def test_template_json_dict_and_bytes_paths() -> None:
@@ -252,10 +251,10 @@ def test_declared_use_cases_are_set_and_guessed_ones_are_not() -> None:
         assert by_name[undecided].use_case is None
         assert by_name[undecided].attribute is None
         # Blank because nobody measured, not because it was judged to need no index.
-        assert CARDINALITY_NOT_MEASURED in by_name[undecided].comment
+        assert CARDINALITY_NOT_MEASURED in present(by_name[undecided].comment)
 
     for decided in ("ck", "msg", "count", "when", "flag", "addr"):
-        assert CARDINALITY_NOT_MEASURED not in by_name[decided].comment
+        assert CARDINALITY_NOT_MEASURED not in present(by_name[decided].comment)
 
     assert by_name["ck"].use_case == "dimension"
     assert by_name["ck"].attribute == ["lowcardinality"]
@@ -293,7 +292,7 @@ def test_index_false_drops_the_index_and_keeps_the_column() -> None:
     assert by_name["event_original"].use_case is None
     assert by_name["event_original"].attribute is None
     # The template answered the question, so the column is decided, not unmeasured.
-    assert CARDINALITY_NOT_MEASURED not in by_name["event_original"].comment
+    assert CARDINALITY_NOT_MEASURED not in present(by_name["event_original"].comment)
     # Suppression beats the type default, including where the type is bounded.
     assert by_name["event_seq"].use_case is None
     assert by_name["event_kind"].use_case == "dimension"

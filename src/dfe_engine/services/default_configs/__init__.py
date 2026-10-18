@@ -1,1 +1,1 @@
-# Package resource marker for default service configuration files.
+"""The default service configuration files, read as package data."""

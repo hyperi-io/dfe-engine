@@ -111,6 +111,7 @@ class TopicSpec:
     config: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
+        """The topic spec as a plain dict."""
         return {
             "name": self.name,
             "partitions": self.partitions,
@@ -129,6 +130,7 @@ class TopicEnsureResult:
 
     @property
     def ok(self) -> bool:
+        """Whether no topic failed."""
         return not self.failed
 
 
@@ -142,6 +144,7 @@ class TopicRemoveResult:
 
     @property
     def ok(self) -> bool:
+        """Whether no topic failed."""
         return not self.failed
 
 
@@ -263,6 +266,7 @@ class TopicAdmin:
         self._admin = AdminClient(config)
 
     def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
+        """Every topic name on the cluster."""
         metadata = self._admin.list_topics(timeout=timeout)
         return set(metadata.topics.keys())
 
@@ -280,6 +284,7 @@ class TopicAdmin:
         config: dict[str, str] | None = None,
         timeout: float = 30.0,
     ) -> None:
+        """Create one topic, raising when the broker refuses it."""
         new_topic = NewTopic(
             name,
             num_partitions=partitions,
@@ -290,6 +295,7 @@ class TopicAdmin:
         futures[name].result()
 
     def delete(self, name: str, *, timeout: float = 30.0) -> None:
+        """Delete one topic, raising when the broker refuses it."""
         futures = self._admin.delete_topics([name], request_timeout=timeout)
         futures[name].result()
 
@@ -345,6 +351,7 @@ def build_admin(
     password: str | None = None,
     settings: DFESettings | None = None,
 ) -> TopicAdmin:
+    """A TopicAdmin for the cluster the arguments or the settings name."""
     return TopicAdmin(
         admin_config(
             bootstrap=bootstrap,

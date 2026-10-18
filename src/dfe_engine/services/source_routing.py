@@ -21,8 +21,6 @@ Usage:
     loader_routing = compile_loader_routing(source_registry, db="prod")
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 
@@ -53,7 +51,7 @@ from dfe_engine.source.models import (
     TOPIC_LAND_SUFFIX,
     Source,
 )
-from dfe_engine.source.registry import SourceRegistry
+from dfe_engine.source.reader import SourceReader
 
 # SourceMatch.operator -> receiver SourceRule.mode. The receiver's hot-path
 # router has exactly three modes; the other four engine operators (not_equals,
@@ -139,7 +137,7 @@ class UnsupportedMatchOperatorError(ValueError):
 
 
 def compile_receiver_routing(
-    registry: SourceRegistry,
+    registry: SourceReader,
     *,
     default_source: str = DEFAULT_LANDING_LABEL,
     topic_suffix: str = TOPIC_LAND_SUFFIX,
@@ -195,7 +193,7 @@ def compile_receiver_routing(
     )
 
 
-def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> DestinationsConfig:
+def compile_receiver_destinations(registry: SourceReader, settings: Any) -> DestinationsConfig:
     """Compile where the receiver sends each matched record, on the direct transport.
 
     On the bus the receiver produces to a topic and the next stage consumes it,
@@ -295,7 +293,7 @@ def compile_receiver_destinations(registry: SourceRegistry, settings: Any) -> De
     )
 
 
-def compile_archiver_topics(registry: SourceRegistry, settings: Any) -> list[str]:
+def compile_archiver_topics(registry: SourceReader, settings: Any) -> list[str]:
     """The landing topics the archiver reads, from the sources that asked for it.
 
     On the bus the archiver keeps the raw record by consuming the landing topic,
@@ -330,7 +328,7 @@ def compile_archiver_topics(registry: SourceRegistry, settings: Any) -> list[str
 
 
 def compile_loader_capture(
-    registry: SourceRegistry,
+    registry: SourceReader,
     *,
     db: str,
     derived_base_dir: Any = None,
@@ -347,7 +345,7 @@ def compile_loader_capture(
     dfe-loader looks up.
 
     Args:
-        registry: SourceRegistry to read Source definitions from.
+        registry: Where the Source definitions are read from.
         db: Default database the loader writes to.
         derived_base_dir: Root a ``derived/...`` reference resolves under
             (``DerivedSchemaRegistry.reference_root``).
@@ -386,7 +384,7 @@ def compile_loader_capture(
 
 
 def compile_loader_routing(
-    registry: SourceRegistry,
+    registry: SourceReader,
     *,
     db: str = "dfe",
 ) -> LoaderRoutingConfig:
@@ -403,7 +401,7 @@ def compile_loader_routing(
     pre-positioned but they have no live loader path.
 
     Args:
-        registry: SourceRegistry to read Source definitions from.
+        registry: Where the Source definitions are read from.
         db: Default database for the loader.
     """
     source_to_table: dict[str, str] = {}

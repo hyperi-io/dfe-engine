@@ -14,6 +14,7 @@ import re
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -22,6 +23,7 @@ from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.scheduler import sync_is_due
 from tests.support.failing_stores import StampFailingProviderRegistry
+from tests.support.present import present
 from tests.unit.test_auth.factories import (
     make_group_store,
     make_oidc_provider,
@@ -37,7 +39,7 @@ from tests.unit.test_auth.test_oidc.scheduler_cases import (
 DIRECTORY_ENV = "DFE_TEST_SCHEDULER_DIRECTORY"
 
 
-def _mock_directory_provider(**kwargs: object) -> OIDCProvider:
+def _mock_directory_provider(**kwargs: Any) -> OIDCProvider:
     """An api-mode provider whose directory is the JSON fixture named by DIRECTORY_ENV."""
     groups = {"directory_backend": "mock", "mock_directory_env": DIRECTORY_ENV, "mode": "api"}
     return make_oidc_provider(groups=groups, **kwargs)
@@ -385,6 +387,6 @@ class TestOidcSyncScheduler:
 
             outcomes = await scheduler.run_once(now=NOW)
 
-            stored = group_store.get("operators")
+            stored = present(group_store.get("operators"))
             assert outcomes == {"mock-dir": "ok"}
             assert (stored.source_provider, stored.description) == ("scim", "From the directory")

@@ -10,6 +10,7 @@ from dfe_engine.query.models import (
     QueryOptions,
     QueryRequest,
 )
+from tests.support.present import present
 
 
 class TestQueryRequest:
@@ -45,8 +46,9 @@ class TestQueryRequest:
             options=options,
         )
 
-        assert request.options.limit == 100
-        assert request.options.timeout_seconds == 60
+        request_options = present(request.options)
+        assert request_options.limit == 100
+        assert request_options.timeout_seconds == 60
 
     def test_request_serialization(self):
         """Test JSON serialization."""
@@ -268,8 +270,9 @@ class TestExplainStep:
             details={"table": "events", "parts": 42},
         )
 
-        assert step.details["table"] == "events"
-        assert step.details["parts"] == 42
+        details = present(step.details)
+        assert details["table"] == "events"
+        assert details["parts"] == 42
 
     def test_all_step_types(self):
         """Test all step type enum values."""

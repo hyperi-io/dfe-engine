@@ -1,3 +1,5 @@
+"""The ClickHouse manager, query attribution tags and identifier quoting."""
+
 from .attribution import (
     DfeQueryTags,
     current_tags,

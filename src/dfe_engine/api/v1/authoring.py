@@ -18,8 +18,6 @@ The AI endpoints submit to the AI module registry - stub modules by default; rea
 models register under the same name (see dfe_engine.ai). RBAC: rules:read.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -58,6 +56,8 @@ def _module(request: Request, module_type: AIModuleType):
 
 
 class FromHyperdxRequest(BaseModel):
+    """Body for turning a HyperDX query into rule SQL."""
+
     query: str
     time_fields: list[str] | None = None
 
@@ -69,6 +69,8 @@ async def from_hyperdx(body: FromHyperdxRequest, user: CurrentUser) -> dict[str,
 
 
 class ScaffoldRequest(BaseModel):
+    """Body for a starter SELECT over a table's columns."""
+
     table: str
     columns: list[str] = Field(default_factory=list)
     source: str | None = None
@@ -84,12 +86,15 @@ async def scaffold(body: ScaffoldRequest, user: CurrentUser) -> dict[str, str]:
 
 
 class ReviewRequest(BaseModel):
+    """Body for an AI review of rule SQL."""
+
     sql: str
     execution_profile: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.post("/ai/review", dependencies=[_READ])
 async def ai_review(body: ReviewRequest, user: CurrentUser, request: Request) -> AIModuleResult:
+    """Review rule SQL with the registered query optimiser module."""
     mod = _module(request, AIModuleType.QUERY_OPTIMISER)
     return mod.get_result(
         mod.submit(QueryOptimiser.Input(query=body.sql, execution_profile=body.execution_profile))
@@ -97,6 +102,8 @@ async def ai_review(body: ReviewRequest, user: CurrentUser, request: Request) ->
 
 
 class CreateRequest(BaseModel):
+    """Body for an AI query drafted from a prompt."""
+
     prompt: str
     source_name: str | None = None
     columns: list[dict[str, Any]] = Field(default_factory=list)
@@ -104,6 +111,7 @@ class CreateRequest(BaseModel):
 
 @router.post("/ai/create", dependencies=[_READ])
 async def ai_create(body: CreateRequest, user: CurrentUser, request: Request) -> AIModuleResult:
+    """Draft a query from a prompt with the registered query generator module."""
     mod = _module(request, AIModuleType.QUERY_GENERATOR)
     return mod.get_result(
         mod.submit(
@@ -115,12 +123,15 @@ async def ai_create(body: CreateRequest, user: CurrentUser, request: Request) ->
 
 
 class VrlRequest(BaseModel):
+    """Body for AI VRL drafted from raw log samples."""
+
     samples: list[str]
     source_hint: str | None = None
 
 
 @router.post("/ai/generate-vrl", dependencies=[_READ])
 async def ai_generate_vrl(body: VrlRequest, user: CurrentUser, request: Request) -> AIModuleResult:
+    """Draft VRL from log samples with the registered log parser module."""
     mod = _module(request, AIModuleType.LOG_PARSER)
     return mod.get_result(
         mod.submit(LogParser.Input(samples=body.samples, source_hint=body.source_hint))
@@ -128,6 +139,8 @@ async def ai_generate_vrl(body: VrlRequest, user: CurrentUser, request: Request)
 
 
 class SchemaSuggestRequest(BaseModel):
+    """Body for AI meta-schema suggestions for a source."""
+
     source_name: str
     source_schema: dict[str, Any] = Field(default_factory=dict)
     query_patterns: list[str] = Field(default_factory=list)
@@ -137,6 +150,7 @@ class SchemaSuggestRequest(BaseModel):
 async def ai_suggest_schema(
     body: SchemaSuggestRequest, user: CurrentUser, request: Request
 ) -> AIModuleResult:
+    """Suggest meta-schema changes with the registered schema optimiser module."""
     mod = _module(request, AIModuleType.SCHEMA_OPTIMISER)
     return mod.get_result(
         mod.submit(

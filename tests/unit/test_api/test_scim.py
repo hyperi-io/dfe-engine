@@ -33,6 +33,7 @@ from dfe_engine.auth.scim_mapping import (
     scim_user_to_account_fields,
 )
 from tests.support.failing_stores import StampFailingAccountStore
+from tests.support.present import present
 from tests.support.racing_stores import RacingAccountStore
 
 BASE = "/api/v1/scim/v2"
@@ -61,7 +62,7 @@ class TestMapperRoundTrips:
         assert user.id == "alice"
         assert user.active is False
         assert user.external_id == "ext-42"
-        assert [m.value for m in user.groups] == ["admins"]
+        assert [m.value for m in present(user.groups)] == ["admins"]
 
         fields = scim_user_to_account_fields(user)
         assert fields["username"] == "alice"
@@ -72,7 +73,8 @@ class TestMapperRoundTrips:
     def test_user_active_defaults_true_when_absent(self):
         from scim2_models import User as ScimUser
 
-        fields = scim_user_to_account_fields(ScimUser(user_name="bob"))
+        # scim2-models fills `schemas` from `__schema__` in a before-validator ty cannot see.
+        fields = scim_user_to_account_fields(ScimUser(user_name="bob"))  # ty: ignore[missing-argument]
         assert fields["enabled"] is True
 
     def test_group_to_scim_to_fields(self):
@@ -83,7 +85,7 @@ class TestMapperRoundTrips:
         assert scim_group.display_name == "engineers"
         assert scim_group.id == "engineers"
         assert scim_group.external_id == "g-7"
-        assert [m.value for m in scim_group.members] == ["alice", "bob"]
+        assert [m.value for m in present(scim_group.members)] == ["alice", "bob"]
 
         fields = scim_group_to_group_fields(scim_group)
         assert fields["name"] == "engineers"

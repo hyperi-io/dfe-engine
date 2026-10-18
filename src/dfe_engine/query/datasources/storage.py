@@ -11,11 +11,9 @@
 Returns rows as list[dict] with consistent column schema across backends.
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
 from scalo.logger import logger
 
@@ -156,6 +154,7 @@ class S3Adapter(DatasourceAdapter):
 
         return rows, LISTING_COLUMNS
 
+    @override
     def explain(self, query: str, params: dict[str, Any] | None = None) -> ExplainPlan:
         params = params or {}
         bucket = params.get("bucket") or self.target
@@ -171,6 +170,7 @@ class S3Adapter(DatasourceAdapter):
             warnings=[],
         )
 
+    @override
     def healthcheck(self) -> bool:
         try:
             bucket = self.config.get("bucket") or self.target
@@ -204,6 +204,7 @@ class FilesystemAdapter(DatasourceAdapter):
 
     @property
     def base_path(self) -> Path:
+        """The root the adapter lists under, refusing when it is unset or absent."""
         if self._base_path is None:
             path = self.config.get("base_path")
             if not path:
@@ -290,6 +291,7 @@ class FilesystemAdapter(DatasourceAdapter):
         mime_type, _ = mimetypes.guess_type(str(path))
         return mime_type
 
+    @override
     def explain(self, query: str, params: dict[str, Any] | None = None) -> ExplainPlan:
         params = params or {}
         subpath = params.get("path", query.strip() if query else "")
@@ -309,6 +311,7 @@ class FilesystemAdapter(DatasourceAdapter):
             warnings=[],
         )
 
+    @override
     def healthcheck(self) -> bool:
         try:
             return self.base_path.exists() and self.base_path.is_dir()

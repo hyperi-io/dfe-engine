@@ -182,6 +182,7 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
+        assert sql is not None
         assert "severity" in sql
         assert "GROUP BY severity" in sql
         assert "JSONExtract" not in sql  # direct column, no JSON extraction
@@ -215,6 +216,7 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
+        assert sql is not None
 
         assert select_expr in sql
         assert f"GROUP BY {group_by}" in sql
@@ -231,6 +233,7 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
+        assert sql is not None
         assert "JSONExtractString(_json, 'source_ip') AS `source_ip`" in sql
         assert "GROUP BY `source_ip`" in sql
 
@@ -247,6 +250,7 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
+        assert sql is not None
         # severity is direct, source_ip is JSON
         assert "severity" in sql
         assert "JSONExtractString(_json, 'source_ip') AS `source_ip`" in sql
@@ -264,6 +268,7 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
+        assert sql is not None
         assert "hunt_name = 'windows_hunt'" in sql
         assert "rule_name = 'win_priv_esc'" in sql
         assert "_org_id = 'acme_corp'" in sql
@@ -282,6 +287,7 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
+        assert sql is not None
         assert "hunt_name = 'analyst''s hunt C:\\\\Temp\\\\'" in sql
         assert "rule_name = 'it''s a rule\\\\'" in sql
         assert "_org_id = 'o''brien\\\\'" in sql
@@ -298,6 +304,7 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
+        assert sql is not None
         assert "ORDER BY match_count DESC" in sql
 
     def test_max_sample_events(self):
@@ -313,6 +320,7 @@ class TestBuildGroupingQuery:
             results_table_columns=self.RESULTS_COLS,
             max_sample_events=25,
         )
+        assert sql is not None
         assert "groupArray(25)(_json)" in sql
 
     def test_from_table_reference(self):
@@ -327,6 +335,7 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
+        assert sql is not None
         assert "FROM `acme`.`logs_alerts`" in sql
 
     def test_from_reference_quotes_a_hyphenated_table(self):
@@ -341,6 +350,7 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
+        assert sql is not None
         assert "FROM `acme`.`filebeat-alerts`" in sql
 
 
@@ -614,8 +624,7 @@ class TestDispatchIntegration:
                 "max_sample_events": 20,
             }
         }
-        grouping_data = hunt_data.get("alert_grouping")
-        cfg = AlertGroupingConfig(**grouping_data)
+        cfg = AlertGroupingConfig.model_validate(hunt_data["alert_grouping"])
         assert cfg.group_by == ["source_ip", "event_type"]
         assert cfg.cooldown_td == timedelta(hours=2)
         assert cfg.max_alerts_per_run == 100

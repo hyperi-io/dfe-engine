@@ -13,8 +13,6 @@ Wraps ``SigmaSourceMapper`` for REST access to Sigma field resolution,
 selected rules into DFE rules.
 """
 
-from __future__ import annotations
-
 import asyncio
 from collections.abc import Callable
 from datetime import datetime
@@ -606,8 +604,10 @@ def _confine_provider_url(url: str, field: str) -> None:
 
 
 def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
-    """Confine a provider's reach at register/update time (S1, defence in depth on
-    top of the sigma:admin gate + the ProviderConfig file:// reject).
+    """Confine a provider's reach at register and update time.
+
+    Defence in depth (S1) on top of the sigma:admin gate and the ProviderConfig
+    file:// reject.
 
     - local_files ``directory`` MUST resolve UNDER the engine config dir, so a
       provider cannot read arbitrary server files.

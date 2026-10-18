@@ -22,6 +22,7 @@ import pytest
 
 from dfe_engine.appmgmt import catalogue
 from dfe_engine.services.models.archiver import PATH_TEMPLATE_PLACEHOLDERS
+from dfe_engine.services.models.receiver import ReceiverConfig
 from dfe_engine.services.plugins import get_plugin
 from dfe_engine.services.registry import ServiceConfigRegistry
 from dfe_engine.yaml_utils import yaml_load_string
@@ -121,6 +122,7 @@ def test_no_shipped_receiver_config_accepts_a_published_header(name: str, text: 
 
 def test_the_receiver_model_accepts_no_header_by_default():
     model = get_plugin("receiver").config_class.model_validate({})
+    assert isinstance(model, ReceiverConfig)
     assert model.server.auth.accepted_headers == []
     assert _app_default("contract", "dfe-receiver", "server")["auth"]["accepted_headers"] == []
 

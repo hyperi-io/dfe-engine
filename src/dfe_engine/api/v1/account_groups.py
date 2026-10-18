@@ -92,6 +92,8 @@ _SOURCE_PROVIDER_DESCRIPTION = (
 
 
 class CreateGroupRequest(BaseModel):
+    """Body for creating a group."""
+
     name: StoreName = Field(description="Unique group name")
     roles: list[str] = Field(description="Roles assigned to all group members")
     description: str = Field("", description="Human-readable description")
@@ -109,6 +111,8 @@ class CreateGroupRequest(BaseModel):
 
 
 class UpdateGroupRequest(BaseModel):
+    """Body for updating a group, where an omitted field keeps its value."""
+
     roles: list[str] | None = Field(None, description="Replace role list")
     description: str | None = Field(None, description="Replace description")
     members: list[str] | None = Field(None, description="Replace member username list")
@@ -122,10 +126,14 @@ class UpdateGroupRequest(BaseModel):
 
 
 class AddMemberRequest(BaseModel):
+    """Body for adding one account to a group."""
+
     username: str = Field(description="Account username to add")
 
 
 class GroupResponse(BaseModel):
+    """A group as the API returns it."""
+
     name: str
     description: str
     roles: list[str]
@@ -651,7 +659,7 @@ async def update_group(
         _refuse_last_admin_member_removals(
             request, group_name=name, removed=old_members - new_members
         )
-        group = store.update(name, **update_fields)
+        group = store.update(name, allow_protected=False, **update_fields)
         sync_account_groups_for_membership_change(
             account_store,
             name,
@@ -659,7 +667,7 @@ async def update_group(
             removed=old_members - new_members,
         )
     else:
-        group = store.update(name, **update_fields)
+        group = store.update(name, allow_protected=False, **update_fields)
     request_ch_rbac_reconcile(request.app.state)
     audit_group_change(
         user.user_id, group.name, "updated", {"fields": sorted(update_fields), **details}

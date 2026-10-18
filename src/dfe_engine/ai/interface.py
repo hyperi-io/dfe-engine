@@ -29,12 +29,10 @@ Usage::
     result = module.get_result(task_id)
 """
 
-from __future__ import annotations
-
 import uuid
 from abc import ABC, abstractmethod
 from enum import Enum
-from typing import Any
+from typing import Any, override
 
 from pydantic import BaseModel, Field
 from scalo.logger import logger
@@ -158,6 +156,7 @@ class QueryOptimiser(AIModuleInterface):
         )
 
     @property
+    @override
     def module_type(self) -> AIModuleType:
         return AIModuleType.QUERY_OPTIMISER
 
@@ -183,6 +182,7 @@ class QueryGenerator(AIModuleInterface):
         rationale: str = Field(default="", description="How the prompt maps to the query")
 
     @property
+    @override
     def module_type(self) -> AIModuleType:
         return AIModuleType.QUERY_GENERATOR
 
@@ -214,6 +214,7 @@ class SchemaOptimiser(AIModuleInterface):
         rationale: str = Field(default="", description="Explanation of proposals")
 
     @property
+    @override
     def module_type(self) -> AIModuleType:
         return AIModuleType.SCHEMA_OPTIMISER
 
@@ -254,6 +255,7 @@ class LogParser(AIModuleInterface):
         )
 
     @property
+    @override
     def module_type(self) -> AIModuleType:
         return AIModuleType.LOG_PARSER
 

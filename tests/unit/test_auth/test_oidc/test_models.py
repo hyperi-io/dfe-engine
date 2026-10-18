@@ -33,7 +33,7 @@ class TestGroupResolutionConfig:
 
     def test_invalid_mode_raises(self):
         with pytest.raises(ValidationError):
-            GroupResolutionConfig(mode="ldap")
+            GroupResolutionConfig(mode="ldap")  # ty: ignore[invalid-argument-type]  # the refused value is the point of the test
 
     def test_token_claim_mode_with_custom_claim(self):
         cfg = GroupResolutionConfig(mode="token_claim", claim_name="cognito:groups")
@@ -208,7 +208,7 @@ class TestOIDCProviderTypes:
 
     def test_invalid_type_raises(self):
         with pytest.raises(ValidationError):
-            OIDCProvider(type="saml")
+            OIDCProvider(type="saml")  # ty: ignore[invalid-argument-type]  # the refused value is the point of the test
 
     def test_disabled_provider(self):
         provider = OIDCProvider(enabled=False)
@@ -270,8 +270,8 @@ class TestGroupInfo:
 
     def test_id_required(self):
         with pytest.raises(ValidationError):
-            GroupInfo(name="No ID")
+            GroupInfo(name="No ID")  # ty: ignore[missing-argument]  # the missing field is the point of the test
 
     def test_name_required(self):
         with pytest.raises(ValidationError):
-            GroupInfo(id="grp-001")
+            GroupInfo(id="grp-001")  # ty: ignore[missing-argument]  # the missing field is the point of the test

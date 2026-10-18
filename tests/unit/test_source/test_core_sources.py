@@ -8,6 +8,7 @@
 
 """Tests for the core landing source."""
 
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -62,7 +63,7 @@ def _store_stale_core_source(registry: SourceRegistry, settings, name: str) -> N
 
 
 @pytest.fixture
-def registry(tmp_path) -> SourceRegistry:
+def registry(tmp_path) -> Iterator[SourceRegistry]:
     SourceRegistry.reset_instance()
     directory = tmp_path / "sources"
     directory.mkdir()

@@ -13,8 +13,6 @@ it printed while resolving its engine. So these assert the LINE - that it carrie
 the hunt, the rows and the duration - and the rows counter beside it.
 """
 
-from __future__ import annotations
-
 from scalo.logger import logger
 
 from dfe_engine.hunt_runner import HuntSpec, HuntWorker
@@ -71,7 +69,7 @@ def _run_capturing_logs(worker: HuntWorker) -> list:
 
 
 def test_a_completed_fire_logs_one_line_with_the_hunt_rows_and_duration():
-    worker = HuntWorker(_FakeCh(written_rows=7), _FakeCoordinator())
+    worker = HuntWorker(_FakeCh(written_rows=7), _FakeCoordinator())  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
     lines = _run_capturing_logs(worker)
 
@@ -85,7 +83,7 @@ def test_a_completed_fire_logs_one_line_with_the_hunt_rows_and_duration():
 
 def test_a_fire_that_found_nothing_still_says_so():
     """Zero rows is a result. Silence is what makes a stopped hunt invisible."""
-    worker = HuntWorker(_FakeCh(written_rows=0), _FakeCoordinator())
+    worker = HuntWorker(_FakeCh(written_rows=0), _FakeCoordinator())  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
     lines = _run_capturing_logs(worker)
 
@@ -95,7 +93,9 @@ def test_a_fire_that_found_nothing_still_says_so():
 
 def test_the_rows_a_fire_wrote_reach_the_counter(manager):
     worker = HuntWorker(
-        _FakeCh(written_rows=7), _FakeCoordinator(), metrics=HuntRunnerMetrics(manager)
+        _FakeCh(written_rows=7),
+        _FakeCoordinator(),  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the calls this path makes
+        metrics=HuntRunnerMetrics(manager),
     )
 
     worker.run(SPEC, scheduled_start=600)
@@ -107,7 +107,7 @@ def test_the_rows_a_fire_wrote_reach_the_counter(manager):
 
 def test_a_worker_with_no_metrics_backend_still_runs_the_hunt():
     coord = _FakeCoordinator()
-    worker = HuntWorker(_FakeCh(written_rows=3), coord)
+    worker = HuntWorker(_FakeCh(written_rows=3), coord)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
     worker.run(SPEC, scheduled_start=600)
 

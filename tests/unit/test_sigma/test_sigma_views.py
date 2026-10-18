@@ -12,7 +12,7 @@ the per-source view definition round-trips through git and the JSON-derived DDL 
 exercised end to end. The DDL is asserted as a string only (no live ClickHouse).
 """
 
-from __future__ import annotations
+from collections.abc import Collection
 
 import pytest
 
@@ -27,6 +27,7 @@ from dfe_engine.sigma.views import (
 )
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceNotFoundError
+from tests.support.present import present
 
 
 @pytest.fixture
@@ -256,7 +257,9 @@ class _FakeSourceRegistry:
             raise SourceNotFoundError(f"Source '{name}' not found")
         return self._sources[name]
 
-    def get_all_sources(self, enabled_only: bool = False) -> list[Source]:
+    def get_all_sources(
+        self, enabled_only: bool = False, *, states: Collection[str] | None = None
+    ) -> list[Source]:
         return list(self._sources.values())
 
 
@@ -281,7 +284,7 @@ def test_source_mapper_prefers_stored_view_definition(crud):
     registry = _FakeSourceRegistry([_source("windows-audit", {"EventID": "legacy_col"})])
     mapper = SigmaSourceMapper(registry, view_store=store)
 
-    ddl = mapper.generate_sigma_view("windows-audit", db="default")
+    ddl = present(mapper.generate_sigma_view("windows-audit", db="default"))
     # stored def wins: JSON-derived extraction present, legacy field-map alias absent
     assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
     assert "legacy_col" not in ddl
@@ -294,7 +297,7 @@ def test_source_mapper_falls_back_to_field_maps_without_definition(crud):
     registry = _FakeSourceRegistry([_source("windows-audit", {"EventID": "event_id"})])
     mapper = SigmaSourceMapper(registry, view_store=store)
 
-    ddl = mapper.generate_sigma_view("windows-audit", db="default")
+    ddl = present(mapper.generate_sigma_view("windows-audit", db="default"))
     # legacy field-map path: real-column -> Sigma-field alias
     assert "`event_id` AS `EventID`" in ddl
     assert "assumeNotNull(_json)" not in ddl

@@ -6,24 +6,25 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
 
 from dfe_engine.appmgmt import instances
-from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
 from dfe_engine.auth.bootstrap import bootstrap_auth
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.settings import DFESettings
+from tests.support.present import present
 
 
-def _stores(tmp_path: Path) -> tuple[AccountStore, GroupStore, OrgRegistry]:
+def _stores(
+    tmp_path: Path,
+) -> tuple[AccountStore | DocuStoreAccountStore, GroupStore | DocuStoreGroupStore, OrgRegistry]:
     """Stores as the running app hands them to the seeders.
 
     ``api/app.py``'s lifespan always runs ``bootstrap_auth`` before the e2e
@@ -104,7 +105,7 @@ def test_seed_dispatches_dfe_admin_user_to_accounts(tmp_path, monkeypatch):
     assert user is not None
     assert "dfe-admins" in user.groups
     assert accounts.verify_password("dfe_admin", "changeme")
-    assert "dfe_admin" in groups.get("dfe-admins").members
+    assert "dfe_admin" in present(groups.get("dfe-admins")).members
     # The bootstrap-owned break-glass account is untouched by the seed.
     assert accounts.verify_password("admin", "changeme")
 
@@ -154,7 +155,7 @@ def test_account_ensure_reuses_private_upsert_for_other_groups(tmp_path, monkeyp
     user = accounts.get("analyst")
     assert user is not None
     assert "dfe-analysts" in user.groups
-    assert "analyst" in groups.get("dfe-analysts").members
+    assert "analyst" in present(groups.get("dfe-analysts")).members
     assert accounts.verify_password("analyst", "analyst-pw")
 
 

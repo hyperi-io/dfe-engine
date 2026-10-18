@@ -112,21 +112,29 @@ class RuleUpdateRequest(_RuleWriteFields):
 
 
 class SqlValidationRequest(BaseModel):
+    """Body for validating a rule's SQL."""
+
     sql: str = Field(description="Full SELECT ... FROM ... query to validate")
 
 
 class SqlValidationError(BaseModel):
+    """One error in rule SQL, with where it is and a suggested fix."""
+
     message: str
     position: int | None = None
     suggestion: str | None = None
 
 
 class SqlValidationResponse(BaseModel):
+    """Whether rule SQL is valid, and its errors."""
+
     valid: bool
     errors: list[SqlValidationError] = Field(default_factory=list)
 
 
 class RuleResponse(BaseModel):
+    """A detection rule as the API returns it."""
+
     name: str = Field(description="Rule file name (YAML stem)")
     display_name: str = Field(description="Human-readable rule label")
     severity: str
@@ -143,6 +151,8 @@ class RuleResponse(BaseModel):
 
 
 class RuleSummary(BaseModel):
+    """A detection rule in a listing."""
+
     name: str = Field(description="Rule file name (YAML stem)")
     display_name: str
     severity: str
@@ -154,6 +164,8 @@ class RuleSummary(BaseModel):
 
 
 class RuleCreateResponse(BaseModel):
+    """The created rule, what sanitising changed, and what the rule is estimated to cost."""
+
     rule: RuleResponse
     sanitize_summary: dict = Field(default_factory=dict)
     sql_errors: list[SqlValidationError] = Field(default_factory=list)
@@ -185,6 +197,8 @@ class RuleFromHyperdxRequest(BaseModel):
 
 
 class RuleFromHyperdxResponse(BaseModel):
+    """The rule created from a HyperDX query."""
+
     id: str = Field(description="Created rule id (YAML stem); open at /rules/{id}")
     display_name: str
     sanitize_summary: dict = Field(default_factory=dict)

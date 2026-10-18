@@ -14,8 +14,6 @@ here - it stores the returned JWT in the credential file). Everything else in th
 tree is generated from the spec.
 """
 
-from __future__ import annotations
-
 import click
 import httpx
 import httpx2
@@ -114,7 +112,7 @@ def login(
 
     if credential is not None:
         store.save_credential(credential)
-        store.set_value("account", account, profile)
+        store.set_value("account", credential.account, profile)
     store.set_active_profile(profile)
 
     _emit(ctx, f"You are now logged in as {account}. Active endpoint: {effective_url}")

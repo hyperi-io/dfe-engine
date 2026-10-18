@@ -71,7 +71,7 @@ def _entra(server: LocalGraph, *, access_token: str = "") -> EntraAdapter:
     )
     adapter = EntraAdapter(provider, access_token=access_token)
     adapter.GRAPH_BASE = server.base_url
-    adapter._get_token = lambda: "app-token"  # type: ignore[method-assign]
+    adapter._get_token = lambda: "app-token"  # ty: ignore[invalid-assignment]  # the test replaces this adapter's token fetch
     return adapter
 
 

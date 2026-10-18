@@ -17,16 +17,15 @@ drift guard: it compares this dict against the file the installed dfe-schemas
 ships at ``sources/main.yaml``.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
+from typing import Any
 
 from dfe_engine.source.core_sources import LANDING_SOURCE_FILE, SOURCES_SUBDIR
 from dfe_engine.yaml_utils import yaml_dump
 
 # What dfe-schemas ships at sources/main.yaml. No `source` name: the engine fills
 # it from the landing-table setting.
-LANDING_DEFINITION = {
+LANDING_DEFINITION: dict[str, Any] = {
     "resource_type": "core",
     "description": "Where the loader puts a record it has nowhere else to send",
     "state": "active",

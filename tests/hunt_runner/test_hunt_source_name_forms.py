@@ -13,6 +13,7 @@ without a database is read from the data database the runner's CLI hands the
 loader. A results table is still held to letters, digits and ``_``.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -36,7 +37,7 @@ def _save_rule(rules_dir: Path, **fields) -> None:
         registry.close()
 
 
-def _errors(run) -> tuple[object, list[str]]:
+def _errors[T](run: Callable[[], T]) -> tuple[T, list[str]]:
     captured: list = []
     handler_id = logger.add(captured.append, level="ERROR")
     try:

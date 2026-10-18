@@ -17,9 +17,8 @@ directly for the path-encoding, None-filtering, JSON-string parsing and auth-hea
 branches that the end-to-end orgs round-trips do not pin.
 """
 
-from __future__ import annotations
-
 import json
+from typing import Any
 
 import pytest
 from starlette.applications import Starlette
@@ -35,7 +34,7 @@ from dfe_engine.cli.auto.spec import BodyProp, Operation, Param
 
 def _op(**over) -> Operation:
     """An Operation with sane defaults; override only what a test cares about."""
-    base = {
+    base: dict[str, Any] = {
         "path": "/api/v1/things",
         "method": "get",
         "path_params": [],

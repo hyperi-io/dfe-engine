@@ -16,10 +16,8 @@ raise_for_status baked in) -- never a git CLI, matching the rest of the gitops
 bridge.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, override
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -48,7 +46,8 @@ class ForgeError(RuntimeError):
 class ForgeProvider(Protocol):
     """Anything that can open a review PR for a pushed branch."""
 
-    def open_pull_request(self, *, head: str, base: str, title: str, body: str) -> PullRequest: ...
+    def open_pull_request(self, *, head: str, base: str, title: str, body: str) -> PullRequest:
+        """Open a review PR from *head* into *base*."""
 
 
 @dataclass(frozen=True)
@@ -161,6 +160,7 @@ class ForgejoForge(_RestForge):
 
     provider = "forgejo"
 
+    @override
     def open_pull_request(self, *, head: str, base: str, title: str, body: str) -> PullRequest:
         url = f"{self._base}/api/v1/repos/{self._owner}/{self._repo}/pulls"
         headers = {"Content-Type": "application/json"}
@@ -181,6 +181,7 @@ class GitHubForge(_RestForge):
 
     provider = "github"
 
+    @override
     def open_pull_request(self, *, head: str, base: str, title: str, body: str) -> PullRequest:
         url = f"{self._base}/repos/{self._owner}/{self._repo}/pulls"
         headers = {"Accept": "application/vnd.github+json"}
@@ -201,6 +202,7 @@ class GitLabForge(_RestForge):
 
     provider = "gitlab"
 
+    @override
     def open_pull_request(self, *, head: str, base: str, title: str, body: str) -> PullRequest:
         project = quote(f"{self._owner}/{self._repo}", safe="")
         url = f"{self._base}/api/v4/projects/{project}/merge_requests"

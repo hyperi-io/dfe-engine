@@ -6,8 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""
-DFE Engine Settings Module
+"""DFE engine settings.
 
 Provides centralized configuration management through the engine's own cascade in
 ``load_settings``: defaults.yaml, then an optional config file, then the environment
@@ -345,7 +344,7 @@ class ClickHouseSettings(BaseModel):
         ),
     )
 
-    @field_validator("platform")  # noqa: V105
+    @field_validator("platform")
     @classmethod
     def _platform_is_a_known_choice(cls, value: str) -> str:
         # dfe-schemas owns the choices, and refuses an unknown one naming them all.
@@ -604,7 +603,7 @@ class HuntsSettings(BaseModel):
         ),
     )
 
-    @field_validator("hunt_dir")  # noqa: V105
+    @field_validator("hunt_dir")
     @classmethod
     def _hunt_dir_is_one_directory(cls, value: str) -> str:
         directory = value.strip()
@@ -615,7 +614,7 @@ class HuntsSettings(BaseModel):
             )
         return directory
 
-    @field_validator("lookup_databases")  # noqa: V105
+    @field_validator("lookup_databases")
     @classmethod
     def _lookup_databases_are_plain_names(cls, value: list[str]) -> list[str]:
         names = [name.strip() for name in value]
@@ -864,8 +863,7 @@ class KafkaSettings(BaseModel):
 
 
 class StorageSettings(BaseModel):
-    """
-    Storage backend settings for artifacts and templates.
+    """Storage backend settings for artifacts and templates.
 
     Supports local filesystem, S3, and HTTP backends.
     The 'type' field is auto-detected from 'path' if not explicitly set:
@@ -2252,7 +2250,7 @@ class DFESettings(BaseModel):
         ),
     )
 
-    @model_validator(mode="after")  # noqa: V105
+    @model_validator(mode="after")
     def _data_database_is_no_lookup(self) -> DFESettings:
         # Every org's rows are in the data database, so a lookup there reads them all.
         data = self.clickhouse.effective_data_database
@@ -2981,8 +2979,8 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 def load_settings(config_file: str | None = None) -> DFESettings:
-    """
-    Load DFE settings with the following precedence:
+    """Load DFE settings, highest precedence first.
+
     1. Environment variables (highest priority)
     2. User config file (if provided)
     3. defaults.yaml (lowest priority)
@@ -3077,8 +3075,7 @@ def provided_service_password(role: str) -> str:
 
 
 def get_clickhouse_config(settings: DFESettings | None = None) -> dict:
-    """
-    Get ClickHouse configuration as a dictionary.
+    """Get ClickHouse configuration as a dictionary.
 
     This provides backward compatibility with existing code that expects
     a dictionary with keys like 'ch_host', 'ch_port', etc.

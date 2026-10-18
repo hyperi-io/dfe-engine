@@ -12,8 +12,6 @@ wrote is in the other pod's tree only once that pod takes the remote's head. The
 tests are the read half: write on A, read on B.
 """
 
-from __future__ import annotations
-
 import threading
 from pathlib import Path
 
@@ -53,7 +51,7 @@ def replicas(tmp_path: Path) -> tuple[GitCrud, GitCrud]:
 
 
 def _source(name: str = "filebeat") -> Source:
-    return Source(
+    return Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         source=name,
         enabled=True,
         description=f"{name} test source",

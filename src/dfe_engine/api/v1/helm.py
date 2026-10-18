@@ -47,10 +47,14 @@ _CLASS = "helmvars"
 
 
 class SetVarRequest(BaseModel):
+    """Body for setting one helm var."""
+
     value: Any
 
 
 class WriteResult(BaseModel):
+    """The outcome of a helm var write: its commit, or the review PR it went to."""
+
     changed: bool
     commit_sha: str | None = None
     auto_merged: bool = False
@@ -60,6 +64,7 @@ class WriteResult(BaseModel):
 
 
 def gitcrud_of(request: Request) -> GitCrud:
+    """The app's GitCrud engine, or a 503 when gitops is off."""
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
         raise HTTPException(
@@ -70,10 +75,12 @@ def gitcrud_of(request: Request) -> GitCrud:
 
 
 def policy_of(request: Request) -> PolicyStore | None:
+    """The app's policy store, or None when none is configured."""
     return getattr(request.app.state, "policy_store", None)
 
 
 def has_override(request: Request, user: Any) -> bool:
+    """Whether *user* holds the helmvars override grant."""
     return authorize(user, "helmvars:override", role_config=request.app.state.role_config).allowed
 
 
@@ -243,9 +250,12 @@ def set_var_governed(
 
 
 def delete_var_governed(cls: str, name: str, path: str, user: Any, request: Request) -> WriteResult:
-    """Revert one var to its chart default. Reverting a protected var IS changing
-    it, so the same override grant applies as on a set, and a revert may not add a
-    value-rule violation to the document any more than a set may."""
+    """Revert one var to its chart default.
+
+    Reverting a protected var IS changing it, so the same override grant applies as
+    on a set, and a revert may not add a value-rule violation to the document any
+    more than a set may.
+    """
     check_name(name)
     gc = gitcrud_of(request)
     settings = request.app.state.settings
@@ -326,8 +336,10 @@ def set_var(
     request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> WriteResult:
-    """Set a helm var. Direct commit in dev/solo; routed to a review PR (or 409
-    'review_required') in production+team. 409 on stale If-Match; 403 if protected.
+    """Set a helm var.
+
+    A direct commit in dev or solo, and routed to a review PR (or 409
+    'review_required') in production+team. 409 on a stale If-Match, 403 if protected.
     """
     return set_var_governed(_CLASS, name, path, body.value, user, request, if_match)
 
@@ -338,7 +350,9 @@ def set_var(
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
 def delete_var(name: str, path: str, user: CurrentUser, request: Request) -> WriteResult:
-    """Revert a helm var to its chart default. Routed like set_var (PR in prod+team);
-    403 if protected, since reverting a locked var changes it as surely as setting it.
+    """Revert a helm var to its chart default.
+
+    Routed like set_var (a PR in prod+team). 403 if protected, since reverting a
+    locked var changes it as surely as setting it.
     """
     return delete_var_governed(_CLASS, name, path, user, request)

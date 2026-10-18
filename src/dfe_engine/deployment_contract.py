@@ -38,7 +38,8 @@ from scalo.deployment import (
 _DEFAULT_IMAGE_REGISTRY = "ghcr.io/hyperi-io"
 
 
-def _env(env_var: str, key_name: str, secret_key: str) -> SecretEnvContract:
+# scalo 2.31.17 types each scalo.deployment export as a union with its _missing placeholder (scalo-py#138).
+def _env(env_var: str, key_name: str, secret_key: str) -> SecretEnvContract:  # ty: ignore[invalid-type-form]
     """Map one env var the engine reads to a key of its group's Kubernetes Secret.
 
     Args:
@@ -52,7 +53,7 @@ def _env(env_var: str, key_name: str, secret_key: str) -> SecretEnvContract:
     return SecretEnvContract(env_var=env_var, key_name=key_name, secret_key=secret_key)
 
 
-def engine_deployment_contract() -> DeploymentContract:
+def engine_deployment_contract() -> DeploymentContract:  # ty: ignore[invalid-type-form]
     """Build the deployment contract for dfe-engine.
 
     ``image_registry`` is ``DFE_DEPLOYMENT_IMAGE_REGISTRY`` when that env var is
@@ -166,7 +167,7 @@ def engine_deployment_contract() -> DeploymentContract:
         ),
         # One pod: the config claim is ReadWriteOnce, and two replicas serve two source registries (#361).
         singleton=True,
-        image_profile=ImageProfile.PRODUCTION,
+        image_profile=ImageProfile.PRODUCTION,  # ty: ignore[unresolved-attribute]
         # scalo ships no vendor, licence or copyright defaults, so the product identity is set here.
         oci_labels=OciLabels(
             title="dfe-engine",

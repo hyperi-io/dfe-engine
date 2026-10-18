@@ -6,11 +6,10 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 from typing import TypedDict
 
 import pytest
+from dulwich.objects import Commit
 from dulwich.repo import Repo, check_user_identity
 
 from dfe_engine.auth.models import AuthContext
@@ -82,6 +81,7 @@ class TestCommitFile:
             repo = Repo(str(tmp_path))
             head = repo[repo.head()]
             repo.close()
+            assert isinstance(head, Commit)
             assert head.author == b"admin <admin@dfe.local>"
             assert head.committer == COMMITTER_IDENTITY.encode("utf-8")
             assert head.message == b"test: add thing"

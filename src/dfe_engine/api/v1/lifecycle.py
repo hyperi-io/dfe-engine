@@ -16,8 +16,6 @@ pinned services (ClickHouse, OpenBao, the cluster, DNS, Argo) have no lifecycle
 API. Every change is a git commit (commit != deployment - Argo reconciles).
 """
 
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -43,16 +41,22 @@ router = APIRouter(prefix="/lifecycle", tags=["Governed Ops: Lifecycle"], depend
 
 
 class ServiceInfo(BaseModel):
+    """A service, its tier and its lifecycle state."""
+
     name: str
     tier: str
     state: str
 
 
 class LifecycleRequest(BaseModel):
+    """Body for setting a service's lifecycle state."""
+
     state: LifecycleState
 
 
 class LifecycleResponse(BaseModel):
+    """The outcome of a lifecycle change, which applies once Argo reconciles it."""
+
     name: str
     state: str
     changed: bool

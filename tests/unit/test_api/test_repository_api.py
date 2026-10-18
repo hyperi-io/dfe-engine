@@ -436,6 +436,23 @@ class TestValidation:
         resp = client.get(f"{OBJECTS}/cosmic/x/ns/key", headers=admin_headers)
         assert resp.status_code == 422
 
+    def test_the_contract_offers_exactly_the_four_scopes(self, app):
+        """A generated client offers a select for scope only if the spec carries the set."""
+        paths = app.openapi()["paths"]
+        scope_params = [
+            param
+            for path, operations in paths.items()
+            if path.startswith(f"{OBJECTS}/{{scope}}/")
+            for operation in operations.values()
+            for param in operation["parameters"]
+            if param["name"] == "scope"
+        ]
+
+        assert len(scope_params) == 4
+        assert all(
+            param["schema"]["enum"] == ["system", "org", "group", "user"] for param in scope_params
+        )
+
     def test_system_scope_id_must_be_dash(self, client: TestClient, fake_ch, admin_headers):
         resp = client.put(f"{OBJECTS}/system/oops/ns/key", content=b"v", headers=admin_headers)
         assert resp.status_code == 422

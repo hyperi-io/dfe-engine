@@ -17,8 +17,6 @@ The loader's vocabulary is restated here as a literal, because a test against
 the engine's own constants only ever checks the engine against itself.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
@@ -29,6 +27,7 @@ from dfe_engine.services.schema.json_promotion_service import (
     promoted_column_expr,
 )
 from dfe_engine.source.type_registry import TypeRegistry
+from tests.support.present import present
 
 # dfe-loader/src/column_meta/mod.rs:379-386 DIRECTIVE_NAMES. A '@' only starts a
 # directive when the word after it is one of these; anything else is read as
@@ -82,7 +81,7 @@ class TestPromotedColumnDirective:
             type_registry=TypeRegistry.default(),
             path_types={},
         )
-        column = outcomes[0].column
+        column = present(outcomes[0].column)
         generator = DDLGenerator(TypeRegistry.default())
         ddl = generator.generate_alter_add_column("events", column, DDLConfig(db="dfe"))
         comment = ddl.split("COMMENT '", 1)[1].split("'", 1)[0]
@@ -100,4 +99,4 @@ class TestPromotedColumnDirective:
             type_registry=TypeRegistry.default(),
             path_types={path: ["String"]},
         )
-        assert discovered[0].column_expr == outcomes[0].column.expr
+        assert discovered[0].column_expr == present(outcomes[0].column).expr

@@ -12,8 +12,6 @@ loads - a `transforms` map of named components - because a validator demanding
 some other shape rejects every real file while looking like it works.
 """
 
-from __future__ import annotations
-
 import sys
 
 import pytest
@@ -115,7 +113,7 @@ class TestVrl:
         import types
 
         module = types.ModuleType("vectordotdev")
-        module.vrl_check = lambda content: outcome
+        module.vrl_check = lambda content: outcome  # ty: ignore[unresolved-attribute]  # a bare ModuleType takes any attribute
         monkeypatch.setitem(sys.modules, "vectordotdev", module)
         assert validation.validate_language("vrl", ".a = 1", enabled=True).status is expected
 
@@ -123,7 +121,7 @@ class TestVrl:
         import types
 
         module = types.ModuleType("vectordotdev")
-        module.vrl_check = lambda content: 42
+        module.vrl_check = lambda content: 42  # ty: ignore[unresolved-attribute]  # a bare ModuleType takes any attribute
         monkeypatch.setitem(sys.modules, "vectordotdev", module)
         result = validation.validate_language("vrl", ".a = 1", enabled=True)
         assert result.status is validation.ValidationStatus.UNAVAILABLE
@@ -135,7 +133,7 @@ class TestVrl:
             raise RuntimeError("linked against nothing")
 
         module = types.ModuleType("vectordotdev")
-        module.vrl_check = boom
+        module.vrl_check = boom  # ty: ignore[unresolved-attribute]  # a bare ModuleType takes any attribute
         monkeypatch.setitem(sys.modules, "vectordotdev", module)
         result = validation.validate_language("vrl", ".a = 1", enabled=True)
         assert result.status is validation.ValidationStatus.UNAVAILABLE

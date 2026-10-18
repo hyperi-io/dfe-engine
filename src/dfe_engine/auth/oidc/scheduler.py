@@ -20,7 +20,7 @@ from dfe_engine.auth.oidc.sync import SyncMetrics, SyncOutcome, sync_provider
 from dfe_engine.http_errors import describe_failure
 
 if TYPE_CHECKING:
-    from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
     from dfe_engine.auth.oidc.models import OIDCProvider
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
     from dfe_engine.secrets import DfeSecrets
@@ -60,7 +60,7 @@ class OidcSyncScheduler:
         self,
         *,
         bindings: Mapping[str, str],
-        group_store: GroupStore,
+        group_store: GroupStore | DocuStoreGroupStore,
         metrics: SyncMetrics | None,
         on_groups_created: Callable[[], None] | None,
         registry: OIDCProviderRegistry,

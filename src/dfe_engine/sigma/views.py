@@ -26,8 +26,6 @@ deploy repo, so every view mutation is one attributed git commit - survivability
 audit come free.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
@@ -187,6 +185,7 @@ class SigmaViewStore:
         return SigmaViewDefinition.model_validate(doc)
 
     def exists(self, source_name: str) -> bool:
+        """Whether a view is stored for *source_name*."""
         try:
             self._crud.get(VIEWS_CLASS, source_name)
             return True

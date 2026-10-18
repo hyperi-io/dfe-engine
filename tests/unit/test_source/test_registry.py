@@ -1,5 +1,7 @@
 """Tests for SourceRegistry — CRUD, validation, round-trip."""
 
+from collections.abc import Iterator
+
 import pytest
 
 from dfe_engine.schema.schema_builder_v2 import SchemaBuildResult
@@ -12,6 +14,7 @@ from dfe_engine.source.registry import (
     SourceValidationError,
 )
 from dfe_engine.yaml_utils import yaml_load
+from tests.support.present import present
 
 
 @pytest.fixture
@@ -23,7 +26,7 @@ def sources_dir(tmp_path):
 
 
 @pytest.fixture
-def registry(sources_dir) -> SourceRegistry:
+def registry(sources_dir) -> Iterator[SourceRegistry]:
     """Create a fresh SourceRegistry for each test."""
     SourceRegistry.reset_instance()
     reg = SourceRegistry(
@@ -89,7 +92,7 @@ class TestCRUD:
 
         loaded = registry.get_source("filebeat")
         assert loaded.source == "filebeat"
-        assert loaded.match.value == "filebeat"
+        assert present(loaded.match).value == "filebeat"
 
     def test_save_writes_versioned_yaml(self, registry: SourceRegistry, sources_dir):
         registry.save_source(
@@ -250,7 +253,7 @@ class TestList:
                 {"source": "main", "match": {"field": "_source", "operator": "always"}}
             )
         )
-        assert registry.get_source("main").match.operator == "always"
+        assert present(registry.get_source("main").match).operator == "always"
 
     def test_a_fetcher_route_may_not_name_its_own_source(self, registry: SourceRegistry):
         looping = Source.model_validate(
@@ -400,7 +403,7 @@ class TestList:
         )
         registry.save_source(many)
 
-        assert len(registry.get_source("okta-audit").fetcher.config["connections"]) == 3
+        assert len(present(registry.get_source("okta-audit").fetcher).config["connections"]) == 3
 
     def test_the_override_dial_lets_a_mixed_source_through(
         self, registry: SourceRegistry, monkeypatch
@@ -428,7 +431,7 @@ class TestList:
         )
         registry.save_source(mixed)
 
-        assert registry.get_source("okta-audit").fetcher.source_type == "okta"
+        assert present(registry.get_source("okta-audit").fetcher).source_type == "okta"
         assert warnings == [
             {
                 "source": "okta-audit",
@@ -478,7 +481,7 @@ class TestList:
                 }
             )
         )
-        assert registry.get_source("okta").fetcher.routes[0].source == "audit"
+        assert present(registry.get_source("okta").fetcher).routes[0].source == "audit"
 
     def test_archive_on_the_direct_transport_is_accepted(
         self, registry: SourceRegistry, direct_deployment
@@ -551,7 +554,7 @@ class TestList:
 
         registry.save_source(_routing_fetcher())
 
-        assert registry.get_source("okta-audit").fetcher.routes[0].source == "okta-alerts"
+        assert present(registry.get_source("okta-audit").fetcher).routes[0].source == "okta-alerts"
 
     def test_a_direct_fetcher_route_saves_before_its_target_exists(
         self, registry: SourceRegistry, direct_deployment
@@ -567,7 +570,7 @@ class TestList:
 
         registry.save_source(_routing_fetcher())
 
-        assert registry.get_source("okta-audit").fetcher.routes[0].source == "okta-alerts"
+        assert present(registry.get_source("okta-audit").fetcher).routes[0].source == "okta-alerts"
 
     def test_a_transform_that_does_not_carry_the_transport_is_refused(
         self, registry: SourceRegistry, direct_deployment
@@ -719,16 +722,21 @@ class TestRoundTrip:
         assert loaded.description == source.description
         assert loaded.enabled == source.enabled
         assert loaded.header.type == source.header.type
-        assert loaded.match.field == source.match.field
-        assert loaded.match.value == source.match.value
+        assert present(loaded.match).field == present(source.match).field
+        assert present(loaded.match).value == present(source.match).value
         assert loaded.schema_config.meta_schema == source.schema_config.meta_schema
         assert loaded.schema_config.ttl_days == source.schema_config.ttl_days
         assert loaded.schema_config.engine == source.schema_config.engine
-        assert loaded.transform.engine == source.transform.engine
-        assert loaded.transform.config_file == source.transform.config_file
+        assert present(loaded.transform).engine == present(source.transform).engine
+        assert present(loaded.transform).config_file == present(source.transform).config_file
         assert loaded.fetcher is None
-        assert loaded.view_for("sigma").taxonomy == source.view_for("sigma").taxonomy
-        assert loaded.view_for("sigma").custom_mappings == source.view_for("sigma").custom_mappings
+        assert (
+            present(loaded.view_for("sigma")).taxonomy == present(source.view_for("sigma")).taxonomy
+        )
+        assert (
+            present(loaded.view_for("sigma")).custom_mappings
+            == present(source.view_for("sigma")).custom_mappings
+        )
 
     def test_save_load_fetcher_source(self, registry: SourceRegistry):
         source = Source.model_validate(
@@ -752,8 +760,8 @@ class TestRoundTrip:
 
         assert loaded.origin == "fetcher"
         assert loaded.match is None
-        assert loaded.fetcher.source_type == "crowdstrike"
-        assert loaded.fetcher.config == source.fetcher.config
+        assert present(loaded.fetcher).source_type == "crowdstrike"
+        assert present(loaded.fetcher).config == present(source.fetcher).config
         assert registry.list_sources()[0]["origin"] == "fetcher"
         assert registry.list_sources()[0]["current_table_topic_type"] == "own"
 

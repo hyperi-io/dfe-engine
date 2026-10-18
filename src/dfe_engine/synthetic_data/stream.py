@@ -16,8 +16,6 @@ API responses); ``HttpPostSink`` posts JSON to dfe-receiver so a demo stream
 exercises the real default data path end to end.
 """
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import json
@@ -50,6 +48,7 @@ class CollectSink:
         self.events: list[dict[str, Any]] = []
 
     async def __call__(self, event: dict[str, Any]) -> None:
+        """Keep the event."""
         self.events.append(event)
 
     async def flush(self) -> None:
@@ -89,6 +88,7 @@ class HttpPostSink:
         self._client: Any = None
 
     async def __call__(self, event: dict[str, Any]) -> None:
+        """Buffer the event, and post the batch once it is full."""
         self._buffer.append(event)
         if len(self._buffer) >= self.batch_max:
             await self.flush()

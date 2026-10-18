@@ -1,3 +1,5 @@
+"""Hunt alerting and scoring, detection rules, and the hunt result schema."""
+
 from .alert import (
     AlertConfig,
     AlertDestination,

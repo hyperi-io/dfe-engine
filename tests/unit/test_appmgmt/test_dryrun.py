@@ -12,8 +12,6 @@ fake at the import site. That is the point of the seam - an absent backend must
 report ``unavailable``, never a pass.
 """
 
-from __future__ import annotations
-
 import sys
 import types
 
@@ -30,7 +28,7 @@ def fake_backend(monkeypatch):
 
     def install(fn):
         module = types.ModuleType("vectordotdev.native_vector_executor")
-        module.quick_vrl_test = fn
+        module.quick_vrl_test = fn  # ty: ignore[unresolved-attribute]  # a bare ModuleType takes any attribute
         package = types.ModuleType("vectordotdev")
         monkeypatch.setitem(sys.modules, "vectordotdev", package)
         monkeypatch.setitem(sys.modules, "vectordotdev.native_vector_executor", module)

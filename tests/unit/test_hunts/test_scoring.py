@@ -381,8 +381,7 @@ class TestScoringAlertIntegration:
                 ],
             }
         }
-        scoring_data = hunt_data.get("scoring")
-        cfg = ScoringConfig(**scoring_data)
+        cfg = ScoringConfig.model_validate(hunt_data["scoring"])
         assert cfg.base_score == 75
         assert len(cfg.factors) == 1
 

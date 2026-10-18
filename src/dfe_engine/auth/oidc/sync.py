@@ -59,7 +59,7 @@ from dfe_engine.names import VALID_NAME
 from dfe_engine.yaml_utils import YAMLError
 
 if TYPE_CHECKING:
-    from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
     from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
     from dfe_engine.auth.oidc.models import GroupInfo
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
@@ -259,7 +259,7 @@ _APPLY_LOCK = threading.Lock()
 
 def _apply_groups(
     *,
-    group_store: GroupStore,
+    group_store: GroupStore | DocuStoreGroupStore,
     metrics: SyncMetrics,
     own_stamps: frozenset[str],
     provider_name: str,
@@ -285,7 +285,7 @@ def _apply_groups(
 
 def _upsert_groups(
     *,
-    group_store: GroupStore,
+    group_store: GroupStore | DocuStoreGroupStore,
     metrics: SyncMetrics,
     own_stamps: frozenset[str],
     provider_name: str,
@@ -427,7 +427,7 @@ def _upsert_groups(
 async def sync_provider(
     provider_name: str,
     provider_registry: OIDCProviderRegistry,
-    group_store: GroupStore,
+    group_store: GroupStore | DocuStoreGroupStore,
     adapter: OIDCGroupAdapter | None = None,
     secrets: DfeSecrets | None = None,
     metrics: SyncMetrics | None = None,

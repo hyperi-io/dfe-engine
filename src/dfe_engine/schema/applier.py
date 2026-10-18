@@ -607,20 +607,6 @@ class SchemaApplier:
             and _nullable(live[col.name]) != _nullable(self._ddl_gen.resolve_type(col)[0])
         )
 
-    # -- materialised views ------------------------------------------
-
-    def ensure_view(self, database: str, name: str, ddl: str) -> TableChange:
-        """Create a materialised view if absent.
-
-        Create-only, not a reconcile: a view has no columns to diff, and
-        replacing one that already exists would drop whatever it has aggregated.
-        Changing a view's SELECT is a deliberate migration, not an apply.
-        """
-        if self._table_exists(database, name):
-            return self._record(TableChange(database=database, table=name, action="unchanged"))
-        self._run(ddl)
-        return self._record(TableChange(database=database, table=name, action="created"))
-
     # -- internals ---------------------------------------------------
 
     def _record(self, change: TableChange) -> TableChange:

@@ -30,6 +30,7 @@ from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.hyperdx.client import HyperDXClient
 from tests.support.failing_stores import StampFailingAccountStore
 from tests.support.loopback import CountingListener
+from tests.support.present import present
 from tests.support.racing_stores import RacingAccountStore
 
 NO_LOOP_EVENT = "JIT HyperDX invite skipped - no running event loop"
@@ -488,7 +489,7 @@ class TestCrossIdentityRefusal:
             jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra", email="evil@example.com")
 
         assert refused.value.reason == "local_account"
-        stored = AccountStore(tmp_path / "accounts").get("jane-corp-com")
+        stored = present(AccountStore(tmp_path / "accounts").get("jane-corp-com"))
         assert stored.groups == ["acme-viewers"]
         assert stored.email == "j@dfe.local"
 
@@ -513,7 +514,9 @@ class TestCrossIdentityRefusal:
             jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
 
         assert refused.value.reason == "provider_mismatch"
-        assert AccountStore(tmp_path / "accounts").get("jane-corp-com").groups == ["acme-viewers"]
+        assert present(AccountStore(tmp_path / "accounts").get("jane-corp-com")).groups == [
+            "acme-viewers"
+        ]
 
     def test_the_owning_provider_still_updates(self, stores):
         """The negative control: an ordinary shadow account still reconciles."""
@@ -609,7 +612,9 @@ class TestOneStemTwoSubjects:
             jit.ensure_account(self.SECOND, ["dfe-admins"], "entra")
 
         assert refused.value.reason == "subject_mismatch"
-        assert AccountStore(tmp_path / "accounts").get(self.STEM).groups == ["acme-viewers"]
+        assert present(AccountStore(tmp_path / "accounts").get(self.STEM)).groups == [
+            "acme-viewers"
+        ]
 
     def test_a_session_for_the_second_subject_binds_no_account(self, stores):
         """A token already minted for the second subject must not read the first one's account."""
@@ -775,7 +780,7 @@ class TestSourceProviderBinding:
             jit.ensure_account("jane@corp.com", ["dfe-admins"], "okta")
 
         assert refused.value.reason == "provider_mismatch"
-        assert AccountStore(tmp_path / "accounts").get("jane-corp-com").groups == []
+        assert present(AccountStore(tmp_path / "accounts").get("jane-corp-com")).groups == []
 
     @pytest.mark.parametrize(
         "bindings",
@@ -819,7 +824,9 @@ class TestSourceProviderBinding:
             jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
 
         assert refused.value.reason == "local_account"
-        assert AccountStore(tmp_path / "accounts").get("jane-corp-com").email == "j@dfe.local"
+        assert (
+            present(AccountStore(tmp_path / "accounts").get("jane-corp-com")).email == "j@dfe.local"
+        )
 
     def test_a_caller_asserting_no_provider_adopts_nothing(self, stores):
         """A misconfigured proxy_provider must not become a wildcard."""
@@ -1063,42 +1070,42 @@ class TestHdxInviteScheduling:
 
 class TestResolveHyperdxTeam:
     def test_admin_wins(self, stores):
-        _, groups = stores
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
         assert jit.resolve_hyperdx_team(["acme-viewers", "dfe-admins"], "entra") == "dfe-admin"
 
     def test_analyst_wins_over_org(self, stores):
-        _, groups = stores
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
         team = jit.resolve_hyperdx_team(["acme-viewers", "dfe-analysts"], "entra")
         assert team == "dfe-analysts"
 
     def test_org_scoped_fallback(self, stores):
-        _, groups = stores
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
         assert jit.resolve_hyperdx_team(["acme-viewers"], "entra") == "customer-acme"
 
     def test_no_groups_returns_empty(self, stores):
-        _, groups = stores
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
         assert jit.resolve_hyperdx_team([], "entra") == ""
 
     def test_unknown_group_returns_empty(self, stores):
-        _, groups = stores
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
         assert jit.resolve_hyperdx_team(["nonexistent-group"], "entra") == ""
 
     def test_a_group_the_idp_only_names_gives_no_team(self, stores):
         """A directory user can name a group dfe-admins; only the id the directory assigns links."""
         _, groups = stores
         groups.create("platform-admins", roles=["admin"])
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        jit = JitProvisioner(account_store=stores[0], group_store=groups)
         assert jit.resolve_hyperdx_team(["platform-admins"], "entra") == ""
 
     def test_a_group_linked_to_another_provider_gives_no_team(self, stores):
         _, groups = stores
         groups.update("dfe-admins", source_provider="okta")
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        jit = JitProvisioner(account_store=stores[0], group_store=groups)
         assert jit.resolve_hyperdx_team(["dfe-admins"], "entra") == ""
         assert jit.resolve_hyperdx_team(["dfe-admins"], "okta") == "dfe-admin"
 
@@ -1106,7 +1113,7 @@ class TestResolveHyperdxTeam:
         """Entra sends object GUIDs, so the team has to resolve the same way roles do."""
         _, groups = stores
         groups.update("dfe-admins", source_id="0295f72c-e3f8-4962-9183-f95ef939e3b8")
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        jit = JitProvisioner(account_store=stores[0], group_store=groups)
         team = jit.resolve_hyperdx_team(["0295f72c-e3f8-4962-9183-f95ef939e3b8"], "entra")
         assert team == "dfe-admin"
 
@@ -1122,7 +1129,7 @@ class TestResolveHyperdxTeam:
             source_id="acme-ops",
         )
         groups.update("acme-ops", org_ids=["acme"])
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        jit = JitProvisioner(account_store=stores[0], group_store=groups)
         assert jit.resolve_hyperdx_team(["acme-ops"], "entra") == "customer-acme"
 
     def test_an_org_scoped_admin_does_not_outrank_a_system_analyst(self, stores):
@@ -1134,7 +1141,7 @@ class TestResolveHyperdxTeam:
             source_provider="entra",
             source_id="acme-admins",
         )
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        jit = JitProvisioner(account_store=stores[0], group_store=groups)
         team = jit.resolve_hyperdx_team(["acme-admins", "dfe-analysts"], "entra")
         assert team == "dfe-analysts"
 
@@ -1148,14 +1155,14 @@ class TestResolveHyperdxTeam:
             source_provider="entra",
             source_id="globex-staff",
         )
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        jit = JitProvisioner(account_store=stores[0], group_store=groups)
         assert jit.resolve_hyperdx_team(["globex-staff"], "entra") == "customer-globex"
 
     def test_a_system_admin_with_org_markers_keeps_the_platform_team(self, stores):
         """Platform roles win at system scope, as the CH group bindings decide."""
         _, groups = stores
         groups.update("dfe-admins", org_ids=["acme"])
-        jit = JitProvisioner(account_store=None, group_store=groups)
+        jit = JitProvisioner(account_store=stores[0], group_store=groups)
         assert jit.resolve_hyperdx_team(["dfe-admins"], "entra") == "dfe-admin"
 
 

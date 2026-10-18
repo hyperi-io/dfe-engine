@@ -8,14 +8,18 @@
 """pytest prints a fixture object in a failure trace, so no secret may reach its repr."""
 
 import dataclasses
+from typing import TYPE_CHECKING
 
 import pytest
 
 from tests.e2e.conftest import E2EConfig, OIDCFixtureLogin
 from tests.e2e.engine_api import EngineAPI
 
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
+
 _SECRET = "s3cret-value-that-must-not-print"
-_SECRET_FIELDS = {
+_SECRET_FIELDS: dict[type[DataclassInstance], set[str]] = {
     E2EConfig: {
         "receiver_token",
         "ch_password",
@@ -30,7 +34,7 @@ _SECRET_FIELDS = {
 }
 
 
-def _build(cls: type) -> object:
+def _build(cls: type[DataclassInstance]) -> object:
     """Fill every field: secrets with the marker, the rest with a harmless value."""
     values: dict[str, object] = {}
     for spec in dataclasses.fields(cls):
@@ -46,14 +50,14 @@ def _build(cls: type) -> object:
 
 
 @pytest.mark.parametrize("cls", list(_SECRET_FIELDS), ids=lambda cls: cls.__name__)
-def test_no_secret_reaches_the_repr(cls: type) -> None:
+def test_no_secret_reaches_the_repr(cls: type[DataclassInstance]) -> None:
     rendered = repr(_build(cls))
     assert _SECRET not in rendered
     assert "visible" in rendered
 
 
 @pytest.mark.parametrize("cls", list(_SECRET_FIELDS), ids=lambda cls: cls.__name__)
-def test_every_secret_looking_field_is_hidden(cls: type) -> None:
+def test_every_secret_looking_field_is_hidden(cls: type[DataclassInstance]) -> None:
     """A new token or password field that forgets repr=False fails here."""
     looks_secret = {
         spec.name

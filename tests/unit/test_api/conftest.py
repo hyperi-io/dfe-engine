@@ -4,6 +4,7 @@ Uses FastAPI TestClient with tmp_path isolation for registries.
 Auth stores are bootstrapped via bootstrap_auth() with test accounts.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -114,7 +115,9 @@ def reader(app, client: TestClient) -> RecordingClient:
     """The tenant-isolated view ``analytics/events``, over a client recording what it binds."""
     recording = RecordingClient()
     app.state.view_executor = ViewExecutor(
-        restricted_client=recording, catalog=OneViewCatalog(view_definition()), database="dfe"
+        restricted_client=recording,
+        catalog=OneViewCatalog(view_definition()),  # ty: ignore[invalid-argument-type]  # a stand-in catalog serving one view
+        database="dfe",
     )
     return recording
 
@@ -138,7 +141,7 @@ def app(api_settings: DFESettings):
 
 
 @pytest.fixture
-def client(app, api_settings: DFESettings) -> TestClient:
+def client(app, api_settings: DFESettings) -> Iterator[TestClient]:
     """TestClient with lifespan events (registries bootstrapped)."""
     with TestClient(app, raise_server_exceptions=False) as c:
         # After lifespan runs, bootstrap_auth has created admin with

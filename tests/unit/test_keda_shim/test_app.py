@@ -28,7 +28,7 @@ class _StubShim:
 
 
 def _client(values: dict[str, int]) -> TestClient:
-    return TestClient(create_app(settings=DFESettings(env="test"), shim=_StubShim(values)))
+    return TestClient(create_app(settings=DFESettings(env="test"), shim=_StubShim(values)))  # ty: ignore[invalid-argument-type]  # a stand-in shim carrying only the call the app makes
 
 
 def test_pressure_alias():

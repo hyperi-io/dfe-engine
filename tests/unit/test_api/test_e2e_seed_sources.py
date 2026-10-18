@@ -1,5 +1,6 @@
 """The e2e source seeder: create-once, but the display name still reconciles."""
 
+from collections.abc import Iterator
 from unittest.mock import Mock
 
 import pytest
@@ -9,7 +10,7 @@ from dfe_engine.source.registry import SourceRegistry
 
 
 @pytest.fixture
-def registry(tmp_path) -> SourceRegistry:
+def registry(tmp_path) -> Iterator[SourceRegistry]:
     sources_dir = tmp_path / "sources"
     sources_dir.mkdir()
     SourceRegistry.reset_instance()

@@ -16,12 +16,10 @@ call (auto-following pagination for ``list``), applies ``--query`` and formats t
 result. Nothing here is endpoint-specific - a new API means a new command for free.
 """
 
-from __future__ import annotations
-
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, override
 from urllib.parse import urlsplit
 
 import click
@@ -41,6 +39,7 @@ class HelpGroup(click.Group):
     aws-cli/gcloud convention.
     """
 
+    @override
     def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
         if not args and self.no_args_is_help and not ctx.resilient_parsing:
             click.echo(ctx.get_help(), color=ctx.color)
@@ -69,12 +68,14 @@ class GlobalOptions:
     out_stream: Any = None
 
     def emit(self, text: str, *, nl: bool = True) -> None:
+        """Write *text* to the captured stream, else to stdout."""
         if self.out_stream is not None:
             self.out_stream.write(text + ("\n" if nl else ""))
         else:
             click.echo(text, nl=nl)
 
     def make_client(self, resolved: Resolved, *, retries: int | None = None) -> Client:
+        """An API client for *resolved*, refusing when no engine URL is set."""
         if not resolved.url:
             raise DfeConfigError(
                 "No engine URL configured. Run `dfe login --url <URL> ...` or pass "

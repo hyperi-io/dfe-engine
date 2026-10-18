@@ -114,13 +114,13 @@ def admin_account_password(override: str = "") -> str:
 
 
 def default_credentials_in_use(admin_password: str) -> bool:
-    """True when the deployment is running on the unset/shipped admin password.
+    r"""True when the deployment is running on the unset/shipped admin password.
 
     THE contract for the ``changeme`` check, and the one every repo in the suite
     copies: strip surrounding whitespace, then compare against empty and
     ``changeme``. The strip is what the copies disagree on -- a password arriving
     through a kubernetes Secret, a heredoc or an ``.env`` line keeps its trailing
-    newline, so an exact comparison reads ``"changeme\\n"`` as a minted password
+    newline, so an exact comparison reads ``"changeme\n"`` as a minted password
     while the login it guards still accepts ``changeme``.
     """
     candidate = admin_password.strip()
@@ -258,6 +258,10 @@ def bootstrap_auth(
             to ``changeme``.
         default_admin_name: Username for the local admin. Empty falls through
             to ``admin``.
+        account_store: The account store to bootstrap. None builds the YAML store
+            under ``auth_dir``.
+        group_store: The group store to bootstrap. None builds the YAML store
+            under ``auth_dir``.
         group_metrics: Where the default group store counts the group files it
             skips. Unused when ``group_store`` is given.
         gitcrud: When gitops is enabled, the deploy-repo engine. The live store is
@@ -491,7 +495,7 @@ def _reconcile_seed_accounts(
             ):
                 updates["email"] = spec.email
             if updates:
-                account_store.update(spec.username, **updates)
+                account_store.update(spec.username, allow_protected=False, **updates)
                 logger.info(f"Reconciled fields for seed account '{spec.username}'")
 
         # Reconcile the group rosters to match the account's groups exactly.

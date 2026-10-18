@@ -13,10 +13,9 @@ carrying only what dfe-schemas ships. Nothing is shared between them, so a
 schema only reaches beta by travelling in an exchange document.
 """
 
-from __future__ import annotations
-
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 from dulwich.repo import Repo
@@ -32,6 +31,7 @@ from dfe_engine.exchange.schemas import (
 )
 from dfe_engine.schema.registry import SchemaNotFoundError, SchemaRegistry
 from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string
+from tests.support.present import present
 
 AUTHOR = "tester <tester@dfe.local>"
 
@@ -57,7 +57,7 @@ CUSTOM_SCHEMA = {
     },
 }
 
-CORE_SCHEMA = {
+CORE_SCHEMA: dict[str, Any] = {
     "current": "2.0.0",
     "resource_type": "core",
     "versions": {
@@ -129,13 +129,13 @@ class TestUserAuthoredRoundTrip:
         document = build_meta_schema_export(alpha, "meta/cisco_ios")
 
         assert document.current == "1.1.0"
-        assert sorted(document.versions) == ["1.0.0", "1.1.0"]
+        assert sorted(present(document.versions)) == ["1.0.0", "1.1.0"]
 
     def test_a_single_version_export_pins_current_to_it(self, alpha):
         document = build_meta_schema_export(alpha, "meta/cisco_ios", version="1.0.0")
 
         assert document.current == "1.0.0"
-        assert list(document.versions) == ["1.0.0"]
+        assert list(present(document.versions)) == ["1.0.0"]
 
     def test_the_import_is_a_git_commit(self, alpha, beta):
         document = build_meta_schema_export(alpha, "meta/cisco_ios")

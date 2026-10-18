@@ -1,5 +1,4 @@
-"""
-Pydantic models for Query API requests and metadata.
+"""Pydantic models for Query API requests and metadata.
 
 This module defines the data structures for the secure Query API where:
 - Clients reference queries by label (not raw SQL)
@@ -7,8 +6,6 @@ This module defines the data structures for the secure Query API where:
 - Parameters are validated against view definitions
 - Multi-tenant isolation is enforced via org_id from JWT
 """
-
-from __future__ import annotations
 
 from enum import Enum
 from typing import Any, Literal
@@ -26,8 +23,7 @@ from dfe_engine.auth.models import AuthorizationError as AuthorizationError
 
 
 class QueryRequest(BaseModel):
-    """
-    Request payload for query execution.
+    """Request payload for query execution.
 
     Clients specify a query label and parameters - never raw SQL.
     The SQL is resolved server-side via parameterized views.
@@ -50,8 +46,7 @@ class QueryRequest(BaseModel):
 
 
 class QueryOptions(BaseModel):
-    """
-    Query execution options.
+    """Query execution options.
 
     These are standard parameters available for all queries.
     Server enforces maximums from query definition and global config.
@@ -199,30 +194,6 @@ class ExplainPlan(BaseModel):
 
 # AuthContext moved to auth.models -- re-export for backward compat
 from dfe_engine.auth.models import AuthContext as AuthContext
-
-# =============================================================================
-# Audit Models
-# =============================================================================
-
-
-class QueryAuditLog(BaseModel):
-    """Audit log entry for query execution."""
-
-    timestamp: str
-    request_id: str
-    query_label: str
-    org_id: str
-    user_id: str
-    datasource: str
-    store: str | None
-    params: dict[str, Any] | None = None  # Only if audit_level=full
-    duration_ms: int
-    row_count: int
-    cached: bool
-    client_ip: str | None
-    user_agent: str | None
-    error: str | None = None
-
 
 # =============================================================================
 # Parameterized View Models

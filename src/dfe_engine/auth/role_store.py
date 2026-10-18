@@ -5,9 +5,9 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
+"""YAML-backed CRUD for the role definitions in roles.yaml."""
 
-from __future__ import annotations
-
+import builtins
 from pathlib import Path
 
 from pydantic import BaseModel, Field
@@ -35,20 +35,25 @@ class Role(BaseModel):
 class RoleStore:
     """CRUD for the single ``roles.yaml`` file (``roles:`` map)."""
 
+    # Annotations in this class name `builtins.list`, because the `list` method shadows the builtin here.
+
     def __init__(self, roles_path: Path) -> None:
         self._path = Path(roles_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
 
     @property
     def path(self) -> Path:
+        """The roles file this store reads and writes."""
         return self._path
 
     def load_config(self) -> RoleConfig:
+        """Load the roles file, raising FileNotFoundError when it is absent."""
         if not self._path.exists():
             raise FileNotFoundError(f"Roles file not found: {self._path}")
         return RoleConfig.load(self._path)
 
-    def list(self) -> list[Role]:
+    def list(self) -> builtins.list[Role]:
+        """Every role, in name order."""
         config = self.load_config()
         return [
             Role(name=name, **definition.model_dump())
@@ -56,6 +61,7 @@ class RoleStore:
         ]
 
     def get(self, name: str) -> Role | None:
+        """The named role, or None."""
         config = self.load_config()
         definition = config.roles.get(name)
         if definition is None:
@@ -67,9 +73,10 @@ class RoleStore:
         name: str,
         *,
         description: str,
-        permissions: list[str],
+        permissions: builtins.list[str],
         scoped: bool = False,
     ) -> Role:
+        """Add a custom role, refusing a name already taken."""
         config = self.load_config()
         if name in config.roles:
             raise ValueError(f"Role '{name}' already exists")
@@ -94,9 +101,10 @@ class RoleStore:
         name: str,
         *,
         description: str | None = None,
-        permissions: list[str] | None = None,
+        permissions: builtins.list[str] | None = None,
         scoped: bool | None = None,
     ) -> Role:
+        """Change a custom role, refusing a core one."""
         config = self.load_config()
         existing = config.roles.get(name)
         if existing is None:
@@ -120,6 +128,7 @@ class RoleStore:
         return Role(name=name, **updated.model_dump())
 
     def delete(self, name: str) -> None:
+        """Remove a custom role, refusing a core one."""
         config = self.load_config()
         if name not in config.roles:
             raise KeyError(f"Role '{name}' not found")

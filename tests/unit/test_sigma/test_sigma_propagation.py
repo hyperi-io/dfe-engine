@@ -12,8 +12,6 @@ SourceRegistry / RuleRegistry / HuntConfigRegistry over tmp dirs, and the real
 SqlBackend conversion. The generated WHERE clause is asserted as a string only.
 """
 
-from __future__ import annotations
-
 from types import SimpleNamespace
 
 import pytest
@@ -41,6 +39,7 @@ from dfe_engine.sigma.propagation import (
 from dfe_engine.sigma.providers import parse_sigma_yaml
 from dfe_engine.sigma.source_mapper import SigmaSourceMapper
 from dfe_engine.source.registry import SourceRegistry
+from tests.support.present import present
 
 _ID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
 
@@ -214,7 +213,7 @@ def test_deselect_then_repropagate_reports_stale_binding(env):
     report = prop.propagate()
 
     assert any(b["rule_id"] == rid for b in report.stale_bindings)
-    summary = prop.get_binding(rid)
+    summary = present(prop.get_binding(rid))
     assert summary["stale"] is True
     assert summary["selected"] is False
     assert summary["drift"] is True  # stale folds into drift for the review surface

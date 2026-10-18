@@ -8,8 +8,6 @@
 
 """Tests for ClickHouseConnection and ConnectionConfig model validation."""
 
-from __future__ import annotations
-
 import pytest
 from pydantic import ValidationError
 
@@ -46,7 +44,7 @@ class TestClickHouseConnection:
 
     def test_name_required(self) -> None:
         with pytest.raises(ValidationError):
-            ClickHouseConnection()  # type: ignore[call-arg]
+            ClickHouseConnection()  # ty: ignore[missing-argument]  # the missing name is the point of the test
 
     def test_serialization_round_trip(self) -> None:
         conn = ClickHouseConnection(name="test", host="ch.example.com", port=9000)

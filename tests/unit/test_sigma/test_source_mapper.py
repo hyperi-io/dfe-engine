@@ -1,6 +1,6 @@
 """Tests for SigmaSourceMapper — Source-based Sigma field mapping."""
 
-from __future__ import annotations
+from collections.abc import Collection
 
 import pytest
 
@@ -59,8 +59,12 @@ class FakeSourceRegistry:
             raise SourceNotFoundError(f"Source '{source_name}' not found")
         return self._sources[source_name]
 
-    def get_all_sources(self, enabled_only: bool = False) -> list[Source]:
+    def get_all_sources(
+        self, enabled_only: bool = False, *, states: Collection[str] | None = None
+    ) -> list[Source]:
         sources = list(self._sources.values())
+        if states is not None:
+            return [s for s in sources if s.state in states]
         if enabled_only:
             sources = [s for s in sources if s.enabled]
         return sources

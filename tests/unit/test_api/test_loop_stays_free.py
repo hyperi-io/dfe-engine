@@ -416,7 +416,7 @@ def _routes(router: Any) -> list[APIRoute]:
 def test_no_handler_on_a_deploy_repo_router_runs_its_body_on_the_loop(router):
     """An async handler with nothing to await is sync work the event loop has to wait out."""
     on_the_loop = [
-        route.endpoint.__name__
+        route.endpoint.__name__  # ty: ignore[unresolved-attribute]  # a route endpoint is a function, which carries __name__
         for route in _routes(router)
         if inspect.iscoroutinefunction(route.endpoint) and not _awaits(route.endpoint)
     ]
@@ -430,7 +430,7 @@ def test_a_deploy_repo_router_puts_its_writes_in_turn(router):
 
 
 def test_the_setup_routes_run_off_the_loop():
-    by_name = {route.endpoint.__name__: route for route in _routes(auth.router)}
+    by_name = {route.endpoint.__name__: route for route in _routes(auth.router)}  # ty: ignore[unresolved-attribute]  # a route endpoint is a function, which carries __name__
 
     for name in ("get_setup_status", "retire_bootstrap_admin"):
         assert not inspect.iscoroutinefunction(by_name[name].endpoint), name

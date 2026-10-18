@@ -17,8 +17,6 @@ stay valid. All statements are convergent: ``IF NOT EXISTS`` creates, and an
 objects that already exist.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
@@ -40,10 +38,10 @@ def _bq(identifier: str) -> str:
 
 
 def _sq(value: str) -> str:
-    """Single-quote a CH string literal - delegates to the canonical quoting seam.
+    r"""Single-quote a CH string literal - delegates to the canonical quoting seam.
 
     Uses ``quote_literal`` so backslashes are escaped BEFORE single quotes: a
-    RESTRICTIVE row-policy predicate must not fail open via a crafted ``\\' OR 1=1``
+    RESTRICTIVE row-policy predicate must not fail open via a crafted ``\' OR 1=1``
     (F-ROWPOLICY-BACKSLASH). The old inline ``_sq`` doubled quotes only.
     """
     return quote_literal(value)
@@ -140,10 +138,9 @@ def render_tenant_axis(
     tables: list[tuple[str, str]],
     deny_tables: list[tuple[str, str]] | None = None,
 ) -> list[str]:
-    """DDL for the SHARED tenant axis: one role, its system grants, one RESTRICTIVE
-    policy per table.
+    """DDL for the SHARED tenant axis: one role, its system grants, a policy per table.
 
-    The predicate reads the caller's pinned ``SQL_current_tenant_id`` (comma-joined
+    Each policy is RESTRICTIVE. The predicate reads the caller's pinned ``SQL_current_tenant_id`` (comma-joined
     tenant ids), so ONE policy set serves every org - adding an org adds a pinned
     user and nothing here. ``tables`` is the list of ``(db, table)`` that actually
     carry ``_org_id`` (discovered from ``system.columns``).

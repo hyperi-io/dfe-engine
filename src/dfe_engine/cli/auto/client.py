@@ -20,8 +20,6 @@ Auth header: an api_key credential -> ``X-API-Key``; a token credential ->
 ``Authorization: Bearer <token>``.
 """
 
-from __future__ import annotations
-
 import json
 from typing import Any
 from urllib.parse import quote
@@ -74,6 +72,7 @@ class Client:
     # -- lifecycle -----------------------------------------------------------
 
     def close(self) -> None:
+        """Close the HTTP session, when this client opened it."""
         if self._owns_session:
             self._session.close()
 
@@ -103,6 +102,7 @@ class Client:
         return path
 
     def build_query(self, op: Operation, query_args: dict[str, Any]) -> dict[str, Any]:
+        """The query parameters of *op* that *query_args* gives a value."""
         params: dict[str, Any] = {}
         for param in op.query_params:
             if param.name in query_args and query_args[param.name] is not None:
@@ -170,9 +170,10 @@ class Client:
         return response
 
     def raw(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        """Low-level call for the built-in auth endpoints (login/me) that the CLI
-        drives directly - they are ``x-cli`` hidden, so they are not in the
-        generated command tree. Same session dispatch + raise as ``call``.
+        """Low-level call for the built-in auth endpoints (login/me) the CLI drives directly.
+
+        They are ``x-cli`` hidden, so they are not in the generated command tree.
+        Same session dispatch and raise as ``call``.
         """
         send = getattr(self._session, method.lower())
         response = send(path, **kwargs)

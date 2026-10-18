@@ -224,7 +224,7 @@ def _refusal(tmp_path: Path, rules_dir: Path, **fields) -> BaseException:
         yaml_dump_string({**_hunt(**fields), "cron": "* * * * *"}), encoding="utf-8"
     )
     spec = load_specs(hunts, rules_dir=rules_dir)["orphan"]
-    worker = HuntWorker(_Untouchable(), _Untouchable())
+    worker = HuntWorker(_Untouchable(), _Untouchable())  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
     with pytest.raises(Exception) as caught:
         worker.run(spec, scheduled_start=600)
     return caught.value

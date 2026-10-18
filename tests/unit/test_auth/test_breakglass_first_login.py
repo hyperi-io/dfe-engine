@@ -43,6 +43,7 @@ from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import SeedAccount
 from dfe_engine.yaml_utils import yaml_load
+from tests.support.present import present
 
 MINTED_ADMIN = secrets.token_urlsafe(16)
 MINTED_BREAKGLASS = secrets.token_urlsafe(16)
@@ -143,7 +144,7 @@ class TestAdminSeed:
     def test_the_admin_is_issued_with_a_forced_change(self, tmp_path: Path):
         store, *_ = bootstrap_auth(tmp_path / "auth", default_admin_password=MINTED_ADMIN)
 
-        admin = store.get("admin")
+        admin = present(store.get("admin"))
         assert admin.password_change_required is True
         assert store.verify_password("admin", MINTED_ADMIN)
         assert admin.seeded_password_hash == admin.password_hash
@@ -156,7 +157,7 @@ class TestAdminSeed:
         store, *_ = bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN)
 
         assert store.verify_password("admin", MINTED_ADMIN)
-        assert store.get("admin").password_change_required is True
+        assert present(store.get("admin")).password_change_required is True
 
     def test_the_owners_change_survives_the_next_boot(self, tmp_path: Path):
         auth_dir = tmp_path / "auth"
@@ -168,7 +169,7 @@ class TestAdminSeed:
 
         assert store.verify_password("admin", own)
         assert not store.verify_password("admin", MINTED_ADMIN)
-        assert store.get("admin").password_change_required is False
+        assert present(store.get("admin")).password_change_required is False
 
     def test_a_rotated_injected_password_is_issued_again(self, tmp_path: Path):
         """A new value in the secret store is a new issue, so the change is due again."""
@@ -180,7 +181,7 @@ class TestAdminSeed:
         store, *_ = bootstrap_auth(auth_dir, default_admin_password=rotated)
 
         assert store.verify_password("admin", rotated)
-        assert store.get("admin").password_change_required is True
+        assert present(store.get("admin")).password_change_required is True
 
     def test_the_owners_password_written_back_into_config_is_kept(self, tmp_path: Path):
         """A deployment that records the owner's new password as the injected one has not rotated it."""
@@ -188,11 +189,11 @@ class TestAdminSeed:
         own = MINTED_ADMIN + "-the-owners-own"
         store, *_ = bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN)
         store.reset_password("admin", own)
-        owners_hash = store.get("admin").password_hash
+        owners_hash = present(store.get("admin")).password_hash
 
         store, *_ = bootstrap_auth(auth_dir, default_admin_password=own)
 
-        admin = store.get("admin")
+        admin = present(store.get("admin"))
         assert admin.password_change_required is False
         assert admin.password_hash == owners_hash
         assert store.verify_password("admin", own)
@@ -206,15 +207,17 @@ class TestAdminSeed:
             tmp_path / "auth", default_admin_password=MINTED_ADMIN, gitcrud=crud
         )
         store.reset_password("admin", own)
-        owners_hash = store.get("admin").password_hash
-        account_durability.publish_direct(crud, store.get("admin"), summary="reset password")
+        owners_hash = present(store.get("admin")).password_hash
+        account_durability.publish_direct(
+            crud, present(store.get("admin")), summary="reset password"
+        )
 
         for recreate in range(3):
             store, *_ = bootstrap_auth(
                 tmp_path / f"recreated-{recreate}", default_admin_password=own, gitcrud=crud
             )
-            assert store.get("admin").password_change_required is False
-            assert store.get("admin").password_hash == owners_hash
+            assert present(store.get("admin")).password_change_required is False
+            assert present(store.get("admin")).password_hash == owners_hash
 
         assert crud.get("accounts", "admin")["password_hash"] == owners_hash
 
@@ -226,7 +229,7 @@ class TestAdminSeed:
         store, *_ = bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN)
 
         assert store.verify_password("admin", MINTED_ADMIN)
-        assert store.get("admin").password_change_required is True
+        assert present(store.get("admin")).password_change_required is True
 
     def test_the_owners_change_survives_a_rebuilt_store(self, tmp_path: Path, crud):
         """The deploy repo carries the owner's hash and the cleared flag through a rebuild."""
@@ -235,14 +238,16 @@ class TestAdminSeed:
             tmp_path / "auth", default_admin_password=MINTED_ADMIN, gitcrud=crud
         )
         store.reset_password("admin", own)
-        account_durability.publish_direct(crud, store.get("admin"), summary="reset password")
+        account_durability.publish_direct(
+            crud, present(store.get("admin")), summary="reset password"
+        )
 
         store, *_ = bootstrap_auth(
             tmp_path / "rebuilt-auth", default_admin_password=MINTED_ADMIN, gitcrud=crud
         )
 
         assert store.verify_password("admin", own)
-        assert store.get("admin").password_change_required is False
+        assert present(store.get("admin")).password_change_required is False
 
     def test_named_seeds_are_not_issued_a_forced_change(self, tmp_path: Path):
         seeds = [SeedAccount(username="kay", password=MINTED_SEED, groups=["dfe-viewers"])]
@@ -251,7 +256,7 @@ class TestAdminSeed:
             tmp_path / "auth", default_admin_password=MINTED_ADMIN, seed_accounts=seeds
         )
 
-        assert store.get("kay").password_change_required is False
+        assert present(store.get("kay")).password_change_required is False
 
     def test_the_hash_is_stable_across_boots_after_a_rotation(self, tmp_path: Path, crud):
         """The reconciled hash reaches the deploy repo, so hydration stops re-minting.
@@ -267,7 +272,7 @@ class TestAdminSeed:
         hashes = set()
         for _ in range(3):
             store, *_ = bootstrap_auth(auth_dir, default_admin_password=rotated, gitcrud=crud)
-            hashes.add(store.get("admin").password_hash)
+            hashes.add(present(store.get("admin")).password_hash)
 
         assert len(hashes) == 1, "the admin hash is re-minted on every boot"
         assert crud.get("accounts", "admin")["password_hash"] == hashes.pop()
@@ -282,7 +287,7 @@ class TestAdminSeed:
 
         assert store.verify_password("admin", MINTED_ADMIN)
         assert store.verify_password("kay", MINTED_SEED)
-        assert "admin" in groups.get("dfe-admins").members
+        assert "admin" in present(groups.get("dfe-admins")).members
 
 
 # ── The break-glass hash, round-tripped through gitcrud ──────
@@ -300,10 +305,10 @@ class TestBreakGlassHash:
         committed = crud.get(breakglass.CLASS, breakglass.NAME)["breakglass"]["password_hash"]
         assert committed.startswith("$2")
         assert store.verify_password(breakglass.USERNAME, MINTED_BREAKGLASS)
-        assert breakglass.USERNAME in groups.get(breakglass.GROUP).members
-        assert store.get(breakglass.USERNAME).email == "breakglass@dfe.local"
+        assert breakglass.USERNAME in present(groups.get(breakglass.GROUP)).members
+        assert present(store.get(breakglass.USERNAME)).email == "breakglass@dfe.local"
         # Break-glass keeps its own first-login rules: it is never issued a forced change.
-        assert store.get(breakglass.USERNAME).password_change_required is False
+        assert present(store.get(breakglass.USERNAME)).password_change_required is False
 
     def test_an_admin_group_linked_by_id_alone_still_boots_both_recovery_credentials(
         self, tmp_path: Path, crud
@@ -327,8 +332,8 @@ class TestBreakGlassHash:
 
         assert groups.resolve_roles_for_member("admin") == ["admin"]
         assert groups.resolve_roles_for_member(breakglass.USERNAME) == ["admin"]
-        assert "dfe-admins" in store.get("admin").groups
-        assert groups.get("dfe-admins").source_id == ""
+        assert "dfe-admins" in present(store.get("admin")).groups
+        assert present(groups.get("dfe-admins")).source_id == ""
 
     def test_break_glass_email_is_backfilled_when_missing(self, tmp_path: Path, crud):
         store, *_ = bootstrap_auth(
@@ -344,7 +349,7 @@ class TestBreakGlassHash:
             default_admin_password=MINTED_ADMIN,
             gitcrud=crud,
         )
-        assert store.get(breakglass.USERNAME).email == "breakglass@dfe.local"
+        assert present(store.get(breakglass.USERNAME)).email == "breakglass@dfe.local"
 
     def test_recovery_email_seeds_admin_and_breakglass(self, tmp_path: Path, crud):
         store, *_ = bootstrap_auth(
@@ -355,8 +360,8 @@ class TestBreakGlassHash:
             recovery_email="ops@example.com",
         )
 
-        assert store.get("admin").email == "ops@example.com"
-        assert store.get(breakglass.USERNAME).email == "ops@example.com"
+        assert present(store.get("admin")).email == "ops@example.com"
+        assert present(store.get(breakglass.USERNAME)).email == "ops@example.com"
 
     def test_recovery_email_reconciles_breakglass_over_fallback(self, tmp_path: Path, crud):
         auth_dir = tmp_path / "auth"
@@ -366,7 +371,7 @@ class TestBreakGlassHash:
             gitcrud=crud,
             breakglass_password=MINTED_BREAKGLASS,
         )
-        assert store.get(breakglass.USERNAME).email == "breakglass@dfe.local"
+        assert present(store.get(breakglass.USERNAME)).email == "breakglass@dfe.local"
 
         store, *_ = bootstrap_auth(
             auth_dir,
@@ -374,8 +379,8 @@ class TestBreakGlassHash:
             gitcrud=crud,
             recovery_email="ops@example.com",
         )
-        assert store.get("admin").email == "ops@example.com"
-        assert store.get(breakglass.USERNAME).email == "ops@example.com"
+        assert present(store.get("admin")).email == "ops@example.com"
+        assert present(store.get(breakglass.USERNAME)).email == "ops@example.com"
 
     def test_the_committed_hash_survives_a_rebuilt_store(self, tmp_path: Path, crud):
         bootstrap_auth(
@@ -527,13 +532,13 @@ class TestRetireTheBootstrapAdmin:
     def test_the_seed_is_skipped_and_the_account_disabled(self, tmp_path: Path, crud):
         auth_dir = tmp_path / "auth"
         store, *_ = bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN, gitcrud=crud)
-        assert store.get("admin").enabled is True
+        assert present(store.get("admin")).enabled is True
 
         admin_retirement.set_retired(crud, "kaz")
         store, *_ = bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN, gitcrud=crud)
 
         # The hash is left alone -- the disabled account is what refuses the login.
-        assert store.get("admin").enabled is False
+        assert present(store.get("admin")).enabled is False
 
     def test_a_rebuilt_store_does_not_bring_the_admin_back(self, tmp_path: Path, crud):
         bootstrap_auth(tmp_path / "auth", default_admin_password=MINTED_ADMIN, gitcrud=crud)

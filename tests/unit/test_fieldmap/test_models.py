@@ -133,7 +133,7 @@ class TestFieldMapValidation:
 
     def test_standard_required(self):
         with pytest.raises(Exception):
-            FieldMap(mappings={"a": "b"})
+            FieldMap(mappings={"a": "b"})  # ty: ignore[missing-argument]  # the missing field is the point of the test
 
 
 # ---------------------------------------------------------------

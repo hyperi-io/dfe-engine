@@ -19,8 +19,6 @@ constant: a test written against the engine's own list only checks the engine
 against itself, which is how the rename survived.
 """
 
-from __future__ import annotations
-
 import ast
 from pathlib import Path
 
@@ -83,7 +81,9 @@ def _elastic_types_the_importer_handles() -> list[str]:
         for pattern in (
             case.pattern.patterns if isinstance(case.pattern, ast.MatchOr) else [case.pattern]
         )
-        if isinstance(pattern, ast.MatchValue) and isinstance(pattern.value, ast.Constant)
+        if isinstance(pattern, ast.MatchValue)
+        and isinstance(pattern.value, ast.Constant)
+        and isinstance(pattern.value.value, str)
     ]
     assert named, "no match arms found in _map_es_type -- the enumeration has gone stale"
     return named

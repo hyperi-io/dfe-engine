@@ -6,11 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import secrets
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -58,7 +56,7 @@ def _settings(
     e2e_server: bool,
     env: str = "test",
     gitops: bool = False,
-    deployment_target: str = "unknown",
+    deployment_target: Literal["kubernetes", "docker", "unknown"] = "unknown",
     profile: str = "",
 ) -> DFESettings:
     """Settings for an e2e-server process.
@@ -681,7 +679,7 @@ def _stood_up_as_on_kubernetes(deploy: Path) -> None:
 def _deploy_commits(client: TestClient) -> int:
     from dulwich.repo import Repo
 
-    with Repo(str(client.app.state.gitcrud.repo_path)) as repo:
+    with Repo(str(client.app.state.gitcrud.repo_path)) as repo:  # ty: ignore[unresolved-attribute]  # TestClient types app as the bare ASGI callable, and this one is the FastAPI app
         return sum(1 for _ in repo.get_walker())
 
 

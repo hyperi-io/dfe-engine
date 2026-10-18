@@ -58,7 +58,7 @@ class TestServiceDescriptor:
     def test_descriptor_is_frozen(self):
         d = ServiceDescriptor(name="test", display_name="Test", image="test:latest")
         with pytest.raises(AttributeError):
-            d.name = "changed"
+            d.name = "changed"  # ty: ignore[invalid-assignment]  # the refused write is the point of the test
 
     def test_kafka_role_enum(self):
         assert KafkaRole.PRODUCER.value == "producer"

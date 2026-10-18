@@ -6,13 +6,12 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.attributes import AttributeStore
 from dfe_engine.auth.groups import Group, GroupStore
+from tests.support.present import present
 
 _NESTED = {"team": {"role": "lead"}, "tags": ["a", "b"]}
 
@@ -43,7 +42,7 @@ class TestAccountInlineAttributes:
         store.create("alice", "pw-Aa1")
         store.set_attributes("alice", {"first": 1})
         store.set_attributes("alice", {"second": 2})
-        assert store.get("alice").attributes == {"second": 2}
+        assert present(store.get("alice")).attributes == {"second": 2}
 
     def test_set_attributes_bumps_updated_at(self, tmp_path):
         store = AccountStore(tmp_path / "accounts")
@@ -82,7 +81,7 @@ class TestGroupInlineAttributes:
         store.create("admins", roles=["admin"])
         store.set_attributes("admins", {"first": 1})
         store.set_attributes("admins", {"second": 2})
-        assert store.get("admins").attributes == {"second": 2}
+        assert present(store.get("admins")).attributes == {"second": 2}
 
     def test_set_attributes_missing_raises(self, tmp_path):
         store = GroupStore(tmp_path / "groups")

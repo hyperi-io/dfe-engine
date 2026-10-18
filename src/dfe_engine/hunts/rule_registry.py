@@ -9,8 +9,6 @@ Each rule is stored as ``{name}.yaml``, in one of two interchangeable backends:
   volume the docker hunt runner reads.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -103,6 +101,7 @@ class RuleRegistry:
         self._store.start()
 
     def close(self) -> None:
+        """Stop the backing store."""
         if self._store is not None:
             self._store.stop()
 
@@ -206,6 +205,7 @@ class RuleRegistry:
     # -----------------------------------------------------------------
 
     def exists(self, name: str) -> bool:
+        """Whether a rule of this name exists."""
         return self._get_raw(name) is not None
 
     def name_exists(self, name: str) -> bool:
@@ -216,6 +216,7 @@ class RuleRegistry:
         return any(table.casefold() == key for table in self._names())
 
     def get(self, name: str) -> Rule:
+        """The named rule, raising RuleNotFoundError."""
         config_data = self._get_raw(name)
         if config_data is None:
             raise RuleNotFoundError(f"Rule not found: '{name}'")

@@ -5,8 +5,10 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Auto-merge status + toggle (the dfe-ui banner contract), audit log, and the
-resource-class enumeration the generated clients build their selects from.
+"""Auto-merge status and toggle, the gitops audit log, and the resource-class enumeration.
+
+The auto-merge pair is the dfe-ui banner contract, and the generated clients build
+their selects from the enumeration.
 
 GET /api/v1/gitops/auto-merge -> {stored, effective, allowed, reason} (governance:read)
 PUT /api/v1/gitops/auto-merge -> toggle; refuses to enable when the deployment
@@ -46,6 +48,8 @@ router = APIRouter(prefix="/gitops", tags=["Governed Ops: Gitops"], dependencies
 
 
 class AutoMergeStatus(BaseModel):
+    """The auto-merge flag as stored, as in effect, and whether the posture allows it."""
+
     stored: bool
     effective: bool
     allowed: bool
@@ -53,6 +57,8 @@ class AutoMergeStatus(BaseModel):
 
 
 class AutoMergeRequest(BaseModel):
+    """Body for turning auto-merge on or off."""
+
     enabled: bool
 
 
@@ -215,6 +221,8 @@ def list_class_resource_vars(
 
 
 class LogEntryModel(BaseModel):
+    """One commit in the deploy repo's audit log."""
+
     sha: str
     timestamp: int
     ctype: str
@@ -231,17 +239,23 @@ class LogEntryModel(BaseModel):
 
 
 class LogResponse(BaseModel):
+    """A page of the audit log, with the cursor for the next page."""
+
     entries: list[LogEntryModel]
     next_before: str | None = None
 
 
 class LogGroup(BaseModel):
+    """Audit log entries sharing a key, with the latest of them."""
+
     key: str
     count: int
     latest: LogEntryModel
 
 
 class GroupedLogResponse(BaseModel):
+    """The audit log grouped by key."""
+
     groups: list[LogGroup]
 
 

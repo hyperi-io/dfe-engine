@@ -8,8 +8,6 @@
 
 """Local-account seeding. Public methods are the scripts; privates are reusable."""
 
-from __future__ import annotations
-
 from dfe_engine.api.e2e.seed.base import Seed
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.bootstrap import admin_account_name
@@ -252,7 +250,7 @@ class Accounts(Seed):
         updates: dict[str, object] = {"groups": merged, "enabled": True}
         if email and (not existing.email or (recovery.strip() and existing.email != email)):
             updates["email"] = email
-        self._account_store.update(name, **updates)
+        self._account_store.update(name, allow_protected=False, **updates)
         return False
 
     def _ensure_membership(self, group_name: str, username: str) -> None:

@@ -6,8 +6,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""One credential contract: SASL, username+password, mechanism DERIVED from the
-provider type.
+"""One credential contract: SASL with username+password, the mechanism DERIVED from the provider.
 
 The old "SCRAM-512 everywhere" single-mechanism standard is dead - Confluent Cloud
 has no SCRAM. The invariant that DOES hold everywhere is SASL with a
@@ -45,8 +44,6 @@ would have to be added to all three tables. SCRAM-SHA-512 is the one mechanism
 allowed onto a plaintext transport; there is deliberately no such key for a PLAIN
 or OAUTHBEARER provider.
 """
-
-from __future__ import annotations
 
 # (security_protocol, sasl_mechanism) pairs.
 _SCRAM = ("SASL_SSL", "SCRAM-SHA-512")

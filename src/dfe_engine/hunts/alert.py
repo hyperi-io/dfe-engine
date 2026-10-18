@@ -29,8 +29,6 @@ Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
 - 'severity == "critical" && result_count > 0' -- compound conditions
 """
 
-from __future__ import annotations
-
 import builtins
 from pathlib import Path
 from typing import Any
@@ -355,6 +353,7 @@ class AlertDispatcher:
             group_context: Optional dict with grouped alert details:
                 group_fields (dict), match_count (int),
                 first_seen (str), last_seen (str).
+            score: The hunt's score, passed to the alert template context.
 
         Returns:
             True if an alert was sent, False otherwise.

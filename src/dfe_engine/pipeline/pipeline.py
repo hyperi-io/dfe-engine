@@ -1,5 +1,8 @@
+"""One ingestion pipeline, rendered from a Jinja template into its config file."""
+
 import os
 import re
+from pathlib import Path
 
 import jinja2
 from jinja2 import Environment, FileSystemLoader, meta
@@ -14,6 +17,8 @@ from .pipeline_util import (
 
 class Pipeline:
     # These keys are set by secrets during run time so we don't need to check them here
+    """One ingestion pipeline, rendered from its template into a config file."""
+
     SECRETS_VARS = [
         "CH_HOST",
         "CH_PASSWORD",
@@ -36,13 +41,12 @@ class Pipeline:
         name: str,
         dfe_config: dict,
         pipeline_config: dict,
-        output_dir: str,
+        output_dir: str | Path,
         logger=None,
-        ingestion_pipeline_template_path: str = None,
-        extra_config: dict = None,
+        ingestion_pipeline_template_path: str | Path | None = None,
+        extra_config: dict | None = None,
     ):
-        """
-        Initialize the Pipeline instance.
+        """Initialize the Pipeline instance.
 
         Args:
             name (str): The name of the pipeline.
@@ -50,6 +54,9 @@ class Pipeline:
             dfe_config (Dict): A dictionary containing the DFE configuration settings.
             pipeline_config (Dict): A dictionary containing the pipeline configuration settings.
             logger (Logger, optional): The logger object for logging messages. Defaults to None.
+            ingestion_pipeline_template_path: The pipeline template. None reads
+                ``global_settings.helm_template`` from the DFE config.
+            extra_config: Template variables that override the combined env vars.
         """
         if extra_config is None:
             extra_config = {}
@@ -74,8 +81,8 @@ class Pipeline:
         self.extra_config = extra_config
 
     def combine_global_and_pipeline_env_vars(self) -> dict:
-        """
-        Combines the global environment variables with the pipeline environment variables.
+        """Combine the global environment variables with the pipeline's own.
+
         Global args are used as base, and pipeline-specific env vars override them.
 
         Returns:
@@ -92,8 +99,7 @@ class Pipeline:
         return combined_vars
 
     def get_pipeline_template(self):
-        """
-        Retrieves and returns a Jinja2 template for the pipeline.
+        """Retrieves and returns a Jinja2 template for the pipeline.
 
         This method loads a Jinja2 template from the file path specified in the
         global settings under the key 'helm_template'. It sets up
@@ -126,8 +132,7 @@ class Pipeline:
         return template
 
     def render_template_for_pipeline(self, env_vars: dict, vector_env_vars: dict) -> str:
-        """
-        Renders the template for the specified pipeline.
+        """Renders the template for the specified pipeline.
 
         Args:
             env_vars (dict): A dictionary containing the environment variables.
@@ -281,12 +286,12 @@ class Pipeline:
                     f"Variable {var} is not defined in the pipeline or global settings or in the .env file."
                 )
 
-    def gather_env_variables_for_pipeline(self) -> dict:
-        """
-        Gathers the environment variables for the specified pipeline.
+    def gather_env_variables_for_pipeline(self) -> tuple[dict, dict]:
+        """Gathers the environment variables for the specified pipeline.
 
         Returns:
-            Dict: A dictionary containing the environment variables.
+            Tuple[dict, dict]: Every environment variable the pipeline needs, and those
+            its vector steps read.
         """
         # Get base environment variables for this pipeline
         env_vars, self.vector_env_vars = gather_env_variables_for_pipeline(
@@ -320,8 +325,7 @@ class Pipeline:
         return env_vars, self.vector_env_vars
 
     def convert_all_env_vars_to_str(self, env_vars: dict) -> dict:
-        """
-        Converts all the environment variables to strings.
+        """Converts all the environment variables to strings.
 
         Args:
             env_vars (Dict): A dictionary containing the environment variables.
@@ -344,8 +348,7 @@ class Pipeline:
         return str_env_vars
 
     def write_pipeline_config(self, rendered_template: str):
-        """
-        Writes the rendered pipeline configuration to a file.
+        """Writes the rendered pipeline configuration to a file.
 
         Args:
             rendered_template (str): The rendered pipeline configuration.
@@ -375,15 +378,13 @@ class Pipeline:
         logger.info(f"Pipeline configuration written to {output_file}")
 
     def build(self):
-        """
-        Builds the pipeline configuration by gathering environment variables,
-        rendering the pipeline template with these variables, and writing the
-        rendered template to the pipeline configuration file.
+        """Render the pipeline template with its environment variables and write the result.
 
         Steps:
         1. Gather environment variables for the pipeline.
         2. Render the pipeline template using the gathered environment variables.
         3. Write the rendered template to the pipeline configuration file.
+
         Returns:
             None
         """

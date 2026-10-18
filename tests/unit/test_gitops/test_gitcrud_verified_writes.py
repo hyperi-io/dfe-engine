@@ -13,6 +13,8 @@ from pathlib import Path
 import pytest
 from dulwich import porcelain
 from dulwich.object_store import tree_lookup_path
+from dulwich.objects import Blob, Commit
+from dulwich.refs import Ref
 from dulwich.repo import Repo
 
 from dfe_engine.gitcrud import GitCrud
@@ -41,17 +43,20 @@ def _remote(tmp_path: Path) -> tuple[str, str]:
 
 def _remote_head(remote: str, branch: str) -> bytes:
     with Repo(remote) as repo:
-        return repo.refs[f"refs/heads/{branch}".encode()]
+        return repo.refs[Ref(f"refs/heads/{branch}".encode())]
 
 
 def _remote_file(remote: str, branch: str, rel: str) -> str | None:
     with Repo(remote) as repo:
-        tree = repo[repo.refs[f"refs/heads/{branch}".encode()]].tree
+        head = repo[repo.refs[Ref(f"refs/heads/{branch}".encode())]]
+        assert isinstance(head, Commit)
         try:
-            _mode, sha = tree_lookup_path(repo.get_object, tree, rel.encode())
+            _mode, sha = tree_lookup_path(repo.get_object, head.tree, rel.encode())
         except KeyError:
             return None
-        return repo[sha].data.decode("utf-8")
+        blob = repo[sha]
+        assert isinstance(blob, Blob)
+        return blob.data.decode("utf-8")
 
 
 @pytest.fixture

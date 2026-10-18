@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +21,7 @@ from dfe_engine.synthetic_data.schema_source import (
     parse_source_path,
     set_path,
 )
+from tests.support.present import present
 
 _SCHEMAS_ROOT = _resolve_package_schemas_root()
 GUARDDUTY = (_SCHEMAS_ROOT / "meta" / "aws" / "guardduty.yaml") if _SCHEMAS_ROOT else None
@@ -74,9 +73,11 @@ class TestParseSourcePath:
 class TestSetPath:
     def test_nested_and_indexed(self):
         event: dict = {}
-        set_path(event, parse_source_path("@source: Resource.ResourceType"), "AwsEc2Instance")
-        set_path(event, parse_source_path("@source: Resources[0].Type"), "AwsIamUser")
-        set_path(event, parse_source_path("@source: Id"), "abc")
+        set_path(
+            event, present(parse_source_path("@source: Resource.ResourceType")), "AwsEc2Instance"
+        )
+        set_path(event, present(parse_source_path("@source: Resources[0].Type")), "AwsIamUser")
+        set_path(event, present(parse_source_path("@source: Id")), "abc")
         assert event["Resource"]["ResourceType"] == "AwsEc2Instance"
         assert event["Resources"][0]["Type"] == "AwsIamUser"
         assert event["Id"] == "abc"
@@ -88,7 +89,7 @@ class TestSetPath:
 )
 class TestFactoryFromRealSchema:
     def test_events_are_source_shaped_and_valid(self):
-        factory = SchemaEventFactory.from_schema(GUARDDUTY, seed=42)
+        factory = SchemaEventFactory.from_schema(present(GUARDDUTY), seed=42)
         events = factory.events(200, end=FIXED_END)
         assert len(events) == 200
         regions = {e["Region"] for e in events}
@@ -102,26 +103,30 @@ class TestFactoryFromRealSchema:
         assert len(regions) > 1
 
     def test_synthetic_tag_default_on(self):
-        factory = SchemaEventFactory.from_schema(GUARDDUTY, seed=1)
+        factory = SchemaEventFactory.from_schema(present(GUARDDUTY), seed=1)
         assert factory.event(when=FIXED_END)["tags"]["synthetic"] is True
 
     def test_synthetic_tag_overridable(self):
-        factory = SchemaEventFactory.from_schema(GUARDDUTY, seed=1, mark_synthetic=False)
+        factory = SchemaEventFactory.from_schema(present(GUARDDUTY), seed=1, mark_synthetic=False)
         assert "synthetic" not in factory.event(when=FIXED_END).get("tags", {})
 
     def test_extra_tags_merged(self):
-        factory = SchemaEventFactory.from_schema(GUARDDUTY, seed=1, tags={"scenario": "demo-1"})
+        factory = SchemaEventFactory.from_schema(
+            present(GUARDDUTY), seed=1, tags={"scenario": "demo-1"}
+        )
         tags = factory.event(when=FIXED_END)["tags"]
         assert tags["scenario"] == "demo-1"
         assert tags["synthetic"] is True
 
     def test_identical_seed_identical_events(self):
-        a = SchemaEventFactory.from_schema(GUARDDUTY, seed=99).events(50, end=FIXED_END)
-        b = SchemaEventFactory.from_schema(GUARDDUTY, seed=99).events(50, end=FIXED_END)
+        a = SchemaEventFactory.from_schema(present(GUARDDUTY), seed=99).events(50, end=FIXED_END)
+        b = SchemaEventFactory.from_schema(present(GUARDDUTY), seed=99).events(50, end=FIXED_END)
         assert a == b
 
     def test_batch_timestamps_ascend(self):
-        events = SchemaEventFactory.from_schema(GUARDDUTY, seed=5).events(50, end=FIXED_END)
+        events = SchemaEventFactory.from_schema(present(GUARDDUTY), seed=5).events(
+            50, end=FIXED_END
+        )
         stamps = [e["CreatedAt"] for e in events]
         assert stamps == sorted(stamps)
         assert stamps[-1] <= "2026-08-18T12:00:00.001Z"

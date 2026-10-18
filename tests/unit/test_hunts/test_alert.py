@@ -420,6 +420,7 @@ class TestBuildAlertConfig:
             }
         }
         config = build_alert_config(data)
+        assert config is not None
         assert len(config.triggers) == 1
         assert config.triggers[0].when == "result_count >= 10"
 
@@ -434,12 +435,14 @@ class TestBuildAlertConfig:
             }
         }
         config = build_alert_config(data)
+        assert config is not None
         assert len(config.triggers) == 2
 
     def test_default_trigger_when_no_triggers_specified(self):
         """Channels but no triggers → defaults to result_count > 0."""
         data = {"alerts": {"channels": ["slack://t"]}}
         config = build_alert_config(data)
+        assert config is not None
         assert len(config.triggers) == 1
         assert config.triggers[0].when == "result_count > 0"
 
@@ -458,6 +461,7 @@ class TestBuildAlertConfig:
             }
         }
         config = build_alert_config(data)
+        assert config is not None
         assert config.title_template == "Custom: {hunt_name}"
         assert config.body_template == "Found {result_count}"
 
@@ -504,6 +508,7 @@ class TestBuildAlertConfigWithRegistry:
             }
         }
         config = build_alert_config(data, destination_registry=registry)
+        assert config is not None
         assert config.channels == ["slack://t/b/c/", "mailto://user:pass@smtp.example.com"]
 
     def test_destinations_plus_global_channels(self, registry):
@@ -512,6 +517,7 @@ class TestBuildAlertConfigWithRegistry:
         config = build_alert_config(
             data, global_channels=["pagerduty://key"], destination_registry=registry
         )
+        assert config is not None
         assert config.channels == ["slack://t/b/c/", "pagerduty://key"]
 
     def test_destinations_deduped_with_global(self, registry):
@@ -520,6 +526,7 @@ class TestBuildAlertConfigWithRegistry:
         config = build_alert_config(
             data, global_channels=["pagerduty://key"], destination_registry=registry
         )
+        assert config is not None
         assert config.channels == ["pagerduty://key"]
 
     def test_no_registry_warns(self):
@@ -534,6 +541,7 @@ class TestBuildAlertConfigWithRegistry:
         config = build_alert_config(
             data, global_channels=["slack://g"], destination_registry=registry
         )
+        assert config is not None
         assert config.channels == ["slack://g"]
 
 

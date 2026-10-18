@@ -53,17 +53,6 @@ KEDA_ENABLED_PATH = "keda.enabled"
 KEDA_MIN_PATH = "keda.minReplicaCount"
 KEDA_MAX_PATH = "keda.maxReplicaCount"
 
-SCALING_PATHS = (
-    REPLICA_COUNT_PATH,
-    CPU_REQUEST_PATH,
-    MEMORY_REQUEST_PATH,
-    CPU_LIMIT_PATH,
-    MEMORY_LIMIT_PATH,
-    KEDA_ENABLED_PATH,
-    KEDA_MIN_PATH,
-    KEDA_MAX_PATH,
-)
-
 # The `deploy:` block the layer2-apps ApplicationSet reads off each values file to
 # name the Argo Application. Without it the file produces no Application at all.
 DEPLOY_SERVICE_PATH = "deploy.service"

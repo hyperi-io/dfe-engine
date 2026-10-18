@@ -28,6 +28,7 @@ from dfe_engine.auth.groups import (
     source_id_holder,
 )
 from dfe_engine.auth.membership import linked_groups
+from tests.support.present import present
 from tests.unit.test_auth.groups_cases import (
     IDENTIFIER_HOLDER_CASES,
     SOURCE_ID_HOLDER_CASES,
@@ -568,7 +569,7 @@ class TestGroupSourceProvider:
         store.create("acme-viewers", roles=["org_viewer"])
         store.update("acme-viewers", org_ids=["acme"])
         group = store.get("acme-viewers")
-        assert group.org_ids == ["acme"]
+        assert present(group).org_ids == ["acme"]
 
     def test_a_provider_group_id_that_names_no_provider_is_refused(self):
         """A link with no provider would answer every provider that asserts the id."""
@@ -627,7 +628,7 @@ class TestGroupSourceProvider:
         assert "breakglass" not in json.dumps(warned, default=str)
         assert _unlinked(manager) == {"no_provider": 1.0}
         store.add_member("dfe-admins", "alice")
-        assert "alice" in store.get("dfe-admins").members
+        assert "alice" in present(store.get("dfe-admins")).members
 
     def test_existing_groups_without_source_provider_still_load(self, tmp_path):
         """Old YAML files without source_provider/source_id load with defaults."""

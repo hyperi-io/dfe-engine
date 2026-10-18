@@ -41,6 +41,8 @@ router = APIRouter(prefix="/roles", tags=["Roles"])
 
 
 class CreateRoleRequest(BaseModel):
+    """Body for creating a custom role."""
+
     model_config = ConfigDict(extra="forbid")
 
     # A /auth/roles/{name} path segment, so held to the rule the role routes can reach.
@@ -51,6 +53,8 @@ class CreateRoleRequest(BaseModel):
 
 
 class UpdateRoleRequest(BaseModel):
+    """Body for updating a custom role, where an omitted field keeps its value."""
+
     model_config = ConfigDict(extra="forbid")
 
     description: str | None = Field(None, description="Replace description")
@@ -59,6 +63,8 @@ class UpdateRoleRequest(BaseModel):
 
 
 class RoleResponse(BaseModel):
+    """A role as the API returns it."""
+
     name: str
     description: str
     permissions: list[str]

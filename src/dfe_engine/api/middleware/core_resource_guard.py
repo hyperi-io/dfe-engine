@@ -1,7 +1,6 @@
 #  Purpose:      HTTP middleware blocking mutations on core resources
 #  License:      BUSL-1.1
-
-from __future__ import annotations
+"""HTTP middleware that refuses writes to core resources."""
 
 import json
 from collections.abc import Awaitable, Callable

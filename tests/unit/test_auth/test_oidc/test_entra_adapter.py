@@ -297,7 +297,7 @@ class TestTestConnectionCredentialState:
         adapter = EntraAdapter(_make_provider())
         # MSAL pins an https authority at login.microsoftonline.com, so Entra's refusal
         # cannot come from a loopback server: it arrives as the token call returning None.
-        adapter._get_token = lambda: None  # type: ignore[method-assign]
+        adapter._get_token = lambda: None  # ty: ignore[invalid-assignment]  # the test replaces this adapter's token fetch
 
         success, message = await adapter.test_connection()
 
@@ -638,7 +638,7 @@ def _overage_adapter(
     """An Entra adapter reading Graph at *server*; *app_token* stands in for the client-credentials token."""
     adapter = EntraAdapter(_make_provider(), access_token=token)
     adapter.GRAPH_BASE = server.base_url
-    adapter._get_token = lambda: app_token  # type: ignore[method-assign]
+    adapter._get_token = lambda: app_token  # ty: ignore[invalid-assignment]  # the test replaces this adapter's token fetch
     return adapter
 
 

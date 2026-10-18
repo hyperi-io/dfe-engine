@@ -21,8 +21,6 @@ artifacts a deployment need not have, so an absent backend reports ``unavailable
 rather than raising.
 """
 
-from __future__ import annotations
-
 import json
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -69,6 +67,7 @@ class EventOutcome:
 
     @property
     def changed(self) -> bool:
+        """Whether the event came out different from how it went in."""
         return not self.error and not self.dropped and self.after != self.before
 
 
@@ -84,14 +83,17 @@ class DryRunResult:
 
     @property
     def succeeded(self) -> int:
+        """Events the program kept without an error."""
         return sum(1 for e in self.events if not e.error and not e.dropped)
 
     @property
     def failed(self) -> int:
+        """Events the program raised an error on."""
         return sum(1 for e in self.events if e.error)
 
     @property
     def dropped(self) -> int:
+        """Events the program dropped."""
         return sum(1 for e in self.events if e.dropped)
 
 

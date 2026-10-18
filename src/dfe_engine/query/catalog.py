@@ -1,12 +1,9 @@
-"""
-ViewCatalog - Discovers parameterized views from ClickHouse system.tables.
+"""ViewCatalog - Discovers parameterized views from ClickHouse system.tables.
 
 Queries system.tables for views matching the dfe_v_ prefix, parses their
 {param:Type} patterns, and builds a typed catalog for API consumers.
 Results are cached with a configurable TTL.
 """
-
-from __future__ import annotations
 
 import re
 import time
@@ -61,7 +58,7 @@ def map_clickhouse_type(ch_type: str) -> tuple[str, str, str]:
     # Array type -- refine typescript_type based on element type
     if ch_type.startswith("Array("):
         inner = ch_type[6:-1]  # Extract inner type
-        inner_py, inner_ts, _ = map_clickhouse_type(inner)
+        _, inner_ts, _ = map_clickhouse_type(inner)
         ts_type = f"{inner_ts}[]"
         return "array", ts_type, "multiselect"
 

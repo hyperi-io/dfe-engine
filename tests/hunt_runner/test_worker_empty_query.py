@@ -14,8 +14,6 @@ refuses BEFORE it reaches ClickHouse or the coordinator rather than proving whic
 calls it happened to make.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.hunt_runner import EmptyHuntQuery, HuntSpec, HuntWorker
@@ -29,13 +27,13 @@ class _Untouchable:
 
 
 def test_a_hunt_with_no_queries_raises_before_touching_clickhouse():
-    worker = HuntWorker(_Untouchable(), _Untouchable())
+    worker = HuntWorker(_Untouchable(), _Untouchable())  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
     with pytest.raises(EmptyHuntQuery, match="silent_hunt"):
         worker.run(HuntSpec(hunt_id="silent_hunt", interval_seconds=60), scheduled_start=500)
 
 
 def test_a_hunt_whose_only_query_is_blank_raises_too():
-    worker = HuntWorker(_Untouchable(), _Untouchable())
+    worker = HuntWorker(_Untouchable(), _Untouchable())  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
     with pytest.raises(EmptyHuntQuery):
         worker.run(
             HuntSpec(hunt_id="blank", interval_seconds=60, queries=["   ", ""]),

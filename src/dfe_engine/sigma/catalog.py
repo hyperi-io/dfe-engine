@@ -28,8 +28,6 @@ default_registry, whose class set is asserted elsewhere) over the SAME deploy re
   * sigma_providers  - one YAML doc per provider config
 """
 
-from __future__ import annotations
-
 import asyncio
 import copy
 import json
@@ -102,6 +100,7 @@ class SyncReport:
     warnings: list[str] | None = None
 
     def as_dict(self) -> dict[str, Any]:
+        """The import report as a plain dict."""
         return {
             "source": self.source,
             "total": self.total,
@@ -127,6 +126,7 @@ class SigmaCatalogStore:
     # -- reads --
 
     def list_ids(self) -> list[str]:
+        """Every catalogued rule id."""
         return self._crud.list(RULES_CLASS)
 
     def get_rule(self, rule_id: str) -> dict[str, Any]:
@@ -134,6 +134,7 @@ class SigmaCatalogStore:
         return self._crud.get(RULES_CLASS, rule_id)
 
     def exists(self, rule_id: str) -> bool:
+        """Whether the catalogue holds *rule_id*."""
         try:
             self._crud.get(RULES_CLASS, rule_id)
             return True
@@ -317,6 +318,7 @@ class SigmaSelectionStore:
         self._crud = _sigma_crud(crud)
 
     def list_selected(self) -> list[str]:
+        """The ids of the selected rules."""
         try:
             doc = self._crud.get(SELECTIONS_CLASS, _SELECTION_DOC)
         except ResourceNotFoundError:
@@ -324,6 +326,7 @@ class SigmaSelectionStore:
         return list(doc.get("rules", []) or [])
 
     def is_selected(self, rule_id: str) -> bool:
+        """Whether *rule_id* is selected."""
         return rule_id in set(self.list_selected())
 
     def _write(self, ids: list[str], actor: str, summary: str) -> None:
@@ -395,11 +398,13 @@ class SigmaProviderStore:
         return out
 
     def list_configs(self) -> list[ProviderConfig]:
+        """Every provider config, a stored one in place of the builtin default."""
         merged = {c.name: c for c in default_provider_configs()}
         merged.update(self._stored())  # a stored override wins over the builtin default
         return [merged[name] for name in sorted(merged)]
 
     def get_config(self, name: str) -> ProviderConfig:
+        """The named provider config, stored or builtin."""
         stored = self._stored().get(name)
         if stored is not None:
             return stored
@@ -409,6 +414,7 @@ class SigmaProviderStore:
         raise ResourceNotFoundError(f"{PROVIDERS_CLASS}/{name}")
 
     def save_config(self, config: ProviderConfig, actor: str) -> ProviderConfig:
+        """Store a provider config."""
         self._crud.put(
             PROVIDERS_CLASS,
             config.name,
@@ -419,6 +425,7 @@ class SigmaProviderStore:
         return config
 
     def set_enabled(self, name: str, enabled: bool, actor: str) -> ProviderConfig:
+        """Turn a provider on or off."""
         config = self.get_config(name)
         updated = config.model_copy(update={"enabled": enabled})
         return self.save_config(updated, actor)

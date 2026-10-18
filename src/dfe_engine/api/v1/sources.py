@@ -1984,7 +1984,8 @@ def _apply_source_schema(
     try:
         from dfe_engine.governance.ch.reconciler import fence_tables
 
-        fence_tables(ch._client, database=db)
+        # Only a dry run leaves ch unset, and a dry run has returned before this.
+        fence_tables(ch._client, database=db)  # ty: ignore[unresolved-attribute]
     except Exception as exc:
         logger.warning(f"Tenant fence not applied after deploying '{name}': {exc}")
 
@@ -2583,11 +2584,6 @@ def import_source(
 
 
 # -- Helpers --
-
-
-def _utc_now_iso() -> str:
-
-    return datetime.now(tz=UTC).isoformat()
 
 
 def _source_catalogue() -> source_catalogue_module.SourceCatalogue | None:

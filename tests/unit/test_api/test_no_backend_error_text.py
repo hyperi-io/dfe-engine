@@ -64,6 +64,7 @@ from dfe_engine.schema.retention import CLICKHOUSE_REFUSED, apply_pinned_default
 from dfe_engine.services.schema.json_promotion_service import JsonPromotionError
 from dfe_engine.settings import SourceSettings
 from dfe_engine.source.registry import SourceNotFoundError
+from tests.support.present import present
 from tests.unit.test_query.view_fakes import view_definition
 
 FAKE_HASH = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
@@ -265,7 +266,7 @@ class TestSystem:
         settings = SimpleNamespace(clickhouse=SimpleNamespace(effective_data_database="dfe"))
 
         with pytest.raises(system_module.HTTPException) as raised:
-            system_module._deployed_tables(settings, [SimpleNamespace(deployed_version="1")])
+            system_module._deployed_tables(settings, [SimpleNamespace(deployed_version="1")])  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the fields this path reads
 
         assert raised.value.status_code == 503
         assert_hidden(str(raised.value.detail))
@@ -277,7 +278,7 @@ class TestSystem:
 
         assert transport.status_code == 502
         assert_hidden(str(transport.detail))
-        assert refusal.detail["message"] == "CH Cloud service 'dev' not found"
+        assert refusal.detail["message"] == "CH Cloud service 'dev' not found"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
         assert_logged(audit_events)
 
     def test_a_failed_schema_pass_names_the_stage_not_clickhouses_text(
@@ -309,7 +310,7 @@ class TestSystem:
         source = SimpleNamespace(source="s", table_name="s", deployed_version="2", current="2")
         settings = SimpleNamespace(clickhouse=SimpleNamespace(effective_data_database="dfe"))
 
-        (outcome,) = apply_pinned_defaults(_refuse, settings=settings, sources=[source])
+        (outcome,) = apply_pinned_defaults(_refuse, settings=settings, sources=[source])  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the fields this path reads
 
         assert outcome.status == "failed"
         assert outcome.reason == CLICKHOUSE_REFUSED
@@ -335,14 +336,14 @@ class TestKafkaTopics:
     _SPECS = [TopicSpec(name="acme_land", partitions=3, replication_factor=1)]
 
     def test_a_refused_create_records_no_broker_text(self, audit_events):
-        outcome = ensure_topics(self._SPECS, admin=_Admin("create"))
+        outcome = ensure_topics(self._SPECS, admin=_Admin("create"))  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
 
         assert outcome.failed == [("acme_land", BROKER_REFUSED)]
         assert_logged(audit_events)
 
     def test_an_unreachable_broker_records_no_broker_text(self, audit_events):
-        ensured = ensure_topics(self._SPECS, admin=_Admin("list"))
-        status = topic_status(self._SPECS, admin=_Admin("list"))
+        ensured = ensure_topics(self._SPECS, admin=_Admin("list"))  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
+        status = topic_status(self._SPECS, admin=_Admin("list"))  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
 
         assert ensured.failed == [("acme_land", BROKER_UNREACHABLE)]
         assert status.error == BROKER_UNREACHABLE
@@ -391,10 +392,10 @@ class TestSources:
         )
         source = SimpleNamespace(source="acme", table_name="acme")
 
-        teams, error = await sources_module._sync_hyperdx_source(request, source, "dfe", ["a"])
+        teams, error = await sources_module._sync_hyperdx_source(request, source, "dfe", ["a"])  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the fields this path reads
 
         assert teams is None
-        assert_hidden(error)
+        assert_hidden(present(error))
         assert_logged(audit_events)
 
     def test_a_dry_run_hides_why_the_live_table_was_unreadable(self, monkeypatch, audit_events):
@@ -407,12 +408,16 @@ class TestSources:
         settings = SimpleNamespace(clickhouse=SimpleNamespace(effective_data_database="dfe"))
 
         ttl, settings_change, error = sources_module._dry_run_table_moves(
-            None, source, "1", None, settings
+            None,
+            source,  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the fields this path reads
+            "1",
+            None,
+            settings,
         )
 
         assert ttl is None
         assert settings_change is None
-        assert_hidden(error)
+        assert_hidden(present(error))
         assert_logged(audit_events)
 
     def test_an_unreadable_clickhouse_on_deploy_is_503_without_its_text(self, audit_events):
@@ -421,7 +426,7 @@ class TestSources:
         )
 
         assert raised.status_code == 503
-        assert raised.detail["code"] == "clickhouse_unavailable"
+        assert raised.detail["code"] == "clickhouse_unavailable"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
         assert_hidden(str(raised.detail))
         assert_logged(audit_events)
 
@@ -445,7 +450,7 @@ class TestSources:
         user = AuthContext(user_id="admin")
 
         settings = SimpleNamespace(source=SourceSettings())
-        _, failed, _ = sources_module._apply_bulk(body, {}, user, _Registry(), settings)
+        _, failed, _ = sources_module._apply_bulk(body, {}, user, _Registry(), settings)  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the fields this path reads
 
         by_source = {entry["source"]: entry for entry in failed}
         assert by_source["gone"]["error"] == "Source 'gone' not found"
@@ -457,7 +462,7 @@ class TestSources:
         raised = metrics_unavailable(MetricsUnavailableError(f"otel query 'up' failed: {SENTINEL}"))
 
         assert raised.status_code == 503
-        assert raised.detail["code"] == "metrics_unavailable"
+        assert raised.detail["code"] == "metrics_unavailable"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
         assert_hidden(str(raised.detail))
         assert_logged(audit_events)
 
@@ -477,7 +482,7 @@ class TestSchemas:
             JsonPromotionError("Illegal JSON path: 'a b'"), "discovery_failed", "acme"
         )
 
-        assert raised.detail["message"] == "Illegal JSON path: 'a b'"
+        assert raised.detail["message"] == "Illegal JSON path: 'a b'"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
 
 
 class TestSampler:

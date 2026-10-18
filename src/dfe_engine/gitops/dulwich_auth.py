@@ -86,6 +86,10 @@ class RedactingErrStream(io.RawIOBase):
             del self._buffer[: match.end()]
         return len(raw)
 
+    def progress(self, data: bytes) -> None:
+        """Take one chunk through ``write``, in the callback shape dulwich's fetch reports with."""
+        self.write(data)
+
     def close(self) -> None:
         """Log whatever the last write left unterminated, then close."""
         if self._buffer:

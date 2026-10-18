@@ -1,3 +1,5 @@
+"""Validation for hunt configurations and the syntax they carry."""
+
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -26,18 +28,16 @@ def rule_source(source_db: str, source_table: str) -> str:
 
 
 class HuntValidator:
-    """
-    A class that provides static methods for validating hunt configurations and related syntax.
-    """
+    """A class that provides static methods for validating hunt configurations and related syntax."""
 
+    @staticmethod
     def validate_hunt_configuration(
         hunt_data: dict,
         rules_dir: str | Path,
-        checkpoint_timestamp_field: str,
+        checkpoint_timestamp_field: str | None,
         source_registry: Any = None,
     ):
-        """
-        Validates the hunt configuration for correctness.
+        """Validates the hunt configuration for correctness.
 
         :param hunt_data: A dictionary containing hunt configuration.
         :param rules_dir: The directory holding each rule as ``{name}.yaml``, the
@@ -65,7 +65,7 @@ class HuntValidator:
             raise ValueError(f"Invalid YAML structure: {e}") from e
 
     @staticmethod
-    def _validate_required_fields(hunt_data: dict, checkpoint_timestamp_field: str) -> None:
+    def _validate_required_fields(hunt_data: dict, checkpoint_timestamp_field: str | None) -> None:
         """Validate required fields in hunt configuration."""
         if "log_buffer" not in hunt_data:
             raise ValueError("Missing 'log_buffer' in hunt configuration.")
