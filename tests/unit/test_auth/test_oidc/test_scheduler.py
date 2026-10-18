@@ -192,7 +192,8 @@ class TestOidcSyncScheduler:
                 }
             ),
         )
-        ran = await _wait_for(condition=synced)
+        # The groups are stored before the hook runs, so wait for both.
+        ran = await _wait_for(condition=lambda: synced() and len(calls) == 2)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
