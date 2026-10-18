@@ -159,8 +159,7 @@ class TestContractWellFormed:
 
         original = engine_deployment_contract()
         as_json = original.to_json()
-        # scalo 2.31.17 types each scalo.deployment export as a union with its _missing placeholder (scalo-py#138).
-        restored = DeploymentContract.model_validate_json(as_json)  # ty: ignore[unresolved-attribute]
+        restored = DeploymentContract.model_validate_json(as_json)
         assert restored.model_dump() == original.model_dump()
 
 

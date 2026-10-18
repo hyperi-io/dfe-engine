@@ -703,7 +703,7 @@ requires-dist = [
     { name = "confluent-kafka", specifier = ">=2.16.0" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "dfe-schemas", specifier = ">=0.2.14,<1" },
+    { name = "dfe-schemas", specifier = ">=0.2.15,<1" },
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "dulwich", specifier = ">=1.2.7" },
     { name = "faker", specifier = ">=40.43.0" },
@@ -730,7 +730,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.17,<3" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.18,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.22.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -759,14 +759,14 @@ dev = [
 
 [[package]]
 name = "dfe-schemas"
-version = "0.2.14"
+version = "0.2.15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3f/b7/ac56c302a78a0aed33c5ec893698609eedde7db8cbd4491fb69ea7ff4513/dfe_schemas-0.2.14.tar.gz", hash = "sha256:7fac77b6ed154116bb5f82502d399c79a969ac22ef895d77ac436c90a3a0e27f", size = 1147990, upload-time = "2026-10-18T04:24:21.831Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/e6/97/9bc4df0ce5bf15330ce6bc01eb614df1affa8fa449aed293bf5f4cd1c682/dfe_schemas-0.2.15.tar.gz", hash = "sha256:67edcb5e85c5fde1fbcfcdc3f469e17ee80644b71cdc681bec6634e316215222", size = 1148291, upload-time = "2026-10-18T21:34:38.315Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/99/d8/da7e47658b2b2e93257c8a52c2b7795d0d41c049e44e5d6f5a3ed3b05b6c/dfe_schemas-0.2.14-py3-none-any.whl", hash = "sha256:6dd276b05917ac94511cdee7fd7acfb0aaa6e727d835df890b92413e357c1fd9", size = 2170713, upload-time = "2026-10-18T04:24:19.607Z" },
+    { url = "https://files.pythonhosted.org/packages/88/f2/c2007caa02a5466acf26519208ce12fe2762e8e75332289129e7ec10248a/dfe_schemas-0.2.15-py3-none-any.whl", hash = "sha256:5be91592c0cd32481552e3909b5ad7f31e3b2801081e8027970b6f82ad6ffff4", size = 2170771, upload-time = "2026-10-18T21:34:35.736Z" },
 ]
 
 [[package]]
@@ -2389,7 +2389,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.31.17"
+version = "2.31.18"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2407,9 +2407,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/13/65/d64047d97a21004a425ba064287ce27920bab1b83c35527884baf626d2ef/scalo-2.31.17.tar.gz", hash = "sha256:dee4c4cccb1de02b92375bdaa8e11155560fa2e9fb4cc254b9261542dc56d752", size = 365892, upload-time = "2026-10-17T05:06:26.962Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/80/b1/460b262f50fcaa30b7047e95c94b5f403f12f006bde8f6fe6db765847ca0/scalo-2.31.18.tar.gz", hash = "sha256:ecebd6658ac20bf39f72023251d54743134e693cae8be72546dce1002051db37", size = 369513, upload-time = "2026-10-18T21:34:29.78Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5f/7c/838262ee34262ea118f6ccec7c1ab602224b49655d400ff104d472d68899/scalo-2.31.17-py3-none-any.whl", hash = "sha256:22bd902db124d5b86e981c07a4cd8ac3c09437bb9f3591678fe6227947109fb3", size = 438230, upload-time = "2026-10-17T05:06:24.221Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/70/e62d4f964dcd00756bccf5610959a28d1ecb235ab3a571187ccff8da0fa4/scalo-2.31.18-py3-none-any.whl", hash = "sha256:037b9d6e7cc1415091a80cd2556d72ac79c81bd668d3ba058e56f15a5d01a1e3", size = 441768, upload-time = "2026-10-18T21:34:27.512Z" },
 ]
 
 [package.optional-dependencies]

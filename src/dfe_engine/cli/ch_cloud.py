@@ -19,8 +19,7 @@ import typer
 from scalo.cli import Typer
 from scalo.cli.output import print_error, print_info
 
-# scalo 2.31.17 types its Typer export as a union with the not-installed placeholder (scalo-py#138).
-ch_cloud_app: typer.Typer = Typer(help="ClickHouse Cloud service lifecycle (status/start/stop).")  # ty: ignore[invalid-assignment]
+ch_cloud_app = Typer(help="ClickHouse Cloud service lifecycle (status/start/stop).")
 
 
 def _service():

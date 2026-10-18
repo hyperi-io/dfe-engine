@@ -9,9 +9,9 @@
 
 A request path can carry a value, the user's login in
 ``/api/v1/auth/accounts/{username}`` for one. The template keeps the shape of the
-request without its values. scalo's request histogram labels the route with the
-matched route's own template, which leaves out a lazily included router's prefix
-(hyperi-io/scalo-py#136), so the two can name one route differently.
+request without its values. scalo's request histogram labels the same full template,
+except above a parameter: it names a parameterised mount from its template and labels a
+parameterised router prefix ``__unresolved__``, where this line keeps the route's own.
 """
 
 import time

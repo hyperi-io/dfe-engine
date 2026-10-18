@@ -43,7 +43,6 @@ async def test_a_request_is_recorded_under_its_route_template(api_settings):
     async with httpx.AsyncClient(base_url="http://test", transport=transport) as client:
         await client.get("/api/v1/apps/dfe-loader/default/status")
 
-    # The API is mounted at /api/v1, and FastAPI's template is relative to the mount.
     exposition = metrics.get_metrics().decode()
-    assert 'endpoint="/apps/{service}/{instance}/status"' in exposition
+    assert 'endpoint="/api/v1/apps/{service}/{instance}/status"' in exposition
     assert "dfe-loader/default" not in exposition
