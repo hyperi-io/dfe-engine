@@ -28,7 +28,7 @@ import functools
 import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -667,22 +667,24 @@ async def create_provider(
         else ""
     )
     group_paths = _group_secret_paths(groups=body.groups, name=body.name)
-    provider = OIDCProvider(
-        type=body.type,
-        enabled=body.enabled,
-        display_name=body.display_name,
-        issuer=body.issuer,
-        client_id=body.client_id,
-        client_id_env=body.client_id_env,
-        client_secret_env=body.client_secret_env,
-        client_secret_path=client_secret_path,
+    fields: dict[str, Any] = {
+        "type": body.type,
+        "enabled": body.enabled,
+        "display_name": body.display_name,
+        "issuer": body.issuer,
+        "client_id": body.client_id,
+        "client_id_env": body.client_id_env,
+        "client_secret_env": body.client_secret_env,
+        "client_secret_path": client_secret_path,
         # Empty takes the provider type's default scopes.
-        scopes=" ".join(body.scopes) if body.scopes is not None else "",
-        groups=_group_config(groups=body.groups, kept=group_paths, provider_type=body.type),
-        created_at=datetime.now(UTC).isoformat(),
-    )
+        "scopes": " ".join(body.scopes) if body.scopes is not None else "",
+        "groups": _group_config(groups=body.groups, kept=group_paths, provider_type=body.type),
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    # The rules run before the model's validators, so a pair both refuse answers 422 on its field.
     rule_problems = field_problems(
-        provider=provider, sent_group_fields=_sent_group_fields(groups=body.groups)
+        provider=OIDCProvider.model_construct(**fields),
+        sent_group_fields=_sent_group_fields(groups=body.groups),
     )
     _moved, env_problems = _group_env_moves(current=None, groups=body.groups)
     if _moves_to_env(
@@ -692,6 +694,7 @@ async def create_provider(
             0, _env_var_not_set(env=body.client_secret_env, field="client_secret_env")
         )
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
+    provider = OIDCProvider(**fields)
 
     await run_blocking(
         lambda: _store_group_secrets(groups=body.groups, name=body.name, request=request)
