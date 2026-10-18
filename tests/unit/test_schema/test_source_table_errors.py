@@ -78,7 +78,8 @@ def _settings(tmp_path: Path) -> SimpleNamespace:
             default_engine="MergeTree",
             default_ttl_days=90,
             effective_data_database="dfe",
-            topology="single",
+            host="localhost",
+            platform="auto",
         ),
         schemas=SimpleNamespace(schemas_dir=""),
         source=SimpleNamespace(

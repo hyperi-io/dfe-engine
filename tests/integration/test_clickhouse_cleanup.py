@@ -5,11 +5,16 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""``DROP DATABASE`` leaves row policies behind on a real server, so the helper drops them."""
+"""``DROP DATABASE`` leaves row policies behind on a real server, so the helper drops them.
+
+On a cluster, a Replicated database dropped through one replica stays on the others,
+so the helper drops it on every replica.
+"""
 
 import uuid
 
 import pytest
+from dfe_schemas.clickhouse import Platform, create_database
 
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 
@@ -70,3 +75,26 @@ def test_dropping_a_database_that_is_already_gone_is_not_an_error(ch_client, dat
     drop_database_and_policies(ch_client, name)
 
     drop_database_and_policies(ch_client, name)
+
+
+def test_a_replicated_database_is_dropped_on_every_replica(two_replicas):
+    import clickhouse_connect
+
+    r1 = clickhouse_connect.get_client(**two_replicas.first)
+    r2 = clickhouse_connect.get_client(**two_replicas.second)
+    control, name = (f"dfe_test_cleanup_{uuid.uuid4().hex[:8]}" for _ in range(2))
+    for db in (control, name):
+        r1.command(create_database(db, Platform.SELF_HOSTED))
+        r1.command(f"CREATE TABLE `{db}`.`t` (a String) ENGINE = ReplicatedMergeTree ORDER BY a")
+        r1.command(f"CREATE ROW POLICY `p` ON `{db}`.`t` USING 1 TO ALL")
+        r2.command(f"SYSTEM SYNC DATABASE REPLICA `{db}`")
+    assert (_databases(r2, control), _databases(r2, name)) == (1, 1)
+
+    r1.command(f"DROP DATABASE `{control}` SYNC")
+    drop_database_and_policies(r1, name)
+
+    assert (_databases(r1, control), _databases(r2, control)) == (0, 1), "the control"
+    assert (_databases(r1, name), _databases(r2, name)) == (0, 0)
+    assert (_policies(r1, name), _policies(r2, name)) == (0, 0)
+    drop_database_and_policies(r2, control)
+    assert _databases(r2, control) == 0

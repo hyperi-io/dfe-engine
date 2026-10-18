@@ -19,7 +19,7 @@ overview: [schema.md](schema.md).
 | `src/dfe_engine/schema/schema_builder_v2.py` | `SchemaBuilderV2`, `SchemaBuildResult` - Source -> DDL orchestration |
 | `src/dfe_engine/schema/schema_manager.py` | `SchemaManager` - version write operations (add, clone, create) |
 | `src/dfe_engine/schema/ddl_writer.py` | `DDLFileWriter` - reference SQL file generation |
-| `src/dfe_engine/schema/engine_resolver.py` | table-engine choice (MergeTree / Replicated / cloud) resolved from the CH server |
+| dfe-schemas `dfe_schemas/clickhouse.py` | `PlatformProbe` (Cloud or self-hosted, probed once per connection), `engine_clause` (the one `Replicated*` form), `create_database`, the settings realign |
 | `src/dfe_engine/fieldmap/view_generator.py` | `ViewGenerator` - standard field map -> view DDL |
 
 ## Build pipeline

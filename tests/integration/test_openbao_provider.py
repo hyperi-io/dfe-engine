@@ -23,6 +23,7 @@ import uuid
 import pytest
 
 from dfe_engine.secrets import DfeSecrets
+from tests.integration.conftest import _remove_container
 
 _IMAGE = os.environ.get("DFE_TEST_OPENBAO_IMAGE", "openbao/openbao:2.5.4")
 _PORT = int(os.environ.get("DFE_TEST_OPENBAO_PORT", "18200"))
@@ -77,17 +78,7 @@ def openbao_addr():
         pytest.skip(f"cannot start OpenBao on docker host '{spec}': {exc}")
 
     def teardown() -> None:
-        try:
-            subprocess.run(
-                [*docker, "rm", "-f", name],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=60,
-            )
-        except subprocess.SubprocessError, FileNotFoundError:
-            pass
+        _remove_container(docker, name)
 
     ready = False
     for _ in range(30):

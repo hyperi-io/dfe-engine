@@ -190,21 +190,3 @@ def load_table_spec(ref: str, database: str, *, version: str | None = None) -> T
         columns=[_column(raw, path) for raw in entry["columns"]],
         config=_config(table, database),
     )
-
-
-def load_view_ddl(ref: str, database: str, on_cluster: str = "") -> tuple[str, str] | None:
-    """The materialised view a definition declares, as ``(name, DDL)``.
-
-    Returns None when the file declares none. A view has no columns to
-    reconcile, only a SELECT, so it is not a TableSpec.
-    """
-    path = _table_yaml_path(ref)
-    view = SchemaLoader.load_version_entry(path).get("materialized_view")
-    if not view:
-        return None
-    select = view["select"].format(db=database)
-    return (
-        view["name"],
-        f"CREATE MATERIALIZED VIEW IF NOT EXISTS {database}.{view['name']}{on_cluster} "
-        f"TO {database}.{view['to']} AS\n{select}",
-    )

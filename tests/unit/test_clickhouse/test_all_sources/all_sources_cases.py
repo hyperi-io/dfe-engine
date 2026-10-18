@@ -88,7 +88,6 @@ class MergeTableDdlCase(TypedDict):
     database: str
     expected_ddl: str
     members: list[str]
-    on_cluster: str
 
 
 MEMBER_PATTERN_CASES: list[MemberPatternCase] = [
@@ -393,19 +392,18 @@ MERGE_TABLE_DDL_CASES: list[MergeTableDdlCase] = [
             "ENGINE = Merge(`dfe`, '^(main)$')"
         ),
         "members": ["main"],
-        "on_cluster": "",
     },
     {
-        "id": "on_cluster_follows_the_table_name",
+        # The Replicated database replicates the CREATE, and refuses ON CLUSTER inside it.
+        "id": "two_members_and_no_on_cluster",
         "columns": [("_timestamp_load", "DateTime64(3)"), ("_json", "JSON")],
         "database": "dfe",
         "expected_ddl": (
-            "CREATE OR REPLACE TABLE `dfe`.`all_sources` ON CLUSTER dfe_cluster "
+            "CREATE OR REPLACE TABLE `dfe`.`all_sources` "
             "(`_timestamp_load` DateTime64(3), `_json` JSON) "
             "ENGINE = Merge(`dfe`, '^(main|zeek-conn)$')"
         ),
         "members": ["main", "zeek-conn"],
-        "on_cluster": " ON CLUSTER dfe_cluster",
     },
     {
         "id": "every_header_column",
@@ -420,7 +418,6 @@ MERGE_TABLE_DDL_CASES: list[MergeTableDdlCase] = [
             "ENGINE = Merge(`dfe`, '^(main|zeek)$')"
         ),
         "members": ["main", "zeek"],
-        "on_cluster": "",
     },
     {
         "id": "hyphenated_database",
@@ -432,6 +429,5 @@ MERGE_TABLE_DDL_CASES: list[MergeTableDdlCase] = [
             "ENGINE = Merge(`dfe-prod`, '^(main)$')"
         ),
         "members": ["main"],
-        "on_cluster": "",
     },
 ]

@@ -243,6 +243,24 @@ class TestEnvOverrides:
         with pytest.raises(ValidationError):
             load_settings()
 
+    def test_clickhouse_platform_ships_auto(self, monkeypatch):
+        monkeypatch.delenv("DFE_CLICKHOUSE_PLATFORM", raising=False)
+        assert load_settings().clickhouse.platform == "auto"
+
+    @pytest.mark.parametrize(
+        ("value", "stored"), [("cloud", "cloud"), (" Self_Hosted ", "self_hosted")]
+    )
+    def test_clickhouse_platform_override_is_read_from_the_environment(
+        self, monkeypatch, value, stored
+    ):
+        monkeypatch.setenv("DFE_CLICKHOUSE_PLATFORM", value)
+        assert load_settings().clickhouse.platform == stored
+
+    def test_clickhouse_platform_refuses_an_unknown_choice_naming_the_list(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_PLATFORM", "hybrid")
+        with pytest.raises(ValidationError, match="auto, cloud, self_hosted"):
+            load_settings()
+
     def test_api_host_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_HOST", "127.0.0.1")
         settings = load_settings()

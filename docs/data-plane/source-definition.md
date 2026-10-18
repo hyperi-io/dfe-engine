@@ -106,7 +106,7 @@ schema:
   additional_fields: filebeat/add       # Extra fields, indexes (optional)
   ttl_days: 90                          # Data retention
   engine: MergeTree                     # Base variant only (MergeTree, ReplacingMergeTree(...), ...)
-                                        # Topology (Replicated/Shared/Cloud) resolves at DDL time
+                                        # The Replicated prefix is added at DDL time
 ```
 
 `match.field` is a dotted path into the record as it arrives, which is what the

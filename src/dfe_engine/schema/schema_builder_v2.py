@@ -19,9 +19,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from dfe_schemas.clickhouse import Platform
 from scalo.logger import logger
 
-from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import (
     SchemaLoader,
@@ -126,7 +126,7 @@ class SchemaBuilderV2:
         default_ttl_days: int | None = None,
         default_header_type: str = DEFAULT_HEADER_TYPE,
         default_header_version: str = DEFAULT_HEADER_VERSION,
-        resolver: EngineResolver | None = None,
+        platform: Platform = Platform.SELF_HOSTED,
     ) -> None:
         """Initialize the schema builder.
 
@@ -151,26 +151,24 @@ class SchemaBuilderV2:
                                 schema leaves ``engine`` empty (the inherit sentinel).
                                 Pass the deployment value
                                 (``settings.clickhouse.default_engine``) so an
-                                operator can make e.g. ReplacingMergeTree the default;
-                                falls back to plain MergeTree.
+                                operator can make e.g. ReplacingMergeTree the default.
+                                Falls back to the MergeTree variant.
             default_ttl_days: Retention for a source whose schema leaves ``ttl_days``
                                 unset. Pass the deployment value
                                 (``settings.clickhouse.default_ttl_days``); 0 declares
                                 no TTL, which removes a live one, and None leaves it alone.
             default_header_type: Common-header profile an unauthored source inherits.
             default_header_version: Version of that profile.
-            resolver: Engine resolver for the table engine and ``ON CLUSTER``. A
-                                path that applies DDL to a live server passes one
-                                built with that server's client, so a multi-node
-                                cluster gets a Replicated table on every replica;
-                                without one the DDL follows the deployment's
-                                ``clickhouse.topology`` alone.
+            platform: The ClickHouse platform the DDL is for, which picks a JSON
+                                table's platform-only settings. A path that applies
+                                DDL to a live server passes what that server's
+                                probe names.
         """
         self._registry = registry or TypeRegistry.default()
         self._schemas_base_dir = Path(schemas_base_dir) if schemas_base_dir else None
         self._derived_base_dir = Path(derived_base_dir) if derived_base_dir else None
         self._ddl_gen = DDLGenerator(
-            self._registry, use_legacy_indexes=use_legacy_indexes, resolver=resolver
+            self._registry, use_legacy_indexes=use_legacy_indexes, platform=platform
         )
         self._field_map_registry = field_map_registry
         self._default_engine = default_engine or "MergeTree"
@@ -180,7 +178,7 @@ class SchemaBuilderV2:
 
     @property
     def ddl_generator(self) -> DDLGenerator:
-        """The generator this builder renders with, on its engine resolver."""
+        """The generator this builder renders with, for its platform."""
         return self._ddl_gen
 
     # -- Main entry points -------------------------------------------

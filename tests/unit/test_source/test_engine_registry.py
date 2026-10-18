@@ -1,8 +1,8 @@
 """Tests for the engine registry (engine_registry.py).
 
 The registry gates the MergeTree-family VARIANT on every load, and each
-variant's argument rule on save. The Replicated/Shared prefix is topology-derived
-at DDL time, so it is not a permitted variant.
+variant's argument rule on save. The Replicated prefix is added at DDL time, so
+it is not a permitted variant.
 """
 
 import pytest

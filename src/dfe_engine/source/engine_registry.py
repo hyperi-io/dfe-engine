@@ -2,9 +2,9 @@
 
 Restricts the table engine a source may use to the set dfe-schemas ships as
 ``registries/engines.yaml``, mirroring how TypeRegistry restricts column
-primitives. The registry lists MergeTree-family VARIANTS; the Replicated/Shared
-prefix is added at DDL time by the engine resolver from the topology and is
-never declared in config.
+primitives. The registry lists MergeTree-family VARIANTS. dfe-schemas adds the
+Replicated prefix every DFE table takes at DDL time, so it is never declared in
+config.
 
 Two gates: :meth:`EngineRegistry.validate` checks the variant and runs on every
 model load, and :meth:`EngineRegistry.validate_arguments` checks each variant's

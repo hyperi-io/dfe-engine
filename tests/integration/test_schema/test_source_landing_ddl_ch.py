@@ -21,11 +21,10 @@ asked what it created.
 """
 
 import re
-import uuid
 
 import pytest
+from dfe_schemas.clickhouse import PlatformProbe
 
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.source.deployment import deploy_statements_for_build
@@ -36,23 +35,9 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def source_database(ch_client):
-    """A throwaway database for one deploy, dropped afterwards."""
-    from dfe_engine.schema.applier import SchemaApplier
-
-    db = f"dfe_source_ddl_{uuid.uuid4().hex[:8]}"
-    resolver = EngineResolver(client=ch_client)
-    SchemaApplier(ch_client, resolver).ensure_database(db)
-    try:
-        yield db
-    finally:
-        try:
-            # The same ON CLUSTER the applier created with, or a cluster target
-            # keeps the database on every node but the one this connection reached.
-            on_cluster = resolver.resolve(parse_engine("MergeTree"), db).on_cluster
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`{on_cluster} SYNC")
-        except Exception:
-            pass
+def source_database(clickhouse_test_database):
+    """A throwaway Replicated database for one deploy, dropped afterwards."""
+    return clickhouse_test_database
 
 
 def _source(name: str) -> Source:
@@ -69,7 +54,7 @@ def _source(name: str) -> Source:
 
 def _deploy(ch_client, db: str, source: Source) -> list[str]:
     """Generate this source's deploy DDL and run it, returning the statements."""
-    builder = SchemaBuilderV2(resolver=EngineResolver(client=ch_client))
+    builder = SchemaBuilderV2(platform=PlatformProbe(ch_client).platform)
     result = builder.build(source)
     assert not result.validation_errors, result.validation_errors
 
@@ -179,7 +164,7 @@ def test_an_index_on_a_column_named_with_punctuation_lands_through_the_create_an
     hyphens and slashes. The server is asked to run both statements that carry an
     index name, and then asked which indexes it holds.
     """
-    gen = DDLGenerator(TypeRegistry.default(), resolver=EngineResolver(client=ch_client))
+    gen = DDLGenerator(TypeRegistry.default(), platform=PlatformProbe(ch_client).platform)
     cfg = DDLConfig(db=source_database)
     table = "punctuated_index_probe"
 

@@ -10,8 +10,9 @@
 ClickHouse is DFE's only operational store, so integration tests use real CH (no
 mocks). The harness picks a target in this preference order:
 
-  Tier 1 "cluster" - a local-network CH CLUSTER (3+ nodes) configured in .env /
-      settings, or an explicit ``DFE_TEST_CH_*`` target. Tests replicated behaviour.
+  Tier 1 "cluster" - an explicit ``DFE_TEST_CH_*`` target, or, only under
+      ``DFE_TEST_TIER=cluster``, the CH cluster the app settings (.env) name. A run
+      never takes a ClickHouse host from .env unasked. Tests replicated behaviour.
   Tier 2 "remote"  - spin a throwaway CH via docker on a REMOTE host over ssh,
       named by ``DFE_TEST_DOCKER_HOST`` (``user@host``). If you can ssh to it you
       can run the container there, so a machine that cannot spare the resources
@@ -21,6 +22,8 @@ mocks). The harness picks a target in this preference order:
 Controls (env):
   DFE_TEST_TIER=cluster|remote|local (or 1|2|3) - force a tier instead of auto.
       Auto order is cluster -> remote (if DFE_TEST_DOCKER_HOST set) -> local.
+  DFE_TEST_CH_HOST, _PORT, _USER, _PASSWORD - the tier 1 target, which wins over
+      anything the app settings name.
   DFE_TEST_DOCKER_HOST=user@host  - the ssh target for tier 2.
   DFE_TEST_KEEP=1                 - keep the spun container running afterwards
       (reused on the next run); default is to remove it (clean up after itself).
@@ -32,10 +35,17 @@ clickhouse`, or `dfe-engine-test-integration-clickhouse` for the shared
 DFE_TEST_KEEP one, and carry `io.hyperi.test.*` labels naming the suite, the repo,
 the service and the owning pid. To sweep whatever a killed run left behind:
 
-  docker rm -f $(docker ps -aq --filter label=io.hyperi.test.suite=dfe-engine-integration)
+  docker rm -f -v $(docker ps -aq --filter label=io.hyperi.test.suite=dfe-engine-integration)
 
 Every test also DROPs the databases it creates. No Postgres: the hunt runner
 coordinates through ClickHouse.
+
+Every container this suite starts runs Keeper embedded, with the ``{cluster}``,
+``{shard}`` and ``{replica}`` macros and a one-node ``remote_servers`` cluster:
+every DFE table is an argumentless ``ReplicatedMergeTree`` inside a Replicated
+database, which a server without them refuses (dfe-schemas
+``docs/clickhouse-platform.md``). A configured cluster target must carry the same,
+and keep its SQL users and roles in Keeper.
 
 The document store resolves separately (``mongo_uri``): ``DFE_TEST_MONGO_URI`` if
 set, else one FerretDB per xdist worker on the same docker host, named
@@ -43,14 +53,15 @@ set, else one FerretDB per xdist worker on the same docker host, named
 DFE_TEST_KEEP does not apply to it.
 """
 
-from __future__ import annotations
-
+import base64
 import os
 import secrets
+import shlex
 import subprocess
 import time
 import warnings
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NoReturn
@@ -82,6 +93,105 @@ _FERRETDB_DIGEST = "sha256:1bf47a449dd65839aabfc1a535d1370c98326f8a90de20437eda0
 _FERRETDB_IMAGE = f"ghcr.io/ferretdb/ferretdb-eval:{_FERRETDB_TAG}@{_FERRETDB_DIGEST}"
 _FERRETDB_USER = "dfe"
 
+# The cluster name the {cluster} macro carries on every container this suite starts.
+_CLUSTER = "dfe"
+_KEEPER_PORT = 9181
+_KEEPER_CONFIG_PATH = "/etc/clickhouse-server/config.d/dfe-keeper.xml"
+
+
+# SQL users and roles in Keeper. It must REPLACE the default list: appended, it sits
+# behind local_directory, and the first writable storage takes every CREATE ROLE.
+_REPLICATED_ACCESS = """
+    <user_directories replace="replace">
+        <users_xml><path>users.xml</path></users_xml>
+        <replicated><zookeeper_path>/clickhouse/access/</zookeeper_path></replicated>
+    </user_directories>"""
+
+
+def keeper_config(
+    *, replica: str, keeper_host: str | None, hosts: list[str], replicated_access: bool = False
+) -> str:
+    """The server config one replica needs to hold DFE's Replicated database.
+
+    Args:
+        replica: The ``{replica}`` macro, unique per server.
+        keeper_host: The host this server runs Keeper on and every replica connects
+            to, or None when this server only connects to another one's.
+        hosts: Every replica's hostname, for the one-shard ``remote_servers`` cluster.
+        replicated_access: Keep SQL users and roles in Keeper, which a cluster of
+            more than one server needs. A single node may keep them local.
+    """
+    connect_to = keeper_host or hosts[0]
+    access = _REPLICATED_ACCESS if replicated_access else ""
+    keeper_server = ""
+    if keeper_host is not None:
+        keeper_server = f"""
+    <keeper_server>
+        <tcp_port>{_KEEPER_PORT}</tcp_port>
+        <server_id>1</server_id>
+        <log_storage_path>/var/lib/clickhouse/coordination/log</log_storage_path>
+        <snapshot_storage_path>/var/lib/clickhouse/coordination/snapshots</snapshot_storage_path>
+        <raft_configuration>
+            <server><id>1</id><hostname>{keeper_host}</hostname><port>9234</port></server>
+        </raft_configuration>
+    </keeper_server>"""
+    replicas = "".join(f"<replica><host>{host}</host><port>9000</port></replica>" for host in hosts)
+    # The digest identity every deploy sets, read from DFE_KEEPER_IDENTITY (keeper_run_args).
+    return f"""<clickhouse>{keeper_server}
+    <zookeeper>
+        <node><host>{connect_to}</host><port>{_KEEPER_PORT}</port></node>
+        <identity from_env="DFE_KEEPER_IDENTITY" hide_in_preprocessed="1"/>
+    </zookeeper>
+    <macros><cluster>{_CLUSTER}</cluster><shard>01</shard><replica>{replica}</replica></macros>
+    <remote_servers>
+        <{_CLUSTER}><shard><internal_replication>true</internal_replication>{replicas}</shard></{_CLUSTER}>
+    </remote_servers>{access}
+</clickhouse>
+"""
+
+
+def keeper_identity() -> str:
+    """A ``user:password`` Keeper digest identity, generated for one test's servers."""
+    return f"dfe:{secrets.token_hex(16)}"
+
+
+def keeper_run_args(config: str, image: str, *, identity: str) -> list[str]:
+    """The tail of a ``docker run`` that writes *config* into the server before it starts.
+
+    Carried in an environment variable rather than a mount, so a remote docker host
+    reached over ssh needs no file of its own.
+
+    Args:
+        config: The server config, from :func:`keeper_config`.
+        image: The ClickHouse image.
+        identity: The Keeper digest identity. Replicas sharing a Keeper take the same
+            one, as a deployment's do.
+    """
+    encoded = base64.b64encode(config.encode("utf-8")).decode("ascii")
+    script = (
+        f'printf %s "$DFE_TEST_CH_CONFIG" | base64 -d > {_KEEPER_CONFIG_PATH} '
+        "&& exec /entrypoint.sh"
+    )
+    return [
+        "-e",
+        f"DFE_TEST_CH_CONFIG={encoded}",
+        "-e",
+        f"DFE_KEEPER_IDENTITY={identity}",
+        "--entrypoint",
+        "/bin/sh",
+        image,
+        "-c",
+        script,
+    ]
+
+
+def _single_node_run_args(image: str) -> list[str]:
+    return keeper_run_args(
+        keeper_config(replica="r1", keeper_host="localhost", hosts=["localhost"]),
+        image,
+        identity=keeper_identity(),
+    )
+
 
 def _truthy(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
@@ -98,22 +208,21 @@ def _unavailable(reason: str) -> NoReturn:
     pytest.skip(reason)
 
 
-def _cluster_params() -> dict | None:
-    """Tier 1: a configured CH cluster (settings/.env non-localhost, then DFE_TEST_CH_*)."""
-    try:
-        from dfe_engine.settings import load_settings
+_FORCED_TIERS = {"cluster": "cluster", "1": "cluster", "remote": "remote", "2": "remote"}
+_FORCED_TIERS |= {"local": "local", "3": "local"}
 
-        s = load_settings().clickhouse
-        if s.host and s.host not in ("localhost", "127.0.0.1"):
-            return {
-                "host": s.host,
-                "port": s.port,
-                "username": s.username,
-                "password": s.password,
-                "secure": s.secure,
-            }
-    except Exception:
-        pass
+
+def _forced_tier() -> str | None:
+    """The tier ``DFE_TEST_TIER`` names, or None for auto."""
+    return _FORCED_TIERS.get(os.environ.get("DFE_TEST_TIER", "").strip().lower())
+
+
+def _cluster_params() -> dict | None:
+    """Tier 1: the ``DFE_TEST_CH_*`` target, else the app settings' ClickHouse when asked.
+
+    The app settings read the checkout's .env, which can name a shared ClickHouse no
+    test should reach, so they count only under ``DFE_TEST_TIER=cluster``.
+    """
     host = os.environ.get("DFE_TEST_CH_HOST")
     if host:
         return {
@@ -123,18 +232,30 @@ def _cluster_params() -> dict | None:
             "password": os.environ.get("DFE_TEST_CH_PASSWORD", ""),
             "secure": False,
         }
-    return None
+    if _forced_tier() != "cluster":
+        return None
+    try:
+        from dfe_engine.settings import load_settings
+
+        s = load_settings().clickhouse
+    except Exception:
+        return None
+    if not s.host or s.host in ("localhost", "127.0.0.1"):
+        return None
+    return {
+        "host": s.host,
+        "port": s.port,
+        "username": s.username,
+        "password": s.password,
+        "secure": s.secure,
+    }
 
 
 def _resolve_tier() -> str:
     """Chosen tier: explicit DFE_TEST_TIER, else auto (cluster -> remote -> local)."""
-    forced = os.environ.get("DFE_TEST_TIER", "").strip().lower()
-    if forced in ("cluster", "1"):
-        return "cluster"
-    if forced in ("remote", "2"):
-        return "remote"
-    if forced in ("local", "3"):
-        return "local"
+    forced = _forced_tier()
+    if forced is not None:
+        return forced
     if _cluster_params() is not None:
         return "cluster"
     if os.environ.get("DFE_TEST_DOCKER_HOST"):
@@ -223,8 +344,17 @@ def _reap_stale(docker: list[str], name: str) -> None:
     """
     if _container_running(docker, name):
         return
+    _remove_container(docker, name)
+
+
+def _remove_container(docker: list[str], name: str) -> None:
+    """Force-remove ``name`` and its anonymous volumes, best-effort.
+
+    Every image this suite runs declares a VOLUME, so a removal without ``-v`` leaves
+    one dangling volume on the docker host per container.
+    """
     try:
-        _run([*docker, "rm", "-f", name], timeout=60)
+        _run([*docker, "rm", "-f", "-v", name], timeout=60)
     except subprocess.SubprocessError, FileNotFoundError:
         pass
 
@@ -237,6 +367,9 @@ def _reach_address(spec: str) -> str:
 
 
 def _run(cmd: list[str], timeout: int) -> subprocess.CompletedProcess:
+    if cmd[0] == "ssh":
+        # ssh hands the remote shell one string, so each argument is quoted to arrive whole.
+        cmd = [*cmd[:2], shlex.join(cmd[2:])]
     return subprocess.run(
         cmd,
         check=True,
@@ -282,13 +415,14 @@ def _start_or_join_shared(
     _unavailable(f"docker host '{spec}' cannot start or join the shared ClickHouse '{name}'")
 
 
-def _spin_ch_on_docker(spec: str, *, keep: bool, test: str):
+def _spin_ch_on_docker(spec: str, *, keep: bool, test: str, keeper: bool = True):
     """Start (or reuse) a CH container on a local/remote docker host.
 
     Returns ``(params, teardown)``. With keep=True a stable-named container is
     shared, reused across runs and left running; otherwise a container named for
     ``test`` is started and removed on teardown. Skips (never errors) if the
-    docker host can't run it.
+    docker host can't run it. ``keeper=False`` starts the stock image with no
+    Keeper, the server the engine refuses.
     """
     docker = _docker_prefix(spec)
     image = os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE)
@@ -296,19 +430,20 @@ def _spin_ch_on_docker(spec: str, *, keep: bool, test: str):
     # throwaway is owned by the test that asked for it: the fixture is
     # function-scoped and the suite runs under xdist, so tests do not share one
     # and a common name would collide rather than pool.
-    name = _container_name(None if keep else test, "clickhouse")
+    service = "clickhouse" if keeper else "clickhouse-keeperless"
+    name = _container_name(None if keep else test, service)
     run_cmd = [
         *docker,
         "run",
         "-d",
         "--name",
         name,
-        *_container_labels("clickhouse"),
+        *_container_labels(service),
         "-p",
         "0:8123",
         "-e",
         "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1",
-        image,
+        *(_single_node_run_args(image) if keeper else [image]),
     ]
 
     if keep:
@@ -325,10 +460,7 @@ def _spin_ch_on_docker(spec: str, *, keep: bool, test: str):
     def teardown() -> None:
         if keep:
             return  # left running for reuse (DFE_TEST_KEEP)
-        try:
-            _run([*docker, "rm", "-f", name], timeout=60)
-        except subprocess.SubprocessError, FileNotFoundError:
-            pass
+        _remove_container(docker, name)
 
     try:
         # docker prints e.g. "0.0.0.0:49153" (take the last line, then the port)
@@ -348,13 +480,26 @@ def _spin_ch_on_docker(spec: str, *, keep: bool, test: str):
     return params, teardown
 
 
-def _connect_when_ready(clickhouse_connect, params: dict, attempts: int = 40, delay: float = 1.0):
-    """Poll the real readiness signal (SELECT 1) until it succeeds; return the client."""
+def _connect_when_ready(
+    clickhouse_connect,
+    params: dict,
+    attempts: int = 40,
+    delay: float = 1.0,
+    *,
+    keeper: bool = True,
+):
+    """Poll the real readiness signals until both answer, and return the client.
+
+    ``SELECT 1`` says the server is up. A read of Keeper's root says the Replicated
+    database can be created, which an embedded Keeper allows a moment later.
+    """
     last: Exception | None = None
     for _ in range(attempts):
         try:
             client = clickhouse_connect.get_client(**params)
             client.command("SELECT 1")
+            if keeper:
+                client.command("SELECT count() FROM system.zookeeper WHERE path = '/'")
             return client
         except Exception as exc:  # CH still starting up
             last = exc
@@ -430,6 +575,166 @@ def ch_client(ch_params):
     return clickhouse_connect.get_client(**ch_params)
 
 
+def _docker_spec(what: str) -> str:
+    """The docker host a fixture that starts its own servers runs on: local, or ssh."""
+    tier = _resolve_tier()
+    if tier == "cluster":
+        pytest.skip(f"{what} starts its own servers, which the configured cluster tier cannot")
+    if tier == "remote":
+        spec = os.environ.get("DFE_TEST_DOCKER_HOST")
+        if not spec:
+            _unavailable("DFE_TEST_TIER=remote but DFE_TEST_DOCKER_HOST (user@host) is not set")
+        return spec
+    return "local"
+
+
+@pytest.fixture
+def keeperless_ch_params(request):
+    """A stock ClickHouse with no Keeper and no macros, the server the engine refuses."""
+    clickhouse_connect = pytest.importorskip("clickhouse_connect")
+    spec = _docker_spec("a keeperless server")
+    params, teardown = _spin_ch_on_docker(spec, keep=False, test=request.node.nodeid, keeper=False)
+    try:
+        _connect_when_ready(clickhouse_connect, params, keeper=False).close()
+    except Exception as exc:
+        teardown()
+        _unavailable(f"keeperless ClickHouse not reachable: {exc}")
+    try:
+        yield params
+    finally:
+        teardown()
+
+
+def _published_params(docker: list[str], name: str, spec: str) -> dict:
+    """Connection params for a container's published HTTP port."""
+    # docker prints e.g. "0.0.0.0:49153" (take the last line, then the port)
+    out = _run([*docker, "port", name, "8123"], timeout=30).stdout.strip()
+    return {
+        "host": _reach_address(spec),
+        "port": int(out.splitlines()[-1].rsplit(":", 1)[-1]),
+        "username": "default",
+        "password": "",
+        "secure": False,
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class ReplicaPair:
+    """Two replicas' connection params, and the docker calls that take replica 2 down and back.
+
+    Attributes:
+        first: Replica 1, which runs Keeper.
+        second: Replica 2, which connects to replica 1's Keeper.
+    """
+
+    first: dict
+    second: dict
+    docker: tuple[str, ...]
+    second_name: str
+    spec: str
+
+    def stop_second(self) -> None:
+        """Stop replica 2 cleanly, which ends its Keeper session at once."""
+        _run([*self.docker, "stop", "-t", "30", self.second_name], timeout=90)
+
+    def start_second(self) -> dict:
+        """Start replica 2 again and return its params, whose published port may have moved."""
+        import clickhouse_connect
+
+        _run([*self.docker, "start", self.second_name], timeout=90)
+        params = _published_params(list(self.docker), self.second_name, self.spec)
+        _connect_when_ready(clickhouse_connect, params, attempts=90).close()
+        return params
+
+
+@pytest.fixture
+def two_replicas(request):
+    """Two ClickHouse replicas of one shard on their own docker network, sharing one Keeper.
+
+    Replica 1 runs Keeper embedded and replica 2 connects to it, and both declare
+    the ``{cluster}`` macro over a ``remote_servers`` cluster naming the pair, which
+    is the shape a DFE cluster deployment has. SQL users and roles live in Keeper
+    unless the test parametrises this fixture indirectly with False. Yields a
+    :class:`ReplicaPair`, and removes both containers and the network on teardown.
+    """
+    clickhouse_connect = pytest.importorskip("clickhouse_connect")
+    replicated_access = getattr(request, "param", True)
+    spec = _docker_spec("a two-replica cluster")
+    docker = _docker_prefix(spec)
+    image = os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE)
+    test = request.node.nodeid
+    network = _container_name(test, "net")
+    aliases = ("chr1", "chr2")
+    names = [_container_name(test, f"clickhouse-{alias}") for alias in aliases]
+
+    def teardown() -> None:
+        for name in names:
+            _remove_container(docker, name)
+        try:
+            _run([*docker, "network", "rm", network], timeout=60)
+        except subprocess.SubprocessError, FileNotFoundError:
+            pass
+
+    teardown()
+    params: list[dict] = []
+    # One identity for both replicas, as a deployment's replicas share one.
+    identity = keeper_identity()
+    try:
+        _run([*docker, "network", "create", "--label", _SUITE_LABEL, network], timeout=60)
+        for index, (alias, name) in enumerate(zip(aliases, names, strict=True)):
+            config = keeper_config(
+                replica=alias,
+                keeper_host=aliases[0] if index == 0 else None,
+                hosts=list(aliases),
+                replicated_access=replicated_access,
+            )
+            _run(
+                [
+                    *docker,
+                    "run",
+                    "-d",
+                    "--name",
+                    name,
+                    "--hostname",
+                    alias,
+                    "--network",
+                    network,
+                    "--network-alias",
+                    alias,
+                    *_container_labels("clickhouse"),
+                    "-p",
+                    "0:8123",
+                    "-e",
+                    "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1",
+                    *keeper_run_args(config, image, identity=identity),
+                ],
+                timeout=240,
+            )
+            params.append(_published_params(docker, name, spec))
+            if index == 0:
+                # Replicated access storage refuses to boot without Keeper (exit 231),
+                # so replica 2 starts only once replica 1's Keeper answers.
+                _connect_when_ready(clickhouse_connect, params[0], attempts=90).close()
+        for replica in params:
+            _connect_when_ready(clickhouse_connect, replica, attempts=90).close()
+    except (subprocess.SubprocessError, FileNotFoundError, ValueError, IndexError) as exc:
+        teardown()
+        _unavailable(f"docker host '{spec}' cannot start a two-replica ClickHouse: {exc}")
+    except Exception as exc:
+        teardown()
+        _unavailable(f"the two-replica ClickHouse did not come up: {exc}")
+    try:
+        yield ReplicaPair(
+            first=params[0],
+            second=params[1],
+            docker=tuple(docker),
+            second_name=names[1],
+            spec=spec,
+        )
+    finally:
+        teardown()
+
+
 @pytest.fixture
 def late_clickhouse(request):
     """A ClickHouse whose address is fixed now and which starts only when asked.
@@ -467,7 +772,7 @@ def late_clickhouse(request):
         f"127.0.0.1:{port}:8123",
         "-e",
         "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1",
-        os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE),
+        *_single_node_run_args(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE)),
     ]
 
     def start() -> dict:
@@ -482,10 +787,7 @@ def late_clickhouse(request):
     try:
         yield params, start
     finally:
-        try:
-            _run([*docker, "rm", "-f", name], timeout=60)
-        except subprocess.SubprocessError, FileNotFoundError:
-            pass
+        _remove_container(docker, name)
 
 
 @pytest.fixture
@@ -499,30 +801,28 @@ def dfe_db(ch_client):
     """
     import uuid
 
+    from dfe_schemas.clickhouse import PlatformProbe
+
     from dfe_engine.hunt_runner.ch_coordinator import _COORDINATION_IDS
     from dfe_engine.schema.applier import SchemaApplier
     from dfe_engine.schema.ddl_writer import DDLFileWriter
-    from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
     from dfe_engine.schema.plan import render_one
 
     db = f"dfe_core_{uuid.uuid4().hex[:8]}"
-    resolver = EngineResolver(client=ch_client)
-    applier = SchemaApplier(ch_client, resolver)
+    platform = PlatformProbe(ch_client).platform
+    applier = SchemaApplier(ch_client, platform)
     applier.ensure_database(db)
-    writer = DDLFileWriter(resolver=resolver, database=db)
+    writer = DDLFileWriter(platform=platform, database=db)
     for spec in (writer.default_table_spec(), writer.detection_table_spec()):
         applier.ensure_table(db, spec.name, spec.columns, spec.config)
     for object_id in _COORDINATION_IDS:
-        for statement in render_one(object_id, data_database=db).statements:
+        for statement in render_one(object_id, data_database=db, platform=platform).statements:
             ch_client.command(statement)
     try:
         yield db
     finally:
         try:
-            # Same ON CLUSTER the applier created with, or a cluster target keeps
-            # the database on every node but the one this connection reached.
-            on_cluster = resolver.resolve(parse_engine("MergeTree"), db).on_cluster
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`{on_cluster} SYNC")
+            drop_database_and_policies(ch_client, db)
         except Exception:
             pass
 
@@ -553,11 +853,17 @@ def manager_client(ch_params):
 
 @pytest.fixture
 def clickhouse_test_database(ch_client):
-    """An empty isolated database on the harness's ClickHouse; dropped after the test."""
+    """An empty Replicated database on the harness's ClickHouse, dropped after the test.
+
+    Created the way the engine creates its own, because every DFE table DDL is the
+    argumentless Replicated form that only a Replicated database accepts.
+    """
     import uuid
 
+    from dfe_schemas.clickhouse import PlatformProbe, create_database
+
     db = f"dfe_test_{uuid.uuid4().hex[:8]}"
-    ch_client.command(f"CREATE DATABASE IF NOT EXISTS `{db}`")
+    ch_client.command(create_database(db, PlatformProbe(ch_client).platform))
     try:
         yield db
     finally:
@@ -719,10 +1025,7 @@ def mongo_uri():
         _unavailable(f"docker host '{spec}' cannot start FerretDB: {exc}")
 
     def teardown() -> None:
-        try:
-            _run([*docker, "rm", "-f", name], timeout=60)
-        except subprocess.SubprocessError, FileNotFoundError:
-            pass
+        _remove_container(docker, name)
 
     try:
         out = _run([*docker, "port", name, "27017"], timeout=30).stdout.strip()

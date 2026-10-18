@@ -14,15 +14,13 @@ the build and deploy functions the source deploy endpoint runs, with the maps th
 installed dfe-schemas seeds, and then ask the server what it created.
 """
 
-import uuid
 from pathlib import Path
 
 import dfe_schemas
 import pytest
+from dfe_schemas.clickhouse import PlatformProbe
 
 from dfe_engine.fieldmap.registry import FieldMapRegistry
-from dfe_engine.schema.applier import SchemaApplier
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import resolve_registry_path
@@ -55,19 +53,9 @@ CARRIED = [
 
 
 @pytest.fixture
-def source_database(ch_client):
-    """A throwaway database for one deploy, dropped afterwards."""
-    db = f"dfe_source_views_{uuid.uuid4().hex[:8]}"
-    resolver = EngineResolver(client=ch_client)
-    SchemaApplier(ch_client, resolver).ensure_database(db)
-    try:
-        yield db
-    finally:
-        try:
-            on_cluster = resolver.resolve(parse_engine("MergeTree"), db).on_cluster
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`{on_cluster} SYNC")
-        except Exception:
-            pass
+def source_database(clickhouse_test_database):
+    """A throwaway Replicated database for one deploy, dropped afterwards."""
+    return clickhouse_test_database
 
 
 @pytest.fixture
@@ -87,18 +75,19 @@ def _shipped_map(standard: str) -> dict[str, str]:
 
 def _deploy(manager_client, db: str, source: Source, schemas_dir: Path, maps) -> dict[str, str]:
     """Build and apply *source* the way the deploy endpoint does; return the view DDLs."""
+    platform = PlatformProbe(manager_client).platform
     result = run_source_build(
         source,
         version_id=source.runtime_version_id(),
         schemas_base_dir=schemas_dir,
-        resolver=EngineResolver(client=manager_client),
+        platform=platform,
         settings=DFESettings(env="dev"),
         field_map_registry=maps,
     )
     assert not result.validation_errors, result.validation_errors
     # The builder here only renders ALTERs for an existing table; the views come from result.
     statements, _ = deploy_statements_for_build(
-        SchemaBuilderV2(resolver=EngineResolver(client=manager_client)),
+        SchemaBuilderV2(platform=platform),
         source,
         source.runtime_version_id(),
         result,

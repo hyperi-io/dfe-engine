@@ -66,12 +66,6 @@ class FakeRepositoryCH:
     def query(self, sql: str, *args: Any, parameters: Any = None, **kwargs: Any):
         """The state reads, returning a QueryResult-shaped object."""
         params = parameters or {}
-        # The engine resolver's sensing probes: no cloud_mode and no cluster
-        # macros, so it classifies this fake as a single node.
-        if "system.settings" in sql or "system.macros" in sql:
-            return SimpleNamespace(result_rows=[])
-        if "system.databases" in sql and "engine" in sql:
-            return SimpleNamespace(result_rows=[])
         if "system.databases" in sql:
             rows = [(1,)] if params.get("db") in self.databases else []
         elif "system.tables" in sql and "names" in params:

@@ -24,9 +24,9 @@ A common-header type is stored and compared as the bare profile name, so
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
+from dfe_schemas.clickhouse import parse_engine
 from scalo.logger import logger
 
-from dfe_engine.schema.engine_resolver import parse_engine
 from dfe_engine.source.engine_registry import InvalidEngineError
 from dfe_engine.source.models import (
     DEFAULT_HEADER_TYPE,
@@ -449,7 +449,7 @@ def source_default_drift(
     table, they are measured on it, so a value the table never took is drift
     whatever the source stores; a table without a TTL runs 0 days, a TTL that is
     not whole days is reported as its interval and is always drift, and the
-    engine compares as a variant without its topology prefix. Without *live*,
+    engine compares as a variant without its Replicated or Shared prefix. Without *live*,
     and always for the header, the stored value is measured: unset inherits on
     the next deploy and is not drift, nor is a stored value equal to the
     default. Header types compare as bare profile names.

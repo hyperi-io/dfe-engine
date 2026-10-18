@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, NamedTuple, NoReturn
 
+from dfe_schemas.clickhouse import PlatformProbe, ReplicationNotConfiguredError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from scalo.concurrency import run_blocking
@@ -135,6 +136,25 @@ def _ch_unreadable(exc: Exception, source: str) -> HTTPException:
         event="source deploy: ClickHouse unreadable",
         source=source,
     )
+
+
+def _require_replication(probe: PlatformProbe, source: str) -> None:
+    """Refuse a deploy to a server the schema phase would refuse, with dfe-schemas' reason.
+
+    Raises:
+        HTTPException: 503 ``clickhouse_not_replicated`` carrying the reason, which
+            dfe-schemas composes and which names no host, or 503
+            ``clickhouse_unavailable`` when the server could not be asked.
+    """
+    try:
+        probe.require_replication()
+    except ReplicationNotConfiguredError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "clickhouse_not_replicated", "message": str(exc)},
+        ) from exc
+    except Exception as exc:
+        raise _ch_unreadable(exc, source) from exc
 
 
 def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
@@ -1340,7 +1360,7 @@ def plan_source_deploy(
     ),
 ) -> SourcePlanResponse:
     """Dry-run ClickHouse deploy: DDL statements and validation errors (not persisted)."""
-    from dfe_engine.schema.engine_resolver import EngineResolver
+    from dfe_engine.schema.plan import platform_probe
     from dfe_engine.schema.schema_builder_v2 import (
         SchemaBuildError,
         SchemaBuilderV2,
@@ -1362,9 +1382,8 @@ def plan_source_deploy(
 
     settings = ttl_settings(request, get_settings())
     store = SourceDeploymentStore.from_settings(settings)
-    # The plan shows the DDL the deploy would apply, so it senses the engine and
-    # ON CLUSTER from the same server.
-    resolver = EngineResolver(client=ch_client, topology_setting=settings.clickhouse.topology)
+    # The plan shows the DDL the deploy would apply, so it probes the same server.
+    platform = platform_probe(settings, ch_client).platform
     try:
         result, _artifact = ensure_build_artifact(
             store,
@@ -1372,7 +1391,7 @@ def plan_source_deploy(
             version_id=version_id,
             schemas_base_dir=settings.schemas.schemas_dir or None,
             refresh=True,
-            resolver=resolver,
+            platform=platform,
             settings=settings,
             field_map_registry=get_field_map_registry_optional(),
         )
@@ -1386,7 +1405,7 @@ def plan_source_deploy(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
-        resolver=resolver,
+        platform=platform,
         **inherited_builder_kwargs(settings),
     )
     db = settings.clickhouse.effective_data_database
@@ -1799,9 +1818,7 @@ def _dry_run_table_moves(
         live = live_tables(client, db).get(source.table_name)
         if live is None:
             return None, None, None
-        settings_change = settings_change_for_table(
-            builder, source, version_id, result, db=db, client=client
-        )
+        settings_change = settings_change_for_table(builder, source, result, db=db, client=client)
     except SchemaApplyError as exc:
         return (
             None,
@@ -1849,14 +1866,14 @@ def _apply_source_schema(
     if not dry_run and registry.is_core(name):
         _raise_save_validation_http(SourceCoreResourceError(action="deploy", source=name))
 
-    # A deploy reaches ClickHouse before the build: the table engine and ON CLUSTER
-    # are sensed from the live server, so the DDL lands on every replica of a
-    # cluster. A dry run renders the deployment's topology and only reads ClickHouse.
+    # A deploy reaches ClickHouse before the build, so the platform is probed on the
+    # server the DDL lands on. A dry run only reads ClickHouse, and takes the
+    # platform the hostname names.
+    from dfe_engine.schema.plan import platform_probe
+
     ch = None
-    resolver = None
     if not dry_run:
         from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-        from dfe_engine.schema.engine_resolver import EngineResolver
         from dfe_engine.settings import get_clickhouse_config
 
         try:
@@ -1865,13 +1882,14 @@ def _apply_source_schema(
             ).get_clickhouse_client()
         except Exception as exc:
             raise _ch_unreadable(exc, name) from exc
-        resolver = EngineResolver(client=ch, topology_setting=settings.clickhouse.topology)
+    probe = platform_probe(settings, ch)
+    platform = probe.platform
 
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
         derived_base_dir=derived_reference_root(settings),
-        resolver=resolver,
+        platform=platform,
         field_map_registry=get_field_map_registry_optional(),
         **inherited_builder_kwargs(settings),
     )
@@ -1924,6 +1942,9 @@ def _apply_source_schema(
             },
         )
 
+    # The schema phase's refusal, made here too: after the caller's own errors, which
+    # need no server, and before the first statement reaches one.
+    _require_replication(probe, name)
     db = settings.clickhouse.effective_data_database
     try:
         planned = plan_deploy_statements(
@@ -1938,11 +1959,11 @@ def _apply_source_schema(
         raise _ch_unreadable(exc, name) from exc
     applied = 0
     try:
-        # Through the applier on the sensed resolver: a bare CREATE DATABASE lands
-        # on one replica, leaving the ON CLUSTER table DDL nowhere to go.
+        # Through the applier, which creates the Replicated database every
+        # replica holds rather than a plain one on the replica this connection reached.
         from dfe_engine.schema.applier import SchemaApplier
 
-        SchemaApplier(ch, resolver).ensure_database(db)
+        SchemaApplier(ch, platform).ensure_database(db)
         for stmt in planned.statements:
             execute_ddl(ch, stmt)
             applied += 1

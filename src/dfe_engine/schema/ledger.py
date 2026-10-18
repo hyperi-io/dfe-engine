@@ -15,8 +15,8 @@ it was rendered from, the engine release that applied it, the checksum of the
 normalised statement and the statement itself.
 
 The checksum is what makes the next pass cheap and truthful: it is taken with the
-topology token removed, so one schema reads as one checksum whether it was
-applied to a single node or fanned over a cluster.
+platform token removed, so one schema reads as one checksum on ClickHouse Cloud
+and on self-hosted ClickHouse.
 
 The table is a manifest object like any other and is created by the same applier
 before anything else, so the engine carries no DDL even for its own bookkeeping.
@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from dfe_engine.clickhouse.inserts import keep_identical_rows
 from dfe_engine.clickhouse.quoting import quote_identifier
 
 _COLUMNS = (
@@ -38,7 +39,7 @@ _COLUMNS = (
     "checksum",
     "statement",
     "action",
-    "topology",
+    "platform",
 )
 
 
@@ -57,7 +58,7 @@ class LedgerRow:
     engine_version: str
     checksum: str
     action: str
-    topology: str
+    platform: str
 
 
 class MigrationLedger:
@@ -79,7 +80,7 @@ class MigrationLedger:
             "SELECT database, object, argMax(kind, applied_at), "  # noqa: S608 - quoted database and manifest table
             "argMax(schemas_version, applied_at), argMax(engine_version, applied_at), "
             "argMax(checksum, applied_at), argMax(action, applied_at), "
-            f"argMax(topology, applied_at) FROM {target} "
+            f"argMax(platform, applied_at) FROM {target} "
             "GROUP BY database, object"
         )
         try:
@@ -96,18 +97,26 @@ class MigrationLedger:
                 engine_version=str(row[4]),
                 checksum=str(row[5]),
                 action=str(row[6]),
-                topology=str(row[7]),
+                platform=str(row[7]),
             )
             recorded[(entry.database, entry.object)] = entry
         return recorded
 
     def record(self, rows: list[list[Any]]) -> None:
-        """Write one row per applied object. Nothing to write is not an error."""
+        """Write one row per applied object. Nothing to write is not an error.
+
+        An unchanged pass writes rows identical to the last pass's, and each one has
+        to land so ``applied_at`` moves on.
+        """
         if not rows:
             return
         try:
             self._client.insert(
-                self._table, rows, column_names=list(_COLUMNS), database=self._database
+                self._table,
+                rows,
+                column_names=list(_COLUMNS),
+                database=self._database,
+                settings=keep_identical_rows(self._client),
             )
         except Exception as exc:
             raise LedgerError(f"could not write the migration ledger: {exc}") from exc
@@ -123,7 +132,7 @@ class MigrationLedger:
         checksum: str,
         statement: str,
         action: str,
-        topology: str,
+        platform: str,
     ) -> list[Any]:
         """One ledger row, in the column order :meth:`record` inserts."""
         return [
@@ -135,5 +144,5 @@ class MigrationLedger:
             checksum,
             statement,
             action,
-            topology,
+            platform,
         ]

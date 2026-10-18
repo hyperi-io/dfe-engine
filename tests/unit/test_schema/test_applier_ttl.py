@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
+from dfe_schemas.clickhouse import Platform
 
 from dfe_engine.schema.applier import (
     LiveTable,
@@ -26,7 +27,6 @@ from dfe_engine.schema.applier import (
     ttl_from_engine_full,
     ttl_move,
 )
-from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_ddl import DDLConfig
 from dfe_engine.source.models import SchemaColumn
 
@@ -76,7 +76,7 @@ def _columns() -> list[SchemaColumn]:
 
 
 def _apply(client: _FakeClient, *, wanted: int | None, dry_run: bool = False):
-    applier = SchemaApplier(client, EngineResolver(override="single"), dry_run=dry_run)
+    applier = SchemaApplier(client, Platform.SELF_HOSTED, dry_run=dry_run)
     change = applier.ensure_table(
         DB, TABLE, _columns(), DDLConfig(db=DB, ttl_days=wanted, projection_order_by=None)
     )
@@ -165,7 +165,7 @@ def test_a_shorter_ttl_is_still_applied():
 
 def test_a_ttl_over_an_absent_column_is_skipped_not_raised():
     client = _FakeClient(columns=["_timestamp_load", "message"], live_ttl_days=None)
-    applier = SchemaApplier(client, EngineResolver(override="single"))
+    applier = SchemaApplier(client, Platform.SELF_HOSTED)
 
     change = applier.ensure_table(
         DB,
@@ -197,7 +197,7 @@ def test_a_ttl_already_in_place_is_not_reported_as_skipped():
         ("ReplacingMergeTree", "ReplacingMergeTree"),
     ],
 )
-def test_a_live_engine_compares_without_its_topology_prefix(engine: str, variant: str):
+def test_a_live_engine_compares_without_its_replicated_or_shared_prefix(engine: str, variant: str):
     assert LiveTable(engine=engine, ttl=None).variant == variant
 
 
@@ -231,7 +231,6 @@ def test_a_move_that_deletes_rows_kept_today_is_marked(
 ):
     move = ttl_move(
         target="`dfe`.`t`",
-        on_cluster="",
         cfg=DDLConfig(db=DB, ttl_days=wanted),
         columns=_columns(),
         live=live,
@@ -244,7 +243,6 @@ def test_a_move_that_deletes_rows_kept_today_is_marked(
 def test_removing_a_ttl_never_expires_rows():
     move = ttl_move(
         target="`dfe`.`t`",
-        on_cluster="",
         cfg=DDLConfig(db=DB, ttl_days=0),
         columns=_columns(),
         live=LiveTtl(30, "day"),

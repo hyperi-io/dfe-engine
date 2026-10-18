@@ -41,7 +41,6 @@ import pytest
 from tests.e2e import filebeat_corpus as corpus
 from tests.e2e.conftest import (
     E2EConfig,
-    cluster_name,
     count_rows,
     drop_table,
     must,
@@ -194,15 +193,11 @@ def _delete(engine: EngineAPI, name: str) -> None:
 
 
 def _alter(ch_client, statement: str) -> None:
-    """Run an ALTER on every replica of the cluster the server declares.
+    """Run an ALTER, which the Replicated DFE database replicates to every replica.
 
-    Without ON CLUSTER the change lands on the one replica the connection
-    reached, so the other replicas answer a query the index is meant to serve
-    without it.
+    ClickHouse refuses ON CLUSTER on a table inside a Replicated database (code 80).
     """
-    cluster = cluster_name(ch_client)
-    on_cluster = f" ON CLUSTER {cluster}" if cluster else ""
-    ch_client.command(statement.replace("{on_cluster}", on_cluster))
+    ch_client.command(statement)
 
 
 def _transform_engine(cfg: E2EConfig) -> str:
@@ -1057,8 +1052,7 @@ class TestStage2:
 
         _alter(
             ch_client,
-            f"ALTER TABLE {evolved.table}{{on_cluster}} ADD INDEX {index} hostname "
-            "TYPE set(0) GRANULARITY 4",
+            f"ALTER TABLE {evolved.table} ADD INDEX {index} hostname TYPE set(0) GRANULARITY 4",
         )
         assert index in live_indexes(), (
             f"the ALTER returned but {index} is not in system.data_skipping_indices, so the "
@@ -1070,7 +1064,7 @@ class TestStage2:
             f"part(s) to {added}, so the data was rewritten rather than the metadata"
         )
 
-        _alter(ch_client, f"ALTER TABLE {evolved.table}{{on_cluster}} DROP INDEX {index}")
+        _alter(ch_client, f"ALTER TABLE {evolved.table} DROP INDEX {index}")
         assert index not in live_indexes(), f"{index} survived the DROP"
         dropped = rows_and_parts()
         assert dropped == before, (

@@ -25,10 +25,10 @@ the hunt as free cannot then steal it from one that claimed it in the meantime.
 A single worker (the dfe-docker case and most deploys) is exactly-once. With many
 workers, two claims can still both land if their conditional inserts run at the
 same moment on the server; the settle window gives both the same winner as long as
-both inserts commit inside it. A duplicate run is NOT absorbed: the detection table
-is a plain MergeTree, so the same window inserted twice writes its rows twice. The
-watermark gives crash-safe incremental resume; hunt_state carries the
-too_aggressive / overrun signal for the UI.
+both inserts commit inside it. A duplicate run is NOT absorbed: on 26.3 no INSERT
+... SELECT is deduplicated, so the same window run twice writes its rows twice. The
+watermark gives crash-safe incremental resume, and
+hunt_state carries the too_aggressive / overrun signal for the UI.
 
 Tables (all ReplacingMergeTree; the first three bounded to ~1 row/hunt after merge):
   hunt_lease     - who holds a hunt now, until when (mutual exclusion + cap input)
@@ -49,6 +49,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from dfe_engine.clickhouse.inserts import keep_identical_rows
 from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.schema.require import require_objects
 
@@ -120,6 +121,7 @@ class ChCoordinator:
         self._settle = settle_seconds
         self._clock = clock
         self._sleep = sleep
+        self._lease_settings: dict[str, Any] | None = None
 
     @property
     def worker_id(self) -> str:
@@ -171,12 +173,24 @@ class ChCoordinator:
             lease_until=int(rows[0][2]),
         )
 
+    def _keep_lease_rows(self) -> dict[str, Any]:
+        """Insert settings for every lease write, read from the server once.
+
+        A re-claim or a release of the same fire repeats an earlier row, and it has to
+        land. A Replicated table drops an INSERT VALUES identical to a recent one, and
+        an older server (24.8) drops an identical INSERT ... SELECT too.
+        """
+        if self._lease_settings is None:
+            self._lease_settings = keep_identical_rows(self._ch)
+        return self._lease_settings
+
     def _insert_lease(self, hunt_id: str, fire: int, lease_until: int) -> None:
         self._ch.insert(
             "hunt_lease",
             [[hunt_id, self._worker_id, fire, lease_until]],
             column_names=["hunt_id", "owner", "fire", "lease_until"],
             database=self._db,
+            settings=self._keep_lease_rows(),
         )
 
     def _insert_claim_if_free(self, hunt_id: str, fire: int, now: int) -> None:
@@ -199,6 +213,7 @@ class ChCoordinator:
                 "u": now + self._lease_seconds,
                 "now": now,
             },
+            settings=self._keep_lease_rows(),
         )
 
     def try_claim(self, hunt_id: str, fire: int, now: int | None = None) -> bool:

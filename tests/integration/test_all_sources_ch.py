@@ -27,6 +27,7 @@ from typing import Any, TypedDict
 import clickhouse_connect
 import pytest
 from clickhouse_connect.driver.exceptions import DatabaseError
+from dfe_schemas.clickhouse import PlatformProbe
 
 from dfe_engine.clickhouse.all_sources import (
     ALL_SOURCES,
@@ -40,7 +41,6 @@ from dfe_engine.governance.ch.models import TENANT_SETTING, ChTier, tenant_polic
 from dfe_engine.governance.ch.reconciler import fence_tables
 from dfe_engine.governance.ch.render import render_pinned_user, render_tier
 from dfe_engine.hyperdx.dashboards import dashboard_files
-from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.phase import SchemaBootstrapState
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.source.deployment import deploy_statements_for_build
@@ -292,7 +292,7 @@ def _database_policies(*, client: Any, database: str) -> set[str]:
 
 def _deploy(*, client: Any, database: str, source: Source) -> None:
     """Run the DDL a deploy of *source* generates against *database*."""
-    builder = SchemaBuilderV2(resolver=EngineResolver(client=client))
+    builder = SchemaBuilderV2(platform=PlatformProbe(client).platform)
     result = builder.build(source=source)
     assert not (result.validation_errors), result.validation_errors
     statements, _ = deploy_statements_for_build(
@@ -380,7 +380,6 @@ def _rebuild(*, client: Any, database: str, names: list[str]) -> list[str] | Non
         client=client,
         database=database,
         load_sources=functools.partial(list, sources),
-        topology=None,
     )
 
 
@@ -405,9 +404,7 @@ def _replace_without_fence(*, client: Any, database: str, members: list[str]) ->
     columns = merge_columns(
         landing_columns={str(name): str(ch_type) for name, ch_type in rows}, landing_table=LANDING
     )
-    client.command(
-        merge_table_ddl(columns=columns, database=database, members=members, on_cluster="")
-    )
+    client.command(merge_table_ddl(columns=columns, database=database, members=members))
 
 
 def _rows(*, client: Any, parameters: dict[str, Any] | None = None, sql: str) -> list[tuple]:
