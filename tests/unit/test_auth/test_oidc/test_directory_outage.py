@@ -112,6 +112,25 @@ async def test_a_directory_that_never_answers_is_an_outage(monkeypatch, silent, 
     assert failure is LookupFailure.OUTAGE
 
 
+@pytest.mark.parametrize(
+    ("status", "failure"), [(429, "outage"), (503, "outage"), (401, "refused"), (403, "refused")]
+)
+async def test_google_logs_a_failed_user_token_lookup_as_what_it_was(
+    monkeypatch, audit_events, status, failure
+):
+    """An outage is never logged as Google refusing the lookup."""
+    fast_http(monkeypatch)
+    base_url, stop = _cloud_identity_answering(status)
+    try:
+        await _google(base_url).resolve_user_groups("alice@acme.test")
+    finally:
+        stop()
+
+    (line,) = [event for event in audit_events if event.get("failure")]
+    assert line["failure"] == failure
+    assert ("refused" in line["event"]) is (failure == "refused")
+
+
 @pytest.mark.parametrize("provider", sorted(ADAPTERS))
 @pytest.mark.parametrize("status", [401, 403])
 async def test_a_directory_that_refuses_is_a_refusal(monkeypatch, provider, status):

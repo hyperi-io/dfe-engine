@@ -229,7 +229,7 @@ class OIDCProvider(BaseModel):
     sync_error: str = ""
     """Error message from the most recent failed sync, if any."""
 
-    @model_validator(mode="after")
+    @model_validator(mode="after")  # noqa: V105
     def _fill_default_scopes(self) -> Self:
         """Give a provider with no scopes configured the ones its type needs.
 

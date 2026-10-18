@@ -248,8 +248,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 )
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code != 403:
-                    self._log_refusal(exc=exc, method="searchTransitiveGroups")
-                    return lookup_failure(exc)
+                    return self._lookup_failed(exc=exc, method="searchTransitiveGroups")
                 logger.info(
                     "Google Cloud Identity: transitive group search refused, reading direct groups",
                     operation="searchTransitiveGroups",
@@ -257,8 +256,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                     **describe_http_error(exc),
                 )
             except (httpx.HTTPError, ValueError) as exc:
-                self._log_failure(exc=exc, method="searchTransitiveGroups")
-                return lookup_failure(exc)
+                return self._lookup_failed(exc=exc, method="searchTransitiveGroups")
 
             try:
                 return await self._search(
@@ -268,12 +266,8 @@ class GoogleAdapter(OIDCGroupAdapter):
                     query=member,
                     groups_only=True,
                 )
-            except httpx.HTTPStatusError as exc:
-                self._log_refusal(exc=exc, method="searchDirectGroups")
-                return lookup_failure(exc)
             except (httpx.HTTPError, ValueError) as exc:
-                self._log_failure(exc=exc, method="searchDirectGroups")
-                return lookup_failure(exc)
+                return self._lookup_failed(exc=exc, method="searchDirectGroups")
 
     async def _search(
         self,
@@ -321,32 +315,31 @@ class GoogleAdapter(OIDCGroupAdapter):
         )
         return LookupFailure.REFUSED
 
-    def _log_refusal(self, *, exc: httpx.HTTPStatusError, method: str) -> None:
-        """Log a refused Cloud Identity call with Google's error code."""
-        if exc.response.status_code == 403:
+    def _lookup_failed(self, *, exc: httpx.HTTPError | ValueError, method: str) -> LookupFailure:
+        """Log a Cloud Identity call that gave no groups as the outage or refusal it was, and return which."""
+        failure = lookup_failure(exc)
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        if status == 403:
             message = (
                 "Google Cloud Identity refused the user-token group lookup (403): the "
                 "Cloud Identity API is disabled in the OAuth client's project, the login "
                 "did not grant cloud-identity.groups.readonly, or the organisation "
                 "blocks it -- the code says which"
             )
-        else:
+        elif failure is LookupFailure.OUTAGE:
+            message = "Google Cloud Identity could not answer the user-token group lookup"
+        elif status is not None:
             message = "Google Cloud Identity refused the user-token group lookup"
+        else:
+            message = "Google Cloud Identity gave the user-token group lookup no usable answer"
         logger.warning(
             message,
+            failure=failure,
             operation=method,
             provider=self._provider.issuer,
             **describe_http_error(exc),
         )
-
-    def _log_failure(self, *, exc: httpx.HTTPError | ValueError, method: str) -> None:
-        """Log a Cloud Identity call that got no usable answer: no response, or a body that is not JSON."""
-        logger.warning(
-            "Google Cloud Identity group lookup failed",
-            operation=method,
-            provider=self._provider.issuer,
-            **describe_http_error(exc),
-        )
+        return failure
 
     # ------------------------------------------------------------------
     # Directory API, as the service account

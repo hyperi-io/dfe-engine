@@ -297,7 +297,7 @@ class EntraAdapter(OIDCGroupAdapter):
         """Every page of one transitiveMemberOf listing, else why Graph gave none.
 
         A call that got no answer, a 429 or a 5xx is an outage. Any other failure is a
-        refusal, and so is a page that is not an object, a listing still paging at
+        refusal, and so is a page with no ``value`` list, a listing still paging at
         :attr:`MAX_LOGIN_PAGES` or one linking its next page off Graph's origin.
         """
         from scalo.http import AsyncHttpClient
@@ -319,7 +319,14 @@ class EntraAdapter(OIDCGroupAdapter):
                         **describe_http_error(exc),
                     )
                     return failure
-                if not isinstance(data, dict):
+                if not isinstance(data, dict) or not isinstance(data.get("value"), list):
+                    logger.warning(
+                        "Entra resolve_user_groups: a Graph page carried no value list",
+                        failure=LookupFailure.REFUSED,
+                        operation="resolve_user_groups",
+                        provider=self._provider.issuer,
+                        type=type(data).__name__,
+                    )
                     return LookupFailure.REFUSED
                 # A token that may not read a group still gets it, with only the id set and
                 # every other property null; the id is all role resolution keys on.
@@ -330,7 +337,7 @@ class EntraAdapter(OIDCGroupAdapter):
                         email=item.get("mail") or "",
                         description=item.get("description") or "",
                     )
-                    for item in data.get("value") or []
+                    for item in data["value"]
                     if isinstance(item, dict) and item.get("id")
                 )
                 url = data.get("@odata.nextLink", "")
@@ -504,7 +511,7 @@ class EntraAdapter(OIDCGroupAdapter):
         Raises:
             Exception: Whatever was raised when Entra could not be reached, throttled
                 the request or failed on its side: a ``requests`` connection error
-                for no answer, ``requests.HTTPError`` for a 429 or a 5xx, a
+                for no answer, ``requests.HTTPError`` for a 429 or a 5xx. Also a
                 ``JSONDecodeError`` for a token answer that is not JSON.
         """
         credentials = self._graph_credentials
@@ -516,7 +523,7 @@ class EntraAdapter(OIDCGroupAdapter):
             app = _confidential_client(authority, credentials.client_id, credentials.client_secret)
             result = app.acquire_token_for_client(scopes=[self._GRAPH_SCOPE])
         except json.JSONDecodeError:
-            # A token answer that is not JSON is Entra failing, not refusing the credentials.
+            # A non-JSON token answer reaches the caller as itself, and a login counts it a refusal.
             raise
         except ValueError as exc:
             # MSAL raises ValueError for an authority it cannot use, such as a tenant Entra does not know.

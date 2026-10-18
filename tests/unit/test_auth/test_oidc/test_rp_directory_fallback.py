@@ -213,6 +213,39 @@ class TestARefusal:
         assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {"acme-google": 1.0}
         assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {}
 
+    async def test_a_graph_page_with_no_value_list_is_a_refusal_not_an_empty_answer(
+        self, tmp_path, monkeypatch, audit_events
+    ):
+        """The group sync refuses the same page, so a login never reads it as no groups either."""
+        graph = LocalGraph()
+        graph.refuse[f"users/{OID}"] = (200, {"@odata.context": "users/groups"})
+        graph.start()
+        adapter = AppTokenEntra(ENTRA)
+        adapter.GRAPH_BASE = graph.base_url
+        manager = _manager()
+        monkeypatch.setattr(
+            "dfe_engine.auth.oidc.adapters.get_adapter", lambda *_args, **_kwargs: adapter
+        )
+        token = {
+            "userinfo": {
+                "_claim_names": {"groups": "src1"},
+                "email": "big@acme.test",
+                "oid": OID,
+                "sub": "pairwise-sub",
+            },
+        }
+        try:
+            identity = await _rp(tmp_path, manager)._identity_from_token(
+                client=None, provider=ENTRA, provider_name="acme-entra", token=token
+            )
+        finally:
+            graph.stop()
+
+        assert identity.groups == []
+        assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {"acme-entra": 1.0}
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {}
+        assert not [event for event in audit_events if "resolved groups" in event["event"]]
+
 
 class TestADirectoryThatAnswers:
     async def test_an_empty_answer_replaces_the_token_groups(self, tmp_path, monkeypatch):
