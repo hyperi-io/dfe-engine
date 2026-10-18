@@ -115,9 +115,7 @@ class _DfeEngineApp:
 
             # Called by scalo's ServiceApp when run starts the service, so vulture sees no caller.
             async def run_service_async(self, config) -> None:  # noqa: V105
-                import uvicorn
-
-                from dfe_engine.api.server import DaemonServer
+                from dfe_engine.api.server import DaemonServer, server_config
                 from dfe_engine.settings import load_settings
 
                 # ServiceApp's logger init has run by now and left httpx2 uncapped.
@@ -134,18 +132,8 @@ class _DfeEngineApp:
                     health_manager=self.health(),
                     metrics_manager=self._metrics,
                 )
-                # proxy_headers off here: create_app resolves the forwarded client
-                # and scheme from api.forwarded_allow_ips, so trust is decided once.
                 server = DaemonServer(
-                    uvicorn.Config(
-                        app,
-                        host=settings.api.host,
-                        port=settings.api.port,
-                        log_level="info",
-                        # None keeps uvicorn's loggers on scalo's handlers, which scrub tokens from access lines.
-                        log_config=None,
-                        proxy_headers=False,
-                    )
+                    server_config(app, host=settings.api.host, port=settings.api.port)
                 )
                 await server.serve()
 

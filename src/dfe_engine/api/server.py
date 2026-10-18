@@ -9,11 +9,38 @@
 
 import os
 from types import FrameType
-from typing import override
+from typing import Any, override
 
 import uvicorn
 
 from dfe_engine.startup_stop import main_thread_waiting
+
+
+def server_config(app: Any, *, host: str, port: int) -> uvicorn.Config:
+    """The uvicorn config the daemon serves *app* with.
+
+    uvicorn's access line is off because it writes the request path, values and all.
+    The app's ``AccessLogMiddleware`` writes the line with the route template instead.
+
+    Args:
+        app: The ASGI app to serve.
+        host: The address to listen on.
+        port: The port to listen on.
+
+    Returns:
+        The config, with uvicorn's loggers left on scalo's handlers.
+    """
+    return uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="info",
+        # None keeps uvicorn's loggers on scalo's handlers, which scrub tokens from its lines.
+        log_config=None,
+        access_log=False,
+        # Off: create_app resolves the forwarded client and scheme from api.forwarded_allow_ips.
+        proxy_headers=False,
+    )
 
 
 class DaemonServer(uvicorn.Server):

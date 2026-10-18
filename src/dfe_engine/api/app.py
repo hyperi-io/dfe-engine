@@ -767,6 +767,11 @@ def create_app(
         trusted=TrustedProxies.parse(settings.api.forwarded_allow_ips),
     )
 
+    # The access line, in place of uvicorn's: it names the route, so no path value reaches it.
+    from dfe_engine.api.middleware.access_log import AccessLogMiddleware
+
+    app.add_middleware(AccessLogMiddleware)
+
     # Outermost of all, so a request's duration covers the whole stack; the app
     # status page reads its rate, error rate and p95 from this one histogram.
     if metrics_manager is not None:
