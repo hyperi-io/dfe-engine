@@ -8,10 +8,8 @@
 
 """ClickHouse datasource adapter using clickhouse-connect."""
 
-from __future__ import annotations
-
 import re
-from typing import Any
+from typing import Any, override
 
 from clickhouse_connect.driver.exceptions import DatabaseError
 
@@ -240,6 +238,7 @@ class ClickHouseAdapter(DatasourceAdapter):
             details["estimated_rows"] = int(rows_match.group(1))
         return details if details else None
 
+    @override
     def healthcheck(self) -> bool:
         try:
             client = self.manager.get_clickhouse_client()

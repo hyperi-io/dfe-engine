@@ -113,7 +113,7 @@ class TestTransformVectorConfig:
 
     def test_forbids_extra_fields(self):
         with pytest.raises(Exception):
-            TransformVectorConfig(unknown_field="bad")
+            TransformVectorConfig(unknown_field="bad")  # ty: ignore[unknown-argument]  # the refused field is the point of the test
 
 
 class TestTransformWasmConfig:

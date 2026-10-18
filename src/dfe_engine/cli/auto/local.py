@@ -209,10 +209,9 @@ def _keda_by_default(cls: str, name: str) -> bool:
 
 
 def _safety_warn(cls: str, name: str, before: dict, after: dict, *, yes: bool) -> None:
-    """Reuse the API's value-safety validator (``validate_result``) as an
-    OVERRIDABLE warning, NOT a block.
+    """Run the API's value-safety validator (``validate_result``) as a warning, not a block.
 
-    Break-glass can override anything - RBAC is dead and git access is the
+    The warning is OVERRIDABLE. Break-glass can override anything - RBAC is dead and git access is the
     authority - so this is not the API's hard 403. But it checks the SAME
     resulting document the daemon's routes check (``api/v1/helm.py``
     ``set_var_governed`` and ``delete_var_governed``), so a stressed operator
@@ -540,8 +539,7 @@ def _count_unpushed(repo_path: str, gs) -> int | None:
         from dulwich.repo import Repo
 
         result = porcelain.ls_remote(authed_https_url(gs.repo_url, gs.username, gs.token))
-        refs = getattr(result, "refs", result) or {}
-        remote_sha = refs.get(f"refs/heads/{gs.branch}".encode())
+        remote_sha = result.refs.get(f"refs/heads/{gs.branch}".encode())
         if remote_sha is None:
             return None
         with Repo(str(repo_path)) as r:
@@ -577,7 +575,7 @@ def set_cmd(
     yes: bool,
     push: bool | None,
 ) -> None:
-    """Set a dot-path via GitCrud.set_key, e.g. scale a rogue pod's keda dial to 0:
+    """Set a dot-path via GitCrud.set_key, e.g. scale a rogue pod's keda dial to 0.
 
     dfe local set helmvars receiver-default keda.maxReplicaCount 0 --reason "rogue pod"
     """
@@ -675,6 +673,7 @@ def revert_cmd(
     same publish path), marked break-glass.
     """
     from dulwich.diff_tree import tree_changes
+    from dulwich.objects import Blob, Commit
     from dulwich.repo import Repo
 
     crud = _build_crud(repo)
@@ -686,8 +685,11 @@ def revert_cmd(
             commit = r[sha.encode()]
         except KeyError as exc:
             raise click.ClickException(f"unknown commit: {sha}") from exc
+        if not isinstance(commit, Commit):
+            raise click.ClickException(f"not a commit: {sha}")
         commit_tree = commit.tree
-        parent_tree = r[commit.parents[0]].tree if commit.parents else None
+        parent = r[commit.parents[0]] if commit.parents else None
+        parent_tree = parent.tree if isinstance(parent, Commit) else None
 
         artifacts: dict[str, str] = {}
         old_paths: set[str] = set()
@@ -698,7 +700,10 @@ def revert_cmd(
             # the parent back to the parent blob, and delete any path the commit added.
             if ch.old and ch.old.path:
                 p = ch.old.path.decode()
-                artifacts[p] = r[ch.old.sha].data.decode("utf-8")
+                blob = r[ch.old.sha]
+                if not isinstance(blob, Blob):
+                    raise click.ClickException(f"cannot revert {p}: it is not a file")
+                artifacts[p] = blob.data.decode("utf-8")
                 old_paths.add(p)
         for ch in changes:
             if ch.new and ch.new.path:
@@ -823,7 +828,8 @@ def _mount_ch_cloud() -> None:
 
         from dfe_engine.cli.ch_cloud import ch_cloud_app
 
-        local_group.add_command(typer.main.get_command(ch_cloud_app), name="ch-cloud")
+        # typer returns a command from its vendored click copy, which click mounts by duck typing.
+        local_group.add_command(typer.main.get_command(ch_cloud_app), name="ch-cloud")  # ty: ignore[invalid-argument-type]
     except Exception as exc:  # ch-cloud is optional; never break the core group
         click.echo(f"dfe local ch-cloud is unavailable: {exc}", err=True)
 

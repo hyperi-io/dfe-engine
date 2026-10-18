@@ -95,6 +95,7 @@ class AppStatus:
 
     @property
     def uptime_seconds(self) -> float | None:
+        """Seconds from start to the last report, or None until both are known."""
         if self.started_epoch is None or self.last_seen_epoch is None:
             return None
         return max(0.0, self.last_seen_epoch - self.started_epoch)

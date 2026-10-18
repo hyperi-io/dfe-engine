@@ -51,10 +51,14 @@ router = APIRouter(prefix="/e2e", tags=[E2E_TAG])
 
 
 class E2EStatusResponse(BaseModel):
+    """Whether the e2e seeding routes are mounted."""
+
     enabled: bool
 
 
 class SeedRequest(BaseModel):
+    """The seed script to run, by name."""
+
     script: Literal[
         "seed_setup_complete",
         "seed_organisation",
@@ -72,6 +76,8 @@ class SeedRequest(BaseModel):
 
 
 class SeedResponse(BaseModel):
+    """Whether the seed script ran, and what it reported."""
+
     success: bool
     message: str
 

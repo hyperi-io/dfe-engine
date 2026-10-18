@@ -14,11 +14,10 @@ class and reports whether the durable copy has caught up. These tests drive a RE
 direct commit vs review PR vs CLI fallback -- is exercised end to end.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 from dulwich import porcelain
+from dulwich.objects import Commit
 from dulwich.repo import Repo
 
 from dfe_engine.auth import account_durability as ad
@@ -28,6 +27,7 @@ from dfe_engine.gitcrud.auto_merge import set_stored
 from dfe_engine.gitcrud.engine import GitCrud
 from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitops.repo import GitopsRepo
+from tests.support.present import present
 
 # A well-formed-looking bcrypt hash: durability compares hash STRINGS, never verifies.
 _HASH_A = "$2b$12$" + "A" * 53
@@ -251,8 +251,8 @@ def test_hydrate_restores_accounts_from_deploy_repo(tmp_path):
     restored = ad.hydrate_from_deploy_repo(gc, fresh)
 
     assert restored == 2
-    assert fresh.get("admin").password_hash == _HASH_A
-    assert fresh.get("kaz").password_hash == _HASH_B
+    assert present(fresh.get("admin")).password_hash == _HASH_A
+    assert present(fresh.get("kaz")).password_hash == _HASH_B
 
 
 def test_hydrate_is_a_noop_when_gitops_disabled(tmp_path):
@@ -274,8 +274,10 @@ def test_publish_direct_carries_the_summary_and_actor_into_the_commit(tmp_path):
     gc = _gc(tmp_path)
     ad.publish_direct(gc, _account(), summary="retire the bootstrap admin", actor="kaz")
     repo = Repo(str(tmp_path / "deploy"))
-    message = repo[repo.head()].message.decode("utf-8")
+    head = repo[repo.head()]
     repo.close()
+    assert isinstance(head, Commit)
+    message = head.message.decode("utf-8")
     assert "retire the bootstrap admin" in message
     assert "kaz" in message
 

@@ -170,4 +170,5 @@ def _make_plugin() -> ServicePlugin:
 
 
 def plugin() -> ServicePlugin:
+    """The loader plugin, loaded through the ``dfe_engine.services`` entry point."""
     return _make_plugin()

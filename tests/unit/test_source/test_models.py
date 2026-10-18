@@ -1,7 +1,7 @@
 """Tests for Source Pydantic models."""
 
 import re
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 from pydantic import ValidationError
@@ -31,6 +31,7 @@ from dfe_engine.source.models import (
     source_version_bump_required,
 )
 from dfe_engine.source.type_registry import TypeRegistry
+from tests.support.present import present
 
 
 @pytest.fixture
@@ -430,7 +431,7 @@ class TestSourceOrigin:
             )
 
     def test_a_match_rule_makes_a_receiver_source(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         assert s.origin == "receiver"
         assert s.fetcher is None
         assert s.landing_label() == "syslog"
@@ -556,7 +557,7 @@ class TestSourceOrigin:
             }
         )
         updated = apply_source_write_update(existing, write)
-        assert updated.versions["1.0.0"].schema_config.meta_schema == "meta/aws_cloudtrail"
+        assert present(updated.versions["1.0.0"].schema_config).meta_schema == "meta/aws_cloudtrail"
         assert updated.table_topic_type == "own"
 
     def test_a_source_without_a_meta_schema_may_still_gain_one(self):
@@ -617,7 +618,7 @@ class TestSourceView:
 
 class TestSource:
     def test_minimal(self):
-        s = Source(
+        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
             source="syslog",
             match=SourceMatch(field="tags.collector.type", value="syslog"),
         )
@@ -658,12 +659,12 @@ class TestSource:
         assert s.source == "filebeat"
         assert s.display_name == "Elastic Filebeat"
         assert s.schema_config.meta_schema == "logs_beats_filebeat"
-        assert s.transform.engine == "vector"
+        assert present(s.transform).engine == "vector"
         assert s.view_for("sigma") is not None
-        assert s.view_for("sigma").taxonomy == "linux"
+        assert present(s.view_for("sigma")).taxonomy == "linux"
 
     def test_derived_properties(self):
-        s = Source(
+        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
             source="filebeat",
             match=SourceMatch(field="f", value="v"),
             transform=SourceTransform(engine="vector"),
@@ -673,16 +674,16 @@ class TestSource:
         assert s.table_name == "filebeat"
 
     def test_no_transform_no_load_topic(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         assert s.topic_land == "syslog_land"
         assert s.topic_load is None
 
     def test_display_name_auto(self):
-        s = Source(source="crowdstrike-edr", match=SourceMatch(field="f", value="v"))
+        s = Source(source="crowdstrike-edr", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         assert s.display_name == "Crowdstrike Edr"
 
     def test_display_name_explicit(self):
-        s = Source(
+        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
             source="crowdstrike-edr",
             display_name="CrowdStrike EDR",
             match=SourceMatch(field="f", value="v"),
@@ -690,17 +691,17 @@ class TestSource:
         assert s.display_name == "CrowdStrike EDR"
 
     def test_views_default_empty(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         assert s.views == []
         assert s.view_for("sigma") is None
 
     def test_state_default_active(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         assert s.state == "active"
         assert s.enabled is True
 
     def test_legacy_enabled_false_maps_to_disabled(self):
-        s = Source(source="syslog", enabled=False, match=SourceMatch(field="f", value="v"))
+        s = Source(source="syslog", enabled=False, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         assert s.state == "disabled"
         assert s.enabled is False
 
@@ -735,7 +736,7 @@ class TestSource:
         assert dumped["enabled"] is False
 
     def test_views_set(self):
-        s = Source(
+        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
             source="syslog",
             match=SourceMatch(field="f", value="v"),
             views=[SourceView(standard="sigma"), SourceView(standard="ecs")],
@@ -743,7 +744,7 @@ class TestSource:
         assert [v.standard for v in s.views] == ["sigma", "ecs"]
 
     def test_views_in_yaml_dict(self):
-        s = Source(
+        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
             source="syslog",
             match=SourceMatch(field="f", value="v"),
             views=[SourceView(standard="sigma")],
@@ -752,7 +753,7 @@ class TestSource:
         assert d["versions"]["1.0.0"]["views"] == [{"standard": "sigma"}]
 
     def test_views_excluded_when_empty(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         d = s.to_yaml_dict()
         assert "views" not in d["versions"]["1.0.0"]
 
@@ -767,7 +768,7 @@ class TestSourceNaming:
 
     def test_valid_names(self):
         for name in ["filebeat", "syslog", "crowdstrike-edr", "a", "x123-456"]:
-            s = Source(source=name, match=SourceMatch(field="f", value="v"))
+            s = Source(source=name, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
             assert s.source == name
 
     def test_starts_with_digit(self):
@@ -781,7 +782,7 @@ class TestSourceNaming:
     def test_underscores_are_refused_and_the_error_says_why(self):
         """The message has to name the constraint, not just quote the regex."""
         with pytest.raises(ValueError) as caught:
-            Source(source="crowdstrike_edr", match=SourceMatch(field="f", value="v"))
+            Source(source="crowdstrike_edr", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         message = str(caught.value)
         assert "DNS-1123 label" in message
         assert "use '-' instead of '_'" in message
@@ -802,7 +803,7 @@ class TestSourceNaming:
             Source(source="a" * 41)
 
     def test_max_length_ok(self):
-        s = Source(source="a" * 40, match=SourceMatch(field="f", value="v"))
+        s = Source(source="a" * 40, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         assert len(s.source) == 40
 
     def test_empty(self):
@@ -818,7 +819,7 @@ class TestSourceNaming:
         from dfe_engine.appmgmt.instances import validate_instance
 
         for name in ["filebeat", "crowdstrike-edr", "x123-456", "a", "a" * 40]:
-            Source(source=name, match=SourceMatch(field="f", value="v"))
+            Source(source=name, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
             validate_instance(name)
 
 
@@ -846,7 +847,7 @@ class TestSourceYaml:
         assert "current" in yaml_dict
 
     def test_excludes_none(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         yaml_dict = s.to_yaml_dict()
         assert "match" not in yaml_dict
         assert "transform" not in yaml_dict
@@ -934,7 +935,7 @@ class TestSourceVersion:
             match=SourceMatch(field="f", value="v"),
             views=[SourceView(standard="sigma", taxonomy="windows")],
         )
-        assert ver.view_for("sigma").taxonomy == "windows"
+        assert present(ver.view_for("sigma")).taxonomy == "windows"
         assert ver.view_for("ecs") is None
 
     def test_duplicate_view_standards_rejected(self):
@@ -1008,7 +1009,7 @@ class TestSourceWriteRequest:
         )
         src = source_from_write(write, source_name="profile-pin")
         assert "1.0.0" in src.versions
-        assert src.versions["1.0.0"].header.version == "1.1.0"
+        assert present(src.versions["1.0.0"].header).version == "1.1.0"
         assert src.current == "1.0.0"
         assert src.deployed_version is None
 
@@ -1108,10 +1109,10 @@ class TestSourceWriteRequest:
         )
         updated = apply_source_write_update(existing, write)
         assert "1.0.0" in updated.versions
-        assert updated.versions["1.0.0"].schema_config.ttl_days == 90
+        assert present(updated.versions["1.0.0"].schema_config).ttl_days == 90
         assert "2.0.0" in updated.versions
-        assert updated.versions["2.0.0"].schema_config.ttl_days == 30
-        assert updated.versions["2.0.0"].schema_config.meta_schema_version == "2.0.0"
+        assert present(updated.versions["2.0.0"].schema_config).ttl_days == 30
+        assert present(updated.versions["2.0.0"].schema_config).meta_schema_version == "2.0.0"
         assert updated.current == "2.0.0"
         assert updated.deployed_version == "1.0.0"
         assert updated.description == "rev 2"
@@ -1140,7 +1141,7 @@ class TestSourceWriteRequest:
         updated = apply_source_write_update(existing, write)
         assert updated.versions.keys() == {"1.0.0"}
         assert updated.current == "1.0.0"
-        assert updated.versions["1.0.0"].schema_config.meta_schema_version == "2.0.0"
+        assert present(updated.versions["1.0.0"].schema_config).meta_schema_version == "2.0.0"
 
     def test_apply_write_update_omitted_header_keeps_the_stored_one(self):
         existing = Source.model_validate(
@@ -1168,7 +1169,7 @@ class TestSourceWriteRequest:
         ver = updated.versions["1.0.0"]
         assert ver.header == SourceHeader(type="timeseries", version="1.0.0")
         assert ver.to_yaml_dict()["header"] == {"type": "timeseries", "version": "1.0.0"}
-        assert ver.schema_config.ttl_days == 30
+        assert present(ver.schema_config).ttl_days == 30
 
     def test_apply_write_update_in_place_after_deploy_non_bump_fields(self):
         existing = Source.model_validate(
@@ -1194,8 +1195,8 @@ class TestSourceWriteRequest:
         )
         updated = apply_source_write_update(existing, write)
         assert updated.versions.keys() == {"1.0.0"}
-        assert updated.versions["1.0.0"].schema_config.ttl_days == 90
-        assert updated.versions["1.0.0"].match.field == "g"
+        assert present(updated.versions["1.0.0"].schema_config).ttl_days == 90
+        assert present(updated.versions["1.0.0"].match).field == "g"
 
     def test_apply_write_update_bumps_on_ttl_days_after_deploy(self):
         existing = Source.model_validate(
@@ -1220,8 +1221,8 @@ class TestSourceWriteRequest:
         )
         updated = apply_source_write_update(existing, write)
         assert updated.current == "2.0.0"
-        assert updated.versions["1.0.0"].schema_config.ttl_days == 90
-        assert updated.versions["2.0.0"].schema_config.ttl_days == 30
+        assert present(updated.versions["1.0.0"].schema_config).ttl_days == 90
+        assert present(updated.versions["2.0.0"].schema_config).ttl_days == 30
 
     def test_apply_write_update_bumps_on_engine_after_deploy(self):
         existing = Source.model_validate(
@@ -1246,7 +1247,7 @@ class TestSourceWriteRequest:
         )
         updated = apply_source_write_update(existing, write)
         assert updated.current == "2.0.0"
-        assert updated.versions["2.0.0"].schema_config.engine == "ReplacingMergeTree"
+        assert present(updated.versions["2.0.0"].schema_config).engine == "ReplacingMergeTree"
 
     def test_apply_write_update_bumps_on_header_after_deploy(self):
         existing = Source.model_validate(
@@ -1350,8 +1351,8 @@ class TestSourceWriteRequest:
         )
         updated = apply_source_write_update(existing, write)
         assert updated.current == "3.0.0"
-        assert updated.versions["2.0.0"].schema_config.meta_schema == "meta/aws/cloudwatch"
-        assert updated.versions["3.0.0"].schema_config.meta_schema == "meta/aws/guardduty"
+        assert present(updated.versions["2.0.0"].schema_config).meta_schema == "meta/aws/cloudwatch"
+        assert present(updated.versions["3.0.0"].schema_config).meta_schema == "meta/aws/guardduty"
         assert updated.deployed_version == "2.0.0"
 
     def test_apply_write_update_draft_current_no_bump_after_deploy(self):
@@ -1393,7 +1394,7 @@ class TestSourceWriteRequest:
         updated = apply_source_write_update(existing, write)
         assert updated.current == "2.0.0"
         assert "3.0.0" not in updated.versions
-        assert updated.versions["2.0.0"].schema_config.meta_schema == "meta/aws/guardduty"
+        assert present(updated.versions["2.0.0"].schema_config).meta_schema == "meta/aws/guardduty"
         assert updated.deployed_version == "1.0.0"
 
     def test_source_version_bump_required_transform(self):
@@ -1679,23 +1680,23 @@ class TestLandingTopic:
     """A source landing on the shared topic arrives there but never owns it."""
 
     def test_a_main_landing_fetcher_arrives_on_the_shared_topic(self):
-        s = Source(source="aws-cloudtrail", fetcher=SourceFetcher(source_type="aws", topic="main"))
+        s = Source(source="aws-cloudtrail", fetcher=SourceFetcher(source_type="aws", topic="main"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
 
         assert s.topic_land == "main_land"
 
     def test_a_main_landing_fetcher_owns_no_landing_topic(self):
-        s = Source(source="aws-cloudtrail", fetcher=SourceFetcher(source_type="aws", topic="main"))
+        s = Source(source="aws-cloudtrail", fetcher=SourceFetcher(source_type="aws", topic="main"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
 
         assert s.owns_landing_topic is False
 
     def test_an_own_topic_fetcher_arrives_on_its_own_topic(self):
-        s = Source(source="okta-audit", fetcher=SourceFetcher(source_type="okta", topic="own"))
+        s = Source(source="okta-audit", fetcher=SourceFetcher(source_type="okta", topic="own"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
 
         assert s.topic_land == "okta-audit_land"
         assert s.owns_landing_topic is True
 
     def test_a_receiver_source_owns_its_landing_topic(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
 
         assert s.topic_land == "syslog_land"
         assert s.owns_landing_topic is True
@@ -1703,7 +1704,7 @@ class TestLandingTopic:
     def test_the_landing_source_owns_the_shared_topic(self):
         # The core `main` source is named for the landing table, so the shared
         # topic has an owner and the sources landing on it do not need one.
-        s = Source(source=DEFAULT_LANDING_LABEL, match=SourceMatch(field="f", value="v"))
+        s = Source(source=DEFAULT_LANDING_LABEL, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
 
         assert s.topic_land == "main_land"
         assert s.owns_landing_topic is True
@@ -1889,7 +1890,7 @@ class TestOmittedFieldsKeepTheStoredValue:
     """A PUT keeps what its body leaves out; only an explicit empty value clears it."""
 
     MATCH = {"field": "f", "value": "v"}
-    STORED = {
+    STORED: dict[str, Any] = {
         "date_time": "2026-01-01",
         "header": {"type": "minimal", "version": "1.0.0"},
         "match": MATCH,
@@ -1996,7 +1997,7 @@ class TestSourceVersionGetResponse:
         )
         assert resp.source == "my-source"
         assert resp.current_table_topic_type == "main"
-        assert resp.version.schema_config.engine == "MergeTree"
+        assert present(resp.version.schema_config).engine == "MergeTree"
         assert resp.version.match is not None
         assert resp.version.match.value == "x"
 
@@ -2116,7 +2117,7 @@ class TestSourceVersioning:
         assert ver.fetcher.config == {"services": [{"name": "alerts"}]}
         assert ver.origin == "fetcher"
         assert ver.view_for("sigma") is not None
-        assert ver.view_for("sigma").taxonomy == "windows"
+        assert present(ver.view_for("sigma")).taxonomy == "windows"
 
     def test_versioned_input_defaults_current_from_deployed_only(self):
         ver_body = {
@@ -2166,7 +2167,7 @@ class TestSourceVersioning:
             versions={},
         )
         with pytest.raises(ValueError, match="at least one"):
-            Source._validate_versions_and_display_name(src)
+            Source._validate_versions_and_display_name(src)  # ty: ignore[call-non-callable]  # pydantic leaves the validator callable on the built class
 
     def test_current_not_in_versions(self):
         ver_body = {

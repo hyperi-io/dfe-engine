@@ -19,8 +19,6 @@ the crypto, scalo owns the key at rest. The ``kid`` is the RFC 7638 JWK thumbpri
 stable, deterministic, and identical wherever the same public key is seen.
 """
 
-from __future__ import annotations
-
 import base64
 import hashlib
 import json
@@ -125,14 +123,17 @@ class JwtAuthority:
 
     @property
     def kid(self) -> str:
+        """The key id new tokens are signed with."""
         return self._active_kid
 
     @property
     def issuer(self) -> str:
+        """The issuer claim new tokens carry."""
         return self._issuer
 
     @property
     def algorithm(self) -> str:
+        """The algorithm new tokens are signed with."""
         return self._alg
 
     def _load_or_mint(self) -> EllipticCurvePrivateKey:

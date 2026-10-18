@@ -26,8 +26,6 @@ Usage:
     full = loader.compose(header, columns)
 """
 
-from __future__ import annotations
-
 import os
 from importlib import resources
 from pathlib import Path
@@ -41,7 +39,6 @@ from dfe_engine.yaml_utils import yaml_load
 
 # Subdirectories of a dfe-schemas tree, wherever that tree is resolved from.
 _COMMON_HEADER_SUBDIR = "common-header"
-_HUNTS_SUBDIR = "hunts"
 REGISTRIES_SUBDIR = "registries"
 
 # The apply manifest at the root of a dfe-schemas tree. Named here rather than
@@ -155,11 +152,6 @@ def _resolve_subdir(name: str) -> Path:
     raise SchemaLoadError(
         f"No dfe-schemas tree carries {name!r}: set DFE_SCHEMAS_DIR or install dfe-schemas"
     )
-
-
-def _resolve_hunts_schemas_dir() -> Path:
-    """Resolve the hunts schemas directory: DFE_SCHEMAS_DIR, then the resolved schemas root."""
-    return _resolve_subdir(_HUNTS_SUBDIR)
 
 
 def _resolve_profiles_dir() -> Path:
@@ -593,7 +585,7 @@ class SchemaLoader:
                           path (e.g. ``common-header/minimal``).
             profiles_dir: Directory containing profile YAML files.
                           When provided, skips the resolution chain.
-            version: Target schema version (semver).  When ``None``,
+            profile_version: Target schema version (semver).  When ``None``,
                      uses the file's ``current`` marker.
 
         Returns:

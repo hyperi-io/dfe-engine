@@ -612,7 +612,7 @@ class TestSyncNeverCreatesAGroupCrossingTheNamespaces:
         provider_registry, group_store = registries
         provider_registry.create(name="test-sso", provider=api_provider)
         group_store.create(members=[], name=case["stored_name"], roles=["admin"])
-        group_store.update(name=case["stored_name"], **case["stored_link"])
+        group_store.update(case["stored_name"], allow_protected=False, **case["stored_link"])
         manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
         groups = [GroupInfo(email="", id=case["group_id"], name=case["group_name"])]
 

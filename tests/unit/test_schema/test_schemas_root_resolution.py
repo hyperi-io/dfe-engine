@@ -13,8 +13,6 @@ Job runs neither, so it resolved no schemas root and then built a path from
 None -- a TypeError that said nothing about what was missing.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.bootstrap import _seed_stamp, ensure_storage
@@ -27,6 +25,7 @@ from dfe_engine.schema.schema_loader import (
     resolve_registry_path,
 )
 from dfe_engine.settings import DFESettings, SchemasSettings
+from tests.support.present import present
 
 
 def _make_schemas_tree(root, *, hunts: bool = True):
@@ -167,7 +166,7 @@ def test_a_volume_an_older_engine_seeded_never_shadows_the_seed(monkeypatch, see
     resolved = _resolve_schemas_root()
 
     assert resolved == seed
-    assert (resolved / "topics" / "kafka.yaml").is_file(), (
+    assert (present(resolved) / "topics" / "kafka.yaml").is_file(), (
         "the resolved root must carry the topic policy the engine reads at import"
     )
 

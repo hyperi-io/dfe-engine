@@ -30,9 +30,8 @@ it.
     uv run pytest tests/e2e/test_data_evolution.py -m live -o addopts=""
 """
 
-from __future__ import annotations
-
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -49,6 +48,7 @@ from tests.e2e.conftest import (
     require,
 )
 from tests.e2e.engine_api import EngineAPI
+from tests.support.present import present
 
 # What a record gets to make the whole trip. A new source's FIRST record waits
 # on dfe-loader's topic refresh, which runs on a 60 s interval, so anything
@@ -397,7 +397,7 @@ def capture_off(engine: EngineAPI, e2e: E2EConfig, ch_client):
 
 
 @pytest.fixture(scope="module")
-def exported_schema(engine: EngineAPI) -> dict:
+def exported_schema(engine: EngineAPI) -> Iterator[dict]:
     """A custom meta schema, exported and re-pathed ready to import.
 
     Built here rather than borrowed from the deployment: a `core` schema exports
@@ -1176,11 +1176,13 @@ class TestStage3:
             )
 
         poll_until(_sent_and_landed, timeout=LANDING_DEADLINE, desc=f"a record in {table}")
-        typed, json_length = _row(
-            ch_client,
-            f"SELECT message, length(toString(`_json`)) FROM {table} "
-            "WHERE host_name = %(h)s LIMIT 1",
-            {"h": f"host-{probe}"},
+        typed, json_length = present(
+            _row(
+                ch_client,
+                f"SELECT message, length(toString(`_json`)) FROM {table} "
+                "WHERE host_name = %(h)s LIMIT 1",
+                {"h": f"host-{probe}"},
+            )
         )
         assert typed, "the typed column did not fill, so this says nothing about _json"
         assert json_length == EMPTY_JSON_LENGTH, (

@@ -36,12 +36,10 @@ the SELECT terms it needs and reads its own columns back out of the same
 bounded read, so a second property costs no second scan.
 """
 
-from __future__ import annotations
-
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, override
 
 from dfe_engine.schema.schema_ddl import quote_ident
 from dfe_engine.services.schema.json_promotion_service import (
@@ -144,9 +142,11 @@ class CardinalityProbe(ShapeProbe):
     def __init__(self, *, ceiling: int = LOW_CARDINALITY_CEILING) -> None:
         self._ceiling = ceiling
 
+    @override
     def terms(self, accessor: str) -> dict[str, str]:
         return {"distinct_values": f"uniqCombined({accessor})"}
 
+    @override
     def read(self, values: Mapping[str, Any], rows: int) -> tuple[str, dict[str, int]]:
         distinct = int(values["distinct_values"] or 0)
         detail = {"distinct_values": distinct, "ceiling": self._ceiling}

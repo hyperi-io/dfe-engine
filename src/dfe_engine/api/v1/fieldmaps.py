@@ -8,8 +8,6 @@ DELETE /api/v1/field-maps/{standard}/{source} -> Delete source-specific map
 POST   /api/v1/field-maps/seed             -> Seed built-in defaults
 """
 
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
@@ -27,6 +25,8 @@ router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
 
 
 class FieldMapSummary(BaseModel):
+    """A field map in a listing."""
+
     standard: str
     source: str | None = None
     is_default: bool = False
@@ -36,6 +36,8 @@ class FieldMapSummary(BaseModel):
 
 
 class SeedResponse(BaseModel):
+    """How many default field maps were seeded."""
+
     seeded: int
 
 

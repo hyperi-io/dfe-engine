@@ -65,16 +65,6 @@ reconciler substitutes ``clickhouse.effective_data_database`` (see
 ``resolve_grant_databases``).
 """
 
-# The analyst tier grants the WHOLE data database to EVERY user, org and platform
-# alike: an org_viewer sees every source table with no admin action. Isolation is
-# by ROW POLICY, not grant scope - a RESTRICTIVE `_org_id` policy fences each org
-# to its own rows, and a `USING 0` deny policy hides the tables that carry no
-# `_org_id` (otel_*, meta, the engine's own state). The reconciler DISCOVERS which
-# tables those are, so a new one is fenced without anyone remembering.
-# (D9: reverses D8's per-table grant narrowing.)
-BROAD_DATA_GRANT = f"SELECT ON {DB}.*"
-
-
 # ClickHouse's own introspection tables, granted to the platform reader so the
 # pre-canned ClickHouse dashboards (and an operator writing ad-hoc SQL) can ask
 # the server about itself. Named one by one rather than `system.*`: a tenant must
@@ -177,15 +167,19 @@ class ChTier(BaseModel):
     quota: dict[str, Any] = Field(default_factory=dict)
 
     def role(self) -> str:
+        """The ClickHouse role this tier creates."""
         return _naming("role").format(name=self.name)
 
     def profile(self) -> str:
+        """The settings profile this tier creates."""
         return _naming("settings_profile").format(name=self.name)
 
     def quota_name(self) -> str:
+        """The quota this tier creates."""
         return _naming("quota").format(name=self.name)
 
     def quota_interval(self) -> str:
+        """The quota's interval, an hour unless set."""
         return str(self.quota.get("interval", "1 hour"))
 
     def quota_maxima(self) -> dict[str, int]:
@@ -207,9 +201,11 @@ class ChServiceRole(BaseModel):
     settings: dict[str, int] = Field(default_factory=dict)
 
     def role(self) -> str:
+        """The ClickHouse role this service role creates."""
         return _naming("role").format(name=self.name)
 
     def profile(self) -> str:
+        """The settings profile this service role creates."""
         return _naming("settings_profile").format(name=self.name)
 
     def user(self) -> str:
@@ -238,6 +234,7 @@ class GroupChBinding(BaseModel):
     ch_roles: list[str] = Field(default_factory=list)
 
     def user(self) -> str:
+        """The ClickHouse user for this group, ``ch_user`` when set."""
         return self.ch_user or group_user_name(self.group)
 
 

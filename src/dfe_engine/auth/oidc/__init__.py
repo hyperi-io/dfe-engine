@@ -5,8 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-
-from __future__ import annotations
+"""OIDC provider models, with the provider registry loaded on first use."""
 
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 

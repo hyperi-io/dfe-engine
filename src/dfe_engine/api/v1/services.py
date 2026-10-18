@@ -54,12 +54,16 @@ def _as_redacted(value: Any) -> Any:
 
 
 class ServiceConfigSummary(BaseModel):
+    """One service config instance in a listing."""
+
     service: str
     instance: str
     updated_at: str | None = None
 
 
 class ValidationResult(BaseModel):
+    """Whether a service config is valid, and its errors."""
+
     valid: bool
     errors: list[str] = Field(default_factory=list)
 
@@ -73,6 +77,8 @@ class ServiceConfigDetail(BaseModel):
 
 
 class ConfigHistoryEntry(BaseModel):
+    """One commit that changed a service config."""
+
     commit: str
     message: str
     author: str
@@ -80,6 +86,8 @@ class ConfigHistoryEntry(BaseModel):
 
 
 class SeedResponse(BaseModel):
+    """How many default service configs were seeded."""
+
     seeded: int
 
 

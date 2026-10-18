@@ -103,4 +103,4 @@ def test_discovery_refuses_with_422_when_clickhouse_cannot_be_read(unreachable):
         )
 
     assert refused.value.status_code == 422
-    assert refused.value.detail["code"] == "discovery_failed"
+    assert refused.value.detail["code"] == "discovery_failed"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict

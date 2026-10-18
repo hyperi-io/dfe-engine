@@ -1019,7 +1019,7 @@ class TestGitopsMode:
         from dfe_engine.settings import GitopsSettings
 
         with pytest.raises(ValidationError):
-            GitopsSettings(mode="duo")
+            GitopsSettings(mode="duo")  # ty: ignore[invalid-argument-type]  # the refused value is the point of the test
 
     def test_env_override(self, monkeypatch):
         from dfe_engine.settings import _get_env_overrides

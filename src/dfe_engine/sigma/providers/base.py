@@ -21,8 +21,6 @@ Auth (git token / api key) resolves through the scalo.secrets seam (DfeSecrets):
 the provider config holds only a secret PATH, never a secret value.
 """
 
-from __future__ import annotations
-
 import abc
 from datetime import date, datetime
 from enum import Enum
@@ -80,11 +78,12 @@ class ProviderConfig(BaseModel):
 
     @model_validator(mode="after")
     def _reject_local_file_url(self) -> ProviderConfig:
-        """Refuse a ``file://`` git URL. It is never a legitimate remote and turns
-        provider registration into an arbitrary local-file read / SSRF primitive
-        (reachable now that sigma:write is a data_analyst grant, not admin-only).
-        NB host-allowlisting and confining a local_files ``directory`` under a
-        configured root remain an operator-policy decision, flagged separately.
+        """Refuse a ``file://`` git URL.
+
+        It is never a legitimate remote and turns provider registration into an
+        arbitrary local-file read / SSRF primitive (reachable because sigma:write is a
+        data_analyst grant, not admin-only). Host allowlisting and confining a
+        local_files ``directory`` under a configured root are left to operator policy.
         """
         url = str(self.options.get("url", "")).strip().lower()
         if url.startswith("file:"):
@@ -198,6 +197,7 @@ class SigmaProvider(abc.ABC):
 
     @property
     def name(self) -> str:
+        """The provider's configured name."""
         return self.config.name
 
     @property

@@ -92,7 +92,8 @@
         "required": [
           "enabled"
         ],
-        "title": "E2EStatusResponse"
+        "title": "E2EStatusResponse",
+        "description": "Whether the e2e seeding routes are mounted."
       },
       "HTTPValidationError": {
         "properties": {
@@ -132,7 +133,8 @@
         "required": [
           "script"
         ],
-        "title": "SeedRequest"
+        "title": "SeedRequest",
+        "description": "The seed script to run, by name."
       },
       "SeedResponse": {
         "properties": {
@@ -150,7 +152,8 @@
           "success",
           "message"
         ],
-        "title": "SeedResponse"
+        "title": "SeedResponse",
+        "description": "Whether the seed script ran, and what it reported."
       },
       "ValidationError": {
         "properties": {

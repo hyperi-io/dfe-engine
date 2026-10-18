@@ -6,8 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""One TLS posture, resolved once, for every clickhouse-connect client the
-engine mints.
+"""One TLS setting, resolved once, for every clickhouse-connect client the engine mints.
 
 ``ClickHouseManager``, ``ConnectionRegistry``, the restricted query client,
 the hunt-runner CLI and the KEDA shim each build their own clickhouse-connect

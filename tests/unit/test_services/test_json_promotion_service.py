@@ -6,8 +6,6 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-from __future__ import annotations
-
 from typing import Any, TypedDict
 
 import pytest
@@ -30,14 +28,15 @@ from dfe_engine.services.schema.json_promotion_service import (
     suggested_column_name,
 )
 from dfe_engine.source.type_registry import TypeRegistry
+from tests.support.present import present
 
 
-def make_meta_schema_column(name: str, type: str = "string", **kwargs: object) -> MetaSchemaColumn:
-    """Build a schema.models.SchemaColumn (meta-schema layer)."""
-    return MetaSchemaColumn.model_validate({"name": name, "type": type, **kwargs})
+def make_meta_schema_column(name: str, **fields: object) -> MetaSchemaColumn:
+    """Build a schema.models.SchemaColumn (meta-schema layer), a string column by default."""
+    return MetaSchemaColumn.model_validate({"name": name, "type": "string", **fields})
 
 
-def make_promotion_request(json_path: str, **kwargs: object) -> PromotionRequest:
+def make_promotion_request(json_path: str, **kwargs: str | None) -> PromotionRequest:
     """Build a PromotionRequest."""
     return PromotionRequest(json_path=json_path, **kwargs)
 
@@ -512,7 +511,7 @@ class TestBuildPromotionColumns:
             type_registry=TypeRegistry.default(),
             path_types={"user.email": ["String"]},
         )
-        column = outcomes[0].column
+        column = present(outcomes[0].column)
         assert column.expr == "@source: user.email"
         assert column.use_case == "exact_match"
         assert column.type == "string"
@@ -536,7 +535,7 @@ class TestBuildPromotionColumns:
             path_types={},
         )
         assert outcomes[0].status == "error"
-        assert reason in outcomes[0].error
+        assert reason in present(outcomes[0].error)
 
     def test_index_use_case_invalid_for_primitive_errors(self):
         # range is not a question a string column can be asked.
@@ -547,7 +546,7 @@ class TestBuildPromotionColumns:
             path_types={"user.email": ["String"]},
         )
         assert outcomes[0].status == "error"
-        assert "not valid for primitive 'string'" in outcomes[0].error
+        assert "not valid for primitive 'string'" in present(outcomes[0].error)
 
 
 # ── promotion_preview_ddl ────────────────────────────────────
@@ -561,7 +560,7 @@ class TestPromotionPreviewDdl:
             type_registry=TypeRegistry.default(),
             path_types={"user.email": ["String"]},
         )
-        columns = [o.column for o in outcomes if o.status == "ok"]
+        columns = [present(o.column) for o in outcomes if o.status == "ok"]
         statements = promotion_preview_ddl("filebeat", columns, db="dfe")
         joined = "\n".join(statements)
         assert "ALTER TABLE `dfe`.`filebeat` ADD COLUMN IF NOT EXISTS `user_email`" in joined
@@ -709,7 +708,7 @@ class TestDiscoverPaths:
         from dfe_engine.services.source_routing import receiver_match
         from dfe_engine.source.models import Source, SourceMatch
 
-        source = Source(
+        source = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
             source="filebeat",
             match=SourceMatch(field="tags.collector.type", value="syslog"),
         )

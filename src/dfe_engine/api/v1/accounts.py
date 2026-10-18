@@ -221,6 +221,8 @@ class CreateAccountRequest(BaseModel):
 
 
 class UpdateAccountRequest(BaseModel):
+    """Body for updating an account, where an omitted field keeps its value."""
+
     groups: list[str] | None = Field(None, description="Replace group memberships")
     enabled: bool | None = Field(None, description="Enable or disable the account")
     blocked: bool | None = Field(None, description="Block the account from holding a session")
@@ -239,6 +241,8 @@ class UpdateOwnAccountRequest(BaseModel):
 
 
 class ResetPasswordRequest(BaseModel):
+    """Body for setting an account's new password."""
+
     new_password: str = Field(
         min_length=MIN_ADMIN_PASSWORD_LENGTH,
         description=(
@@ -480,7 +484,8 @@ async def _reset_stored_password(
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
     _refuse_external(existing)
-    if not await run_blocking(_write_new_password, store, existing, new_password):
+    # scalo-py#126: run_blocking's ParamSpec signature rejects every forwarded argument.
+    if not await run_blocking(_write_new_password, store, existing, new_password):  # ty: ignore[invalid-argument-type]
         raise HTTPException(
             status_code=400,
             detail={
@@ -663,7 +668,9 @@ async def update_current_user_account(
     store: AccountStore = request.app.state.account_store
     existing = _require_own_account(store, user.user_id)
     fields = _contact_updates(body)
-    account = store.update(existing.username, **fields) if fields else existing
+    account = (
+        store.update(existing.username, allow_protected=False, **fields) if fields else existing
+    )
     await _persist_account(
         request,
         settings,
@@ -810,7 +817,7 @@ async def update_account(
         # The group files decide membership, so diff against them: re-sending a list repairs drift.
         listed_in = {g.name for g in group_store.list() if username in g.members}
         new_groups = set(body.groups)
-        account = store.update(username, **update_fields)
+        account = store.update(username, allow_protected=False, **update_fields)
         sync_group_members_for_account_groups_change(
             group_store,
             username,
@@ -818,7 +825,7 @@ async def update_account(
             removed=listed_in - new_groups,
         )
     else:
-        account = store.update(username, **update_fields)
+        account = store.update(username, allow_protected=False, **update_fields)
     await _persist_account(
         request,
         settings,
@@ -882,7 +889,8 @@ async def reset_current_user_password(
     wait = throttle.retry_after(account.username, client_ip)
     if wait:
         raise throttled(request, wait)
-    if not await run_blocking(store.verify_password, account.username, body.current_password):
+    # scalo-py#126: run_blocking's ParamSpec signature rejects every forwarded argument.
+    if not await run_blocking(store.verify_password, account.username, body.current_password):  # ty: ignore[invalid-argument-type]
         throttle.failed(account.username, client_ip)
         audit_login_denied(user.user_id, "password_change", client_ip, "wrong_current_password")
         raise HTTPException(

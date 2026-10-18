@@ -88,14 +88,14 @@ def _origin(url: str) -> str:
 
 
 def validate_return_to(return_to: str, request_origin: str, trusted_origins: list[str]) -> str:
-    """Accept a relative path or an absolute URL on a trusted origin; raise 400 otherwise.
+    r"""Accept a relative path or an absolute URL on a trusted origin, else raise 400.
 
     A relative path must start with a single ``/`` (``//host`` is scheme-relative
     and would leave the origin). An absolute URL must be http(s) on the API's own
     origin or on one of the configured CORS origins, which already name the
     browser clients allowed to talk to this API. A backslash, tab, CR or LF is
-    refused anywhere, because a browser reads ``\\`` as ``/`` and drops the others,
-    which turns ``/\\host`` or ``/<tab>/host`` into ``//host``.
+    refused anywhere, because a browser reads ``\`` as ``/`` and drops the others,
+    which turns ``/\host`` or ``/<tab>/host`` into ``//host``.
     """
     if any(char in return_to for char in "\\\t\r\n"):
         _refuse_return_to()

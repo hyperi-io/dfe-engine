@@ -248,7 +248,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # document store is engine-wide and lifespan-owned so consumers share it.
     from dfe_engine.auth.store_backend import resolve_store_backend
 
-    store_backend, doc_store = resolve_store_backend(
+    # A document store comes back exactly when the resolved backend is 'document'.
+    _, doc_store = resolve_store_backend(
         settings.auth.store_backend,
         settings.auth.accounts_store.uri,
         settings.auth.accounts_store.database,
@@ -259,7 +260,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     group_metrics = GroupMetrics(app.state.metrics_manager)
     injected_account_store = None
     injected_group_store = None
-    if store_backend == "document":
+    if doc_store is not None:
         from dfe_engine.auth.accounts import DocuStoreAccountStore
         from dfe_engine.auth.groups import DocuStoreGroupStore
 
@@ -313,7 +314,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # mode, else one YAML dir each under auth_dir.
     from dfe_engine.auth.attributes import AttributeStore, DocuStoreAttributeStore
 
-    if store_backend == "document":
+    if doc_store is not None:
         app.state.account_sensitive_attributes = DocuStoreAttributeStore(
             doc_store, collection="sensitive_account_attributes"
         )

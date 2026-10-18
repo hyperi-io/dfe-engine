@@ -12,7 +12,7 @@ it which transports the deployment offers, and a stub would answer whatever the
 test wished for.
 """
 
-from __future__ import annotations
+from collections.abc import Collection
 
 import pytest
 
@@ -49,7 +49,7 @@ def direct_settings() -> DFESettings:
 
 
 class FakeRegistry:
-    """The two reader methods the routing compilers call."""
+    """The two reader methods the routing compilers call, as SourceReader declares them."""
 
     def __init__(self, sources: list[Source]) -> None:
         self._sources = {s.source: s for s in sources}
@@ -60,7 +60,7 @@ class FakeRegistry:
         return self._sources[source_name]
 
     def get_all_sources(
-        self, enabled_only: bool = False, *, states: tuple[str, ...] | None = None
+        self, enabled_only: bool = False, *, states: Collection[str] | None = None
     ) -> list[Source]:
         sources = list(self._sources.values())
         if states is not None:

@@ -51,8 +51,6 @@ Usage:
     )
 """
 
-from __future__ import annotations
-
 import copy
 import re
 from collections.abc import Sequence
@@ -116,7 +114,7 @@ def _with_current_use_cases(columns: list[dict[str, Any]]) -> list[dict[str, Any
 
 
 def _normalise_columns(
-    columns: list[dict[str, Any] | SchemaColumn],
+    columns: Sequence[dict[str, Any] | SchemaColumn],
 ) -> list[dict[str, Any]]:
     """Accept dicts or SchemaColumn models, return plain dicts for YAML."""
     result = []

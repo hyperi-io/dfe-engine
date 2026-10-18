@@ -147,6 +147,8 @@ def _checked_scopes(scopes: list[str]) -> list[str]:
 
 
 class GroupResolutionRequest(BaseModel):
+    """How a provider's groups resolve: by hand, from a token claim, or from its API."""
+
     mode: Literal["manual", "token_claim", "api"] = Field(
         default="token_claim",
         description="Group resolution mode: manual, token_claim, api",
@@ -215,6 +217,8 @@ class GroupResolutionRequest(BaseModel):
 
 class CreateProviderRequest(BaseModel):
     # A filename stem and a secret-store path segment, refused before any secret is written.
+    """Body for registering an OIDC provider."""
+
     name: StoreName = Field(description="Unique provider name (used as filename stem)")
     type: Literal["generic", "google", "entra_id", "okta"] = Field(
         description="Provider type: generic, google, entra_id, okta"
@@ -257,6 +261,8 @@ class CreateProviderRequest(BaseModel):
 
 
 class UpdateProviderRequest(BaseModel):
+    """Body for updating a provider, where an omitted field keeps its value."""
+
     enabled: bool | None = Field(None, description="Enable or disable the provider")
     display_name: str | None = Field(None, description="Human-readable label")
     client_id: str | None = Field(None, description="OIDC client ID (not a secret)")
@@ -294,6 +300,8 @@ class UpdateProviderRequest(BaseModel):
 
 
 class GroupResolutionResponse(BaseModel):
+    """A provider's group resolution, with secret paths in place of values."""
+
     mode: str
     claim_name: str
     sync_interval: int
@@ -336,6 +344,8 @@ class ProviderResponse(BaseModel):
 
 
 class OrphanedGroupInfo(BaseModel):
+    """A group its provider no longer backs."""
+
     name: str
     source_provider: str
     roles: list[str]
@@ -354,6 +364,8 @@ class DisabledAccountInfo(BaseModel):
 
 
 class DetachResponse(BaseModel):
+    """What detaching a provider deleted, orphaned and disabled."""
+
     deleted: str
     orphaned_groups: list[OrphanedGroupInfo]
     disabled_accounts: list[DisabledAccountInfo] = Field(
@@ -367,6 +379,8 @@ class DetachResponse(BaseModel):
 
 
 class SyncResponse(BaseModel):
+    """The outcome of a group sync."""
+
     created: int
     updated: int
     total: int
@@ -398,6 +412,8 @@ class SyncResponse(BaseModel):
 
 
 class TestResponse(BaseModel):
+    """Whether the provider answered the connection test."""
+
     success: bool
     message: str
 

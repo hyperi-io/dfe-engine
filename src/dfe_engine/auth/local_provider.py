@@ -21,10 +21,8 @@ Usage::
     auth = provider.authenticate("admin", "changeme")
 """
 
-from __future__ import annotations
-
-from dfe_engine.auth.accounts import AccountStore
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
+from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
 from dfe_engine.auth.models import AuthContext, AuthenticationError
 
 
@@ -33,8 +31,8 @@ class LocalAuthProvider:
 
     def __init__(
         self,
-        account_store: AccountStore,
-        group_store: GroupStore,
+        account_store: AccountStore | DocuStoreAccountStore,
+        group_store: GroupStore | DocuStoreGroupStore,
     ) -> None:
         self._accounts = account_store
         self._groups = group_store

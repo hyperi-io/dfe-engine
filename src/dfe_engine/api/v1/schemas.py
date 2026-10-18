@@ -156,14 +156,6 @@ def _meta_schema_resource_type(
         return "custom"
 
 
-class SchemaVersionInfo(BaseModel):
-    """Summary of a schema version."""
-
-    version: str
-    column_count: int
-    columns: list[SchemaColumn]
-
-
 class DDLResult(BaseModel):
     """Generated DDL output."""
 
@@ -1390,25 +1382,6 @@ def _resolve_meta_schema(rel, source_name, schema_registry):
             },
         ) from None
     return canonical, meta, meta.versions[meta.current].columns
-
-
-def _resolve_source_meta_schema(source, schema_registry):
-    """Resolve a source's (deployed) meta-schema: (canonical path, MetaSchema, columns).
-
-    Raises:
-        HTTPException: 422 when the source has no meta_schema, 404 when the
-        referenced meta-schema is missing.
-    """
-    rel = source.schema_config.meta_schema
-    if not rel:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "code": "no_meta_schema",
-                "message": f"Source '{source.source}' has no meta_schema configured",
-            },
-        )
-    return _resolve_meta_schema(rel, source.source, schema_registry)
 
 
 def _resolve_promote_meta_schema(

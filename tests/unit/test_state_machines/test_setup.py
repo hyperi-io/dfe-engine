@@ -27,8 +27,10 @@ from dfe_engine.state_machines.setup import (
     STEP_FIRST_USER,
     STEP_OIDC_PROVIDER,
     STEP_ORGANISATIONS,
+    OIDCProviderSummary,
     SetupContext,
 )
+from tests.support.present import present
 
 # A password a deployment minted, as opposed to the shipped default.
 MINTED_ADMIN_PASSWORD = "a-minted-admin-password"
@@ -179,7 +181,7 @@ def test_default_credentials_clears_once_the_admin_replaces_its_issued_password(
     ctx = _issued_admin(tmp_path)
     assert SETUP_MACHINE.status(ctx).default_credentials is True
 
-    ctx.account_store.reset_password("admin", secrets.token_urlsafe(16))
+    present(ctx.account_store).reset_password("admin", secrets.token_urlsafe(16))
 
     assert SETUP_MACHINE.status(ctx).default_credentials is False
 
@@ -187,7 +189,7 @@ def test_default_credentials_clears_once_the_admin_replaces_its_issued_password(
 def test_a_retired_admin_is_not_on_the_default_password(tmp_path):
     """Retirement disables the admin, and an operator may then delete its password."""
     ctx = _issued_admin(tmp_path)
-    ctx.account_store.update("admin", enabled=False, allow_protected=True)
+    present(ctx.account_store).update("admin", enabled=False, allow_protected=True)
 
     assert SETUP_MACHINE.status(ctx).default_credentials is False
 
@@ -411,8 +413,8 @@ def test_completed_setup_still_carries_the_password_hint(ctx):
 
 
 def _complete(ctx: SetupContext) -> SetupContext:
-    ctx.org_registry.create("acme")
-    ctx.account_store.create("alice", "a-strong-user-password")
+    present(ctx.org_registry).create("acme")
+    present(ctx.account_store).create("alice", "a-strong-user-password")
     return _minted(ctx)
 
 
@@ -483,4 +485,5 @@ def test_incomplete_setup_still_returns_full_oidc_providers(ctx):
     providers = SETUP_MACHINE.status(ctx).oidc_providers
 
     assert [p.name for p in providers] == ["okta"]
+    assert isinstance(providers[0], OIDCProviderSummary)
     assert providers[0].issuer == "https://okta"

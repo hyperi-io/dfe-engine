@@ -13,8 +13,6 @@ keys present, so the LogParser (VRL generation) and QueryGenerator (query-builde
 have real samples + an available-column list to work from.
 """
 
-from __future__ import annotations
-
 import json
 from typing import Any
 
@@ -22,10 +20,10 @@ from typing import Any
 def sample_json_rows(
     ch: Any, table: str, *, limit: int = 100, source: str | None = None
 ) -> list[str]:
-    """Up to ``limit`` raw ``_json`` values (as JSON strings) from ``table``.
+    r"""Up to ``limit`` raw ``_json`` values (as JSON strings) from ``table``.
 
     ``table`` is caller-supplied and must be a TRUSTED, already-qualified identifier
-    (e.g. ``\\`db\\`.\\`events\\```) - it is interpolated, not bound (ClickHouse does
+    (e.g. ``\`db\`.\`events\```) - it is interpolated, not bound (ClickHouse does
     not bind table names). Optionally filter to one source via ``_source``.
     """
     where = ""

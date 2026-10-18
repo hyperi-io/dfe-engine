@@ -1,3 +1,5 @@
+"""Schema loading, building and DDL generation."""
+
 from .ddl_writer import DDLFileWriter
 from .schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from .schema_ddl import DDLConfig, DDLGenerator

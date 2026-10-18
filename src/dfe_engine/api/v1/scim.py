@@ -126,7 +126,8 @@ def scim_error(status_code: int, detail: str, scim_type: str | None = None) -> J
     Public because the app-level exception handlers answer a SCIM request in this
     envelope rather than the native one.
     """
-    err = Error(status=status_code, detail=detail, scim_type=scim_type)
+    # scim2-models fills `schemas` from `__schema__` in a before-validator ty cannot see.
+    err = Error(status=status_code, detail=detail, scim_type=scim_type)  # ty: ignore[missing-argument]
     return JSONResponse(
         content=err.model_dump(),
         status_code=status_code,
@@ -286,7 +287,8 @@ async def list_users(user: CurrentUser, request: Request) -> Response:
         )
         for a in window
     ]
-    lr = ListResponse[ScimUser](
+    # scim2-models fills `schemas` from `__schema__` in a before-validator ty cannot see.
+    lr = ListResponse[ScimUser](  # ty: ignore[missing-argument]
         total_results=total,
         start_index=start_index,
         items_per_page=len(resources),
@@ -556,7 +558,8 @@ async def list_groups(user: CurrentUser, request: Request) -> Response:
     resources = [
         group_to_scim_group(g, location=_location(request, "Groups", g.name)) for g in window
     ]
-    lr = ListResponse[ScimGroup](
+    # scim2-models fills `schemas` from `__schema__` in a before-validator ty cannot see.
+    lr = ListResponse[ScimGroup](  # ty: ignore[missing-argument]
         total_results=total,
         start_index=start_index,
         items_per_page=len(resources),
@@ -609,7 +612,7 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
         validate_store_name(name)
     except InvalidNameError as exc:
         return scim_error(400, f"displayName: {exc}", "invalidValue")
-    members = list(fields["members"])  # type: ignore[arg-type]
+    members = list(fields["members"])
     taken = _refuse_taken_provider_id(store, str(fields["source_id"]), name)
     if taken is not None:
         return taken
@@ -656,7 +659,7 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
         return _invalid_body("Group", exc)
 
     fields = scim_group_to_group_fields(inbound)
-    new_members = list(fields["members"])  # type: ignore[arg-type]
+    new_members = list(fields["members"])
     old = set(existing.members)
     new = set(new_members)
     moves_link = fields["source_id"] != existing.source_id
@@ -889,7 +892,8 @@ def _member_values(value) -> list[str]:
 @router.get("/ServiceProviderConfig")
 async def service_provider_config(request: Request) -> Response:
     """Static SCIM capability advertisement (RFC 7643 s5)."""
-    config = ServiceProviderConfig(
+    # scim2-models fills `schemas` from `__schema__` in a before-validator ty cannot see.
+    config = ServiceProviderConfig(  # ty: ignore[missing-argument]
         documentation_uri=None,
         patch=Patch(supported=True),
         bulk=Bulk(supported=False, max_operations=0, max_payload_size=0),
@@ -917,7 +921,8 @@ async def service_provider_config(request: Request) -> Response:
 async def resource_types(request: Request) -> Response:
     """Advertise the User and Group resource types."""
     types = [ResourceType.from_resource(ScimUser), ResourceType.from_resource(ScimGroup)]
-    lr = ListResponse[ResourceType](
+    # scim2-models fills `schemas` from `__schema__` in a before-validator ty cannot see.
+    lr = ListResponse[ResourceType](  # ty: ignore[missing-argument]
         total_results=len(types), start_index=1, items_per_page=len(types), resources=types
     )
     return JSONResponse(
@@ -930,7 +935,8 @@ async def resource_types(request: Request) -> Response:
 async def schemas(request: Request) -> Response:
     """Advertise the User and Group core schemas (generated from scim2-models)."""
     defs: list[Schema] = [ScimUser.to_schema(), ScimGroup.to_schema()]
-    lr = ListResponse[Schema](
+    # scim2-models fills `schemas` from `__schema__` in a before-validator ty cannot see.
+    lr = ListResponse[Schema](  # ty: ignore[missing-argument]
         total_results=len(defs), start_index=1, items_per_page=len(defs), resources=defs
     )
     return JSONResponse(

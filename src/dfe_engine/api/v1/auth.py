@@ -72,11 +72,15 @@ RequestTime = Annotated[int, Depends(request_time)]
 
 
 class LoginRequest(BaseModel):
+    """Body for a local login."""
+
     username: str = Field(description="Account name (admin, operator, viewer)")
     password: str = Field(description="Plaintext password")
 
 
 class TokenResponse(BaseModel):
+    """The token a login issues, with the flags the UI acts on."""
+
     access_token: str = Field(description="JWT Bearer token")
     token_type: str = Field(default="bearer")
     expires_in: int = Field(description="Token lifetime in seconds")
@@ -97,6 +101,8 @@ class TokenResponse(BaseModel):
 
 
 class UserResponse(BaseModel):
+    """The calling user, their roles, permissions and org access."""
+
     org_id: str
     user_id: str
     roles: list[str]
@@ -141,6 +147,8 @@ class UserResponse(BaseModel):
 
 
 class PermissionsResponse(BaseModel):
+    """The calling user's roles and the permissions they resolve to."""
+
     roles: list[str] = Field(description="User's assigned roles")
     permissions: list[str] = Field(description="Resolved permissions from all roles")
 
@@ -300,13 +308,14 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
             )
 
     try:
+        # scalo-py#126: run_blocking's ParamSpec signature rejects every forwarded argument.
         auth_ctx = await run_blocking(
             provider.authenticate,
-            body.username,
-            body.password,
-            request_id=request.headers.get("X-Request-ID"),
-            client_ip=client_ip,
-            user_agent=request.headers.get("User-Agent"),
+            body.username,  # ty: ignore[invalid-argument-type]
+            body.password,  # ty: ignore[invalid-argument-type]
+            request_id=request.headers.get("X-Request-ID"),  # ty: ignore[invalid-argument-type]
+            client_ip=client_ip,  # ty: ignore[invalid-argument-type]
+            user_agent=request.headers.get("User-Agent"),  # ty: ignore[invalid-argument-type]
         )
     except AuthenticationError as exc:
         throttle.failed(body.username, client_ip)

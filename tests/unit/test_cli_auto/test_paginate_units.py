@@ -16,7 +16,7 @@ and a non-envelope runtime body being returned as-is. A tiny real Starlette stub
 returns the crafted bodies - no mocks.
 """
 
-from __future__ import annotations
+from typing import Any
 
 import pytest
 from starlette.applications import Starlette
@@ -30,7 +30,7 @@ from dfe_engine.cli.auto.spec import Operation
 
 
 def _op(path: str, **over) -> Operation:
-    base = {
+    base: dict[str, Any] = {
         "path": path,
         "method": "get",
         "path_params": [],

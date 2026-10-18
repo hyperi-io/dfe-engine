@@ -24,8 +24,6 @@ A resource file carries it under a top-level ``metadata`` key::
     <resource body>
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -67,8 +65,10 @@ def extract_metadata(doc: dict[str, Any]) -> ResourceMetadata:
 
 
 def with_metadata(doc: dict[str, Any], metadata: ResourceMetadata) -> dict[str, Any]:
-    """Return ``doc`` with its ``metadata`` block set (non-empty fields only), so the
-    stored file stays clean."""
+    """Return ``doc`` with its ``metadata`` block set from the non-empty fields only.
+
+    Leaving the empty ones out keeps the stored file clean.
+    """
     out = dict(doc)
     # exclude_defaults (not exclude_none + empty-filter) so unknown EXTRA keys
     # survive the round-trip while defaulted standard fields stay off disk.

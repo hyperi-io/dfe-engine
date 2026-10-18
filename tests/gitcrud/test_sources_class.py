@@ -12,8 +12,6 @@ exchange file = stored doc, every mutation is one commit, and the universal
 gitcrud metadata block rides on the stored file.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.gitcrud import GitCrud
@@ -41,7 +39,7 @@ def registry(crud):
 
 
 def _source(name: str = "filebeat", *, value: str | None = None, enabled: bool = True) -> Source:
-    return Source(
+    return Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         source=name,
         enabled=enabled,
         description=f"{name} test source",
@@ -106,12 +104,15 @@ class TestCrudBackedCrud:
 
     def test_delete_commit_carries_attribution(self, registry, crud):
         """Delete commits are attributed like saves: '(by <created_by>)' suffix."""
+        from dulwich.objects import Commit
         from dulwich.repo import Repo
 
         registry.save_source(_source())
         registry.delete_source("filebeat", created_by="kaz")
         repo = Repo(str(crud.repo_path))
-        msg = repo[repo.head()].message.decode()
+        head = repo[repo.head()]
+        assert isinstance(head, Commit)
+        msg = head.message.decode()
         assert msg.startswith("source: delete filebeat")
         assert "(by kaz)" in msg
 

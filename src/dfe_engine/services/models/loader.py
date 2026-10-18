@@ -116,6 +116,7 @@ class ClickHouseConfig(BaseModel):
     def validate_protocol(cls, v: str) -> str:
         # The loader rejects native at startup: its pinned ClickHouse client has
         # no TCP row fetch, so every message stalls pending schema (#115).
+        """Refuse any ClickHouse protocol but http."""
         if v.lower() == "native":
             msg = (
                 "clickhouse.protocol 'native' cannot serve the loader's schema fetch: "
@@ -225,6 +226,7 @@ class TimestampDqConfig(BaseModel):
     @field_validator("invalid_action")
     @classmethod
     def validate_invalid_action(cls, v: str) -> str:
+        """Refuse an invalid-timestamp action other than replace_with_now, drop or dlq."""
         allowed = {"replace_with_now", "drop", "dlq"}
         if v.lower() not in allowed:
             msg = f"Invalid action: {v}. Allowed: {', '.join(sorted(allowed))}"
@@ -335,6 +337,7 @@ class CoercionConfig(BaseModel):
     @field_validator("null_handling")
     @classmethod
     def validate_null_handling(cls, v: str) -> str:
+        """Refuse a null handling mode other than default, error or passthrough."""
         allowed = {"default", "error", "passthrough"}
         if v.lower() not in allowed:
             msg = f"Invalid null_handling: {v}. Allowed: {', '.join(sorted(allowed))}"
@@ -399,6 +402,7 @@ class LoaderConfig(BaseServiceConfig):
     @field_validator("transport")
     @classmethod
     def validate_transport(cls, v: str) -> str:
+        """Refuse a transport other than kafka or grpc, and lower-case the one given."""
         allowed = {"kafka", "grpc"}
         if v.lower() not in allowed:
             msg = f"Invalid transport: {v}. Allowed: {', '.join(sorted(allowed))}"

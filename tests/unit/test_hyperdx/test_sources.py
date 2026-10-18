@@ -15,8 +15,6 @@ nobody. And HyperDX being down or absent must cost the deploy nothing: the
 schema, the topics and the app routing are all already live by then.
 """
 
-from __future__ import annotations
-
 from types import SimpleNamespace
 from typing import Any
 
@@ -35,6 +33,7 @@ from dfe_engine.hyperdx.sources import (
     source_spec,
     timestamp_column,
 )
+from tests.support.present import present
 from tests.unit.test_hyperdx.fake_hyperdx import HUMAN_TEAMS, Exploding, FakeHyperDX
 
 # The default `timeseries` header profile; `passthrough` is the one without an
@@ -240,7 +239,7 @@ class TestListSourcesByTeam:
             client, name="filebeat", database="dfe", table="filebeat", columns=TIMESERIES_COLUMNS
         )
 
-        listing = await list_sources_by_team(client)
+        listing = present(await list_sources_by_team(client))
 
         assert [entry["teamName"] for entry in listing] == HUMAN_TEAMS
         assert [source["name"] for source in listing[0]["sources"]] == ["filebeat"]
@@ -261,7 +260,10 @@ class TestRouterHelpers:
         client = FakeHyperDX()
 
         teams, error = await _sync_hyperdx_source(
-            request_with(client), dfe_source("filebeat"), "dfe", TIMESERIES_COLUMNS
+            request_with(client),
+            dfe_source("filebeat"),  # ty: ignore[invalid-argument-type]  # a stand-in source carrying only the fields this path reads
+            "dfe",
+            TIMESERIES_COLUMNS,
         )
 
         assert teams == len(HUMAN_TEAMS)
@@ -271,7 +273,10 @@ class TestRouterHelpers:
         client = FakeHyperDX(reachable=False)
 
         teams, error = await _sync_hyperdx_source(
-            request_with(client), dfe_source("filebeat"), "dfe", TIMESERIES_COLUMNS
+            request_with(client),
+            dfe_source("filebeat"),  # ty: ignore[invalid-argument-type]  # a stand-in source carrying only the fields this path reads
+            "dfe",
+            TIMESERIES_COLUMNS,
         )
 
         assert teams is None
@@ -279,16 +284,22 @@ class TestRouterHelpers:
 
     async def test_deploy_survives_a_raising_client(self):
         teams, error = await _sync_hyperdx_source(
-            request_with(Exploding()), dfe_source("filebeat"), "dfe", TIMESERIES_COLUMNS
+            request_with(Exploding()),
+            dfe_source("filebeat"),  # ty: ignore[invalid-argument-type]  # a stand-in source carrying only the fields this path reads
+            "dfe",
+            TIMESERIES_COLUMNS,
         )
 
         assert teams is None
-        assert "Search did not accept the source" in error
-        assert "connection refused" not in error
+        assert "Search did not accept the source" in present(error)
+        assert "connection refused" not in present(error)
 
     async def test_deployment_without_hyperdx_reports_nothing(self):
         teams, error = await _sync_hyperdx_source(
-            request_with(None), dfe_source("filebeat"), "dfe", TIMESERIES_COLUMNS
+            request_with(None),
+            dfe_source("filebeat"),  # ty: ignore[invalid-argument-type]  # a stand-in source carrying only the fields this path reads
+            "dfe",
+            TIMESERIES_COLUMNS,
         )
 
         assert (teams, error) == (None, None)

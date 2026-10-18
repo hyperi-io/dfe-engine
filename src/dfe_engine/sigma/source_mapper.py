@@ -29,7 +29,7 @@ from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.sigma.views import SigmaViewError, build_sigma_view_ddl
 from dfe_engine.source.models import Source
-from dfe_engine.source.registry import SourceRegistry
+from dfe_engine.source.reader import SourceReader
 from dfe_engine.source.type_registry import TypeRegistry
 
 if TYPE_CHECKING:
@@ -60,7 +60,7 @@ class SigmaSourceMapper:
 
     def __init__(
         self,
-        source_registry: SourceRegistry,
+        source_registry: SourceReader,
         registry: TypeRegistry | None = None,
         field_map_registry: FieldMapRegistry | None = None,
         view_store: SigmaViewStore | None = None,

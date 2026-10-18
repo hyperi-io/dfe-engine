@@ -101,7 +101,7 @@ def _corruption_fields(exc: BaseException) -> dict[str, str]:
 
 
 def _as_path_bytes(host_path: str | bytes) -> bytes:
-    """dulwich's clients take the remote path as bytes; the transport hands back either."""
+    """Dulwich's clients take the remote path as bytes, and the transport hands back either."""
     return host_path.encode() if isinstance(host_path, str) else host_path
 
 
@@ -468,6 +468,7 @@ class GitopsRepo:
         if not self._repo_url:
             return None
         from dulwich.object_store import tree_lookup_path
+        from dulwich.objects import Blob, Commit
         from dulwich.repo import Repo
 
         result = self._remote_op(
@@ -480,10 +481,16 @@ class GitopsRepo:
         with Repo(str(self._path)) as repo:
             try:
                 commit = repo[head]
+                if not isinstance(commit, Commit):
+                    return None
                 _mode, blob_sha = tree_lookup_path(repo.get_object, commit.tree, rel.encode())
             except KeyError:
                 return None
-            return repo[blob_sha].data.decode("utf-8")
+            blob = repo[blob_sha]
+            # A path naming a directory resolves to a tree, which is no file's content.
+            if not isinstance(blob, Blob):
+                return None
+            return blob.data.decode("utf-8")
 
     def review_branch_files(
         self, directory: str, *, bound: Literal["read", "write"] = "write"
@@ -820,7 +827,8 @@ class GitopsRepo:
             str(self._path),
             branch=self._branch.encode(),
             errstream=errstream,
-            pool_manager=pool_manager,
+            # dulwich types clone's **kwargs as refspecs, but forwards pool_manager to the transport.
+            pool_manager=pool_manager,  # ty: ignore[invalid-argument-type]
         )
 
     def _fetch(self, errstream: RedactingErrStream, *, timeout: float) -> FetchPackResult:
@@ -844,7 +852,7 @@ class GitopsRepo:
             client, host_path = get_transport_and_path(
                 url, config=config, pool_manager=self._bounded_pool(config, timeout)
             )
-            return client.fetch(_as_path_bytes(host_path), repo, progress=errstream.write)
+            return client.fetch(_as_path_bytes(host_path), repo, progress=errstream.progress)
 
     def _send_pack(
         self, refspec: bytes, errstream: RedactingErrStream, *, timeout: float
@@ -873,7 +881,8 @@ class GitopsRepo:
         # urllib3 retries a failed connect three times by default, which would make
         # the real bound four times the timeout.
         manager.connection_pool_kw["retries"] = False
-        return manager
+        # dulwich returns its auth wrapper only for auth callbacks, and none are passed here.
+        return manager  # ty: ignore[invalid-return-type]
 
     def refresh(self) -> bool:
         """Take the remote's head when it has moved; returns whether this clone moved.
@@ -1055,6 +1064,7 @@ class GitopsRepo:
         if remote_head is None:
             return False
         from dulwich.graph import can_fast_forward
+        from dulwich.objects import ObjectID
         from dulwich.repo import Repo
 
         local = self.head_revision()
@@ -1062,7 +1072,7 @@ class GitopsRepo:
             return False
         if local is not None and not discard_local:
             with Repo(str(self._path)) as repo:
-                if not can_fast_forward(repo, local.encode(), remote_head):
+                if not can_fast_forward(repo, ObjectID(local.encode()), ObjectID(remote_head)):
                     raise GitopsDivergedError(self._branch, local, remote_head.decode())
         repo_path = str(self._path)
         porcelain.update_ref(repo_path, b"refs/heads/" + self._branch.encode(), remote_head)

@@ -33,7 +33,7 @@ class _NoQueryClient:
 def _install(app, params: list[ViewParameter]) -> None:
     app.state.view_executor = ViewExecutor(
         restricted_client=_NoQueryClient(),
-        catalog=OneViewCatalog(view_definition(params)),
+        catalog=OneViewCatalog(view_definition(params)),  # ty: ignore[invalid-argument-type]  # a stand-in catalog serving one view
         database="dfe",
     )
     # The view is held to the session's org, so the admin account is bound to one.

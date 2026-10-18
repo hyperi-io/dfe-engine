@@ -122,4 +122,5 @@ def _make_plugin() -> ServicePlugin:
 
 # Entry point callable -- returns a ServicePlugin
 def plugin() -> ServicePlugin:
+    """The receiver plugin, loaded through the ``dfe_engine.services`` entry point."""
     return _make_plugin()

@@ -11,6 +11,7 @@ in ``tests/support/producer_contract.py``.
 """
 
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 
 import pytest
@@ -65,7 +66,7 @@ class FakeSourceRegistry:
         return self._sources[source_name]
 
     def get_all_sources(
-        self, enabled_only: bool = False, *, states: tuple[str, ...] | None = None
+        self, enabled_only: bool = False, *, states: Collection[str] | None = None
     ) -> list[Source]:
         sources = list(self._sources.values())
         if states is not None:
@@ -315,7 +316,7 @@ class TestSourceRuleModel:
 
     def test_rejects_unknown_mode(self):
         with pytest.raises(ValueError):
-            SourceRule(field="x", mode="regex_match", source="z")
+            SourceRule(field="x", mode="regex_match", source="z")  # ty: ignore[invalid-argument-type]  # the refused mode is the point of the test
 
 
 class TestReceiverRoutingConfigModel:
@@ -361,8 +362,8 @@ class TestDestinationsModel:
             self._fanned()
 
     def test_the_default_may_fan_out_too(self):
-        config = DestinationsConfig(
-            default=["loader", "dfe-archiver"], **{"dfe-archiver": self.ARCHIVER}
+        config = DestinationsConfig.model_validate(
+            {"default": ["loader", "dfe-archiver"], "dfe-archiver": self.ARCHIVER}
         )
 
         assert config.default == ["loader", "dfe-archiver"]

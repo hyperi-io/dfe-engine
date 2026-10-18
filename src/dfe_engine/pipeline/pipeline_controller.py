@@ -1,6 +1,7 @@
+"""List, download and build the ingestion templates a DFE package carries."""
+
 import os
 import re
-from importlib import resources
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -48,13 +49,7 @@ def _load_yaml_config(config_file_path: str | None = None, require: bool = True)
 
 
 class PipelineBuilderController:
-    @staticmethod
-    def get_resource_path(log, package: str, resource_path: str):
-        try:
-            return resources.files(package) / resource_path
-        except FileNotFoundError:
-            log.error(f"Resource does not exist: {package}/{resource_path}")
-            return None
+    """Lists, downloads and builds the ingestion templates a DFE package carries."""
 
     @staticmethod
     def list_ingestion_templates(
@@ -62,8 +57,7 @@ class PipelineBuilderController:
         args_log_path: str,
         args_download: bool = False,
     ) -> dict[str, list[str]]:
-        """
-        List all vector templates from the provided DFE package file.
+        """List all vector templates from the provided DFE package file.
 
         Parameters:
             args_dfe_package_file_path (str): The path to the dfe_package file.
@@ -96,9 +90,7 @@ class PipelineBuilderController:
             # Download the vector templates if the flag is set
             PipelineBuilderController.download_templates(
                 args_log_path=args_log_path,
-                args_output=dfe_config_data["global_settings"]["vector_files"]
-                .get("core")
-                .split("/src/")[0],
+                args_output=vector_files["core"].split("/src/")[0],
                 args_version="latest",
             )
             logger.info("Vector templates downloaded successfully.")
@@ -129,14 +121,13 @@ class PipelineBuilderController:
         args_dfe_package_file_path: str,
         args_ingestion_output_path: str | None,
         args_log_path: str,
-        args_core_config: str = None,
+        args_core_config: str | None = None,
         args_pipeline_template: str | None = None,
         args_extra_config: dict | None = None,
         args_build_core: bool = False,
         args_download: bool = False,
     ) -> None:
-        """
-        Render Jinja2 templates using the given configuration file.
+        """Render Jinja2 templates using the given configuration file.
 
         Parameters:
             args_dfe_package_file_path (str): The path to the dfe_package file.
@@ -216,14 +207,13 @@ class PipelineBuilderController:
     @staticmethod
     def download_templates(
         args_log_path: str | None = "./tmp/logs",
-        args_output: str | None = "./hs_artefacts",
+        args_output: str = "./hs_artefacts",
         args_repo_url: str | None = None,
         args_version: str | None = None,
         args_username: str | None = None,
         args_password: str | None = None,
     ) -> None:
-        """
-        Download templates from storage backend (local, HTTP, or S3).
+        """Download templates from storage backend (local, HTTP, or S3).
 
         Auto-detects storage type from the URL/path:
         - Local paths (/path, ./path): Copy from local filesystem (for on-prem/Rancher with PVC mounts)

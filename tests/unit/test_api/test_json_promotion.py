@@ -423,7 +423,7 @@ class TestSchemaColumns:
 
         assert version.effective_schema().meta_schema == "meta/promo.yaml"
         with pytest.raises(AttributeError):
-            _ = version.meta_schema
+            _ = version.meta_schema  # ty: ignore[unresolved-attribute]  # the missing attribute is the point of the test
 
     def test_a_version_with_no_schema_still_answers(self):
         """effective_schema() defaults, so the caller never has to None-check it."""

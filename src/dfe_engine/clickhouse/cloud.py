@@ -24,8 +24,6 @@ org-admin key; no billing / member-management). Every start it issues is billabl
 and is logged.
 """
 
-from __future__ import annotations
-
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -36,11 +34,9 @@ from scalo.logger import logger
 from ..settings import ClickHouseCloudSettings
 
 # CH Cloud service states we key behaviour on. "stopped" needs an explicit start
-# (slow cold-start); "idle" auto-wakes on connect but also accepts a start; the
-# transitional states just mean "keep polling".
+# (slow cold-start), and "idle" auto-wakes on connect but also accepts a start.
 _RUNNING = "running"
 _STOPPED_STATES = frozenset({"stopped", "idle"})
-_TRANSITIONING = frozenset({"starting", "stopping", "provisioning", "awaking", "degraded"})
 
 
 class CloudServiceError(Exception):
@@ -65,15 +61,13 @@ class CloudServiceStatus:
 
     @property
     def is_running(self) -> bool:
+        """Whether the service is running."""
         return self.state == _RUNNING
 
     @property
     def is_stopped(self) -> bool:
+        """Whether the service is stopped or idle."""
         return self.state in _STOPPED_STATES
-
-    @property
-    def is_transitioning(self) -> bool:
-        return self.state in _TRANSITIONING
 
 
 # bool is an int in Python, so each parser refuses it where it wants a number.

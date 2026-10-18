@@ -360,7 +360,7 @@ def _run_page(
     client = RecordingClient(error)
     executor = ViewExecutor(
         restricted_client=client,
-        catalog=OneViewCatalog(view_definition(view_params)),
+        catalog=OneViewCatalog(view_definition(view_params)),  # ty: ignore[invalid-argument-type]  # a stand-in catalog serving one view
         database="testdb",
     )
     executor.execute(

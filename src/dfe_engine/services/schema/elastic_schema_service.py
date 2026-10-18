@@ -46,8 +46,6 @@ does so AFTER, per column, via a ``ch_override`` (e.g. ES ``unsigned_long`` -> `
 ``date_nanos`` -> ``datetime`` is correct-BY-DEFAULT, not a gap.
 """
 
-from __future__ import annotations
-
 import json
 from collections.abc import Iterable
 from typing import Any
@@ -71,7 +69,6 @@ def _join_path(prefix: str, segment: str) -> str:
 
 def _column_name_from_field_path(field_path: str) -> str:
     """Build a ClickHouse-friendly column name; keeps dotted paths as underscore segments."""
-
     parts = field_path.split(".")
     cleaned: list[str] = []
     for segment in parts:
@@ -83,7 +80,6 @@ def _column_name_from_field_path(field_path: str) -> str:
 
 def _index_suppressed(mapping: dict[str, Any]) -> bool:
     """Elastic's own declaration that a field is not searchable or not aggregatable."""
-
     return mapping.get("index") is False or mapping.get("doc_values") is False
 
 
@@ -96,7 +92,6 @@ def _map_es_type(
     covers both a three-value enum and an unbounded URL, so it gets neither
     ``lowcardinality`` nor a ``use_case`` - the picker decides those.
     """
-
     match es_type:
         case "keyword" | "wildcard" | "version":
             return "string", [], ""
@@ -205,7 +200,6 @@ def _walk_mapping(prefix: str, mapping: dict[str, Any], columns: list[SchemaColu
 
 def _extract_mappings_properties(doc: dict[str, Any]) -> dict[str, Any]:
     """Resolve mappings.properties from common Elastic export shapes."""
-
     if not isinstance(doc, dict):
         raise ElasticSchemaConversionError("Document root must be a JSON object")
 
@@ -235,9 +229,10 @@ def _extract_mappings_properties(doc: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fields_to_properties(entries: Any) -> dict[str, Any]:
-    """Convert a beats ``fields.yml`` field list into the ``mappings.properties`` shape
-    the ES-template importer already walks - so a beats schema re-uses the SAME
-    column-mapping code path (no second importer).
+    """Convert a beats ``fields.yml`` field list into the ES ``mappings.properties`` shape.
+
+    That is the shape the ES-template importer already walks, so a beats schema re-uses
+    the SAME column-mapping code path (no second importer).
 
     A ``group`` (or an entry with nested ``fields`` and no leaf ``type``) becomes a
     ``properties`` container; an ``alias`` keeps ``type: alias`` (skipped downstream,
@@ -304,6 +299,7 @@ class ElasticSchemaService:
     def template_json_to_columns(
         raw: bytes | str | dict[str, Any], roots: Iterable[str] | None = None
     ) -> list[SchemaColumn]:
+        """Columns from an ES index template given as JSON text, bytes or a parsed dict."""
         if isinstance(raw, dict):
             return ElasticSchemaService.template_dict_to_columns(raw, roots)
         if isinstance(raw, bytes):
@@ -322,10 +318,9 @@ class ElasticSchemaService:
     def beats_fields_to_columns(
         fields: Any, roots: Iterable[str] | None = None
     ) -> list[SchemaColumn]:
-        """Convert a beats ``fields.yml`` (parsed YAML - a list of field groups) to
-        physical columns, RE-USING the ES-template importer.
+        """Convert a parsed beats ``fields.yml`` to physical columns via the ES-template importer.
 
-        Same `_map_es_type` + physical naming + subtree-selection as an index-template
+        The parsed YAML is a list of field groups. Same `_map_es_type` + physical naming + subtree-selection as an index-template
         import - just fed from the beats field format instead of a generated template.
         Re-running it over a module's ``fields.yml`` refreshes a source's columns so
         incoming data keeps landing as the format evolves. filebeat is imported

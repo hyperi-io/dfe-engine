@@ -21,6 +21,7 @@ import contextlib
 import secrets
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from fastapi import FastAPI
@@ -65,10 +66,10 @@ def _settings(
     *,
     gitops: bool,
     env: str = DEV,
-    mode: str = "team",
+    mode: Literal["solo", "team"] = "team",
     auth_sub: str = "auth",
     secret_path: str = "",
-    deploy_kind: str = "kubernetes",
+    deploy_kind: Literal["kubernetes", "docker", "unknown"] = "kubernetes",
 ) -> DFESettings:
     """One deployment shape. ``auth_sub`` names the live account store's directory."""
     for sub in ("sources", "services", "rules", "hunts", auth_sub, "schemas", "secrets"):

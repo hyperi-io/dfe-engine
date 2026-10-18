@@ -15,7 +15,7 @@ command displaced when a group is needed at its name, and two ops colliding on t
 same ``(group, verb)`` being disambiguated by method.
 """
 
-from __future__ import annotations
+from typing import Any
 
 import click
 
@@ -24,7 +24,7 @@ from dfe_engine.cli.auto.spec import BodyProp, Operation, Param
 
 
 def _op(**over) -> Operation:
-    base = {
+    base: dict[str, Any] = {
         "path": "/api/v1/res/act",
         "method": "post",
         "path_params": [],
@@ -89,6 +89,7 @@ def test_command_collision_disambiguated_by_method():
     root = click.Group("dfe")
     build_command_tree(root, [_op(method="post"), _op(method="get")])
     group = root.commands["res"]
+    assert isinstance(group, click.Group)
     # Neither op is lost: the second keeps its verb suffixed with the method.
     assert "action" in group.commands
     assert "action-get" in group.commands

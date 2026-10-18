@@ -17,8 +17,6 @@ Default format is chosen by the caller (see build.py): ``describe`` -> yaml,
 (script-safe).
 """
 
-from __future__ import annotations
-
 import json
 from collections.abc import Callable
 from typing import Any
@@ -41,12 +39,14 @@ def _default_json(obj: Any) -> Any:
 
 
 def format_json(data: Any, stream: Any) -> None:
+    """Write *data* as indented JSON."""
     json.dump(data, stream, indent=2, default=_default_json, sort_keys=False)
     stream.write("\n")
 
 
 def format_yaml(data: Any, stream: Any) -> None:
     # Prefer the project's ruamel wrapper (YAML 1.2) for consistency with the API.
+    """Write *data* as YAML."""
     try:
         from dfe_engine.yaml_utils import yaml_dump_string
 
@@ -89,6 +89,7 @@ def _scalar_columns(rows: list[dict[str, Any]]) -> list[str]:
 
 
 def format_table(data: Any, stream: Any) -> None:
+    """Write *data* as a table of its scalar columns, or as JSON when it has none."""
     rows = _rows_for_table(data)
     if not rows:
         stream.write("\n")
@@ -141,6 +142,7 @@ def format_value(data: Any, stream: Any) -> None:
     # A list of dicts -> one tab-joined row of scalar values per item; a list of
     # scalars -> one per line; a single dict -> its scalar values tab-joined. Nested
     # dict/list values are dropped (only the scalar leaves are printed).
+    """Write the scalar values of *data* without their keys."""
     plain = _plain(data)
     if isinstance(plain, dict):
         _write_value_row(plain, stream, None)
@@ -165,6 +167,7 @@ def format_value(data: Any, stream: Any) -> None:
 
 
 def format_text(data: Any, stream: Any) -> None:
+    """Write *data* as aws-cli's tab-delimited text."""
     _text.format_text(_plain(data), stream)
 
 

@@ -14,6 +14,7 @@ as a plausible-looking list nobody checks.
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from scalo.logger.filters import is_credential_name
@@ -1484,7 +1485,7 @@ class TestTheMappingBesideACredentialDecides:
     """
 
     R = contract.REDACTED
-    DOC = {
+    DOC: dict[str, Any] = {
         "config": {
             "log_level": "info",
             "kafka": {
@@ -1606,7 +1607,7 @@ class TestAValueReadAsOneMask:
     def test_what_the_read_showed_has_to_be_said(self):
         """Without it every stored value is compared in the clear."""
         with pytest.raises(TypeError, match="shown"):
-            contract.restore_masked(self.R, self.STORED)  # type: ignore[call-arg]
+            contract.restore_masked(self.R, self.STORED)  # ty: ignore[missing-argument]  # the missing keyword is the point of the test
 
 
 ABSENT = contract.AppContract(service="", available=False, source=contract.ContractSource.ABSENT)

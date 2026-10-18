@@ -76,7 +76,7 @@ def _start_server(status: int = 201, response: dict | None = None) -> _Server:
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
-    host, port = httpd.server_address
+    host, port = httpd.server_address[:2]
     return _Server(base_url=f"http://{host}:{port}", captured=captured, httpd=httpd, thread=thread)
 
 

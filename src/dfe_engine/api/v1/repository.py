@@ -306,7 +306,7 @@ async def patch_preferences(
     openapi_extra=CLI_HIDDEN,
 )
 async def list_objects(
-    scope: str,
+    scope: RepositoryScope,
     scope_id: str,
     namespace: str,
     request: Request,
@@ -323,7 +323,7 @@ async def list_objects(
 
 @router.get("/objects/{scope}/{scope_id}/{namespace}/{key}", openapi_extra=CLI_HIDDEN)
 async def get_object(
-    scope: str,
+    scope: RepositoryScope,
     scope_id: str,
     namespace: str,
     key: str,
@@ -355,7 +355,7 @@ async def get_object(
     "repository.max_object_bytes", lambda settings: settings.repository.max_object_bytes
 )
 async def put_object(
-    scope: str,
+    scope: RepositoryScope,
     scope_id: str,
     namespace: str,
     key: str,
@@ -408,7 +408,7 @@ async def put_object(
     openapi_extra=CLI_HIDDEN,
 )
 async def delete_object(
-    scope: str,
+    scope: RepositoryScope,
     scope_id: str,
     namespace: str,
     key: str,

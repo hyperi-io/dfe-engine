@@ -24,11 +24,15 @@ router = APIRouter(prefix="/config", tags=["Client Config"])
 
 
 class HyperDXConfig(BaseModel):
+    """Whether the UI links to HyperDX, and where."""
+
     enabled: bool = False
     url: str = ""
 
 
 class ClientConfig(BaseModel):
+    """Settings the UI reads when it starts."""
+
     api_base: str = ""  # same-origin by default
     hyperdx: HyperDXConfig = HyperDXConfig()
     auth_mode: str = Field(

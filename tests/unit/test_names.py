@@ -81,7 +81,10 @@ def test_every_store_object_is_created_under_exactly_the_store_names(name, accep
     assert _accepted(lambda: CreateGroupRequest(name=name, roles=[])) is accepted
     assert _accepted(lambda: CreateAccountRequest(username=name, password=_PASSWORD)) is accepted
     assert _accepted(lambda: CreateAPIKeyRequest(name=name)) is accepted
-    assert _accepted(lambda: CreateProviderRequest(name=name, **provider)) is accepted
+    assert (
+        _accepted(lambda: CreateProviderRequest.model_validate({"name": name, **provider}))
+        is accepted
+    )
 
 
 @pytest.mark.parametrize(("name", "accepted"), _DETECTION)
@@ -91,7 +94,7 @@ def test_a_rule_and_a_hunt_are_created_under_exactly_the_detection_names(name, a
     assert _accepted(lambda: validate_rule_name(name)) is accepted
     assert _accepted(lambda: validate_hunt_name(name)) is accepted
     assert _accepted(lambda: RuleCreateRequest(name=name, user_sql="SELECT 1")) is accepted
-    assert _accepted(lambda: HuntCreateRequest(name=name, **hunt)) is accepted
+    assert _accepted(lambda: HuntCreateRequest.model_validate({"name": name, **hunt})) is accepted
 
 
 @pytest.mark.parametrize(

@@ -29,11 +29,9 @@ There is no server-side "modified since" filter, so incremental is done
 client-side (`modified >= since`) - the store's upsert skips the unchanged rest.
 """
 
-from __future__ import annotations
-
 import asyncio
 from datetime import datetime
-from typing import Any
+from typing import Any, override
 
 from scalo.logger import logger
 
@@ -146,6 +144,7 @@ class ValhallaProvider(SigmaProvider):
             f"valhalla provider {self.name!r}: exhausted {self._max_retries} retries on 429"
         )
 
+    @override
     async def fetch(self, since: datetime | None = None) -> list[SigmaRuleDoc]:
         raw = await self._fetch_raw()
         docs, warnings = parse_sigma_dicts(raw, self.origin, source_ref=self.name)
