@@ -51,7 +51,7 @@ class TestTheElementTokens:
         assert len({json.dumps(record) for record in records}) == BATCH_SIZE
 
     def test_no_token_is_a_substring_of_another(self) -> None:
-        # The per-element count is a _raw LIKE, so one token inside another would
+        # The per-element count is a payload LIKE, so one token inside another would
         # count a neighbour's row and hide a dropped element.
         tokens = [_element("flowmarker", index) for index in range(BATCH_SIZE)]
         for token in tokens:
