@@ -359,8 +359,24 @@ def _connect_when_ready(clickhouse_connect, params: dict, attempts: int = 40, de
     raise last if last is not None else RuntimeError("ClickHouse unreachable")
 
 
+@pytest.fixture(scope="session")
+def local_tier_notice() -> None:
+    """Warn once per session when the integration ClickHouse is a container on this host.
+
+    It is the fallback nobody chose, so the run says so. Session scope, so a run of
+    hundreds of integration tests carries one notice per worker, not one per test.
+    """
+    if _resolve_tier() == "local":
+        warnings.warn(
+            "integration ClickHouse tier: local docker on this host (no cluster in "
+            ".env, no DFE_TEST_DOCKER_HOST)",
+            RuntimeWarning,
+            stacklevel=1,
+        )
+
+
 @pytest.fixture
-def ch_params(request):
+def ch_params(request, local_tier_notice):
     """Resolved CH connection params by tier (cluster -> remote -> local docker).
 
     Yields the params dict (so a test can open MANY clients - e.g. N synthetic
@@ -372,14 +388,6 @@ def ch_params(request):
     clickhouse_connect = pytest.importorskip("clickhouse_connect")
     tier = _resolve_tier()
     teardown = None
-    if tier == "local":
-        # A container on the test host is the fallback nobody chose; say so.
-        warnings.warn(
-            "integration ClickHouse tier: local docker on this host (no cluster in "
-            ".env, no DFE_TEST_DOCKER_HOST)",
-            RuntimeWarning,
-            stacklevel=1,
-        )
 
     if tier == "cluster":
         params = _cluster_params()

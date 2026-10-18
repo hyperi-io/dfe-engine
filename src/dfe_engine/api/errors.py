@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 from starlette.routing import BaseRoute
 
+from dfe_engine.api.middleware.access_log import route_template
 from dfe_engine.http_errors import failure_reference, referenced
 from dfe_engine.log_limit import LineLimit
 
@@ -384,7 +385,7 @@ def install_exception_handlers(app: FastAPI) -> None:
                 SERVICE_UNAVAILABLE_MESSAGE,
                 exc,
                 event="backing service unavailable",
-                path=request.url.path,
+                route=route_template(request.scope),
             )
         body = ErrorResponse(
             code=ErrorCode.SERVICE_UNAVAILABLE,
@@ -405,7 +406,7 @@ def install_exception_handlers(app: FastAPI) -> None:
                 GITOPS_UNAVAILABLE_MESSAGE,
                 exc,
                 event="deploy repo unavailable",
-                path=request.url.path,
+                route=route_template(request.scope),
             ),
             context={"service": "gitops", "remote": exc.remote},
         )
@@ -425,7 +426,8 @@ def install_exception_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
-        logger.exception(f"Unhandled exception on {request.method} {request.url.path}")
+        # The route template, since a path can carry a login or other identifier.
+        logger.exception(f"Unhandled exception on {request.method} {route_template(request.scope)}")
         message = "An unexpected error occurred"
         if is_scim(request):
             return scim_error(500, message)

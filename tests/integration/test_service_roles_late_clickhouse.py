@@ -12,7 +12,8 @@ ClickHouse that is not up yet it fails, and before the retry nothing ran it agai
 short of a restart, so the hunt runner dialled a user that did not exist and
 crash-looped. Here the engine is never restarted: the user has to appear on its
 own once ClickHouse answers, with tenant isolation off (the service-role reconcile)
-and on (the full one).
+and on (the full one). With the schema phase on as well, the projection tables its
+late pass creates are filled too.
 """
 
 import time
@@ -26,7 +27,7 @@ from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.governance.ch.bootstrap import TENANT_ISOLATION_ENV
-from dfe_engine.governance.ch.models import DEFAULT_SERVICE_ROLES
+from dfe_engine.governance.ch.models import DEFAULT_SERVICE_ROLES, meta_projection
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -46,7 +47,7 @@ HUNT_RUNNER = "dfe_hunt_runner"
 USER_DEADLINE_SECONDS = 120.0
 
 
-def _settings(tmp_path: Path, params: dict) -> DFESettings:
+def _settings(tmp_path: Path, params: dict, *, bootstrap_tables: bool = False) -> DFESettings:
     for sub in ("auth", "secrets"):
         (tmp_path / sub).mkdir()
     return DFESettings(
@@ -57,10 +58,13 @@ def _settings(tmp_path: Path, params: dict) -> DFESettings:
             username=params["username"],
             password=params["password"],
             secure=False,
-            bootstrap_tables=False,
+            bootstrap_tables=bootstrap_tables,
+            # The boot pass gives up on the absent server at once and hands over to its retry.
+            bootstrap_wait_seconds=1.0,
             resilience=ClickHouseResilienceSettings(budget_seconds=2.0),
         ),
-        kafka=KafkaSettings(ensure_topics=False),
+        # No broker here, and a schema pass that cannot place its dead-letter topics fails.
+        kafka=KafkaSettings(ensure_topics=False, bootstrap_topics=False),
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
@@ -127,6 +131,51 @@ def test_the_hunt_runner_user_appears_once_a_late_clickhouse_answers(
                 "ClickHouse answering, without an engine restart"
             )
             assert getattr(app.state, trigger).wait_idle(30.0), "the retry kept running"
+    finally:
+        _registries.clear()
+        ClickHouseManager.reset_instance()
+
+
+def _projected_tiers(client) -> int:
+    database, _orgs, tiers = meta_projection()
+    exists = client.query(
+        "SELECT count() FROM system.tables WHERE database = {db:String} AND name = {name:String}",
+        parameters={"db": database, "name": tiers},
+    ).result_rows[0][0]
+    if not exists:
+        return 0
+    return client.query(f"SELECT count() FROM {database}.{tiers}").result_rows[0][0]
+
+
+def test_with_the_schema_phase_on_the_projection_fills_once_a_late_clickhouse_answers(
+    late_clickhouse, hunt_runner_minted, tmp_path, monkeypatch
+):
+    """The schema pass that converges late creates the projection tables, and they get filled.
+
+    A reconcile that got through before that pass found no tables to write into, so the
+    pass asks for one more. Either order ends with the tiers projected and the retry idle.
+    """
+    params, start_clickhouse = late_clickhouse
+    monkeypatch.setenv(TENANT_ISOLATION_ENV, "true")
+    for role in DEFAULT_SERVICE_ROLES:
+        monkeypatch.delenv(f"DFE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
+
+    settings = _settings(tmp_path, params, bootstrap_tables=True)
+    ClickHouseManager.reset_instance()
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False):
+            start_clickhouse()
+            admin = clickhouse_connect.get_client(**params)
+            deadline = time.monotonic() + USER_DEADLINE_SECONDS
+            while not _projected_tiers(admin) and time.monotonic() < deadline:
+                time.sleep(1.0)
+
+            assert _projected_tiers(admin), (
+                f"the tier projection was still empty {USER_DEADLINE_SECONDS:.0f}s after "
+                "ClickHouse answered"
+            )
+            assert app.state.ch_rbac_reconcile.wait_idle(30.0), "the retry kept running"
     finally:
         _registries.clear()
         ClickHouseManager.reset_instance()

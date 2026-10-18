@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, Request
 
+from dfe_engine.api.middleware.access_log import route_template
 from dfe_engine.api.v1.account_groups import router as account_groups_router
 from dfe_engine.api.v1.accounts import router as accounts_router
 from dfe_engine.api.v1.admin_links import router as admin_links_router
@@ -61,15 +62,17 @@ async def _deploy_repo_scope():
 
 
 async def _attribution_scope(request: Request):
-    """Scope CH query attribution to the request (feature = the route path).
+    """Scope CH query attribution to the request (feature = the route template).
 
     Every ClickHouse query the request issues is stamped with this feature in its
     ``log_comment`` (via the ClickHouseClientWrapper hook + ``current_tags``), so
     ``system.query_log`` and the query_log_archive cost leaderboard attribute cost
-    per endpoint. Auth-agnostic (no user dependency) so it runs on public routes
+    per endpoint. It is the template, never the path, so no login or other value in
+    the path is stored with the query.
+    Auth-agnostic (no user dependency) so it runs on public routes
     too; user/tenant enrichment is a follow-up needing the per-route auth context.
     """
-    with tags_context(feature=request.url.path):
+    with tags_context(feature=route_template(request.scope)):
         yield
 
 

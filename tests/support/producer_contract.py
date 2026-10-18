@@ -121,13 +121,13 @@ SCALO_RS = Producer(
 )
 DFE_TRANSFORM_VRL = Producer(
     repo="dfe-transform-vrl",
-    ref="v1.1.34",
+    ref="v1.1.36",
     dir_env="DFE_TRANSFORM_VRL_DIR",
     files=("tests/fixtures/filebeat/filebeat-testdata.tar.gz", "docs/config-schema.json"),
 )
 DFE_TRANSFORM_VECTOR = Producer(
     repo="dfe-transform-vector",
-    ref="v1.0.50",
+    ref="v1.0.52",
     dir_env="DFE_TRANSFORM_VECTOR_DIR",
     files=("docs/config-schema.json",),
 )

@@ -19,6 +19,7 @@ from scalo.metrics import create_metrics
 from scalo.metrics.groups import ResourceMetrics
 
 from dfe_engine.api import init_scalo_logger
+from dfe_engine.api.server import server_config
 from dfe_engine.settings import DFESettings, load_settings
 
 from .app import create_app
@@ -50,17 +51,25 @@ def run() -> None:
     """Serve the shim until SIGTERM (k8s pod stop) / SIGINT (local ctrl-c)."""
     init_scalo_logger(_SERVICE_NAME, otel_tracing=True)
     settings = load_settings()
+    uvicorn.Server(shim_server_config(served_app(settings), settings)).run()
+
+
+def shim_server_config(served: FastAPI, settings: DFESettings) -> uvicorn.Config:
+    """The uvicorn config the shim pod serves *served* with.
+
+    uvicorn's access line is off, so a scrape's full URL is not written at INFO on
+    every KEDA poll. uvicorn still reads the client from a forwarding peer here, since
+    the shim app does not resolve it itself.
+
+    Args:
+        served: The shim app.
+        settings: The settings the listen address comes from.
+
+    Returns:
+        The config.
+    """
     ks = settings.keda_shim
-    uvicorn.Server(
-        uvicorn.Config(
-            served_app(settings),
-            host=ks.host,
-            port=ks.port,
-            log_level="info",
-            # None keeps uvicorn's loggers on scalo's handlers, which scrub tokens from access lines.
-            log_config=None,
-        )
-    ).run()
+    return server_config(served, host=ks.host, port=ks.port, proxy_headers=True)
 
 
 def main() -> None:

@@ -146,11 +146,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     if schema_state.transient:
         from dfe_engine.clickhouse.bootstrap import SchemaRetry
+        from dfe_engine.governance.ch import request_ch_rbac_reconcile
+
+        def schema_converged() -> None:
+            seed_core(tables_bootstrapped=True)
+            # A reconcile that got through before this pass found no projection tables to fill.
+            request_ch_rbac_reconcile(app.state)
 
         app.state.schema_retry = SchemaRetry(
             run_schema_pass,
             resilience=settings.clickhouse.resilience,
-            on_converged=functools.partial(seed_core, tables_bootstrapped=True),
+            on_converged=schema_converged,
         )
         app.state.schema_retry.start()
 
@@ -439,16 +445,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     )
 
     if tenant_isolation_enabled():
-        from dfe_engine.governance.ch import reconcile_from_stores, request_ch_rbac_reconcile
+        from dfe_engine.governance.ch import (
+            note_ch_projection,
+            reconcile_from_stores,
+            request_ch_rbac_reconcile,
+        )
 
         def reconcile_ch_rbac_now() -> ReconcileResult:
-            return reconcile_from_stores(
+            result = reconcile_from_stores(
                 ch_admin_client(settings),
                 settings=settings,
                 org_registry=app.state.org_registry,
                 group_store=app.state.group_store,
                 role_config=app.state.role_config,
             )
+            note_ch_projection(app.state, result)
+            return result
 
         app.state.ch_rbac_reconcile = ReconcileTrigger(
             reconcile_ch_rbac_now, metrics=ReconcileMetrics(app.state.metrics_manager)
@@ -693,6 +705,10 @@ def create_app(
     app.state.seed_metrics = SeedMetrics(metrics_manager)
     app.state.oidc_sync_metrics = SyncMetrics(metrics_manager)
     app.state.oidc_login_metrics = LoginMetrics(metrics_manager)
+    from dfe_engine.governance.ch import ProjectionSkips
+
+    # One for the app, so a background reconcile and the governance endpoint log a skip once between them.
+    app.state.ch_projection_skips = ProjectionSkips(metrics_manager)
     # Every store writes YAML without the app in reach, so its refusals count process-wide.
     write_health().bind(YamlWriteMetrics(metrics_manager))
 
@@ -750,6 +766,11 @@ def create_app(
         ForwardedHeadersMiddleware,
         trusted=TrustedProxies.parse(settings.api.forwarded_allow_ips),
     )
+
+    # The access line, in place of uvicorn's: it names the route, so no path value reaches it.
+    from dfe_engine.api.middleware.access_log import AccessLogMiddleware
+
+    app.add_middleware(AccessLogMiddleware)
 
     # Outermost of all, so a request's duration covers the whole stack; the app
     # status page reads its rate, error rate and p95 from this one histogram.

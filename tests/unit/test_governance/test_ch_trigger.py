@@ -18,15 +18,18 @@ from types import SimpleNamespace
 
 import clickhouse_connect
 from prometheus_client.parser import text_string_to_metric_families
+from scalo.logger import logger
 from scalo.metrics import create_metrics
 
 from dfe_engine.governance.ch import (
+    ProjectionSkips,
     ReconcileMetrics,
     ReconcileResult,
     ReconcileTrigger,
+    note_ch_projection,
     note_ch_rbac_reconciled,
 )
-from dfe_engine.governance.ch.trigger import RECONCILES, RETRIES
+from dfe_engine.governance.ch.trigger import PROJECTION_SKIPS, RECONCILES, RETRIES
 
 # The gauge an operator alerts on, by the name the scrape carries.
 UNCONVERGED = "ch_rbac_reconcile_unconverged"
@@ -445,3 +448,69 @@ def test_close_waits_for_the_run_in_flight() -> None:
     recorder.release.set()
     assert trigger.close(_WAIT) is True
     assert recorder.calls == 1
+
+
+_SKIPPED = ReconcileResult(projection_missing=["dfe_meta.ch_tiers", "dfe_meta.orgs"])
+_SKIP_LINE = "CH RBAC projection left unwritten"
+
+
+def _projection_skips(manager) -> float:
+    for family in text_string_to_metric_families(manager.metrics_text):
+        for sample in family.samples:
+            if sample.name == PROJECTION_SKIPS:
+                return sample.value
+    return 0.0
+
+
+def _warnings_naming(lines: list[str], text: str) -> int:
+    return sum(1 for line in lines if line.startswith("WARNING") and text in line)
+
+
+def test_every_projection_skip_is_counted_and_only_the_first_of_a_run_is_logged() -> None:
+    """A deployment with the schema phase off skips on every reconcile, so the line goes out once."""
+    manager = _manager()
+    skips = ProjectionSkips(manager)
+    lines: list[str] = []
+    sink = logger.add(lines.append, level="DEBUG", format="{level} {message} {extra}")
+    try:
+        for _ in range(3):
+            skips.note(_SKIPPED)
+    finally:
+        logger.remove(sink)
+
+    assert _projection_skips(manager) == 3.0
+    assert _warnings_naming(lines, _SKIP_LINE) == 1
+    assert any("dfe_meta.orgs" in line for line in lines)
+
+
+def test_a_projection_written_in_between_lets_the_next_skip_log_again() -> None:
+    manager = _manager()
+    skips = ProjectionSkips(manager)
+    lines: list[str] = []
+    sink = logger.add(lines.append, level="DEBUG", format="{level} {message} {extra}")
+    try:
+        skips.note(_SKIPPED)
+        skips.note(ReconcileResult())
+        skips.note(_SKIPPED)
+    finally:
+        logger.remove(sink)
+
+    assert _projection_skips(manager) == 2.0
+    assert _warnings_naming(lines, _SKIP_LINE) == 2
+
+
+def test_a_written_projection_counts_nothing() -> None:
+    manager = _manager()
+    ProjectionSkips(manager).note(ReconcileResult())
+
+    assert _projection_skips(manager) == 0.0
+
+
+def test_note_ch_projection_reaches_the_apps_counter_and_tolerates_an_app_without_one() -> None:
+    manager = _manager()
+    state = SimpleNamespace(ch_projection_skips=ProjectionSkips(manager))
+
+    note_ch_projection(state, _SKIPPED)
+    note_ch_projection(SimpleNamespace(), _SKIPPED)
+
+    assert _projection_skips(manager) == 1.0
