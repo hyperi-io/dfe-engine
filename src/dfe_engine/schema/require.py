@@ -19,9 +19,9 @@ run or did not converge, and a path that silently created its own would hide
 that from the operator reading the schema status route.
 """
 
-from __future__ import annotations
-
 from typing import Any
+
+from clickhouse_connect.driver.exceptions import ClickHouseError
 
 from dfe_engine.schema.plan import object_names
 
@@ -32,6 +32,32 @@ class SchemaNotAppliedError(Exception):
     The engine's schema phase creates it at boot, so this means the phase has not
     run here, was switched off, or did not converge.
     """
+
+
+def missing_objects(client: Any, *, database: str, object_ids: tuple[str, ...]) -> list[str]:
+    """The named manifest objects absent from *database*, as ``database.name``, sorted.
+
+    Args:
+        client: A live ClickHouse client exposing ``query``.
+        database: The database the objects land in.
+        object_ids: Manifest ids, so no caller restates a table name.
+
+    Returns:
+        Every absent object, empty when all are there.
+
+    Raises:
+        clickhouse_connect.driver.exceptions.ClickHouseError: The server could not
+            be read, as the client raises it.
+        OSError: The connection failed below the driver.
+    """
+    names = object_names(*object_ids, data_database=database)
+    wanted = sorted(names.values())
+    rows = client.query(
+        "SELECT name FROM system.tables WHERE database = {db:String} AND name IN {names:Array(String)}",
+        parameters={"db": database, "names": wanted},
+    ).result_rows
+    present = {str(row[0]) for row in rows}
+    return [f"{database}.{name}" for name in wanted if name not in present]
 
 
 def require_objects(client: Any, *, database: str, object_ids: tuple[str, ...], what: str) -> None:
@@ -47,19 +73,12 @@ def require_objects(client: Any, *, database: str, object_ids: tuple[str, ...], 
         SchemaNotAppliedError: One or more of them is absent, or the server could
             not be read.
     """
-    names = object_names(*object_ids, data_database=database)
-    wanted = sorted(names.values())
     try:
-        rows = client.query(
-            "SELECT name FROM system.tables WHERE database = {db:String} AND name IN {names:Array(String)}",
-            parameters={"db": database, "names": wanted},
-        ).result_rows
-    except Exception as exc:
+        missing = missing_objects(client, database=database, object_ids=object_ids)
+    except (ClickHouseError, OSError) as exc:
         raise SchemaNotAppliedError(f"could not check {what} in {database}: {exc}") from exc
-    present = {str(row[0]) for row in rows}
-    missing = [name for name in wanted if name not in present]
     if missing:
         raise SchemaNotAppliedError(
-            f"{what} needs {', '.join(f'{database}.{name}' for name in missing)}, which the "
-            "engine's schema phase creates at boot; check GET /api/v1/system/schema"
+            f"{what} needs {', '.join(missing)}, which the engine's schema phase creates at "
+            "boot; check GET /api/v1/system/schema"
         )

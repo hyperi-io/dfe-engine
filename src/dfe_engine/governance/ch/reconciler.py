@@ -26,7 +26,7 @@ from scalo.secrets.exceptions import SecretAlreadyExistsError
 
 from dfe_engine.clickhouse.errors import is_connection_error
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
-from dfe_engine.schema.require import SchemaNotAppliedError, require_objects
+from dfe_engine.schema.require import missing_objects
 
 from .models import (
     DB,
@@ -63,6 +63,8 @@ class ReconcileResult(BaseModel):
     minted: list[str] = Field(default_factory=list)  # identities whose secret was touched
     forgotten: list[str] = Field(default_factory=list)  # dropped identities, secret deleted
     errors: list[str] = Field(default_factory=list)
+    # Projection tables not on the server, so the projection was left unwritten.
+    projection_missing: list[str] = Field(default_factory=list)
 
 
 def resolve_grant_databases(items: list[Any], database: str) -> list[Any]:
@@ -396,23 +398,21 @@ class ChRbacReconciler:
                 continue
             result.forgotten.append(f"group/{group}")
 
-    def _materialise(self, orgs: list[Any], tiers: list[Any]) -> list[str]:
+    def _materialise(self, orgs: list[Any], tiers: list[Any], result: ReconcileResult) -> list[str]:
         """The projection DML, or none while the projection tables are not on the server.
 
         The schema phase creates them, and it may be off or not yet converged. A write
         into a missing table fails the same way on every run, so rendering it would
         hold the reconcile unconverged and retrying after every user and grant applied.
+        The tables left out go on ``result.projection_missing``. A server that cannot
+        be read raises, as every other read in the run does, so the run is retried.
         """
         database, _orgs, _tiers = meta_projection()
-        try:
-            require_objects(
-                self._client,
-                database=database,
-                object_ids=(META_ORGS_ID, META_TIERS_ID),
-                what="the governance projection",
-            )
-        except SchemaNotAppliedError as exc:
-            logger.warning("governance projection skipped", reason=str(exc))
+        missing = missing_objects(
+            self._client, database=database, object_ids=(META_ORGS_ID, META_TIERS_ID)
+        )
+        if missing:
+            result.projection_missing = missing
             return []
         return render_materialise(orgs, tiers)
 
@@ -547,7 +547,7 @@ class ChRbacReconciler:
             existing_group_users=existing_group_users,
             bindings=bindings,
         )
-        materialise = self._materialise(orgs, tiers)
+        materialise = self._materialise(orgs, tiers, result)
 
         failed = self._apply(stmts + drops + materialise, result)
         self._forget_dropped_groups(

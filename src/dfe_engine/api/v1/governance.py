@@ -484,6 +484,7 @@ def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str,
     from dfe_engine.clickhouse.errors import is_connection_error
     from dfe_engine.governance.ch import (
         ch_admin_client,
+        note_ch_projection,
         note_ch_rbac_reconciled,
         reconcile_from_stores,
     )
@@ -519,6 +520,7 @@ def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str,
             exc,
             event="CH RBAC reconcile: ClickHouse connection lost",
         ) from exc
+    note_ch_projection(request.app.state, result)
     # A full clean run covers every identity, so a startup retry still waiting stands down.
     if not result.errors:
         note_ch_rbac_reconciled(request.app.state)

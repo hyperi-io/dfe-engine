@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
+from clickhouse_connect.driver.exceptions import OperationalError
 from scalo.logger import logger
 from scalo.secrets import SecretsManager
 
@@ -494,13 +495,12 @@ class TestGovernanceProjection:
 
     def test_without_the_tables_the_run_applies_everything_else_and_reports_no_error(self):
         client = _FakeAdminClient()
-        with captured_logs() as lines:
-            result = self._reconcile(client)
+        result = self._reconcile(client)
 
         assert result.errors == []
         assert not any("dfe_meta" in stmt for stmt in client.executed)
         assert "CREATE ROLE IF NOT EXISTS `dfe_analyst_tier_2_role`" in client.executed
-        assert any("governance projection skipped" in line for line in lines)
+        assert result.projection_missing == ["dfe_meta.ch_tiers", "dfe_meta.orgs"]
 
     def test_one_missing_table_skips_the_whole_projection(self):
         client = _FakeAdminClient(meta_tables=["orgs"])
@@ -508,16 +508,32 @@ class TestGovernanceProjection:
 
         assert result.errors == []
         assert not any("dfe_meta" in stmt for stmt in client.executed)
+        assert result.projection_missing == ["dfe_meta.ch_tiers"]
 
     def test_with_the_tables_the_projection_is_rewritten(self):
         client = _FakeAdminClient(meta_tables=["orgs", "ch_tiers"])
         result = self._reconcile(client)
 
         assert result.errors == []
+        assert result.projection_missing == []
         assert "TRUNCATE TABLE dfe_meta.orgs" in client.executed
         assert "TRUNCATE TABLE dfe_meta.ch_tiers" in client.executed
         assert any(stmt.startswith("INSERT INTO dfe_meta.orgs") for stmt in client.executed)
         assert any(stmt.startswith("INSERT INTO dfe_meta.ch_tiers") for stmt in client.executed)
+
+    def test_a_server_that_cannot_be_read_fails_the_run_rather_than_skipping(self):
+        """Only absent tables skip the projection, so a lost connection is retried as a failed run."""
+
+        class _LosesTheProjectionCheck(_FakeAdminClient):
+            def query(self, sql: str, parameters: dict | None = None) -> SimpleNamespace:
+                if "system.tables" in sql and (parameters or {}).get("db") == "dfe_meta":
+                    raise OperationalError("HTTPConnectionPool: Connection refused")
+                return super().query(sql, parameters)
+
+        client = _LosesTheProjectionCheck()
+        with pytest.raises(OperationalError):
+            self._reconcile(client)
+        assert client.executed == []
 
 
 class TestDefaultTierName:
