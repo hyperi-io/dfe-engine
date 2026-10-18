@@ -22,6 +22,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 from scalo.logger import logger
+from scalo.secrets.exceptions import SecretAlreadyExistsError
 
 from dfe_engine.clickhouse.errors import is_connection_error
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
@@ -221,13 +222,19 @@ class ChRbacReconciler:
 
     # ---- discovery -------------------------------------------------------
 
-    def discover_org_id_tables(self) -> list[tuple[str, str]]:
-        """(db, table) for every table carrying an ``_org_id`` column."""
+    def discover_org_id_tables(self, dbs: list[str] | None = None) -> list[tuple[str, str]]:
+        """(db, table) for every table carrying an ``_org_id`` column.
+
+        Args:
+            dbs: Only the tables in these databases. ``None`` takes every database
+                bar the system ones, which is what a full reconcile wants.
+        """
         rows = self._client.query(
             "SELECT database, table FROM system.columns "
             "WHERE name = '_org_id' AND database NOT IN {skip:Array(String)} "
+            "AND ({scoped:UInt8} = 0 OR database IN {dbs:Array(String)}) "
             "GROUP BY database, table ORDER BY database, table",
-            parameters={"skip": _SKIP_DBS},
+            parameters={"skip": _SKIP_DBS, "scoped": int(dbs is not None), "dbs": dbs or []},
         ).result_rows
         return [(r[0], r[1]) for r in rows]
 
@@ -283,13 +290,19 @@ class ChRbacReconciler:
 
         Reuse is essential: ``CREATE USER IF NOT EXISTS`` never rotates an existing
         user's password, so regenerating every run would desync CH from the store.
+        The mint is create-only, so two replicas reconciling together keep one password.
         """
-        if self._secrets is not None and self._secrets.exists(path):
-            plaintext = self._secrets.get(path)
-        else:
-            plaintext = _stdlib_secrets.token_urlsafe(24)[:32]
-            if self._secrets is not None:
-                self._secrets.put(path, plaintext)
+        minted = _stdlib_secrets.token_urlsafe(24)[:32]
+        if self._secrets is None:
+            return hashlib.sha256(minted.encode()).hexdigest()
+        plaintext = self._secrets.get_or_none(path)
+        if plaintext is None:
+            try:
+                self._secrets.create(path, minted)
+                plaintext = minted
+            except SecretAlreadyExistsError:
+                # Another replica stored one between this read and the create, so use that one.
+                plaintext = self._secrets.get(path)
         return hashlib.sha256(plaintext.encode()).hexdigest()
 
     def _service_hash(self, role: Any) -> str | None:
@@ -304,7 +317,7 @@ class ChRbacReconciler:
         if not provided:
             return self._hash_for(path) if self._secrets is not None else None
         if self._secrets is not None:
-            stored = self._secrets.get(path) if self._secrets.exists(path) else None
+            stored = self._secrets.get_or_none(path)
             if stored != provided:
                 self._secrets.put(path, provided)
         return hashlib.sha256(provided.encode()).hexdigest()
@@ -572,16 +585,19 @@ def fence_tables(
     policy waits for a reconcile. Running this on deploy closes that window. Mints
     nothing and touches no user, so it is cheap enough to run every time.
 
+    It reaches only the databases the tiers grant, since a table anywhere else is
+    not one a tenant can read, so a server shared with other deployments keeps
+    their tables' policies as they were. A full reconcile covers every database.
+
     ``tables`` limits the policies to those tables of the reconciler's database; None fences every table discovered. The tenant role and its system grants are applied either way, since a policy names the role.
     """
     reconciler = ChRbacReconciler(admin_client, database=database or None)
     resolved = resolve_grant_databases(list(tiers or DEFAULT_TIERS), reconciler._database)
-    org_tables = reconciler.discover_org_id_tables()
+    granted = _tenant_granted_dbs(resolved)
+    org_tables = reconciler.discover_org_id_tables(granted)
     org_set = set(org_tables)
     deny_tables = [
-        t
-        for t in reconciler.discover_tenant_reachable_tables(_tenant_granted_dbs(resolved))
-        if t not in org_set
+        t for t in reconciler.discover_tenant_reachable_tables(granted) if t not in org_set
     ]
     if tables is not None:
         wanted = {(reconciler._database, name) for name in tables}

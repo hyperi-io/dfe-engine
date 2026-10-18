@@ -9,8 +9,9 @@
 
 ``rule:write`` is held by data_analyst, and the saved rule's condition runs in
 the volume preview and in the hunt runner's ``INSERT ... SELECT``, so a call
-such as ``url()`` would carry the row to whatever host it names. The addresses
-below are in the documentation range (RFC 5737) and nothing here opens a socket.
+such as ``url()`` would carry the row to whatever host it names, and a subquery
+would read another org's rows. The addresses below are in the documentation
+range (RFC 5737) and nothing here opens a socket.
 """
 
 import pytest
@@ -103,11 +104,36 @@ def test_a_rule_over_its_own_rows_is_still_accepted(client, admin_headers):
 
 
 @pytest.mark.parametrize(
+    "condition",
+    [
+        "_source IN (SELECT ioc FROM threat.iocs)",
+        "_source NOT IN (SELECT ioc FROM threat.iocs)",
+        "_source IN threat.iocs",
+        "_source IN (threat.iocs)",
+    ],
+    ids=["lookup", "excluded_lookup", "table", "bracketed_table"],
+)
+def test_a_rule_reading_another_table_is_refused_and_never_written(
+    client, admin_headers, condition
+):
+    """The hunt runner's user reads every org, so another table answers past the hunt's orgs."""
+    resp = client.post(
+        "/api/v1/rules",
+        json=_payload("lookup", f"SELECT * FROM dfe.main WHERE {condition}"),
+        headers=admin_headers,
+    )
+
+    assert resp.status_code == 422, resp.text
+    messages = [error["message"] for error in resp.json()["context"]["sql_errors"]]
+    assert any("SELECT" in message or "after IN" in message for message in messages), messages
+    assert client.get("/api/v1/rules/lookup", headers=admin_headers).status_code == 404
+
+
+@pytest.mark.parametrize(
     ("name", "condition"),
     [
-        ("lookup", "_source IN (SELECT ioc FROM threat.iocs)"),
-        ("excluded_lookup", "_source NOT IN (SELECT ioc FROM threat.iocs)"),
         ("listed", "severity IN ('high', 'critical')"),
+        ("excluded", "severity NOT IN ('low')"),
     ],
 )
 def test_a_rule_using_the_in_operator_is_accepted(client, admin_headers, name, condition):

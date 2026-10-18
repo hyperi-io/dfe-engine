@@ -86,7 +86,8 @@ class HuntRunnerMetrics:
         )
         self._fire_failures = manager.counter(
             FIRE_FAILURES,
-            "Hunt fires that failed, by the ClickHouse error category or empty_query",
+            "Hunt fires that failed, by the ClickHouse error category or the hunt's own "
+            "refusal (empty_query, no_customers, unknown_customers)",
             ["hunt_id", "reason"],
         )
         self._fires_held = manager.counter(
@@ -162,7 +163,8 @@ class HuntRunnerMetrics:
 
         Args:
             stage: ``connect`` at startup, or ``tick`` once running.
-            reason: ``connection`` for an outage, ``authentication`` for a refused user.
+            reason: ``connection`` for an outage, ``authentication`` for a refused user,
+                ``capacity`` for a server out of memory or query slots.
         """
         if self._manager is None:
             return
@@ -173,8 +175,9 @@ class HuntRunnerMetrics:
 
         Args:
             hunt_id: The hunt whose fire failed.
-            reason: A ClickHouse error category (``not_found`` for a missing table)
-                or ``empty_query``, so the label stays bounded.
+            reason: A ClickHouse error category (``not_found`` for a missing table),
+                ``empty_query``, ``no_customers`` or ``unknown_customers``, so the label
+                stays bounded.
         """
         if self._manager is None:
             return

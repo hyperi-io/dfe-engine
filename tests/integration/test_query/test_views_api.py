@@ -95,7 +95,7 @@ def stack(ch_params, ch_client, tmp_path, monkeypatch):
     leak_view = f"dfe_v_probe{uid}_leak"
     ch_client.command(f"CREATE DATABASE IF NOT EXISTS `{DATA_DB}`")
     ch_client.command(f"CREATE TABLE {table} (org String, n UInt64) ENGINE = MergeTree ORDER BY n")
-    # The admin token below carries no org claim, so the API resolves it to `default`.
+    # The admin account below is bound to org `default`, which is the org the view reads.
     ch_client.command(f"INSERT INTO {table} VALUES ('default', 1), ('default', 2), ('other', 3)")
     ch_client.command(
         f"CREATE VIEW `{DATA_DB}`.`{who_view}` AS SELECT currentUser() AS who, n "
@@ -113,6 +113,7 @@ def stack(ch_params, ch_client, tmp_path, monkeypatch):
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             app.state.account_store.reset_password("admin", ADMIN_PASSWORD)
+            app.state.account_store.update("admin", org="default")
             token = create_access_token(data={"sub": "admin"}, settings=settings)
             yield SimpleNamespace(
                 app=app,
@@ -165,8 +166,8 @@ def test_a_view_over_url_is_refused_by_the_readers_grants(stack):
 
     assert resp.status_code == 500, resp.text
     assert resp.json()["code"] == "query_error"
-    assert resp.json()["message"] == (
-        f"View '{stack.leak}' failed to execute; the engine log has ClickHouse's reason"
+    assert resp.json()["message"].startswith(
+        f"View '{stack.leak}' failed to execute; the engine log has ClickHouse's reason (reference "
     )
     assert "ACCESS_DENIED" not in resp.text
     # Any failure gets the same answer, so only the logged cause shows the grant refused it.

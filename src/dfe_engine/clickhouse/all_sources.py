@@ -148,7 +148,7 @@ def _rebuild(
     *, client: Any, database: str, sources: Iterable[Source], topology: str | None
 ) -> list[str]:
     """Create or replace all_sources over the live member tables, fence it, and return the members."""
-    landing_table = landing_table_name(data_database=database)
+    landing_table = landing_table_name()
     members = member_tables(
         landing_table=landing_table,
         live=live_tables(client=client, database=database),

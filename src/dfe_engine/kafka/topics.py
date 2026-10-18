@@ -47,6 +47,7 @@ shape. Collapse onto KafkaAdmin once scalo grows that surface.
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from confluent_kafka import KafkaError, KafkaException
 from confluent_kafka.admin import (
     AdminClient,
     AlterConfigOpType,
@@ -57,21 +58,44 @@ from confluent_kafka.admin import (
 )
 from scalo.logger import logger
 
-from dfe_engine.source.models import manifest_max_message_bytes, transformed_topic
+from dfe_engine.source.models import (
+    manifest_max_message_bytes,
+    manifest_replication_factor,
+    transformed_topic,
+)
 
 if TYPE_CHECKING:
     from dfe_engine.settings import DFESettings
     from dfe_engine.source.models import Source
 
-# A reason recorded here reaches API callers, so the broker's own text goes to the log.
+# A reason recorded here reaches API callers, so broker and config text goes to the log.
 BROKER_UNREACHABLE = "broker unreachable; the engine log has the reason"
 BROKER_REFUSED = "the broker refused it; the engine log has the reason"
+KAFKA_CONFIG_REJECTED = "kafka config rejected; the engine log has the reason"
 
 
 def _unreachable(exc: Exception) -> str:
     """The reason recorded for a broker that could not be reached, its own text logged."""
     logger.warning("Kafka broker unreachable", error=str(exc))
     return BROKER_UNREACHABLE
+
+
+def _config_rejected(exc: Exception) -> str:
+    """The reason recorded for a kafka config the credential contract refused, its own text logged."""
+    logger.warning("Kafka config rejected", error=str(exc))
+    return KAFKA_CONFIG_REJECTED
+
+
+def _refused(exc: Exception) -> str:
+    """The reason recorded for a request the broker refused, naming its error code where it gave one.
+
+    The code is librdkafka's name for the error, such as ``POLICY_VIOLATION``, and
+    carries none of the broker's own text.
+    """
+    error = exc.args[0] if isinstance(exc, KafkaException) and exc.args else None
+    if not isinstance(error, KafkaError):
+        return BROKER_REFUSED
+    return f"the broker refused it ({error.name()}); the engine log has the reason"
 
 
 @dataclass
@@ -440,6 +464,24 @@ def broker_count(
     return nodes
 
 
+def source_replication_factor(
+    settings: DFESettings,
+    *,
+    admin: TopicAdmin | None = None,
+) -> int:
+    """The replication factor every source's ``_land`` and ``_load`` topics are created at.
+
+    The configured factor where one is set, used as given. Unset takes the manifest's
+    landing factor clamped to :func:`broker_count`, the clamp the bootstrap set gets:
+    Confluent Cloud and Redpanda Cloud refuse a topic below 3 replicas, and an
+    in-cluster broker set loses a one-replica topic with its broker.
+    """
+    configured = settings.kafka.topic_replication_factor
+    if configured is not None:
+        return configured
+    return min(manifest_replication_factor(), broker_count(settings=settings, admin=admin))
+
+
 def topic_max_message_bytes(settings: DFESettings) -> int:
     """The ``max.message.bytes`` every topic DFE creates carries, bootstrap and source alike.
 
@@ -473,23 +515,31 @@ def deployment_topic_config(settings: DFESettings) -> dict[str, str]:
 
 
 def specs_for_sources(
-    sources: list[Source], settings: DFESettings
+    sources: list[Source],
+    settings: DFESettings,
+    *,
+    admin: TopicAdmin | None = None,
 ) -> tuple[list[TopicSpec], dict[str, str]]:
     """Every source's topic specs, de-duplicated, plus the source that owns each.
 
     Sources share a topic only by name collision, which the registry already
     refuses, so the first owner wins and the duplicate is dropped rather than
     ensured twice.
+
+    Blocking where the replication factor is unset, since the bus is asked its
+    size, so a caller on the event loop hands it to a thread.
     """
-    ks = settings.kafka
+    if not sources:
+        return [], {}
     config = deployment_topic_config(settings)
+    replication_factor = source_replication_factor(settings, admin=admin)
     specs: list[TopicSpec] = []
     owners: dict[str, str] = {}
     for source in sources:
         for spec in source_topic_specs(
             source,
-            partitions=ks.topic_partitions,
-            replication_factor=ks.topic_replication_factor,
+            partitions=settings.kafka.topic_partitions,
+            replication_factor=replication_factor,
             config=config,
         ):
             if not spec.name or spec.name in owners:
@@ -513,7 +563,7 @@ def ensure_all_source_topics(
     """
     if not topics_managed_at_startup(settings):
         return TopicEnsureResult()
-    specs, _ = specs_for_sources(sources, settings)
+    specs, _ = specs_for_sources(sources, settings, admin=admin)
     return ensure_topics(specs, admin=admin, settings=settings)
 
 
@@ -619,7 +669,8 @@ def ensure_topics(
     except KafkaContractError as exc:
         # A rejected credential shape is a config fault, not an unreachable broker.
         # Reporting it as the latter sends the operator to the wrong place.
-        result.failed = [(spec.name, f"kafka config rejected: {exc}") for spec in specs]
+        reason = _config_rejected(exc)
+        result.failed = [(spec.name, reason) for spec in specs]
         return result
     except Exception as exc:
         reason = _unreachable(exc)
@@ -643,7 +694,7 @@ def ensure_topics(
                 f"(partitions={spec.partitions}, rf={spec.replication_factor})"
             )
         except Exception as exc:
-            result.failed.append((spec.name, BROKER_REFUSED))
+            result.failed.append((spec.name, _refused(exc)))
             logger.error(f"Kafka topic creation failed: {spec.name} - {exc}")
 
     return result
@@ -678,7 +729,8 @@ def remove_topics(
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
     except KafkaContractError as exc:
-        result.failed = [(name, f"kafka config rejected: {exc}") for name in names]
+        reason = _config_rejected(exc)
+        result.failed = [(name, reason) for name in names]
         return result
     except Exception as exc:
         reason = _unreachable(exc)
@@ -694,7 +746,7 @@ def remove_topics(
             result.removed.append(name)
             logger.info(f"Kafka topic deleted: {name}")
         except Exception as exc:
-            result.failed.append((name, BROKER_REFUSED))
+            result.failed.append((name, _refused(exc)))
             logger.error(f"Kafka topic deletion failed: {name} - {exc}")
 
     return result
@@ -734,7 +786,7 @@ def topic_status(
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
     except KafkaContractError as exc:
-        result.error = f"kafka config rejected: {exc}"
+        result.error = _config_rejected(exc)
         return result
     except Exception as exc:
         result.error = _unreachable(exc)
@@ -804,7 +856,8 @@ def update_topics(
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
     except KafkaContractError as exc:
-        result.failed = [(spec.name, f"kafka config rejected: {exc}") for spec in specs]
+        reason = _config_rejected(exc)
+        result.failed = [(spec.name, reason) for spec in specs]
         return result
     except Exception as exc:
         reason = _unreachable(exc)
@@ -821,7 +874,7 @@ def update_topics(
             # that would find that out is skipped.
             drifted = _config_drift(spec, admin.describe_config(spec.name)) if spec.config else {}
         except Exception as exc:
-            result.failed.append((spec.name, BROKER_REFUSED))
+            result.failed.append((spec.name, _refused(exc)))
             logger.error(f"Kafka topic could not be described: {spec.name} - {exc}")
             continue
 
@@ -847,7 +900,7 @@ def update_topics(
             try:
                 admin.alter_config(spec.name, drifted)
             except Exception as exc:
-                result.failed.append((spec.name, BROKER_REFUSED))
+                result.failed.append((spec.name, _refused(exc)))
                 logger.error(f"Kafka topic config alter failed: {spec.name} - {exc}")
                 continue
             logger.info(f"Kafka topic config altered: {spec.name} ({sorted(drifted)})")
@@ -860,7 +913,7 @@ def update_topics(
                 try:
                     admin.widen_partitions(spec.name, total=spec.partitions)
                 except Exception as exc:
-                    result.failed.append((spec.name, BROKER_REFUSED))
+                    result.failed.append((spec.name, _refused(exc)))
                     logger.error(f"Kafka topic partition widening failed: {spec.name} - {exc}")
                     continue
                 logger.info(

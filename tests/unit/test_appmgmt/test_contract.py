@@ -426,6 +426,7 @@ class TestProvenance:
             "config.kafka.tls.enabled",
             "config.kafka.sasl.username",
             "config.kafka.sasl.password",
+            "config.kafka.sasl.mechanism",
             "config.clickhouse.hosts",
             "config.clickhouse.database",
             "config.clickhouse.username",
@@ -656,8 +657,19 @@ class TestProvenance:
             "config.source.sasl.password",
             "config.sink.sasl.username",
             "config.sink.sasl.password",
+            "config.source.sasl.mechanism",
+            "config.sink.sasl.mechanism",
             *own,
         } == derived
+
+    @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
+    def test_one_name_carries_the_broker_s_mechanism_to_both_endpoints(self, service):
+        # The chart mounts the Kafka Secret's sasl.mechanism, so an overlay value
+        # for either endpoint is one the deployment replaces.
+        for path in ("config.source.sasl.mechanism", "config.sink.sasl.mechanism"):
+            assert (
+                contract.chart_supplier(service, path, {}) == "DFE_TRANSFORM_KAFKA_SASL_MECHANISM"
+            )
 
     @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
     def test_the_transforms_directory_is_the_deployment_s_once_files_are_written(self, service):

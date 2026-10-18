@@ -22,7 +22,7 @@ from dfe_engine.api.deps import _registries
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.settings import ClickHouseResilienceSettings
+from dfe_engine.settings import ClickHouseResilienceSettings, ClickHouseSettings
 
 URL = "/api/v1/system/defaults"
 
@@ -461,3 +461,28 @@ class TestDefaultDrift:
         assert body["per_page"] == 1
         assert body["next_page"] == 2
         assert body["items"][0]["source"] != "main"
+
+
+class TestDriftWithAStaleLandingConfig:
+    """A config still carrying the retired ``clickhouse.landing_table`` does not unhide the landing source."""
+
+    @pytest.fixture
+    def api_settings(self, api_settings):
+        stale = ClickHouseSettings.model_validate(
+            {"bootstrap_tables": False, "landing_table": "inbox"}
+        )
+        return api_settings.model_copy(update={"clickhouse": stale})
+
+    def test_the_landing_source_is_never_listed(self, admin_headers, app, client, tmp_path):
+        assert client.get("/api/v1/sources/main", headers=admin_headers).status_code == 200
+        _wire(app, tmp_path)
+        client.patch(
+            URL,
+            headers=admin_headers,
+            json={"common_header_type": "minimal", "engine": "ReplacingMergeTree"},
+        )
+
+        resp = client.get(DRIFT, headers=admin_headers, params={"search": "main"})
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["items"] == []

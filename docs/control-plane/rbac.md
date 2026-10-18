@@ -32,7 +32,7 @@ flowchart TD
     RESOLVE_KEY --> CTX
 
     APIKEY -->|No| JWT{Authorization:<br/>Bearer?}
-    JWT -->|Yes| DECODE["Verify signature ES384 by default,<br/>issuer and expiry<br/>Take sub and org_id"]
+    JWT -->|Yes| DECODE["Verify signature ES384 by default,<br/>issuer and expiry<br/>Take sub"]
     DECODE --> BIND["Bind sub to its account<br/>disabled or blocked -> 401"]
     BIND --> RESOLVE_JWT["GroupStore resolves the account's<br/>groups -> roles + org_ids<br/>token claims ignored"]
     RESOLVE_JWT --> CTX
@@ -57,7 +57,9 @@ flowchart TD
 | JWT Bearer | Console sessions, standalone, dev | Issued by `POST /api/v1/auth/login`, the OIDC login callback and `POST /api/v1/auth/refresh` | `api.jwt_expire_minutes` (`DFE_API_JWT_EXPIRE_MINUTES`, default 60) |
 | Disabled | Dev/test | N/A | N/A |
 
-A JWT carries identity, not authority. Its `roles`, `groups` and `org_ids` claims grant nothing: every request re-resolves them from the account the `sub` binds to, so a role or org taken away is gone from the next request. A `sub` that binds no account holds nothing -- an API-key subject, a deleted account -- and with auth enabled `POST /api/v1/auth/refresh` answers 401 for it, since each refresh issues a new expiry.
+A JWT carries identity, not authority. Its `org_id`, `roles`, `groups` and `org_ids` claims grant nothing: every request re-resolves them from the account the `sub` binds to, so a role or org taken away is gone from the next request.
+
+A session's `org_id` is its account's `org`, set by `POST` or `PUT /api/v1/auth/accounts`, or its API key's `org`, set by `POST /api/v1/auth/api-keys` (`422 unknown_org` for an unregistered org), and empty for one bound to none. A view taking `org_id` runs only when the session's groups grant that org or it reads every org, else `403 no_org` or `403 org_not_granted`. A `sub` that binds no account holds nothing -- an API-key subject, a deleted account -- and with auth enabled `POST /api/v1/auth/refresh` answers 401 for it, since each refresh issues a new expiry.
 
 OIDC headers injected by Envoy Gateway SecurityPolicy, read only when `auth.trust_proxy_auth_headers` (`DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`) is true:
 
@@ -212,64 +214,7 @@ if key_meta.is_expired():
 
 ### 2.1 Identity Resolution Chain
 
-```mermaid
-flowchart TD
-    subgraph "Authentication (who are you?)"
-        OIDC_AUTH["OIDC: X-Oidc-Subject → user_id"]
-        KEY_AUTH["API Key: X-API-Key → APIKeyStore.verify() → key name"]
-        JWT_AUTH["JWT: Bearer -> verify -> sub binds an account"]
-        LOCAL_AUTH["Login: POST /auth/login → AccountStore.verify_password()"]
-    end
-
-    subgraph "Group Resolution (what groups?)"
-        OIDC_GRP["OIDC: X-Oidc-Groups, recorded on the<br/>account the sign-in binds"]
-        ACCT_GRP["Account: the group files listing it as a member,<br/>plus its IdP-asserted groups when an IdP owns it"]
-        KEY_GRP["API Key: key.groups field"]
-    end
-
-    subgraph "Role Resolution (what roles?)"
-        ROLE_RES["Member groups by name, IdP identifiers by linked source_id<br/>Union of roles, scoped grants and org_ids"]
-    end
-
-    subgraph "Permission Check (can you do this?)"
-        PERM["authorize(auth, action)<br/>permission_matches() with wildcards"]
-    end
-
-    OIDC_AUTH --> OIDC_GRP
-    KEY_AUTH --> KEY_GRP
-    JWT_AUTH --> ACCT_GRP
-    LOCAL_AUTH --> ACCT_GRP
-
-    OIDC_GRP --> ACCT_GRP
-    ACCT_GRP --> ROLE_RES
-    KEY_GRP --> ROLE_RES
-
-    ROLE_RES --> PERM
-
-    PERM -->|allowed| ALLOW[AuthzResult: allowed=true]
-    PERM -->|denied| DENY[AuthzResult: allowed=false]
-
-    style ALLOW fill:#4a4,color:#fff
-    style DENY fill:#f44,color:#fff
-```
-
-An identifier an IdP asserts, in a token's groups claim, `X-Oidc-Groups` or a SCIM record, takes a group only when that group's `source_id` is the identifier and its `source_provider` is the provider the login came through (or one `auth.source_provider_bindings` joins to it). A group's name links nothing, so an IdP group that happens to be called `dfe-admins` gets no roles until an admin links it. Logins through `X-Oidc-Groups` count as the provider named in `auth.proxy_provider` (default `oidc`).
-
-A link names its provider. A group with a `source_id` and no `source_provider` would answer every provider that asserts the id, so the group stores refuse to write one. A group file or document already carrying one loads unlinked: the id is dropped and links no provider, its members keep the group's roles, and the engine logs a warning naming the group and counts it on `auth_groups_unlinked_total{reason="no_provider"}`. The next write to that group saves it without the id, so link it again by setting both fields.
-
-`auth.source_provider_bindings` joins each stamp straight to one OIDC provider, and settings refuse a chain such as `{"legacy": "scim", "scim": "entra"}`, where a target is itself a stamp. An IdP sign-in is admitted on the providers its account's own stamp answers for, the set its roles resolve through, so a SCIM account stamped `scim` is admitted on `scim` and `entra` but not on another stamp bound to `entra`.
-
-A sign-in through `X-Oidc-Groups` resolves its roles the way a token does, from the account the sign-in binds: the groups its asserted identifiers link to, plus every group whose members list the account. A gateway that forwards no groups claim, Envoy among them, reaches roles only through that membership, so on those deployments adding an account to a group by hand is how its roles arrive.
-
-The linked groups are also the sign-in allowlist. An IdP sign-in, through the OIDC callback or `X-Oidc-Groups`, is admitted only when the account it binds to would hold a role, from a group its identifiers link to or a group whose members name the account, so a linked group with no role (every group the sync creates, until an admin gives it one) admits nobody. Anyone else gets `401 no_role_granted` (a sign-in the console started, with `return_to`, goes back to the console with that code in the URL fragment instead) and an `auth.jit.login_refused` audit event, a first sign-in leaves no account, and an existing account records the groups its IdP now asserts and has every session ended, as a logout ends them, so an issued token answers `401 session_ended` on any route, refresh included. The local admin or the break-glass account (section 3.5) links the first group, and adding an account to a group by hand admits someone the IdP groups do not cover, which is the only way in through a `manual`-mode provider.
-
-An admin sets `source_id` and `source_provider` together through the groups API or dfe-ui's group form (section 4.4); `source_provider` names the provider whose logins the link answers. Where a `token_claim` provider's claim carries names (Okta's default, dex, Keycloak), `source_id` is the name the IdP sends; for Entra it is the object ID.
-
-A groups claim sent as one string is split on commas (on whitespace when it has none, `auth/oidc/rp.py`) and `X-Oidc-Groups` is split on commas. So a group name containing a space needs an array claim; a `source_id` containing a comma matches only an array claim on the relying-party path.
-
-For a local account the group files are the authority. The account's own `groups` list is kept in step by the API routes, but it grants nothing. A member removed from a group file in the live store loses that group's roles and orgs at its next engine request, whether the API removed it, someone edited the file in the engine's auth directory, or the Helm chart's `authConfig.groupsConfigMap` copied a new file in at pod start. The deploy repo's `governance/rbac` classes are neither read nor written at runtime, so an edit there changes nothing. An account an IdP owns (JIT or SCIM) also holds the groups its record says the IdP asserts, so a group an operator adds it to by hand sits beside those.
-
-dfe-hyperdx decides on the `role` claim of the token it holds, so there a role taken away lasts until that token expires or is refreshed (`api.jwt_expire_minutes`).
+Moved to [rbac-sign-in.md](rbac-sign-in.md#21-identity-resolution-chain).
 
 ### 2.2 Role Definitions
 
@@ -301,6 +246,8 @@ graph LR
     style ADMIN fill:#c33,color:#fff
     style CV fill:#36c,color:#fff
 ```
+
+A role write grants only what its caller already holds. Creating a role, or changing what one grants, needs every permission it lists through the caller's system-scope grants, where a pattern covers another when it matches everything that one does (`config:*` covers `config:read`). An unscoped role reads every org once bound at system scope, so it needs those permissions through roles that themselves read every org. Handing a role to a group, an account or an API key follows the same rule at the group's scope, `role:write` adds nothing to it, and a role `roles.yaml` does not declare needs `*`.
 
 ### 2.3 Permission Taxonomy
 
@@ -450,6 +397,7 @@ enabled: true
 short_token: "8a3f2c91"
 key_hash: "sha384:38b060a7..."
 groups: ["infra-ops"]
+org: "acme"                      # org its sessions are bound to, empty for none
 description: "CI/CD pipeline deployer"
 created_at: "2026-03-31T02:00:00Z"
 ```
@@ -490,55 +438,7 @@ On first startup (empty `config/auth/` directory), `bootstrap_auth()` seeds:
 
 ### 3.5 First Login: the two seeded accounts
 
-The deploy mints the credentials, the engine refuses defaults, the UI never holds
-a password.
-
-**`admin`** takes its password from `DFE_AUTH_LOCAL_ADMIN_PASSWORD`, filled by the deployment's own secret store, issued with a forced change at first login. Every boot reasserts it until the admin replaces it, and after that only on a rotation.
-
-**`breakglass`** is the recovery admin, verified against a bcrypt hash committed
-at `governance/settings/auth.yaml` in the deploy repo, so it survives losing the
-engine, the UI and the secret store:
-
-```yaml
-breakglass:
-  password_hash: $2b$12$...   # minted once, never the plaintext
-  enabled: true               # false locks the account out
-```
-
-`DFE_AUTH_BREAKGLASS_PASSWORD` mints that hash on the first boot with none
-committed and is ignored afterwards. Gitops off means no hash and no break-glass
-account. Every attempt is audit-logged (`auth.breakglass.login`); with
-`enabled: false` the login returns 403 naming the setting.
-
-**No `changeme` outside dev.** The engine refuses to start on an unset or default
-admin password unless `DFE_ENV` is a dev posture -- the predicate gitops
-auto-merge gates on (`settings.is_dev_posture`), and the error names the variable
-and the fix. A dev posture running the default reports `default_credentials: true` on setup-status, login and refresh, for the UI to banner and force a change. Each reads the admin account at the request, so the forced change clears it with no restart.
-
-**The predicate other repos copy** is `auth.bootstrap.default_credentials_in_use`:
-strip surrounding whitespace, then treat empty and `changeme` as the default. An
-exact comparison reads the `"changeme\n"` a Secret or `.env` line delivers as a
-minted password.
-
-**Reading the minted password.** setup-status carries `deploy_kind` (`docker` |
-`kubernetes` | `local`, from `DFE_DEPLOYMENT_TARGET` else scalo's runtime
-detection) and `credential_fetch_command`: `make creds` for docker, `kubectl -n
-<ns> get secret <name> -o jsonpath='{.data.<key>}' | base64 -d` for kubernetes,
-the environment file for local. Both survive setup completion (#301) -- that is
-when an operator has lost the password.
-
-**Changing either password.** `POST /auth/accounts/{username}/reset-password` works for both accounts on every deployment, and is the console's one password action for each. The new password works at the next sign-in, and the engine keeps it where that account's password lives so a restart does not undo it:
-
-| Account | Kept in | Gitops off |
-|---|---|---|
-| `admin` | the live account store, and its whole account doc at `governance/rbac/accounts/<admin>.yaml` | the live account store only |
-| `breakglass` | its bcrypt hash at `governance/settings/auth.yaml`, which every boot seeds the account from | no `breakglass` account |
-
-A deployment that commits straight to main (dev, solo, auto-merge) is done at once. Production with `DFE_GITOPS_MODE=team` opens a review instead, and the response's `git.pending` carries the PR URL, or the merge command when no forge is configured. A restart before the review merges brings the old password back. `GET /auth/accounts/{username}/git-status` reports when it has merged.
-
-**Rotation.** `POST /auth/accounts/{admin}/rotate-password` changes the value the deployment injects, not the live password: it writes the deployment's secret store when `DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH` is set, else returns 501 with the command that changes it where the deployment keeps it (`context.store_command`). The next boot issues the rotated value with a forced change. The engine never writes the password into its own YAML store. The new password faces the two rules that gate startup -- 12 characters minimum, never the default -- so a rotation cannot lock the deployment out of its own next boot. Either is a 422 naming the field. Any other account answers 400 `not_store_backed` and is reset instead.
-
-**The admin is kept.** The console never retires `admin`: its first login replaces the minted password, and from then on it is reset like any other account. `POST /api/v1/auth/setup/retire-admin` remains for an operator whose policy is to disable it once the deployment has an admin of its own.
+Moved to [rbac-sign-in.md](rbac-sign-in.md#35-first-login-the-two-seeded-accounts).
 
 ---
 
@@ -633,71 +533,7 @@ A sign-in's group lookup fails safe. A credential or API failure, or a lookup st
 
 ### 4.4 Group Sync Process
 
-```mermaid
-sequenceDiagram
-    participant Sync as sync_provider()
-    participant Reg as OIDCProviderRegistry
-    participant Adapter as OIDC Adapter
-    participant GS as GroupStore
-
-    Sync->>Reg: get(provider_name)
-    Reg-->>Sync: OIDCProvider config
-    Note over Sync: Skip if disabled or mode != api
-
-    Sync->>Adapter: list_all_groups()
-    Adapter-->>Sync: list[GroupInfo]
-
-    Sync->>GS: list()
-    GS-->>Sync: stored groups, by their link
-
-    loop Each remote group
-        alt Group linked to this IdP group, through this provider
-            Sync->>GS: update(description only,<br/>preserve existing roles)
-        else Group of any name carrying its id, linked to another provider
-            Note over Sync: skip, count provider_mismatch
-        else No group of that name
-            Sync->>GS: create(empty roles,<br/>source_provider + source_id)
-        else Group not linked to it
-            Note over Sync: skip, count name_taken
-        end
-    end
-
-    Sync->>Reg: update(last_sync_at,<br/>last_sync_status)
-```
-
-The sync updates a stored group only when it is already linked to that IdP group: its `source_id` is the IdP group's id and its `source_provider` is this provider, or one `auth.source_provider_bindings` joins to it. The directory assigns that id, so a user cannot choose it the way they choose a display name. Okta is the exception: its groups claim carries names, so an Okta group's id here is its name ([idp-setup/okta.md](idp-setup/okta.md)). A group the sync creates is linked in the same write. A linked group keeps its roles, and the sync refreshes only its description. Admins assign roles to synced groups by hand.
-
-A name match links nothing. Directory display names are not unique, and in a tenant where users can create groups anyone can pick one, so an IdP group named `DFE Admins` would otherwise take the seeded `dfe-admins` and its `admin` role. A stored group of the same name with no `source_id`, or carrying another IdP group's id, is left untouched and counted as `name_taken`. So is a new group whose name is a stored group's `source_id` or whose id is a stored group's name.
-
-A sync never moves a group between providers. Two providers can assign one id, and Okta's ids are group names, so an Okta group named `SOC Analysts` carries the same id as a Keycloak group of that name. A stored group carrying the IdP group's id but linked to another provider, whatever it is called, is left untouched and counted as `provider_mismatch`, so the sync never creates a second group carrying the id, and the engine log names the syncing provider, the provider the group is linked to and the reason. `auth.source_provider_bindings` declares two names one identity source, either way round, so with `{"scim": "entra"}` the `entra` sync refreshes a group SCIM stamped `scim` and leaves the stamp as it is.
-
-Linking an IdP group to a stored group is an admin's act. Set both `source_provider`, the provider's name in the registry, and `source_id`, the IdP group's id, through the groups API (`POST` or `PUT /api/v1/auth/groups`), dfe-ui's group form, the group's file in the live store or the chart's `authConfig.groupsConfigMap`. `PUT /api/v1/scim/v2/Groups/{name}` sets `source_id` from `externalId`. On a group not yet linked it also sets `source_provider` to `scim`, so an OIDC sign-in reaches the group only through the provider `auth.source_provider_bindings` binds to `scim`. A group already linked keeps its provider.
-
-The groups API refuses a link no login could use to reach the group alone:
-
-- `409 conflict`: another group carries the `source_id`, under any provider (SCIM answers `uniqueness`).
-- `409 identifier_taken`: a new group's name is another group's `source_id` or a new or changed `source_id` is another group's name (SCIM answers `uniqueness` for a `displayName` or `externalId`). An API key resolves each group identifier by name, then by `source_id`, so an identifier in both namespaces would let a key minted for one group take the other's roles once the first is deleted. A group whose name is its own `source_id` is one group and is accepted. A pair already stored is logged as a warning at startup, naming both groups.
-- `422 invalid_source_id`: the `source_id` is over 512 characters, starts or ends with whitespace or holds a control character.
-- `422 invalid_source_provider`: the `source_provider` is over 512 characters or is not an OIDC provider, a binding, `scim` or (while `auth.trust_proxy_auth_headers` is on) `auth.proxy_provider`.
-- `422 missing_source_provider`: a new or changed link has a `source_id` but no `source_provider`.
-
-Only a changed value is checked, so an edit to other fields of a group whose stored link these rules now refuse still succeeds. Setting, changing or clearing a link needs the role rights adding a member does, since each changes who holds the group's roles. Deleting a linked group needs them too, through the groups API and SCIM alike.
-
-An account write is checked against the groups the account holds before and after it. An IdP-owned account's own list is also its assertion, so a name in that list that is another group's `source_id` is checked as that group as well.
-
-A group write, through the groups API or SCIM, changes only the group's member list. It updates a local account's own `groups` list to match but never an IdP-owned account's (one with `source_provider` set): that list is what the IdP asserts, so a group name written there would be read as an assertion. The member still holds the group through the member list, which SCIM `/Users` reports.
-
-One bad group never aborts the sync. A provider group that carries no id, whose email, name or id makes no valid group name, whose name is held by a stored group that does not load, whose name is held by a stored group not linked to it, or whose stored group is linked to another provider, is skipped and counted on `auth_oidc_sync_groups_skipped_total{reason}` (`no_id`, `invalid_name`, `stored_unloadable`, `name_taken`, `provider_mismatch`), and the provider's `last_sync_status` reads `partial` with each reason. A group with no id can never be linked, from any provider, so the engine log counts those in one line per run and names none of them.
-
-A listing that fails on any page, the first or the last, stops the sync before it writes a group. So does a page without the listing's shape, and a listing still handing out pages after 1,000. `last_sync_status` reads `error`, and `sync_error` says what failed: the provider's HTTP status, a page it could not read, or the page limit. A 429 reads as throttling, not as a refusal. The engine log carries the provider's error code, and the next run lists again from the start.
-
-A credential that is set but gives no access fails the same way. Entra issuing no token for the client secret, a Google service account JSON that does not build a client, or Google's token endpoint refusing the service account (`invalid_grant`), reads `error`, and `sync_error` says the directory API could not use the configured credential. The engine log has the reason. An Entra that cannot be reached, throttles the token request (429) or fails it (5xx) says that instead, and never blames the credential. `GET /oidc-providers/{name}/test` reports an Entra credential the same way, and keeps "not configured" for one that was never set.
-
-An api-mode Entra or Okta provider with no directory credential, or a Google provider whose configured service account resolves to nothing, has nothing to list with. Its `last_sync_status` reads `not_configured`, `sync_error` says no credential is configured, and `POST /oidc-providers/{name}/sync` answers with the same text in `skipped`. A Google provider with no service account reads `user_token` with an empty `sync_error`, because each sign-in reads that user's groups with their own token. A credential whose secret store does not answer reads `error`, and `sync_error` names the secret store. One whose secret store refuses the engine access (a 403 on the path, or a refused AppRole login) also reads `error`, and `sync_error` says the store refused access, so the fix is the engine's secrets policy rather than the store's reachability.
-
-A `generic` provider has no directory API, so one set to api mode reads `error`, and `sync_error` says to set `groups.mode` to `token_claim`.
-
-The sync answer's `status` field carries the outcome: `ok`, `partial`, `error`, `not_configured`, `user_token` or `skipped`. The scheduled sync counts each run on `auth_oidc_sync_scheduled_runs_total{outcome}`. A provider that is not configured is tried again after its `sync_interval`, so adding the credential is picked up without a restart.
+Moved to [rbac-groups.md](rbac-groups.md#44-group-sync-process).
 
 ---
 
@@ -734,9 +570,7 @@ Group bindings (`governance/ch/bindings.py`) follow the same rule. An org-scoped
 
 ### 5.3 The Engine's Own Reads
 
-`connections.yaml` names the engine's own ClickHouse connections, and the engine asks for them by name. Only `default` is asked for, by schema discovery. The query API does not lean on a ClickHouse user for tenancy: the executor injects the caller's `org_id` as a reserved bind parameter that a client cannot override (`query/executor.py`, `RESERVED_PARAMS`).
-
-The row reads the engine makes for a caller with no platform grant -- the sampler, the transform dry run, and the schema routes `sample-rows`, `json-paths` and `promote-field` -- bind `_org_id` to the tenant ids of the caller's registered orgs, the same ids each org's pinned user carries (`orgs/tenant_scope.py`). Each org marker the caller carries resolves the same way as a group's (`resolve_orgs`): by name, or failing that by the one org declaring it as a tenant id; a marker no org declares, or a tenant id two orgs share, binds nothing, and a caller left with no tenant id, or a table with no `_org_id`, is refused before any row is read. `/tasks` shows such a caller only the tasks held to its orgs.
+Moved to [rbac-engine-reads.md](rbac-engine-reads.md#53-the-engines-own-reads).
 
 ---
 
@@ -772,6 +606,16 @@ Creating an org does not create its ClickHouse user. The CH RBAC reconcile does,
 A reconcile that raises, ClickHouse unreachable being the usual cause, is logged with the cause and run again in the background on a jittered back-off from 5 seconds up to 5 minutes, until one gets through. That includes the startup run, so a ClickHouse that comes up after the engine still gets every service user the dfe-schemas role catalogue mints without a restart. With tenant isolation off only the service roles reconcile, and they retry the same way. A successful `POST` stands a waiting retry down. Each retry adds 1 to `ch_rbac_reconcile_retries_total` (`reconcile`: `rbac` or `service_roles`), and every run counts on `ch_rbac_reconciles_total` (`outcome`). None of it gates readiness.
 
 `create` and `update` both refuse a name or tenant id that collides with another org's name or tenant ids -- `409 conflict` naming the other org -- because a shared marker would let their pinned ClickHouse users read each other's rows. An org keeping its own name among its own tenant ids is not a collision.
+
+### 6.3 Hunts Follow Their Orgs
+
+A hunt stores the tenant ids each of its customer orgs resolved to, because the hunt runner reads the deploy repo and the org registry is not in it. `POST /api/v1/orgs`, and `PUT` and `DELETE` on `/api/v1/orgs/{name}`, store the org's tenant ids afresh in every hunt naming it, as one deploy-repo commit, before the org itself is written. A hunt write that fails leaves the org as it was, so the same request can be sent again, and a `PUT` with nothing changed repairs a hunt holding stale ids.
+
+- **Delete.** The hunt keeps the org's name and loses its ids, so it fails as `unknown_customers` and holds its watermark until someone edits it.
+- **Rename.** An org's name is its identity, so `PUT` cannot change it.
+- **Review.** A production+team posture puts the hunt change on one review branch, the org answer carries `X-DFE-Review-Required`, and the runner keeps the old ids until it is merged.
+
+Each hunt rewritten emits `resource.hunt.updated` naming the org.
 
 ---
 
@@ -814,6 +658,8 @@ Logins, denied authorisation decisions and admin changes are logged for complian
 | Org change | `org.{change}` | info |
 | Resource change | `resource.{type}.{change}` -- OIDC providers, sources, fieldmaps and other config resources | info |
 
+A refused bearer token emits `auth.login.denied` with `login_method: jwt`, the verifier's error class as `reason`, and the `reference` its 401 answer names. The verifier's own text goes to a `bearer token refused` line at most once a minute, the next one naming how many it held back, and `api_bearer_tokens_refused_total{reason}` counts every refusal.
+
 Every account, group, API key and role write through `/api/v1/auth` emits one event naming the actor (`admin_id`), the change and the target. Its `details` carry the roles, groups, members or permissions the write set, and the names of contact fields changed, never their values. No event carries a password, a hash, an attribute value or an API key's secret half.
 
 Events flow through the OTel pipeline → JSON → ClickHouse → HyperDX.
@@ -825,7 +671,7 @@ No custom ClickHouse audit table — standard OTel log ingestion is used.
 
 ```python
 class AuthContext(BaseModel):
-    org_id: str = "default"  # Primary tenant
+    org_id: str = ""  # The account's or API key's org, empty when bound to none
     user_id: str  # Required unique identifier
     email: str | None = None  # From the OIDC/JWT claim, for git author attribution
     roles: list[str]  # Resolved DFE roles

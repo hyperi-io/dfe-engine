@@ -11,6 +11,7 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    HuntsSettings,
     load_settings,
     reset_settings,
 )
@@ -750,6 +751,14 @@ _LIST_SETTINGS = [
         id="hunts.alert_channels",
     ),
     pytest.param(
+        "hunts.lookup_databases",
+        "DFE_HUNTS_LOOKUP_DATABASES",
+        "threat, geo",
+        None,
+        ["threat", "geo"],
+        id="hunts.lookup_databases",
+    ),
+    pytest.param(
         "auth.local.seed_accounts",
         "DFE_AUTH_LOCAL_SEED_ACCOUNTS",
         '[{"username": "from-env"}]',
@@ -771,6 +780,7 @@ _LIST_SETTINGS = [
 _FILE_LISTS = {
     "api.cors_origins": (["https://file.example"], None, ["https://file.example"]),
     "hunts.alert_channels": (["json://file.example"], None, ["json://file.example"]),
+    "hunts.lookup_databases": (["intel"], None, ["intel"]),
     "auth.local.seed_accounts": ([{"username": "from-file"}], "username", ["from-file"]),
     "orgs.seed_orgs": ([{"name": "from-file"}], "name", ["from-file"]),
     "deployment.admin_links": (
@@ -817,6 +827,73 @@ class TestListsAcrossLayers:
         assert load_settings().api.cors_origins == ["https://a.example", "https://b.example"]
 
 
+class TestLookupDatabases:
+    """The shared reference databases a rule may look values up in: none unless listed."""
+
+    def test_no_database_is_listed_by_default(self):
+        assert load_settings().hunts.lookup_databases == []
+
+    def test_a_repeated_name_is_listed_once(self):
+        assert HuntsSettings(lookup_databases=["threat", "geo", "threat"]).lookup_databases == [
+            "threat",
+            "geo",
+        ]
+
+    @pytest.mark.parametrize(
+        "name", ["", "threat intel", "threat.iocs", "`threat`", "1threat", "thr'eat"]
+    )
+    def test_a_name_that_is_not_a_plain_database_name_is_refused(self, name):
+        with pytest.raises(ValidationError, match="lookup database"):
+            HuntsSettings(lookup_databases=[name])
+
+    @pytest.mark.parametrize(
+        "name", ["system", "SYSTEM", "information_schema", "INFORMATION_SCHEMA"]
+    )
+    def test_a_clickhouse_catalogue_is_refused(self, name):
+        """ClickHouse's own databases describe every org's tables and queries."""
+        with pytest.raises(ValidationError, match="ClickHouse's own"):
+            HuntsSettings(lookup_databases=[name])
+
+    def test_the_data_database_is_refused(self, monkeypatch):
+        """Every org's rows are in it, so a lookup there reads them all."""
+        monkeypatch.setenv("DFE_CLICKHOUSE_DATA_DATABASE", "telemetry")
+        monkeypatch.setenv("DFE_HUNTS_LOOKUP_DATABASES", "threat,telemetry")
+
+        with pytest.raises(ValidationError, match="telemetry"):
+            load_settings()
+
+
+class TestHuntDir:
+    """One directory, which the engine's hunt registry and the hunt runner both read as is."""
+
+    def test_surrounding_space_is_dropped(self):
+        assert HuntsSettings(hunt_dir="  /config/hunts \n").hunt_dir == "/config/hunts"
+
+    def test_a_list_of_directories_is_refused(self, monkeypatch):
+        """The engine read only the first and the runner none, so a list ran no hunt."""
+        monkeypatch.setenv("DFE_HUNTS_DIR", "/config/hunts,/extra/hunts")
+
+        with pytest.raises(ValidationError, match="one directory"):
+            load_settings()
+
+    def test_the_engine_writes_where_the_runner_reads(self, tmp_path):
+        from dfe_engine.api.deps import (
+            bootstrap_registries,
+            get_hunt_config_registry_optional,
+            shutdown_registries,
+        )
+        from dfe_engine.hunt_runner.spec_loader import load_specs
+
+        settings = DFESettings(env="test", hunts=HuntsSettings(hunt_dir=f" {tmp_path / 'hunts'} "))
+        bootstrap_registries(settings)
+        try:
+            get_hunt_config_registry_optional().save("windows_hunt", {"cron": "*/5 * * * *"})
+        finally:
+            shutdown_registries()
+
+        assert set(load_specs(settings.hunts.hunt_dir)) == {"windows_hunt"}
+
+
 class TestTransportAvailability:
     """What a deployment can carry a source on: the one transport it was stood up with."""
 
@@ -845,6 +922,31 @@ class TestTransportAvailability:
 
         with pytest.raises(ValidationError, match="DFE_TRANSPORT_BUS_PRESENT"):
             TransportSettings(default="bus", bus_present=False)
+
+
+class TestBrokerlessLocalE2e:
+    """A local e2e engine with no broker is told how to run without one."""
+
+    def test_the_e2e_example_names_settings_that_skip_the_broker(self, monkeypatch):
+        """Uncommented as written, they load and leave the startup nothing to wait on a broker for."""
+        import re
+        from pathlib import Path
+
+        from dfe_engine.schema.phase import _topics_skipped
+        from dfe_engine.settings import DFESettings, _get_env_overrides
+
+        example = Path(__file__).resolve().parents[2] / ".env.e2e.example"
+        documented = dict(
+            re.findall(r"^# (DFE_TRANSPORT_[A-Z_]+)=(\S+)", example.read_text("utf-8"), flags=re.M)
+        )
+        assert set(documented) == {"DFE_TRANSPORT_BUS_PRESENT", "DFE_TRANSPORT_DEFAULT"}
+        for name, value in documented.items():
+            monkeypatch.setenv(name, value)
+
+        settings = DFESettings(env="test", transport=_get_env_overrides()["transport"])
+
+        assert settings.transport.bus_present is False
+        assert _topics_skipped(settings) == "this deployment carries no bus"
 
 
 class TestTransportMesh:
@@ -941,11 +1043,22 @@ class TestGitopsMode:
         assert pack.interval_seconds == 60.5
 
     def test_write_timeout_is_longer_than_the_read_bound(self):
-        from dfe_engine.gitops.repo import REMOTE_HEAD_TIMEOUT_SECONDS
-        from dfe_engine.settings import GitopsWriteSettings
+        from dfe_engine.settings import GitopsReadSettings, GitopsWriteSettings
 
         timeout = GitopsWriteSettings.model_fields["timeout_seconds"].default
-        assert timeout > REMOTE_HEAD_TIMEOUT_SECONDS
+        assert timeout > GitopsReadSettings.model_fields["timeout_seconds"].default
+
+    def test_the_read_bound_defaults_to_three_seconds(self):
+        from dfe_engine.settings import GitopsSettings
+
+        assert GitopsSettings().read.timeout_seconds == 3.0
+
+    def test_the_read_bound_comes_from_the_environment(self, monkeypatch):
+        from dfe_engine.settings import GitopsSettings, _get_env_overrides
+
+        monkeypatch.setenv("DFE_GITOPS_READ_TIMEOUT_SECONDS", "1.5")
+        read = GitopsSettings(**_get_env_overrides()["gitops"]).read
+        assert read.timeout_seconds == 1.5
 
 
 class TestIsDevPosture:

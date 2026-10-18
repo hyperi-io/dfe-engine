@@ -8,17 +8,19 @@
 """The raw query route through the real API over a real ClickHouse.
 
 The route runs caller SQL as the engine's own ClickHouse user, which may write.
-A viewer is refused before any SQL is sent; an admin reads, and ClickHouse refuses
+A viewer is refused before any SQL is sent. An admin reads, and ClickHouse refuses
 the admin's writes, table-function writes included, because the adapter sends
-``readonly=1``.
+``readonly=1``. The refusal's text reaches the log, under the reference the answer names.
 """
 
+import re
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from scalo.logger import logger
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token
@@ -33,6 +35,7 @@ from dfe_engine.settings import (
     LocalAuthSettings,
     SecretsSettings,
 )
+from tests.support.clickhouse_cleanup import drop_database_and_policies
 
 pytestmark = pytest.mark.integration
 
@@ -97,7 +100,7 @@ def stack(ch_params, ch_client, tmp_path):
     finally:
         _registries.clear()
         ClickHouseManager.reset_instance()
-        ch_client.command(f"DROP DATABASE IF EXISTS `{database}` SYNC")
+        drop_database_and_policies(ch_client, database)
 
 
 def _raw(stack, headers: dict[str, str], sql: str):
@@ -132,10 +135,26 @@ def test_an_admin_reads(stack):
     ids=["create", "insert", "drop", "alter", "insert-into-url"],
 )
 def test_an_admin_write_is_refused_by_clickhouse(stack, ch_client, statement):
-    resp = _raw(stack, stack.admin, statement.format(db=stack.database))
+    captured: list = []
+    handler_id = logger.add(captured.append, level="WARNING")
+    try:
+        resp = _raw(stack, stack.admin, statement.format(db=stack.database))
+    finally:
+        logger.remove(handler_id)
 
     assert resp.status_code == 500, resp.text
     assert resp.json()["code"] == "query_error"
-    assert "readonly" in resp.json()["message"].lower()
+    # ClickHouse's reason is in the log line the answer's reference names, never the answer.
+    message = resp.json()["message"]
+    assert "readonly" not in message.lower()
+    reference = re.search(r"\(reference ([0-9a-f]{12})\)$", message)
+    assert reference is not None, message
+    logged = [
+        m.record["extra"]["error"]
+        for m in captured
+        if m.record["extra"].get("reference") == reference.group(1)
+    ]
+    assert len(logged) == 1
+    assert "readonly" in logged[0].lower()
     rows = ch_client.query(f"SELECT count() FROM `{stack.database}`.events").result_rows
     assert rows == [(2,)]

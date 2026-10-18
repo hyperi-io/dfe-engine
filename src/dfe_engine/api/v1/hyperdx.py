@@ -39,13 +39,16 @@ from typing import NamedTuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
     is_action_allowed,
     reads_every_org,
+    registered_orgs,
     require_action,
+    secrets_store,
 )
 from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -125,9 +128,7 @@ def _resolve_identity(request: Request, user) -> ConnectionIdentity | _Refusal:
         return ConnectionIdentity("platform", _PLATFORM_USERNAME, _PLATFORM_SECRET)
 
     # A held caller reads as exactly one registered org, resolved as every org-held read resolves it.
-    org_registry = getattr(request.app.state, "org_registry", None)
-    orgs = list(org_registry.list()) if org_registry is not None else []
-    matched = resolve_orgs(user.org_ids, orgs)
+    matched = resolve_orgs(user.org_ids, registered_orgs(request))
     if len(matched) != 1:
         return _Refusal("no_single_org", "caller does not resolve to exactly one org")
 
@@ -173,11 +174,8 @@ async def hyperdx_connection(
             detail={"code": identity.code, "message": identity.message},
         )
 
-    from dfe_engine.secrets import build_secrets
-
-    store = build_secrets(settings.secrets)
-    path = identity.secret_path
-    password = store.get(path) if store.exists(path) else ""
+    store = secrets_store(request)
+    password = await run_blocking(lambda: store.get_or_none(identity.secret_path)) or ""
     if not password:
         if identity.username == _PLATFORM_USERNAME:
             detail = {

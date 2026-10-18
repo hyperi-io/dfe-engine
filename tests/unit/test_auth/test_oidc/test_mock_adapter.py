@@ -23,6 +23,7 @@ from dfe_engine.auth.oidc.adapters import get_adapter
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryNotConfiguredError,
+    LookupFailure,
 )
 from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -72,6 +73,7 @@ async def test_mock_loads_groups_and_members(tmp_path, monkeypatch):
     assert {g.name for g in all_groups} == {"dfe-admins", "dfe-viewers"}
 
     resolved = await adapter.resolve_user_groups("user-oid")
+    assert isinstance(resolved, list)
     assert sorted(g.id for g in resolved) == ["g-admins", "g-viewers"]
 
     ok, msg = await adapter.test_connection()
@@ -88,12 +90,12 @@ async def test_mock_unknown_user_has_no_groups(tmp_path, monkeypatch):
 
 
 async def test_a_missing_fixture_fails_the_listing_and_the_login_lookup_open(tmp_path, monkeypatch):
-    """A sign-in reads no groups, but the listing never passes for a directory with none."""
+    """A sign-in's lookup answers nothing, and the listing never passes for a directory with none."""
     monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(tmp_path / "nope.json"))
     adapter = get_adapter(_mock_provider())
     with pytest.raises(DirectoryCredentialError):
         await adapter.list_all_groups()
-    assert await adapter.resolve_user_groups("anyone") == []
+    assert await adapter.resolve_user_groups("anyone") is LookupFailure.REFUSED
     ok, msg = await adapter.test_connection()
     assert ok is False
     assert "not loaded" in msg
@@ -120,6 +122,50 @@ async def test_a_sync_over_a_missing_fixture_is_an_error(tmp_path, monkeypatch):
     assert group_store.list() == []
 
 
+MALFORMED_FIXTURES = {
+    "a list at the top": "[]",
+    "a string at the top": '"text"',
+    "a number at the top": "3",
+    "null at the top": "null",
+    "groups that are not a list": '{"groups": {"id": "g1"}}',
+    "a group that is not an object": '{"groups": ["g1"]}',
+    "members that are not an object": '{"groups": [], "members": ["u1"]}',
+    "a membership that is not a list": '{"groups": [], "members": {"u1": 5}}',
+}
+
+
+@pytest.mark.parametrize("body", MALFORMED_FIXTURES.values(), ids=MALFORMED_FIXTURES.keys())
+async def test_a_malformed_fixture_is_a_failed_listing_not_a_crash(tmp_path, monkeypatch, body):
+    """Valid JSON of the wrong shape builds an adapter that fails the listing, as an unreadable file does."""
+    fixture = tmp_path / "dir.json"
+    fixture.write_text(body, encoding="utf-8")
+    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+
+    adapter = get_adapter(_mock_provider())
+
+    with pytest.raises(DirectoryCredentialError):
+        await adapter.list_all_groups()
+    assert await adapter.resolve_user_groups("anyone") is LookupFailure.REFUSED
+    ok, msg = await adapter.test_connection()
+    assert ok is False
+    assert "not loaded" in msg
+
+
+async def test_a_sync_over_a_fixture_that_is_not_an_object_is_an_error(tmp_path, monkeypatch):
+    """The sync records the failure on the provider, where it once escaped as an AttributeError."""
+    fixture = tmp_path / "dir.json"
+    fixture.write_text("[]", encoding="utf-8")
+    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+    registry = OIDCProviderRegistry(tmp_path / "oidc")
+    registry.create("mock-dir", _mock_provider())
+
+    result = await sync_provider("mock-dir", registry, GroupStore(tmp_path / "groups"))
+
+    stored = registry.get("mock-dir")
+    assert stored is not None
+    assert (result["status"], stored.last_sync_status) == ("error", "error")
+
+
 # ── the RP overage enrichment path, at >200 scale ────────────────
 
 
@@ -143,7 +189,9 @@ async def test_rp_enriches_overflowed_groups_at_scale(tmp_path, monkeypatch):
     # oid, not sub, is what the directory is keyed on.
     userinfo = {"sub": "pairwise-sub", "oid": "user-oid"}
 
-    enriched = await rp._enrich_groups_from_directory(provider, identity, userinfo)
+    enriched = await rp._enrich_groups_from_directory(
+        provider, identity, userinfo, provider_name="mock-dir"
+    )
     assert len(enriched.groups) == 250
     assert "guid-0" in enriched.groups
     assert "guid-249" in enriched.groups
@@ -154,5 +202,7 @@ async def test_rp_overage_enrichment_fails_safe_without_fixture(tmp_path, monkey
     monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(tmp_path / "absent.json"))
     rp = OidcRelyingParty(OIDCProviderRegistry(tmp_path / "reg"))
     identity = NormalizedIdentity(subject="s", groups=[], groups_overflowed=True)
-    enriched = await rp._enrich_groups_from_directory(_mock_provider(), identity, {"oid": "x"})
+    enriched = await rp._enrich_groups_from_directory(
+        _mock_provider(), identity, {"oid": "x"}, provider_name="mock-dir"
+    )
     assert enriched.groups == []

@@ -24,11 +24,15 @@ Usage::
     #  "skipped": None, "status": "ok"}
 """
 
+import functools
 import re
+import threading
 from collections.abc import Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.auth.groups import GroupExistsError, identifier_holder
@@ -36,6 +40,7 @@ from dfe_engine.auth.membership import linked_providers
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryCredentialUnreadableError,
+    DirectoryForeignLinkError,
     DirectoryNotConfiguredError,
     DirectoryPageError,
     DirectoryPageLimitError,
@@ -51,10 +56,12 @@ from dfe_engine.http_errors import (
     http_failure_message,
 )
 from dfe_engine.names import VALID_NAME
+from dfe_engine.yaml_utils import YAMLError
 
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
+    from dfe_engine.auth.oidc.models import GroupInfo
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
     from dfe_engine.secrets import DfeSecrets
 
@@ -125,12 +132,18 @@ def _listing_failure_message(exc: BaseException) -> str:
                 f"{_DIRECTORY_API} answered a listing page that was not a list of groups; "
                 "the engine log has the reason"
             )
+        case DirectoryForeignLinkError():
+            return (
+                f"{_DIRECTORY_API} linked its next listing page on another origin, so the "
+                "listing was abandoned before the credential left the directory's host. "
+                "The engine log names both origins"
+            )
         case _:
             return http_failure_message(exc, service=_DIRECTORY_API)
 
 
 SyncSkipReason = Literal[
-    "invalid_name", "stored_unloadable", "name_taken", "provider_mismatch", "no_id"
+    "invalid_name", "stored_unloadable", "name_taken", "provider_mismatch", "no_id", "write_failed"
 ]
 """Why the sync left a provider group unsynced.
 
@@ -145,6 +158,8 @@ SyncSkipReason = Literal[
   provider, one ``auth.source_provider_bindings`` does not join to this one, and that
   provider keeps it, whatever the stored group is called.
 - ``no_id``: the provider gave it no id, and only the id links a stored group to it.
+- ``write_failed``: the store refused or could not take the group, such as a
+  description YAML cannot carry or a volume that is full or read-only.
 """
 
 # The provider's last_sync_status names each reason that skipped a group.
@@ -154,7 +169,14 @@ _SKIP_STATUS: dict[SyncSkipReason, str] = {
     "name_taken": "their name is held by a group not linked to them",
     "provider_mismatch": "their stored copy is linked to another provider",
     "no_id": "they carry no id to link them by",
+    "write_failed": "the store could not write them",
 }
+
+STORE_FAILURE_MESSAGE = (
+    "The group store failed while the groups were written, so the sync stopped part way; "
+    "the engine log has the reason"
+)
+"""What a provider's ``sync_error`` and a sync's ``error`` say when the sync failed after it had listed the directory."""
 
 
 class SyncMetrics:
@@ -204,6 +226,202 @@ def _safe_name(value: str) -> str:
     slug = re.sub(r"[^a-z0-9._-]", "-", slug)
     slug = re.sub(r"-{2,}", "-", slug)
     return slug.strip("-")
+
+
+@dataclass(slots=True)
+class _Tally:
+    """What one sync run has done so far, kept outside the run so a failure part way still reports it."""
+
+    created: int = 0
+    updated: int = 0
+    skips: dict[SyncSkipReason, int] = field(default_factory=lambda: dict.fromkeys(_SKIP_STATUS, 0))
+
+
+def _write_failed(
+    *, exc: Exception, group_id: str, metrics: SyncMetrics, provider_name: str, tally: _Tally
+) -> None:
+    """Count one provider group the store could not write, naming the failure's class and never its text."""
+    logger.warning(
+        "OIDC group sync skipped a group the store could not write",
+        group_id=group_id,
+        provider=provider_name,
+        reason="write_failed",
+        **describe_http_error(exc),
+    )
+    metrics.skipped("write_failed")
+    tally.skips["write_failed"] += 1
+
+
+# Two syncs applying at once would each find the other's new group missing and race to create it.
+# SHORTCUT: one lock per process, so two engine replicas still apply at the same time. Move to a ClickHouse lease shaped like schema/lock.py when HPA deployments share a group store.
+_APPLY_LOCK = threading.Lock()
+
+
+def _apply_groups(
+    *,
+    group_store: GroupStore,
+    metrics: SyncMetrics,
+    own_stamps: frozenset[str],
+    provider_name: str,
+    remote_groups: list[GroupInfo],
+    tally: _Tally,
+) -> None:
+    """Upsert *remote_groups* into *group_store*, adding what happened to *tally*.
+
+    A group the store cannot write is skipped as ``write_failed`` and the rest carry on.
+    Any other store failure ends the run, with *tally* holding what was done before it.
+    Blocking: each group is a file read, write and fsync, so call it off the event loop.
+    """
+    with _APPLY_LOCK:
+        _upsert_groups(
+            group_store=group_store,
+            metrics=metrics,
+            own_stamps=own_stamps,
+            provider_name=provider_name,
+            remote_groups=remote_groups,
+            tally=tally,
+        )
+
+
+def _upsert_groups(
+    *,
+    group_store: GroupStore,
+    metrics: SyncMetrics,
+    own_stamps: frozenset[str],
+    provider_name: str,
+    remote_groups: list[GroupInfo],
+    tally: _Tally,
+) -> None:
+    """The body of :func:`_apply_groups`, run under its lock."""
+    # A directory rename changes the name a group is keyed on, never its id, so the link finds it.
+    linked_by_id: dict[str, list[str]] = {}
+    # The first stored group, by name, carrying each id under a provider that is not ours.
+    foreign_by_id = {}
+    # Every stored group plus each this run creates, for the name and id a new group may not take.
+    known = group_store.list()
+    for stored in known:
+        if stored.source_id and stored.source_provider in own_stamps:
+            linked_by_id.setdefault(stored.source_id, []).append(stored.name)
+        elif stored.source_id:
+            foreign_by_id.setdefault(stored.source_id, stored)
+    skips = tally.skips
+
+    for group_info in remote_groups:
+        # Only the id links a stored group to a provider group, so a group with none is skipped.
+        if not group_info.id:
+            metrics.skipped("no_id")
+            skips["no_id"] += 1
+            continue
+        linked_names = linked_by_id.get(group_info.id)
+        if linked_names:
+            try:
+                for linked_name in linked_names:
+                    group_store.update(linked_name, description=group_info.description)
+            except (OSError, YAMLError) as exc:
+                _write_failed(
+                    exc=exc,
+                    group_id=group_info.id,
+                    metrics=metrics,
+                    provider_name=provider_name,
+                    tally=tally,
+                )
+                continue
+            tally.updated += 1
+            continue
+        # Another provider's group already carries the id, whatever its name, so creating one would make two.
+        foreign = foreign_by_id.get(group_info.id)
+        if foreign is not None:
+            logger.warning(
+                "OIDC group sync skipped a group linked to another provider",
+                group=foreign.name,
+                linked_provider=foreign.source_provider,
+                provider=provider_name,
+                reason="provider_mismatch",
+            )
+            metrics.skipped("provider_mismatch")
+            skips["provider_mismatch"] += 1
+            continue
+        # Determine a stable filename-safe group name.
+        # Prefer email (most stable for Google/Entra), fall back to name, then id.
+        raw_key = group_info.email or group_info.name or group_info.id
+        group_name = _safe_name(raw_key)
+        if not VALID_NAME.match(group_name):
+            logger.warning(
+                "OIDC group sync skipped a group whose identifier makes no valid group name",
+                provider=provider_name,
+                group_id=group_info.id,
+            )
+            metrics.skipped("invalid_name")
+            skips["invalid_name"] += 1
+            continue
+
+        existing = group_store.get(group_name)
+        if existing is None:
+            # An API key resolves a group by name, then by id, so neither may be another group's other one.
+            holder = identifier_holder(
+                exclude=group_name, groups=known, name=group_name, source_id=group_info.id
+            )
+            if holder is not None:
+                logger.warning(
+                    "OIDC group sync skipped a group whose name or id is another group's id or name",
+                    group=group_name,
+                    group_id=group_info.id,
+                    held_by=holder.name,
+                    provider=provider_name,
+                )
+                metrics.skipped("name_taken")
+                skips["name_taken"] += 1
+                continue
+            try:
+                created_group = group_store.create(
+                    description=group_info.description,
+                    name=group_name,
+                    roles=[],
+                    source_id=group_info.id,
+                    source_provider=provider_name,
+                )
+            except GroupExistsError:
+                # A stored group that does not load holds the name; the store counts the file.
+                logger.warning(
+                    "OIDC group sync skipped a group whose stored copy does not load",
+                    group=group_name,
+                    provider=provider_name,
+                )
+                metrics.skipped("stored_unloadable")
+                skips["stored_unloadable"] += 1
+                continue
+            except (OSError, YAMLError) as exc:
+                _write_failed(
+                    exc=exc,
+                    group_id=group_info.id,
+                    metrics=metrics,
+                    provider_name=provider_name,
+                    tally=tally,
+                )
+                continue
+            known.append(created_group)
+            linked_by_id[group_info.id] = [group_name]
+            tally.created += 1
+            continue
+
+        # Every group linked to the id, under any provider, was found above, so this is a name match.
+        # A name match is no link: only the IdP group's own id links a group, and a user cannot choose that.
+        logger.warning(
+            "OIDC group sync skipped a group whose name is held by a group not linked to it",
+            group=group_name,
+            group_id=group_info.id,
+            provider=provider_name,
+        )
+        metrics.skipped("name_taken")
+        skips["name_taken"] += 1
+
+    if skips["no_id"]:
+        # One line per run: without an id there is nothing stable to name each group by.
+        logger.warning(
+            "OIDC group sync skipped groups with no id",
+            provider=provider_name,
+            count=skips["no_id"],
+        )
 
 
 async def sync_provider(
@@ -373,126 +591,49 @@ async def sync_provider(
         }
 
     metrics = metrics if metrics is not None else SyncMetrics()
-    own_stamps = linked_providers([provider_name], bindings or {})
-    # A directory rename changes the name a group is keyed on, never its id, so the link finds it.
-    linked_by_id: dict[str, list[str]] = {}
-    # The first stored group, by name, carrying each id under a provider that is not ours.
-    foreign_by_id = {}
-    # Every stored group plus each this run creates, for the name and id a new group may not take.
-    known = group_store.list()
-    for stored in known:
-        if stored.source_id and stored.source_provider in own_stamps:
-            linked_by_id.setdefault(stored.source_id, []).append(stored.name)
-        elif stored.source_id:
-            foreign_by_id.setdefault(stored.source_id, stored)
-    created = 0
-    updated = 0
-    skips: dict[SyncSkipReason, int] = dict.fromkeys(_SKIP_STATUS, 0)
-
-    for group_info in remote_groups:
-        # Only the id links a stored group to a provider group, so a group with none is skipped.
-        if not group_info.id:
-            metrics.skipped("no_id")
-            skips["no_id"] += 1
-            continue
-        linked_names = linked_by_id.get(group_info.id)
-        if linked_names:
-            for linked_name in linked_names:
-                group_store.update(linked_name, description=group_info.description)
-            updated += 1
-            continue
-        # Another provider's group already carries the id, whatever its name, so creating one would make two.
-        foreign = foreign_by_id.get(group_info.id)
-        if foreign is not None:
-            logger.warning(
-                "OIDC group sync skipped a group linked to another provider",
-                group=foreign.name,
-                linked_provider=foreign.source_provider,
-                provider=provider_name,
-                reason="provider_mismatch",
+    tally = _Tally()
+    try:
+        await run_blocking(
+            functools.partial(
+                _apply_groups,
+                group_store=group_store,
+                metrics=metrics,
+                own_stamps=linked_providers([provider_name], bindings or {}),
+                provider_name=provider_name,
+                remote_groups=remote_groups,
+                tally=tally,
             )
-            metrics.skipped("provider_mismatch")
-            skips["provider_mismatch"] += 1
-            continue
-        # Determine a stable filename-safe group name.
-        # Prefer email (most stable for Google/Entra), fall back to name, then id.
-        raw_key = group_info.email or group_info.name or group_info.id
-        group_name = _safe_name(raw_key)
-        if not VALID_NAME.match(group_name):
-            logger.warning(
-                "OIDC group sync skipped a group whose identifier makes no valid group name",
-                provider=provider_name,
-                group_id=group_info.id,
-            )
-            metrics.skipped("invalid_name")
-            skips["invalid_name"] += 1
-            continue
-
-        existing = group_store.get(group_name)
-        if existing is None:
-            # An API key resolves a group by name, then by id, so neither may be another group's other one.
-            holder = identifier_holder(
-                exclude=group_name, groups=known, name=group_name, source_id=group_info.id
-            )
-            if holder is not None:
-                logger.warning(
-                    "OIDC group sync skipped a group whose name or id is another group's id or name",
-                    group=group_name,
-                    group_id=group_info.id,
-                    held_by=holder.name,
-                    provider=provider_name,
-                )
-                metrics.skipped("name_taken")
-                skips["name_taken"] += 1
-                continue
-            try:
-                created_group = group_store.create(
-                    description=group_info.description,
-                    name=group_name,
-                    roles=[],
-                    source_id=group_info.id,
-                    source_provider=provider_name,
-                )
-            except GroupExistsError:
-                # A stored group that does not load holds the name; the store counts the file.
-                logger.warning(
-                    "OIDC group sync skipped a group whose stored copy does not load",
-                    group=group_name,
-                    provider=provider_name,
-                )
-                metrics.skipped("stored_unloadable")
-                skips["stored_unloadable"] += 1
-                continue
-            known.append(created_group)
-            linked_by_id[group_info.id] = [group_name]
-            created += 1
-            continue
-
-        # Every group linked to the id, under any provider, was found above, so this is a name match.
-        # A name match is no link: only the IdP group's own id links a group, and a user cannot choose that.
-        logger.warning(
-            "OIDC group sync skipped a group whose name is held by a group not linked to it",
-            group=group_name,
-            group_id=group_info.id,
-            provider=provider_name,
         )
-        metrics.skipped("name_taken")
-        skips["name_taken"] += 1
-
-    if skips["no_id"]:
-        # One line per run: without an id there is nothing stable to name each group by.
+    except Exception as exc:
+        # A failure the per-group handling does not cover still ends in a recorded run.
         logger.warning(
-            "OIDC group sync skipped groups with no id",
+            "OIDC group sync failed",
+            operation="write_groups",
             provider=provider_name,
-            count=skips["no_id"],
+            **describe_http_error(exc),
         )
+        provider_registry.update(
+            provider_name,
+            last_sync_at=datetime.now(UTC).isoformat(),
+            last_sync_status="error",
+            sync_error=STORE_FAILURE_MESSAGE,
+        )
+        return {
+            "created": tally.created,
+            "updated": tally.updated,
+            "total": tally.created + tally.updated,
+            "groups_skipped": sum(tally.skips.values()),
+            "error": STORE_FAILURE_MESSAGE,
+            "skipped": None,
+            "status": "error",
+        }
 
-    total = created + updated
-    skipped = sum(skips.values())
+    total = tally.created + tally.updated
+    skipped = sum(tally.skips.values())
     outcome: SyncOutcome = "partial" if skipped else "ok"
     status = "ok"
     if skipped:
-        why = "; ".join(text for reason, text in _SKIP_STATUS.items() if skips[reason])
+        why = "; ".join(text for reason, text in _SKIP_STATUS.items() if tally.skips[reason])
         status = f"{PARTIAL_SYNC_PREFIX}{skipped} of {len(remote_groups)} groups skipped, {why}"
 
     # Update provider sync metadata
@@ -506,15 +647,15 @@ async def sync_provider(
     logger.info(
         "OIDC group sync complete",
         provider=provider_name,
-        created=created,
-        updated=updated,
+        created=tally.created,
+        updated=tally.updated,
         total=total,
         groups_skipped=skipped,
     )
 
     return {
-        "created": created,
-        "updated": updated,
+        "created": tally.created,
+        "updated": tally.updated,
         "total": total,
         "groups_skipped": skipped,
         "error": None,

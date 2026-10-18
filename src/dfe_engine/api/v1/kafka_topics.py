@@ -26,10 +26,12 @@ failing, because a deployment whose bus is still coming up is not a bad request.
 from __future__ import annotations
 
 import asyncio
+import functools
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import CurrentUser, Settings, SourceReg, require_action
 from dfe_engine.auth.audit import audit_resource_change
@@ -142,7 +144,11 @@ def _require_managed(settings: DFESettings) -> None:
 def _specs_in_scope(
     registry: Any, settings: DFESettings, source: str | None
 ) -> tuple[list[TopicSpec], dict[str, str]]:
-    """The specs and their owners for one source, or for every source."""
+    """The specs and their owners for one source, or for every source.
+
+    Blocking, because an unset replication factor asks the bus its size, so a
+    route hands it to a thread.
+    """
     if source is None:
         return specs_for_sources(registry.get_all_sources(), settings)
     try:
@@ -176,7 +182,9 @@ async def list_topic_status(
     reports that it could not be read rather than reporting every topic missing.
     """
     _require_managed(settings)
-    specs, owners = _specs_in_scope(registry, settings, source)
+    specs, owners = await run_blocking(
+        functools.partial(_specs_in_scope, registry, settings, source)
+    )
     outcome = await asyncio.to_thread(topic_status, specs, sources=owners, settings=settings)
     return TopicStatusResponse(
         reachable=outcome.reachable,
@@ -204,7 +212,7 @@ async def ensure_source_topics(
     live topic as a side effect.
     """
     _require_managed(settings)
-    specs, _ = _specs_in_scope(registry, settings, source)
+    specs, _ = await run_blocking(functools.partial(_specs_in_scope, registry, settings, source))
     outcome = await asyncio.to_thread(ensure_topics, specs, settings=settings, dry_run=dry_run)
     if not dry_run:
         audit_resource_change(
@@ -236,7 +244,7 @@ async def update_source_topics(
     source that never deployed shows up here instead of being quietly fixed.
     """
     _require_managed(settings)
-    specs, _ = _specs_in_scope(registry, settings, source)
+    specs, _ = await run_blocking(functools.partial(_specs_in_scope, registry, settings, source))
     outcome = await asyncio.to_thread(update_topics, specs, settings=settings, dry_run=dry_run)
     if not dry_run:
         audit_resource_change(

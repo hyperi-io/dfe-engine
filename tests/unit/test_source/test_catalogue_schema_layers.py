@@ -216,6 +216,64 @@ class TestAllOrNothing:
         assert _layers(write) == (ECS, "derived/aws/cloudtrail", None)
 
 
+class TestTheLayerThatDoesNotResolve:
+    """What the catalogue listing reports, so an entry the create would refuse can be named."""
+
+    @staticmethod
+    def _missing(catalogue: sc.SourceCatalogue, entry: str, settings: DFESettings):
+        binding = catalogue.app.catalogue
+        assert binding is not None
+        resolution = sc.resolve_schema_layers(
+            catalogue.entry(entry), binding.schema_layers, settings
+        )
+        return resolution.schema is None, resolution.missing_layer, resolution.missing_reference
+
+    def test_every_layer_resolving_names_none(self, shipped, tmp_path):
+        _put(tmp_path, ECS, _columns("event_action"))
+        _put(tmp_path, "derived/cisco_ios/log", _selection(ECS, "event_action"))
+
+        assert self._missing(shipped, "cisco_ios", _tree_settings(tmp_path)) == (False, None, "")
+
+    def test_no_meta_schema_names_the_meta_schema(self, shipped, tmp_path):
+        _put(tmp_path, "derived/cisco_ios/log", _selection(ECS, "event_action"))
+
+        assert self._missing(shipped, "cisco_ios", _tree_settings(tmp_path)) == (
+            True,
+            "meta_schema",
+            ECS,
+        )
+
+    def test_no_derived_schema_names_the_derived_schema(self, shipped, tmp_path):
+        _put(tmp_path, ECS, _columns("event_action"))
+
+        assert self._missing(shipped, "fortinet", _tree_settings(tmp_path)) == (
+            True,
+            "derived_schema",
+            "derived/fortinet_fortigate/log",
+        )
+
+    def test_a_derived_schema_over_another_base_names_the_derived_schema(self, shipped, tmp_path):
+        _put(tmp_path, ECS, _columns("event_action"))
+        _put(tmp_path, "derived/aws/cloudtrail", _selection("meta/aws/cloudtrail", "EventName"))
+
+        assert self._missing(shipped, "aws_cloudtrail", _tree_settings(tmp_path)) == (
+            True,
+            "derived_schema",
+            "derived/aws/cloudtrail",
+        )
+
+    def test_a_manifest_naming_no_layers_names_the_meta_schema_and_no_reference(
+        self, shipped, tmp_path
+    ):
+        app = _elastic_declaring(tmp_path)
+
+        assert self._missing(replace(shipped, app=app), "cisco_ios", _tree_settings(tmp_path)) == (
+            True,
+            "meta_schema",
+            "",
+        )
+
+
 class TestWhereTheDerivedSchemaResolves:
     def test_the_bound_layers_compose_narrowed_then_appended(self, shipped, tmp_path):
         _put(tmp_path, ECS, _columns("event_action", "host_name", "source_ip"))

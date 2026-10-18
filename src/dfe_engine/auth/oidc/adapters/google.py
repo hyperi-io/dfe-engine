@@ -25,12 +25,12 @@ Cloud Identity resource name with its ``groups/`` prefix removed. Group files
 link on that id, never on the group email, which an admin can rename.
 """
 
-import asyncio
 import functools
 import json
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import (
@@ -38,8 +38,12 @@ from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialUnreadableError,
     DirectoryNotConfiguredError,
     DirectoryPageLimitError,
+    LookupFailure,
     NoDirectoryListingError,
     OIDCGroupAdapter,
+    first_answer,
+    lookup_failure,
+    missing_credential,
 )
 from dfe_engine.auth.oidc.credential_env import (
     ResolvedCredential,
@@ -95,7 +99,7 @@ class GoogleAdapter(OIDCGroupAdapter):
     """Google Workspace groups: Cloud Identity as the user, else the Directory API as a service account.
 
     Every method but ``list_all_groups`` fails closed: missing credentials or a
-    refused call yield no groups, never an exception. ``list_all_groups`` is not on
+    refused call yield a ``LookupFailure``, never an exception. ``list_all_groups`` is not on
     the login path and raises when no service account is configured, when the one
     configured does not build a client and when the Directory API refuses it.
     """
@@ -117,7 +121,7 @@ class GoogleAdapter(OIDCGroupAdapter):
     # Public async interface
     # ------------------------------------------------------------------
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | LookupFailure:
         """Return the groups the user with email *directory_id* belongs to.
 
         Asks Cloud Identity with the user's own access token first. Only when
@@ -126,16 +130,19 @@ class GoogleAdapter(OIDCGroupAdapter):
         answers with no groups is the answer: it does not fall through.
 
         Returns:
-            The user's groups keyed by directory id, or ``[]`` (default deny)
-            when no path could answer.
+            The user's groups keyed by directory id, else why no path answered
+            (:func:`first_answer`). A user who declines the Cloud Identity scope, with
+            no service account to ask instead, is a refusal and never an outage.
         """
         if not directory_id:
             return []
+        by_user: list[GroupInfo] | LookupFailure = LookupFailure.REFUSED
         if self._access_token:
-            groups = await self._groups_with_user_token(email=directory_id)
-            if groups is not None:
-                return groups
-        return await self._groups_with_service_account(user_key=directory_id)
+            by_user = await self._groups_with_user_token(email=directory_id)
+            if not isinstance(by_user, LookupFailure):
+                return by_user
+        by_service = await self._groups_with_service_account(user_key=directory_id)
+        return first_answer(by_user, by_service)
 
     async def list_all_groups(self) -> list[GroupInfo]:
         """List every group in ``groups.domain`` through the service account.
@@ -162,10 +169,9 @@ class GoogleAdapter(OIDCGroupAdapter):
                 is never returned as an empty one: group sync would record it as a
                 directory with no groups.
         """
-        service = self._get_service()
+        service = await run_blocking(self._get_service)
         if service is None:
-            groups = self._provider.groups
-            if not (groups.service_account_json_path) and not (groups.service_account_json_env):
+            if not self._names_a_service_account:
                 raise NoDirectoryListingError
             service_account = self._service_account_json
             if service_account.unreadable:
@@ -174,7 +180,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 raise DirectoryNotConfiguredError
             raise DirectoryCredentialError
 
-        raw = await asyncio.to_thread(self._fetch_all_groups_sync, service)
+        raw = await run_blocking(self._fetch_all_groups_sync, service)
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
 
     async def test_connection(self) -> tuple[bool, str]:
@@ -184,13 +190,14 @@ class GoogleAdapter(OIDCGroupAdapter):
             (True, message) when the probe succeeds or there is no service
             account to probe, else (False, error_message).
         """
-        groups = self._provider.groups
-        if not (groups.service_account_json_path) and not (groups.service_account_json_env):
+        if not self._names_a_service_account:
             return True, (
                 "No service account configured: each login reads that user's groups "
                 "from Cloud Identity with the user's own token, so there is no "
                 "directory credential to test"
             )
+        # Runs first: it reads the service account from the store and keeps it for the checks below.
+        service = await run_blocking(self._get_service)
         service_account = self._service_account_json
         if service_account.unreadable:
             return False, unreadable_credential_message(
@@ -202,12 +209,11 @@ class GoogleAdapter(OIDCGroupAdapter):
                 "'groups.service_account_json' to the provider API, or set the env var "
                 "named in groups.service_account_json_env"
             )
-        service = self._get_service()
         if service is None:
             return False, "Failed to build service from the configured service account JSON"
 
         try:
-            await asyncio.to_thread(self._probe_sync, service)
+            await run_blocking(self._probe_sync, service)
             return True, "OK"
         except Exception as exc:
             logger.warning(
@@ -222,8 +228,8 @@ class GoogleAdapter(OIDCGroupAdapter):
     # Cloud Identity, as the user
     # ------------------------------------------------------------------
 
-    async def _groups_with_user_token(self, *, email: str) -> list[GroupInfo] | None:
-        """The user's groups from Cloud Identity, or None when Cloud Identity could not answer.
+    async def _groups_with_user_token(self, *, email: str) -> list[GroupInfo] | LookupFailure:
+        """The user's groups from Cloud Identity, else why Cloud Identity gave none.
 
         Transitive search also names the groups the user holds through nesting,
         but only Enterprise and Cloud Identity Premium editions serve it, so its
@@ -242,8 +248,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                 )
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code != 403:
-                    self._log_refusal(exc=exc, method="searchTransitiveGroups")
-                    return None
+                    return self._lookup_failed(exc=exc, method="searchTransitiveGroups")
                 logger.info(
                     "Google Cloud Identity: transitive group search refused, reading direct groups",
                     operation="searchTransitiveGroups",
@@ -251,8 +256,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                     **describe_http_error(exc),
                 )
             except (httpx.HTTPError, ValueError) as exc:
-                self._log_failure(exc=exc, method="searchTransitiveGroups")
-                return None
+                return self._lookup_failed(exc=exc, method="searchTransitiveGroups")
 
             try:
                 return await self._search(
@@ -262,11 +266,8 @@ class GoogleAdapter(OIDCGroupAdapter):
                     query=member,
                     groups_only=True,
                 )
-            except httpx.HTTPStatusError as exc:
-                self._log_refusal(exc=exc, method="searchDirectGroups")
             except (httpx.HTTPError, ValueError) as exc:
-                self._log_failure(exc=exc, method="searchDirectGroups")
-        return None
+                return self._lookup_failed(exc=exc, method="searchDirectGroups")
 
     async def _search(
         self,
@@ -276,13 +277,13 @@ class GoogleAdapter(OIDCGroupAdapter):
         method: str,
         query: str,
         groups_only: bool = False,
-    ) -> list[GroupInfo] | None:
+    ) -> list[GroupInfo] | LookupFailure:
         """Every page of one Cloud Identity membership search, as groups keyed by directory id.
 
-        None when a page is not a JSON object, or the search is still paging at
-        :attr:`MAX_LOGIN_PAGES`: the pages read so far are not the user's groups, so they are
-        no answer. ``groups_only`` keeps only the results that carry the Google group label,
-        for a query that could not filter on it.
+        A refusal when a page is not a JSON object, or the search is still paging at
+        :attr:`MAX_LOGIN_PAGES`: the pages read so far are not the user's groups. ``groups_only``
+        keeps only the results that carry the Google group label, for a query that could not
+        filter on it.
         """
         url = f"{self.CLOUD_IDENTITY_BASE}/groups/-/memberships:{method}"
         params = {"query": query}
@@ -297,7 +298,7 @@ class GoogleAdapter(OIDCGroupAdapter):
                     provider=self._provider.issuer,
                     type=type(body).__name__,
                 )
-                return None
+                return LookupFailure.REFUSED
             relations = body.get("memberships") or []
             if groups_only:
                 relations = [item for item in relations if _is_google_group(item)]
@@ -312,64 +313,84 @@ class GoogleAdapter(OIDCGroupAdapter):
             pages=self.MAX_LOGIN_PAGES,
             provider=self._provider.issuer,
         )
-        return None
+        return LookupFailure.REFUSED
 
-    def _log_refusal(self, *, exc: httpx.HTTPStatusError, method: str) -> None:
-        """Log a refused Cloud Identity call with Google's error code."""
-        if exc.response.status_code == 403:
+    def _lookup_failed(self, *, exc: httpx.HTTPError | ValueError, method: str) -> LookupFailure:
+        """Log a Cloud Identity call that gave no groups as the outage or refusal it was, and return which."""
+        failure = lookup_failure(exc)
+        status = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        if status == 403:
             message = (
                 "Google Cloud Identity refused the user-token group lookup (403): the "
                 "Cloud Identity API is disabled in the OAuth client's project, the login "
                 "did not grant cloud-identity.groups.readonly, or the organisation "
                 "blocks it -- the code says which"
             )
-        else:
+        elif failure is LookupFailure.OUTAGE:
+            message = "Google Cloud Identity could not answer the user-token group lookup"
+        elif status is not None:
             message = "Google Cloud Identity refused the user-token group lookup"
+        else:
+            message = "Google Cloud Identity gave the user-token group lookup no usable answer"
         logger.warning(
             message,
+            failure=failure,
             operation=method,
             provider=self._provider.issuer,
             **describe_http_error(exc),
         )
-
-    def _log_failure(self, *, exc: httpx.HTTPError | ValueError, method: str) -> None:
-        """Log a Cloud Identity call that got no usable answer: no response, or a body that is not JSON."""
-        logger.warning(
-            "Google Cloud Identity group lookup failed",
-            operation=method,
-            provider=self._provider.issuer,
-            **describe_http_error(exc),
-        )
+        return failure
 
     # ------------------------------------------------------------------
     # Directory API, as the service account
     # ------------------------------------------------------------------
 
-    async def _groups_with_service_account(self, *, user_key: str) -> list[GroupInfo]:
-        """The user's groups from the Directory API, or [] when no service account answers."""
-        service = self._get_service()
+    async def _groups_with_service_account(
+        self, *, user_key: str
+    ) -> list[GroupInfo] | LookupFailure:
+        """The user's groups from the Directory API, else why none.
+
+        No service account is a refusal, unless one is configured and the secret store
+        holding it did not answer.
+        """
+        service = await run_blocking(self._get_service)
         if service is None:
-            return []
+            if not self._names_a_service_account:
+                return LookupFailure.REFUSED
+            account = self._service_account_json
+            return missing_credential(unreadable=account.unreadable, refused=account.refused)
 
         try:
-            raw = await asyncio.to_thread(self._fetch_user_groups_sync, service, user_key)
+            raw = await run_blocking(
+                functools.partial(self._fetch_user_groups_sync, service, user_key)
+            )
         except Exception as exc:
+            failure = lookup_failure(exc)
             logger.warning(
-                "Google Admin SDK resolve_user_groups failed -- default deny",
+                "Google Admin SDK resolve_user_groups failed",
+                failure=failure,
                 operation="resolve_user_groups",
                 provider=self._provider.issuer,
                 **describe_http_error(exc),
             )
-            return []
+            return failure
 
         return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
+
+    @property
+    def _names_a_service_account(self) -> bool:
+        """Whether the provider points at a service account, readable or not."""
+        groups = self._provider.groups
+        return bool(groups.service_account_json_path or groups.service_account_json_env)
 
     @functools.cached_property
     def _service_account_json(self) -> ResolvedCredential:
         """The service account JSON: the secret store first, then the env var.
 
         Resolved once per adapter, which serves one sync, one connection test or one
-        login, so an unreachable store is asked and logged once.
+        login, so an unreachable store is asked and logged once. The first access reads
+        the store, which blocks, so every caller reaches it through ``_get_service``
+        under ``run_blocking`` before reading it on the loop.
         """
         return resolve_credential(
             secret_path=self._provider.groups.service_account_json_path,
@@ -379,6 +400,9 @@ class GoogleAdapter(OIDCGroupAdapter):
 
     def _get_service(self) -> Any | None:
         """Build a Directory API client that acts as the service account itself.
+
+        Blocking: it reads the service account from the secret store and builds the
+        client, so async callers run it with ``run_blocking``.
 
         Returns:
             A googleapiclient Resource object, or None if no service account is
@@ -426,7 +450,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             return None
 
     # ------------------------------------------------------------------
-    # Synchronous helpers (called via asyncio.to_thread)
+    # Synchronous helpers (called via run_blocking)
     # ------------------------------------------------------------------
 
     def _fetch_all_groups_sync(self, service: Any) -> list[dict[str, Any]]:

@@ -223,10 +223,6 @@ that repo (`tools/validate_governance.py`); the chart vars they point at are
 owned by dfe-infra's chart validation. An action's `description` is its
 runbook line -- what it does, and which action reverts it.
 
-Two more governance pieces keep authz itself in git: `rbac_source` loads roles and
-groups FROM the gitops tree, and `auth_sync` mirrors them back INTO it. Accounts and
-API keys hold secret material, so they stay out of git (that is an ESO job).
-
 ## ClickHouse data RBAC -- one user per group
 
 `governance/ch_rbac.py`. Access control in HyperDX's app layer cannot contain a bad

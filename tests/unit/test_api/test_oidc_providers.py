@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.http_errors import credential_failure_message
 from dfe_engine.settings import DFESettings
-from tests.support.failing_stores import make_delete_failing_secrets
+from tests.support.failing_stores import make_delete_failing_secrets, make_name_held_secrets
 from tests.support.loopback import CountingListener
 from tests.unit.test_api.oidc_providers_cases import (
     CREATE_PROVIDER_UNSET_ENV_CASES,
@@ -1130,6 +1130,19 @@ class TestCredentialsGoToTheSecretStore:
         assert app.state.dfe_secrets.get("oidc/stored/client_secret") == "rp-client-secret"
         assert "rp-client-secret" not in _provider_yaml(api_settings, "stored").read_text()
 
+    def test_a_name_a_deleted_secret_still_holds_answers_409_with_the_remedy(
+        self, client, app, api_settings, admin_headers
+    ):
+        app.state.dfe_secrets = make_name_held_secrets(root=api_settings.secrets.path)
+
+        resp = _create_provider(client, admin_headers, name="okta", client_secret="rp-secret")
+
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["code"] == "conflict"
+        assert "Restore the secret, or wait out its recovery window" in body["message"]
+        assert app.state.oidc_provider_registry.get("okta") is None
+
     def test_a_secret_is_never_echoed_back(self, client, admin_headers):
         resp = _create_provider(
             client, admin_headers, name="no-echo", client_secret="rp-client-secret"
@@ -1437,6 +1450,7 @@ class TestProviderFieldRules:
         ("overrides", "fields"),
         [
             ({"groups": {"mode": "api"}}, ["groups.mode"]),
+            ({"groups": {"enrich_on_login": True, "mode": "api"}}, ["groups.mode"]),
             (
                 {"groups": {"api_token": "okta-ssws-token", "mode": "api"}, "type": "okta"},
                 ["groups.okta_domain"],
@@ -1456,6 +1470,7 @@ class TestProviderFieldRules:
         ],
         ids=[
             "generic-api-mode",
+            "generic-api-mode-enriching-on-login",
             "okta-api-without-domain",
             "no-issuer",
             "no-client-id",

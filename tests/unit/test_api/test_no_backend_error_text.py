@@ -41,12 +41,16 @@ from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.clickhouse.cloud import CloudServiceError
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo, GitopsUnavailableError
+from dfe_engine.kafka.contract import KafkaContractError
 from dfe_engine.kafka.topics import (
     BROKER_REFUSED,
     BROKER_UNREACHABLE,
+    KAFKA_CONFIG_REJECTED,
     TopicSpec,
     ensure_topics,
+    remove_topics,
     topic_status,
+    update_topics,
 )
 from dfe_engine.orgs.available_ids import OrgIdDiscoveryError
 from dfe_engine.query.executor import ViewExecutionError
@@ -58,7 +62,9 @@ from dfe_engine.schema.applier import SchemaApplyError
 from dfe_engine.schema.manifest_applier import ManifestApplyError
 from dfe_engine.schema.retention import CLICKHOUSE_REFUSED, apply_pinned_defaults
 from dfe_engine.services.schema.json_promotion_service import JsonPromotionError
+from dfe_engine.settings import SourceSettings
 from dfe_engine.source.registry import SourceNotFoundError
+from tests.unit.test_query.view_fakes import view_definition
 
 FAKE_HASH = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
 SENTINEL = f"Code: 516. DB::Exception: ALTER USER dfe_org_acme IDENTIFIED WITH sha256_hash BY '{FAKE_HASH}'"
@@ -142,10 +148,15 @@ class TestQueries:
         self, app, client, viewer_headers, audit_events
     ):
         class _FailingExecutor:
+            def get_view(self, label: str):
+                return view_definition()
+
             def execute(self, **_kwargs):
                 raise ViewExecutionError(f"Failed to execute view 'x': {SENTINEL}")
 
         app.state.view_executor = _FailingExecutor()
+        # The view is held to the session's org, so the viewer's account is bound to one.
+        app.state.account_store.update("viewer", org="test-org")
 
         resp = client.post(
             "/api/v1/queries/views/analytics/events/execute", headers=viewer_headers, json={}
@@ -337,6 +348,22 @@ class TestKafkaTopics:
         assert status.error == BROKER_UNREACHABLE
         assert_logged(audit_events)
 
+    def test_a_rejected_kafka_config_records_none_of_its_text(self, audit_events, monkeypatch):
+        def _reject(**_kwargs):
+            raise KafkaContractError(SENTINEL)
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", _reject)
+
+        reasons = [
+            *(reason for _, reason in ensure_topics(self._SPECS).failed),
+            *(reason for _, reason in remove_topics(["acme_land"]).failed),
+            *(reason for _, reason in update_topics(self._SPECS).failed),
+            topic_status(self._SPECS).error,
+        ]
+
+        assert reasons == [KAFKA_CONFIG_REJECTED] * 4
+        assert_logged(audit_events)
+
 
 class TestSources:
     def test_a_failed_app_reconcile_answers_502_without_the_repos_text(
@@ -417,7 +444,8 @@ class TestSources:
         )
         user = AuthContext(user_id="admin")
 
-        _, failed, _ = sources_module._apply_bulk(body, {}, user, _Registry())
+        settings = SimpleNamespace(source=SourceSettings())
+        _, failed, _ = sources_module._apply_bulk(body, {}, user, _Registry(), settings)
 
         by_source = {entry["source"]: entry for entry in failed}
         assert by_source["gone"]["error"] == "Source 'gone' not found"

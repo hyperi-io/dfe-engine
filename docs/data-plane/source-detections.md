@@ -63,6 +63,20 @@ surface as any other -- including rules written against alerts, which is how
 correlation is expressed. How the runner scales is
 [hunt-runner-scaling.md](hunt-runner-scaling.md).
 
+## Hunt customers
+
+A hunt's `customers` are org names. The engine resolves each to the org's tenant ids when it saves the hunt and stores them as `customer_tenant_ids`, and the runner reads only rows whose `_org_id` is one of them. Every org create, update and delete stores that org's tenant ids afresh in each hunt naming it, as one deploy-repo change, before the org itself is written. A deleted org keeps its name in `customers` and loses its stored ids, so the hunt fails every fire as `unknown_customers` and holds its watermark until someone edits it. A hunt carrying a direct `query` instead of `rules` is trusted SQL from the operator-controlled deploy repo, and no customer holds it.
+
+In production+team the hunt change waits on review while the org is written at once. So an org create or update is refused with 409 `tenant_id_held` when it takes a tenant id a hunt reads for another org, on main or on an unmerged review branch. Merge or delete that branch, or edit the hunt, to release the id. A squash merge leaves the branch behind, so turn on the forge's auto-delete of merged head branches. The startup seed skips such an org, and one the forge cannot check, until the next boot.
+
+Accepted residual: the runner keeps the hunts it loaded until its next reload (`--reload-every` ticks of `hunts.runner_poll_seconds`, 20 x 15 s = 300 s at the defaults, plus `huntRunner.gitSync.period` on Kubernetes), so a tenant id deleted and given to a new org inside that window can fire once on the old org's hunt.
+
+## Lookup databases
+
+A rule condition reads its own row and one more kind of table: a table of a database `hunts.lookup_databases` lists (`DFE_HUNTS_LOOKUP_DATABASES`, comma-separated, empty by default). The forms are `x IN (SELECT <columns> FROM <db>.<table> [WHERE <condition>])`, `x IN <db>.<table>` and `x IN (<db>.<table>)`, with `NOT` and `GLOBAL` as usual. Any other subquery, join, union or table after `IN` is refused when the rule is saved, in a governance action and when the runner compiles it.
+
+The runner's ClickHouse user reads every org, so a listed database must hold shared reference data, such as threat-intel indicators, and no org's rows. Each of its tables must be a plain store of its own rows, on a `MergeTree`-family, `Log`, `TinyLog`, `StripeLog`, `Memory` or `EmbeddedRocksDB` engine, with no `_org_id` column. So a view, `Merge`, `Distributed`, `Set` or `Join` table is refused. The runner refuses to start while one is there, and stops at the reload that first finds one. The engine refuses to start too when ClickHouse answers at its start. When it does not, the engine starts with the check unrun and logs a warning, and the runner's check still applies. `system`, `information_schema` and the data database cannot be listed. The runner's `hunt_runner` service role needs `SELECT` on each listed database, added to its grants as a governed-ops edit.
+
 ## Sigma views
 
 Sigma rules reference fields by standardised names (`SourceIP`, `CommandLine`,

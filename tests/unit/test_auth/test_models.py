@@ -22,7 +22,7 @@ ORG_SCOPE = Scope(type="org", id="acme")
 class TestAuthContext:
     def test_minimal(self):
         ctx = AuthContext(user_id="alice")
-        assert ctx.org_id == "default"
+        assert ctx.org_id == ""
         assert ctx.user_id == "alice"
         assert ctx.roles == []
         assert ctx.groups == []
@@ -47,9 +47,10 @@ class TestAuthContext:
         assert ctx.org_ids == ["acme", "globex"]
         assert ctx.connection_id == "ch-acme"
 
-    def test_default_org_id(self):
+    def test_a_context_names_no_org_unless_given_one(self):
+        """No literal stands in for an org, so an unbound session reads no org-bound view."""
         ctx = AuthContext(user_id="bob")
-        assert ctx.org_id == "default"
+        assert ctx.org_id == ""
 
     def test_explicit_org_id(self):
         ctx = AuthContext(org_id="acme", user_id="bob")

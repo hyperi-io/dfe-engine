@@ -109,6 +109,7 @@ def _build_crud(repo: str | None) -> GitCrud:
         token=gs.token,
         author_name=gs.author_name,
         author_email=gs.author_email,
+        read=gs.read,
         pack=gs.pack,
     )
     return GitCrud(grepo)
@@ -265,6 +266,7 @@ def _do_push(repo_path: str) -> None:
         token=gs.token,
         author_name=gs.author_name,
         author_email=gs.author_email,
+        read=gs.read,
         write=gs.write,
         pack=gs.pack,
     )

@@ -15,7 +15,9 @@ GET    /api/v1/auth/roles/{name}       -> Get role
 PUT    /api/v1/auth/roles/{name}       -> Update role
 DELETE /api/v1/auth/roles/{name}       -> Delete role
 
-All endpoints require admin role (org:write).
+Reads need role:read and writes role:write. A role write may grant only what its
+caller holds system-wide, and an unscoped role only what the caller reads across
+orgs with, so holding role:write never adds up to more than the caller already has.
 """
 
 from typing import Literal, cast
@@ -23,9 +25,11 @@ from typing import Literal, cast
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, live_role_config, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
-from dfe_engine.auth.audit import audit_role_change
+from dfe_engine.auth import AuthContext, AuthorizationError, RoleConfig, Scope
+from dfe_engine.auth.audit import audit_permission_denied, audit_role_change
+from dfe_engine.auth.models import ungrantable_permissions
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog, scopes_dict
 from dfe_engine.auth.role_store import Role, RoleStore
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
@@ -123,6 +127,34 @@ def _grant_details(role: Role) -> dict[str, object]:
     return {"permissions": role.permissions, "scoped": role.scoped}
 
 
+def _refuse_ungrantable(
+    request: Request, user: AuthContext, *, permissions: list[str], scoped: bool
+) -> None:
+    """Refuse a role definition granting a permission the caller does not hold system-wide.
+
+    An unscoped role bound system-wide reads every org, so it counts only the
+    permissions the caller reads every org with.
+
+    Raises:
+        AuthorizationError: 403 naming the permissions the caller does not hold.
+    """
+    if not request.app.state.settings.auth.enabled:
+        return
+    missing = ungrantable_permissions(
+        user,
+        permissions,
+        Scope(),
+        across_orgs=not scoped,
+        role_config=live_role_config(request) or RoleConfig.load_builtin(),
+    )
+    if missing:
+        reason = f"a role may grant only permissions you hold system-wide, not {missing}"
+        if not scoped:
+            reason += " (an unscoped role reads every org, so they must be held that way too)"
+        audit_permission_denied(user.user_id, scopes_dict["role_write"], user.roles, reason)
+        raise AuthorizationError(reason)
+
+
 def _role_in_use(request: Request, role_name: str) -> bool:
     from dfe_engine.auth.groups import GroupStore
 
@@ -176,7 +208,8 @@ async def create_role(
     user: CurrentUser,
     request: Request,
 ) -> RoleResponse:
-    """Create a new RBAC role (admin only)."""
+    """Create a new RBAC role granting no more than the caller holds."""
+    _refuse_ungrantable(request, user, permissions=body.permissions, scoped=body.scoped)
     store: RoleStore = request.app.state.role_store
     try:
         role = store.create(
@@ -213,7 +246,7 @@ async def list_roles(
         description="Case-insensitive match on role name or description",
     ),
 ) -> PaginatedResponse[RoleResponse]:
-    """List roles with pagination (admin only)."""
+    """List roles with pagination, for a caller holding role:read."""
     store: RoleStore = request.app.state.role_store
     roles = store.list()
     if resource_type is not None:
@@ -235,7 +268,7 @@ async def get_role(
     user: CurrentUser,
     request: Request,
 ) -> RoleResponse:
-    """Get one role by name (admin only)."""
+    """Get one role by name, for a caller holding role:read."""
     store: RoleStore = request.app.state.role_store
     role = store.get(name)
     if role is None:
@@ -257,8 +290,20 @@ async def update_role(
     user: CurrentUser,
     request: Request,
 ) -> RoleResponse:
-    """Update a role (admin only)."""
+    """Update a role. A change to what it grants needs the caller to hold it before and after."""
     store: RoleStore = request.app.state.role_store
+    stored = store.get(name)
+    if stored is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Role '{name}' not found"},
+        )
+    permissions = stored.permissions if body.permissions is None else body.permissions
+    scoped = stored.scoped if body.scoped is None else body.scoped
+    if (permissions, scoped) != (stored.permissions, stored.scoped):
+        # Every holder of the role keeps, gains or loses what it grants before and after.
+        _refuse_ungrantable(request, user, permissions=stored.permissions, scoped=stored.scoped)
+        _refuse_ungrantable(request, user, permissions=permissions, scoped=scoped)
     try:
         role = store.update(
             name,
@@ -286,7 +331,7 @@ async def delete_role(
     user: CurrentUser,
     request: Request,
 ) -> None:
-    """Delete a role (admin only)."""
+    """Delete a role no group holds, for a caller holding role:delete."""
     if _role_in_use(request, name):
         raise HTTPException(
             status_code=409,

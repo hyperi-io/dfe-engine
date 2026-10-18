@@ -29,7 +29,6 @@ ClickHouse:
   never a config file (see provided_service_password)
 - DFE_CLICKHOUSE_DATABASE (legacy: CLICKHOUSE_DATABASE) -> clickhouse.database
 - DFE_CLICKHOUSE_DATA_DATABASE (legacy: CLICKHOUSE_DATA_DATABASE) -> clickhouse.data_database
-- DFE_CLICKHOUSE_LANDING_TABLE (legacy: CLICKHOUSE_LANDING_TABLE) -> clickhouse.landing_table
 - DFE_CLICKHOUSE_SECURE (legacy: CLICKHOUSE_SECURE) -> clickhouse.secure (true/false)
 - DFE_CLICKHOUSE_VERIFY (legacy: CLICKHOUSE_VERIFY) -> clickhouse.verify (true/false)
 - DFE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
@@ -66,6 +65,7 @@ Hunts:
 - DFE_HUNTS_ALERT_DESTINATIONS_DIR -> hunts.alert_destinations_dir
 - DFE_HUNTS_MAX_DETECTIONS_PER_RUN -> hunts.max_detections_per_run
 - DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING -> hunts.max_detections_per_run_ceiling
+- DFE_HUNTS_LOOKUP_DATABASES -> hunts.lookup_databases (comma-separated)
 - DFE_DETECTION_GUARD_ENABLED -> hunts.detection_guard.enabled (true/false)
 - DFE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES -> hunts.detection_guard.preview_window_minutes
 - DFE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS -> hunts.detection_guard.preview_timeout_seconds
@@ -104,7 +104,6 @@ Auth (local):
 - DFE_AUTH_LOCAL_ADMIN_PASSWORD -> auth.local.admin_password
 - DFE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
 - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
-- DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
 - DFE_AUTH_BREAKGLASS_PASSWORD -> auth.local.breakglass_password
 - DFE_RECOVERY_EMAIL -> auth.local.recovery_email
 - DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH -> auth.local.admin_password_secret_path
@@ -149,13 +148,16 @@ API (Elasticsearch template elastic-converter upload limits):
   api.elastic_converter_content_length_slack_bytes
 """
 
+import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from .orgs.models import ORG_NAME_PATTERN
+from .names import MAX_NAME_LENGTH
+from .orgs.models import ORG_NAME_PATTERN, TenantId
 from .transport import SourceTransport
 from .yaml_utils import yaml_load
 
@@ -261,10 +263,6 @@ class ClickHouseSettings(BaseModel):
             "read it via `effective_data_database`, never directly."
         ),
     )
-    landing_table: str = Field(
-        default="main",
-        description="Catch-all table where un-split source data lands (DFE_CLICKHOUSE_LANDING_TABLE)",
-    )
     default_table_profile: str = Field(
         default="timeseries",
         description="Schema profile the bootstrapped landing table is built from (DFE_DEFAULT_TABLE_PROFILE)",
@@ -359,6 +357,12 @@ class ClickHouseSettings(BaseModel):
 # Shared by HuntsSettings and the hunt runner compiler's default, so the two cannot drift.
 MAX_DETECTIONS_PER_RUN = 1000
 MAX_DETECTIONS_PER_RUN_CEILING = 10_000
+
+# A plain database name, the only shape the rule guard compares a lookup's database against.
+LOOKUP_DATABASE_PATTERN = r"[A-Za-z_][A-Za-z0-9_-]*"
+
+# ClickHouse's own databases describe every org's tables and queries, so none is a lookup.
+_CLICKHOUSE_CATALOGUES = frozenset({"system", "information_schema"})
 
 
 class DetectionGuardSettings(BaseModel):
@@ -473,7 +477,14 @@ class HuntsSettings(BaseModel):
     cron_task_timeout: int = Field(
         default=300, description="Scheduler timeout in seconds (-1 = no timeout)"
     )
-    hunt_dir: str = Field(default="", description="Directory containing hunt YAML configs")
+    hunt_dir: str = Field(
+        default="",
+        description=(
+            "The one directory holding hunt YAML, which the engine's hunt registry writes "
+            "with gitops off and the hunt runner reads. A comma-separated list is refused. "
+            "DFE_HUNTS_DIR."
+        ),
+    )
     rules_dir: str = Field(
         default="",
         description="YAML directory for API-managed detection rules (DirectoryConfigStore SSoT)",
@@ -568,6 +579,48 @@ class HuntsSettings(BaseModel):
         default_factory=DetectionGuardSettings,
         description="Alert-volume preview on rule create and update",
     )
+    lookup_databases: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Shared reference databases a rule may look values up in, as "
+            "IN (SELECT <columns> FROM <db>.<table> [WHERE <condition>]) or IN <db>.<table>. "
+            "The hunt runner's ClickHouse user reads every org, so a listed database must "
+            "hold no org's rows. The hunt runner refuses to start, or stops at its next "
+            "reload, while one of its tables has an _org_id column or is not a plain store "
+            "of its own rows, as a view is. The engine refuses to start on one when "
+            "ClickHouse answers at its start, and starts with the check unrun when it does not. "
+            "The hunt runner's role needs SELECT on each. Empty refuses every lookup. "
+            "DFE_HUNTS_LOOKUP_DATABASES (comma-separated)."
+        ),
+    )
+
+    @field_validator("hunt_dir")  # noqa: V105
+    @classmethod
+    def _hunt_dir_is_one_directory(cls, value: str) -> str:
+        directory = value.strip()
+        if "," in directory:
+            raise ValueError(
+                f"hunts.hunt_dir {directory!r} must name one directory, which the engine "
+                "and the hunt runner both read"
+            )
+        return directory
+
+    @field_validator("lookup_databases")  # noqa: V105
+    @classmethod
+    def _lookup_databases_are_plain_names(cls, value: list[str]) -> list[str]:
+        names = [name.strip() for name in value]
+        for name in names:
+            if re.fullmatch(LOOKUP_DATABASE_PATTERN, name) is None:
+                raise ValueError(
+                    f"lookup database {name!r} is not a plain database name "
+                    "(letters, digits, '_' and '-', not starting with a digit)"
+                )
+            if name.lower() in _CLICKHOUSE_CATALOGUES:
+                raise ValueError(
+                    f"lookup database {name!r} is one of ClickHouse's own, which describe "
+                    "every org's tables and queries"
+                )
+        return list(dict.fromkeys(names))
 
 
 class ArtifactorySettings(BaseModel):
@@ -737,13 +790,16 @@ class KafkaSettings(BaseModel):
             "controller metadata across the cluster."
         ),
     )
-    topic_replication_factor: int = Field(
-        default=1,
+    topic_replication_factor: int | None = Field(
+        default=None,
         ge=1,
         le=10,
         description=(
-            "Replication factor for topics DFE creates. 1 suits a single-broker "
-            "dev cluster; raise it to match a real broker count."
+            "Replication factor for each source's _land and _load topics "
+            "(DFE_KAFKA_TOPIC_REPLICATION_FACTOR), used as given when set. Unset "
+            "takes the dfe-schemas landing default clamped to the brokers the bus "
+            "reports, so a managed broker that refuses fewer than 3 replicas gets 3 "
+            "and a one-broker dev cluster gets 1."
         ),
     )
     topic_retention_ms: int | None = Field(
@@ -1380,7 +1436,6 @@ class LocalAuthSettings(BaseModel):
     """
 
     enabled: bool = Field(default=False, description="Seed built-in local accounts")
-    org_id: str = Field(default="default", description="Org id for the seeded accounts")
     admin_name: str = Field(default="", description="Bootstrap admin username")
     admin_password: str = Field(default="", description="Bootstrap admin password")
     operator_password: str = Field(default="", description="Bootstrap operator password")
@@ -1689,6 +1744,28 @@ class GitopsWriteSettings(BaseModel):
     )
 
 
+class GitopsReadSettings(BaseModel):
+    """How long a deploy-repo read waits on the forge before it answers from the clone.
+
+    Every API read pays a ref advertisement and may pay a fetch behind it, both under
+    the tree lock, so a forge that drops packets rather than refusing them must not
+    hold a request, or every reader behind it, for the OS connect timeout. A read
+    waits up to ``timeout_seconds`` on any one connect or read and is not retried.
+    The startup org seed's review-branch check takes the same bound, so a down forge
+    cannot hold startup.
+
+    Environment variables:
+    - DFE_GITOPS_READ_TIMEOUT_SECONDS -> gitops.read.timeout_seconds
+    """
+
+    # The cascade's last rung: a config file or DFE_GITOPS_READ_TIMEOUT_SECONDS overrides it.
+    timeout_seconds: float = Field(
+        default=3.0,
+        gt=0.0,
+        description="Connect and per-read timeout for a deploy-repo read, seconds.",
+    )
+
+
 class GitopsPackSettings(BaseModel):
     """When the deploy-repo clone packs its objects, and how often it checks.
 
@@ -1748,6 +1825,7 @@ class GitopsSettings(BaseModel):
     - DFE_GITOPS_MODE -> gitops.mode
     - DFE_GITOPS_FORGE_PROVIDER -> gitops.forge_provider (review-PR seam)
     - DFE_GITOPS_FORGE_API_BASE -> gitops.forge_api_base
+    - DFE_GITOPS_READ_* -> gitops.read (see GitopsReadSettings)
     - DFE_GITOPS_WRITE_* -> gitops.write (see GitopsWriteSettings)
     - DFE_GITOPS_PACK_* -> gitops.pack (see GitopsPackSettings)
     """
@@ -1785,6 +1863,7 @@ class GitopsSettings(BaseModel):
             "Forgejo/GitHub Enterprise). Empty = derive from repo_url."
         ),
     )
+    read: GitopsReadSettings = Field(default_factory=GitopsReadSettings)
     write: GitopsWriteSettings = Field(default_factory=GitopsWriteSettings)
     pack: GitopsPackSettings = Field(default_factory=GitopsPackSettings)
 
@@ -1951,22 +2030,40 @@ class APISettings(BaseModel):
         return v
 
 
+# GCP Secret Manager and Azure Key Vault names allow letters, digits, '-' and (GCP only) '_'.
+_UNNAMEABLE_SECRET_PROVIDERS = frozenset({"gcp", "azure"})
+# Amazon MSK reads SCRAM credentials only from secrets whose names start with this.
+_MSK_NAME_PREFIX = "AmazonMSK_"
+# AWS Secrets Manager's CreateSecret takes these characters in a name, at most 512 of them.
+_AWS_SECRET_NAME = re.compile(r"[A-Za-z0-9/_+=.@-]+")
+_AWS_SECRET_NAME_MAX = 512
+# The longest engine path whose parts are bounded: an OIDC provider's directory key.
+_LONGEST_ENGINE_PATH = len("oidc//groups_service_account_json") + MAX_NAME_LENGTH
+_NAME_PREFIX_MAX = _AWS_SECRET_NAME_MAX - len("/") - _LONGEST_ENGINE_PATH
+
+
 class SecretsSettings(BaseModel):
     """Backing-service seam for secrets the engine MINTS - backend by config.
 
     The engine reads runtime config secrets from env; this is the WRITE seam for
-    secrets it generates (per-group ClickHouse passwords, OIDC client secrets, API
-    keys). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
-    product: 'file'/'ansible_vault' for dfe-docker (a local encrypted file, no extra
-    service), 'openbao' on k8s (external-first), 'aws'/'gcp'/'azure' for cloud
-    (deferred). See docs/deployment/backing-services.md.
+    secrets it generates (the JWT signing key, ClickHouse passwords, OIDC client
+    secrets). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
+    product: 'file' by default (a directory on the engine's volume), 'ansible_vault',
+    'openbao'/'vault' where a deployment runs one, and 'aws' for AWS Secrets Manager.
+    'gcp' and 'azure' are refused: their secret names allow no '/', and every path
+    the engine mints carries one. See docs/deployment/backing-services.md.
 
     Environment variables (DFE_SECRETS_ prefix):
-    - DFE_SECRETS_PROVIDER -> secrets.provider (file|ansible_vault|openbao|aws|gcp|azure)
+    - DFE_SECRETS_PROVIDER -> secrets.provider (file|ansible_vault|openbao|vault|aws)
     - DFE_SECRETS_PATH -> secrets.path (file/ansible_vault root)
     - DFE_SECRETS_ADDR -> secrets.addr (openbao/vault address)
     - DFE_SECRETS_MOUNT -> secrets.mount (kv mount / key prefix)
     - DFE_SECRETS_ROLE -> secrets.role (openbao AppRole role id)
+    - DFE_SECRETS_REGION -> secrets.region (aws region)
+    - DFE_SECRETS_NAME_PREFIX -> secrets.name_prefix (aws: a secret is <name_prefix>/<path>)
+    - DFE_SECRETS_KMS_KEY_ID -> secrets.kms_key_id (aws KMS key id, ARN or alias)
+    - DFE_SECRETS_RECOVERY_WINDOW_DAYS -> secrets.recovery_window_days (aws: 0 or 7-30)
+    - DFE_SECRETS_TAGS -> secrets.tags (aws: JSON object of tags on each secret it creates)
     """
 
     provider: str = Field(default="file", description="scalo.secrets backend provider")
@@ -1974,6 +2071,80 @@ class SecretsSettings(BaseModel):
     addr: str = Field(default="", description="openbao/vault address")
     mount: str = Field(default="dfe", description="kv mount / key prefix")
     role: str = Field(default="", description="openbao AppRole role id")
+    region: str = Field(default="", description="aws region the secrets live in")
+    # Not DFE_SECRETS_PREFIX, which bootstrap.sh reads as the ESO store root above these names.
+    name_prefix: str = Field(
+        default="", description="aws name prefix, so a secret is <name_prefix>/<path>"
+    )
+    kms_key_id: str = Field(
+        default="", description="aws KMS key id, ARN or alias, empty for the AWS managed key"
+    )
+    recovery_window_days: int = Field(
+        default=0,
+        description="aws days a deleted secret stays recoverable: 0 for no window, or 7-30",
+    )
+    tags: dict[str, str] = Field(
+        default_factory=dict, description="aws tags every secret the engine creates carries"
+    )
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _tags_from_json(cls, value: object) -> object:
+        # Parsed here, not in the env mapping, so a malformed value fails only a secrets load.
+        if not isinstance(value, str):
+            return value
+        try:
+            return json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"DFE_SECRETS_TAGS is not valid JSON: {exc}") from exc
+
+    @model_validator(mode="after")
+    def _check_provider(self) -> SecretsSettings:
+        if self.provider in _UNNAMEABLE_SECRET_PROVIDERS:
+            raise ValueError(
+                f"DFE_SECRETS_PROVIDER={self.provider} is not supported yet for the secrets "
+                "the engine mints: its secret names cannot hold the '/' every engine path "
+                "carries. Use file, ansible_vault, openbao or aws"
+            )
+        if self.provider == "aws":
+            self._check_aws()
+        return self
+
+    def _check_aws(self) -> None:
+        if not self.region:
+            raise ValueError("DFE_SECRETS_PROVIDER=aws needs DFE_SECRETS_REGION")
+        self._check_name_prefix(self.name_prefix)
+        window = self.recovery_window_days
+        if window != 0 and not 7 <= window <= 30:
+            raise ValueError(
+                "DFE_SECRETS_RECOVERY_WINDOW_DAYS must be 0 (no recovery window) or 7-30, "
+                f"got {window}"
+            )
+
+    @staticmethod
+    def _check_name_prefix(prefix: str) -> None:
+        if not prefix:
+            raise ValueError(
+                "DFE_SECRETS_PROVIDER=aws needs DFE_SECRETS_NAME_PREFIX, so two deployments "
+                "in one account never share a secret name"
+            )
+        if not _AWS_SECRET_NAME.fullmatch(prefix):
+            raise ValueError(
+                f"DFE_SECRETS_NAME_PREFIX {prefix!r} may hold only ASCII letters, digits "
+                "and /_+=.@-, the characters AWS Secrets Manager allows in a name"
+            )
+        if len(prefix) > _NAME_PREFIX_MAX:
+            raise ValueError(
+                f"DFE_SECRETS_NAME_PREFIX is {len(prefix)} characters: at most {_NAME_PREFIX_MAX} "
+                f"keeps every engine secret name within AWS's {_AWS_SECRET_NAME_MAX}"
+            )
+        if prefix.startswith("/") or prefix.endswith("/"):
+            raise ValueError(f"DFE_SECRETS_NAME_PREFIX {prefix!r} must not start or end with '/'")
+        if prefix.startswith(_MSK_NAME_PREFIX):
+            raise ValueError(
+                f"DFE_SECRETS_NAME_PREFIX {prefix!r} must not start with {_MSK_NAME_PREFIX!r}, "
+                "which names the secrets Amazon MSK authenticates against"
+            )
 
 
 class SeedOrg(BaseModel):
@@ -1981,7 +2152,7 @@ class SeedOrg(BaseModel):
 
     name: str = Field(description="Org name, the registry identifier", pattern=ORG_NAME_PATTERN)
     display_name: str = Field(default="", description="Human-readable label")
-    org_ids: list[str] = Field(
+    org_ids: list[TenantId] = Field(
         default_factory=list,
         description="Tenant IDs for ClickHouse row-level security",
     )
@@ -2070,6 +2241,17 @@ class DFESettings(BaseModel):
             "(seed-admin). DFE_E2E_SERVER. Refused in a production posture."
         ),
     )
+
+    @model_validator(mode="after")  # noqa: V105
+    def _data_database_is_no_lookup(self) -> DFESettings:
+        # Every org's rows are in the data database, so a lookup there reads them all.
+        data = self.clickhouse.effective_data_database
+        if data in self.hunts.lookup_databases:
+            raise ValueError(
+                f"hunts.lookup_databases lists {data!r}, the data database, which holds "
+                "every org's rows"
+            )
+        return self
 
     @model_validator(mode="after")
     def _dev_cors_origins(self) -> DFESettings:
@@ -2185,8 +2367,6 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["database"] = val
     if val := _get_env("DFE_CLICKHOUSE_DATA_DATABASE", "CLICKHOUSE_DATA_DATABASE"):
         overrides["clickhouse"]["data_database"] = val
-    if val := _get_env("DFE_CLICKHOUSE_LANDING_TABLE", "CLICKHOUSE_LANDING_TABLE"):
-        overrides["clickhouse"]["landing_table"] = val
     if val := _get_env("DFE_DEFAULT_TABLE_PROFILE"):
         overrides["clickhouse"]["default_table_profile"] = val
     if val := _get_env("DFE_CLICKHOUSE_BOOTSTRAP_TABLES"):
@@ -2295,6 +2475,8 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["max_detections_per_run_ceiling"] = int(val)
     if val := _get_env("DFE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
         overrides["hunts"]["default_max_sample_events"] = int(val)
+    if val := _get_env("DFE_HUNTS_LOOKUP_DATABASES"):
+        overrides["hunts"]["lookup_databases"] = [d.strip() for d in val.split(",") if d.strip()]
 
     guard: dict[str, Any] = {}
     if val := _get_env("DFE_DETECTION_GUARD_ENABLED"):
@@ -2586,8 +2768,6 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("local", {})["operator_password"] = val
     if val := _get_env("DFE_AUTH_LOCAL_VIEWER_PASSWORD"):
         overrides["auth"].setdefault("local", {})["viewer_password"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
-        overrides["auth"].setdefault("local", {})["org_id"] = val
     if val := _get_env("DFE_AUTH_BREAKGLASS_PASSWORD"):
         overrides["auth"].setdefault("local", {})["breakglass_password"] = val
     if val := _get_env("DFE_RECOVERY_EMAIL"):
@@ -2674,6 +2854,8 @@ def _get_env_overrides() -> dict:
         overrides["gitops"]["forge_provider"] = val.strip().lower()
     if val := _get_env("DFE_GITOPS_FORGE_API_BASE"):
         overrides["gitops"]["forge_api_base"] = val
+    if val := _get_env("DFE_GITOPS_READ_TIMEOUT_SECONDS"):
+        overrides["gitops"].setdefault("read", {})["timeout_seconds"] = float(val)
     if val := _get_env("DFE_GITOPS_WRITE_TIMEOUT_SECONDS"):
         overrides["gitops"].setdefault("write", {})["timeout_seconds"] = float(val)
     if val := _get_env("DFE_GITOPS_WRITE_BUDGET_SECONDS"):
@@ -2728,6 +2910,17 @@ def _get_env_overrides() -> dict:
         overrides["secrets"]["mount"] = val
     if val := _get_env("DFE_SECRETS_ROLE"):
         overrides["secrets"]["role"] = val
+    if val := _get_env("DFE_SECRETS_REGION"):
+        overrides["secrets"]["region"] = val
+    if val := _get_env("DFE_SECRETS_NAME_PREFIX"):
+        overrides["secrets"]["name_prefix"] = val
+    if val := _get_env("DFE_SECRETS_KMS_KEY_ID"):
+        overrides["secrets"]["kms_key_id"] = val
+    # Left as text for SecretsSettings to parse, so a bad value fails only a secrets load.
+    if val := _get_env("DFE_SECRETS_RECOVERY_WINDOW_DAYS"):
+        overrides["secrets"]["recovery_window_days"] = val
+    if val := _get_env("DFE_SECRETS_TAGS"):
+        overrides["secrets"]["tags"] = val
 
     # The stack this pod was deployed from, when the deploy passed it in
     if val := _get_env("DFE_STACK_VERSION"):

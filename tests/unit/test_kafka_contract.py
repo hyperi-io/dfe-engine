@@ -252,7 +252,8 @@ class TestTopicEnvWiring:
         ks = KafkaSettings()
         # None, not True: no override, so the deploy hook follows bus_present.
         assert ks.ensure_topics is None
-        assert (ks.topic_partitions, ks.topic_replication_factor) == (3, 1)
+        # None, not 1: unset is derived from the bus, and every managed broker refuses 1.
+        assert (ks.topic_partitions, ks.topic_replication_factor) == (3, None)
 
     @pytest.mark.parametrize("raw", ["false", "False", "0", "no", "anything-not-truthy"])
     def test_ensure_topics_turns_off(self, monkeypatch, raw):

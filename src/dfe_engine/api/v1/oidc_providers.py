@@ -24,17 +24,19 @@ provider YAML keeps only the store PATH. A response carries the client id, the
 secret paths and the env var names, never a secret value.
 """
 
+import functools
 import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
-from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
+from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action, secrets_store
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -52,12 +54,16 @@ from dfe_engine.auth.oidc.models import SyncStatus
 from dfe_engine.auth.oidc.sync import SyncOutcome
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
-from dfe_engine.http_errors import describe_http_error, http_failure_message
+from dfe_engine.http_errors import (
+    describe_http_error,
+    failure_reference,
+    http_failure_message,
+    referenced,
+)
 from dfe_engine.names import StoreName
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
-    from dfe_engine.secrets import DfeSecrets
 
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 
@@ -370,8 +376,8 @@ class SyncResponse(BaseModel):
         "name, a name held by a stored group that does not load, a name held by a stored "
         "group not linked to that provider group, a name another group carries as its "
         "source_id or an id another group has as its name, a stored group carrying the id but linked "
-        "to another provider, or no id to link a group by. Each is counted on "
-        "auth_oidc_sync_groups_skipped_total{reason}.",
+        "to another provider, no id to link a group by, or a group the store could not "
+        "write. Each is counted on auth_oidc_sync_groups_skipped_total{reason}.",
     )
     error: str | None
     skipped: str | None = Field(
@@ -383,8 +389,8 @@ class SyncResponse(BaseModel):
     )
     status: SyncOutcome = Field(
         description="How the sync ended: ok, partial (some groups skipped), error (the "
-        "listing failed, or the secret store holding its credential did not answer or "
-        "refused access), "
+        "listing failed, the secret store holding its credential did not answer or "
+        "refused access, or the group store failed part way), "
         "not_configured (no directory credential), user_token (no directory to sync, "
         "which is a Google provider's default and not a fault) or skipped (disabled or "
         "not in api mode). Key on this, never on the text of error or skipped.",
@@ -466,23 +472,9 @@ def _get_registry(request: Request):
     return registry
 
 
-def _secrets(request: Request) -> DfeSecrets:
-    """The DfeSecrets seam provider credentials are written to and read from."""
-    store = getattr(request.app.state, "dfe_secrets", None)
-    if store is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "secrets_unavailable",
-                "message": "no secrets backend is configured; set DFE_SECRETS_PROVIDER",
-            },
-        )
-    return store
-
-
 def _store_secret(*, field: str, name: str, request: Request, value: str) -> None:
     """Write one provider secret through the seam, at the path the provider records."""
-    _secrets(request).put(provider_secret_path(field=field, provider_name=name), value)
+    secrets_store(request).put(provider_secret_path(field=field, provider_name=name), value)
 
 
 def _group_config(
@@ -621,19 +613,24 @@ def _moves_to_env(*, env: str, stored_env: str, stored_path: str, value: str) ->
     return (env != stored_env) or (bool(stored_path))
 
 
-def _refresh_rp(request: Request) -> None:
+async def _refresh_rp(request: Request) -> None:
     """Rebuild the relying party so this write takes effect on the login routes.
 
     The registry is read fresh from YAML on every call, but the RP snapshots the
     enabled providers and their resolved credentials when it is built. Without
     this rebuild a provider created here 404s on ``/auth/oidc/{name}/login``
-    until the process restarts. Cheap and non-raising - see
-    ``build_relying_party``.
+    until the process restarts. Non-raising - see ``build_relying_party``. The
+    rebuild reads each credential from the secret store, so it runs on a worker thread.
     """
     from dfe_engine.auth.oidc.rp import build_relying_party
 
-    request.app.state.oidc_rp = build_relying_party(
-        _get_registry(request), secrets=getattr(request.app.state, "dfe_secrets", None)
+    request.app.state.oidc_rp = await run_blocking(
+        functools.partial(
+            build_relying_party,
+            _get_registry(request),
+            secrets=getattr(request.app.state, "dfe_secrets", None),
+            metrics=getattr(request.app.state, "oidc_login_metrics", None),
+        )
     )
 
 
@@ -670,22 +667,24 @@ async def create_provider(
         else ""
     )
     group_paths = _group_secret_paths(groups=body.groups, name=body.name)
-    provider = OIDCProvider(
-        type=body.type,
-        enabled=body.enabled,
-        display_name=body.display_name,
-        issuer=body.issuer,
-        client_id=body.client_id,
-        client_id_env=body.client_id_env,
-        client_secret_env=body.client_secret_env,
-        client_secret_path=client_secret_path,
+    fields: dict[str, Any] = {
+        "type": body.type,
+        "enabled": body.enabled,
+        "display_name": body.display_name,
+        "issuer": body.issuer,
+        "client_id": body.client_id,
+        "client_id_env": body.client_id_env,
+        "client_secret_env": body.client_secret_env,
+        "client_secret_path": client_secret_path,
         # Empty takes the provider type's default scopes.
-        scopes=" ".join(body.scopes) if body.scopes is not None else "",
-        groups=_group_config(groups=body.groups, kept=group_paths, provider_type=body.type),
-        created_at=datetime.now(UTC).isoformat(),
-    )
+        "scopes": " ".join(body.scopes) if body.scopes is not None else "",
+        "groups": _group_config(groups=body.groups, kept=group_paths, provider_type=body.type),
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    # The rules run before the model's validators, so a pair both refuse answers 422 on its field.
     rule_problems = field_problems(
-        provider=provider, sent_group_fields=_sent_group_fields(groups=body.groups)
+        provider=OIDCProvider.model_construct(**fields),
+        sent_group_fields=_sent_group_fields(groups=body.groups),
     )
     _moved, env_problems = _group_env_moves(current=None, groups=body.groups)
     if _moves_to_env(
@@ -695,11 +694,17 @@ async def create_provider(
             0, _env_var_not_set(env=body.client_secret_env, field="client_secret_env")
         )
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
+    provider = OIDCProvider(**fields)
 
-    _store_group_secrets(groups=body.groups, name=body.name, request=request)
+    await run_blocking(
+        lambda: _store_group_secrets(groups=body.groups, name=body.name, request=request)
+    )
     if body.client_secret:
-        _store_secret(
-            field="client_secret", name=body.name, request=request, value=body.client_secret
+        secret = body.client_secret
+        await run_blocking(
+            lambda: _store_secret(
+                field="client_secret", name=body.name, request=request, value=secret
+            )
         )
 
     try:
@@ -710,7 +715,7 @@ async def create_provider(
             detail={"code": "conflict", "message": f"OIDC provider '{body.name}' already exists"},
         )
 
-    _refresh_rp(request)
+    await _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", body.name, "created")
     return _provider_to_response(body.name, provider)
 
@@ -850,16 +855,20 @@ async def update_provider(
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
 
     if body.client_secret:
-        _store_secret(field="client_secret", name=name, request=request, value=body.client_secret)
+        secret = body.client_secret
+        await run_blocking(
+            lambda: _store_secret(field="client_secret", name=name, request=request, value=secret)
+        )
     if body.groups is not None:
-        _store_group_secrets(groups=body.groups, name=name, request=request)
+        groups = body.groups
+        await run_blocking(lambda: _store_group_secrets(groups=groups, name=name, request=request))
 
     provider = registry.update(name, **update_fields)
     # Picks up an enable/disable flip and a rotated client secret alike.
-    _refresh_rp(request)
+    await _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "updated")
     # Deleted only once the saved config no longer points at them, so a failed update never leaves the provider on a missing secret.
-    _delete_secrets(paths=stale_paths, request=request)
+    await run_blocking(lambda: _delete_secrets(paths=stale_paths, request=request))
     return _provider_to_response(name, provider)
 
 
@@ -932,9 +941,9 @@ async def delete_provider(
         )
 
     registry.delete(name)
-    _delete_stored_secrets(request, provider)
+    await run_blocking(lambda: _delete_stored_secrets(request, provider))
     # A detached provider must stop serving logins immediately, not at restart.
-    _refresh_rp(request)
+    await _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "deleted")
 
     return DetachResponse(
@@ -1046,13 +1055,20 @@ async def verify_login_config(
     checks: list[LoginConfigCheck] = []
 
     # Resolve each credential the way the RP does and report only whether it
-    # resolved - the value never enters the response.
+    # resolved - the value never enters the response. The store read blocks.
     for label, value, secret_path, env_name in (
         ("client_id", provider.client_id, "", provider.client_id_env),
         ("client_secret", "", provider.client_secret_path, provider.client_secret_env),
     ):
-        ok, detail = credential_check(
-            label, value=value, secret_path=secret_path, env_name=env_name, secrets=store
+        ok, detail = await run_blocking(
+            functools.partial(
+                credential_check,
+                label,
+                value=value,
+                secret_path=secret_path,
+                env_name=env_name,
+                secrets=store,
+            )
         )
         checks.append(LoginConfigCheck(name=label, ok=ok, detail=detail))
 
@@ -1083,13 +1099,17 @@ async def verify_login_config(
                     LoginConfigCheck(name="discovery", ok=True, detail="discovery reachable")
                 )
         except Exception as exc:
+            reference = failure_reference()
             logger.warning(
                 "OIDC verify-login: discovery failed",
                 operation="discovery",
                 provider=name,
+                reference=reference,
                 **describe_http_error(exc),
             )
-            detail = http_failure_message(exc, service="The issuer's discovery endpoint")
+            detail = referenced(
+                http_failure_message(exc, service="The issuer's discovery endpoint"), reference
+            )
             checks.append(LoginConfigCheck(name="discovery", ok=False, detail=detail))
 
     return LoginConfigResponse(ok=all(c.ok for c in checks), checks=checks)

@@ -151,6 +151,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         )
         app.state.schema_retry.start()
 
+    # A rule may read a lookup database, so one holding an org's rows stops the start here.
+    from dfe_engine.governance.ch import ch_admin_client
+    from dfe_engine.hunts.lookups import refuse_tenant_lookups_if_reachable
+
+    refuse_tenant_lookups_if_reachable(
+        functools.partial(ch_admin_client, settings), settings.hunts.lookup_databases
+    )
+
     # Every carried source's topics, at boot rather than at its next deploy: a
     # deployment restored from its config repo otherwise has topics only for the
     # sources somebody happens to redeploy, and the rest produce into nothing.
@@ -314,6 +322,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             auth_dir / "sensitive-group-attributes"
         )
 
+    from dfe_engine.secrets import build_secrets, warn_on_aws_managed_key
+
+    # Ahead of the first store use, so a failed mint cannot hide which key it ran under.
+    warn_on_aws_managed_key(settings.secrets)
+
     # JWT authority: the engine as the single ES384 issuer - signs, verifies, and
     # publishes the JWKS. Shares its scalo.secrets signing key with create_access_token.
     from dfe_engine.api.deps import jwt_authority_for
@@ -322,8 +335,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     # The one seam for secrets the engine mints - OIDC provider credentials and
     # sigma provider tokens resolve through it, never through a backend SDK.
-    from dfe_engine.secrets import build_secrets
-
     app.state.dfe_secrets = build_secrets(settings.secrets)
 
     from dfe_engine.governance import PolicyStore
@@ -335,11 +346,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.policy_store = PolicyStore(gitcrud) if gitcrud is not None else None
 
     # Bootstrap OIDC provider registry
-    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry, ProviderMetrics
 
     oidc_dir = auth_dir / "oidc-providers"
     oidc_dir.mkdir(parents=True, exist_ok=True)
-    app.state.oidc_provider_registry = OIDCProviderRegistry(oidc_dir)
+    app.state.oidc_provider_registry = OIDCProviderRegistry(
+        oidc_dir, metrics=ProviderMetrics(app.state.metrics_manager)
+    )
 
     # Build the OIDC relying party from the enabled providers. The engine is the
     # RP + single token issuer: it terminates the IdP login and re-mints its own
@@ -349,7 +362,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     from dfe_engine.auth.oidc.rp import build_relying_party
 
     app.state.oidc_rp = build_relying_party(
-        app.state.oidc_provider_registry, secrets=app.state.dfe_secrets
+        app.state.oidc_provider_registry,
+        secrets=app.state.dfe_secrets,
+        metrics=app.state.oidc_login_metrics,
     )
 
     # Bootstrap connection registry for multi-tenant ClickHouse
@@ -380,10 +395,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.org_registry = OrgRegistry(Path(orgs_dir_str))
 
     # Ahead of the CH RBAC reconcile below, so a seeded org is fenced on this boot.
+    from dfe_engine.api.deps import get_hunt_config_registry_optional
     from dfe_engine.orgs.seed import seed_orgs
 
     try:
-        seed_orgs(registry=app.state.org_registry, seeds=settings.orgs.seed_orgs)
+        seed_orgs(
+            registry=app.state.org_registry,
+            seeds=settings.orgs.seed_orgs,
+            hunts=get_hunt_config_registry_optional(),
+        )
     except Exception as exc:  # a failed seed must never break startup
         logger.warning("organisations not seeded at startup", error=str(exc))
 
@@ -661,6 +681,7 @@ def create_app(
     # The routes reach these through app.state, so each set is built once per app.
     from dfe_engine.api.e2e.seed.metrics import SeedMetrics
     from dfe_engine.api.metrics import ApiMetrics
+    from dfe_engine.auth.oidc.rp import LoginMetrics
     from dfe_engine.auth.oidc.sync import SyncMetrics
     from dfe_engine.schema.metrics import SchemaMetrics
     from dfe_engine.yaml_health import YamlWriteMetrics, write_health
@@ -673,11 +694,17 @@ def create_app(
 
     app.state.login_throttle = LoginThrottle(settings.auth.login_throttle)
 
+    from dfe_engine.log_limit import LineLimit
+
+    # A refused token's reason is logged once a minute, and the counter takes every one.
+    app.state.bearer_refused_log = LineLimit(period_seconds=60)
+
     from dfe_engine.backing.observed import SizingCache
 
     app.state.observed_sizing = SizingCache()
     app.state.seed_metrics = SeedMetrics(metrics_manager)
     app.state.oidc_sync_metrics = SyncMetrics(metrics_manager)
+    app.state.oidc_login_metrics = LoginMetrics(metrics_manager)
     # Every store writes YAML without the app in reach, so its refusals count process-wide.
     write_health().bind(YamlWriteMetrics(metrics_manager))
 

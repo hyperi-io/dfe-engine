@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from scalo.logger import logger
 
 from ..clickhouse.quoting import quote_identifier, quote_literal
+from ..orgs.available_ids import ORG_ID_COLUMN
 from ..schema.schema_loader import SchemaLoader
 
 # Common header columns to copy from source -> hunt results.
@@ -110,12 +111,27 @@ RESULTS_TABLE_COLUMNS: frozenset[str] = (
 )
 
 
+def tenant_condition(tenant_ids: Sequence[str]) -> str:
+    """The conjunct holding a read to ``tenant_ids``, as quoted literals.
+
+    Literals, not a bind slot: binding would parse the rule's own text for placeholders.
+
+    Raises:
+        ValueError: If ``tenant_ids`` is empty, since the read would match nothing.
+    """
+    if not tenant_ids:
+        raise ValueError("a read held to no org would match nothing")
+    return f"{ORG_ID_COLUMN} IN ({', '.join(quote_literal(t) for t in tenant_ids)})"
+
+
 def matching_rows(
     source_db: str,
     source_table: str,
     columns: Sequence[str],
     where_clause: str,
     timestamp_placeholder: str,
+    *,
+    tenant_condition: str = "",
 ) -> str:
     """Build the subquery yielding ``columns`` of the source rows the window and rule match.
 
@@ -131,11 +147,14 @@ def matching_rows(
         where_clause: Detection logic (without time bounds).
         timestamp_placeholder: The time-window condition, or the placeholder the
             runner fills with one.
+        tenant_condition: The orgs the read is held to, its own conjunct, or empty.
 
     Returns:
         The parenthesised subquery, to follow ``FROM``.
     """
     where_parts = [timestamp_placeholder]
+    if tenant_condition:
+        where_parts.append(tenant_condition)
     if where_clause.strip():
         # On its own lines, so a rule ending in a line comment cannot comment out the bracket.
         where_parts.append(f"(\n{where_clause.strip()}\n    )")
@@ -276,6 +295,7 @@ class HuntResultSchema:
         hunt_name: str,
         severity: str,
         timestamp_placeholder: str = "{timestamp_condition}",
+        tenant_condition: str = "",
     ) -> str:
         """Build a complete INSERT INTO ... SELECT statement.
 
@@ -296,6 +316,7 @@ class HuntResultSchema:
             hunt_name: Parent hunt name.
             severity: Detection severity level.
             timestamp_placeholder: Placeholder for checkpoint time bounds.
+            tenant_condition: The orgs the statement may read, ANDed beside the rule.
 
         Returns:
             Complete SQL statement string.
@@ -310,7 +331,12 @@ class HuntResultSchema:
         )
 
         matched = matching_rows(
-            source_db, source_table, self._source_columns(), where_clause, timestamp_placeholder
+            source_db,
+            source_table,
+            self._source_columns(),
+            where_clause,
+            timestamp_placeholder,
+            tenant_condition=tenant_condition,
         )
 
         # Target is hunt configuration text, so it can only ever name a table.

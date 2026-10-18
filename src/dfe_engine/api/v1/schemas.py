@@ -52,6 +52,7 @@ from dfe_engine.exchange.schemas import (
 from dfe_engine.git_identity import git_author
 from dfe_engine.schema.applier import SchemaApplyError
 from dfe_engine.schema.column_query import filter_columns
+from dfe_engine.schema.core_schema import landing_table_name
 from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.schema.models import (
     MetaSchema,
@@ -1639,9 +1640,7 @@ def _dedicated_source_table_ready(
         raise _promotion_refused(exc, "discovery_failed", source.source) from exc
 
 
-def _discovery_target(
-    source, ver, schema_registry, *, version_id: str, landing: str, ch=None, db=None
-):
+def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None, db=None):
     """Resolve where to discover a source version's ``_json`` paths.
 
     A version with a ``meta_schema`` owns its own table once that version is
@@ -1656,6 +1655,7 @@ def _discovery_target(
         version's match; null when the dedicated source table is queried whole.
     """
     match_rule = ver.match
+    landing = landing_table_name()
     if ver.effective_schema().meta_schema:
         _canonical, meta, _ = _resolve_meta_schema(
             ver.effective_schema().meta_schema, source.source, schema_registry
@@ -1788,7 +1788,6 @@ async def discover_json_paths(
         ver,
         schema_registry,
         version_id=_version_id,
-        landing=clickhouse.landing_table,
         ch=ch,
         db=db,
     )
@@ -1895,7 +1894,6 @@ async def sample_source_rows(
         ver,
         schema_registry,
         version_id=_version_id,
-        landing=clickhouse.landing_table,
         ch=ch,
         db=db,
     )
@@ -2031,7 +2029,6 @@ async def promote_field(
         ver,
         schema_registry,
         version_id=_version_id,
-        landing=clickhouse.landing_table,
         ch=ch,
         db=db,
     )

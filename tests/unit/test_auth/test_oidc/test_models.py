@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 
 
 class TestGroupResolutionConfig:
@@ -212,6 +213,41 @@ class TestOIDCProviderTypes:
     def test_disabled_provider(self):
         provider = OIDCProvider(enabled=False)
         assert provider.enabled is False
+
+
+class TestAGenericProviderReadsNoDirectory:
+    """It has no directory API, so asking one at login would leave every user with no groups."""
+
+    def test_enrich_on_login_in_api_mode_is_refused(self):
+        with pytest.raises(ValidationError, match="no directory API"):
+            OIDCProvider(type="generic", groups={"enrich_on_login": True, "mode": "api"})
+
+    @pytest.mark.parametrize(
+        "groups",
+        [{"mode": "api"}, {"enrich_on_login": True, "mode": "token_claim"}],
+        ids=["api-mode-alone", "enrich-outside-api-mode"],
+    )
+    def test_either_setting_alone_still_loads(self, groups):
+        assert OIDCProvider(type="generic", groups=groups).type == "generic"
+
+    @pytest.mark.parametrize("provider_type", ["google", "okta", "entra_id"])
+    def test_a_provider_with_a_directory_may_enrich(self, provider_type):
+        groups = {"enrich_on_login": True, "mode": "api"}
+        assert OIDCProvider(type=provider_type, groups=groups).groups.enrich_on_login is True
+
+    def test_a_provider_file_written_past_the_api_does_not_load(self, tmp_path):
+        directory = tmp_path / "oidc"
+        directory.mkdir()
+        (directory / "generic-enrich.yaml").write_text(
+            "type: generic\nissuer: https://idp.example.com\n"
+            "groups:\n  mode: api\n  enrich_on_login: true\n",
+            encoding="utf-8",
+        )
+        registry = OIDCProviderRegistry(directory)
+
+        assert registry.list() == []
+        with pytest.raises(ValidationError):
+            registry.get("generic-enrich")
 
 
 class TestGroupInfo:

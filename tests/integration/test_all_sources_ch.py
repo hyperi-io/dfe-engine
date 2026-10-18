@@ -22,7 +22,7 @@ from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
-from typing import Any, NoReturn, TypedDict
+from typing import Any, TypedDict
 
 import clickhouse_connect
 import pytest
@@ -45,8 +45,9 @@ from dfe_engine.schema.phase import SchemaBootstrapState
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.source.deployment import deploy_statements_for_build
 from dfe_engine.source.models import Source
-from tests.support.engine_stack import bootstrap_settings, deploy_source, drop_row_policies
-from tests.support.producer_contract import in_ci
+from tests.integration.conftest import _unavailable
+from tests.support.clickhouse_cleanup import drop_database_and_policies
+from tests.support.engine_stack import bootstrap_settings, deploy_source
 
 pytestmark = pytest.mark.integration
 
@@ -457,13 +458,6 @@ def _tiles() -> dict[str, dict[str, Any]]:
     }
 
 
-def _unavailable(*, reason: str) -> NoReturn:
-    """Skip a test the server cannot support; in CI fail it instead."""
-    if in_ci():
-        pytest.fail(reason, pytrace=False)
-    pytest.skip(reason)
-
-
 def make_source(*, header: str, name: str) -> Source:
     """Build a source.models.Source on *header*'s current profile version that matches records by collector type."""
     return Source.model_validate(
@@ -480,22 +474,20 @@ def make_source(*, header: str, name: str) -> Source:
 def bootstrap_pass(
     ch_client: Any, ch_params: dict[str, Any]
 ) -> Iterator[Callable[..., SchemaBootstrapState]]:
-    """Run bootstrap_clickhouse against the harness's ClickHouse, dropping the row policies it leaves in each database it ran on."""
+    """Run bootstrap_clickhouse against the harness's ClickHouse, dropping each database it ran on with the row policies it left there."""
 
     def run(
         *,
         bootstrap_tables: bool,
         database: str,
-        landing_table: str = LANDING,
         load_sources: Callable[[], Iterable[Source]] | None,
     ) -> SchemaBootstrapState:
-        """One bootstrap pass over *database* with *load_sources* as the registry's loader and *landing_table* as the landing table setting."""
+        """One bootstrap pass over *database* with *load_sources* as the registry's loader."""
         databases.append(database)
         ClickHouseManager.reset_instance()
         settings = bootstrap_settings(
             bootstrap_tables=bootstrap_tables, ch_params=ch_params, database=database
         )
-        settings.clickhouse.landing_table = landing_table
         return bootstrap_clickhouse(load_sources=load_sources, settings=settings)
 
     databases = []
@@ -504,7 +496,7 @@ def bootstrap_pass(
     finally:
         ClickHouseManager.reset_instance()
         for database in databases:
-            drop_row_policies(client=ch_client, database=database)
+            drop_database_and_policies(client=ch_client, database=database)
 
 
 @pytest.fixture
@@ -545,7 +537,7 @@ def estate(ch_client: Any, ch_params: dict[str, Any], dfe_db: str) -> Iterator[E
                 ch_client.command(statement)
         yield Estate(anchor_ms=anchor_ms, database=dfe_db, logins=logins, params=ch_params)
     finally:
-        drop_row_policies(client=ch_client, database=dfe_db)
+        drop_database_and_policies(client=ch_client, database=dfe_db)
         for user, _ in logins.values():
             _drop_quietly(client=ch_client, statement=f"DROP USER IF EXISTS `{user}`")
         _drop_quietly(client=ch_client, statement=f"DROP ROLE IF EXISTS `{tier.role()}`")
@@ -876,18 +868,6 @@ def test_a_bootstrap_switched_off_builds_all_sources_over_the_existing_landing_t
     bootstrap_pass: Callable[..., SchemaBootstrapState], ch_client: Any, dfe_db: str
 ):
     state = bootstrap_pass(bootstrap_tables=False, database=dfe_db, load_sources=tuple)
-
-    observed = {**_all_sources_state(client=ch_client, database=dfe_db), "state": state.state}
-
-    assert observed == {"all_sources policies": 1, "member pattern": "^(main)$", "state": "unknown"}
-
-
-def test_a_landing_table_setting_other_than_main_still_builds_over_main(
-    bootstrap_pass: Callable[..., SchemaBootstrapState], ch_client: Any, dfe_db: str
-):
-    state = bootstrap_pass(
-        bootstrap_tables=False, database=dfe_db, landing_table="default", load_sources=tuple
-    )
 
     observed = {**_all_sources_state(client=ch_client, database=dfe_db), "state": state.state}
 

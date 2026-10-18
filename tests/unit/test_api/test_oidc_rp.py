@@ -182,16 +182,20 @@ def test_rp_registers_a_provider_with_no_credentials_at_all(tmp_path):
     assert _registered_client(rp, "acme").client_secret is None
 
 
-def test_an_rp_that_cannot_be_built_logs_no_provider_file_value(tmp_path, audit_events):
-    """A provider file that does not load quotes its own values in the error, so the log takes none."""
-    registry = OIDCProviderRegistry(tmp_path / "oidc-providers")
-    (tmp_path / "oidc-providers" / "acme.yaml").write_text(
+def test_a_provider_file_that_does_not_load_leaves_the_rp_serving_the_others(
+    tmp_path, audit_events
+):
+    """The file quotes its own values in the error, so the log takes none."""
+    registry = _registry_with(tmp_path)
+    (tmp_path / "oidc-providers" / "broken.yaml").write_text(
         "type: rp-sentinel-7f3a\nissuer: https://idp.example\n", encoding="utf-8"
     )
 
-    assert build_relying_party(registry, secrets=None) is None
+    rp = build_relying_party(registry, secrets=None)
 
-    (line,) = [e for e in audit_events if e["event"] == "OIDC relying party unavailable"]
+    assert rp is not None
+    assert rp.provider_names() == ["acme"]
+    (line,) = [e for e in audit_events if e["event"].startswith("OIDC provider file skipped")]
     assert line["error_type"] == "ValidationError"
     assert "error" not in line
     assert "rp-sentinel-7f3a" not in json.dumps(audit_events, default=str)
@@ -355,7 +359,7 @@ class _Req:
         self.app = app
 
 
-def test_reload_picks_up_provider_written_out_of_band(client, app):
+async def test_reload_picks_up_provider_written_out_of_band(client, app):
     """A provider written straight to the registry dir is usable without a restart."""
     from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
 
@@ -366,23 +370,23 @@ def test_reload_picks_up_provider_written_out_of_band(client, app):
         "gitops-added", OIDCProvider(type="generic", issuer="https://idp.example")
     )
 
-    rp = _reload_rp_if_provider_known(_Req(app), "gitops-added")
+    rp = await _reload_rp_if_provider_known(_Req(app), "gitops-added")
     assert rp is not None
     assert rp.has_provider("gitops-added")
     # Rebuilt in place, so the next request sees it too.
     assert app.state.oidc_rp is rp
 
 
-def test_reload_ignores_unknown_provider(client, app):
+async def test_reload_ignores_unknown_provider(client, app):
     """A bogus name does NOT rebuild - an unauthenticated caller cannot force churn."""
     from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
 
     before = app.state.oidc_rp
-    assert _reload_rp_if_provider_known(_Req(app), "no-such-provider") is None
+    assert await _reload_rp_if_provider_known(_Req(app), "no-such-provider") is None
     assert app.state.oidc_rp is before
 
 
-def test_reload_ignores_disabled_provider(client, app):
+async def test_reload_ignores_disabled_provider(client, app):
     """A disabled provider stays unusable - the reload is not an enable back door."""
     from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
 
@@ -390,7 +394,7 @@ def test_reload_ignores_disabled_provider(client, app):
         "switched-off",
         OIDCProvider(type="generic", issuer="https://idp.example", enabled=False),
     )
-    assert _reload_rp_if_provider_known(_Req(app), "switched-off") is None
+    assert await _reload_rp_if_provider_known(_Req(app), "switched-off") is None
 
 
 def test_login_still_404s_for_a_provider_that_was_never_configured(client):

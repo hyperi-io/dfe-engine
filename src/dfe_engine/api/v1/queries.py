@@ -23,7 +23,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    Settings,
+    granted_bound_org,
+    live_role_config,
+    require_action,
+)
 from dfe_engine.api.errors import backend_failure
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.query.models import (
@@ -173,20 +179,33 @@ def execute_view(
     body: ViewExecuteRequest,
     user: CurrentUser,
     executor: ViewExec,
+    request: Request,
 ) -> QueryResponse:
     """Execute a parameterized view and return JSON results.
 
     The ``org_id`` parameter is always injected from the authenticated
-    user's context -- it cannot be overridden by the client.
+    user's context -- it cannot be overridden by the client. It is the org the
+    session's account is bound to, and a view taking it runs only when the caller's
+    groups grant that org or it reads every org (``granted_bound_org``).
     """
     from dfe_engine.query.executor import ViewExecutionError, ViewRequestError
 
+    try:
+        view_def = executor.get_view(label)
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"View '{label}' not found"},
+        )
+    if view_def.tenant_isolated:
+        granted_bound_org(request, user, scopes_dict["query_execute"])
     try:
         result = executor.execute(
             label=label,
             params=body.params,
             auth=user,
             options=body.options,
+            role_config=live_role_config(request),
         )
     except KeyError:
         raise HTTPException(
@@ -259,11 +278,14 @@ async def execute_raw_query(
         # nosemgrep: python.django.security.injection.sql.sql-injection-using-db-cursor-execute.sql-injection-db-cursor-execute
         rows, columns = adapter.execute(request.query, request.params, timeout)
     except Exception as exc:
-        logger.error("Raw query failed", query=request.query[:200], error=str(exc))
-        raise HTTPException(
-            status_code=500,
-            detail={"code": "query_error", "message": str(exc)},
-        )
+        raise backend_failure(
+            500,
+            "query_error",
+            "The query failed; the engine log has the datasource's reason",
+            exc,
+            event="Raw query failed",
+            datasource=request.datasource,
+        ) from exc
 
     duration_ms = int((time.perf_counter() - start) * 1000)
 

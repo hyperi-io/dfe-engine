@@ -13,11 +13,58 @@ All methods are async to allow network calls without blocking the event loop.
 """
 
 from abc import ABC, abstractmethod
+from enum import StrEnum
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
+
+from scalo.logger import logger
+
+from dfe_engine.http_errors import is_outage
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
     from dfe_engine.secrets import DfeSecrets
+
+
+class LookupFailure(StrEnum):
+    """Why a login's directory group lookup returned no groups list."""
+
+    OUTAGE = "outage"
+    """The directory could not answer: no response, a timeout, a 429 or a 5xx."""
+
+    REFUSED = "refused"
+    """The directory answered without the user's groups: a 401 or 403, a missing scope or
+    credential, any other 4xx, or a body that is not a whole listing."""
+
+
+def lookup_failure(exc: BaseException) -> LookupFailure:
+    """The failure *exc* is, by :func:`~dfe_engine.http_errors.is_outage`."""
+    return LookupFailure.OUTAGE if is_outage(exc) else LookupFailure.REFUSED
+
+
+def missing_credential(*, unreadable: bool, refused: bool) -> LookupFailure:
+    """The failure a lookup with no usable directory credential is.
+
+    An outage only when the secret store holding the credential did not answer. One it
+    refused, or a credential never configured, is a refusal.
+    """
+    return LookupFailure.OUTAGE if unreadable and not refused else LookupFailure.REFUSED
+
+
+def first_answer(*attempts: list[GroupInfo] | LookupFailure) -> list[GroupInfo] | LookupFailure:
+    """The first groups list among *attempts*, else an outage when any attempt was one.
+
+    A lookup that tries the user's token and then an app credential answers from
+    whichever path answered. Only an outage on a path that could have answered keeps
+    the login's last known groups, so a refusal on one path never hides an outage on
+    another, nor the reverse.
+    """
+    for attempt in attempts:
+        if not isinstance(attempt, LookupFailure):
+            return attempt
+    if LookupFailure.OUTAGE in attempts:
+        return LookupFailure.OUTAGE
+    return LookupFailure.REFUSED
 
 
 class DirectoryNotConfiguredError(Exception):
@@ -108,6 +155,60 @@ class DirectoryPageLimitError(Exception):
         self.pages = pages
 
 
+class DirectoryForeignLinkError(Exception):
+    """A directory linked its next page on another origin, so the link was not followed.
+
+    The next request would carry the directory credential, so it goes only to the
+    scheme, host and port the adapter was configured with.
+    """
+
+
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def _origin(url: str) -> tuple[str, str, int | None] | None:
+    """The scheme, host and port *url* names, or None when it names no plain absolute origin.
+
+    A URL carrying user info is refused too: the client would send it as a second credential.
+    """
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    scheme = parts.scheme.lower()
+    if scheme not in _DEFAULT_PORTS or not parts.hostname or "@" in parts.netloc:
+        return None
+    return scheme, parts.hostname.lower(), port or _DEFAULT_PORTS[scheme]
+
+
+def same_origin_link(link: str, *, directory_url: str) -> str:
+    """Return *link* when it is on *directory_url*'s origin, else refuse it.
+
+    Args:
+        link: The next-page URL the directory answered with.
+        directory_url: Any URL on the directory API's own origin.
+
+    Returns:
+        *link*, unchanged.
+
+    Raises:
+        DirectoryForeignLinkError: The link names another scheme, host or port, or no
+            plain origin at all. Logged with both origins, never the link's path,
+            query or the credential.
+    """
+    linked = _origin(link)
+    expected = _origin(directory_url)
+    if linked is not None and linked == expected:
+        return link
+    logger.warning(
+        "directory linked its next page on another origin, so it was not followed",
+        directory_origin="{}://{}:{}".format(*expected) if expected else "",
+        linked_origin="{}://{}:{}".format(*linked) if linked else "",
+    )
+    raise DirectoryForeignLinkError
+
+
 class OIDCGroupAdapter(ABC):
     """Abstract OIDC group adapter.
 
@@ -150,6 +251,8 @@ class OIDCGroupAdapter(ABC):
                 access to the directory.  Group sync reports that as a failed run.
             DirectoryPageError: A page arrived without the listing's shape.
             DirectoryPageLimitError: The listing ran past :attr:`MAX_LISTING_PAGES`.
+            DirectoryForeignLinkError: A page linked the next on another origin
+                (:func:`same_origin_link`).
             Exception: Whatever the provider's API produced when a listing failed,
                 on any page. An empty or short list never means a failed one,
                 because group sync records what it is given as the whole directory.
@@ -165,7 +268,7 @@ class OIDCGroupAdapter(ABC):
             human-readable status or error description.
         """
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | LookupFailure:
         """Return the groups *directory_id* belongs to, fetched from the provider.
 
         This is the enrichment call the Relying Party uses when a token does NOT
@@ -178,10 +281,16 @@ class OIDCGroupAdapter(ABC):
         ``oid``, not the pairwise ``sub``), because that is what the directory API
         keys on.
 
+        Returns:
+            The user's groups, else why there are none: :attr:`LookupFailure.OUTAGE`
+            when the directory could not answer, :attr:`LookupFailure.REFUSED` when it
+            answered without them. The RP takes a list as the user's groups and judges
+            a refusal as no directory groups. Only an outage keeps the last known
+            groups, so a user cannot keep them by declining a consent scope. Never
+            raises.
+
         The default returns an empty list: providers without an admin directory
-        API (generic) or that always deliver groups in-token have nothing to add,
-        and returning ``[]`` fails safe (no groups -> default deny, never an
-        accidental grant). Adapters that CAN enumerate a user's groups override
-        this.
+        API (generic) or that always deliver groups in-token have nothing to add.
+        Adapters that CAN enumerate a user's groups override this.
         """
         return []

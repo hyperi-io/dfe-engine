@@ -54,6 +54,7 @@ from sigma.collection import SigmaCollection
 
 from dfe_engine.gitcrud import ResourceNotFoundError
 from dfe_engine.gitcrud.routing import ReviewRouting, WriteOutcome
+from dfe_engine.hunts.customers import CUSTOMER_TENANT_IDS
 from dfe_engine.hunts.hunt_config_registry import (
     HuntConfigNotFoundError,
     HuntConfigRegistry,
@@ -61,6 +62,7 @@ from dfe_engine.hunts.hunt_config_registry import (
 )
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleNotFoundError, RuleRegistry
+from dfe_engine.orgs.tenant_scope import tenant_ids_by_org
 from dfe_engine.sigma.catalog import SigmaCatalogStore, SigmaSelectionStore
 from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend
 from dfe_engine.sigma.source_mapper import SigmaSourceMapper
@@ -268,6 +270,8 @@ class SigmaPropagator:
     and WRITES through the existing ``RuleRegistry`` / ``HuntConfigRegistry`` - it
     is a generator, not a second CRUD implementation. ``database`` is the data
     database the ``{source}_sigma`` views live in (``effective_data_database``).
+    ``orgs`` are the org registry's entries, which a new hunt's customers resolve
+    against.
     """
 
     def __init__(
@@ -280,6 +284,7 @@ class SigmaPropagator:
         hunt_registry: HuntConfigRegistry,
         actor: str,
         database: str,
+        orgs: list[Any] | None = None,
     ) -> None:
         self._catalog = catalog
         self._selection = selection
@@ -288,6 +293,7 @@ class SigmaPropagator:
         self._hunts = hunt_registry
         self._actor = actor
         self._database = database
+        self._orgs = list(orgs or [])
 
     # -- source binding --
 
@@ -369,6 +375,7 @@ class SigmaPropagator:
                 "global_target_table_name": target_table,
                 "global_source_table_name": f"{self._database}.{sigma_view_name(source)}",
                 "customers": list(customers),
+                CUSTOMER_TENANT_IDS: tenant_ids_by_org(customers, self._orgs),
                 "rules": [{"rule_name": rid} for rid in rule_ids],
             }
         else:
@@ -395,8 +402,12 @@ class SigmaPropagator:
         hunt_target_table: str = "detection",
         hunt_customers: list[str] | None = None,
     ) -> PropagationReport:
-        """Generate/refresh bindings + hunts for every SELECTED sigma rule."""
-        customers = list(hunt_customers) if hunt_customers else ["default"]
+        """Generate/refresh bindings + hunts for every SELECTED sigma rule.
+
+        A new hunt reads the orgs ``hunt_customers`` names. Naming none, it reads
+        no org and every fire fails until its customers are set through PUT /hunts.
+        """
+        customers = list(hunt_customers or [])
         selected = self._selection.list_selected()
         report = PropagationReport(total_selected=len(selected))
         # Each generated rule and hunt is its own routed write, so the run's review

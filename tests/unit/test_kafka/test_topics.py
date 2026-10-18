@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from confluent_kafka import KafkaError, KafkaException
 
 from dfe_engine.kafka.contract import KafkaContractError
 from dfe_engine.kafka.topics import (
@@ -13,6 +14,7 @@ from dfe_engine.kafka.topics import (
     ensure_all_source_topics,
     ensure_topics,
     remove_topics,
+    source_replication_factor,
     source_topic_names,
     source_topic_specs,
     specs_for_sources,
@@ -22,27 +24,29 @@ from dfe_engine.kafka.topics import (
     topics_managed_at_startup,
     update_topics,
 )
-from dfe_engine.settings import KafkaSettings, TransportSettings
+from dfe_engine.settings import DFESettings, KafkaSettings, TransportSettings
 from dfe_engine.source.models import Source, SourceFetcher, SourceMatch, SourceTransform
 
 
-def _settings(**kafka) -> SimpleNamespace:
-    return SimpleNamespace(kafka=KafkaSettings(**kafka))
+def _settings(**kafka) -> DFESettings:
+    # model_construct skips the production-posture checks, which no topic test reaches.
+    return DFESettings.model_construct(kafka=KafkaSettings(**kafka))
 
 
-def _deployment(*, bus=True, **kafka) -> SimpleNamespace:
+def _deployment(*, bus=True, **kafka) -> DFESettings:
     """Settings with both dials the topic hooks read."""
-    return SimpleNamespace(
+    return DFESettings.model_construct(
         kafka=KafkaSettings(**kafka),
         transport=TransportSettings(default="bus" if bus else "direct", bus_present=bus),
     )
 
 
-class _FakeAdmin:
-    """Stands in for TopicAdmin so no test needs a broker."""
+class _FakeAdmin(TopicAdmin):
+    """Stands in for TopicAdmin so no test needs a broker. Never opens a client."""
 
-    def __init__(self, present=(), fail_on=(), shapes=None, configs=None):
+    def __init__(self, present=(), fail_on=(), shapes=None, configs=None, brokers=1):
         self.present = set(present)
+        self.brokers = brokers
         self.fail_on = set(fail_on)
         # name -> (partitions, replication_factor) for a topic the broker holds.
         self.shapes: dict[str, tuple[int, int]] = dict(shapes or {})
@@ -55,6 +59,9 @@ class _FakeAdmin:
 
     def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
         return set(self.present)
+
+    def node_count(self, *, timeout: float = 10.0) -> int:
+        return self.brokers
 
     def create(
         self, name, *, partitions, replication_factor, config=None, timeout: float = 30.0
@@ -97,9 +104,27 @@ class _FakeAdmin:
         self.shapes[name] = (total, rf)
 
 
-class _UnreachableAdmin:
+class _UnreachableAdmin(TopicAdmin):
+    def __init__(self) -> None:
+        """Opens no client: every call fails the way an unreachable broker does."""
+
     def list_topic_names(self, *, timeout: float = 10.0) -> set[str]:
         raise RuntimeError("connection refused")
+
+    def node_count(self, *, timeout: float = 10.0) -> int:
+        raise RuntimeError("connection refused")
+
+
+class _SizeCounter(TopicAdmin):
+    """Counts every size read, because the read swallows anything a fake raises."""
+
+    def __init__(self, brokers: int = 6) -> None:
+        self.brokers = brokers
+        self.asked = 0
+
+    def node_count(self, *, timeout: float = 10.0) -> int:
+        self.asked += 1
+        return self.brokers
 
 
 def _main_lander(name="aws-cloudtrail", *, transform=False) -> Source:
@@ -220,6 +245,20 @@ class TestEnsureTopics:
         assert [name for name, _ in result.failed] == ["filebeat_land", "filebeat_load"]
         assert result.failed[0][1] == BROKER_UNREACHABLE
 
+    def test_a_refusal_names_the_brokers_error_code_and_none_of_its_text(self):
+        class _Refusing(_FakeAdmin):
+            def create(self, name, **_kwargs) -> None:
+                error = KafkaError(
+                    KafkaError.POLICY_VIOLATION, "replication factor below 3 at acme"
+                )
+                raise KafkaException(error)
+
+        result = ensure_topics([TopicSpec("t", 3, 1)], admin=_Refusing())
+
+        assert result.failed == [
+            ("t", "the broker refused it (POLICY_VIOLATION); the engine log has the reason")
+        ]
+
     def test_dry_run_creates_nothing(self):
         admin = _FakeAdmin()
         result = ensure_topics([TopicSpec("t", 3, 1)], admin=admin, dry_run=True)
@@ -259,7 +298,56 @@ class TestTopicsManaged:
         assert topics_managed_at_startup(_deployment(ensure_topics=True))
 
 
+class TestSourceReplicationFactor:
+    """What a source's topics are created at: the setting, else the bus's own size.
+
+    Confluent Cloud and Redpanda Cloud refuse a topic below 3 replicas, and an
+    in-cluster broker set loses a one-replica topic with the broker that holds it.
+    """
+
+    def test_unset_asks_a_big_bus_for_three(self):
+        assert source_replication_factor(_settings(), admin=_FakeAdmin(brokers=6)) == 3
+
+    @pytest.mark.parametrize("brokers", [1, 2, 3])
+    def test_unset_never_asks_for_more_replicas_than_brokers(self, brokers):
+        # More replicas than brokers is a topic the broker accepts and never places.
+        factor = source_replication_factor(_settings(), admin=_FakeAdmin(brokers=brokers))
+        assert factor == brokers
+
+    def test_an_unreadable_bus_falls_back_to_one(self):
+        assert source_replication_factor(_settings(), admin=_UnreachableAdmin()) == 1
+
+    @pytest.mark.parametrize("configured", [1, 2, 5])
+    def test_a_configured_factor_is_used_as_given(self, configured):
+        bus = _SizeCounter(brokers=6)
+        settings = _settings(topic_replication_factor=configured)
+
+        assert source_replication_factor(settings, admin=bus) == configured
+        assert bus.asked == 0
+
+
 class TestSpecsForSources:
+    def test_an_unset_factor_follows_the_bus(self):
+        specs, _ = specs_for_sources([_source()], _deployment(), admin=_FakeAdmin(brokers=6))
+
+        assert [(s.name, s.replication_factor) for s in specs] == [
+            ("filebeat_land", 3),
+            ("filebeat_load", 3),
+        ]
+
+    def test_the_bus_is_asked_once_for_every_source(self):
+        bus = _SizeCounter(brokers=6)
+
+        specs_for_sources([_source(), _source("syslog")], _deployment(), admin=bus)
+
+        assert bus.asked == 1
+
+    def test_no_sources_never_asks_the_bus(self):
+        bus = _SizeCounter()
+
+        assert specs_for_sources([], _deployment(), admin=bus) == ([], {})
+        assert bus.asked == 0
+
     def test_it_names_the_owner_of_every_topic(self):
         specs, owners = specs_for_sources(
             [_source(), _source("syslog", transform=False)], _deployment()
@@ -299,6 +387,16 @@ class TestEnsureAllSourceTopics:
         )
 
         assert result.created == ["filebeat_land", "filebeat_load", "syslog_land"]
+
+    def test_a_managed_broker_gets_the_replicas_it_requires(self):
+        admin = _FakeAdmin(brokers=6)
+
+        ensure_all_source_topics([_source()], _deployment(ensure_topics=True), admin=admin)
+
+        assert [(name, rf) for name, _, rf in admin.created] == [
+            ("filebeat_land", 3),
+            ("filebeat_load", 3),
+        ]
 
     def test_an_unset_dial_reaches_no_broker(self):
         """Boot-time, so it runs only where an operator turned it on.

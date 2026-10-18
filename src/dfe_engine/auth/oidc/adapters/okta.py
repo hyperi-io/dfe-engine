@@ -20,6 +20,7 @@ import re
 from typing import Any
 from urllib.parse import urlparse
 
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import (
@@ -28,7 +29,11 @@ from dfe_engine.auth.oidc.adapters.base import (
     DirectoryNotConfiguredError,
     DirectoryPageError,
     DirectoryPageLimitError,
+    LookupFailure,
     OIDCGroupAdapter,
+    lookup_failure,
+    missing_credential,
+    same_origin_link,
 )
 from dfe_engine.auth.oidc.credential_env import (
     ResolvedCredential,
@@ -42,17 +47,26 @@ from dfe_engine.http_errors import describe_http_error, http_failure_message
 class OktaAdapter(OIDCGroupAdapter):
     """Okta Groups API adapter."""
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
-        """List groups for a user (Okta user id or login)."""
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | LookupFailure:
+        """List groups for a user (Okta user id or login).
+
+        A call that got no answer, a 429 or a 5xx is an outage. A domain or token not
+        configured, any other refused call, a page that is not a list of groups or a
+        listing still paging at :attr:`MAX_LOGIN_PAGES` is a refusal. Either is logged,
+        and never returns the groups read before it.
+        """
         if not directory_id:
             return []
 
-        base, headers = self._api_base_and_headers()
+        base, headers = await run_blocking(self._api_base_and_headers)
         if base is None or headers is None:
             # A token that is set but never sent finds no groups, so the login says why once.
-            if base is not None and self._api_token.value:
+            if base is None:
+                return LookupFailure.REFUSED
+            if self._api_token.value:
                 self._warn_unsendable_token(operation="resolve_user_groups")
-            return []
+            token = self._api_token
+            return missing_credential(unreadable=token.unreadable, refused=token.refused)
 
         from scalo.http import AsyncHttpClient
 
@@ -63,21 +77,24 @@ class OktaAdapter(OIDCGroupAdapter):
                 for _page in range(self.MAX_LOGIN_PAGES):
                     response = await client.get(url, headers=headers)
                     data = response.json()
-                    if isinstance(data, list):
-                        for item in data:
-                            groups.append(_group_info_from_okta(item))
+                    if not isinstance(data, list):
+                        raise DirectoryPageError
+                    groups.extend(_group_info_from_okta(item) for item in data)
                     url = _next_url_from_link_header(getattr(response, "headers", {}).get("link"))
                     if not url:
                         return groups
+                    url = same_origin_link(url, directory_url=base)
             raise DirectoryPageLimitError(self.MAX_LOGIN_PAGES)
         except Exception as exc:
+            failure = lookup_failure(exc)
             logger.warning(
-                "Okta resolve_user_groups failed -- default deny",
+                "Okta resolve_user_groups failed",
+                failure=failure,
                 operation="resolve_user_groups",
                 provider=self._provider.issuer,
                 **describe_http_error(exc),
             )
-            return []
+            return failure
 
     async def list_all_groups(self) -> list[GroupInfo]:
         """List all Okta groups (paginated).
@@ -93,11 +110,12 @@ class OktaAdapter(OIDCGroupAdapter):
                 cannot carry, so it is never sent.
             DirectoryPageError: A page Okta served was not a list of groups.
             DirectoryPageLimitError: Okta still linked a next page at the page limit.
+            DirectoryForeignLinkError: Okta linked the next page off its own origin.
             Exception: Whatever the client raised on a page Okta did not serve.
                 A listing cut short is never returned: group sync would record
                 the groups read so far as the whole directory.
         """
-        base, headers = self._api_base_and_headers()
+        base, headers = await run_blocking(self._api_base_and_headers)
         if base is None or headers is None:
             if base is not None and self._api_token.value:
                 self._warn_unsendable_token(operation="list_all_groups")
@@ -121,6 +139,7 @@ class OktaAdapter(OIDCGroupAdapter):
                 url = _next_url_from_link_header(getattr(response, "headers", {}).get("link"))
                 if not url:
                     return groups
+                url = same_origin_link(url, directory_url=base)
         raise DirectoryPageLimitError(self.MAX_LISTING_PAGES)
 
     async def test_connection(self) -> tuple[bool, str]:
@@ -133,7 +152,7 @@ class OktaAdapter(OIDCGroupAdapter):
                 "(use GET .../verify-login for OIDC login configuration)",
             )
 
-        base, headers = self._api_base_and_headers()
+        base, headers = await run_blocking(self._api_base_and_headers)
         if base is None:
             return False, "Okta domain not configured (groups.okta_domain)"
         if headers is None and self._api_token.value:
@@ -172,7 +191,9 @@ class OktaAdapter(OIDCGroupAdapter):
         """The Management API token: the secret store first, then the env var.
 
         Resolved once per adapter, which serves one sync, one connection test or one
-        login, so an unreachable store is asked and logged once.
+        login, so an unreachable store is asked and logged once. The first access reads
+        the store, which blocks, so every caller reaches it through
+        ``_api_base_and_headers`` under ``run_blocking`` before reading it on the loop.
         """
         return resolve_credential(
             secret_path=self._provider.groups.api_token_path,
@@ -181,6 +202,11 @@ class OktaAdapter(OIDCGroupAdapter):
         )
 
     def _api_base_and_headers(self) -> tuple[str | None, dict[str, str] | None]:
+        """Resolve the Management API origin and its request headers.
+
+        Blocking: it reads the API token from the secret store, so async callers run
+        it with ``run_blocking``.
+        """
         base = _normalize_okta_api_base(self._provider.groups.okta_domain)
         if not base:
             return None, None

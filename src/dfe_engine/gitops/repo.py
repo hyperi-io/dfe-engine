@@ -15,8 +15,8 @@ Every remote op goes through :meth:`GitopsRepo._remote_op`: dulwich writes the
 remote URL verbatim to its ``errstream`` and into its failure messages, and on the
 HTTPS path that URL carries the deploy token (F-GITOPS-TOKEN).
 
-A read's remote calls are held to ``REMOTE_HEAD_TIMEOUT_SECONDS`` and a failure
-leaves the clone serving what it has. A write's fetch and push take the longer
+A read's remote calls are held to the ``gitops.read`` timeout and a failure leaves
+the clone serving what it has. A write's fetch and push take the longer
 ``gitops.write`` timeout, and a transient failure is retried inside that budget
 before the write raises :class:`GitopsUnavailableError`, which the API answers 503.
 Once enough writes in a row run out of budget, a circuit breaker answers the next
@@ -27,6 +27,7 @@ through.
 import math
 import os
 import re
+import stat
 import sys
 import threading
 import time
@@ -36,7 +37,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 
 from dulwich import porcelain
 from dulwich.errors import (
@@ -56,7 +57,7 @@ from scalo.resilience import (
 )
 
 from ..backoff import jittered_sleep
-from ..settings import GitopsPackSettings, GitopsWriteSettings
+from ..settings import GitopsPackSettings, GitopsReadSettings, GitopsWriteSettings
 from .dulwich_auth import RedactingErrStream, redact_credentials, scrub_remote_credentials
 from .metrics import GitopsMetrics, WriteOp
 
@@ -66,11 +67,6 @@ if TYPE_CHECKING:
     from dulwich.config import Config, StackedConfig
 
 T = TypeVar("T")
-
-# Every API read pays a ref advertisement and may pay a fetch behind it, both under
-# the tree lock, so a forge that drops packets rather than refusing them must not
-# hold a request -- or every other reader -- for the OS connect timeout.
-REMOTE_HEAD_TIMEOUT_SECONDS = 3.0
 
 # Only the HTTP(S) client takes a pool manager, so only these schemes can be bounded.
 _BOUNDABLE_SCHEMES = ("http://", "https://")
@@ -245,6 +241,20 @@ class PublishResult:
     branch: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class ReviewBranchFile:
+    """A file a review branch changes, and what the branch's merge base held there."""
+
+    branch: str
+    name: str
+    content: str
+    base_content: str | None
+
+
+# Every review branch gitcrud opens is named under this (gitcrud/routing.pr_branch_name).
+_REVIEW_REF_PREFIX = b"refs/heads/dfe/"
+
+
 @dataclass(slots=True)
 class _Batch:
     """The net writes of an open batch, and the subject of each write that changed a file."""
@@ -272,13 +282,67 @@ class _Batch:
         return self.message + "\n\n" + "\n".join(f"- {s}" for s in subjects)
 
 
+def _directory_blobs(repo: Any, commit: bytes | None, directory: str) -> dict[bytes, bytes]:
+    """Each file directly in ``directory`` at ``commit``, by name, to its blob id."""
+    from dulwich.object_store import tree_lookup_path
+    from dulwich.objects import Tree
+
+    if commit is None:
+        return {}
+    try:
+        _mode, tree_id = tree_lookup_path(repo.get_object, repo[commit].tree, directory.encode())
+        tree = repo[tree_id]
+    except KeyError:
+        return {}
+    if not isinstance(tree, Tree):
+        return {}
+    return {entry.path: entry.sha for entry in tree.items() if stat.S_ISREG(entry.mode)}
+
+
+def _branch_changes(
+    repo: Any, ref: bytes, head: bytes, tracked: bytes | None, directory: str
+) -> list[ReviewBranchFile]:
+    """The files in ``directory`` review branch ``ref`` changes, empty once it is merged."""
+    from dulwich.graph import can_fast_forward, find_merge_base
+    from dulwich.objects import ObjectID
+
+    base: bytes | None = None
+    if tracked is not None:
+        try:
+            if can_fast_forward(repo, ObjectID(head), ObjectID(tracked)):
+                return []
+            bases = find_merge_base(repo, [ObjectID(head), ObjectID(tracked)])
+        except KeyError:
+            bases = []
+        base = bases[0] if bases else None
+    branch = ref.removeprefix(b"refs/heads/").decode()
+    before = _directory_blobs(repo, base, directory)
+    changed = []
+    for name, blob in sorted(_directory_blobs(repo, head, directory).items()):
+        if before.get(name) == blob:
+            continue
+        prior = before.get(name)
+        changed.append(
+            ReviewBranchFile(
+                branch=branch,
+                name=name.decode(),
+                content=repo[blob].data.decode("utf-8", errors="replace"),
+                base_content=None
+                if prior is None
+                else repo[prior].data.decode("utf-8", errors="replace"),
+            )
+        )
+    return changed
+
+
 class GitopsRepo:
     """A local working clone of the deploy-specific gitops repo.
 
     ``ensure()`` makes the working tree present (clone ``repo_url``, or init a
     fresh local repo when ``repo_url`` is empty). ``publish()`` writes a
     ``{path: content}`` artifact map, stages, commits only on change, and pushes
-    when ``push`` is set and a remote is configured. ``write`` bounds and retries
+    when ``push`` is set and a remote is configured. ``read`` bounds a read's remote
+    calls, and None takes the ``gitops.read`` defaults. ``write`` bounds and retries
     the fetch and push a write makes, and sets when its breaker opens; None takes
     the ``gitops.write`` defaults. ``pack`` sets when a commit packs the loose
     objects and when :meth:`consolidate_if_due` consolidates the packs, and None
@@ -297,6 +361,7 @@ class GitopsRepo:
         author_name: str = "dfe-engine",
         author_email: str = "dfe-engine@hyperi.io",
         metrics: GitopsMetrics | None = None,
+        read: GitopsReadSettings | None = None,
         write: GitopsWriteSettings | None = None,
         pack: GitopsPackSettings | None = None,
     ) -> None:
@@ -308,6 +373,7 @@ class GitopsRepo:
         self._token = token
         self._author = f"{author_name} <{author_email}>".encode()
         self._metrics = metrics or GitopsMetrics()
+        self._read = read if read is not None else GitopsReadSettings()
         self._write = write if write is not None else GitopsWriteSettings()
         self._pack = pack if pack is not None else GitopsPackSettings()
         # No pooled client to rebuild: every dulwich op builds its own, so a retry
@@ -405,7 +471,7 @@ class GitopsRepo:
         from dulwich.repo import Repo
 
         result = self._remote_op(
-            lambda errstream: self._fetch(errstream, timeout=REMOTE_HEAD_TIMEOUT_SECONDS)
+            lambda errstream: self._fetch(errstream, timeout=self._read.timeout_seconds)
         )
         self._scrub_remote()
         head = result.refs.get(b"refs/heads/" + self._branch.encode())
@@ -418,6 +484,57 @@ class GitopsRepo:
             except KeyError:
                 return None
             return repo[blob_sha].data.decode("utf-8")
+
+    def review_branch_files(
+        self, directory: str, *, bound: Literal["read", "write"] = "write"
+    ) -> list[ReviewBranchFile]:
+        """Each file directly in ``directory`` that a review branch not yet merged changes.
+
+        A pushing clone reads the remote's review branches, so deleting a merged or
+        abandoned one there releases what it carried. Any other clone reads its own. A
+        branch the tracked branch already holds is merged and skipped, and each file is
+        compared with the branch's merge base with the tracked branch.
+
+        Args:
+            directory: The repo-relative directory, such as ``config/hunts``.
+            bound: How a pushing clone's fetch waits on the forge. ``write`` takes a
+                write's timeout and retries, for a check a write is waiting on.
+                ``read`` takes the read timeout and fails once, for a caller that
+                carries on without the answer.
+
+        Returns:
+            The changed files, by branch and then name.
+
+        Raises:
+            GitopsUnavailableError: The forge stayed unreachable for the write budget.
+            GitopsRemoteError: The fetch failed.
+        """
+        from dulwich.repo import Repo
+
+        if self._pushes():
+            with self._write_lock:
+                if bound == "write":
+                    result = self._write_op(
+                        "fetch", lambda errstream, timeout: self._fetch(errstream, timeout=timeout)
+                    )
+                else:
+                    result = self._remote_op(
+                        lambda errstream: self._fetch(errstream, timeout=self._read.timeout_seconds)
+                    )
+                self._scrub_remote()
+            refs = {ref: sha for ref, sha in result.refs.items() if sha is not None}
+            tracked = refs.get(b"refs/heads/" + self._branch.encode())
+        else:
+            # A clone that does not push commits to whichever branch it checked out.
+            with self._lock, Repo(str(self._path)) as repo:
+                refs = repo.get_refs()
+            tracked = refs.get(b"HEAD")
+        found: list[ReviewBranchFile] = []
+        with Repo(str(self._path)) as repo:
+            for ref, head in sorted(refs.items()):
+                if ref.startswith(_REVIEW_REF_PREFIX):
+                    found += _branch_changes(repo, ref, head, tracked, directory)
+        return found
 
     def _splices_credentials(self) -> bool:
         """True when :meth:`_authed_url` embeds userinfo, so a clone can persist it."""
@@ -657,7 +774,7 @@ class GitopsRepo:
         before paying for a fetch. None when there is no remote configured or the
         remote does not carry the tracked branch.
 
-        Bounded by ``REMOTE_HEAD_TIMEOUT_SECONDS`` on the HTTP(S) transport, and a
+        Bounded by the ``gitops.read`` timeout on the HTTP(S) transport, and a
         remote that exceeds it raises :class:`GitopsRemoteError` -- the same signal
         an unreachable forge already gives, so :meth:`refresh` serves this clone.
         """
@@ -682,7 +799,7 @@ class GitopsRepo:
 
         config = _default_git_config()
         client, host_path = get_transport_and_path(
-            url, config=config, pool_manager=self._bounded_pool(config, REMOTE_HEAD_TIMEOUT_SECONDS)
+            url, config=config, pool_manager=self._bounded_pool(config, self._read.timeout_seconds)
         )
         return client.get_refs(_as_path_bytes(host_path))
 
@@ -772,7 +889,7 @@ class GitopsRepo:
 
         Only a pushing clone follows the remote: one holding a commit it never pushed
         is the sole copy of it, and a reset would destroy it. Best-effort -- a remote
-        this clone cannot reach, or one slower than ``REMOTE_HEAD_TIMEOUT_SECONDS``,
+        this clone cannot reach, or one slower than the ``gitops.read`` timeout,
         leaves it serving what it already has, because a read must not fail on a
         forge blip.
         """
@@ -919,7 +1036,7 @@ class GitopsRepo:
             )
         else:
             result = self._remote_op(
-                lambda errstream: self._fetch(errstream, timeout=REMOTE_HEAD_TIMEOUT_SECONDS)
+                lambda errstream: self._fetch(errstream, timeout=self._read.timeout_seconds)
             )
         self._scrub_remote()
         return result.refs.get(b"refs/heads/" + self._branch.encode())

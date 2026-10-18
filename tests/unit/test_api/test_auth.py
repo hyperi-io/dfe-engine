@@ -140,7 +140,8 @@ class TestMe:
         assert resp.status_code == 200
         data = resp.json()
         assert data["user_id"] == "admin"
-        assert data["org_id"] == "test-org"
+        # The token's org_id claim grants nothing: the admin account is bound to no org.
+        assert data["org_id"] == ""
         assert "admin" in data["roles"]
         assert "dfe-admins" in data["groups"]
         assert data["external"] is False

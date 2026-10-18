@@ -53,6 +53,7 @@ def _handler_for(*, okta: LocalOkta) -> type[BaseHTTPRequestHandler]:
                 return
             index = int(parse_qs(split.query).get("page", ["0"])[0])
             okta.pages_requested.append(index)
+            okta.authorizations.append(self.headers.get("Authorization", ""))
             body: object
             if okta.fail_page == index:
                 status, body = okta.fail_status, okta.fail_body
@@ -65,7 +66,8 @@ def _handler_for(*, okta: LocalOkta) -> type[BaseHTTPRequestHandler]:
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(encoded)))
             if status == 200 and index + 1 < len(okta.pages):
-                next_page = f"{okta.base_url}{split.path}?page={index + 1}"
+                origin = okta.next_base or okta.base_url
+                next_page = f"{origin}{split.path}?page={index + 1}{okta.next_query}"
                 self.send_header("Link", f'<{next_page}>; rel="next"')
             self.end_headers()
             self.wfile.write(encoded)
@@ -83,16 +85,22 @@ class LocalOkta:
     links the next in a ``Link`` header. ``fail_page`` is the index of a page that
     answers ``fail_status`` and ``fail_body`` instead, and ``malformed_page`` the
     index of one that answers 200 with an object rather than a list of groups.
-    ``pages_requested`` records the index of each request.
+    ``next_query`` is appended to every next-page URL the ``Link`` header hands out, as
+    a provider's paging cursor is. ``next_base``, when set, is the origin the ``Link``
+    header names instead of this server's own. ``pages_requested`` records the index of
+    each request and ``authorizations`` its ``Authorization`` header.
     """
 
-    def __init__(self, *, pages: list[list[dict[str, Any]]]) -> None:
+    def __init__(self, *, pages: list[list[dict[str, Any]]], next_query: str = "") -> None:
+        self.next_query = next_query
         self.pages = pages
         self.fail_page: int | None = None
         self.fail_status = 500
         self.fail_body: dict[str, Any] = {}
         self.malformed_page: int | None = None
+        self.next_base: str | None = None
         self.pages_requested: list[int] = []
+        self.authorizations: list[str] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(okta=self))
         self._thread = threading.Thread(daemon=True, target=self._server.serve_forever)
 

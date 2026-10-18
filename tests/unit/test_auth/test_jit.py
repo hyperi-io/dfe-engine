@@ -371,6 +371,51 @@ class TestALoginThatWouldHoldNoRole:
         assert refusals(audit_events) == [("jane@corp.com", "entra", "local_account")]
 
 
+class TestADirectoryThatGaveNoAnswer:
+    """Unknown groups are not empty ones, so the account keeps what it last held."""
+
+    def test_an_existing_account_keeps_its_stored_groups_and_its_sessions(
+        self, stores, audit_events
+    ):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+        jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
+        before = accounts.get("jane-corp-com")
+
+        account = jit.ensure_account("jane@corp.com", [], "entra", keep_stored_groups=True)
+
+        assert account.groups == ["dfe-admins"]
+        assert groups_held(account, groups.list(), bindings={}) == ["dfe-admins"]
+        assert account.session_marker() == before.session_marker()
+        assert refusals(audit_events) == []
+        assert [e for e in audit_events if e["event"] == "auth.jit.groups_updated"] == []
+
+    def test_stored_groups_with_no_role_are_refused_but_neither_rewritten_nor_logged_out(
+        self, stores, audit_events
+    ):
+        accounts, groups = stores
+        external_account(accounts, "jane-corp-com", "entra", ["unlinked-group"])
+        before = accounts.get("jane-corp-com")
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitNoRoleError):
+            jit.ensure_account("jane@corp.com", [], "entra", keep_stored_groups=True)
+
+        stored = accounts.get("jane-corp-com")
+        assert stored.groups == ["unlinked-group"]
+        assert stored.session_marker() == before.session_marker()
+        assert [e for e in audit_events if e["event"] == "auth.account.sessions_ended"] == []
+
+    def test_a_first_login_has_no_stored_groups_to_keep(self, stores):
+        accounts, groups = stores
+        jit = JitProvisioner(account_store=accounts, group_store=groups)
+
+        with pytest.raises(JitNoRoleError):
+            jit.ensure_account("jane@corp.com", [], "entra", keep_stored_groups=True)
+
+        assert accounts.list() == []
+
+
 class TestCrossIdentityRefusal:
     """An IdP must not reach an account its own identity does not own (#419).
 

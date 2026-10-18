@@ -4,7 +4,7 @@ import pytest
 
 from dfe_engine.schema.schema_builder_v2 import SchemaBuildResult
 from dfe_engine.source.deployment import SourceDeploymentStore, artifact_from_build
-from dfe_engine.source.models import Source, SourceWriteRequest
+from dfe_engine.source.models import Source, SourceFetcher, SourceWriteRequest
 from dfe_engine.source.registry import (
     SourceMatchConflictError,
     SourceNotFoundError,
@@ -58,11 +58,16 @@ def _make_source(name: str, match_value: str | None = None, **kwargs) -> Source:
     return Source.model_validate(data)
 
 
+# A fetcher on its own topic needs a schema to save, because deploy refuses one without.
+OWN_TABLE = {"meta_schema": "meta/syslog"}
+
+
 def _routing_fetcher(target: str = "okta-alerts") -> Source:
     """A fetched source whose alert records belong to *target*."""
     return Source.model_validate(
         {
             "source": "okta-audit",
+            "schema": OWN_TABLE,
             "fetcher": {
                 "source_type": "okta",
                 "config": {},
@@ -260,6 +265,99 @@ class TestList:
         with pytest.raises(SourceValidationError, match="names its own source"):
             registry.save_source(looping)
 
+    def test_a_fetcher_on_its_own_topic_with_no_schema_is_refused(self, registry: SourceRegistry):
+        """Deploy refuses a version with no schema, so the save names both ways out instead."""
+        schemaless = Source.model_validate(
+            {"source": "okta-audit", "fetcher": {"source_type": "okta", "topic": "own"}}
+        )
+
+        with pytest.raises(SourceValidationError) as refusal:
+            registry.save_source(schemaless)
+
+        # The console's own labels, since the console shows this message as it stands.
+        message = str(refusal.value)
+        assert "'okta-audit'" in message
+        assert "Topic to 'Shared table'" in message
+        assert "Meta Schema" in message
+        assert "meta_schema" not in message
+
+    def test_the_default_topic_is_its_own_so_it_is_refused_too(self, registry: SourceRegistry):
+        bare = Source.model_validate({"source": "okta-audit", "fetcher": {"source_type": "okta"}})
+
+        with pytest.raises(SourceValidationError, match="own topic"):
+            registry.save_source(bare)
+
+    def test_a_fetcher_on_the_main_topic_with_no_schema_saves_and_is_deployed(
+        self, registry: SourceRegistry
+    ):
+        created = registry.create_source_from_write(
+            SourceWriteRequest(
+                source="okta-audit", fetcher=SourceFetcher(source_type="okta", topic="main")
+            )
+        )
+
+        assert created.deployed_version == created.current
+
+    def test_the_write_path_refuses_it_too(self, registry: SourceRegistry):
+        with pytest.raises(SourceValidationError, match="own topic"):
+            registry.create_source_from_write(
+                SourceWriteRequest(
+                    source="okta-audit", fetcher=SourceFetcher(source_type="okta", topic="own")
+                )
+            )
+
+        with pytest.raises(SourceNotFoundError):
+            registry.get_source("okta-audit")
+
+    @pytest.mark.parametrize(
+        "schema",
+        [
+            {"meta_schema": "meta/syslog"},
+            {"derived_schema": "okta-audit"},
+            {"additional_fields": "extra/okta"},
+        ],
+        ids=["meta_schema", "derived_schema", "additional_fields"],
+    )
+    def test_a_fetcher_on_its_own_topic_with_a_schema_saves(
+        self, registry: SourceRegistry, schema: dict
+    ):
+        owned = Source.model_validate(
+            {
+                "source": "okta-audit",
+                "fetcher": {"source_type": "okta", "topic": "own"},
+                "schema": schema,
+            }
+        )
+
+        registry.save_source(owned)
+
+        fetcher = registry.get_source("okta-audit").fetcher
+        assert fetcher is not None
+        assert fetcher.topic == "own"
+
+    def test_a_stored_source_in_that_state_is_refused_on_its_next_save(
+        self, registry: SourceRegistry
+    ):
+        """A disabled source skips the gates, which is how an operator retires one."""
+        stored = Source.model_validate(
+            {
+                "source": "okta-audit",
+                "state": "disabled",
+                "fetcher": {"source_type": "okta", "topic": "own"},
+            }
+        )
+        registry.save_source(stored)
+
+        with pytest.raises(SourceValidationError, match="own topic"):
+            registry.save_source(
+                registry.get_source("okta-audit").model_copy(update={"state": "active"})
+            )
+
+    def test_a_source_that_is_not_a_fetcher_needs_no_schema_to_save(self, registry: SourceRegistry):
+        registry.save_source(_make_source("plain", match_value="plain"))
+
+        assert registry.get_source("plain").fetcher is None
+
     def test_a_source_spanning_two_connector_types_is_refused(self, registry: SourceRegistry):
         """One source is one schema, so it is one type however many accounts it polls."""
         mixed = Source.model_validate(
@@ -287,6 +385,7 @@ class TestList:
         many = Source.model_validate(
             {
                 "source": "okta-audit",
+                "schema": OWN_TABLE,
                 "fetcher": {
                     "source_type": "okta",
                     "config": {
@@ -320,6 +419,7 @@ class TestList:
         mixed = Source.model_validate(
             {
                 "source": "okta-audit",
+                "schema": OWN_TABLE,
                 "fetcher": {
                     "source_type": "okta",
                     "config": {"connections": [{"id": "falcon", "type": "crowdstrike"}]},
@@ -368,6 +468,7 @@ class TestList:
             Source.model_validate(
                 {
                     "source": "okta",
+                    "schema": OWN_TABLE,
                     "fetcher": {
                         "source_type": "okta",
                         "routes": [
@@ -404,6 +505,7 @@ class TestList:
         fetched = Source.model_validate(
             {
                 "source": "okta-audit",
+                "schema": OWN_TABLE,
                 "fetcher": {"source_type": "okta", "config": {}},
                 "transport": "direct",
                 "archive": True,
@@ -419,6 +521,7 @@ class TestList:
             Source.model_validate(
                 {
                     "source": "okta-audit",
+                    "schema": OWN_TABLE,
                     "fetcher": {"source_type": "okta", "config": {}},
                     "transport": "bus",
                     "archive": True,
@@ -631,6 +734,7 @@ class TestRoundTrip:
         source = Source.model_validate(
             {
                 "source": "crowdstrike-edr",
+                "schema": OWN_TABLE,
                 "fetcher": {
                     "source_type": "crowdstrike",
                     "topic": "own",
@@ -651,7 +755,7 @@ class TestRoundTrip:
         assert loaded.fetcher.source_type == "crowdstrike"
         assert loaded.fetcher.config == source.fetcher.config
         assert registry.list_sources()[0]["origin"] == "fetcher"
-        assert registry.list_sources()[0]["current_table_topic_type"] == "main"
+        assert registry.list_sources()[0]["current_table_topic_type"] == "own"
 
     def test_update_draft_drops_stale_source_build(self, registry: SourceRegistry, tmp_path):
         store = SourceDeploymentStore(

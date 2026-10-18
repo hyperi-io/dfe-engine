@@ -1,12 +1,12 @@
 #  Project:      dfe-engine
 #  File:         tests/support/engine_stack.py
-#  Purpose:      Settings, source deploys and teardown for integration tests that drive the engine against a real ClickHouse
+#  Purpose:      Settings and source deploys for integration tests that drive the engine against a real ClickHouse
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Build the engine's settings for the harness's ClickHouse, deploy a source through the engine API and drop the row policies a test leaves behind.
+"""Build the engine's settings for the harness's ClickHouse and deploy a source through the engine API.
 
 The ``stack`` fixture in ``tests/integration/conftest.py`` builds the engine API from :func:`api_settings`.
 """
@@ -85,8 +85,6 @@ def bootstrap_settings(
     settings.clickhouse.secure = ch_params["secure"]
     settings.clickhouse.data_database = database
     settings.clickhouse.bootstrap_tables = bootstrap_tables
-    # A .env may rename the landing table, a name the manifest the bootstrap applies does not follow.
-    settings.clickhouse.landing_table = ClickHouseSettings.model_fields["landing_table"].default
     # These assert ClickHouse objects; the topic step would reach whatever broker .env names.
     settings.kafka.bootstrap_topics = False
     return settings
@@ -115,17 +113,3 @@ def deploy_source(
     assert created.status_code in (200, 201), created.text
     deployed = stack.client.post(f"/api/v1/sources/{name}/deploy", headers=stack.headers)
     assert deployed.status_code == 200, deployed.text
-
-
-def drop_row_policies(*, client: Any, database: str) -> None:
-    """Drop every row policy on a table in *database*, since dropping a table or its database leaves its policies behind."""
-    rows = client.query(
-        "SELECT short_name, table FROM system.row_policies WHERE database = {db:String}",
-        parameters={"db": database},
-    ).result_rows
-    for name, table in rows:
-        # Teardown carries on past a policy that is already gone.
-        try:
-            client.command(f"DROP ROW POLICY IF EXISTS `{name}` ON `{database}`.`{table}`")
-        except Exception:
-            pass

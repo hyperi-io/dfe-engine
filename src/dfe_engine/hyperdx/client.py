@@ -30,7 +30,9 @@ act on every team rather than the caller's: the engine's own team has no
 connection and no humans, so a DFE source written there reaches nobody.
 
 All operations are **non-fatal**: if HyperDX is unreachable, failures are
-logged as warnings and the caller proceeds normally.
+logged as warnings and the caller proceeds normally. Only an unreachable fork
+(no answer, or a 5xx) opens the client's circuit breaker. A request the fork
+refuses with a 4xx fails that one call and nothing else.
 
 Usage::
 
@@ -46,11 +48,12 @@ Usage::
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from typing import Any
 
+import httpx
 from scalo.logger import logger
+from scalo.resilience import CircuitBreaker, CircuitBreakerConfig, CircuitState
 
 from dfe_engine.http_errors import describe_http_error
 
@@ -59,9 +62,19 @@ from dfe_engine.http_errors import describe_http_error
 # AsyncHttpClient default of 30s x 3 retries.
 _TIMEOUT_SECONDS = 5.0
 _RETRIES = 1
-# After a failure the breaker re-probes once this window elapses, so a fork
-# that boots after the engine recovers without an engine restart.
+# After the fork proves unreachable the breaker re-probes once this window elapses,
+# so a fork that boots after the engine recovers without an engine restart.
 RETRY_AFTER_SECONDS = 60.0
+
+
+def _is_unreachable(exc: BaseException) -> bool:
+    """Whether a failed call says HyperDX is down: no answer at all, or a 5xx.
+
+    A 4xx is the fork refusing this one request, so it says nothing about the next.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, httpx.TransportError)
 
 
 class HyperDXClient:
@@ -81,11 +94,12 @@ class HyperDXClient:
         self._api_key = api_key
         # Engine-minted machine JWT supplier; wins over any static api_key.
         self._token_provider = token_provider
-        self._connected = True  # Optimistic; set False on first failure
-        # Consulted only while disconnected; inf means "never re-probe", so a
-        # manually latched breaker stays latched while a real failure sets a
-        # finite deadline.
-        self._retry_at = float("inf")
+        # One unreachable answer is enough: the call already spent its timeout, and the
+        # callers are interactive requests that cannot afford a second one.
+        self._breaker = CircuitBreaker(
+            "hyperdx",
+            CircuitBreakerConfig(failure_threshold=1, reset_timeout=RETRY_AFTER_SECONDS),
+        )
 
     # ------------------------------------------------------------------
     # Team (the fork exposes ONE team per authenticated principal)
@@ -241,12 +255,17 @@ class HyperDXClient:
         op: str,
         **log_fields: object,
     ) -> Any | None:
-        """One non-fatal HTTP round trip; None (and ``_connected=False``) on failure."""
-        if not self._connected:
-            if time.monotonic() < self._retry_at:
-                logger.warning("HyperDX unreachable, skipping call", op=op, **log_fields)
-                return None
-            self._connected = True  # re-probe window elapsed
+        """One non-fatal HTTP round trip, or None when it fails.
+
+        Only a failure that says HyperDX is unreachable (see ``_is_unreachable``) counts
+        against the breaker. A 4xx, an unreadable body or a token the engine could not
+        mint fails the one call and leaves the breaker closed.
+        """
+        if not self._breaker.try_acquire_probe():
+            logger.warning("HyperDX unreachable, skipping call", op=op, **log_fields)
+            return None
+        # Holding the single HALF_OPEN slot, which only a recorded result releases.
+        probing = self._breaker.state is CircuitState.HALF_OPEN
         try:
             from scalo.http import AsyncHttpClient
 
@@ -260,17 +279,25 @@ class HyperDXClient:
                 response = await verb(path, **kwargs)
                 response.raise_for_status()
                 # PUT/DELETE succeed with an empty body; report success, not JSON.
-                if not response.content:
-                    return {}
-                return response.json()
+                result = response.json() if response.content else {}
         except Exception as exc:
-            self._connected = False
-            self._retry_at = time.monotonic() + RETRY_AFTER_SECONDS
+            if _is_unreachable(exc):
+                self._breaker.record_failure()
+            else:
+                self._breaker.record_success()
             # The exception text names the request URL, so the log carries the class and the status.
             logger.warning(
                 "HyperDX call failed (non-fatal)", op=op, **describe_http_error(exc), **log_fields
             )
             return None
+        except BaseException:
+            # A cancelled probe never reports, and a HALF_OPEN breaker rejects every call
+            # until one does.
+            if probing:
+                self._breaker.record_failure()
+            raise
+        self._breaker.record_success()
+        return result
 
     def _headers(self) -> dict[str, str]:
         """Return authorization headers for HyperDX API calls."""

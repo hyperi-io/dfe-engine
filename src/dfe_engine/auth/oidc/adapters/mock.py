@@ -17,8 +17,8 @@ enrichment call) runs offline and reproducibly.
 
 It is selected by ``GroupResolutionConfig.directory_backend == "mock"``. The
 fixture path comes from the env var named in ``mock_directory_env`` (default
-``DFE_OIDC_MOCK_DIRECTORY``). A sign-in's lookup fails open: a missing or
-malformed fixture yields no groups (default deny) rather than a crash mid-login.
+``DFE_OIDC_MOCK_DIRECTORY``). A sign-in's lookup never raises: a missing or
+malformed fixture is a refusal, as a live directory with no credential is.
 The listing does not, as the live adapters' does not, so group sync never
 records a fixture it could not read as a directory with no groups.
 
@@ -51,6 +51,7 @@ from scalo.logger import logger
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryNotConfiguredError,
+    LookupFailure,
     OIDCGroupAdapter,
 )
 from dfe_engine.auth.oidc.models import GroupInfo
@@ -58,6 +59,25 @@ from dfe_engine.auth.oidc.models import GroupInfo
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import OIDCProvider
     from dfe_engine.secrets import DfeSecrets
+
+
+def _fixture_parts(data: object) -> tuple[list[dict], dict]:
+    """The raw ``groups`` and ``members`` a parsed fixture holds.
+
+    Raises:
+        ValueError: The fixture is not the object the module docstring describes.
+    """
+    if not isinstance(data, dict):
+        raise ValueError(f"the top level is a {type(data).__name__}, not an object")
+    groups = data.get("groups", [])
+    if not isinstance(groups, list) or not all(isinstance(item, dict) for item in groups):
+        raise ValueError("'groups' is not a list of objects")
+    members = data.get("members", {})
+    if not isinstance(members, dict) or not all(
+        value is None or isinstance(value, list) for value in members.values()
+    ):
+        raise ValueError("'members' is not an object of lists")
+    return groups, members
 
 
 class MockDirectoryAdapter(OIDCGroupAdapter):
@@ -101,7 +121,14 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
             logger.warning("mock directory: fixture unreadable", path=str(path), error=str(exc))
             return
 
-        for item in data.get("groups", []):
+        try:
+            raw_groups, raw_members = _fixture_parts(data)
+        except ValueError as exc:
+            self._load_error = f"fixture malformed: {exc}"
+            logger.warning("mock directory: fixture malformed", path=str(path), error=str(exc))
+            return
+
+        for item in raw_groups:
             info = GroupInfo(
                 id=str(item.get("id", "")),
                 name=str(item.get("name", "")),
@@ -111,9 +138,7 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
             self._groups.append(info)
             if info.id:
                 self._by_id[info.id] = info
-        members = data.get("members", {})
-        if isinstance(members, dict):
-            self._members = {str(k): [str(g) for g in (v or [])] for k, v in members.items()}
+        self._members = {str(k): [str(g) for g in (v or [])] for k, v in raw_members.items()}
 
     def _groups_for(self, directory_id: str) -> list[GroupInfo]:
         """The GroupInfo records for the group ids ``directory_id`` belongs to."""
@@ -124,8 +149,10 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
             out.append(self._by_id.get(gid) or GroupInfo(id=gid, name=gid))
         return out
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
-        """The overage / enrichment call: this user's group memberships."""
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | LookupFailure:
+        """The overage / enrichment call: this user's group memberships, refused when no fixture loaded."""
+        if self._load_error:
+            return LookupFailure.REFUSED
         return self._groups_for(directory_id)
 
     async def list_all_groups(self) -> list[GroupInfo]:

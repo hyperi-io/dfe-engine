@@ -47,6 +47,7 @@ def _receiver_body(name: str) -> dict:
 def _fetcher_body(name: str, **fetcher) -> dict:
     return {
         "source": name,
+        "schema": {"meta_schema": "meta/syslog"},
         "fetcher": {
             "source_type": "crates_io",
             "config": {"crates": ["dfe-fetcher"]},
