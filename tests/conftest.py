@@ -17,20 +17,10 @@ Run examples:
     pytest -m integration                   # Run integration tests only
     pytest -m "not integration"             # Skip integration tests
     pytest -n 4                             # Run with 4 parallel workers
-
-Docker Integration:
-    The test suite automatically manages Docker containers for ClickHouse and PostgreSQL.
-    - Containers are started if not already running
-    - Containers persist after tests complete (for dev reuse)
-    - Tests use isolated databases with unique prefixes
-    - If DFE_CLICKHOUSE_HOST or DFE_POSTGRES_HOST point to non-localhost, Docker is skipped
 """
 
 import os
-import subprocess
 import tempfile
-import time
-import uuid
 from pathlib import Path
 
 import pytest
@@ -164,135 +154,6 @@ try:
     stamina.set_testing(True, attempts=1)
 except ImportError:  # stamina ships with scalo[http]; skip if absent
     pass
-
-# Docker configuration
-DOCKER_COMPOSE_FILE = Path(__file__).parent.parent / "docker-compose.yml"
-CONTAINER_STARTUP_TIMEOUT = 60  # seconds
-
-
-def _is_localhost(host: str) -> bool:
-    """Check if host is localhost or 127.0.0.1."""
-    return host in ("localhost", "127.0.0.1", "::1", "")
-
-
-def _get_configured_hosts() -> tuple[str, str]:
-    """Get configured ClickHouse and PostgreSQL hosts from environment."""
-    ch_host = os.getenv("DFE_CLICKHOUSE_HOST", os.getenv("CLICKHOUSE_HOST", "localhost"))
-    pg_host = os.getenv("DFE_POSTGRES_HOST", os.getenv("POSTGRES_HOST", "localhost"))
-    return ch_host, pg_host
-
-
-def _container_is_running(container_name: str) -> bool:
-    """Check if a Docker container is running."""
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Running}}", container_name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return result.returncode == 0 and result.stdout.strip() == "true"
-    except subprocess.SubprocessError, FileNotFoundError:
-        return False
-
-
-def _container_is_healthy(container_name: str) -> bool:
-    """Check if a Docker container is healthy."""
-    try:
-        result = subprocess.run(
-            ["docker", "inspect", "-f", "{{.State.Health.Status}}", container_name],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        return result.returncode == 0 and result.stdout.strip() == "healthy"
-    except subprocess.SubprocessError, FileNotFoundError:
-        return False
-
-
-def _start_docker_services(profile: str = "test") -> bool:
-    """Start Docker services using docker-compose with specified profile."""
-    if not DOCKER_COMPOSE_FILE.exists():
-        logger.warning(f"docker-compose.yml not found at {DOCKER_COMPOSE_FILE}")
-        return False
-
-    try:
-        logger.info(f"Starting Docker services with profile '{profile}'...")
-        result = subprocess.run(
-            ["docker", "compose", "-f", str(DOCKER_COMPOSE_FILE), "--profile", profile, "up", "-d"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            cwd=DOCKER_COMPOSE_FILE.parent,
-        )
-        if result.returncode != 0:
-            logger.error(f"Failed to start Docker services: {result.stderr}")
-            return False
-        return True
-    except subprocess.SubprocessError as e:
-        logger.error(f"Error starting Docker services: {e}")
-        return False
-
-
-def _wait_for_container_healthy(
-    container_name: str, timeout: int = CONTAINER_STARTUP_TIMEOUT
-) -> bool:
-    """Wait for a container to become healthy."""
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        if _container_is_healthy(container_name):
-            return True
-        time.sleep(1)
-    return False
-
-
-def _ensure_docker_services() -> dict[str, bool]:
-    """
-    Ensure Docker services are running for tests.
-
-    Returns dict with status of each service:
-    - 'clickhouse': True if ClickHouse is available
-    - 'postgres': True if PostgreSQL is available
-    - 'docker_started': True if we started containers (vs already running)
-    """
-    ch_host, pg_host = _get_configured_hosts()
-    status = {"clickhouse": False, "postgres": False, "docker_started": False}
-
-    # Skip Docker if external hosts are configured
-    if not _is_localhost(ch_host) or not _is_localhost(pg_host):
-        logger.info(f"Using external services: ClickHouse={ch_host}, PostgreSQL={pg_host}")
-        status["clickhouse"] = not _is_localhost(ch_host)
-        status["postgres"] = not _is_localhost(pg_host)
-        return status
-
-    # Check if containers are already running
-    ch_running = _container_is_running("dfe-clickhouse")
-    pg_running = _container_is_running("dfe-postgres")
-
-    if ch_running and pg_running:
-        logger.info("Docker containers already running")
-        status["clickhouse"] = _container_is_healthy("dfe-clickhouse")
-        status["postgres"] = _container_is_healthy("dfe-postgres")
-        return status
-
-    # Start containers if needed
-    if _start_docker_services("test"):
-        status["docker_started"] = True
-
-        # Wait for containers to be healthy
-        if _wait_for_container_healthy("dfe-clickhouse"):
-            status["clickhouse"] = True
-            logger.info("ClickHouse container is healthy")
-        else:
-            logger.warning("ClickHouse container did not become healthy in time")
-
-        if _wait_for_container_healthy("dfe-postgres"):
-            status["postgres"] = True
-            logger.info("PostgreSQL container is healthy")
-        else:
-            logger.warning("PostgreSQL container did not become healthy in time")
-
-    return status
 
 
 def _enclosing_repository(path: Path) -> Path | None:
@@ -455,33 +316,3 @@ def _no_ch_rbac_reconcile_against_a_real_clickhouse(request):
         yield
     finally:
         _ch_rbac.ch_admin_client, _ch_rbac_bootstrap.ch_admin_client = originals
-
-
-# =============================================================================
-# Docker Service Fixtures
-# =============================================================================
-
-
-@pytest.fixture(scope="session")
-def docker_services():
-    """
-    Session-scoped fixture that ensures Docker services are running.
-
-    This fixture:
-    - Starts Docker containers if not already running
-    - Waits for containers to be healthy
-    - Returns status dict with service availability
-    - Does NOT stop containers after tests (for dev reuse)
-
-    Usage:
-        def test_something(docker_services):
-            if not docker_services['clickhouse']:
-                pytest.skip("ClickHouse not available")
-    """
-    return _ensure_docker_services()
-
-
-@pytest.fixture(scope="session")
-def test_run_id():
-    """Generate a unique ID for this test run (for database isolation)."""
-    return uuid.uuid4().hex[:8]

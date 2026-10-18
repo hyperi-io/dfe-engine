@@ -21,13 +21,13 @@ from typing import Any
 import pytest
 
 from dfe_engine.auth.oidc.models import OIDCProvider
-from tests.support.event_loop import HELD_SECONDS
 from tests.support.slow_store import SlowSecretStore
 
 _PROBE = "/livez"
-# Under HELD_SECONDS, so a loop held by the read cannot answer in time.
-_PROBE_SECONDS = HELD_SECONDS / 2
+# A backstop for each wait: only a failing run waits it out.
 _WAIT_SECONDS = 10.0
+# Outlasts every wait, so a held read is released by the test, never by the store.
+_HOLD_SECONDS = _WAIT_SECONDS * 3
 _PROVIDERS = "/api/v1/auth/oidc-providers"
 
 _CREATE = {
@@ -63,7 +63,7 @@ def held_store(app, client, monkeypatch) -> Iterator[SlowSecretStore]:
     registry.create("no-issuer", _provider(client_secret_path="oidc/no-issuer/client_secret"))
     registry.create("plain", _provider(issuer=closed_port))
     monkeypatch.setenv("NO_PROXY", "127.0.0.1")
-    store = SlowSecretStore("test-secret")
+    store = SlowSecretStore("test-secret", hold_seconds=_HOLD_SECONDS)
     app.state.dfe_secrets = store
     yield store
     store.gate.set()
@@ -78,20 +78,26 @@ def _answered_while_held(
         The status the request answered once released.
     """
     handled: list[int] = []
-    answered: list[int] = []
+    answered: list[tuple[int, bool]] = []
+
+    def probe() -> None:
+        status = client.get(_PROBE).status_code
+        # True when no read has returned yet: the loop answered while the store held one.
+        answered.append((status, store.gate_opened_by_test == []))
+
     worker = threading.Thread(
         target=lambda: handled.append(client.request(method, path, **request).status_code),
         daemon=True,
     )
-    prober = threading.Thread(
-        target=lambda: answered.append(client.get(_PROBE).status_code), daemon=True
-    )
+    prober = threading.Thread(target=probe, daemon=True)
     worker.start()
     try:
         assert store.arrived.wait(timeout=_WAIT_SECONDS), f"{method} {path} never read the store"
         prober.start()
-        prober.join(timeout=_PROBE_SECONDS)
-        assert answered == [200], f"{method} {path} held the event loop while the store was slow"
+        prober.join(timeout=_WAIT_SECONDS)
+        assert answered == [(200, True)], (
+            f"{method} {path} held the event loop while the store was slow"
+        )
         assert handled == []
     finally:
         store.gate.set()
