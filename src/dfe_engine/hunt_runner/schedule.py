@@ -32,6 +32,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from dfe_engine.clickhouse.inserts import keep_identical_rows
 from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.schema.require import require_objects
 
@@ -79,6 +80,8 @@ def publish_schedule(
     enabled before but is absent now, so a deleted hunt no longer wakes KEDA.
 
     Idempotent: safe to call on every hunt-config change (the Argo post-sync hook).
+    A hunt removed and then re-added writes a block identical to an earlier one, and
+    it has to land over the tombstone, so the insert keeps identical rows.
     """
     ensure_schedule_schema(ch, database)
     rows: list[list[Any]] = []
@@ -96,7 +99,13 @@ def publish_schedule(
     for gone in _enabled_ids(ch, database) - live_ids:
         rows.append([gone, 0, 0, 0])  # tombstone: enabled=0, filtered before any intDiv
     if rows:
-        ch.insert("hunt_schedule", rows, column_names=_COLUMNS, database=database)
+        ch.insert(
+            "hunt_schedule",
+            rows,
+            column_names=_COLUMNS,
+            database=database,
+            settings=keep_identical_rows(ch),
+        )
     return len(live_ids)
 
 

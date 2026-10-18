@@ -19,7 +19,9 @@ What is applied automatically is additive only:
 
 * an absent object is created
 * a column the definition adds and the table lacks is added
-* a JSON table setting the rendered CREATE declares and the table lacks is set
+* a JSON table setting the rendered CREATE declares and the table lacks is set,
+  and a platform-only one this platform does not take is reset, so a deployment
+  moved between ClickHouse Cloud and self-hosted converges
 * a plain view whose SELECT changed is replaced, because it holds no state
 * a role, settings profile, quota or grant is re-asserted, because every
   statement in that set converges
@@ -43,6 +45,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from dfe_schemas.clickhouse import platform_only_setting_names
 from dfe_schemas.deploy_defaults import JSON_TABLE_SETTINGS
 from dfe_schemas.render import RenderedObject
 from scalo.logger import logger
@@ -51,6 +54,7 @@ from dfe_engine.clickhouse.statements import StatementTooLargeError, ddl_setting
 from dfe_engine.schema.applier import (
     LiveTtl,
     SettingsMove,
+    describe_settings,
     settings_from_engine_full,
     settings_move,
     ttl_from_engine_full,
@@ -90,7 +94,7 @@ class ObjectOutcome:
     drift: tuple[str, ...] = ()
     extra_columns: tuple[str, ...] = ()
     reason: str = ""
-    # "name = value" for each table setting this pass set.
+    # "name = value" for each table setting this pass set, "reset name" for each reset.
     settings: tuple[str, ...] = ()
 
     @property
@@ -104,8 +108,7 @@ class ObjectOutcome:
         if self.columns_added:
             added = ", ".join(self.columns_added)
             changes.append(f"added {len(self.columns_added)} column(s) [{added}]")
-        if self.settings:
-            changes.append(f"set {', '.join(self.settings)}")
+        changes.extend(describe_settings(self.settings))
         return changes
 
     def describe(self) -> str:
@@ -276,18 +279,20 @@ def _ttl_text(live: LiveTtl | None) -> str:
 def declared_json_settings(statement: str) -> dict[str, int]:
     """The JSON table settings a rendered CREATE TABLE declares in its SETTINGS clause.
 
-    Only the names in ``JSON_TABLE_SETTINGS``: the others a CREATE sets, such as
-    ``index_granularity``, are fixed when the table is made.
+    Only the names in ``JSON_TABLE_SETTINGS`` and the platform-only ones dfe-schemas
+    manages: the others a CREATE sets, such as ``index_granularity``, are fixed when
+    the table is made.
     """
     _, sep, tail = statement.partition("\nSETTINGS\n")
     if not sep:
         return {}
     clause = tail.split("\nCOMMENT ", 1)[0]
+    managed = set(JSON_TABLE_SETTINGS) | platform_only_setting_names()
     declared: dict[str, int] = {}
     for raw in clause.split(","):
         name, eq, value = raw.partition("=")
         name = name.strip()
-        if eq and name in JSON_TABLE_SETTINGS and value.strip().isdigit():
+        if eq and name in managed and value.strip().isdigit():
             declared[name] = int(value.strip())
     return declared
 
@@ -330,7 +335,7 @@ class ManifestApplier:
         ledger: MigrationLedger | None,
         schemas_version: str,
         engine_version: str,
-        topology: str,
+        platform: str,
         dry_run: bool = False,
         allow_drift: bool = False,
     ) -> None:
@@ -338,7 +343,7 @@ class ManifestApplier:
         self._ledger = ledger
         self._schemas_version = schemas_version
         self._engine_version = engine_version
-        self._topology = topology
+        self._platform = platform
         self._dry_run = dry_run
         self._allow_drift = allow_drift
         self._recorded: dict[tuple[str, str], LedgerRow] = {}
@@ -410,7 +415,7 @@ class ManifestApplier:
         )
         if ttl_matches(live, wanted):
             return ""
-        target = f"{self._target(database, rendered.name)}{self._on_cluster(statement)}"
+        target = self._target(database, rendered.name)
         clause = _declared_ttl_clause(statement)
         if clause is None:
             self._run(f"ALTER TABLE {target} REMOVE TTL")
@@ -450,7 +455,7 @@ class ManifestApplier:
                     drift=(f"{name} is a new column on an object declared non-additive", *drift),
                 )
             self._run(
-                f"ALTER TABLE {self._target(database, rendered.name)}{self._on_cluster(statement)} "
+                f"ALTER TABLE {self._target(database, rendered.name)} "
                 f"ADD COLUMN IF NOT EXISTS `{name}` {clauses[name]}"
             )
             added.append(name)
@@ -471,7 +476,7 @@ class ManifestApplier:
         for message in drift:
             self._apply_drift(rendered, message, clauses)
 
-        changed = bool(added or settings.statement or (drift and self._allow_drift))
+        changed = bool(added or settings.statements or (drift and self._allow_drift))
         action: Action = "altered" if changed else "unchanged"
         return self._record(
             rendered,
@@ -483,27 +488,26 @@ class ManifestApplier:
         )
 
     def _reconcile_settings(self, rendered: RenderedObject) -> SettingsMove:
-        """Set the JSON table settings the rendered CREATE declares and the live table lacks.
+        """Bring a JSON table's settings to the ones the rendered CREATE declares.
 
-        Takes the ON CLUSTER the rendered statement carries, as the TTL reconcile does:
-        MODIFY SETTING is replica-local, and replicas whose settings differ fail part
-        checksums against each other.
+        Sets a declared one the live table lacks or carries at another value, and
+        resets a platform-only one the rendered platform does not take. A table
+        with no JSON column declares none and is left alone. The Replicated database
+        replicates either ALTER, so replicas cannot drift apart on part checksums.
         """
-        statement = rendered.statements[0]
-        wanted = declared_json_settings(statement)
+        wanted = declared_json_settings(rendered.statements[0])
         if not wanted:
             return SettingsMove()
         database = rendered.database or ""
         move = settings_move(
             target=self._target(database, rendered.name),
-            on_cluster=self._on_cluster(statement),
             wanted=wanted,
             live=settings_from_engine_full(
                 self._live_shape(database, rendered.name).get("engine_full", "")
             ),
         )
-        if move.statement:
-            self._run(move.statement)
+        for statement in move.statements:
+            self._run(statement)
         return move
 
     def _apply_stateful_view(self, rendered: RenderedObject) -> ObjectOutcome:
@@ -610,9 +614,7 @@ class ManifestApplier:
         change needs the table rebuilt, so it is left named rather than half-done.
         """
         database = rendered.database or ""
-        target = (
-            f"{self._target(database, rendered.name)}{self._on_cluster(rendered.statements[0])}"
-        )
+        target = self._target(database, rendered.name)
         if message.startswith("column ") and " is " in message and "codec" not in message:
             name = message.split(" ", 2)[1]
             self._run(f"ALTER TABLE {target} MODIFY COLUMN `{name}` {clauses[name]}")
@@ -697,13 +699,6 @@ class ManifestApplier:
     def _target(database: str, name: str) -> str:
         return f"`{database}`.`{name}`"
 
-    @staticmethod
-    def _on_cluster(statement: str) -> str:
-        """The ON CLUSTER suffix the rendered statement carries, for an ALTER."""
-        head = statement.splitlines()[0]
-        _, sep, tail = head.partition(" ON CLUSTER ")
-        return f" ON CLUSTER {tail.strip()}" if sep else ""
-
     def _run_all(self, rendered: RenderedObject) -> None:
         for statement in rendered.statements:
             self._run(statement)
@@ -762,7 +757,7 @@ class ManifestApplier:
                     checksum=rendered.checksum,
                     statement="\n".join(rendered.statements),
                     action=action,
-                    topology=self._topology,
+                    platform=self._platform,
                 )
             )
         return outcome

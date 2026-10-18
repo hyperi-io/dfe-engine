@@ -397,7 +397,7 @@ class TestSourceDefaultDrift:
         assert report.engine.live == "MergeTree"
         assert report.common_header_type.live is None
 
-    def test_a_table_on_the_defaults_has_no_drift_whatever_its_topology(self):
+    def test_a_table_on_the_defaults_has_no_drift_whatever_its_engine_prefix(self):
         source = _source("syslog", schema={"engine": ""})
 
         live = LiveTable(engine="ReplicatedReplacingMergeTree", ttl=LiveTtl(30, "day"))

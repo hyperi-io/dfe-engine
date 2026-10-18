@@ -28,6 +28,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, NamedTuple
 
+from dfe_schemas.clickhouse import parse_engine
 from scalo.logger import logger
 
 from dfe_engine import __version__ as engine_version
@@ -41,9 +42,8 @@ from dfe_engine.schema.applier import (
     live_tables,
 )
 from dfe_engine.schema.derived_registry import derived_reference_root
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.manifest_applier import ManifestApplier, declared_ttl_days
-from dfe_engine.schema.plan import build_plan
+from dfe_engine.schema.plan import build_plan, platform_probe
 from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError
 from dfe_engine.schema.schema_loader import SchemaLoadError
@@ -121,7 +121,7 @@ def reconcile_core_ttls(client: Any, *, settings: Any) -> list[str]:
         ledger=None,
         schemas_version=plan.schemas_version,
         engine_version=engine_version,
-        topology=plan.topology,
+        platform=plan.platform,
     )
     altered: list[str] = []
     for rendered in plan.tables():
@@ -145,15 +145,15 @@ class TableApply(NamedTuple):
 class SourceTables:
     """Brings deployed source tables to a source version's columns and TTL.
 
-    One per pass: the resolver senses the topology once, and :attr:`applier`
+    One per pass: the probe names the platform once, and :attr:`applier`
     records every change in its report.
     """
 
     def __init__(self, client: Any, *, settings: Any) -> None:
         self.client = client
         self.database = settings.clickhouse.effective_data_database
-        resolver = EngineResolver(client=client, topology_setting=settings.clickhouse.topology)
-        self.applier = SchemaApplier(client, resolver)
+        platform = platform_probe(settings, client).platform
+        self.applier = SchemaApplier(client, platform)
         # Header defaults are not passed. ensure_table adds any column this build says
         # is missing, and the admin's common-header override is inherited on the next
         # deploy rather than written onto live tables from a retention reconcile.
@@ -163,7 +163,7 @@ class SourceTables:
             derived_base_dir=derived_reference_root(settings),
             default_engine=settings.clickhouse.default_engine,
             default_ttl_days=settings.clickhouse.default_ttl_days,
-            resolver=resolver,
+            platform=platform,
         )
 
     def apply(self, source: Source, version: str) -> TableApply:

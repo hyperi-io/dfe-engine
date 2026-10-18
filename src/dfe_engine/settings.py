@@ -34,7 +34,7 @@ ClickHouse:
 - DFE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
 - DFE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
 - DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE -> clickhouse.ddl_max_query_size (bytes)
-- DFE_CLICKHOUSE_TOPOLOGY -> clickhouse.topology
+- DFE_CLICKHOUSE_PLATFORM -> clickhouse.platform (auto, cloud or self_hosted)
 - DFE_CLICKHOUSE_DEFAULT_TTL_DAYS -> clickhouse.default_ttl_days (0 = no default TTL)
 - DFE_CLICKHOUSE_BOOTSTRAP_TABLES -> clickhouse.bootstrap_tables (true/false)
 - DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS -> clickhouse.bootstrap_wait_seconds
@@ -154,6 +154,7 @@ import re
 from pathlib import Path
 from typing import Any, Literal
 
+from dfe_schemas.clickhouse import platform_override
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .names import MAX_NAME_LENGTH
@@ -301,6 +302,14 @@ class ClickHouseSettings(BaseModel):
     )
     connections_min: int = Field(default=10)
     connections_max: int = Field(default=300)
+    platform: str = Field(
+        default="auto",
+        description=(
+            "The ClickHouse platform schema DDL is rendered for (DFE_CLICKHOUSE_PLATFORM): "
+            "auto, cloud or self_hosted. auto asks the server, then reads the hostname. "
+            "cloud or self_hosted pins it, for a server the probe reads wrongly."
+        ),
+    )
     ddl_max_query_size: int = Field(
         default=16_777_216,
         ge=262_144,
@@ -311,16 +320,10 @@ class ClickHouseSettings(BaseModel):
             "more than this is refused before it is sent."
         ),
     )
-    # Deployment topology FALLBACK: "single" (standalone CH -> MergeTree DDL) or
-    # "replicated" (Replicated/Shared db or Cloud -> ReplicatedMergeTree). Live
-    # paths sense the server and ignore this; it only decides when sensing is
-    # unavailable (no client) or fails. It cannot express ON CLUSTER - a real
-    # multi-node cluster is recognised by sensing alone (see EngineResolver).
-    topology: str = Field(default="single")
     # Default MergeTree-family VARIANT for tables that do not pin their own engine.
-    # The topology above decides the Replicated/Shared prefix; this decides the
-    # family (MergeTree / ReplacingMergeTree / SummingMergeTree / ...). Must be a
-    # variant the engine registry permits; may be parameterised
+    # dfe-schemas adds the Replicated prefix every DFE table takes, and this decides
+    # the family (MergeTree / ReplacingMergeTree / SummingMergeTree / ...). Must be a
+    # variant the engine registry permits, and may be parameterised
     # (e.g. "ReplacingMergeTree(version)").
     default_engine: str = Field(default="MergeTree")
     # Retention every time-series table gets unless dfe-schemas or a source
@@ -341,6 +344,13 @@ class ClickHouseSettings(BaseModel):
             "resilience.budget_seconds."
         ),
     )
+
+    @field_validator("platform")  # noqa: V105
+    @classmethod
+    def _platform_is_a_known_choice(cls, value: str) -> str:
+        # dfe-schemas owns the choices, and refuses an unknown one naming them all.
+        platform_override(value)
+        return value.strip().lower()
 
     @property
     def effective_data_database(self) -> str:
@@ -2396,8 +2406,8 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["connections_max"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE"):
         overrides["clickhouse"]["ddl_max_query_size"] = int(val)
-    if val := _get_env("DFE_CLICKHOUSE_TOPOLOGY"):
-        overrides["clickhouse"]["topology"] = val
+    if val := _get_env("DFE_CLICKHOUSE_PLATFORM"):
+        overrides["clickhouse"]["platform"] = val
     if val := _get_env("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS"):
         overrides["clickhouse"]["default_ttl_days"] = int(val)
 

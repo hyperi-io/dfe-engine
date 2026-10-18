@@ -21,8 +21,7 @@ Retry SSoT (plan 13.1, verified against the driver docs): retry with backoff on
 210 NETWORK_ERROR (+ the driver's own HTTP 429/503/504). NEVER retry 241
 MEMORY_LIMIT_EXCEEDED, 159 TIMEOUT_EXCEEDED, 160 TOO_SLOW, or any query-logic
 error - a retry is futile and wastes the budget. Branch on ``code``, never on
-message strings. Code 517 (ON CLUSTER replica-metadata lag) is retried only on the
-DDL/migration path, not here.
+message strings.
 
 Superseded and folded in the old ``clickhouse_errors_mapping`` (now removed): its
 coarse code->message table only ever served the resilience retry decision, which

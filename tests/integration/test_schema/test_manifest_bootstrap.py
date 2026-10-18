@@ -25,6 +25,7 @@ Three things are proven here:
 
 from __future__ import annotations
 
+import time
 import uuid
 
 import pytest
@@ -126,9 +127,41 @@ def test_every_applied_object_is_recorded_with_its_checksum(ch_client, empty_dat
             continue
         assert row.checksum == rendered.checksum, f"{rendered.id} recorded a stale checksum"
         assert row.schemas_version == plan.schemas_version
-        assert row.topology == plan.topology
+        assert row.platform == plan.platform
 
     assert (empty_database, ledger_object.name) in recorded, "the ledger records itself"
+
+
+def test_two_identical_ledger_records_both_land(ch_client, empty_database, plan):
+    """An unchanged pass writes the rows the last one wrote, and applied_at must move on."""
+    apply_plan(ch_client, plan)
+    ledger_object = plan.by_id(LEDGER_ID)
+    ledger = MigrationLedger(ch_client, database=empty_database, table=ledger_object.name)
+    row = MigrationLedger.row(
+        database=empty_database,
+        name="probe_object",
+        kind="table",
+        schemas_version="0.0.0",
+        engine_version="0.0.0",
+        checksum="same",
+        statement="CREATE TABLE probe_object",
+        action="created",
+        platform="self_hosted",
+    )
+
+    def applied_at():
+        return ch_client.query(
+            f"SELECT max(applied_at) FROM `{empty_database}`.`{ledger_object.name}` "
+            "WHERE object = 'probe_object'"
+        ).result_rows[0][0]
+
+    ledger.record([row])
+    first = applied_at()
+    time.sleep(0.05)
+    ledger.record([row])
+
+    # Read as the latest version, so a merge folding the two rows cannot hide the answer.
+    assert applied_at() > first, "the second identical record was dropped as a duplicate"
 
 
 def test_a_second_pass_changes_nothing(ch_client, empty_database, plan):

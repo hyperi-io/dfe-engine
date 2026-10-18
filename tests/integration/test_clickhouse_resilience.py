@@ -82,13 +82,14 @@ def heartbeat_table(manager):
     actually has -- TTL clause included, which is DDL only a real server can
     accept or reject.
     """
+    from dfe_schemas.clickhouse import PlatformProbe
+
     from dfe_engine.schema.applier import SchemaApplier
-    from dfe_engine.schema.engine_resolver import EngineResolver
     from dfe_engine.schema.table_loader import load_table_spec
 
     client = manager.get_clickhouse_client()
     db = f"dfe_hb_{uuid.uuid4().hex[:8]}"
-    applier = SchemaApplier(client, EngineResolver(client=client))
+    applier = SchemaApplier(client, PlatformProbe(client).platform)
     applier.ensure_database(db)
     spec = load_table_spec("tables/internal/hunt_runner_heartbeat", db)
     applier.ensure_table(db, spec.name, spec.columns, spec.config)

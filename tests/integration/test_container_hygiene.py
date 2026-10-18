@@ -25,7 +25,9 @@ from tests.integration.conftest import (
     _container_labels,
     _container_name,
     _reap_stale,
+    _remove_container,
     _resolve_tier,
+    _spin_ch_on_docker,
 )
 
 
@@ -120,6 +122,28 @@ def _docker_available() -> bool:
     )
 
 
+def _volumes(name: str) -> list[str]:
+    """The docker volumes mounted into container ``name``."""
+    fmt = '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}} {{end}}{{end}}'
+    out = subprocess.run(
+        ["docker", "inspect", name, "--format", fmt],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=True,
+        timeout=30,
+    )
+    return out.stdout.split()
+
+
+def _volume_exists(volume: str) -> bool:
+    out = subprocess.run(
+        ["docker", "volume", "inspect", volume], capture_output=True, check=False, timeout=30
+    )
+    return out.returncode == 0
+
+
 def test_reap_stale_removes_a_dead_container_but_not_a_live_one():
     """The two halves of the reaper, against real containers.
 
@@ -158,9 +182,10 @@ def test_reap_stale_removes_a_dead_container_but_not_a_live_one():
         )
         return bool(out.stdout.strip())
 
-    subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=60)
+    _remove_container(docker, name)
     try:
-        # A LIVE container must survive the reaper.
+        # A LIVE container must survive the reaper. The anonymous volume stands in for
+        # the one every image this suite runs declares.
         subprocess.run(
             [
                 "docker",
@@ -169,6 +194,8 @@ def test_reap_stale_removes_a_dead_container_but_not_a_live_one():
                 "--name",
                 name,
                 *_container_labels("busybox"),
+                "--volume",
+                "/probe",
                 "busybox:stable",
                 "sleep",
                 "120",
@@ -178,6 +205,7 @@ def test_reap_stale_removes_a_dead_container_but_not_a_live_one():
             timeout=120,
         )
         assert running(), "the probe container should be up"
+        volumes = _volumes(name)
         _reap_stale(docker, name)
         assert running(), "reap_stale must NOT remove a running container"
 
@@ -187,8 +215,29 @@ def test_reap_stale_removes_a_dead_container_but_not_a_live_one():
         assert not running(), "the probe container should not be running after stop"
         _reap_stale(docker, name)
         assert not exists(), "reap_stale must remove a dead container holding the name"
+        assert volumes, "the probe container should carry its anonymous volume"
+        assert [v for v in volumes if _volume_exists(v)] == [], "the reaped volume is left behind"
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, check=False, timeout=60)
+        _remove_container(docker, name)
+
+
+def test_a_torn_down_clickhouse_leaves_no_volume(request):
+    """The fixture's teardown removes the volume the ClickHouse image declares.
+
+    The image declares ``VOLUME /var/lib/clickhouse``, so every container gets an
+    anonymous volume, which a plain ``docker rm -f`` leaves on the docker host.
+    """
+    if not _docker_available():
+        pytest.skip("no docker daemon")
+
+    _, teardown = _spin_ch_on_docker("local", keep=False, test=request.node.nodeid)
+    try:
+        volumes = _volumes(_container_name(request.node.nodeid, "clickhouse"))
+    finally:
+        teardown()
+
+    assert volumes, "the ClickHouse container should carry the volume its image declares"
+    assert [v for v in volumes if _volume_exists(v)] == [], "teardown left the volume behind"
 
 
 def test_a_started_container_carries_the_name_and_labels(ch_params, request):

@@ -24,7 +24,6 @@ from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
 from dfe_engine.clickhouse.statements import ddl_settings
 from dfe_engine.schema.applier import LiveTable, live_columns, live_tables, tables_with_column
 from dfe_engine.schema.core_schema import landing_table_name
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.plan import data_table_names
 
 if TYPE_CHECKING:
@@ -144,9 +143,7 @@ def _fence(*, client: Any, database: str) -> None:
         )
 
 
-def _rebuild(
-    *, client: Any, database: str, sources: Iterable[Source], topology: str | None
-) -> list[str]:
+def _rebuild(*, client: Any, database: str, sources: Iterable[Source]) -> list[str]:
     """Create or replace all_sources over the live member tables, fence it, and return the members."""
     landing_table = landing_table_name()
     members = member_tables(
@@ -160,13 +157,7 @@ def _rebuild(
         landing_columns=live_columns(client=client, database=database, table=landing_table),
         landing_table=landing_table,
     )
-    resolver = EngineResolver(client=client, topology_setting=topology)
-    on_cluster = resolver.resolve(
-        database=database, spec=parse_engine(engine="MergeTree")
-    ).on_cluster
-    sql = merge_table_ddl(
-        columns=columns, database=database, members=members, on_cluster=on_cluster
-    )
+    sql = merge_table_ddl(columns=columns, database=database, members=members)
     client.command(sql, settings=ddl_settings(statement=sql))
     # The tier grant is database-wide, so the table is readable the moment it exists and needs its row policy now.
     _fence(client=client, database=database)
@@ -221,14 +212,18 @@ def merge_columns(
 
 
 def merge_table_ddl(
-    *, columns: Sequence[tuple[str, str]], database: str, members: Sequence[str], on_cluster: str
+    *, columns: Sequence[tuple[str, str]], database: str, members: Sequence[str]
 ) -> str:
-    """The CREATE OR REPLACE statement for all_sources over *members*."""
+    """The CREATE OR REPLACE statement for all_sources over *members*.
+
+    No ON CLUSTER: the Replicated database replicates the statement, and refuses
+    ON CLUSTER on a table inside it (code 80).
+    """
     pattern = member_pattern(members=members)
     column_list = ", ".join(f"{quote_identifier(name=name)} {ch_type}" for name, ch_type in columns)
     db = quote_identifier(name=database)
     return (
-        f"CREATE OR REPLACE TABLE {db}.{quote_identifier(name=ALL_SOURCES)}{on_cluster} "
+        f"CREATE OR REPLACE TABLE {db}.{quote_identifier(name=ALL_SOURCES)} "
         f"({column_list}) ENGINE = Merge({db}, {quote_literal(value=pattern)})"
     )
 
@@ -238,7 +233,6 @@ def rebuild_all_sources(
     client: Any,
     database: str,
     load_sources: Callable[[], Iterable[Source]],
-    topology: str | None,
 ) -> list[str] | None:
     """Create or replace all_sources over the live member tables, fence it, and return the members.
 
@@ -247,7 +241,7 @@ def rebuild_all_sources(
 
     def rebuild() -> list[str]:
         """One pass over the sources as the registry holds them now."""
-        return _rebuild(client=client, database=database, sources=load_sources(), topology=topology)
+        return _rebuild(client=client, database=database, sources=load_sources())
 
     return _REBUILDS.run(work=rebuild)
 
@@ -271,7 +265,6 @@ def try_rebuild_all_sources(
             client=ch_admin_client(settings=settings),
             database=database,
             load_sources=load_sources,
-            topology=settings.clickhouse.topology,
         )
     except Exception as exc:
         logger.warning(

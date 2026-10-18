@@ -71,7 +71,7 @@ def plan_cmd(as_json: bool) -> None:
             json.dumps(
                 {
                     "schemas_version": plan.schemas_version,
-                    "topology": plan.topology,
+                    "platform": plan.platform,
                     "database": plan.data_database,
                     "counts": report.counts(),
                     "objects": [
@@ -84,7 +84,7 @@ def plan_cmd(as_json: bool) -> None:
             )
         )
         return
-    click.echo(f"dfe-schemas {plan.schemas_version}, topology {plan.topology}")
+    click.echo(f"dfe-schemas {plan.schemas_version}, platform {plan.platform}")
     for outcome in report.outcomes:
         click.echo(outcome.describe())
     for refusal in plan.refused:
@@ -158,7 +158,7 @@ def status_cmd(as_json: bool) -> None:
             "engine_version": row.engine_version,
             "checksum": row.checksum,
             "action": row.action,
-            "topology": row.topology,
+            "platform": row.platform,
         }
         for row in sorted(rows.values(), key=lambda entry: (entry.database, entry.object))
     ]
@@ -171,7 +171,7 @@ def status_cmd(as_json: bool) -> None:
     for row in recorded:
         click.echo(
             f"{row['object']}  {row['kind']}  dfe-schemas {row['schemas_version']}  "
-            f"{row['topology']}  {row['checksum'][:12]}"
+            f"{row['platform']}  {row['checksum'][:12]}"
         )
 
 

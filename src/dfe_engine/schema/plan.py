@@ -9,10 +9,9 @@
 """Turn the pinned dfe-schemas manifest into the objects this deployment applies.
 
 The manifest is the one list, and this is the only place the engine reads it.
-Every object is rendered for the topology sensed off the live server, so the same
-definition becomes a plain ``MergeTree`` on a standalone node, a
-``ReplicatedMergeTree`` against a Replicated database, and a ``ReplicatedMergeTree
-ON CLUSTER`` against an Atomic database on a real cluster.
+Every table renders the same DDL on every ClickHouse, and the platform the
+connection reaches -- probed once by dfe-schemas -- picks only the CREATE
+DATABASE and a JSON table's platform-only settings.
 
 Two trees can contribute. The pinned wheel inside the image is the core and is
 read-only. A deployment's own overlay directory comes second and is ADDITIVE: it
@@ -20,8 +19,6 @@ may declare objects the core does not, and an object of its own whose definition
 path sits under a core directory is refused by name rather than applied, so a
 deployment cannot redefine a core table by shadowing its file.
 """
-
-from __future__ import annotations
 
 import os
 from dataclasses import dataclass
@@ -31,12 +28,10 @@ from typing import TYPE_CHECKING, Any
 
 from dfe_schemas import __version__ as schemas_version
 from dfe_schemas import schemas_root
-from dfe_schemas.clickhouse import Topology
+from dfe_schemas.clickhouse import Platform, PlatformProbe
 from dfe_schemas.manifest import Manifest, ManifestError, ManifestObject, load_manifest
 from dfe_schemas.render import RenderedObject, Renderer
 from scalo.logger import logger
-
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 
 if TYPE_CHECKING:
     from dfe_engine.settings import DFESettings
@@ -76,7 +71,7 @@ class SchemaPlan:
 
     objects: tuple[RenderedObject, ...]
     schemas_version: str
-    topology: str
+    platform: str
     data_database: str
     # Overlay objects refused for redefining a core path, as "<id>: <reason>".
     refused: tuple[str, ...] = ()
@@ -131,42 +126,40 @@ def _redefines_core(obj: ManifestObject) -> bool:
     return any(defines == core or defines.startswith(f"{core}/") for core in CORE_DIRS)
 
 
-def sense_topology(
-    client: Any | None, database: str, *, topology_setting: str | None = None
-) -> tuple[Topology, str]:
-    """The topology to render for, and the cluster to fan DDL over.
+def platform_probe(
+    settings: DFESettings, client: Any | None, *, platform: Platform | None = None
+) -> PlatformProbe:
+    """The dfe-schemas platform probe for one connection to this deployment's ClickHouse.
 
-    Sensed off the live server through the same resolver every other DDL path
-    uses, so the manifest render and the per-source render cannot disagree about
-    what this deployment is.
+    Every DDL path asks this one, so the manifest render and the per-source render
+    cannot disagree about which platform the deployment is on.
+
+    Args:
+        settings: The deployment's settings. ``clickhouse.platform`` is the
+            operator's override, ``auto`` for none, and the hostname is read when
+            there is no client.
+        client: A live ClickHouse client, or None.
+        platform: Pins the platform instead of probing, for a test or a caller that
+            knows. It wins over ``clickhouse.platform``.
     """
-    resolved = EngineResolver(client=client, topology_setting=topology_setting).resolve(
-        parse_engine("MergeTree"), database
-    )
-    cluster = resolved.on_cluster.strip().removeprefix("ON CLUSTER ").strip()
-    if cluster:
-        return Topology.REPLICATED_ON_CLUSTER, cluster
-    if resolved.topology == "replicated":
-        return Topology.REPLICATED, ""
-    return Topology.SINGLE, ""
+    override = platform if platform is not None else settings.clickhouse.platform
+    return PlatformProbe(client, host=settings.clickhouse.host or None, override=override)
 
 
 def _renderer(
     manifest: Manifest,
     *,
-    topology: Topology,
+    platform: Platform,
     data_database: str,
     default_ttl_days: int | None,
-    cluster: str,
     broker_count: int,
     kafka_tiered_storage: bool = False,
 ) -> Renderer:
     return Renderer(
         manifest,
-        topology=topology,
+        platform=platform,
         data_database=data_database,
         default_ttl_days=default_ttl_days,
-        cluster=cluster or "dfe_cluster",
         broker_count=broker_count,
         kafka_tiered_storage=kafka_tiered_storage,
     )
@@ -190,23 +183,28 @@ def build_plan(
     client: Any | None = None,
     broker_count: int = 1,
     kafka_tiered_storage: bool = False,
+    platform: Platform | None = None,
 ) -> SchemaPlan:
-    """Read the manifest, sense the topology, render every object.
+    """Read the manifest, probe the platform, render every object.
 
     Args:
-        settings: The deployment's settings; the data database, the default
-            retention and the topology fallback come from ``settings.clickhouse``.
-        client: A live ClickHouse client to sense the topology on. None renders
-            for the configured fallback, which never emits ``ON CLUSTER``.
+        settings: The deployment's settings. The data database and the default
+            retention come from ``settings.clickhouse``.
+        client: A live ClickHouse client to probe. None renders for the platform
+            the hostname names, self-hosted unless it is a Cloud endpoint.
         broker_count: Brokers the deployment has, so the topic set's replication
             factor is clamped to what the bus can actually place. Ask the bus for
-            this; the configured factor clamped against itself never reduces.
+            this, because the configured factor clamped against itself never reduces.
         kafka_tiered_storage: Whether this deployment's brokers tier to object
             storage, which puts ``remote.storage.enable`` on the landing topic.
+        platform: Pins the platform instead of probing *client*.
 
     Raises:
         SchemaPlanError: The manifest is missing or malformed, or an object in it
             could not be rendered.
+        ReplicationNotConfiguredError: *client* reaches a self-hosted ClickHouse
+            without the Keeper, macros, cluster or access storage every DFE table
+            and role needs.
     """
     ch = settings.clickhouse
     database = ch.effective_data_database
@@ -215,16 +213,18 @@ def build_plan(
     except ManifestError as exc:
         raise SchemaPlanError(f"the dfe-schemas apply manifest is unusable: {exc}") from exc
 
-    topology, cluster = sense_topology(client, database, topology_setting=ch.topology)
-    # 0 is the operator's way of saying "no default retention"; the renderer
+    probe = platform_probe(settings, client, platform=platform)
+    if client is not None:
+        probe.require_replication()
+        logger.info("clickhouse platform", platform=str(probe.platform), via=probe.origin)
+    # 0 is the operator's way of saying "no default retention". The renderer
     # reads None for that, and a declared ttl_days still wins either way.
     default_ttl = ch.default_ttl_days or None
     renderer = _renderer(
         manifest,
-        topology=topology,
+        platform=probe.platform,
         data_database=database,
         default_ttl_days=default_ttl,
-        cluster=cluster,
         broker_count=broker_count,
         kafka_tiered_storage=kafka_tiered_storage,
     )
@@ -238,10 +238,9 @@ def build_plan(
                 overlay,
                 refused=refused,
                 declared={obj.id for obj in manifest.objects},
-                topology=topology,
+                platform=probe.platform,
                 data_database=database,
                 default_ttl_days=default_ttl,
-                cluster=cluster,
                 broker_count=broker_count,
                 kafka_tiered_storage=kafka_tiered_storage,
             )
@@ -250,7 +249,7 @@ def build_plan(
     return SchemaPlan(
         objects=tuple(objects),
         schemas_version=schemas_version,
-        topology=topology.value,
+        platform=probe.platform.value,
         data_database=database,
         refused=tuple(refused),
         overlay_root=str(overlay) if overlay is not None else "",
@@ -262,10 +261,9 @@ def _overlay_objects(
     *,
     refused: list[str],
     declared: set[str],
-    topology: Topology,
+    platform: Platform,
     data_database: str,
     default_ttl_days: int | None,
-    cluster: str,
     broker_count: int,
     kafka_tiered_storage: bool = False,
 ) -> list[RenderedObject]:
@@ -293,10 +291,9 @@ def _overlay_objects(
 
     renderer = _renderer(
         manifest,
-        topology=topology,
+        platform=platform,
         data_database=data_database,
         default_ttl_days=default_ttl_days,
-        cluster=cluster,
         broker_count=broker_count,
         kafka_tiered_storage=kafka_tiered_storage,
     )
@@ -327,7 +324,7 @@ def render_one(
     *,
     data_database: str = "dfe",
     default_ttl_days: int | None = None,
-    topology: Topology = Topology.SINGLE,
+    platform: Platform = Platform.SELF_HOSTED,
 ) -> RenderedObject:
     """One manifest object, rendered on its own.
 
@@ -337,10 +334,9 @@ def render_one(
     manifest = _manifest(core_schemas_root())
     renderer = _renderer(
         manifest,
-        topology=topology,
+        platform=platform,
         data_database=data_database,
         default_ttl_days=default_ttl_days,
-        cluster="",
         # Renders a statement, never a topic, so the replication clamp is unused.
         broker_count=1,
     )
@@ -350,11 +346,11 @@ def render_one(
     raise SchemaPlanError(f"the manifest declares no object {object_id!r}")
 
 
-def single_node_statement(object_id: str, *, data_database: str = "dfe") -> str:
-    """One object's first statement, rendered for a single node.
+def reference_statement(object_id: str, *, data_database: str = "dfe") -> str:
+    """One object's first statement, as a self-hosted deployment applies it.
 
     For a caller with no live client that wants to SHOW the DDL rather than apply
-    it. The topology token is the only part that differs from what a cluster gets.
+    it. The platform-only settings are the only part a Cloud deployment differs in.
     """
     return render_one(object_id, data_database=data_database).statements[0]
 
@@ -375,7 +371,7 @@ def data_table_names(*, data_database: str) -> frozenset[str]:
 def object_names(*object_ids: str, data_database: str = "dfe") -> dict[str, str]:
     """Manifest id to the object's real name, for a caller that only needs the name.
 
-    A name is topology-independent, so this never reaches the server. It exists so
+    A name is platform-independent, so this never reaches the server. It exists so
     a module that READS one of these tables names the manifest id rather than
     restating the table name, which is how the engine and dfe-schemas came to
     disagree about the landing table.
@@ -397,10 +393,9 @@ def _all_object_names(root: Path, data_database: str) -> dict[str, str]:
     manifest = _manifest(root)
     renderer = _renderer(
         manifest,
-        topology=Topology.SINGLE,
+        platform=Platform.SELF_HOSTED,
         data_database=data_database,
         default_ttl_days=None,
-        cluster="",
         # Renders names only, which no clamp touches; a topic path needs the real count.
         broker_count=1,
     )

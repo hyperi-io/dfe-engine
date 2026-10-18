@@ -26,6 +26,8 @@ from dfe_engine.clickhouse.statements import (
     split_statements,
 )
 
+ONLY_ACTIVE = {"distributed_ddl_output_mode": "throw_only_active"}
+
 
 @pytest.mark.parametrize(
     ("script", "expected"),
@@ -80,16 +82,29 @@ def _statement_of(size: int) -> str:
     return head + "x" * (size - len(head) - 1) + "'"
 
 
-def test_a_statement_within_the_default_is_sent_without_the_setting():
+def test_a_statement_within_the_default_is_sent_without_a_size():
     statement = _statement_of(CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE - MAX_QUERY_SIZE_MARGIN)
-    assert ddl_settings(statement, ceiling=10**9) == {}
+    assert ddl_settings(statement, ceiling=10**9) == ONLY_ACTIVE
+
+
+@pytest.mark.parametrize("size", [10, CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE, 688_321])
+def test_every_ddl_waits_only_for_the_replicas_that_are_up(size):
+    """A down replica replays the database log on return, so waiting for it only times out."""
+    settings = ddl_settings(_statement_of(size), ceiling=10**9)
+    assert settings["distributed_ddl_output_mode"] == "throw_only_active"
+
+
+def test_the_returned_settings_are_the_callers_to_change():
+    ddl_settings("SELECT 1")["max_query_size"] = 1
+    assert ddl_settings("SELECT 1") == ONLY_ACTIVE
 
 
 def test_a_statement_one_byte_over_gets_its_own_size_plus_the_margin():
     size = CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE - MAX_QUERY_SIZE_MARGIN + 1
     statement = _statement_of(size)
     assert ddl_settings(statement, ceiling=10**9) == {
-        "max_query_size": size + MAX_QUERY_SIZE_MARGIN
+        **ONLY_ACTIVE,
+        "max_query_size": size + MAX_QUERY_SIZE_MARGIN,
     }
 
 
@@ -98,13 +113,14 @@ def test_the_size_is_the_statements_bytes_not_its_characters():
     statement = "SELECT '" + "é" * 200_000 + "'"
     expected = len(statement.encode("utf-8")) + MAX_QUERY_SIZE_MARGIN
     assert len(statement) + MAX_QUERY_SIZE_MARGIN < CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE
-    assert ddl_settings(statement, ceiling=10**9) == {"max_query_size": expected}
+    assert ddl_settings(statement, ceiling=10**9) == {**ONLY_ACTIVE, "max_query_size": expected}
 
 
 def test_the_widest_vendor_table_measured_gets_a_setting_sized_to_it():
     statement = _statement_of(688_321)
     assert ddl_settings(statement, ceiling=10**9) == {
-        "max_query_size": 688_321 + MAX_QUERY_SIZE_MARGIN
+        **ONLY_ACTIVE,
+        "max_query_size": 688_321 + MAX_QUERY_SIZE_MARGIN,
     }
 
 
@@ -119,7 +135,8 @@ def test_the_ceiling_defaults_to_the_deployment_setting():
 
     ceiling = get_settings().clickhouse.ddl_max_query_size
     assert ddl_settings(_statement_of(300_000)) == {
-        "max_query_size": 300_000 + MAX_QUERY_SIZE_MARGIN
+        **ONLY_ACTIVE,
+        "max_query_size": 300_000 + MAX_QUERY_SIZE_MARGIN,
     }
     with pytest.raises(StatementTooLargeError):
         ddl_settings(_statement_of(ceiling))
@@ -176,4 +193,5 @@ def test_execute_passes_the_ddl_size_through_to_the_driver(wrapper_over_recorder
 
     (_sent, kwargs) = recorder.commands[0]
     assert kwargs["settings"]["max_query_size"] == len(statement) + MAX_QUERY_SIZE_MARGIN
+    assert kwargs["settings"]["distributed_ddl_output_mode"] == "throw_only_active"
     assert "log_comment" in kwargs["settings"]

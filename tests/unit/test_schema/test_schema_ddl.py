@@ -3,6 +3,7 @@
 import re
 
 import pytest
+from dfe_schemas.clickhouse import Platform
 
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError, DDLGenerator
 from dfe_engine.source.models import SchemaColumn
@@ -115,12 +116,6 @@ class TestQuotedIdentifiers:
         with pytest.raises(DDLGenerationError, match="unsafe TTL column"):
             DDLGenerator.ttl_clause(cfg, [_col(name=name, type="timestamp")])
 
-    def test_a_cluster_name_is_bare_or_quoted_and_an_unsafe_one_refused(self, gen: DDLGenerator):
-        assert gen.on_cluster(DDLConfig(cluster="dfe_cluster")) == " ON CLUSTER dfe_cluster"
-        assert gen.on_cluster(DDLConfig(cluster="dfe-cluster")) == " ON CLUSTER `dfe-cluster`"
-        with pytest.raises(DDLGenerationError, match="unsafe cluster name"):
-            gen.on_cluster(DDLConfig(cluster="c; DROP TABLE x"))
-
 
 # ── CREATE TABLE ────────────────────────────────────────────────────
 
@@ -128,8 +123,8 @@ class TestQuotedIdentifiers:
 class TestGenerateCreateTable:
     def test_basic_create_table(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("filebeat", _basic_columns())
-        assert "CREATE TABLE IF NOT EXISTS `{db}`.`filebeat`" in ddl
-        assert "ENGINE = MergeTree()" in ddl
+        assert "CREATE TABLE IF NOT EXISTS `{db}`.`filebeat`\n(" in ddl
+        assert "ENGINE = ReplicatedMergeTree\n" in ddl
         assert "PARTITION BY toYYYYMMDD(_timestamp_load)" in ddl
 
     def test_header_comment(self, gen: DDLGenerator):
@@ -248,36 +243,32 @@ class TestGenerateCreateTable:
         with pytest.raises(DDLGenerationError, match="keep every row forever"):
             gen.generate_create_table("t", _basic_columns(), cfg)
 
-    def test_engine_single_topology(self, gen: DDLGenerator):
-        # single topology -> plain <variant>()
-        cfg = DDLConfig(engine="ReplacingMergeTree", topology="single")
+    @pytest.mark.parametrize("platform", list(Platform))
+    def test_a_bare_variant_takes_the_argumentless_replicated_form(self, platform: Platform):
+        # The Replicated database supplies the replica path and name, never this DDL.
+        gen = DDLGenerator(TypeRegistry.default(), platform=platform)
+        cfg = DDLConfig(engine="ReplacingMergeTree")
         ddl = gen.generate_create_table("t", _basic_columns(), cfg)
-        assert "ENGINE = ReplacingMergeTree()" in ddl
+        assert "ENGINE = ReplicatedReplacingMergeTree\n" in ddl
+        assert "ReplicatedReplacingMergeTree(" not in ddl
 
-    def test_engine_replicated_topology(self, gen: DDLGenerator):
-        # replicated topology -> argumentless Replicated<variant> (server supplies
-        # the znode path/replica; they are never emitted here)
-        cfg = DDLConfig(engine="ReplacingMergeTree", topology="replicated")
-        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
-        assert "ENGINE = ReplicatedReplacingMergeTree" in ddl
-        assert "ReplicatedReplacingMergeTree(" not in ddl  # no args on a bare variant
-
-    def test_engine_parameterised_single(self, gen: DDLGenerator):
-        # a version column survives through the resolver, single topology
-        cfg = DDLConfig(engine="ReplacingMergeTree(_timestamp_load)", topology="single")
-        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
-        assert "ENGINE = ReplacingMergeTree(_timestamp_load)" in ddl
-
-    def test_engine_parameterised_replicated(self, gen: DDLGenerator):
-        # params ride onto the Replicated form - no double-parens, no dropped arg
-        cfg = DDLConfig(engine="ReplacingMergeTree(_timestamp_load)", topology="replicated")
+    def test_a_version_column_rides_onto_the_replicated_form(self, gen: DDLGenerator):
+        cfg = DDLConfig(engine="ReplacingMergeTree(_timestamp_load)")
         ddl = gen.generate_create_table("t", _basic_columns(), cfg)
         assert "ENGINE = ReplicatedReplacingMergeTree(_timestamp_load)" in ddl
 
-    def test_cluster(self, gen: DDLGenerator):
-        cfg = DDLConfig(cluster="my_cluster")
-        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
-        assert "ON CLUSTER my_cluster" in ddl
+    def test_no_statement_carries_on_cluster(self, gen: DDLGenerator):
+        """The Replicated database refuses ON CLUSTER on a table inside it (code 80)."""
+        cols = _basic_columns()
+        statements = [
+            gen.generate_create_table("t", cols),
+            gen.generate_alter_add_column("t", cols[0]),
+            gen.generate_alter_modify_column("t", cols[0]),
+            *gen.generate_alter_add_indexes("t", cols[3]),
+            gen.generate_view("t", {"user.name": "user_name"}, "ecs"),
+        ]
+        for statement in statements:
+            assert "ON CLUSTER" not in statement, statement
 
     def test_sample_by(self, gen: DDLGenerator):
         cfg = DDLConfig(sample_by="cityHash64(_timestamp_load)")
@@ -892,7 +883,6 @@ class TestDDLConfig:
         assert cfg.partition_granularity == "day"
         assert cfg.index_granularity == 2048
         assert cfg.ttl_only_drop_parts is True
-        assert cfg.cluster is None
         assert cfg.schema_version is None
 
     def test_custom_config(self):

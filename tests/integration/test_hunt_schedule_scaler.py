@@ -61,3 +61,26 @@ def test_due_count_is_zero_when_all_caught_up(ch_client, dfe_db):
         coord.set_watermark(h, server_now + 10**9)
 
     assert due_count(ch_client, dfe_db) == 0
+
+
+def test_a_hunt_removed_then_added_back_is_scheduled_again(ch_client, dfe_db):
+    """The re-add writes the same block as the first publish, and it has to land.
+
+    A Replicated table drops an insert identical to a recent one, and ``updated`` is
+    filled in by the server, so without the insert settings the tombstone wins. A hunt
+    disabled and enabled again leaves and rejoins the specs, so it is this sequence.
+    """
+    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord.ensure_schema()
+    specs = {h: _spec(h) for h in ("kept", "back")}
+    publish_schedule(ch_client, dfe_db, specs)
+    publish_schedule(ch_client, dfe_db, {"kept": specs["kept"]})
+    assert due_count(ch_client, dfe_db) == 1
+
+    publish_schedule(ch_client, dfe_db, specs)
+
+    enabled = ch_client.query(
+        f"SELECT argMax(enabled, updated) FROM `{dfe_db}`.hunt_schedule WHERE hunt_id = 'back'"
+    ).result_rows[0][0]
+    assert enabled == 1, "the re-added hunt stayed tombstoned"
+    assert due_count(ch_client, dfe_db) == 2

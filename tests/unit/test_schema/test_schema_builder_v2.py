@@ -286,27 +286,25 @@ class TestBuild:
 
     def test_build_engine_config(self, registry, schemas_dir):
         # A per-source engine pin selects any permitted MergeTree-family VARIANT
-        # (not just plain MergeTree). Replicated/Shared is NOT declared here - the
-        # topology adds it at DDL time - so the bare variant is what renders under
-        # the default single topology.
+        # (not just plain MergeTree). Replicated is NOT declared here: dfe-schemas
+        # adds it at DDL time, the one form every DFE table takes.
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = _make_source(
             meta_schema="meta.yaml",
             engine="ReplacingMergeTree",
         )
         result = builder.build(source)
-        assert "ENGINE = ReplacingMergeTree()" in result.create_table_ddl
+        assert "ENGINE = ReplicatedReplacingMergeTree\n" in result.create_table_ddl
 
     def test_build_engine_parameterised(self, registry, schemas_dir):
-        # A parameterised variant keeps its params through the resolver (no
-        # double-parens, no dropped arg).
+        # A parameterised variant keeps its params (no double-parens, no dropped arg).
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = _make_source(
             meta_schema="meta.yaml",
             engine="ReplacingMergeTree(_timestamp_load)",
         )
         result = builder.build(source)
-        assert "ENGINE = ReplacingMergeTree(_timestamp_load)" in result.create_table_ddl
+        assert "ENGINE = ReplicatedReplacingMergeTree(_timestamp_load)" in result.create_table_ddl
 
     def test_build_engine_deployment_default(self, registry, schemas_dir):
         # An empty source engine inherits the deployment default_engine.
@@ -317,7 +315,7 @@ class TestBuild:
         )
         source = _make_source(meta_schema="meta.yaml")  # engine left empty
         result = builder.build(source)
-        assert "ENGINE = AggregatingMergeTree()" in result.create_table_ddl
+        assert "ENGINE = ReplicatedAggregatingMergeTree\n" in result.create_table_ddl
 
     def test_build_ttl_config(self, registry, schemas_dir):
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)

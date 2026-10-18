@@ -51,9 +51,9 @@ class TestDefaultTable:
         """Two calls produce identical output."""
         assert writer.generate_default_table() == writer.generate_default_table()
 
-    def test_uses_mergetree(self, writer):
+    def test_uses_the_replicated_engine(self, writer):
         ddl = writer.generate_default_table()
-        assert "ENGINE = MergeTree()" in ddl
+        assert "ENGINE = ReplicatedMergeTree\n" in ddl
 
 
 # ── Profile Tables ───────────────────────────────────────────────
@@ -109,9 +109,10 @@ class TestCheckpointTable:
         assert "explain_duration_ms" in ddl
         assert "scheduling_mode" in ddl
 
-    def test_uses_mergetree(self, writer):
+    def test_uses_the_replicated_engine(self, writer):
         ddl = writer.generate_detection_checkpoint_table()
-        assert "MergeTree()" in ddl
+        assert "ENGINE = ReplicatedMergeTree" in ddl
+        assert "MergeTree()" not in ddl
 
     def test_partitions_monthly(self, writer):
         # Low row count per day; daily partitions would accumulate a part per
@@ -171,11 +172,8 @@ class TestDetectionTable:
 
 # ── target database ──────────────────────────────────────────────
 # The default "{db}" placeholder is what the reference-SQL output wants (the
-# caller substitutes it). A LIVE caller must pass the real name instead: the
-# resolver senses by querying system.databases for that exact name, and "{db}"
-# matches no row -- so a Replicated/Shared database reads back as None, falls
-# past the Replicated branch, and a macro-configured server wrongly resolves to
-# ON CLUSTER against a database that already replicates itself.
+# caller substitutes it). A LIVE caller must pass the real name instead, because
+# "{db}" names no database the statements could land in.
 
 
 @requires_schemas

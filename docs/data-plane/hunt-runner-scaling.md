@@ -143,22 +143,16 @@ only ClickHouse is guaranteed present.
 ### Coordination needs a SINGLE LOGICAL ClickHouse (scale-tier requirement)
 
 The four coordination tables are the shared source of truth every worker and KEDA
-read/write. That only works if all of them see the SAME tables. On a single-node CH
-(docker / slim / single tiers) that is automatic. On the **scale tier's multi-node
-cluster behind a round-robin load balancer, it is NOT**: a plain
-`ReplacingMergeTree` (and a plain `CREATE DATABASE`) lands on one node, so workers
-whose connections land on other nodes see an empty/absent table - coordination
-silently breaks (surfaced as `UNKNOWN_DATABASE` / missing leases). So on a clustered
-CH the coordination tables MUST be either:
+read/write. That only works if all of them see the SAME tables. On the **scale
+tier's multi-node cluster behind a round-robin load balancer**, a plain
+`ReplacingMergeTree` (and a plain `CREATE DATABASE`) would land on one node, so
+workers whose connections land on other nodes would see an empty or absent table and
+coordination would silently break (`UNKNOWN_DATABASE`, missing leases). The schema
+phase therefore creates the coordination tables as `ReplicatedReplacingMergeTree`
+inside the Replicated `dfe` database on every deployment, so lease, watermark and
+schedule state is shared across nodes (<https://github.com/hyperi-io/dfe-schemas/blob/main/docs/clickhouse-platform.md>).
 
-- **Replicated** - `ReplicatedReplacingMergeTree` in a `Replicated`/`ON CLUSTER`
-  database, so lease/watermark/schedule state is shared across nodes; or
-- **pinned to a single endpoint** - point the runner + KEDA + the materialiser at one
-  CH node (or a sticky service), so every connection hits the same tables.
-
-`ensure_schema` currently creates plain engines (correct for the single-node tiers);
-the scale-tier variant (Replicated engines, chosen by the data-substrate mode) is a
-follow-up. The synthetic multi-pod integration test detects this and skips on a
+The synthetic multi-pod integration test detects this and skips on a
 multi-node endpoint rather than flaking (see tests/integration/test_hunt_synthetic).
 
 ### Materialisation trigger (config-deploy time)

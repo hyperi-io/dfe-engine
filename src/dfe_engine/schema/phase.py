@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
+from dfe_schemas.clickhouse import ReplicationNotConfiguredError
 from scalo.logger import logger
 
 from dfe_engine import __version__ as engine_version
@@ -85,7 +86,13 @@ _SEE_LOG = "the engine log has the cause"
 
 
 def _failed_stage(exc: Exception) -> str:
-    """The status route's account of a failed pass: the stage, never the backend's text."""
+    """The status route's account of a failed pass: the stage, never the backend's text.
+
+    A server refused for replication is the exception: dfe-schemas wrote that
+    message, and it names what the operator has to add.
+    """
+    if isinstance(exc, ReplicationNotConfiguredError):
+        return str(exc)
     for kind, stage in _FAILED_STAGES:
         if isinstance(exc, kind):
             return f"{stage}; {_SEE_LOG}"
@@ -126,7 +133,7 @@ class SchemaBootstrapState:
     state: str = STATE_UNKNOWN
     schemas_version: str = ""
     engine_version: str = engine_version
-    topology: str = ""
+    platform: str = ""
     database: str = ""
     holder: str = ""
     started_at: str = ""
@@ -179,7 +186,7 @@ class SchemaBootstrapState:
             "converged": self.converged,
             "schemas_version": self.schemas_version,
             "engine_version": self.engine_version,
-            "topology": self.topology,
+            "platform": self.platform,
             "database": self.database,
             "holder": self.holder,
             "started_at": self.started_at,
@@ -262,7 +269,7 @@ def apply_plan(
         ledger=None,
         schemas_version=plan.schemas_version,
         engine_version=engine_version,
-        topology=plan.topology,
+        platform=plan.platform,
         dry_run=dry_run,
         allow_drift=allow_drift,
     )
@@ -506,7 +513,7 @@ def run_bootstrap(
             kafka_tiered_storage=settings.kafka.tiered_storage,
         )
         state.schemas_version = plan.schemas_version
-        state.topology = plan.topology
+        state.platform = plan.platform
         state.overlay_refused = list(plan.refused)
 
         lock_object = plan.by_id(LOCK_ID)
@@ -519,7 +526,13 @@ def run_bootstrap(
         report = _apply_under_lock(
             client, plan, lock, wait=wait, allow_drift=allow_drift, state=state
         )
-    except (ManifestApplyError, SchemaPlanError, SchemaLockError, LedgerError) as exc:
+    except (
+        ManifestApplyError,
+        SchemaPlanError,
+        SchemaLockError,
+        LedgerError,
+        ReplicationNotConfiguredError,
+    ) as exc:
         state.state = STATE_FAILED
         state.error = _failed_stage(exc)
         state.transient = is_transient_failure(exc)

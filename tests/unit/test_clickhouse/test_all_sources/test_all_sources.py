@@ -240,10 +240,7 @@ class TestMergeTableDdl:
     )
     def test_matches_expected(self, case: MergeTableDdlCase):
         ddl = merge_table_ddl(
-            columns=case["columns"],
-            database=case["database"],
-            members=case["members"],
-            on_cluster=case["on_cluster"],
+            columns=case["columns"], database=case["database"], members=case["members"]
         )
         assert ddl == case["expected_ddl"]
 
@@ -257,6 +254,4 @@ class TestRebuildAllSources:
         message = "the sources directory could not be read"
 
         with pytest.raises(SourceRegistryError, match=message):
-            rebuild_all_sources(
-                client=object(), database="dfe", load_sources=unreadable, topology=None
-            )
+            rebuild_all_sources(client=object(), database="dfe", load_sources=unreadable)

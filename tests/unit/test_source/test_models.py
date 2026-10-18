@@ -229,8 +229,8 @@ class TestSourceSchema:
             SourceSchema(engine="InvalidEngine")
 
     def test_replicated_prefix_rejected(self):
-        # The Replicated/Shared prefix is topology-derived at DDL time, never
-        # declared in source config - so it is not a permitted variant.
+        # The Replicated prefix is added at DDL time, never declared in source
+        # config - so it is not a permitted variant.
         with pytest.raises(ValueError, match="Invalid engine"):
             SourceSchema(engine="ReplicatedMergeTree")
 
