@@ -12,22 +12,18 @@ login, and once through a real uvicorn server on the daemon's config, which turn
 uvicorn's path-carrying access line off.
 """
 
-import asyncio
-import logging
-import socket
-import threading
-import time
 from collections.abc import Generator
 from contextlib import contextmanager
 
-import httpx
 import uvicorn
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
+from fastapi.testclient import TestClient
 from scalo.logger import logger
 from scalo.metrics.http_server import UNMATCHED_ROUTE
 
 from dfe_engine.api.middleware.access_log import ACCESS_LINE, AccessLogMiddleware
 from dfe_engine.api.server import server_config
+from tests.support.uvicorn_access import serve_once, uvicorn_access_lines
 
 _LOGIN = "jane.doe@example.com"
 _LOCAL_PART = "jane.doe"
@@ -76,41 +72,53 @@ def test_a_path_no_route_matches_is_logged_as_unmatched(client, admin_headers):
     assert _LOCAL_PART not in repr(lines)
 
 
-class _Records(logging.Handler):
-    """Every stdlib record from one logger that reaches the root, formatted."""
-
-    def __init__(self, name: str) -> None:
-        super().__init__(level=logging.DEBUG)
-        self._name = name
-        self.lines: list[str] = []
-
-    def emit(self, record: logging.LogRecord) -> None:
-        if record.name == self._name:
-            self.lines.append(record.getMessage())
+_TENANT = "acme-corp"
 
 
-@contextmanager
-def uvicorn_access_as_scalo_leaves_it() -> Generator[_Records]:
-    """``uvicorn.access`` with no handler of its own, propagating to a root handler.
+def _users_router() -> APIRouter:
+    router = APIRouter()
 
-    That is how scalo's ``setup()`` leaves it, so its records reach scalo's sinks. uvicorn
-    writes its access line only while the logger has a handler to reach, on its own or
-    through propagation.
-    """
-    access = logging.getLogger("uvicorn.access")
-    saved = (list(access.handlers), access.propagate, access.level)
-    root = logging.getLogger()
-    records = _Records("uvicorn.access")
-    access.handlers.clear()
-    access.propagate = True
-    root.addHandler(records)
-    try:
-        yield records
-    finally:
-        root.removeHandler(records)
-        access.handlers[:] = saved[0]
-        access.propagate = saved[1]
-        access.setLevel(saved[2])
+    @router.get("/users/{username}")
+    async def user(username: str) -> dict[str, int]:
+        return {"length": len(username)}
+
+    return router
+
+
+def _routes_logged(app: FastAPI, path: str) -> list[str]:
+    app.add_middleware(AccessLogMiddleware)
+    with access_lines() as lines, TestClient(app) as test_client:
+        assert test_client.get(path).status_code == 200
+    return [line["route"] for line in lines]
+
+
+def test_a_parameter_in_an_include_prefix_never_puts_its_value_in_the_line():
+    app = FastAPI()
+    app.include_router(_users_router(), prefix="/tenants/{tenant}")
+
+    routes = _routes_logged(app, f"/tenants/{_TENANT}/users/{_LOGIN}")
+
+    assert routes == ["/users/{username}"]
+
+
+def test_a_parameter_in_a_mount_path_never_puts_its_value_in_the_line():
+    mounted = FastAPI()
+    mounted.include_router(_users_router())
+    app = FastAPI()
+    app.mount("/orgs/{org}", mounted)
+
+    routes = _routes_logged(app, f"/orgs/{_TENANT}/users/{_LOGIN}")
+
+    assert len(routes) == 1
+    assert _TENANT not in routes[0]
+    assert _LOCAL_PART not in routes[0]
+
+
+def test_a_prefix_with_no_parameter_is_kept_whole():
+    app = FastAPI()
+    app.include_router(_users_router(), prefix="/api/v1")
+
+    assert _routes_logged(app, f"/api/v1/users/{_LOGIN}") == ["/api/v1/users/{username}"]
 
 
 def _accounts_app() -> FastAPI:
@@ -130,24 +138,11 @@ def _serve_one_lookup(config_for) -> tuple[int, list[str], list[dict]]:
     Returns:
         The status, uvicorn's access lines and the engine's.
     """
-    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    listener.bind(("127.0.0.1", 0))
-    port = listener.getsockname()[1]
-    with uvicorn_access_as_scalo_leaves_it() as uvicorn_access, access_lines() as lines:
-        server = uvicorn.Server(config_for(_accounts_app(), port))
-        thread = threading.Thread(target=lambda: asyncio.run(server.serve(sockets=[listener])))
-        thread.start()
-        try:
-            deadline = time.monotonic() + 10.0
-            while not server.started and time.monotonic() < deadline:
-                time.sleep(0.05)
-            assert server.started, "uvicorn did not start"
-            status = httpx.get(f"http://127.0.0.1:{port}/api/v1/auth/accounts/{_LOGIN}").status_code
-        finally:
-            server.should_exit = True
-            thread.join(10.0)
-            listener.close()
-    return status, uvicorn_access.lines, lines
+    with uvicorn_access_lines() as uvicorn_lines, access_lines() as lines:
+        status = serve_once(
+            lambda port: config_for(_accounts_app(), port), f"/api/v1/auth/accounts/{_LOGIN}"
+        )
+    return status, uvicorn_lines, lines
 
 
 def test_the_daemon_config_writes_no_uvicorn_access_line_with_the_path():

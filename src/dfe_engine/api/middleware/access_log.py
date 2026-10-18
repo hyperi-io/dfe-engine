@@ -9,8 +9,9 @@
 
 A request path can carry a value, the user's login in
 ``/api/v1/auth/accounts/{username}`` for one. The template keeps the shape of the
-request without its values, and is the same name scalo's request histogram labels the
-route with.
+request without its values. scalo's request histogram labels the route with the
+matched route's own template, which leaves out a lazily included router's prefix
+(hyperi-io/scalo-py#136), so the two can name one route differently.
 """
 
 import time
@@ -33,23 +34,31 @@ def route_template(scope: Scope) -> str:
     """The matched route's full template, ``UNMATCHED_ROUTE`` when nothing matched.
 
     FastAPI matches an included router lazily, so the route on the scope carries only
-    its own router's prefix. The prefixes above it are the part of the request path
-    before the route rendered with the matched values. Where that does not line up,
-    the route's own template stands, which still carries no value.
+    its own router's prefix. The prefixes above it are taken from the request path, as
+    the part before the route rendered with the matched values. That part is used only
+    when it holds none of the matched values: a parameter in a router prefix or a mount
+    path, ``/tenants/{tenant}``, would otherwise put its value in the result. In that
+    case, and wherever the render does not line up, the route's own template stands.
     """
     route = scope.get("route")
     template = getattr(route, "path", None)
     if not isinstance(template, str):
         return UNMATCHED_ROUTE
-    params = dict(scope.get("path_params") or {})
+    matched = dict(scope.get("path_params") or {})
     try:
-        rendered, _unused = replace_params(template, getattr(route, "param_convertors", {}), params)
+        rendered, _unused = replace_params(
+            template, getattr(route, "param_convertors", {}), dict(matched)
+        )
     except KeyError, TypeError, ValueError, AssertionError:
         return template
     path = str(scope.get("path", ""))
-    if rendered and path.endswith(rendered):
-        return path[: len(path) - len(rendered)] + template
-    return template
+    if not rendered or not path.endswith(rendered):
+        return template
+    prefix = path[: len(path) - len(rendered)]
+    values = (str(value) for value in matched.values())
+    if any(value and value in prefix for value in values):
+        return template
+    return prefix + template
 
 
 class AccessLogMiddleware:
