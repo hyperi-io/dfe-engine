@@ -237,10 +237,33 @@ def reload_source_catalogue() -> SourceCatalogue | None:
     return _HELD
 
 
-def schema_layers(
+SchemaLayer = Literal["meta_schema", "derived_schema"]
+"""A schema layer an entry's table needs. The vendor fields are optional, so never missing."""
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaLayersResolution:
+    """The schema an entry binds on this deployment, or the first layer that does not resolve."""
+
+    schema: SourceSchema | None
+    """The layers bound, or None when one does not resolve."""
+
+    missing_layer: SchemaLayer | None = None
+    """The first layer that does not resolve, or None when ``schema`` is set."""
+
+    missing_reference: str = ""
+    """That layer's reference, empty when the app manifest names no layers at all."""
+
+    @property
+    def resolves(self) -> bool:
+        """Whether every layer the table needs resolved, so the schema is bound."""
+        return self.schema is not None
+
+
+def resolve_schema_layers(
     entry: CatalogueEntry, layers: CatalogueSchemaLayers | None, settings: DFESettings
-) -> SourceSchema | None:
-    """The schema files this entry's table composes from, or None when they do not resolve.
+) -> SchemaLayersResolution:
+    """The schema files this entry's table composes from, or the first one that does not resolve.
 
     The app manifest names them, because the transform decides the shape of its
     own output: one meta schema for every entry, and per stream a derived
@@ -258,7 +281,7 @@ def schema_layers(
     so nothing unresolved is bound.
     """
     if layers is None:
-        return None
+        return SchemaLayersResolution(schema=None, missing_layer="meta_schema")
     from dfe_engine.schema.derived_registry import (
         derived_reference_root,
         resolve_derived_reference,
@@ -268,19 +291,25 @@ def schema_layers(
     configured = settings.schemas.schemas_dir
     root = Path(configured) if configured else _resolve_schemas_root()
     if root is None or not resolve_schema_yaml_path(root, layers.meta_schema).is_file():
-        return None
+        return SchemaLayersResolution(
+            schema=None, missing_layer="meta_schema", missing_reference=layers.meta_schema
+        )
 
     derived = layers.derived(entry.package, entry.data_stream)
     derived_path = resolve_derived_reference(derived, derived_reference_root(settings), root)
     if not _selects_from(derived_path, layers.meta_schema):
-        return None
+        return SchemaLayersResolution(
+            schema=None, missing_layer="derived_schema", missing_reference=derived
+        )
     additional = layers.additional(entry.package, entry.data_stream)
-    return SourceSchema(
-        meta_schema=layers.meta_schema,
-        derived_schema=derived,
-        additional_fields=(
-            additional if resolve_schema_yaml_path(root, additional).is_file() else None
-        ),
+    return SchemaLayersResolution(
+        schema=SourceSchema(
+            meta_schema=layers.meta_schema,
+            derived_schema=derived,
+            additional_fields=(
+                additional if resolve_schema_yaml_path(root, additional).is_file() else None
+            ),
+        )
     )
 
 
@@ -368,7 +397,7 @@ def write_request_for(
     return SourceWriteRequest(
         source=source_name,
         description=f"{entry.dataset} ({intake} intake), from the {catalogue.engine} catalogue",
-        schema_config=schema_layers(entry, binding.schema_layers, settings),
+        schema_config=resolve_schema_layers(entry, binding.schema_layers, settings).schema,
         transform=SourceTransform(
             engine=catalogue.engine,
             variant=binding.variant(entry.name, transform),

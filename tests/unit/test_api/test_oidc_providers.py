@@ -1450,6 +1450,7 @@ class TestProviderFieldRules:
         ("overrides", "fields"),
         [
             ({"groups": {"mode": "api"}}, ["groups.mode"]),
+            ({"groups": {"enrich_on_login": True, "mode": "api"}}, ["groups.mode"]),
             (
                 {"groups": {"api_token": "okta-ssws-token", "mode": "api"}, "type": "okta"},
                 ["groups.okta_domain"],
@@ -1469,6 +1470,7 @@ class TestProviderFieldRules:
         ],
         ids=[
             "generic-api-mode",
+            "generic-api-mode-enriching-on-login",
             "okta-api-without-domain",
             "no-issuer",
             "no-client-id",

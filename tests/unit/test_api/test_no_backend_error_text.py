@@ -41,12 +41,16 @@ from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.clickhouse.cloud import CloudServiceError
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo, GitopsUnavailableError
+from dfe_engine.kafka.contract import KafkaContractError
 from dfe_engine.kafka.topics import (
     BROKER_REFUSED,
     BROKER_UNREACHABLE,
+    KAFKA_CONFIG_REJECTED,
     TopicSpec,
     ensure_topics,
+    remove_topics,
     topic_status,
+    update_topics,
 )
 from dfe_engine.orgs.available_ids import OrgIdDiscoveryError
 from dfe_engine.query.executor import ViewExecutionError
@@ -342,6 +346,22 @@ class TestKafkaTopics:
 
         assert ensured.failed == [("acme_land", BROKER_UNREACHABLE)]
         assert status.error == BROKER_UNREACHABLE
+        assert_logged(audit_events)
+
+    def test_a_rejected_kafka_config_records_none_of_its_text(self, audit_events, monkeypatch):
+        def _reject(**_kwargs):
+            raise KafkaContractError(SENTINEL)
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", _reject)
+
+        reasons = [
+            *(reason for _, reason in ensure_topics(self._SPECS).failed),
+            *(reason for _, reason in remove_topics(["acme_land"]).failed),
+            *(reason for _, reason in update_topics(self._SPECS).failed),
+            topic_status(self._SPECS).error,
+        ]
+
+        assert reasons == [KAFKA_CONFIG_REJECTED] * 4
         assert_logged(audit_events)
 
 

@@ -85,19 +85,7 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
 | **Delete** | Removes the definition (one attributed git commit on the gitcrud backend) and the topics its deploys created; table and data preserved. To pause instead, set `state: dormant` or `disabled` |
 | **List** | All sources with status overlay (healthy, degraded, disabled) |
 
-**Topics are created on deploy.** DFE creates `<source>_land` (unless the source
-lands on the shared topic, which the landing source owns) and
-`<source>_load` when that version has a transform, rather than leaving them to
-the broker's `auto.create.topics.enable`, which yields mis-partitioned
-unmanaged topics and on Confluent Cloud non-Dedicated is not available at all.
-The step never fails a deploy: the schema is already live, and a topic that
-could not be created comes back in `topics_failed`. Width comes from
-`DFE_KAFKA_TOPIC_PARTITIONS` and `DFE_KAFKA_TOPIC_REPLICATION_FACTOR`, and the
-message size from `DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES`, the same size the
-bootstrap topics carry. A
-brokerless profile (`DFE_TRANSPORT_BUS_PRESENT=false`) skips it, since reaching
-for a broker that is not there costs every deploy the admin timeout;
-`DFE_KAFKA_ENSURE_TOPICS=false` turns it off where a broker does exist.
+**Topics are created on deploy.** DFE creates `<source>_land` (unless the source lands on the shared topic, which the landing source owns) and `<source>_load` when that version has a transform, rather than leaving them to the broker's `auto.create.topics.enable`, which yields mis-partitioned unmanaged topics and on Confluent Cloud non-Dedicated is not available at all. A source on the bus transport fails its deploy when a topic is not created: the call answers 502 `topics_not_created`, naming each topic and the broker's error code, and the source is not marked deployed, because its receiver would answer 503 for every record. The table is already in place, so the next deploy re-runs both steps. Off the bus a topic that could not be created comes back in `topics_failed` and the deploy goes ahead. Width comes from `DFE_KAFKA_TOPIC_PARTITIONS` and `DFE_KAFKA_TOPIC_REPLICATION_FACTOR`, and the message size from `DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES`, the same size the bootstrap topics carry. A brokerless profile (`DFE_TRANSPORT_BUS_PRESENT=false`) skips it, since reaching for a broker that is not there costs every deploy the admin timeout, and `DFE_KAFKA_ENSURE_TOPICS=false` turns it off where a broker does exist.
 
 **And removed on delete.** The same dial governs both ends: a deployment whose
 engine creates a source's topics also deletes that pair when the source is
@@ -114,14 +102,14 @@ Sources are the primary API entity (see
 ```text
 GET    /api/v1/sources                  # List sources (paginated)
 POST   /api/v1/sources                  # Create source (flat write body; views/transform/fetcher inline)
-GET    /api/v1/sources/catalogue        # Sources a deployed transform already handles (filter: intake, search)
+GET    /api/v1/sources/catalogue        # Sources a deployed transform already handles, each saying whether its schema layers resolve (filter: intake, search)
 POST   /api/v1/sources/from-catalogue/{entry}  # Create a source from a catalogue entry on one of its intakes
 GET    /api/v1/sources/{name}           # Get source (deployed-version accessors + state + enabled)
 GET    /api/v1/sources/{name}/versions/{version}  # One immutable version snapshot
 GET    /api/v1/sources/{name}/columns   # Composed schema columns for a version
 POST   /api/v1/sources/{name}/build     # Build DDL from a source version
 POST   /api/v1/sources/{name}/plan      # Dry-run deploy plan (not persisted)
-POST   /api/v1/sources/{name}/deploy    # Apply plan DDL to ClickHouse, set deployed_version
+POST   /api/v1/sources/{name}/deploy    # Apply plan DDL to ClickHouse, create the topics, set deployed_version (502 when a bus source's topics are not created)
 PUT    /api/v1/sources/{name}           # Update source (bumps major version when a deployed pin changes)
 PATCH  /api/v1/sources/{name}           # Set lifecycle state (state or enabled) - no new version
 DELETE /api/v1/sources/{name}           # Delete the definition

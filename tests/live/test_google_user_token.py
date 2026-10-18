@@ -117,6 +117,8 @@ async def _resolve(email: str) -> tuple[list[GroupInfo], list[dict[str, Any]]]:
         groups = await GoogleAdapter(_provider(), access_token=token).resolve_user_groups(email)
     finally:
         logger.remove(sink)
+    refusals = [(warning.get("operation"), warning.get("status")) for warning in warnings]
+    assert isinstance(groups, list), f"Cloud Identity gave no answer ({groups}): {refusals}"
     return groups, warnings
 
 
@@ -146,11 +148,9 @@ async def test_resolved_ids_are_bare_group_ids() -> None:
 async def test_outsider_resolves_none_of_the_expected_group_ids() -> None:
     expected = _expected_group_ids()
 
-    groups, warnings = await _resolve(_setting(OUTSIDER_VAR))
+    # A refused lookup answers None, which _resolve fails on, so an empty answer here is Cloud Identity's own.
+    groups, _warnings = await _resolve(_setting(OUTSIDER_VAR))
 
-    # A refused lookup also returns [], so an empty answer only counts when Cloud Identity gave one.
-    refusals = [(warning.get("operation"), warning.get("status")) for warning in warnings]
-    assert not refusals, f"Cloud Identity gave the outsider no answer: {refusals}"
     resolved = {group.id for group in groups}
     leaked = [position for position, group_id in enumerate(expected, 1) if group_id in resolved]
     assert not leaked, f"the outsider resolved expected group(s) at position(s) {leaked}"

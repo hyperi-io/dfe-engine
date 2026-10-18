@@ -182,6 +182,7 @@ async def _reload_rp_if_provider_known(request: Request, provider: str):
             build_relying_party,
             registry,
             secrets=getattr(request.app.state, "dfe_secrets", None),
+            metrics=getattr(request.app.state, "oidc_login_metrics", None),
         )
     )
     return request.app.state.oidc_rp
@@ -337,6 +338,7 @@ async def _complete_login(
                 provider,
                 email=identity.email,
                 name=identity.name,
+                keep_stored_groups=identity.groups_unresolved,
             )
         except (JitIdentityCollisionError, JitSubjectUnusableError) as exc:
             # Ordered before the catch-all: a refused identity is a 401, not a 503.
@@ -366,6 +368,8 @@ async def _complete_login(
             ) from exc
 
     account = require_local_account_enabled(request, identity.subject)
+    # Groups the directory never answered for are the account's stored ones, not none.
+    groups = account.groups if identity.groups_unresolved and account else identity.groups
 
     # From the group files rather than the IdP token, for the claim and the audit.
     live = resolve_live_grants_for_user(request, identity.subject)
@@ -384,7 +388,7 @@ async def _complete_login(
         {
             "sub": identity.subject,
             "email": identity.email,
-            "groups": identity.groups,
+            "groups": groups,
             # dfe-hyperdx gates changing what a team sees on this one value.
             hyperdx_role.CLAIM: hyperdx_role.role_claim(live.grants),
             **session_claims(account, auth_time=now),
@@ -397,7 +401,7 @@ async def _complete_login(
         "OIDC login re-minted engine token",
         provider=provider,
         subject=identity.subject,
-        group_count=len(identity.groups),
+        group_count=len(groups),
     )
 
     # The IdP code is exchanged for an engine token here, so this is the login
@@ -408,7 +412,7 @@ async def _complete_login(
         access_token=token,
         subject=identity.subject,
         email=identity.email,
-        groups=identity.groups,
+        groups=groups,
     )
     response: JSONResponse | RedirectResponse
     if return_to:

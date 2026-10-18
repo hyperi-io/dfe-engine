@@ -211,6 +211,52 @@ def describe_http_error(exc: BaseException) -> dict[str, object]:
     return fields
 
 
+def _got_no_answer(exc: BaseException) -> bool:
+    """Whether the call failed before any answer arrived: a socket, TLS or timeout failure.
+
+    Read from the classes down the cause chain. httpx and httpcore name theirs
+    ``TransportError``, and requests' are ``OSError`` subclasses. A ``ValueError`` is a
+    body that did not parse, so an answer, even where requests makes it an ``OSError``.
+    """
+    seen: set[int] = set()
+    link: BaseException | None = exc
+    while link is not None and id(link) not in seen:
+        seen.add(id(link))
+        transport = any(cls.__name__ == "TransportError" for cls in type(link).__mro__)
+        if transport or (isinstance(link, OSError) and not isinstance(link, ValueError)):
+            return True
+        link = link.__cause__ or link.__context__
+    return False
+
+
+def is_outage(exc: BaseException) -> bool:
+    """Whether a failed call means the provider could not answer, rather than that it declined.
+
+    An outage is a call that got no answer, a 429, a 5xx, or a Google token refresh
+    google-auth marks retryable. Every other failure is the provider answering: a 401 or
+    403, a missing scope, any other 4xx, or a body that is not what the call reads.
+
+    Args:
+        exc: The failure the API client raised.
+
+    Returns:
+        True for an outage.
+    """
+    status, _body = _status_and_body(exc)
+    if status is not None:
+        return status == 429 or status >= 500
+    return _is_google_retryable(exc) or _got_no_answer(exc)
+
+
+def _is_google_retryable(exc: BaseException) -> bool:
+    """Whether google-auth marks a token refresh as one a retry may clear: Google failing, not refusing."""
+    try:
+        from google.auth.exceptions import RefreshError  # type: ignore[import-untyped]
+    except ImportError:
+        return False
+    return isinstance(exc, RefreshError) and bool(exc.retryable)
+
+
 def failure_frames(exc: BaseException, *, limit: int = 10) -> list[str]:
     """Where ``exc`` was raised, innermost last, as ``file.py:line function``.
 

@@ -50,6 +50,6 @@ async def test_service_account_resolves_the_fixture_users_groups() -> None:
 
     groups = await GoogleAdapter(provider).resolve_user_groups(os.environ[USER_VAR].strip())
 
-    # The adapter fails open to [], so an empty answer is either no membership or a failed lookup.
+    assert isinstance(groups, list), f"the Directory API gave no answer ({groups})"
     assert groups, "the fixture user resolved to no groups"
     assert all(group.id for group in groups)

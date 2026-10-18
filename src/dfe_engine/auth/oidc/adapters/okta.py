@@ -29,7 +29,10 @@ from dfe_engine.auth.oidc.adapters.base import (
     DirectoryNotConfiguredError,
     DirectoryPageError,
     DirectoryPageLimitError,
+    LookupFailure,
     OIDCGroupAdapter,
+    lookup_failure,
+    missing_credential,
     same_origin_link,
 )
 from dfe_engine.auth.oidc.credential_env import (
@@ -44,12 +47,13 @@ from dfe_engine.http_errors import describe_http_error, http_failure_message
 class OktaAdapter(OIDCGroupAdapter):
     """Okta Groups API adapter."""
 
-    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | LookupFailure:
         """List groups for a user (Okta user id or login).
 
-        Fails open: a failed call, a page that is not a list of groups or a listing
-        still paging at :attr:`MAX_LOGIN_PAGES` returns ``[]`` and logs, never the
-        groups read before it.
+        A call that got no answer, a 429 or a 5xx is an outage. A domain or token not
+        configured, any other refused call, a page that is not a list of groups or a
+        listing still paging at :attr:`MAX_LOGIN_PAGES` is a refusal. Either is logged,
+        and never returns the groups read before it.
         """
         if not directory_id:
             return []
@@ -57,9 +61,12 @@ class OktaAdapter(OIDCGroupAdapter):
         base, headers = await run_blocking(self._api_base_and_headers)
         if base is None or headers is None:
             # A token that is set but never sent finds no groups, so the login says why once.
-            if base is not None and self._api_token.value:
+            if base is None:
+                return LookupFailure.REFUSED
+            if self._api_token.value:
                 self._warn_unsendable_token(operation="resolve_user_groups")
-            return []
+            token = self._api_token
+            return missing_credential(unreadable=token.unreadable, refused=token.refused)
 
         from scalo.http import AsyncHttpClient
 
@@ -79,13 +86,15 @@ class OktaAdapter(OIDCGroupAdapter):
                     url = same_origin_link(url, directory_url=base)
             raise DirectoryPageLimitError(self.MAX_LOGIN_PAGES)
         except Exception as exc:
+            failure = lookup_failure(exc)
             logger.warning(
-                "Okta resolve_user_groups failed -- default deny",
+                "Okta resolve_user_groups failed",
+                failure=failure,
                 operation="resolve_user_groups",
                 provider=self._provider.issuer,
                 **describe_http_error(exc),
             )
-            return []
+            return failure
 
     async def list_all_groups(self) -> list[GroupInfo]:
         """List all Okta groups (paginated).

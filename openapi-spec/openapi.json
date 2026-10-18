@@ -4510,7 +4510,7 @@
           "Sources"
         ],
         "summary": "List Catalogue",
-        "description": "List the sources the deployed transforms already handle.\n\nEmpty when no catalogue is mounted, which is a deployment without one rather\nthan an error: the app that ships the catalogue prints it from its own image.",
+        "description": "List the sources the deployed transforms already handle.\n\nEmpty when no catalogue is mounted, which is a deployment without one rather\nthan an error: the app that ships the catalogue prints it from its own image.\nEach entry says whether its table's schema layers resolve on this deployment,\nand names the first one that does not, so a console can hold back an entry\nthe create would refuse.",
         "operationId": "list_catalogue_api_v1_sources_catalogue_get",
         "parameters": [
           {
@@ -5161,7 +5161,7 @@
           "Sources"
         ],
         "summary": "Deploy Source Schema",
-        "description": "Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.\n\nRuns the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard\nviews) and validation errors are returned for review WITHOUT touching\nClickHouse. In deploy mode the DDL is applied: an absent table is created, and\nan existing one gains the columns it lacks and moves to the version's TTL, so a\nre-deploy changes only what differs. The engine and the type of an existing\ncolumn are left as created. A schema that failed validation is never deployed.",
+        "description": "Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.\n\nRuns the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard\nviews) and validation errors are returned for review WITHOUT touching\nClickHouse. In deploy mode the DDL is applied: an absent table is created, and\nan existing one gains the columns it lacks and moves to the version's TTL, so a\nre-deploy changes only what differs. The engine and the type of an existing\ncolumn are left as created. A schema that failed validation is never deployed.\nA source on the bus transport whose Kafka topics the broker did not create is\nnot marked deployed either, and the call answers 502 naming each topic.",
         "operationId": "deploy_source_schema_api_v1_sources__name__deploy_post",
         "parameters": [
           {
@@ -5241,6 +5241,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "A backing service refused the deploy: ClickHouse rejected the DDL, or the source rides the bus and the broker did not create its topics (code topics_not_created, naming each topic and the broker's error code)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TopicsNotCreatedErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ],
+                  "title": "Response 502 Deploy Source Schema Api V1 Sources  Name  Deploy Post"
                 }
               }
             }
@@ -25275,6 +25293,10 @@
             "title": "Source",
             "description": "Source name this entry derives; empty when the entry's own name is not a legal source name and one must be supplied on create",
             "default": ""
+          },
+          "schema_layers": {
+            "$ref": "#/components/schemas/CatalogueSchemaAvailability",
+            "description": "Whether the entry's table schema resolves here, and which layer does not"
           }
         },
         "type": "object",
@@ -25284,10 +25306,48 @@
           "data_stream",
           "dataset",
           "intakes",
-          "transforms"
+          "transforms",
+          "schema_layers"
         ],
         "title": "CatalogueEntryObject",
         "description": "One source a deployed transform already handles, as the console lists it."
+      },
+      "CatalogueSchemaAvailability": {
+        "properties": {
+          "resolves": {
+            "type": "boolean",
+            "title": "Resolves",
+            "description": "Whether the meta and derived schemas the entry's table composes from resolve here. When not, a source created from it carries no schema, and the fetcher intake refuses it (422) because a fetcher on its own topic needs one"
+          },
+          "missing_layer": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "meta_schema",
+                  "derived_schema"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Layer",
+            "description": "The first layer that does not resolve, or null when resolves is true"
+          },
+          "missing_reference": {
+            "type": "string",
+            "title": "Missing Reference",
+            "description": "That layer's schema reference, such as derived/cisco_ios/log. Empty when resolves is true, or when the app manifest names no schema layers at all",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "resolves"
+        ],
+        "title": "CatalogueSchemaAvailability",
+        "description": "Whether a catalogue entry's table schema layers resolve on this deployment."
       },
       "CatalogueSourceRequest": {
         "properties": {
@@ -39964,6 +40024,27 @@
         "title": "TopicFailure",
         "description": "One topic the broker would not do the thing to; the broker's own text is in the log."
       },
+      "TopicNotCreated": {
+        "properties": {
+          "topic": {
+            "type": "string",
+            "title": "Topic",
+            "description": "The topic name"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "Why, naming the broker's error code where it gave one and never its text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "topic",
+          "reason"
+        ],
+        "title": "TopicNotCreated",
+        "description": "One Kafka topic a source deploy needed and the broker did not create."
+      },
       "TopicRemoveResponse": {
         "properties": {
           "removed": {
@@ -40154,6 +40235,62 @@
         "type": "object",
         "title": "TopicUpdateResponse",
         "description": "Outcome of a converge pass.\n\n``refused`` is what DFE declined to do (a partition decrease, a replication\nfactor change); ``failed`` is what the broker rejected. They are different\nproblems with different fixes, so they are different lists."
+      },
+      "TopicsNotCreatedContext": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The source being deployed"
+          },
+          "topics": {
+            "items": {
+              "$ref": "#/components/schemas/TopicNotCreated"
+            },
+            "type": "array",
+            "title": "Topics",
+            "description": "Every topic the broker did not create"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "topics"
+        ],
+        "title": "TopicsNotCreatedContext",
+        "description": "Structured context for a source deploy refused because its topics were not created."
+      },
+      "TopicsNotCreatedErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "topics_not_created",
+            "title": "Code",
+            "default": "topics_not_created"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation, naming each topic and reason"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "context": {
+            "$ref": "#/components/schemas/TopicsNotCreatedContext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "context"
+        ],
+        "title": "TopicsNotCreatedErrorResponse",
+        "description": "502 when a source on the bus transport is deployed and the broker did not create its topics.\n\nThe source is not marked deployed. Its ClickHouse table is already in place,\nand a later deploy re-runs both steps."
       },
       "TransportFacts": {
         "properties": {

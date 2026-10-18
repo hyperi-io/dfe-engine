@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from confluent_kafka import KafkaError, KafkaException
 
 from dfe_engine.kafka.contract import KafkaContractError
 from dfe_engine.kafka.topics import (
@@ -243,6 +244,20 @@ class TestEnsureTopics:
         )
         assert [name for name, _ in result.failed] == ["filebeat_land", "filebeat_load"]
         assert result.failed[0][1] == BROKER_UNREACHABLE
+
+    def test_a_refusal_names_the_brokers_error_code_and_none_of_its_text(self):
+        class _Refusing(_FakeAdmin):
+            def create(self, name, **_kwargs) -> None:
+                error = KafkaError(
+                    KafkaError.POLICY_VIOLATION, "replication factor below 3 at acme"
+                )
+                raise KafkaException(error)
+
+        result = ensure_topics([TopicSpec("t", 3, 1)], admin=_Refusing())
+
+        assert result.failed == [
+            ("t", "the broker refused it (POLICY_VIOLATION); the engine log has the reason")
+        ]
 
     def test_dry_run_creates_nothing(self):
         admin = _FakeAdmin()

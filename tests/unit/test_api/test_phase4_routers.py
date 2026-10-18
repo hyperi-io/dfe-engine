@@ -240,6 +240,7 @@ class TestSchemasRouter:
             APISettings,
             AuthSettings,
             DFESettings,
+            KafkaSettings,
             LocalAuthSettings,
             SchemasSettings,
             ServicesSettings,
@@ -327,6 +328,8 @@ class TestSchemasRouter:
                 local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
             ),
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-deploy2"),
+            # No broker runs here, and a bus source's deploy fails without its topics.
+            kafka=KafkaSettings(ensure_topics=False),
         )
         app = create_app(settings)
         monkeypatch.setattr(
