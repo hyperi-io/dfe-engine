@@ -3,6 +3,16 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.47](https://github.com/hyperi-io/dfe-engine/compare/v1.22.46...v1.22.47) (2026-10-18)
+
+### Bug Fixes
+
+* reconcile retry, request-URL logs, transform pins ([#917](https://github.com/hyperi-io/dfe-engine/issues/917)) ([8dd7a59](https://github.com/hyperi-io/dfe-engine/commit/8dd7a599782d9539acba7eba474a2f2be7b1f7be))
+* render ClickHouse DDL through dfe-schemas ([#918](https://github.com/hyperi-io/dfe-engine/issues/918)) ([8e643eb](https://github.com/hyperi-io/dfe-engine/commit/8e643ebc056f3069762a9ec3c22b6db5ad742063))
+* render on scalo-service 2.14.15 ([5c362ab](https://github.com/hyperi-io/dfe-engine/commit/5c362abc7d5916765d9ca3b1da62b5bb758bb2e2))
+* throughput tiles read every source table ([#914](https://github.com/hyperi-io/dfe-engine/issues/914)) ([d82c46a](https://github.com/hyperi-io/dfe-engine/commit/d82c46a3c4abe7b35ddbf79d5ce897387b302cd7)), closes [#891](https://github.com/hyperi-io/dfe-engine/issues/891)
+* topic deploys, directory fallback, catalogue gaps ([#916](https://github.com/hyperi-io/dfe-engine/issues/916)) ([93974a8](https://github.com/hyperi-io/dfe-engine/commit/93974a85dcb71960549b7f0756ccd88311ac7050))
+
 ## [1.22.46](https://github.com/hyperi-io/dfe-engine/compare/v1.22.45...v1.22.46) (2026-10-17)
 
 ### Bug Fixes
