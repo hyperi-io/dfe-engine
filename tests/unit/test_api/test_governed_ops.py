@@ -556,3 +556,27 @@ class TestChRbacReconcileEndpoint:
         assert resp.status_code == 200, resp.text
         assert resp.json()["errors"] == errors
         assert noted == ([True] if stood_down else [])
+
+    @pytest.mark.parametrize(
+        "missing",
+        [["dfe_meta.ch_tiers", "dfe_meta.orgs"], []],
+        ids=["projection-skipped", "projection-written"],
+    )
+    def test_the_response_names_the_projection_tables_it_could_not_write(
+        self, client, admin_headers, monkeypatch, missing
+    ):
+        """The operator who ran it sees the projection was skipped, not only the log."""
+        import dfe_engine.governance.ch as ch
+        from dfe_engine.governance.ch import ReconcileResult
+
+        monkeypatch.setattr(ch, "ch_admin_client", lambda settings: object())
+        monkeypatch.setattr(
+            ch,
+            "reconcile_from_stores",
+            lambda *a, **k: ReconcileResult(projection_missing=list(missing)),
+        )
+
+        resp = client.post("/api/v1/governance/ch-rbac/reconcile", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["projection_missing"] == missing

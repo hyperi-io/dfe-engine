@@ -529,4 +529,6 @@ def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str,
         "dropped": len(result.dropped),
         "minted": result.minted,
         "errors": result.errors,
+        # The dfe_meta tables not on the server, so the projection was left unwritten.
+        "projection_missing": result.projection_missing,
     }
