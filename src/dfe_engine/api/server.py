@@ -16,16 +16,20 @@ import uvicorn
 from dfe_engine.startup_stop import main_thread_waiting
 
 
-def server_config(app: Any, *, host: str, port: int) -> uvicorn.Config:
-    """The uvicorn config the daemon serves *app* with.
+def server_config(app: Any, *, host: str, port: int, proxy_headers: bool = False) -> uvicorn.Config:
+    """The uvicorn config every server on the engine image serves its app with.
 
     uvicorn's access line is off because it writes the request path, values and all.
-    The app's ``AccessLogMiddleware`` writes the line with the route template instead.
+    The engine app's ``AccessLogMiddleware`` writes the line with the route template
+    instead.
 
     Args:
         app: The ASGI app to serve.
         host: The address to listen on.
         port: The port to listen on.
+        proxy_headers: Let uvicorn read the client and scheme from a forwarding peer.
+            Off for the engine API, whose app resolves them from
+            ``api.forwarded_allow_ips`` itself.
 
     Returns:
         The config, with uvicorn's loggers left on scalo's handlers.
@@ -38,8 +42,7 @@ def server_config(app: Any, *, host: str, port: int) -> uvicorn.Config:
         # None keeps uvicorn's loggers on scalo's handlers, which scrub tokens from its lines.
         log_config=None,
         access_log=False,
-        # Off: create_app resolves the forwarded client and scheme from api.forwarded_allow_ips.
-        proxy_headers=False,
+        proxy_headers=proxy_headers,
     )
 
 
