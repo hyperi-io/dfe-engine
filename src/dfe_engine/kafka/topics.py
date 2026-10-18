@@ -47,6 +47,7 @@ shape. Collapse onto KafkaAdmin once scalo grows that surface.
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from confluent_kafka import KafkaError, KafkaException
 from confluent_kafka.admin import (
     AdminClient,
     AlterConfigOpType,
@@ -67,15 +68,34 @@ if TYPE_CHECKING:
     from dfe_engine.settings import DFESettings
     from dfe_engine.source.models import Source
 
-# A reason recorded here reaches API callers, so the broker's own text goes to the log.
+# A reason recorded here reaches API callers, so broker and config text goes to the log.
 BROKER_UNREACHABLE = "broker unreachable; the engine log has the reason"
 BROKER_REFUSED = "the broker refused it; the engine log has the reason"
+KAFKA_CONFIG_REJECTED = "kafka config rejected; the engine log has the reason"
 
 
 def _unreachable(exc: Exception) -> str:
     """The reason recorded for a broker that could not be reached, its own text logged."""
     logger.warning("Kafka broker unreachable", error=str(exc))
     return BROKER_UNREACHABLE
+
+
+def _config_rejected(exc: Exception) -> str:
+    """The reason recorded for a kafka config the credential contract refused, its own text logged."""
+    logger.warning("Kafka config rejected", error=str(exc))
+    return KAFKA_CONFIG_REJECTED
+
+
+def _refused(exc: Exception) -> str:
+    """The reason recorded for a request the broker refused, naming its error code where it gave one.
+
+    The code is librdkafka's name for the error, such as ``POLICY_VIOLATION``, and
+    carries none of the broker's own text.
+    """
+    error = exc.args[0] if isinstance(exc, KafkaException) and exc.args else None
+    if not isinstance(error, KafkaError):
+        return BROKER_REFUSED
+    return f"the broker refused it ({error.name()}); the engine log has the reason"
 
 
 @dataclass
@@ -649,7 +669,8 @@ def ensure_topics(
     except KafkaContractError as exc:
         # A rejected credential shape is a config fault, not an unreachable broker.
         # Reporting it as the latter sends the operator to the wrong place.
-        result.failed = [(spec.name, f"kafka config rejected: {exc}") for spec in specs]
+        reason = _config_rejected(exc)
+        result.failed = [(spec.name, reason) for spec in specs]
         return result
     except Exception as exc:
         reason = _unreachable(exc)
@@ -673,7 +694,7 @@ def ensure_topics(
                 f"(partitions={spec.partitions}, rf={spec.replication_factor})"
             )
         except Exception as exc:
-            result.failed.append((spec.name, BROKER_REFUSED))
+            result.failed.append((spec.name, _refused(exc)))
             logger.error(f"Kafka topic creation failed: {spec.name} - {exc}")
 
     return result
@@ -708,7 +729,8 @@ def remove_topics(
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
     except KafkaContractError as exc:
-        result.failed = [(name, f"kafka config rejected: {exc}") for name in names]
+        reason = _config_rejected(exc)
+        result.failed = [(name, reason) for name in names]
         return result
     except Exception as exc:
         reason = _unreachable(exc)
@@ -724,7 +746,7 @@ def remove_topics(
             result.removed.append(name)
             logger.info(f"Kafka topic deleted: {name}")
         except Exception as exc:
-            result.failed.append((name, BROKER_REFUSED))
+            result.failed.append((name, _refused(exc)))
             logger.error(f"Kafka topic deletion failed: {name} - {exc}")
 
     return result
@@ -764,7 +786,7 @@ def topic_status(
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
     except KafkaContractError as exc:
-        result.error = f"kafka config rejected: {exc}"
+        result.error = _config_rejected(exc)
         return result
     except Exception as exc:
         result.error = _unreachable(exc)
@@ -834,7 +856,8 @@ def update_topics(
         admin = admin or build_admin(bootstrap=bootstrap, settings=settings)
         present = admin.list_topic_names()
     except KafkaContractError as exc:
-        result.failed = [(spec.name, f"kafka config rejected: {exc}") for spec in specs]
+        reason = _config_rejected(exc)
+        result.failed = [(spec.name, reason) for spec in specs]
         return result
     except Exception as exc:
         reason = _unreachable(exc)
@@ -851,7 +874,7 @@ def update_topics(
             # that would find that out is skipped.
             drifted = _config_drift(spec, admin.describe_config(spec.name)) if spec.config else {}
         except Exception as exc:
-            result.failed.append((spec.name, BROKER_REFUSED))
+            result.failed.append((spec.name, _refused(exc)))
             logger.error(f"Kafka topic could not be described: {spec.name} - {exc}")
             continue
 
@@ -877,7 +900,7 @@ def update_topics(
             try:
                 admin.alter_config(spec.name, drifted)
             except Exception as exc:
-                result.failed.append((spec.name, BROKER_REFUSED))
+                result.failed.append((spec.name, _refused(exc)))
                 logger.error(f"Kafka topic config alter failed: {spec.name} - {exc}")
                 continue
             logger.info(f"Kafka topic config altered: {spec.name} ({sorted(drifted)})")
@@ -890,7 +913,7 @@ def update_topics(
                 try:
                     admin.widen_partitions(spec.name, total=spec.partitions)
                 except Exception as exc:
-                    result.failed.append((spec.name, BROKER_REFUSED))
+                    result.failed.append((spec.name, _refused(exc)))
                     logger.error(f"Kafka topic partition widening failed: {spec.name} - {exc}")
                     continue
                 logger.info(

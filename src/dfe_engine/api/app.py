@@ -365,7 +365,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     from dfe_engine.auth.oidc.rp import build_relying_party
 
     app.state.oidc_rp = build_relying_party(
-        app.state.oidc_provider_registry, secrets=app.state.dfe_secrets
+        app.state.oidc_provider_registry,
+        secrets=app.state.dfe_secrets,
+        metrics=app.state.oidc_login_metrics,
     )
 
     # Bootstrap connection registry for multi-tenant ClickHouse
@@ -667,6 +669,7 @@ def create_app(
     # The routes reach these through app.state, so each set is built once per app.
     from dfe_engine.api.e2e.seed.metrics import SeedMetrics
     from dfe_engine.api.metrics import ApiMetrics
+    from dfe_engine.auth.oidc.rp import LoginMetrics
     from dfe_engine.auth.oidc.sync import SyncMetrics
     from dfe_engine.schema.metrics import SchemaMetrics
     from dfe_engine.yaml_health import YamlWriteMetrics, write_health
@@ -689,6 +692,7 @@ def create_app(
     app.state.observed_sizing = SizingCache()
     app.state.seed_metrics = SeedMetrics(metrics_manager)
     app.state.oidc_sync_metrics = SyncMetrics(metrics_manager)
+    app.state.oidc_login_metrics = LoginMetrics(metrics_manager)
     # Every store writes YAML without the app in reach, so its refusals count process-wide.
     write_health().bind(YamlWriteMetrics(metrics_manager))
 

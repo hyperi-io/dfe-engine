@@ -44,6 +44,56 @@ if TYPE_CHECKING:
 # Claims a userinfo response may fill; groups stay ID-token-only because they decide roles.
 _USERINFO_FILL_CLAIMS = ("email", "name", "preferred_username")
 
+DIRECTORY_GROUPS_FALLBACKS = "auth_oidc_login_directory_fallbacks_total"
+DIRECTORY_GROUPS_REFUSALS = "auth_oidc_login_directory_refusals_total"
+
+
+class LoginMetrics:
+    """The OIDC login's instruments, or a no-op set when no backend is wired.
+
+    Args:
+        manager: a scalo ``MetricsManager`` (anything exposing ``counter``). ``None``
+            means no backend, and every record method returns without doing anything.
+    """
+
+    def __init__(self, manager: Any | None = None) -> None:
+        """Register the counters on *manager*, or nothing when there is none."""
+        self._manager = manager
+        if manager is None:
+            return
+        self._fallbacks = manager.counter(
+            DIRECTORY_GROUPS_FALLBACKS,
+            "OIDC logins whose directory could not answer the group lookup, so the last known groups held",
+            ["provider"],
+        )
+        self._refusals = manager.counter(
+            DIRECTORY_GROUPS_REFUSALS,
+            "OIDC logins whose directory refused the group lookup, so they held no directory groups",
+            ["provider"],
+        )
+
+    def directory_fallback(self, provider: str) -> None:
+        """Record a login that kept its last known groups because the directory could not answer.
+
+        Args:
+            provider: The provider's registry name, so the label is bounded by the
+                providers configured.
+        """
+        if self._manager is None:
+            return
+        self._fallbacks.labels(provider=provider).inc()
+
+    def directory_refused(self, provider: str) -> None:
+        """Record a login judged on no directory groups because the directory refused the lookup.
+
+        Args:
+            provider: The provider's registry name, so the label is bounded by the
+                providers configured.
+        """
+        if self._manager is None:
+            return
+        self._refusals.labels(provider=provider).inc()
+
 
 class UserinfoSubjectMismatchError(ValueError):
     """The userinfo response names a different subject from the ID token."""
@@ -75,6 +125,12 @@ class NormalizedIdentity(BaseModel):
     only a ``_claim_names`` pointer); the RP fills it by calling the directory
     API. A consumer that only reads ``groups`` need not care - this is a
     diagnostic flag so the enrichment path is observable in logs and tests."""
+
+    groups_unresolved: bool = False
+    """True when the directory gave no answer and the token carried no groups.
+
+    ``groups`` is then unknown rather than empty, so the login judges an existing
+    account on the groups it already stores instead of rewriting them to none."""
 
 
 def _has_group_overage(claims: dict[str, Any], claim_name: str) -> bool:
@@ -239,10 +295,15 @@ class OidcRelyingParty:
     """
 
     def __init__(
-        self, registry: OIDCProviderRegistry, *, secrets: DfeSecrets | None = None
+        self,
+        registry: OIDCProviderRegistry,
+        *,
+        secrets: DfeSecrets | None = None,
+        metrics: LoginMetrics | None = None,
     ) -> None:
         self._oauth = OAuth()
         self._secrets = secrets
+        self._metrics = metrics if metrics is not None else LoginMetrics()
         # Only providers we actually registered (enabled + non-empty issuer).
         self._providers: dict[str, OIDCProvider] = {}
         for name, provider in registry.list():
@@ -335,10 +396,12 @@ class OidcRelyingParty:
         provider = self._providers[provider_name]  # KeyError if unknown - caller guards
         client = self._client(provider_name)
         token = await client.authorize_access_token(request)
-        return await self._identity_from_token(client=client, provider=provider, token=token)
+        return await self._identity_from_token(
+            client=client, provider=provider, provider_name=provider_name, token=token
+        )
 
     async def _identity_from_token(
-        self, *, client: Any, provider: OIDCProvider, token: dict[str, Any]
+        self, *, client: Any, provider: OIDCProvider, provider_name: str, token: dict[str, Any]
     ) -> NormalizedIdentity:
         """The identity a validated token response names, its groups read from the directory where the token carries none."""
         # Authlib parses + validates the id_token and exposes its claims here.
@@ -353,7 +416,11 @@ class OidcRelyingParty:
         # in the token at all (google-workspace, enrich_on_login).
         if needs_directory_groups(identity=identity, provider=provider):
             identity = await self._enrich_groups_from_directory(
-                provider, identity, userinfo, access_token=str(token.get("access_token") or "")
+                provider,
+                identity,
+                userinfo,
+                access_token=str(token.get("access_token") or ""),
+                provider_name=provider_name,
             )
         return identity
 
@@ -364,6 +431,7 @@ class OidcRelyingParty:
         userinfo: dict[str, Any],
         *,
         access_token: str = "",
+        provider_name: str,
     ) -> NormalizedIdentity:
         """Fetch the user's groups from the provider directory API.
 
@@ -381,24 +449,52 @@ class OidcRelyingParty:
         (Entra ``oid``), falling back to email then ``sub`` (Google's lookups
         key a user on their email).
 
-        Fails safe: on overage the fetched set is authoritative even when empty
-        (default deny); otherwise a populated token set is NOT stripped by a
-        transient empty fetch.
+        An answer is authoritative, an empty one included: the user is in no
+        directory group, whatever the token claimed. So is a refusal (a 401 or 403,
+        a missing scope or credential), which the login judges on no directory
+        groups, so a user cannot keep any by declining a consent scope. Only an
+        outage keeps the groups the signed ID token carries, counted and logged
+        once, so a directory outage never locks a user out. Where the token carries
+        none either, the identity is marked ``groups_unresolved`` and the login keeps
+        the account's stored groups.
         """
         from dfe_engine.auth.oidc.adapters import get_adapter
+        from dfe_engine.auth.oidc.adapters.base import LookupFailure, lookup_failure
 
         directory_id = str(userinfo.get("oid") or identity.email or identity.subject)
+        failure: dict[str, Any] = {}
         try:
             adapter = get_adapter(provider, access_token=access_token, secrets=self._secrets)
             fetched = await adapter.resolve_user_groups(directory_id)
-        except Exception as exc:  # pragma: no cover - defensive; adapters fail open
+        except Exception as exc:
+            fetched = lookup_failure(exc)
+            failure = describe_http_error(exc)
+        if fetched is LookupFailure.OUTAGE:
+            unresolved = not identity.groups
+            self._metrics.directory_fallback(provider_name)
             logger.warning(
-                "OIDC RP: directory group enrichment failed",
+                "OIDC RP: directory could not answer the group lookup, keeping the last known groups",
                 operation="resolve_user_groups",
+                overflow=identity.groups_overflowed,
                 provider=provider.issuer,
-                **describe_http_error(exc),
+                provider_name=provider_name,
+                claimed_group_count=len(identity.groups),
+                kept="stored_groups" if unresolved else "token_groups",
+                **failure,
             )
-            return identity
+            return identity.model_copy(update={"groups_unresolved": unresolved})
+        if isinstance(fetched, LookupFailure):
+            self._metrics.directory_refused(provider_name)
+            logger.warning(
+                "OIDC RP: directory refused the group lookup, judging the login on no directory groups",
+                operation="resolve_user_groups",
+                overflow=identity.groups_overflowed,
+                provider=provider.issuer,
+                provider_name=provider_name,
+                claimed_group_count=len(identity.groups),
+                **failure,
+            )
+            return identity.model_copy(update={"groups": []})
         group_ids = [g.id for g in fetched if g.id]
         logger.info(
             "OIDC RP: resolved groups via directory",
@@ -406,13 +502,14 @@ class OidcRelyingParty:
             overflow=identity.groups_overflowed,
             group_count=len(group_ids),
         )
-        if identity.groups_overflowed or group_ids or not identity.groups:
-            return identity.model_copy(update={"groups": group_ids})
-        return identity
+        return identity.model_copy(update={"groups": group_ids})
 
 
 def build_relying_party(
-    registry: OIDCProviderRegistry, *, secrets: DfeSecrets | None = None
+    registry: OIDCProviderRegistry,
+    *,
+    secrets: DfeSecrets | None = None,
+    metrics: LoginMetrics | None = None,
 ) -> OidcRelyingParty | None:
     """Build an RP over the registry's CURRENT contents, or None if it cannot be built.
 
@@ -429,7 +526,7 @@ def build_relying_party(
     with malformed config must not take a CRUD write down with it.
     """
     try:
-        return OidcRelyingParty(registry, secrets=secrets)
+        return OidcRelyingParty(registry, secrets=secrets, metrics=metrics)
     except Exception as exc:
         # The text can quote a provider file's values, so the log takes the class and status only.
         logger.warning("OIDC relying party unavailable", **describe_http_error(exc))

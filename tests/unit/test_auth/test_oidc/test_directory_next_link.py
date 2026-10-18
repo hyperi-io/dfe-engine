@@ -18,6 +18,7 @@ import json
 
 import pytest
 
+from dfe_engine.auth.oidc.adapters.base import LookupFailure
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from tests.unit.test_auth.test_oidc.local_graph import TENANT, LocalGraph
@@ -103,7 +104,7 @@ class TestOkta:
         groups, raised = await _outcome(okta_adapter(okta.base_url).resolve_user_groups("jane"))
 
         assert foreign_okta.authorizations == []
-        assert (groups, raised) == ([], None)
+        assert (groups, raised) == (LookupFailure.REFUSED, None)
 
     async def test_the_same_host_on_another_port_is_another_origin(self, okta: LocalOkta):
         port = int(okta.base_url.rsplit(":", 1)[1])

@@ -17,6 +17,7 @@ from dfe_engine.auth.membership import linked_groups
 from dfe_engine.auth.oidc.adapters.base import (
     DirectoryCredentialError,
     DirectoryNotConfiguredError,
+    LookupFailure,
 )
 from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
@@ -99,7 +100,8 @@ class TestOktaSecretStoreDidNotAnswer:
 
         with pytest.raises(DirectoryCredentialError):
             await adapter.list_all_groups()
-        assert await adapter.resolve_user_groups("00u1") == []
+        # The secret store not answering is an outage, so the login keeps its last groups.
+        assert await adapter.resolve_user_groups("00u1") is LookupFailure.OUTAGE
 
     async def test_the_connection_test_names_the_secret_store(self, monkeypatch):
         ok, message = await self._adapter(monkeypatch).test_connection()
@@ -162,6 +164,7 @@ class TestOktaLinksOnTheGroupName:
         finally:
             okta.stop()
 
+        assert isinstance(groups, list)
         assert [group.id for group in groups] == ["SOC Analysts"]
         assert okta.pages_requested == [0]
 
@@ -169,7 +172,7 @@ class TestOktaLinksOnTheGroupName:
 class TestOktaLoginLookupThatFailsPartWay:
     """A page Okta did not serve is no answer, never the groups read before it."""
 
-    async def test_a_page_that_is_not_a_list_returns_no_groups_and_says_why(self, audit_events):
+    async def test_a_page_that_is_not_a_list_answers_nothing_and_says_why(self, audit_events):
         okta = LocalOkta(pages=[[SOC_GROUP], [SOC_GROUP], [SOC_GROUP]])
         okta.malformed_page = 1
         okta.start()
@@ -178,7 +181,7 @@ class TestOktaLoginLookupThatFailsPartWay:
         finally:
             okta.stop()
 
-        assert groups == []
+        assert groups is LookupFailure.REFUSED
         assert okta.pages_requested == [0, 1]
         (line,) = [e for e in audit_events if e["event"].startswith("Okta resolve_user_groups")]
         assert line["error_type"] == "DirectoryPageError"
@@ -235,7 +238,7 @@ class TestOktaLoginLookupWithATokenNoHeaderCanCarry:
         ]
         leaked = [event for event in audit_events if "api-token" in json.dumps(event, default=str)]
         assert (groups, logged, leaked) == (
-            [],
+            LookupFailure.REFUSED,
             [("resolve_user_groups", OKTA_API_TOKEN_ENV, "")],
             [],
         )

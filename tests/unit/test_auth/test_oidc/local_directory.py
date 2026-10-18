@@ -14,7 +14,11 @@ protocol and the real adapter parses it. :func:`stop_directories` stops every se
 test started, and the OIDC conftest calls it after each test.
 """
 
+import functools
 from typing import Any
+
+import pytest
+import scalo.http
 
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
@@ -80,3 +84,16 @@ def stop_directories() -> None:
     """Stop every local directory service started since the last call."""
     while _running:
         _running.pop().stop()
+
+
+def fast_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every adapter's HTTP client try once and wait half a second for an answer.
+
+    The production client retries a 5xx with backoff and waits 30 s for a reply, so a
+    test of an outage would otherwise spend that long per call.
+    """
+    monkeypatch.setattr(
+        scalo.http,
+        "AsyncHttpClient",
+        functools.partial(scalo.http.AsyncHttpClient, retries=1, timeout=0.5),
+    )
