@@ -20,7 +20,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from tests.e2e.conftest import E2EConfig, must, poll_until, require
+from tests.e2e.conftest import PAYLOAD_TEXT, E2EConfig, must, poll_until, require
 
 pytestmark = pytest.mark.live
 
@@ -61,7 +61,7 @@ def test_https_ingest_lands_in_clickhouse(e2e: E2EConfig, ch_client) -> None:
     # timeout is only the stuck-dependency backstop.
     def _row():
         rows = ch_client.query(
-            "SELECT _source, _raw FROM main WHERE _raw LIKE %(m)s LIMIT 1",
+            f"SELECT _source, {PAYLOAD_TEXT} FROM main WHERE {PAYLOAD_TEXT} LIKE %(m)s LIMIT 1",
             parameters={"m": f"%{marker}%"},
         ).result_rows
         return rows[0] if rows else None
@@ -96,7 +96,7 @@ def test_ingested_data_visible_in_hyperdx(e2e: E2EConfig, ch_client) -> None:
     poll_until(
         lambda: (
             ch_client.query(
-                "SELECT 1 FROM main WHERE _raw LIKE %(m)s LIMIT 1",
+                f"SELECT 1 FROM main WHERE {PAYLOAD_TEXT} LIKE %(m)s LIMIT 1",
                 parameters={"m": f"%{marker}%"},
             ).result_rows
         ),
