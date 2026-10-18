@@ -18,9 +18,7 @@ Touch-points: review a query (QueryOptimiser), create a query from a prompt
 suggest meta-schema column promotions (SchemaOptimiser).
 """
 
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, override
 
 from pydantic import BaseModel
 
@@ -75,6 +73,7 @@ class StubQueryOptimiser(_StubExec, QueryOptimiser):
     """ai:review - echoes the query unchanged. Migrate a real optimiser."""
 
     @property
+    @override
     def name(self) -> str:
         return "stub-query-optimiser"
 
@@ -89,6 +88,7 @@ class StubQueryGenerator(_StubExec, QueryGenerator):
     """ai:create - returns an empty query echoing the prompt. Migrate a real generator."""
 
     @property
+    @override
     def name(self) -> str:
         return "stub-query-generator"
 
@@ -103,6 +103,7 @@ class StubLogParser(_StubExec, LogParser):
     """VRL generation - returns an empty parser. Migrate the real (CH _json) parser."""
 
     @property
+    @override
     def name(self) -> str:
         return "stub-log-parser"
 
@@ -119,6 +120,7 @@ class StubSchemaOptimiser(_StubExec, SchemaOptimiser):
     """Meta-schema column promotion - returns no proposals. Migrate a real optimiser."""
 
     @property
+    @override
     def name(self) -> str:
         return "stub-schema-optimiser"
 

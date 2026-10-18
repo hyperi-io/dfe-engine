@@ -7,8 +7,6 @@ the separate sensitive store must behave against a real store exactly as they do
 YAML backend.
 """
 
-from __future__ import annotations
-
 import uuid
 
 import pytest
@@ -17,6 +15,7 @@ from dfe_engine.auth.accounts import DocuStoreAccountStore
 from dfe_engine.auth.attributes import DocuStoreAttributeStore
 from dfe_engine.auth.groups import DocuStoreGroupStore
 from dfe_engine.store.documents import DocuStore
+from tests.support.present import present
 
 pytestmark = pytest.mark.integration
 
@@ -42,14 +41,14 @@ class TestDocuStoreInlineAttributes:
         store = DocuStoreAccountStore(doc, collection="accounts")
         store.create("alice", "pw-Aa1")
         store.set_attributes("alice", _NESTED)
-        assert store.get("alice").attributes == _NESTED
+        assert present(store.get("alice")).attributes == _NESTED
 
     def test_account_set_attributes_full_replace(self, doc):
         store = DocuStoreAccountStore(doc, collection="accounts")
         store.create("alice", "pw-Aa1")
         store.set_attributes("alice", {"first": 1})
         store.set_attributes("alice", {"second": 2})
-        assert store.get("alice").attributes == {"second": 2}
+        assert present(store.get("alice")).attributes == {"second": 2}
 
     def test_account_set_attributes_missing_raises(self, doc):
         store = DocuStoreAccountStore(doc, collection="accounts")
@@ -60,7 +59,7 @@ class TestDocuStoreInlineAttributes:
         store = DocuStoreGroupStore(doc, collection="groups")
         store.create("admins", roles=["admin"])
         store.set_attributes("admins", _NESTED)
-        assert store.get("admins").attributes == _NESTED
+        assert present(store.get("admins")).attributes == _NESTED
 
     def test_group_set_attributes_missing_raises(self, doc):
         store = DocuStoreGroupStore(doc, collection="groups")

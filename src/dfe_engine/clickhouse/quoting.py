@@ -48,14 +48,14 @@ _NOT_A_COLUMN_WHEN_BARE = frozenset(
 
 
 def quote_identifier(name: str) -> str:
-    """Backtick-quote a CH identifier - escape backslashes THEN backticks.
+    r"""Backtick-quote a CH identifier - escape backslashes THEN backticks.
 
     For a SINGLE name (org, role, column). A dotted ``db.table`` reference must
     quote each part separately - do not pass it whole (it would become one
     identifier literally named ``db.table``).
 
     ClickHouse honours C-style backslash escapes inside a backtick-quoted
-    identifier as it does in a string literal, so ``\\`` is doubled first, for the
+    identifier as it does in a string literal, so ``\`` is doubled first, for the
     reason :func:`quote_literal` gives: a lone one is read as an escape, which
     renders the wrong name or consumes the closing backtick.
     """
@@ -63,10 +63,10 @@ def quote_identifier(name: str) -> str:
 
 
 def quote_literal(value: str) -> str:
-    """Single-quote a CH string literal - escape backslashes THEN single quotes.
+    r"""Single-quote a CH string literal - escape backslashes THEN single quotes.
 
-    Order is load-bearing: ClickHouse honours C-style backslash escapes, so ``\\``
-    MUST be doubled before ``'`` is doubled, else a crafted ``\\' OR 1=1`` breaks
+    Order is load-bearing: ClickHouse honours C-style backslash escapes, so ``\``
+    MUST be doubled before ``'`` is doubled, else a crafted ``\' OR 1=1`` breaks
     out of a RESTRICTIVE row-policy predicate and tenant isolation fails open
     (F-ROWPOLICY-BACKSLASH, proven live on CH 25.8). Matches clickhouse-connect's
     ``escape_str``. Prefer server-side ``parameters={}`` binding where a slot exists.

@@ -282,6 +282,8 @@ ignore = [
     "E402",   # module-import-not-at-top (conditional imports)
     "T201",   # print (TEMP: needs audit)
     "RUF005", # collection-literal-concatenation
+    "D105",   # magic methods: the protocol defines what each one does
+    "D107",   # __init__: Google style documents the arguments on the class
 ]
 # vulture's own codes, which vulture reads from `# noqa` (V105: a method only a framework calls).
 external = ["V"]
@@ -299,7 +301,10 @@ convention = "google"
     "UP032",
     "C401",
     "SIM",
+    "D",      # upstream carries no docstrings
 ]
+# Each entry is a bare attribute access, which is how vulture sees a use.
+"src/vulture_whitelist.py" = ["B018"]
 "tests/**/*.py" = [
     "S101",
     "S106",  # test fixtures use hardcoded passwords
@@ -317,6 +322,31 @@ convention = "google"
 # Tests import shared helpers as `common.*` from tests/, the path pytest's pythonpath adds.
 extra-paths = ["tests"]
 
+# Vendored Apache-2.0 files stay as upstream wrote them (vendor/NOTICE lists every local
+# edit): colorama is an optional import, a section always exists before add_row, and
+# CPython's ioctl takes the str buffer typeshed refuses.
+[[tool.ty.overrides]]
+include = ["src/dfe_engine/cli/auto/vendor/**"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+unresolved-attribute = "ignore"
+no-matching-overload = "ignore"
+
+# hyperi-ci runs `vulture src/`, so src/vulture_whitelist.py is scanned with the package.
+[tool.vulture]
+# Frameworks call these through registration, which leaves no caller in the source.
+ignore_decorators = [
+    "@router.*",  # FastAPI routes
+    "@app.*",  # FastAPI app routes and exception handlers
+    "@*.command",  # click and typer commands
+    "@field_validator",  # pydantic
+    "@model_validator",
+    "@field_serializer",
+    "@register_adapter",  # query datasource adapters, looked up by name
+]
+# pydantic reads model_config off the class.
+ignore_names = ["model_config"]
 
 [project.scripts]
 # Order matters: hyperi-ci's generate-artefacts build step invokes the FIRST

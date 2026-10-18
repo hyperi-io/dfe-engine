@@ -34,6 +34,7 @@ from dfe_engine.sampling.kafka_reader import build_source
 from dfe_engine.sampling.service import _reservoir
 from dfe_engine.settings import ClickHouseSettings, KafkaSettings, SamplerSettings
 from dfe_engine.source.registry import SourceNotFoundError
+from tests.support.present import present
 
 
 class _Result:
@@ -262,7 +263,7 @@ needs_clickhouse_local = pytest.mark.skipif(
 def _clickhouse_names(query: str) -> list[str]:
     """Run ``query`` in clickhouse-local and return the names it prints, one per line."""
     result = subprocess.run(
-        [CLICKHOUSE_LOCAL, "--query", query],
+        [present(CLICKHOUSE_LOCAL), "--query", query],
         capture_output=True,
         text=True,
         encoding="utf-8",

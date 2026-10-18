@@ -14,8 +14,6 @@ Per-org ClickHouse isolation moved to governance.ch.ChRbacReconciler (row
 policies on _org_id), so the lifecycle manager no longer touches ClickHouse.
 """
 
-from __future__ import annotations
-
 import json
 
 import httpx
@@ -129,7 +127,7 @@ async def test_create_org_leaves_the_team_without_a_connection(registry):
     leaves the first user with no working connection and no sources (#312, #206).
     """
     fork = FakeFork()
-    manager = OrgLifecycleManager(registry, hyperdx_client=fork)
+    manager = OrgLifecycleManager(registry, hyperdx_client=fork)  # ty: ignore[invalid-argument-type]  # a stand-in fork carrying only the calls this path makes
 
     org = await manager.create_org("acme", org_ids=["acme"], admin_id="admin")
 
@@ -139,7 +137,7 @@ async def test_create_org_leaves_the_team_without_a_connection(registry):
 
 @pytest.mark.asyncio
 async def test_a_refused_team_lookup_is_audited_by_class_and_status(registry, audit_events):
-    manager = OrgLifecycleManager(registry, hyperdx_client=RefusingFork())
+    manager = OrgLifecycleManager(registry, hyperdx_client=RefusingFork())  # ty: ignore[invalid-argument-type]  # a stand-in fork carrying only the calls this path makes
 
     org = await manager.create_org("acme", admin_id="admin")
 
@@ -156,7 +154,7 @@ async def test_a_refused_team_lookup_is_audited_by_class_and_status(registry, au
 
 @pytest.mark.asyncio
 async def test_an_answer_with_no_team_is_audited_as_such(registry, audit_events):
-    manager = OrgLifecycleManager(registry, hyperdx_client=TeamlessFork())
+    manager = OrgLifecycleManager(registry, hyperdx_client=TeamlessFork())  # ty: ignore[invalid-argument-type]  # a stand-in fork carrying only the calls this path makes
 
     await manager.create_org("acme", admin_id="admin")
 

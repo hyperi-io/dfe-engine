@@ -30,8 +30,6 @@ the version's digest, and publishing different content over an existing version 
 refused. Metadata and tags are mutable and never produce a version.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -69,6 +67,8 @@ _WRITE = Depends(require_action(scopes_dict["library_write"]))
 
 
 class KindModel(BaseModel):
+    """An artefact kind the app manifest declares."""
+
     name: str
     language: str
     suffixes: list[str]
@@ -76,6 +76,8 @@ class KindModel(BaseModel):
 
 
 class ValidationModel(BaseModel):
+    """What the validation backend said about the content written."""
+
     status: str = Field(
         description=(
             "'valid' or 'invalid' when a backend answered, 'unavailable' when none "
@@ -88,6 +90,8 @@ class ValidationModel(BaseModel):
 
 
 class WriteResult(BaseModel):
+    """The outcome of a library write: its commit, version and validation."""
+
     changed: bool
     commit_sha: str | None = None
     auto_merged: bool = False
@@ -100,6 +104,8 @@ class WriteResult(BaseModel):
 
 
 class ArtifactModel(BaseModel):
+    """A library artefact, with its versions and tags."""
+
     name: str
     kind: str
     state: str
@@ -115,6 +121,8 @@ class ArtifactModel(BaseModel):
 
 
 class VersionSummary(BaseModel):
+    """One published version of an artefact."""
+
     version: int
     digest: str
     size_bytes: int
@@ -125,12 +133,16 @@ class VersionSummary(BaseModel):
 
 
 class VersionDetail(VersionSummary):
+    """One version of an artefact, with its content."""
+
     kind: str
     encoding: str
     content: str
 
 
 class CreateArtifactRequest(BaseModel):
+    """Body for creating an artefact, optionally publishing version 1."""
+
     name: str
     kind: str = Field(description="A kind declared in the app manifest.")
     group: str = Field(default="", description="Optional namespace, e.g. 'network'.")
@@ -144,6 +156,8 @@ class CreateArtifactRequest(BaseModel):
 
 
 class PublishVersionRequest(BaseModel):
+    """Body for publishing a new version of an artefact."""
+
     content: str
     description: str = Field(default="", description="Fixed to this version at publish.")
     message: str = ""
@@ -154,24 +168,34 @@ class PublishVersionRequest(BaseModel):
 
 
 class PatchArtifactRequest(BaseModel):
+    """Body for changing an artefact's metadata, where an omitted field keeps its value."""
+
     description: str | None = None
     labels: dict[str, str] | None = None
     group: str | None = None
 
 
 class StateRequest(BaseModel):
+    """Body for changing an artefact's lifecycle state."""
+
     state: str = Field(description="enabled | disabled | deprecated")
 
 
 class RollbackRequest(BaseModel):
+    """Body for pointing an artefact back at an earlier version."""
+
     version: int
 
 
 class TagRequest(BaseModel):
+    """Body for pointing a tag at a version."""
+
     version: int
 
 
 class UsageModel(BaseModel):
+    """One file that links an artefact."""
+
     service: str
     instance: str
     file_set: str

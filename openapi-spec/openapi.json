@@ -16955,7 +16955,7 @@
           "Governed Ops: Helm Vars"
         ],
         "summary": "Set Var",
-        "description": "Set a helm var. Direct commit in dev/solo; routed to a review PR (or 409\n'review_required') in production+team. 409 on stale If-Match; 403 if protected.",
+        "description": "Set a helm var.\n\nA direct commit in dev or solo, and routed to a review PR (or 409\n'review_required') in production+team. 409 on a stale If-Match, 403 if protected.",
         "operationId": "set_var_api_v1_helm_files__name__vars__path__put",
         "parameters": [
           {
@@ -17056,7 +17056,7 @@
           "Governed Ops: Helm Vars"
         ],
         "summary": "Delete Var",
-        "description": "Revert a helm var to its chart default. Routed like set_var (PR in prod+team);\n403 if protected, since reverting a locked var changes it as surely as setting it.",
+        "description": "Revert a helm var to its chart default.\n\nRouted like set_var (a PR in prod+team). 403 if protected, since reverting a\nlocked var changes it as surely as setting it.",
         "operationId": "delete_var_api_v1_helm_files__name__vars__path__delete",
         "parameters": [
           {
@@ -19163,6 +19163,7 @@
           "content": {
             "application/json": {
               "schema": {
+                "description": "Body for writing one file.",
                 "properties": {
                   "content": {
                     "title": "Content",
@@ -22395,6 +22396,7 @@
           "Rules: Authoring"
         ],
         "summary": "Ai Review",
+        "description": "Review rule SQL with the registered query optimiser module.",
         "operationId": "ai_review_api_v1_authoring_ai_review_post",
         "requestBody": {
           "content": {
@@ -22461,6 +22463,7 @@
           "Rules: Authoring"
         ],
         "summary": "Ai Create",
+        "description": "Draft a query from a prompt with the registered query generator module.",
         "operationId": "ai_create_api_v1_authoring_ai_create_post",
         "requestBody": {
           "content": {
@@ -22527,6 +22530,7 @@
           "Rules: Authoring"
         ],
         "summary": "Ai Generate Vrl",
+        "description": "Draft VRL from log samples with the registered log parser module.",
         "operationId": "ai_generate_vrl_api_v1_authoring_ai_generate_vrl_post",
         "requestBody": {
           "content": {
@@ -22593,6 +22597,7 @@
           "Rules: Authoring"
         ],
         "summary": "Ai Suggest Schema",
+        "description": "Suggest meta-schema changes with the registered schema optimiser module.",
         "operationId": "ai_suggest_schema_api_v1_authoring_ai_suggest_schema_post",
         "requestBody": {
           "content": {
@@ -22950,6 +22955,12 @@
             "in": "path",
             "required": true,
             "schema": {
+              "enum": [
+                "system",
+                "org",
+                "group",
+                "user"
+              ],
               "type": "string",
               "title": "Scope"
             }
@@ -23043,6 +23054,12 @@
             "in": "path",
             "required": true,
             "schema": {
+              "enum": [
+                "system",
+                "org",
+                "group",
+                "user"
+              ],
               "type": "string",
               "title": "Scope"
             }
@@ -23137,6 +23154,12 @@
             "in": "path",
             "required": true,
             "schema": {
+              "enum": [
+                "system",
+                "org",
+                "group",
+                "user"
+              ],
               "type": "string",
               "title": "Scope"
             }
@@ -23249,6 +23272,12 @@
             "in": "path",
             "required": true,
             "schema": {
+              "enum": [
+                "system",
+                "org",
+                "group",
+                "user"
+              ],
               "type": "string",
               "title": "Scope"
             }
@@ -23780,7 +23809,8 @@
         "required": [
           "username"
         ],
-        "title": "AddMemberRequest"
+        "title": "AddMemberRequest",
+        "description": "Body for adding one account to a group."
       },
       "AdminLinkResponse": {
         "properties": {
@@ -23871,7 +23901,8 @@
           "name",
           "url"
         ],
-        "title": "AlertDestination"
+        "title": "AlertDestination",
+        "description": "An alert destination, with its URL masked on every read."
       },
       "AlertDestinationSummary": {
         "properties": {
@@ -23900,7 +23931,8 @@
         "required": [
           "name"
         ],
-        "title": "AlertDestinationSummary"
+        "title": "AlertDestinationSummary",
+        "description": "An alert destination in a listing, without its URL."
       },
       "AppConfigResponse": {
         "properties": {
@@ -24146,7 +24178,8 @@
           "has_compiled_routing",
           "file_sets"
         ],
-        "title": "AppSummary"
+        "title": "AppSummary",
+        "description": "One deployed app instance in a listing."
       },
       "ApplyDefaultsPin": {
         "properties": {
@@ -24323,7 +24356,8 @@
           "kind",
           "state"
         ],
-        "title": "ArtifactModel"
+        "title": "ArtifactModel",
+        "description": "A library artefact, with its versions and tags."
       },
       "AuthKind": {
         "type": "string",
@@ -24346,7 +24380,8 @@
         "required": [
           "enabled"
         ],
-        "title": "AutoMergeRequest"
+        "title": "AutoMergeRequest",
+        "description": "Body for turning auto-merge on or off."
       },
       "AutoMergeStatus": {
         "properties": {
@@ -24374,7 +24409,8 @@
           "allowed",
           "reason"
         ],
-        "title": "AutoMergeStatus"
+        "title": "AutoMergeStatus",
+        "description": "The auto-merge flag as stored, as in effect, and whether the posture allows it."
       },
       "AvailableOrgIdsResponse": {
         "properties": {
@@ -24396,7 +24432,8 @@
         "required": [
           "database"
         ],
-        "title": "AvailableOrgIdsResponse"
+        "title": "AvailableOrgIdsResponse",
+        "description": "The ``_org_id`` values found in the data database."
       },
       "BackingFacts": {
         "properties": {
@@ -25228,7 +25265,8 @@
           "file_sets",
           "instances"
         ],
-        "title": "CatalogueEntry"
+        "title": "CatalogueEntry",
+        "description": "One app the catalogue offers."
       },
       "CatalogueEntryObject": {
         "properties": {
@@ -25673,7 +25711,8 @@
           }
         },
         "type": "object",
-        "title": "ClientConfig"
+        "title": "ClientConfig",
+        "description": "Settings the UI reads when it starts."
       },
       "CloudServiceStateResponse": {
         "properties": {
@@ -25773,7 +25812,8 @@
           "language",
           "files"
         ],
-        "title": "CompileRequest"
+        "title": "CompileRequest",
+        "description": "Body for compiling transform source to WASM."
       },
       "CompileResponse": {
         "properties": {
@@ -25791,7 +25831,8 @@
           "wasm_base64",
           "wasm_bytes"
         ],
-        "title": "CompileResponse"
+        "title": "CompileResponse",
+        "description": "The compiled WASM module, base64-encoded."
       },
       "ConfigFieldModel": {
         "properties": {
@@ -25906,7 +25947,8 @@
           "author",
           "date"
         ],
-        "title": "ConfigHistoryEntry"
+        "title": "ConfigHistoryEntry",
+        "description": "One commit that changed a service config."
       },
       "ConfigWriteRequest": {
         "properties": {
@@ -26024,7 +26066,8 @@
         "required": [
           "target_instance"
         ],
-        "title": "CopyFilesRequest"
+        "title": "CopyFilesRequest",
+        "description": "Body for copying files to another instance."
       },
       "CopyFilesResult": {
         "properties": {
@@ -26113,7 +26156,8 @@
         "required": [
           "changed"
         ],
-        "title": "CopyFilesResult"
+        "title": "CopyFilesResult",
+        "description": "The write result, with the files copied and the files skipped."
       },
       "CoreResourceConflictContext": {
         "properties": {
@@ -26345,7 +26389,8 @@
         "required": [
           "name"
         ],
-        "title": "CreateAPIKeyRequest"
+        "title": "CreateAPIKeyRequest",
+        "description": "Body for creating an API key."
       },
       "CreateAccountRequest": {
         "properties": {
@@ -26455,7 +26500,8 @@
           "name",
           "kind"
         ],
-        "title": "CreateArtifactRequest"
+        "title": "CreateArtifactRequest",
+        "description": "Body for creating an artefact, optionally publishing version 1."
       },
       "CreateGroupRequest": {
         "properties": {
@@ -26512,7 +26558,8 @@
           "name",
           "roles"
         ],
-        "title": "CreateGroupRequest"
+        "title": "CreateGroupRequest",
+        "description": "Body for creating a group."
       },
       "CreateInstanceRequest": {
         "properties": {
@@ -26531,7 +26578,8 @@
         "required": [
           "instance"
         ],
-        "title": "CreateInstanceRequest"
+        "title": "CreateInstanceRequest",
+        "description": "Body for creating an app instance with initial helm values."
       },
       "CreateOrgRequest": {
         "properties": {
@@ -26561,7 +26609,8 @@
         "required": [
           "name"
         ],
-        "title": "CreateOrgRequest"
+        "title": "CreateOrgRequest",
+        "description": "Body for creating an org."
       },
       "CreateProviderRequest": {
         "properties": {
@@ -26649,7 +26698,8 @@
           "name",
           "type"
         ],
-        "title": "CreateProviderRequest"
+        "title": "CreateProviderRequest",
+        "description": "Body for registering an OIDC provider."
       },
       "CreateRequest": {
         "properties": {
@@ -26681,7 +26731,8 @@
         "required": [
           "prompt"
         ],
-        "title": "CreateRequest"
+        "title": "CreateRequest",
+        "description": "Body for an AI query drafted from a prompt."
       },
       "CreateRoleRequest": {
         "properties": {
@@ -26719,7 +26770,8 @@
           "name",
           "permissions"
         ],
-        "title": "CreateRoleRequest"
+        "title": "CreateRoleRequest",
+        "description": "Body for creating a custom role."
       },
       "CustomEnvModel": {
         "properties": {
@@ -27272,7 +27324,8 @@
           "deleted",
           "orphaned_groups"
         ],
-        "title": "DetachResponse"
+        "title": "DetachResponse",
+        "description": "What detaching a provider deleted, orphaned and disabled."
       },
       "DisabledAccountInfo": {
         "properties": {
@@ -27538,7 +27591,8 @@
           "key",
           "value"
         ],
-        "title": "EmittedRecord"
+        "title": "EmittedRecord",
+        "description": "One record a transform emitted."
       },
       "ErrorResponse": {
         "properties": {
@@ -27753,7 +27807,8 @@
         "required": [
           "standard"
         ],
-        "title": "FieldMapSummary"
+        "title": "FieldMapSummary",
+        "description": "A field map in a listing."
       },
       "FieldMapping": {
         "properties": {
@@ -27837,7 +27892,8 @@
           "size_bytes",
           "content"
         ],
-        "title": "FileDetail"
+        "title": "FileDetail",
+        "description": "One file with its content and etag."
       },
       "FileSetSummary": {
         "properties": {
@@ -27873,7 +27929,8 @@
           "reload",
           "directory_setting"
         ],
-        "title": "FileSetSummary"
+        "title": "FileSetSummary",
+        "description": "One file set an app consumes."
       },
       "FileSummary": {
         "properties": {
@@ -27896,7 +27953,8 @@
           "language",
           "size_bytes"
         ],
-        "title": "FileSummary"
+        "title": "FileSummary",
+        "description": "One file in an instance's file set."
       },
       "FilterTier": {
         "type": "string",
@@ -28014,7 +28072,8 @@
         "required": [
           "query"
         ],
-        "title": "FromHyperdxRequest"
+        "title": "FromHyperdxRequest",
+        "description": "Body for turning a HyperDX query into rule SQL."
       },
       "GenerateRequest": {
         "properties": {
@@ -28357,7 +28416,8 @@
           }
         },
         "type": "object",
-        "title": "GroupResolutionRequest"
+        "title": "GroupResolutionRequest",
+        "description": "How a provider's groups resolve: by hand, from a token claim, or from its API."
       },
       "GroupResolutionResponse": {
         "properties": {
@@ -28435,7 +28495,8 @@
           "api_token_path",
           "okta_domain"
         ],
-        "title": "GroupResolutionResponse"
+        "title": "GroupResolutionResponse",
+        "description": "A provider's group resolution, with secret paths in place of values."
       },
       "GroupResponse": {
         "properties": {
@@ -28484,7 +28545,8 @@
           "source_id",
           "source_provider"
         ],
-        "title": "GroupResponse"
+        "title": "GroupResponse",
+        "description": "A group as the API returns it."
       },
       "GroupedLogResponse": {
         "properties": {
@@ -28500,7 +28562,8 @@
         "required": [
           "groups"
         ],
-        "title": "GroupedLogResponse"
+        "title": "GroupedLogResponse",
+        "description": "The audit log grouped by key."
       },
       "HTTPValidationError": {
         "properties": {
@@ -28547,7 +28610,8 @@
           "timestamp",
           "state"
         ],
-        "title": "HistoryEntry"
+        "title": "HistoryEntry",
+        "description": "One commit that changed an instance."
       },
       "HuntCreateRequest": {
         "properties": {
@@ -28684,7 +28748,8 @@
           "rules",
           "name"
         ],
-        "title": "HuntCreateRequest"
+        "title": "HuntCreateRequest",
+        "description": "Body for creating a hunt under a new name."
       },
       "HuntDetailResponse": {
         "properties": {
@@ -29202,7 +29267,8 @@
           }
         },
         "type": "object",
-        "title": "HyperDXConfig"
+        "title": "HyperDXConfig",
+        "description": "Whether the UI links to HyperDX, and where."
       },
       "HyperDXConnection": {
         "properties": {
@@ -29634,7 +29700,8 @@
           "suffixes",
           "encoding"
         ],
-        "title": "KindModel"
+        "title": "KindModel",
+        "description": "An artefact kind the app manifest declares."
       },
       "LifecycleRequest": {
         "properties": {
@@ -29646,7 +29713,8 @@
         "required": [
           "state"
         ],
-        "title": "LifecycleRequest"
+        "title": "LifecycleRequest",
+        "description": "Body for setting a service's lifecycle state."
       },
       "LifecycleResponse": {
         "properties": {
@@ -29685,7 +29753,8 @@
           "state",
           "changed"
         ],
-        "title": "LifecycleResponse"
+        "title": "LifecycleResponse",
+        "description": "The outcome of a lifecycle change, which applies once Argo reconciles it."
       },
       "LifecycleState": {
         "type": "string",
@@ -29728,7 +29797,8 @@
           "version",
           "digest"
         ],
-        "title": "LinkModel"
+        "title": "LinkModel",
+        "description": "A file's link to a library artefact version."
       },
       "LinkRequest": {
         "properties": {
@@ -29765,7 +29835,8 @@
           "name",
           "artifact"
         ],
-        "title": "LinkRequest"
+        "title": "LinkRequest",
+        "description": "Body for linking a library artefact into a file."
       },
       "LinkResult": {
         "properties": {
@@ -29850,7 +29921,8 @@
         "required": [
           "changed"
         ],
-        "title": "LinkResult"
+        "title": "LinkResult",
+        "description": "The write result, with the link it made."
       },
       "LinkStatusModel": {
         "properties": {
@@ -29919,7 +29991,8 @@
           "drift",
           "outdated"
         ],
-        "title": "LinkStatusModel"
+        "title": "LinkStatusModel",
+        "description": "A link, with how the content in the file set compares to the artefact."
       },
       "LogEntryModel": {
         "properties": {
@@ -29998,7 +30071,8 @@
           "conforming",
           "state"
         ],
-        "title": "LogEntryModel"
+        "title": "LogEntryModel",
+        "description": "One commit in the deploy repo's audit log."
       },
       "LogGroup": {
         "properties": {
@@ -30020,7 +30094,8 @@
           "count",
           "latest"
         ],
-        "title": "LogGroup"
+        "title": "LogGroup",
+        "description": "Audit log entries sharing a key, with the latest of them."
       },
       "LogResponse": {
         "properties": {
@@ -30047,7 +30122,8 @@
         "required": [
           "entries"
         ],
-        "title": "LogResponse"
+        "title": "LogResponse",
+        "description": "A page of the audit log, with the cursor for the next page."
       },
       "LoginConfigCheck": {
         "properties": {
@@ -30113,7 +30189,8 @@
           "username",
           "password"
         ],
-        "title": "LoginRequest"
+        "title": "LoginRequest",
+        "description": "Body for a local login."
       },
       "LogsourceMatch": {
         "properties": {
@@ -30770,7 +30847,8 @@
           "gauges",
           "rates"
         ],
-        "title": "MetricsResponse"
+        "title": "MetricsResponse",
+        "description": "An instance's current gauges and rates over a window."
       },
       "NonEmptyDict_str_SchemaVersionCreate_": {
         "additionalProperties": {
@@ -31293,7 +31371,8 @@
           "created_at",
           "updated_at"
         ],
-        "title": "OrgResponse"
+        "title": "OrgResponse",
+        "description": "An org as the API returns it."
       },
       "OrphanedGroupInfo": {
         "properties": {
@@ -31324,7 +31403,8 @@
           "roles",
           "member_count"
         ],
-        "title": "OrphanedGroupInfo"
+        "title": "OrphanedGroupInfo",
+        "description": "A group its provider no longer backs."
       },
       "PackInfo": {
         "properties": {
@@ -31392,6 +31472,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31404,6 +31485,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -31416,6 +31498,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -31458,6 +31541,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31470,6 +31554,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -31482,6 +31567,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -31524,6 +31610,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31536,6 +31623,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -31548,6 +31636,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -31590,6 +31679,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31602,6 +31692,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -31614,6 +31705,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -31656,6 +31748,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31668,6 +31761,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -31680,6 +31774,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -31722,6 +31817,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31734,6 +31830,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -31746,6 +31843,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -31788,6 +31886,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31800,6 +31899,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -31812,6 +31912,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -31854,6 +31955,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31866,6 +31968,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -31878,6 +31981,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -31920,6 +32024,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31932,6 +32037,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -31944,6 +32050,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -31986,6 +32093,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -31998,6 +32106,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32010,6 +32119,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32052,6 +32162,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32064,6 +32175,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32076,6 +32188,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32118,6 +32231,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32130,6 +32244,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32142,6 +32257,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32184,6 +32300,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32196,6 +32313,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32208,6 +32326,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32250,6 +32369,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32262,6 +32382,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32274,6 +32395,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32316,6 +32438,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32328,6 +32451,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32340,6 +32464,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32382,6 +32507,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32394,6 +32520,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32406,6 +32533,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32448,6 +32576,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32460,6 +32589,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32472,6 +32602,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32514,6 +32645,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32526,6 +32658,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32538,6 +32671,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32584,6 +32718,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32596,6 +32731,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32608,6 +32744,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32656,6 +32793,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -32668,6 +32806,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -32680,6 +32819,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -32814,7 +32954,8 @@
           }
         },
         "type": "object",
-        "title": "PatchArtifactRequest"
+        "title": "PatchArtifactRequest",
+        "description": "Body for changing an artefact's metadata, where an omitted field keeps its value."
       },
       "PathTree_SchemaSummaryObject_": {
         "properties": {
@@ -32884,7 +33025,8 @@
           "roles",
           "permissions"
         ],
-        "title": "PermissionsResponse"
+        "title": "PermissionsResponse",
+        "description": "The calling user's roles and the permissions they resolve to."
       },
       "PipelineBuildRequest": {
         "properties": {
@@ -33658,7 +33800,8 @@
         "required": [
           "content"
         ],
-        "title": "PublishVersionRequest"
+        "title": "PublishVersionRequest",
+        "description": "Body for publishing a new version of an artefact."
       },
       "QueryOptions": {
         "properties": {
@@ -34000,7 +34143,8 @@
         "required": [
           "changed"
         ],
-        "title": "RelinkResult"
+        "title": "RelinkResult",
+        "description": "The write result, with the links it moved."
       },
       "ResetPasswordRequest": {
         "properties": {
@@ -34015,7 +34159,8 @@
         "required": [
           "new_password"
         ],
-        "title": "ResetPasswordRequest"
+        "title": "ResetPasswordRequest",
+        "description": "Body for setting an account's new password."
       },
       "ResetPasswordResponse": {
         "properties": {
@@ -34077,7 +34222,8 @@
           "p95",
           "samples"
         ],
-        "title": "ResourceBucketModel"
+        "title": "ResourceBucketModel",
+        "description": "One time bucket of a metric across an instance's pods."
       },
       "ResourceReference": {
         "properties": {
@@ -34130,7 +34276,8 @@
           "bucket_seconds",
           "buckets"
         ],
-        "title": "ResourceSeriesResponse"
+        "title": "ResourceSeriesResponse",
+        "description": "An instance's resource metrics over a window, in time buckets."
       },
       "RetentionReconcileSummary": {
         "properties": {
@@ -34315,7 +34462,8 @@
         "required": [
           "sql"
         ],
-        "title": "ReviewRequest"
+        "title": "ReviewRequest",
+        "description": "Body for an AI review of rule SQL."
       },
       "RoleResponse": {
         "properties": {
@@ -34352,7 +34500,8 @@
           "scoped",
           "resource_type"
         ],
-        "title": "RoleResponse"
+        "title": "RoleResponse",
+        "description": "A role as the API returns it."
       },
       "RollbackRequest": {
         "properties": {
@@ -34365,7 +34514,8 @@
         "required": [
           "version"
         ],
-        "title": "RollbackRequest"
+        "title": "RollbackRequest",
+        "description": "Body for pointing an artefact back at an earlier version."
       },
       "RotatePasswordRequest": {
         "properties": {
@@ -34600,7 +34750,8 @@
         "required": [
           "rule"
         ],
-        "title": "RuleCreateResponse"
+        "title": "RuleCreateResponse",
+        "description": "The created rule, what sanitising changed, and what the rule is estimated to cost."
       },
       "RuleEditRequest": {
         "properties": {
@@ -34723,7 +34874,8 @@
           "id",
           "display_name"
         ],
-        "title": "RuleFromHyperdxResponse"
+        "title": "RuleFromHyperdxResponse",
+        "description": "The rule created from a HyperDX query."
       },
       "RuleResponse": {
         "properties": {
@@ -34832,7 +34984,8 @@
           "original_sql",
           "created_at"
         ],
-        "title": "RuleResponse"
+        "title": "RuleResponse",
+        "description": "A detection rule as the API returns it."
       },
       "RuleSummary": {
         "properties": {
@@ -34905,7 +35058,8 @@
           "severity",
           "created_at"
         ],
-        "title": "RuleSummary"
+        "title": "RuleSummary",
+        "description": "A detection rule in a listing."
       },
       "RuleUpdateRequest": {
         "properties": {
@@ -35043,7 +35197,8 @@
         "required": [
           "value"
         ],
-        "title": "SampleRecord"
+        "title": "SampleRecord",
+        "description": "One input record for a transform test."
       },
       "SampleRequest": {
         "properties": {
@@ -35437,7 +35592,8 @@
         "required": [
           "table"
         ],
-        "title": "ScaffoldRequest"
+        "title": "ScaffoldRequest",
+        "description": "Body for a starter SELECT over a table's columns."
       },
       "ScalingRequest": {
         "properties": {
@@ -35532,7 +35688,8 @@
           }
         },
         "type": "object",
-        "title": "ScalingRequest"
+        "title": "ScalingRequest",
+        "description": "Body for setting an instance's scaling dials."
       },
       "ScalingResponse": {
         "properties": {
@@ -35655,7 +35812,8 @@
           "supported",
           "deploy_target"
         ],
-        "title": "ScalingResponse"
+        "title": "ScalingResponse",
+        "description": "An instance's scaling dials, or why it cannot be scaled."
       },
       "SchemaColumn-Input": {
         "properties": {
@@ -36380,7 +36538,8 @@
         "required": [
           "source_name"
         ],
-        "title": "SchemaSuggestRequest"
+        "title": "SchemaSuggestRequest",
+        "description": "Body for AI meta-schema suggestions for a source."
       },
       "SchemaSummaryObject": {
         "properties": {
@@ -36627,7 +36786,8 @@
           "service",
           "instance"
         ],
-        "title": "ServiceConfigSummary"
+        "title": "ServiceConfigSummary",
+        "description": "One service config instance in a listing."
       },
       "ServiceInfo": {
         "properties": {
@@ -36650,7 +36810,8 @@
           "tier",
           "state"
         ],
-        "title": "ServiceInfo"
+        "title": "ServiceInfo",
+        "description": "A service, its tier and its lifecycle state."
       },
       "SetVarRequest": {
         "properties": {
@@ -36662,7 +36823,8 @@
         "required": [
           "value"
         ],
-        "title": "SetVarRequest"
+        "title": "SetVarRequest",
+        "description": "Body for setting one helm var."
       },
       "SettingsChange": {
         "properties": {
@@ -38312,6 +38474,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -38324,6 +38487,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -38336,6 +38500,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -39146,7 +39311,8 @@
         "required": [
           "message"
         ],
-        "title": "SqlValidationError"
+        "title": "SqlValidationError",
+        "description": "One error in rule SQL, with where it is and a suggested fix."
       },
       "SqlValidationRequest": {
         "properties": {
@@ -39160,7 +39326,8 @@
         "required": [
           "sql"
         ],
-        "title": "SqlValidationRequest"
+        "title": "SqlValidationRequest",
+        "description": "Body for validating a rule's SQL."
       },
       "SqlValidationResponse": {
         "properties": {
@@ -39180,7 +39347,8 @@
         "required": [
           "valid"
         ],
-        "title": "SqlValidationResponse"
+        "title": "SqlValidationResponse",
+        "description": "Whether rule SQL is valid, and its errors."
       },
       "StateRequest": {
         "properties": {
@@ -39194,7 +39362,8 @@
         "required": [
           "state"
         ],
-        "title": "StateRequest"
+        "title": "StateRequest",
+        "description": "Body for changing an artefact's lifecycle state."
       },
       "StatusResponse": {
         "properties": {
@@ -39245,7 +39414,8 @@
           "telemetry_name",
           "reporting"
         ],
-        "title": "StatusResponse"
+        "title": "StatusResponse",
+        "description": "Whether an instance is reporting telemetry, and since when."
       },
       "StrDefault": {
         "properties": {
@@ -39797,7 +39967,8 @@
         "required": [
           "version"
         ],
-        "title": "TagRequest"
+        "title": "TagRequest",
+        "description": "Body for pointing a tag at a version."
       },
       "TaskInfo": {
         "properties": {
@@ -39921,7 +40092,8 @@
           "wasm_base64",
           "records"
         ],
-        "title": "TestRequest"
+        "title": "TestRequest",
+        "description": "Body for running a compiled transform over sample records."
       },
       "TokenResponse": {
         "properties": {
@@ -39973,7 +40145,8 @@
           "user_id",
           "roles"
         ],
-        "title": "TokenResponse"
+        "title": "TokenResponse",
+        "description": "The token a login issues, with the flags the UI acts on."
       },
       "TopicEnsureResponse": {
         "properties": {
@@ -40455,7 +40628,8 @@
           }
         },
         "type": "object",
-        "title": "UpdateAccountRequest"
+        "title": "UpdateAccountRequest",
+        "description": "Body for updating an account, where an omitted field keeps its value."
       },
       "UpdateGroupRequest": {
         "properties": {
@@ -40527,7 +40701,8 @@
           }
         },
         "type": "object",
-        "title": "UpdateGroupRequest"
+        "title": "UpdateGroupRequest",
+        "description": "Body for updating a group, where an omitted field keeps its value."
       },
       "UpdateOrgRequest": {
         "properties": {
@@ -40573,7 +40748,8 @@
           }
         },
         "type": "object",
-        "title": "UpdateOrgRequest"
+        "title": "UpdateOrgRequest",
+        "description": "Body for updating an org, where an omitted field keeps its value."
       },
       "UpdateOwnAccountRequest": {
         "properties": {
@@ -40721,7 +40897,8 @@
           }
         },
         "type": "object",
-        "title": "UpdateProviderRequest"
+        "title": "UpdateProviderRequest",
+        "description": "Body for updating a provider, where an omitted field keeps its value."
       },
       "UpdateRoleRequest": {
         "properties": {
@@ -40767,7 +40944,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "UpdateRoleRequest"
+        "title": "UpdateRoleRequest",
+        "description": "Body for updating a custom role, where an omitted field keeps its value."
       },
       "UsageModel": {
         "properties": {
@@ -40805,7 +40983,8 @@
           "name",
           "version"
         ],
-        "title": "UsageModel"
+        "title": "UsageModel",
+        "description": "One file that links an artefact."
       },
       "UserResponse": {
         "properties": {
@@ -40895,7 +41074,8 @@
           "external",
           "blocked"
         ],
-        "title": "UserResponse"
+        "title": "UserResponse",
+        "description": "The calling user, their roles, permissions and org access."
       },
       "ValidateResponse": {
         "properties": {
@@ -40997,7 +41177,8 @@
         "required": [
           "status"
         ],
-        "title": "ValidationModel"
+        "title": "ValidationModel",
+        "description": "What the validation backend said about the content written."
       },
       "ValidationResult": {
         "properties": {
@@ -41017,7 +41198,8 @@
         "required": [
           "valid"
         ],
-        "title": "ValidationResult"
+        "title": "ValidationResult",
+        "description": "Whether a service config is valid, and its errors."
       },
       "ValuesResponse": {
         "properties": {
@@ -41170,7 +41352,8 @@
           "encoding",
           "content"
         ],
-        "title": "VersionDetail"
+        "title": "VersionDetail",
+        "description": "One version of an artefact, with its content."
       },
       "VersionResponse": {
         "properties": {
@@ -41286,7 +41469,8 @@
           "digest",
           "size_bytes"
         ],
-        "title": "VersionSummary"
+        "title": "VersionSummary",
+        "description": "One published version of an artefact."
       },
       "ViewDefinition": {
         "properties": {
@@ -41526,7 +41710,8 @@
         "required": [
           "samples"
         ],
-        "title": "VrlRequest"
+        "title": "VrlRequest",
+        "description": "Body for AI VRL drafted from raw log samples."
       },
       "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___1": {
         "properties": {
@@ -41555,6 +41740,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -41567,6 +41753,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -41579,6 +41766,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -41621,6 +41809,7 @@
           "total_pages": {
             "type": "integer",
             "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
             "readOnly": true
           },
           "next_page": {
@@ -41633,6 +41822,7 @@
               }
             ],
             "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
             "readOnly": true
           },
           "prev_page": {
@@ -41645,6 +41835,7 @@
               }
             ],
             "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
             "readOnly": true
           }
         },
@@ -41757,7 +41948,8 @@
         "required": [
           "changed"
         ],
-        "title": "WriteResult"
+        "title": "WriteResult",
+        "description": "The outcome of a write: its commit, review routing, validation and reload."
       },
       "dfe_engine__api__v1__fieldmaps__SeedResponse": {
         "properties": {
@@ -41770,7 +41962,8 @@
         "required": [
           "seeded"
         ],
-        "title": "SeedResponse"
+        "title": "SeedResponse",
+        "description": "How many default field maps were seeded."
       },
       "dfe_engine__api__v1__helm__WriteResult": {
         "properties": {
@@ -41815,7 +42008,8 @@
         "required": [
           "changed"
         ],
-        "title": "WriteResult"
+        "title": "WriteResult",
+        "description": "The outcome of a helm var write: its commit, or the review PR it went to."
       },
       "dfe_engine__api__v1__library__WriteResult": {
         "properties": {
@@ -41882,7 +42076,8 @@
         "required": [
           "changed"
         ],
-        "title": "WriteResult"
+        "title": "WriteResult",
+        "description": "The outcome of a library write: its commit, version and validation."
       },
       "dfe_engine__api__v1__oidc_providers__SyncResponse": {
         "properties": {
@@ -41949,7 +42144,8 @@
           "error",
           "status"
         ],
-        "title": "SyncResponse"
+        "title": "SyncResponse",
+        "description": "The outcome of a group sync."
       },
       "dfe_engine__api__v1__oidc_providers__TestResponse": {
         "properties": {
@@ -41967,7 +42163,8 @@
           "success",
           "message"
         ],
-        "title": "TestResponse"
+        "title": "TestResponse",
+        "description": "Whether the provider answered the connection test."
       },
       "dfe_engine__api__v1__schemas__SchemaBuildResult": {
         "properties": {
@@ -42072,7 +42269,8 @@
         "required": [
           "seeded"
         ],
-        "title": "SeedResponse"
+        "title": "SeedResponse",
+        "description": "How many default service configs were seeded."
       },
       "dfe_engine__api__v1__sigma__SyncResponse": {
         "properties": {
@@ -42266,7 +42464,8 @@
           "duration_ms",
           "wasm_memory_bytes"
         ],
-        "title": "TestResponse"
+        "title": "TestResponse",
+        "description": "What a transform emitted, and the time and memory it used."
       },
       "dfe_engine__schema__models__SchemaColumn-Output": {
         "properties": {

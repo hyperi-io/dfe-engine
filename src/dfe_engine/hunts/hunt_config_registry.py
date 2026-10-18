@@ -12,8 +12,6 @@ Each hunt is stored as ``{name}.yaml``. The ``display_name`` field inside the YA
 label used by the hunt engine at runtime (legacy YAML may use ``name`` instead).
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -162,6 +160,7 @@ class HuntConfigRegistry:
         self._store.start()
 
     def close(self) -> None:
+        """Stop the backing store."""
         if self._store is not None:
             self._store.stop()
 
@@ -265,6 +264,7 @@ class HuntConfigRegistry:
     # -----------------------------------------------------------------
 
     def exists(self, name: str) -> bool:
+        """Whether a hunt of this name exists."""
         return self._get_raw(name) is not None
 
     def name_exists(self, name: str) -> bool:
@@ -275,6 +275,7 @@ class HuntConfigRegistry:
         return any(table.casefold() == key for table in self._names())
 
     def get(self, name: str) -> dict[str, Any]:
+        """The named hunt config, raising HuntConfigNotFoundError."""
         config_data = self._get_raw(name)
         if config_data is None:
             raise HuntConfigNotFoundError(f"Hunt not found: '{name}'")

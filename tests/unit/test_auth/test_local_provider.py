@@ -1,7 +1,5 @@
 """Tests for the local authentication provider (store-backed)."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
@@ -14,6 +12,7 @@ from dfe_engine.auth import (
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.local_provider import LocalAuthProvider
+from tests.support.present import present
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -182,9 +181,9 @@ class TestAccountStoreHashing:
         stores: tuple[AccountStore, GroupStore],
     ):
         account_store, group_store = stores
-        old_hash = account_store.get("admin").password_hash
+        old_hash = present(account_store.get("admin")).password_hash
         account_store.reset_password("admin", "new-password")
-        new_hash = account_store.get("admin").password_hash
+        new_hash = present(account_store.get("admin")).password_hash
         assert old_hash != new_hash
 
         # Verify new password works

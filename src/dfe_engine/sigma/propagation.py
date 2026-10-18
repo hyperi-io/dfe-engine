@@ -237,6 +237,7 @@ class PropagationReport:
     pr_urls: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
+        """The propagation report as a plain dict."""
         return {
             "total_selected": self.total_selected,
             "created": list(self.created),

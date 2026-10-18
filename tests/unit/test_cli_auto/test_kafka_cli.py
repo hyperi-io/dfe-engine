@@ -5,8 +5,6 @@ it and test the CLI's OWN behaviour: cred sourcing, the 0600 file write, the
 eval-export shape, and the clean error when scalo lacks the emitter.
 """
 
-from __future__ import annotations
-
 import builtins
 import sys
 import types
@@ -46,10 +44,10 @@ def stub_toolconfig(monkeypatch):
     def emit_kafbat_cluster(provider, conn):
         return {"name": provider, "bootstrapServers": conn.bootstrap_servers, "properties": {}}
 
-    mod.Connection = Connection
-    mod.emit_librdkafka_properties = emit_librdkafka_properties
-    mod.emit_kcat = emit_kcat
-    mod.emit_kafbat_cluster = emit_kafbat_cluster
+    mod.Connection = Connection  # ty: ignore[unresolved-attribute]  # a bare ModuleType takes any attribute
+    mod.emit_librdkafka_properties = emit_librdkafka_properties  # ty: ignore[unresolved-attribute]  # a bare ModuleType takes any attribute
+    mod.emit_kcat = emit_kcat  # ty: ignore[unresolved-attribute]  # a bare ModuleType takes any attribute
+    mod.emit_kafbat_cluster = emit_kafbat_cluster  # ty: ignore[unresolved-attribute]  # a bare ModuleType takes any attribute
     monkeypatch.setitem(sys.modules, "scalo.kafka.toolconfig", mod)
     return mod
 

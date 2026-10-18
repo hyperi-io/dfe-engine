@@ -9,8 +9,6 @@ Usage:
     ms_dict = ms.to_yaml_dict()
 """
 
-from __future__ import annotations
-
 from collections.abc import Sized
 from typing import Annotated, Any, Literal
 
@@ -379,6 +377,7 @@ class MetaSchemaVersionWriteResponse(BaseModel):
 def meta_schema_version_write_response(
     meta: MetaSchema, *, path: str
 ) -> MetaSchemaVersionWriteResponse:
+    """The write response for the meta-schema version just written to *path*."""
     return MetaSchemaVersionWriteResponse(
         path=path,
         current=meta.current,
@@ -428,6 +427,7 @@ class PaginatedSchemaSummaryResponse(
         page: int,
         per_page: int,
     ) -> PaginatedSchemaSummaryResponse:
+        """A page of schema summaries, with the folder tree over all of them."""
         return cls.with_objects(
             summaries,
             page,

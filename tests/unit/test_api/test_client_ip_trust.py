@@ -189,7 +189,7 @@ def test_console_login_audits_the_forwarded_client(
 ):
     """The console's server-side login forwards the browser's chain; the caller is recorded."""
     with _engine(api_settings, CONSOLE_POD) as client:
-        client.app.state.account_store.reset_password("admin", ADMIN_PASSWORD)
+        client.app.state.account_store.reset_password("admin", ADMIN_PASSWORD)  # ty: ignore[unresolved-attribute]  # TestClient types app as the bare ASGI callable, and this one is the FastAPI app
         resp = client.post(
             "/api/v1/auth/login",
             json={"username": "admin", "password": "not-the-password"},

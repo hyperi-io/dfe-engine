@@ -7,6 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import json
+from typing import Literal
 
 import pytest
 
@@ -25,12 +26,15 @@ from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import sync_provider
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
+from tests.support.present import present
 from tests.unit.test_auth.factories import OKTA_API_TOKEN_ENV, make_okta_directory_provider
 from tests.unit.test_auth.test_oidc.local_okta import LocalOkta, okta_adapter
 from tests.unit.test_auth.test_oidc.unreachable_store import UnreachableSecretStore
 
 
-def _okta_provider(*, mode: str = "token_claim") -> OIDCProvider:
+def _okta_provider(
+    *, mode: Literal["manual", "token_claim", "api"] = "token_claim"
+) -> OIDCProvider:
     return OIDCProvider(
         type="okta",
         issuer="https://example.okta.com",
@@ -131,7 +135,7 @@ class TestOktaLinksOnTheGroupName:
             okta.stop()
 
         assert (result["created"], result["status"]) == (1, "ok")
-        synced = group_store.get("soc-analysts")
+        synced = present(group_store.get("soc-analysts"))
         assert (synced.source_provider, synced.source_id) == ("okta", "SOC Analysts")
         assert linked_groups(["SOC Analysts"], group_store.list(), {"okta"}) == [synced]
         assert linked_groups(["00g1soc"], group_store.list(), {"okta"}) == []
@@ -204,7 +208,7 @@ class TestOktaApiTokenResolution:
 
         _, headers = OktaAdapter(provider, secrets=store)._api_base_and_headers()
 
-        assert headers["Authorization"] == "SSWS from-store"
+        assert present(headers)["Authorization"] == "SSWS from-store"
 
     def test_env_serves_when_nothing_is_stored(self, tmp_path, monkeypatch):
         store = self._store(tmp_path)
@@ -216,7 +220,7 @@ class TestOktaApiTokenResolution:
 
         _, headers = OktaAdapter(provider, secrets=store)._api_base_and_headers()
 
-        assert headers["Authorization"] == "SSWS from-env"
+        assert present(headers)["Authorization"] == "SSWS from-env"
 
 
 class TestOktaLoginLookupWithATokenNoHeaderCanCarry:

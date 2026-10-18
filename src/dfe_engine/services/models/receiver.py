@@ -40,6 +40,7 @@ class TlsConfig(BaseModel):
     @field_validator("client_auth")
     @classmethod
     def validate_client_auth(cls, v: str) -> str:
+        """Refuse a client_auth other than none, optional or required."""
         allowed = {"none", "optional", "required"}
         if v.lower() not in allowed:
             msg = f"Invalid client_auth: {v}. Allowed: {', '.join(sorted(allowed))}"
@@ -80,6 +81,7 @@ class AuthConfig(BaseModel):
     @field_validator("mode")
     @classmethod
     def validate_mode(cls, v: str) -> str:
+        """Refuse an auth mode other than none, header, bearer, mtls or both."""
         allowed = {"none", "header", "bearer", "mtls", "both"}
         if v.lower() not in allowed:
             msg = f"Invalid auth mode: {v}. Allowed: {', '.join(sorted(allowed))}"
@@ -266,6 +268,7 @@ class DestinationsConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_destinations(self) -> Self:
+        """Refuse a destination the receiver could not resolve or deliver to."""
         named = self.__pydantic_extra__ or {}
         for name, entry in named.items():
             grpc = entry.get("grpc") if isinstance(entry, dict) else None
@@ -317,6 +320,7 @@ class ProducerConfig(BaseModel):
     @field_validator("compression")
     @classmethod
     def validate_compression(cls, v: str) -> str:
+        """Refuse a compression codec other than none, gzip, snappy, lz4 or zstd."""
         allowed = {"none", "gzip", "snappy", "lz4", "zstd"}
         if v.lower() not in allowed:
             msg = f"Invalid compression: {v}. Allowed: {', '.join(sorted(allowed))}"
@@ -368,6 +372,7 @@ class LoaderConnectionConfig(BaseModel):
     def validate_transport(cls, v: str) -> str:
         # `memory` discards every record and the receiver refuses it at startup,
         # so writing it here would produce a config that cannot boot.
+        """Refuse a transport other than kafka or grpc."""
         allowed = {"kafka", "grpc"}
         if v.lower() not in allowed:
             msg = f"Invalid transport: {v}. Allowed: {', '.join(sorted(allowed))}"

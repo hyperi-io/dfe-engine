@@ -27,6 +27,7 @@ from dfe_engine.auth.membership import (
     sync_account_groups_for_membership_change,
     sync_group_members_for_account_groups_change,
 )
+from tests.support.present import present
 from tests.unit.test_auth.factories import make_account_store
 from tests.unit.test_auth.membership_cases import MEMBERSHIP_MIRROR_CASES, MembershipMirrorCase
 
@@ -40,7 +41,7 @@ class TestSyncAccountGroupsForMembershipChange:
 
         sync_account_groups_for_membership_change(accounts, "ops", added=["alice"])
 
-        assert accounts.get("alice").groups == ["ops"]
+        assert present(accounts.get("alice")).groups == ["ops"]
 
     def test_removes_group_from_account(self, tmp_path):
         accounts = AccountStore(tmp_path / "accounts")
@@ -50,7 +51,7 @@ class TestSyncAccountGroupsForMembershipChange:
 
         sync_account_groups_for_membership_change(accounts, "ops", removed=["alice"])
 
-        assert accounts.get("alice").groups == ["dev"]
+        assert present(accounts.get("alice")).groups == ["dev"]
 
     def test_skips_unknown_usernames(self, tmp_path):
         accounts = AccountStore(tmp_path / "accounts")
@@ -62,7 +63,7 @@ class TestSyncAccountGroupsForMembershipChange:
 
         sync_account_groups_for_membership_change(accounts, "ops", added=["alice"])
 
-        assert accounts.get("alice").groups == ["ops"]
+        assert present(accounts.get("alice")).groups == ["ops"]
 
     @pytest.mark.parametrize(
         "case", MEMBERSHIP_MIRROR_CASES, ids=[case["id"] for case in MEMBERSHIP_MIRROR_CASES]
@@ -81,7 +82,7 @@ class TestSyncAccountGroupsForMembershipChange:
             removed=case["removed"],
         )
 
-        assert accounts.get("alice").groups == case["expected_groups"]
+        assert present(accounts.get("alice")).groups == case["expected_groups"]
 
 
 class TestSyncGroupMembersForAccountGroupsChange:
@@ -93,7 +94,7 @@ class TestSyncGroupMembersForAccountGroupsChange:
 
         sync_group_members_for_account_groups_change(groups, "alice", added=["ops"])
 
-        assert "alice" in groups.get("ops").members
+        assert "alice" in present(groups.get("ops")).members
 
     def test_removes_member_from_group(self, tmp_path):
         groups = GroupStore(tmp_path / "groups")
@@ -103,7 +104,7 @@ class TestSyncGroupMembersForAccountGroupsChange:
 
         sync_group_members_for_account_groups_change(groups, "alice", removed=["ops"])
 
-        assert "alice" not in groups.get("ops").members
+        assert "alice" not in present(groups.get("ops")).members
 
     def test_skips_unknown_groups(self, tmp_path):
         groups = GroupStore(tmp_path / "groups")

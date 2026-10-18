@@ -114,10 +114,10 @@ class Apps(Seed):
     def seed_source_apps(
         self, source: str = SEED_SOURCE_NAME, fetched: str = SEED_FETCHER_SOURCE_NAME
     ) -> bool:
-        """Deploy the transform bound to *source*, with a program to edit, and the
-        fetcher instance bound to *fetched*.
+        """Deploy the transform bound to *source* and the fetcher instance bound to *fetched*.
 
-        Returns True when anything was written, False when it was all already there.
+        The transform carries a program to edit. Returns True when anything was
+        written, False when it was all already there.
         """
         changed = self._ensure_instance(TRANSFORM_SERVICE, source)
         changed |= self._ensure_transform_program(source)

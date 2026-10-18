@@ -8,8 +8,6 @@ Output is written to ``rbac-scopes-spec/scopes/index.ts`` for review and is
 copied into ``dfe-ui`` ``packages/dfe-engine-types/scopes/`` by CI.
 """
 
-from __future__ import annotations
-
 import argparse
 import ast
 from pathlib import Path
@@ -24,11 +22,16 @@ def _literal(node: ast.AST) -> Any:
     if isinstance(node, ast.Constant):
         return node.value
     if isinstance(node, ast.Dict):
-        keys = [_literal(k) for k in node.keys]
-        values = [_literal(v) for v in node.values]
-        if any(k is Ellipsis for k in keys):
-            raise ValueError("unsupported dict key in scope_constants.py")
-        return dict(zip(keys, values, strict=True))
+        pairs: dict[Any, Any] = {}
+        for key_node, value_node in zip(node.keys, node.values, strict=True):
+            # The AST records a `**mapping` entry as a None key, and its scopes cannot be read statically.
+            if key_node is None:
+                raise ValueError("dict unpacking (**) is not supported in scope_constants.py")
+            key = _literal(key_node)
+            if key is Ellipsis:
+                raise ValueError("unsupported dict key in scope_constants.py")
+            pairs[key] = _literal(value_node)
+        return pairs
     raise ValueError(f"unsupported AST node: {type(node).__name__}")
 
 

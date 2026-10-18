@@ -38,8 +38,6 @@ like every other API family and carries that surface's RBAC and audit. The
 commands here are the local ones that reach no engine at all.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import stat
@@ -127,7 +125,7 @@ def client_config_cmd(
     username = username if username is not None else ks.sasl_username
     password = password if password is not None else ks.sasl_password
 
-    conn_cls, emit_properties, emit_kcat, emit_kafbat = _emitters()
+    conn_cls, _, emit_kcat, emit_kafbat = _emitters()
     conn = conn_cls(
         bootstrap_servers=bootstrap,
         username=username or "",

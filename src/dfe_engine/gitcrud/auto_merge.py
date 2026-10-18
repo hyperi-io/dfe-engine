@@ -16,8 +16,6 @@ gate. Loud by design - see the spec
 (docs/superpowers/specs/2026-07-03-gitcrud-auto-merge-design.md).
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -83,7 +81,7 @@ def stored_flag(crud: GitCrud) -> bool:
 def resolve_state(
     crud: GitCrud, *, environment: str, mode: str, warn: bool = True
 ) -> AutoMergeState:
-    """stored AND gate -> effective; WARNs when the flag is stranded ON.
+    """The effective flag (stored AND gate), with a WARN when the flag is stranded ON.
 
     ``warn=False`` for read-only polling paths (the UI polls GET) so a stranded
     flag does not WARN on every poll - keep warn=True on write/badge paths and

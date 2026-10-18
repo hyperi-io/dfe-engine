@@ -1,5 +1,4 @@
-"""
-Storage backend implementations for DFE Engine.
+"""Storage backend implementations for DFE Engine.
 
 Supports local filesystem, HTTP, and S3 storage backends with auto-sensing.
 """
@@ -27,8 +26,7 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def download(self, remote_path: str, local_path: str) -> None:
-        """
-        Download a file from the storage backend to a local path.
+        """Download a file from the storage backend to a local path.
 
         Args:
             remote_path: Path or identifier of the file in the storage backend.
@@ -40,8 +38,7 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def list_files(self, prefix: str = "") -> list[str]:
-        """
-        List files in the storage backend.
+        """List files in the storage backend.
 
         Args:
             prefix: Optional prefix/path to filter files.
@@ -55,8 +52,7 @@ class StorageBackend(ABC):
 
     @abstractmethod
     def exists(self, path: str) -> bool:
-        """
-        Check if a file exists in the storage backend.
+        """Check if a file exists in the storage backend.
 
         Args:
             path: Path to check.
@@ -67,15 +63,13 @@ class StorageBackend(ABC):
 
 
 class LocalStorageBackend(StorageBackend):
-    """
-    Local filesystem storage backend.
+    """Local filesystem storage backend.
 
     Use for on-prem deployments with mounted volumes (PVC, NFS, etc.).
     """
 
     def __init__(self, base_path: str):
-        """
-        Initialize local storage backend.
+        """Initialize local storage backend.
 
         Args:
             base_path: Base directory path for storage operations.
@@ -134,8 +128,7 @@ class LocalStorageBackend(StorageBackend):
 
 
 class HTTPStorageBackend(StorageBackend):
-    """
-    HTTP/HTTPS storage backend.
+    """HTTP/HTTPS storage backend.
 
     Use for Artifactory or other HTTP-based artifact servers.
     """
@@ -147,8 +140,7 @@ class HTTPStorageBackend(StorageBackend):
         password: str | None = None,
         timeout: float = 120.0,
     ):
-        """
-        Initialize HTTP storage backend.
+        """Initialize HTTP storage backend.
 
         Args:
             base_url: Base URL for the storage server.
@@ -204,8 +196,7 @@ class HTTPStorageBackend(StorageBackend):
             raise StorageError(f"Failed to download {url}: {e}", cause=e) from e
 
     def list_files(self, prefix: str = "") -> list[str]:
-        """
-        List files is not typically supported for HTTP backends.
+        """List files is not typically supported for HTTP backends.
 
         Returns an empty list. Use specific API endpoints if available.
         """
@@ -223,8 +214,7 @@ class HTTPStorageBackend(StorageBackend):
 
 
 class S3StorageBackend(StorageBackend):
-    """
-    AWS S3 storage backend.
+    """AWS S3 storage backend.
 
     Use for AWS deployments with S3 buckets.
     """
@@ -235,8 +225,7 @@ class S3StorageBackend(StorageBackend):
         prefix: str = "",
         region: str | None = None,
     ):
-        """
-        Initialize S3 storage backend.
+        """Initialize S3 storage backend.
 
         Args:
             bucket: S3 bucket name.
@@ -309,8 +298,7 @@ def get_storage_backend(
     username: str | None = None,
     password: str | None = None,
 ) -> StorageBackend:
-    """
-    Auto-detect and return the appropriate storage backend based on the path.
+    """Auto-detect and return the appropriate storage backend based on the path.
 
     Args:
         path: Storage path - can be local path, HTTP URL, or S3 URI.

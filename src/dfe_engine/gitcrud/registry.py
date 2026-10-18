@@ -12,8 +12,6 @@ deploy-repo layout from docs/architecture.md; they are config, not hardcoded
 behaviour, so a deployment can override them.
 """
 
-from __future__ import annotations
-
 from collections.abc import Iterable
 
 from .models import Layout, ResourceClass
@@ -36,6 +34,7 @@ class ResourceClassRegistry:
         self._by_name: dict[str, ResourceClass] = {c.name: c for c in classes}
 
     def get(self, name: str) -> ResourceClass:
+        """The named resource class, raising UnknownResourceClassError."""
         try:
             return self._by_name[name]
         except KeyError:
@@ -46,6 +45,7 @@ class ResourceClassRegistry:
         return sorted(self._by_name)
 
     def all(self) -> list[ResourceClass]:
+        """Every registered resource class."""
         return [self._by_name[n] for n in self.names()]
 
     def classes(self) -> list[str]:

@@ -207,19 +207,21 @@ def poll_until(
     timeout: float = 60.0,
     interval: float = 2.0,
     desc: str = "condition",
+    done: Callable[[Any], bool] = bool,
 ) -> Any:
-    """Poll predicate until it returns truthy, or raise on timeout.
+    """Poll predicate until ``done`` accepts what it returns, or raise on timeout.
 
     A readiness-gated wait: we poll the real signal (the row exists, the API
     returns it) and use the timeout only as a BACKSTOP for a genuinely-stuck
-    dependency - never as the thing we race against. Returns the truthy value.
+    dependency - never as the thing we race against. ``done`` defaults to
+    truthiness. Returns the accepted value.
     """
     deadline = time.monotonic() + timeout
     last_exc: Exception | None = None
     while time.monotonic() < deadline:
         try:
             result = predicate()
-            if result:
+            if done(result):
                 return result
         except Exception as exc:  # dependency not ready yet - keep polling
             last_exc = exc

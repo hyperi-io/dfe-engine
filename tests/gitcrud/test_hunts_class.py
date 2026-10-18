@@ -17,12 +17,11 @@ The forge is a recording double at the ForgeProvider seam, matching
 test_routing.py; its REST behaviour is covered in test_forge.py.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pytest
 from common.hunt_files import resolved_customers
+from dulwich.objects import Commit
 from dulwich.repo import Repo
 
 from dfe_engine.gitcrud import GitCrud
@@ -87,7 +86,9 @@ def rules(crud):
 
 def _head_message(crud: GitCrud) -> str:
     with Repo(str(crud.repo_path)) as repo:
-        return repo[repo.head()].message.decode()
+        head = repo[repo.head()]
+        assert isinstance(head, Commit)
+        return head.message.decode()
 
 
 class TestHuntsLandWhereTheRunnerLooks:

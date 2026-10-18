@@ -13,8 +13,6 @@ Usage:
     source_dict = source.model_dump(mode="json")
 """
 
-from __future__ import annotations
-
 import re
 from datetime import date
 from functools import cache, lru_cache
@@ -118,8 +116,7 @@ def state_from_enabled(enabled: bool) -> SourceState:
 
 
 def materialisation_action(state: SourceState) -> Literal["create", "leave", "reclaim"]:
-    """Lazy materialisation rule (locked): CREATE on active / LEAVE on dormant /
-    guarded RECLAIM on disabled.
+    """Lazy materialisation: CREATE on active, LEAVE on dormant, guarded RECLAIM on disabled.
 
     Creates are idempotent (no has-been-materialised bit), dormant is a no-op
     (never drop a dormant source's table - the pre-2.2 bug), and a drop happens
@@ -1654,6 +1651,7 @@ class PaginatedSourceSummaryResponse(
         page: int,
         per_page: int,
     ) -> PaginatedSourceSummaryResponse:
+        """A page of source summaries, with the folder tree over all of them."""
         return cls.with_objects(
             summaries,
             page,

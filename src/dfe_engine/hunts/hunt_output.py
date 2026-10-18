@@ -204,10 +204,12 @@ class HuntResultSchema:
 
     @property
     def profile_name(self) -> str:
+        """The header profile the result table is built on."""
         return self._profile_name
 
     @property
     def detection_columns(self) -> tuple[HuntDetectionColumn, ...]:
+        """The detection columns every hunt result carries."""
         return HUNT_DETECTION_COLUMNS
 
     def insert_columns(self) -> list[str]:

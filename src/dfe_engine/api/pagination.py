@@ -4,10 +4,8 @@ PaginatedResponse[T] is the standard envelope. Compatible with TanStack Query
 useInfiniteQuery: UI reads ``next_page`` from ``getNextPageParam``.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
-from typing import Annotated, Any, Generic, TypeVar
+from typing import Annotated, Any, Generic, Self, TypeVar
 
 from pydantic import AfterValidator, BaseModel, Field, computed_field, model_validator
 
@@ -37,14 +35,6 @@ class PaginationParams(BaseModel):
     )
 
 
-class SortOrder(str):
-    """Sort direction. Accepts both 'asc'/'desc' and Ant Design 'ascend'/'descend'."""
-
-    @property
-    def is_descending(self) -> bool:
-        return self in ("desc", "descend")
-
-
 class PaginatedResponse(BaseModel, Generic[T]):
     """Generic paginated response envelope.
 
@@ -61,6 +51,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def total_pages(self) -> int:
+        """Number of pages, 1 when ``per_page`` is -1 and every item is on one page."""
         if self.per_page == -1:
             return 1
         if self.per_page <= 0:
@@ -70,6 +61,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def next_page(self) -> int | None:
+        """The next page number, or None on the last page or when every item is on one."""
         if self.per_page == -1:
             return None
         if self.page < self.total_pages:
@@ -79,6 +71,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def prev_page(self) -> int | None:
+        """The previous page number, or None on the first page."""
         if self.page > 1:
             return self.page - 1
         return None
@@ -129,7 +122,8 @@ class PaginatedResponseWithObjects(PaginatedResponse[T], Generic[T, ObjectT]):
         page: int,
         per_page: int,
         objects: ObjectT,
-    ) -> PaginatedResponseWithObjects[T, ObjectT]:
+    ) -> Self:
+        """Paginate *all_items* as ``from_list`` does, with *objects* beside the page."""
         paginated = PaginatedResponse.from_list(all_items, page, per_page)
         return cls(objects=objects, **paginated.model_dump())
 

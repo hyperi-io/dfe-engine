@@ -48,6 +48,7 @@ class SaslConfig(BaseModel):
     @field_validator("mechanism")
     @classmethod
     def validate_mechanism(cls, v: str) -> str:
+        """Refuse a SASL mechanism the apps do not support."""
         allowed = {
             "none",
             "plain",
@@ -173,6 +174,7 @@ class LoggingConfig(BaseModel):
     @field_validator("level")
     @classmethod
     def validate_level(cls, v: str) -> str:
+        """Refuse a log level other than trace, debug, info, warn or error."""
         allowed = {"trace", "debug", "info", "warn", "error"}
         if v.lower() not in allowed:
             msg = f"Invalid log level: {v}. Allowed: {', '.join(sorted(allowed))}"
@@ -182,6 +184,7 @@ class LoggingConfig(BaseModel):
     @field_validator("format")
     @classmethod
     def validate_format(cls, v: str) -> str:
+        """Refuse a log format other than json or text."""
         allowed = {"json", "text"}
         if v.lower() not in allowed:
             msg = f"Invalid log format: {v}. Allowed: {', '.join(sorted(allowed))}"

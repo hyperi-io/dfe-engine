@@ -20,8 +20,6 @@ table of hunts, so a per-hunt endpoint would be one request per row for somethin
 one query already answers for all of them.
 """
 
-from __future__ import annotations
-
 import time
 from typing import Any
 
@@ -260,6 +258,7 @@ class HuntWriteRequest(_HuntConfigFields):
         return cleaned
 
     def to_config_dict(self, *, hunt_name: str) -> dict[str, Any]:
+        """The stored hunt config this request writes for *hunt_name*."""
         display = (
             self.display_name if self.display_name is not None else default_display_name(hunt_name)
         )
@@ -289,6 +288,7 @@ class HuntDetailResponse(_HuntConfigFields):
 
     @classmethod
     def from_stored_config(cls, name: str, config: dict[str, Any]) -> HuntDetailResponse:
+        """Build the response from a stored hunt config."""
         payload = {k: v for k, v in config.items() if k not in ("hunt_id", "name")}
         payload["rules"] = _rules_from_stored(config.get("rules"))
         payload["display_name"] = resolve_display_name(config, name)
@@ -307,6 +307,8 @@ class HuntDetailResponse(_HuntConfigFields):
 
 
 class HuntCreateRequest(HuntWriteRequest):
+    """Body for creating a hunt under a new name."""
+
     name: HuntName = Field(description="Hunt file name (YAML stem); must be unique")
 
     @field_validator("rules")

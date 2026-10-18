@@ -11,8 +11,6 @@ POST /api/v1/transforms/compile  -> Compile source code to WASM via compiler ser
 POST /api/v1/transforms/test     -> Run a compiled WASM against sample records
 """
 
-from __future__ import annotations
-
 from typing import Literal
 
 import httpx
@@ -33,6 +31,8 @@ Language = Literal["rust", "go", "assemblyscript"]
 
 
 class CompileRequest(BaseModel):
+    """Body for compiling transform source to WASM."""
+
     language: Language
     files: dict[str, str] = Field(
         description="Source files. Key = filename, value = source content.",
@@ -40,11 +40,15 @@ class CompileRequest(BaseModel):
 
 
 class CompileResponse(BaseModel):
+    """The compiled WASM module, base64-encoded."""
+
     wasm_base64: str
     wasm_bytes: int
 
 
 class SampleRecord(BaseModel):
+    """One input record for a transform test."""
+
     key: str = ""
     value: str
     timestamp: int = 0
@@ -52,17 +56,23 @@ class SampleRecord(BaseModel):
 
 
 class TestRequest(BaseModel):
+    """Body for running a compiled transform over sample records."""
+
     wasm_base64: str = Field(description="Base64-encoded WASM binary from /compile")
     records: list[SampleRecord] = Field(description="Sample input records")
 
 
 class EmittedRecord(BaseModel):
+    """One record a transform emitted."""
+
     key: str
     value: str
     headers: dict[str, str] = Field(default_factory=dict)
 
 
 class TestResponse(BaseModel):
+    """What a transform emitted, and the time and memory it used."""
+
     emitted: list[EmittedRecord]
     duration_ms: float
     wasm_memory_bytes: int

@@ -25,8 +25,8 @@ def cleanup(tmp_path_factory):
     yield
     if os.path.exists(temp_dir):
 
-        def on_rm_error(func, path, exc_info):
+        def on_rm_error(func, path, _exc):
             os.chmod(path, stat.S_IWRITE)
             func(path)
 
-        shutil.rmtree(temp_dir, onerror=on_rm_error)
+        shutil.rmtree(temp_dir, onexc=on_rm_error)

@@ -370,7 +370,7 @@ async def test_reload_picks_up_provider_written_out_of_band(client, app):
         "gitops-added", OIDCProvider(type="generic", issuer="https://idp.example")
     )
 
-    rp = await _reload_rp_if_provider_known(_Req(app), "gitops-added")
+    rp = await _reload_rp_if_provider_known(_Req(app), "gitops-added")  # ty: ignore[invalid-argument-type]  # a stand-in request carrying only the app this path reads
     assert rp is not None
     assert rp.has_provider("gitops-added")
     # Rebuilt in place, so the next request sees it too.
@@ -382,7 +382,7 @@ async def test_reload_ignores_unknown_provider(client, app):
     from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
 
     before = app.state.oidc_rp
-    assert await _reload_rp_if_provider_known(_Req(app), "no-such-provider") is None
+    assert await _reload_rp_if_provider_known(_Req(app), "no-such-provider") is None  # ty: ignore[invalid-argument-type]  # a stand-in request carrying only the app this path reads
     assert app.state.oidc_rp is before
 
 
@@ -394,7 +394,7 @@ async def test_reload_ignores_disabled_provider(client, app):
         "switched-off",
         OIDCProvider(type="generic", issuer="https://idp.example", enabled=False),
     )
-    assert await _reload_rp_if_provider_known(_Req(app), "switched-off") is None
+    assert await _reload_rp_if_provider_known(_Req(app), "switched-off") is None  # ty: ignore[invalid-argument-type]  # a stand-in request carrying only the app this path reads
 
 
 def test_login_still_404s_for_a_provider_that_was_never_configured(client):

@@ -297,7 +297,7 @@ class TestSaveValidationHttpMapping:
         with pytest.raises(HTTPException) as exc_info:
             _raise_save_validation_http(SourceValidationError("invalid source definition"))
         assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["code"] == "validation_error"
+        assert exc_info.value.detail["code"] == "validation_error"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
 
 
 class TestCreateSource:

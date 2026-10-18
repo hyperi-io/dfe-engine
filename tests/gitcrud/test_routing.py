@@ -13,16 +13,16 @@ small recording double at the ForgeProvider seam; its real REST behaviour is
 covered in test_forge.py.
 """
 
-from __future__ import annotations
-
 import pytest
 from dulwich import porcelain
+from dulwich.refs import Ref
 from dulwich.repo import Repo
 
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, default_registry
 from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.gitops.repo import GitopsRepo
+from tests.support.present import present
 
 
 class _RecordingForge:
@@ -53,7 +53,7 @@ def _seed_bare(tmp_path):
 
 def _remote_main(bare) -> str:
     with Repo(str(bare)) as r:
-        return r.refs[b"refs/heads/main"].decode()
+        return r.refs[Ref(b"refs/heads/main")].decode()
 
 
 def _remote_refs(bare) -> list[str]:
@@ -122,7 +122,7 @@ def test_prod_team_routes_to_review_pr(wired):
     # the change was routed to a PR, not committed to main
     assert outcome.review_required is True
     assert outcome.pr_url == "http://forge/pr/42"
-    assert outcome.branch.startswith("dfe/helmvars/")
+    assert present(outcome.branch).startswith("dfe/helmvars/")
     assert outcome.changed is True
 
     # the forge was asked to open exactly one PR from the branch onto main

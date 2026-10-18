@@ -14,7 +14,7 @@ first login leaves. The forced change itself is tested in
 ``tests/unit/test_api/test_password_change_gate.py``.
 """
 
-from typing import Any
+from typing import Any, Self, override
 
 from fastapi.testclient import TestClient
 
@@ -38,7 +38,8 @@ def admin_on_its_own_password(app: Any) -> None:
 class OnboardedClient(TestClient):
     """A client whose app starts with the admin past its first login."""
 
-    def __enter__(self) -> TestClient:
+    @override
+    def __enter__(self) -> Self:
         client = super().__enter__()
         admin_on_its_own_password(self.app)
         return client

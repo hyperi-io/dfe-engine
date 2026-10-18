@@ -20,6 +20,12 @@ from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
 from dfe_engine.orgs.registry import OrgRegistry
 
 if TYPE_CHECKING:
+    from dfe_engine.api.e2e.seed.accounts import Accounts
+    from dfe_engine.api.e2e.seed.apps import Apps
+    from dfe_engine.api.e2e.seed.artefacts import Artefacts
+    from dfe_engine.api.e2e.seed.backing import Backing
+    from dfe_engine.api.e2e.seed.organisations import Organisations
+    from dfe_engine.api.e2e.seed.sources import Sources
     from dfe_engine.gitcrud import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
     from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
@@ -41,6 +47,14 @@ class Seed:
     as the org routes take it, and an org seeder moves the hunts naming an org
     whenever there is one.
     """
+
+    # Set by _attach_seeders, which binds a child seeder's own attribute to itself.
+    accounts: Accounts
+    organisations: Organisations
+    sources: Sources
+    apps: Apps
+    artefacts: Artefacts
+    backing: Backing
 
     def __init__(
         self,
@@ -94,8 +108,7 @@ class Seed:
         from dfe_engine.api.e2e.seed.organisations import Organisations
         from dfe_engine.api.e2e.seed.sources import Sources
 
-        cls = type(self)
-        if cls is Seed:
+        if type(self) is Seed:
             self.accounts = self._child(Accounts, env)
             self.organisations = self._child(Organisations, env)
             self.sources = self._child(Sources, env)
@@ -103,22 +116,23 @@ class Seed:
             self.artefacts = self._child(Artefacts, env)
             self.backing = self._child(Backing, env)
             return
-        if cls is Accounts:
+        # Child seeders stay leaf classes, or more than one of these would match.
+        if isinstance(self, Accounts):
             self.accounts = self
             return
-        if cls is Organisations:
+        if isinstance(self, Organisations):
             self.organisations = self
             return
-        if cls is Sources:
+        if isinstance(self, Sources):
             self.sources = self
             return
-        if cls is Apps:
+        if isinstance(self, Apps):
             self.apps = self
             return
-        if cls is Artefacts:
+        if isinstance(self, Artefacts):
             self.artefacts = self
             return
-        if cls is Backing:
+        if isinstance(self, Backing):
             self.backing = self
 
     def _require_gitcrud(self) -> GitCrud:

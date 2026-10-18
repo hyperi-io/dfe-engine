@@ -29,6 +29,7 @@ from dulwich import porcelain
 from dulwich.errors import NotGitRepository
 from dulwich.object_store import tree_lookup_path
 from dulwich.objects import Blob, Commit
+from dulwich.refs import Ref
 from dulwich.repo import Repo
 from dulwich.server import DictBackend
 from dulwich.web import make_wsgi_chain
@@ -204,7 +205,7 @@ def _breaker(manager, event: str) -> float:
 
 def _head(bare: Path, branch: str) -> bytes:
     with Repo(str(bare)) as repo:
-        return repo.refs[f"refs/heads/{branch}".encode()]
+        return repo.refs[Ref(f"refs/heads/{branch}".encode())]
 
 
 def test_a_write_waits_past_the_read_bound_for_a_slow_forge(tmp_path: Path, serve) -> None:
@@ -356,7 +357,7 @@ def test_a_failure_another_attempt_cannot_fix_is_not_retried(tmp_path: Path, ser
 def _remote_file(bare: Path, branch: str, rel: str) -> str:
     """A file's content at the remote branch's head."""
     with Repo(str(bare)) as repo:
-        commit = repo[repo.refs[f"refs/heads/{branch}".encode()]]
+        commit = repo[repo.refs[Ref(f"refs/heads/{branch}".encode())]]
         assert isinstance(commit, Commit)
         _mode, sha = tree_lookup_path(repo.get_object, commit.tree, rel.encode())
         blob = repo[sha]
@@ -398,7 +399,7 @@ def test_a_push_that_landed_is_not_re_applied_over_a_peers_write(tmp_path: Path,
     assert result.pushed is True
     assert _remote_file(bare, branch, "x.yaml") == "v: 2\n"
     with Repo(str(bare)) as remote:
-        head = remote[remote.refs[f"refs/heads/{branch}".encode()]]
+        head = remote[remote.refs[Ref(f"refs/heads/{branch}".encode())]]
         assert isinstance(head, Commit)
         assert head.parents == [(result.commit_sha or "").encode()]
     assert ours.head_revision() == head.id.decode()

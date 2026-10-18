@@ -38,7 +38,7 @@ def _settings(
 
 
 def _source(name="filebeat", *, transform=True) -> Source:
-    return Source(
+    return Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
         source=name,
         match=SourceMatch(field="f", value="v"),
         transform=SourceTransform(engine="vector") if transform else None,

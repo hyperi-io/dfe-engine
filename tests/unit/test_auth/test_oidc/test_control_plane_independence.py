@@ -16,6 +16,7 @@ If dfe-engine is down, Envoy Gateway keeps doing OIDC (static K8s CRD),
 and existing group YAML files on disk still resolve roles correctly.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -81,7 +82,7 @@ def app(auth_settings: DFESettings):
 
 
 @pytest.fixture
-def client(app, auth_settings: DFESettings) -> TestClient:
+def client(app, auth_settings: DFESettings) -> Iterator[TestClient]:
     """TestClient with lifespan — bootstrap groups already seeded."""
     with TestClient(app, raise_server_exceptions=False) as c:
         account_store = app.state.account_store

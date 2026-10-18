@@ -18,8 +18,6 @@ injects it on a bare ``dfe-engine`` run, so the fallback is scalo's own runtime
 detection -- the same cascade that picks the container paths.
 """
 
-from __future__ import annotations
-
 from scalo.runtime import RuntimeEnvironment
 
 DOCKER = "docker"
@@ -34,7 +32,7 @@ ADMIN_PASSWORD_ENV = "DFE_AUTH_LOCAL_ADMIN_PASSWORD"  # noqa: S105, RUF100 - an 
 
 
 def detect_deploy_kind(target: str = "") -> str:
-    """docker | kubernetes | local. Injected target wins; else scalo's detection."""
+    """The deploy kind (docker, kubernetes or local): the injected target, else scalo's detection."""
     if target in (DOCKER, KUBERNETES):
         return target
     paths = RuntimeEnvironment("dfe-engine").detect_runtime()

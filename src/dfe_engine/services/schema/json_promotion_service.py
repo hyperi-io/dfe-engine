@@ -20,8 +20,6 @@ Two responsibilities, kept separate so the column maths is pure and testable:
   per-path outcomes with no I/O.
 """
 
-from __future__ import annotations
-
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -182,10 +180,9 @@ def promoted_path_from_column(column: MetaSchemaColumn) -> str | None:
 
 
 def ch_dynamic_type_to_primitive(ch_type: str) -> tuple[str, list[str]]:
-    """Map a ClickHouse dynamic type (from JSONDynamicPathsWithTypes) to a
-    DFE primitive + storage attributes.
+    """Map a ClickHouse dynamic type to a DFE primitive and its storage attributes.
 
-    Unwraps ``Nullable(...)`` / ``LowCardinality(...)`` first. Unknown or
+    The type is one JSONDynamicPathsWithTypes reports. Unwraps ``Nullable(...)`` / ``LowCardinality(...)`` first. Unknown or
     compound types (Array/Tuple/Map/Object/JSON) fall back to ``json``.
     """
     base = ch_type.strip()
@@ -699,7 +696,7 @@ def build_promotion_columns(
             use_case=req.use_case,
             expr=promoted_column_expr(path),
             comment=f"Promoted from {copy_cel}",
-            _field_type=PROMOTED_FIELD_TYPE,
+            field_type=PROMOTED_FIELD_TYPE,
         )
 
         errors = column.validate_against_registry(type_registry)

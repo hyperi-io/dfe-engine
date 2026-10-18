@@ -1,3 +1,5 @@
+"""Helpers the pipeline builder shares: config merging and vector step lookup."""
+
 import copy
 import os
 import re
@@ -7,7 +9,7 @@ from dfe_engine.yaml_utils import deep_merge
 
 
 class VectorStepType(Enum):
-    """The type of vector step"""
+    """The type of vector step."""
 
     BASE = "hs"
     HYPERSEC = "hypersec"
@@ -24,9 +26,8 @@ class PipelineSchemaError(Exception):
         super().__init__(self.message)
 
 
-def find_vector_type(vector_step: str) -> VectorStepType:
-    """
-    Finds and returns the matching VectorStepType for a given vector step string.
+def find_vector_type(vector_step: str) -> VectorStepType | None:
+    """Finds and returns the matching VectorStepType for a given vector step string.
 
     Args:
         vector_step (str): The vector step string to be matched.
@@ -42,8 +43,7 @@ def find_vector_type(vector_step: str) -> VectorStepType:
 
 
 def get_vector_step_type(vector_step: str, package_config: dict) -> str:
-    """
-    Retrieve the version and type of a given vector step from the package configuration.
+    """Retrieve the version and type of a given vector step from the package configuration.
 
     Args:
         vector_step (str): The name of the vector step to look up.
@@ -72,8 +72,7 @@ def get_vector_step_type(vector_step: str, package_config: dict) -> str:
 
 
 def read_vector_step_config(vector_step: str, package_config: dict) -> str:
-    """
-    Reads the configuration for a given vector step from the specified package configuration.
+    """Reads the configuration for a given vector step from the specified package configuration.
 
     Vector config files contain shell-style variable substitution (${VAR}) which is not
     valid YAML. This function returns the raw text content for regex-based extraction
@@ -106,8 +105,7 @@ def read_vector_step_config(vector_step: str, package_config: dict) -> str:
 
 
 def get_required_env_vars(vector_step: str, package_config: dict) -> dict:
-    """
-    Extracts required environment variables from a vector step configuration.
+    """Extracts required environment variables from a vector step configuration.
 
     This function reads the configuration for a given vector step and extracts
     environment variables that are required. The environment variables are
@@ -144,30 +142,28 @@ def get_required_env_vars(vector_step: str, package_config: dict) -> dict:
     return required_environment_variables
 
 
-def get_vector_pipelines(package_config: dict) -> list:
-    """
-    Retrieve the vector pipelines from the given package configuration.
+def get_vector_pipelines(package_config: dict) -> dict:
+    """Retrieve the vector pipelines from the given package configuration.
 
     Args:
         package_config (dict): The package configuration dictionary containing pipeline information.
 
     Returns:
-        list: A list of vector pipelines specified in the package configuration. If no pipelines are found, an empty list is returned.
+        dict: Each pipeline's configuration by pipeline name, empty when the package defines none.
     """
-    vector_pipelines = package_config.get("ingestion_pipelines", [])
+    vector_pipelines = package_config.get("ingestion_pipelines", {})
     return vector_pipelines
 
 
-def get_pipeline(package_config: dict, pipeline_name: str) -> list:
-    """
-    Retrieve a specific pipeline from the package configuration.
+def get_pipeline(package_config: dict, pipeline_name: str) -> dict:
+    """Retrieve a specific pipeline from the package configuration.
 
     Args:
         package_config (dict): The configuration dictionary containing pipeline definitions.
         pipeline_name (str): The name of the pipeline to retrieve.
 
     Returns:
-        list: The pipeline configuration corresponding to the specified pipeline name.
+        dict: The pipeline configuration corresponding to the specified pipeline name.
 
     Raises:
         PipelineSchemaError: If the specified pipeline name is not found in the package configuration.
@@ -182,8 +178,7 @@ def get_pipeline(package_config: dict, pipeline_name: str) -> list:
 
 
 def vector_step_name_to_input(vector_step: str) -> str:
-    """
-    Converts a vector step name to an input name format.
+    """Converts a vector step name to an input name format.
 
     Args:
         vector_step (str): The vector step name, expected to be in the format "step-name.yaml" or simply "step-name".
@@ -196,8 +191,7 @@ def vector_step_name_to_input(vector_step: str) -> str:
 
 
 def vector_step_name_to_output(vector_step: str) -> str:
-    """
-    Converts a vector step name to an output name.
+    """Converts a vector step name to an output name.
 
     This function takes a vector step name in the format of a string and converts it into the output of the vector.
 
@@ -211,8 +205,7 @@ def vector_step_name_to_output(vector_step: str) -> str:
 
 
 def gather_env_variables_for_pipeline(package_config: dict, pipeline_name: str) -> tuple:
-    """
-    Gathers and merges environment variables required for a specific pipeline.
+    """Gathers and merges environment variables required for a specific pipeline.
 
     This function retrieves global environment variables from the package configuration
     and overrides them with environment variables specific to the given pipeline. It also

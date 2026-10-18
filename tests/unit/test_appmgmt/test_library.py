@@ -7,8 +7,6 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Immutable content, mutable metadata and tags, over a real git repo."""
 
-from __future__ import annotations
-
 import base64
 import hashlib
 
@@ -229,7 +227,7 @@ class TestMetadata:
 
     def test_a_non_string_label_is_refused(self, artifact):
         with pytest.raises(library.InvalidArtifactError, match="must be a string"):
-            library.set_metadata(artifact, labels={"team": 7})
+            library.set_metadata(artifact, labels={"team": 7})  # ty: ignore[invalid-argument-type]  # the refused value is the point of the test
 
     def test_state_moves_without_touching_content(self, artifact):
         library.publish(artifact, content=VRL_SOURCE, actor="alice")
@@ -390,7 +388,9 @@ class TestGitRoundTrip:
         versioned = VersionedDoc(crud)
         assert versioned.list_versions(LIBRARY_CLASS, "parse-syslog") == [1, 2]
         assert versioned.status(LIBRARY_CLASS, "parse-syslog") == "published"
-        assert versioned.get_published(LIBRARY_CLASS, "parse-syslog")["file"] == "versions/0002.vrl"
-        assert (
-            versioned.get_version(LIBRARY_CLASS, "parse-syslog", 1)["file"] == "versions/0001.vrl"
-        )
+        published = versioned.get_published(LIBRARY_CLASS, "parse-syslog")
+        assert published is not None
+        assert published["file"] == "versions/0002.vrl"
+        first_version = versioned.get_version(LIBRARY_CLASS, "parse-syslog", 1)
+        assert first_version is not None
+        assert first_version["file"] == "versions/0001.vrl"

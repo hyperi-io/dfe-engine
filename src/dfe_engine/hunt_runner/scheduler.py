@@ -12,8 +12,6 @@ it. NEVER double-run a hunt: if it is still running when the next fire is due,
 DEFER (set too_aggressive) - always. A global concurrency cap protects ClickHouse.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from .models import HuntState
@@ -21,6 +19,8 @@ from .models import HuntState
 
 @dataclass
 class Decision:
+    """What the scheduler does with a hunt this tick, and why."""
+
     action: str  # "run" | "defer" | "wait"
     reason: str
 

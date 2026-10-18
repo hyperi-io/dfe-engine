@@ -21,8 +21,6 @@ PUT    /api/v1/alerts/destinations/{name}     -> Update destination
 DELETE /api/v1/alerts/destinations/{name}     -> Delete destination
 """
 
-from __future__ import annotations
-
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -58,6 +56,8 @@ OptionalHuntConfigReg = Annotated[Any | None, Depends(_get_hunt_config_registry_
 
 
 class AlertDestination(BaseModel):
+    """An alert destination, with its URL masked on every read."""
+
     name: str = Field(description="Unique destination identifier (used as filename)")
     url: str = Field(
         description=(
@@ -77,6 +77,8 @@ class AlertDestination(BaseModel):
 
 
 class AlertDestinationSummary(BaseModel):
+    """An alert destination in a listing, without its URL."""
+
     name: str
     description: str = ""
     enabled: bool = True

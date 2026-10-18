@@ -5,8 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""A standard, extensible framework for auto-aligning DFE pre-supplied schemas to an
-external schema source.
+"""Align DFE's pre-supplied schemas to an external schema source, one adapter per format.
 
 ONE common core (the type-mapping + physical naming in :mod:`elastic_schema_service`);
 per-FORMAT ADAPTERS feed it. Adding a new external source - e.g. a CrowdStrike feed
@@ -20,8 +19,6 @@ Both re-use the SAME importer (physical-only columns, ``@source:`` paths, subtre
 selection), so a source's DFE schema is refreshed by re-running its adapter over the
 schema definition.
 """
-
-from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable, Iterator
@@ -119,9 +116,11 @@ def _json_schema_es_type(prop: dict[str, Any]) -> str:
 
 
 def _json_schema_to_properties(schema: Any) -> dict[str, Any]:
-    """JSON Schema (draft) object -> the ES ``mappings.properties`` shape, so a JSON
-    Schema re-uses the SAME importer. Nested ``object`` recurses; ``array`` and a typeless
-    object collapse to a JSON blob (as ES flattened/nested do)."""
+    """JSON Schema (draft) object -> the ES ``mappings.properties`` shape.
+
+    A JSON Schema so re-uses the SAME importer. A nested ``object`` recurses, and an
+    ``array`` or a typeless object collapses to a JSON blob (as ES flattened/nested do).
+    """
     props: dict[str, Any] = {}
     schema_props = schema.get("properties") if isinstance(schema, dict) else None
     if not isinstance(schema_props, dict):
@@ -140,8 +139,10 @@ def _json_schema_to_properties(schema: Any) -> dict[str, Any]:
 
 
 def _json_schema_adapter(raw: Any, roots: Iterable[str] | None = None) -> list[SchemaColumn]:
-    """A JSON Schema (draft 2020-12 etc.) as JSON/YAML text or a parsed dict. Also the
-    substrate for OCSF, which is delivered as JSON."""
+    """A JSON Schema (draft 2020-12 etc.) as JSON/YAML text or a parsed dict.
+
+    OCSF, which is delivered as JSON, is read through this too.
+    """
     raw = _parse_json(raw, allow_yaml=True)
     props = _json_schema_to_properties(raw)
     if not props:
@@ -168,8 +169,11 @@ _OCSF_TYPE_TO_ES = {
 
 
 def _ocsf_attrs(schema: Any) -> Iterator[tuple[str, Any]]:
-    """Yield (name, definition) for an OCSF class' attributes, whether the API's
-    list-of-single-key-dicts form or the repo's `{name: def}` dict form."""
+    """Yield (name, definition) for an OCSF class' attributes.
+
+    Both the API's list-of-single-key-dicts form and the repo's `{name: def}` dict form
+    are read.
+    """
     attrs = schema.get("attributes") if isinstance(schema, dict) else None
     if isinstance(attrs, dict):
         yield from attrs.items()
@@ -180,8 +184,10 @@ def _ocsf_attrs(schema: Any) -> Iterator[tuple[str, Any]]:
 
 
 def _ocsf_to_properties(schema: Any) -> dict[str, Any]:
-    """A resolved OCSF class/object -> the ES `mappings.properties` shape (reuse the
-    importer). `is_array` and nested objects collapse to a JSON blob."""
+    """A resolved OCSF class/object -> the ES `mappings.properties` shape the importer reads.
+
+    `is_array` and nested objects collapse to a JSON blob.
+    """
     props: dict[str, Any] = {}
     for name, defn in _ocsf_attrs(schema):
         if not isinstance(defn, dict):

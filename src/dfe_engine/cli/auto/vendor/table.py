@@ -68,7 +68,7 @@ def determine_terminal_width(default_width=80):
     except ImportError:
         return default_width
     try:
-        height, width = struct.unpack("hhhh", ioctl(sys.stdout, TIOCGWINSZ, "\000" * 8))[0:2]
+        height, width = struct.unpack("hhhh", ioctl(sys.stdout, TIOCGWINSZ, "\000" * 8))[0:2]  # noqa: V107
     except Exception:
         return default_width
     else:

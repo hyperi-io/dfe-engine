@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Planning the deploy-repo writes the source definitions imply."""
 
-from __future__ import annotations
+from typing import Any
 
 import pytest
 
@@ -72,6 +72,12 @@ def _account_source(name: str, client_id: str) -> Source:
     )
 
 
+def _written(change: derived.DerivedChange) -> dict[str, Any]:
+    """The overlay a deploy or sync commits, which a removal does not carry."""
+    assert change.doc is not None
+    return change.doc
+
+
 def _put(crud, app, doc):
     crud.put(instances.HELMVARS_CLASS, app.overlay_name, doc, ACTOR, message="test: put")
 
@@ -123,7 +129,7 @@ class TestStackRouting:
         changes = derived.plan(crud, _Registry([_receiver_source()]), settings)
 
         assert [(c.app.service, c.action) for c in changes] == [(RECEIVER, "sync")]
-        rules = get_path(changes[0].doc, "config.routing.source_rules")
+        rules = get_path(_written(changes[0]), "config.routing.source_rules")
         assert [r["source"] for r in rules] == ["filebeat"]
 
     def test_a_synced_overlay_is_left_alone(self, crud, settings):
@@ -155,7 +161,7 @@ class TestStackRouting:
         changes = derived.plan(crud, _Registry([_fetcher_source()]), settings)
 
         receiver = next(c for c in changes if c.app.service == RECEIVER)
-        rules = get_path(receiver.doc, "config.routing.source_rules")
+        rules = get_path(_written(receiver), "config.routing.source_rules")
         assert rules == [
             {
                 "field": "_source",
@@ -173,7 +179,7 @@ class TestFetcherInstances:
         assert [(c.app.service, c.app.instance, c.action) for c in changes] == [
             (FETCHER, "crates-audit", "deploy")
         ]
-        doc = changes[0].doc
+        doc = _written(changes[0])
         assert doc["deploy"] == {"service": FETCHER, "instance": "crates-audit"}
         assert doc["component"] == "fetcher-crates-audit"
         assert get_path(doc, "config.instance_id") == "crates-audit"
@@ -188,7 +194,7 @@ class TestFetcherInstances:
 
     def test_the_main_topic_reaches_the_stanza(self, crud, settings):
         changes = derived.plan(crud, _Registry([_fetcher_source(topic="main")]), settings)
-        assert get_path(changes[0].doc, "config.sources.crates_io.topic") == "main"
+        assert get_path(_written(changes[0]), "config.sources.crates_io.topic") == "main"
 
     @pytest.mark.parametrize(
         "source",
@@ -223,12 +229,14 @@ class TestFetcherInstances:
     def test_a_changed_stanza_is_synced_not_redeployed(self, crud, settings):
         _apply(crud, derived.plan(crud, _Registry([_fetcher_source()]), settings))
         changed = _fetcher_source()
-        changed.versions["1.0.0"].fetcher.config["interval_secs"] = 60
+        fetcher = changed.versions["1.0.0"].fetcher
+        assert fetcher is not None
+        fetcher.config["interval_secs"] = 60
 
         changes = derived.plan(crud, _Registry([changed]), settings)
 
         assert [(c.app.instance, c.action) for c in changes] == [("crates-audit", "sync")]
-        assert get_path(changes[0].doc, "config.sources.crates_io.interval_secs") == 60
+        assert get_path(_written(changes[0]), "config.sources.crates_io.interval_secs") == 60
 
     def test_a_hand_edit_to_the_stanza_is_drift(self, crud, settings):
         registry = _Registry([_fetcher_source()])
@@ -241,7 +249,7 @@ class TestFetcherInstances:
         changes = derived.plan(crud, registry, settings)
 
         assert [c.action for c in changes] == ["sync"]
-        assert get_path(changes[0].doc, "config.sources.crates_io.topic") == "crates-audit"
+        assert get_path(_written(changes[0]), "config.sources.crates_io.topic") == "crates-audit"
 
     def test_two_sources_of_one_type_get_an_instance_each(self, crud, settings):
         """Two accounts on one connector are two sources, so they are two deployments."""
@@ -258,7 +266,7 @@ class TestFetcherInstances:
             ("crowdstrike-eu", "deploy"),
             ("crowdstrike-us", "deploy"),
         ]
-        eu, us = (c.doc for c in changes)
+        eu, us = (_written(c) for c in changes)
         # Distinct component: dfe-common.fullname takes the object names from it,
         # so two instances sharing one would fight over the same Deployment.
         assert (eu["component"], us["component"]) == (
@@ -319,8 +327,8 @@ class TestTransformInstances:
 
         transform = next(c for c in changes if c.app.service == VRL)
         assert (transform.app.instance, transform.action) == ("filebeat", "deploy")
-        assert get_path(transform.doc, "config.source.topics") == ["filebeat_land"]
-        assert get_path(transform.doc, "config.sink.topic") == "filebeat_load"
+        assert get_path(_written(transform), "config.source.topics") == ["filebeat_land"]
+        assert get_path(_written(transform), "config.sink.topic") == "filebeat_load"
 
     def test_only_the_app_that_runs_it_gets_an_instance(self, crud, settings):
         source = _receiver_source(transform={"engine": "vrl"})

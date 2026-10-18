@@ -6,8 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2025 HYPERI PTY LIMITED
 
-"""
-ClickHouse connection management using clickhouse-connect.
+"""ClickHouse connection management using clickhouse-connect.
 
 Uses the official ClickHouse Inc. driver with built-in HTTP connection pooling.
 
@@ -24,8 +23,6 @@ classifiers live in :mod:`dfe_engine.clickhouse.errors`; the generic engine live
 in scalo (promoted from dfe in scalo 2.29.6). Budget exhaustion raises scalo's
 :class:`~scalo.resilience.ServiceUnavailable`, which the API maps to 503.
 """
-
-from __future__ import annotations
 
 from collections.abc import Callable
 from itertools import chain
@@ -50,8 +47,7 @@ T = TypeVar("T")
 
 
 class ClickHouseClientWrapper:
-    """
-    Wrapper around clickhouse-connect Client to provide backward-compatible execute() method.
+    """Wrapper around clickhouse-connect Client to provide backward-compatible execute() method.
 
     clickhouse-connect uses:
     - command() for DDL/DML statements (CREATE, DROP, ALTER, INSERT without data)
@@ -90,8 +86,7 @@ class ClickHouseClientWrapper:
 
     @property
     def _client(self) -> Client:
-        """The LIVE clickhouse-connect client (lazily built; rebuilt after a
-        reconnect).
+        """The LIVE clickhouse-connect client, built lazily and rebuilt after a reconnect.
 
         A property, not a stored reference, so (a) an op re-run inside the
         resilience loop after ``reconnect`` picks up the freshly rebuilt pooled
@@ -102,10 +97,11 @@ class ClickHouseClientWrapper:
         return self._manager._live_client()
 
     def query(self, query: str, *args, **kwargs):
-        """Raw SELECT -> the clickhouse-connect QueryResult (``.column_names`` /
-        ``.result_rows``). Use when the caller needs the result object;
-        ``execute()`` yields only result_rows and ``query_rows()`` returns
-        ``(columns, rows)``.
+        """Raw SELECT -> the clickhouse-connect QueryResult.
+
+        Use it when the caller needs the result object (``.column_names`` and
+        ``.result_rows``). ``execute()`` yields only result_rows and ``query_rows()``
+        returns ``(columns, rows)``.
         """
         kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
         return self._run_resilient(lambda: self._client.query(query, *args, **kwargs))
@@ -116,10 +112,9 @@ class ClickHouseClientWrapper:
         return self._run_resilient(lambda: self._client.command(statement, *args, **kwargs))
 
     def insert(self, table: str, *args, **kwargs):
-        """Row insert -> clickhouse-connect's ``insert(table, rows, column_names=,
-        database=)``, through the resilience layer.
+        """Row insert through the resilience layer, to clickhouse-connect's ``insert``.
 
-        A retry can insert the same row twice, which is safe only where the table
+        The call is ``insert(table, rows, column_names=, database=)``. A retry can insert the same row twice, which is safe only where the table
         collapses duplicates; every hunt coordination table this is used for is
         ReplacingMergeTree.
         """
@@ -134,7 +129,6 @@ class ClickHouseClientWrapper:
         assemble row dicts. Use this when the caller needs to map values back to
         their columns (e.g. sampling whole rows).
         """
-
         kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
 
         def op():
@@ -144,8 +138,7 @@ class ClickHouseClientWrapper:
         return self._run_resilient(op)
 
     def execute(self, query: str, *args, **kwargs):
-        """
-        Execute a query, routing to command() or query() based on query type.
+        """Execute a query, routing to command() or query() based on query type.
 
         For backward compatibility with clickhouse-driver style code. A script of
         several statements runs one statement at a time, cut where a semicolon ends
@@ -237,8 +230,7 @@ class ClickHouseClientWrapper:
 
 
 class ClickHouseManager:
-    """
-    Manages ClickHouse connections using clickhouse-connect.
+    """Manages ClickHouse connections using clickhouse-connect.
 
     Uses built-in HTTP connection pooling via urllib3.
     Pool configuration is managed via settings.clickhouse.connections_max.
@@ -280,6 +272,7 @@ class ClickHouseManager:
 
     @classmethod
     def get_instance(cls, target_config_data: dict | None = None):
+        """The process-wide manager, built on the first call."""
         if cls._instance is None:
             cls._instance = cls(target_config_data)
         return cls._instance
@@ -373,8 +366,10 @@ class ClickHouseManager:
         return self._client
 
     def _reconnect(self) -> None:
-        """Resilience reconnect hook: tear the pooled client down so the next op
-        rebuilds a fresh one against the recovered (or newly-woken) server."""
+        """Resilience reconnect hook that tears the pooled client down.
+
+        The next op rebuilds a fresh one against the recovered (or newly-woken) server.
+        """
         self._cleanup()
 
     def _get_resilience(self) -> ReconnectingResilience:

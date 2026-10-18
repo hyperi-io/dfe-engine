@@ -20,6 +20,7 @@ from dfe_engine.auth.accounts import (
     DocuStoreAccountStore,
     discard_created,
 )
+from tests.support.present import present
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -479,7 +480,7 @@ class TestUpdate:
             source_provider="entra",
             last_login_at="2026-04-03T00:00:00Z",
         )
-        acct = store.get("external-user")
+        acct = present(store.get("external-user"))
         assert acct.external is True
         assert acct.source_provider == "entra"
         assert acct.last_login_at == "2026-04-03T00:00:00Z"

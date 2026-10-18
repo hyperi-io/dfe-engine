@@ -28,14 +28,12 @@ seeds every default app with no routing at all, and until the main flow is
 compiled in, a receiver with no destination refuses to start.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
-from dfe_engine.source.registry import SourceRegistry
+from dfe_engine.source.reader import SourceReader
 
 from . import catalogue, instances, routing
 from .instances import AppInstance
@@ -68,7 +66,7 @@ class DerivedChange:
         return f"{self.app.service}/{self.app.instance}: {self.summary}"
 
 
-def plan(gc: GitCrud, registry: SourceRegistry, settings: Any) -> list[DerivedChange]:
+def plan(gc: GitCrud, registry: SourceReader, settings: Any) -> list[DerivedChange]:
     """Every overlay write that brings the deploy repo into step with the sources."""
     deployed = instances.list_instances(gc)
     docs = {app: instances.read_overlay(gc, app) for app in deployed}
@@ -113,7 +111,7 @@ def plan(gc: GitCrud, registry: SourceRegistry, settings: Any) -> list[DerivedCh
 
 
 def reconcile(
-    gc: GitCrud, registry: SourceRegistry, settings: Any, actor: str = ENGINE_ACTOR
+    gc: GitCrud, registry: SourceReader, settings: Any, actor: str = ENGINE_ACTOR
 ) -> list[str]:
     """Apply the plan straight to the tracked branch and report each write.
 

@@ -21,7 +21,12 @@ from typing import NoReturn
 
 from scalo.logger import logger
 
-from dfe_engine.auth.accounts import Account, AccountStore, discard_created
+from dfe_engine.auth.accounts import (
+    Account,
+    AccountStore,
+    DocuStoreAccountStore,
+    discard_created,
+)
 from dfe_engine.auth.audit import (
     audit_account_change,
     audit_jit_account_created,
@@ -30,7 +35,7 @@ from dfe_engine.auth.audit import (
     audit_jit_login_refused,
     audit_jit_team_assigned,
 )
-from dfe_engine.auth.groups import Group, GroupStore
+from dfe_engine.auth.groups import DocuStoreGroupStore, Group, GroupStore
 from dfe_engine.auth.membership import groups_held_by, linked_groups, linked_providers
 from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant, platform_grants
 from dfe_engine.auth.protected_accounts import resolve_floor
@@ -128,8 +133,8 @@ class JitProvisioner:
 
     def __init__(
         self,
-        account_store: AccountStore,
-        group_store: GroupStore,
+        account_store: AccountStore | DocuStoreAccountStore,
+        group_store: GroupStore | DocuStoreGroupStore,
         hyperdx_client=None,
         admin_name: str = "",
         source_provider_bindings: dict[str, str] | None = None,
@@ -239,8 +244,7 @@ class JitProvisioner:
                 updates["email"] = wanted_email
             if wanted_name and existing.name != wanted_name:
                 updates["name"] = wanted_name
-            self._accounts.update(key, **updates)
-            return self._accounts.get(key)
+            return self._accounts.update(key, allow_protected=False, **updates)
 
         listed = self._groups.list() if groups is None else groups
         # The race branch below reconciles an account under this name, so this covers it too.
@@ -276,11 +280,10 @@ class JitProvisioner:
                 race_updates["email"] = wanted_email
             if wanted_name:
                 race_updates["name"] = wanted_name
-            self._accounts.update(safe_name, **race_updates)
-            return self._accounts.get(safe_name)
+            return self._accounts.update(safe_name, allow_protected=False, **race_updates)
 
         try:
-            self._accounts.update(
+            stamped = self._accounts.update(
                 safe_name,
                 external=True,
                 source_provider=source_provider,
@@ -323,7 +326,7 @@ class JitProvisioner:
                     self._invite_tasks.add(task)
                     task.add_done_callback(self._invite_tasks.discard)
 
-        return self._accounts.get(safe_name)
+        return stamped
 
     def _refuse_protected(self, safe_name: str, user_id: str, source_provider: str) -> None:
         """Refuse any assertion resolving onto a recovery credential.
@@ -494,8 +497,12 @@ class JitProvisioner:
 
     async def _invite_to_hdx(self, user_id: str, team_name: str) -> None:
         """Invite the user to the fork's team; a refusal or failure is logged, never raised."""
+        hdx = self._hdx
+        # ensure_account schedules the invite only once a client is bound.
+        if hdx is None:
+            return
         try:
-            success = await self._hdx.invite_member(user_id)
+            success = await hdx.invite_member(user_id)
         except Exception as exc:
             # The login already succeeded, so the user must not lose it over HyperDX.
             logger.warning(

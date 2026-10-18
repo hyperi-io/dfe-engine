@@ -19,8 +19,6 @@ schema (plus its ref name, so the paginator can spot our ``PaginatedResponse_*``
 envelope).
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
 
@@ -76,10 +74,6 @@ class Operation:
     # True when the request body is a raw (unmodelled) object with no named
     # properties - the whole body is accepted as one --body JSON string option.
     freeform_body: bool = False
-
-
-class SpecError(RuntimeError):
-    """Raised when the spec cannot be loaded or parsed."""
 
 
 def load_live_spec(settings: Any | None = None) -> dict[str, Any]:

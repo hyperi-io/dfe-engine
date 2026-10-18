@@ -27,8 +27,6 @@ overwritten - the Sources append-only rule). See
 docs/superpowers/plans/2026-07-01-rules-hunts-versioning.md.
 """
 
-from __future__ import annotations
-
 import copy
 from typing import Any
 
@@ -154,6 +152,7 @@ class VersionedDoc:
         return out
 
     def status(self, cls: str, name: str) -> str | None:
+        """The document's status, or None when there is no document."""
         env = self._envelope(cls, name)
         return env.get("status") if env else None
 

@@ -15,13 +15,12 @@ step - it works even when the daemon is not running. Config comes from the
 A start is BILLABLE. Replaces the standalone scripts/ch_cloud.py helper.
 """
 
-from __future__ import annotations
-
 import typer
 from scalo.cli import Typer
 from scalo.cli.output import print_error, print_info
 
-ch_cloud_app = Typer(help="ClickHouse Cloud service lifecycle (status/start/stop).")
+# scalo 2.31.17 types its Typer export as a union with the not-installed placeholder (scalo-py#138).
+ch_cloud_app: typer.Typer = Typer(help="ClickHouse Cloud service lifecycle (status/start/stop).")  # ty: ignore[invalid-assignment]
 
 
 def _service():
@@ -75,8 +74,3 @@ def ch_cloud_stop() -> None:
         print_error(str(exc))
         raise typer.Exit(1) from exc
     print_info(f"{st.name}: stop issued -> {st.state}")
-
-
-def register_ch_cloud_commands(app) -> None:
-    """Register the ``ch-cloud`` command group (mounted under ``dfe local``)."""
-    app.add_typer(ch_cloud_app, name="ch-cloud")

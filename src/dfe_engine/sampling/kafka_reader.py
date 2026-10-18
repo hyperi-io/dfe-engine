@@ -20,8 +20,6 @@ The engine has no long-lived Kafka consumer; these use throwaway,
 non-committing consumer groups so sampling never disturbs real offsets.
 """
 
-from __future__ import annotations
-
 from typing import Any
 
 from .models import SamplerError
@@ -105,13 +103,18 @@ def read_recent(
                     break
                 continue
             idle = 0
+            partition = msg.partition()
+            # A polled message always names its partition, and only a hand-built one has None.
+            if partition is None:
+                continue
             err = msg.error()
             if err is not None:
                 if err.code() == KafkaError._PARTITION_EOF:
-                    done.add(msg.partition())
+                    done.add(partition)
                 continue
-            if msg.offset() >= ends.get(msg.partition(), 0) - 1:
-                done.add(msg.partition())
+            offset = msg.offset()
+            if offset is not None and offset >= ends.get(partition, 0) - 1:
+                done.add(partition)
             value = msg.value()
             if value is not None:
                 lines.append(value.decode("utf-8", errors="replace"))

@@ -23,8 +23,6 @@ standard naming is a read-time view (see the elastic importer + the ECS/CIM/Sigm
 default maps under dfe-schemas ``registries/field-maps/``).
 """
 
-from __future__ import annotations
-
 import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -131,10 +129,10 @@ class RemapViewDefinition(BaseModel):
 
 
 def _safe_ident(name: str, *, what: str) -> str:
-    """Validate a bare identifier for a backtick-quoted DDL position.
+    r"""Validate a bare identifier for a backtick-quoted DDL position.
 
-    Rejects a backtick (which would break out of ``\\`...\\``` quoting), whitespace,
-    and the DDL control chars ``; ( ) ' " \\``. The charset rule is
+    Rejects a backtick (which would break out of ``\`...\``` quoting), whitespace,
+    and the DDL control chars ``; ( ) ' " \``. The charset rule is
     ``schema_ddl.unsafe_ident_reason`` (ONE rule, two exception seams). Governed,
     RBAC'd, git-stored values, checked as defence in depth (the discipline
     json_promotion_service applies to its JSON subcolumn accessor).

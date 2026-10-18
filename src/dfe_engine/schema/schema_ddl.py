@@ -740,8 +740,9 @@ class DDLGenerator:
         ORDER BY, mark it 'not_null' (or give it a DEFAULT, which also forces
         non-null). See docs/data-plane/schema.md "Nullability Defaults".
         """
-        ordered = [col for col in columns if col.order is not None]
-        ordered.sort(key=lambda c: c.order)
+        keyed = [(col.order, col) for col in columns if col.order is not None]
+        keyed.sort(key=lambda pair: pair[0])
+        ordered = [col for _, col in keyed]
 
         result: list[str] = []
         for col in ordered:

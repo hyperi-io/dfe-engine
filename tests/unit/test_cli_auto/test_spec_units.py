@@ -16,10 +16,8 @@ the paginator keys on. ``test_tree_naming`` covers the same code against the LIV
 spec; this fixes the behaviour on inputs the live spec may not exercise.
 """
 
-from __future__ import annotations
-
 from dfe_engine.api.cli_exposure import cli_enabled
-from dfe_engine.cli.auto.spec import RefResolver, iter_operations
+from dfe_engine.cli.auto.spec import Operation, RefResolver, iter_operations
 
 
 def _spec() -> dict:
@@ -136,7 +134,7 @@ def _spec() -> dict:
     }
 
 
-def _by_key(spec: dict) -> dict[tuple, object]:
+def _by_key(spec: dict) -> dict[tuple, Operation]:
     return {(tuple(op.group_path), op.verb): op for op in iter_operations(spec)}
 
 

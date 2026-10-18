@@ -130,6 +130,8 @@ _DEPLOY_DELETE = Depends(require_action(scopes_dict["deployment_delete"]))
 
 
 class ValidationModel(BaseModel):
+    """What the validation backend said about the content written."""
+
     status: str = Field(
         description=(
             "'valid' or 'invalid' when a backend answered, 'unavailable' when none "
@@ -142,6 +144,8 @@ class ValidationModel(BaseModel):
 
 
 class WriteResult(BaseModel):
+    """The outcome of a write: its commit, review routing, validation and reload."""
+
     changed: bool
     commit_sha: str | None = None
     auto_merged: bool = False
@@ -166,6 +170,8 @@ class WriteResult(BaseModel):
 
 
 class CreateInstanceRequest(BaseModel):
+    """Body for creating an app instance with initial helm values."""
+
     instance: str
     values: dict[str, Any] = Field(
         default_factory=dict,
@@ -174,6 +180,8 @@ class CreateInstanceRequest(BaseModel):
 
 
 class FileSetSummary(BaseModel):
+    """One file set an app consumes."""
+
     name: str
     language: str
     suffixes: list[str]
@@ -277,6 +285,8 @@ def _display_name_field() -> Any:
 
 
 class AppSummary(BaseModel):
+    """One deployed app instance in a listing."""
+
     service: str
     display_name: str | None = _display_name_field()
     instance: str
@@ -293,6 +303,8 @@ class AppSummary(BaseModel):
 
 
 class CatalogueEntry(BaseModel):
+    """One app the catalogue offers."""
+
     service: str
     display_name: str | None = _display_name_field()
     scale_deployed: bool
@@ -427,6 +439,8 @@ class ConfigWriteResult(WriteResult):
 
 
 class ScalingResponse(BaseModel):
+    """An instance's scaling dials, or why it cannot be scaled."""
+
     supported: bool
     reason: str = ""
     deploy_target: str
@@ -442,6 +456,8 @@ class ScalingResponse(BaseModel):
 
 
 class ScalingRequest(BaseModel):
+    """Body for setting an instance's scaling dials."""
+
     replica_count: int | None = Field(
         default=None,
         description=(
@@ -461,17 +477,23 @@ class ScalingRequest(BaseModel):
 
 
 class FileSummary(BaseModel):
+    """One file in an instance's file set."""
+
     name: str
     language: str
     size_bytes: int
 
 
 class FileDetail(FileSummary):
+    """One file with its content and etag."""
+
     content: str
     etag: str | None = _etag_field()
 
 
 class FileWriteRequest(BaseModel):
+    """Body for writing one file."""
+
     content: str
 
 
@@ -543,6 +565,8 @@ class DryRunResponse(BaseModel):
 
 
 class CopyFilesRequest(BaseModel):
+    """Body for copying files to another instance."""
+
     target_instance: str = Field(
         description="Instance to copy into. For a source-bound app this is the source."
     )
@@ -553,11 +577,15 @@ class CopyFilesRequest(BaseModel):
 
 
 class CopyFilesResult(WriteResult):
+    """The write result, with the files copied and the files skipped."""
+
     copied: list[str] = Field(default_factory=list)
     skipped: list[str] = Field(default_factory=list)
 
 
 class LinkRequest(BaseModel):
+    """Body for linking a library artefact into a file."""
+
     name: str = Field(description="Filename the artefact's content resolves into.")
     artifact: str
     version: int | None = Field(
@@ -570,6 +598,8 @@ class LinkRequest(BaseModel):
 
 
 class LinkModel(BaseModel):
+    """A file's link to a library artefact version."""
+
     name: str
     artifact: str
     version: int
@@ -578,6 +608,8 @@ class LinkModel(BaseModel):
 
 
 class LinkStatusModel(LinkModel):
+    """A link, with how the content in the file set compares to the artefact."""
+
     resolved_digest: str = Field(description="Digest of the content sitting in the file set.")
     available_version: int | None = Field(
         default=None, description="The version re-resolving would move this link to."
@@ -588,14 +620,20 @@ class LinkStatusModel(LinkModel):
 
 
 class LinkResult(WriteResult):
+    """The write result, with the link it made."""
+
     link: LinkModel | None = None
 
 
 class RelinkResult(WriteResult):
+    """The write result, with the links it moved."""
+
     relinked: list[LinkModel] = Field(default_factory=list)
 
 
 class HistoryEntry(BaseModel):
+    """One commit that changed an instance."""
+
     sha: str
     timestamp: int
     actor: str = ""
@@ -609,6 +647,8 @@ class HistoryEntry(BaseModel):
 
 
 class StatusResponse(BaseModel):
+    """Whether an instance is reporting telemetry, and since when."""
+
     telemetry_name: str
     reporting: bool
     last_seen_epoch: float | None = None
@@ -617,6 +657,8 @@ class StatusResponse(BaseModel):
 
 
 class ResourceBucketModel(BaseModel):
+    """One time bucket of a metric across an instance's pods."""
+
     metric: str
     bucket_epoch: float
     minimum: float
@@ -627,6 +669,8 @@ class ResourceBucketModel(BaseModel):
 
 
 class ResourceSeriesResponse(BaseModel):
+    """An instance's resource metrics over a window, in time buckets."""
+
     telemetry_name: str
     window_seconds: int
     bucket_seconds: int
@@ -639,6 +683,8 @@ class ResourceSeriesResponse(BaseModel):
 
 
 class MetricsResponse(BaseModel):
+    """An instance's current gauges and rates over a window."""
+
     telemetry_name: str
     window_seconds: int
     gauges: dict[str, float]

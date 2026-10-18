@@ -1,12 +1,11 @@
 """Tests for SchemaRegistry (meta-schema YAML directory)."""
 
-from __future__ import annotations
-
 from pathlib import Path
 
 import pydantic
 import pytest
 from dulwich import porcelain as dulwich_porcelain
+from dulwich.objects import Commit
 from dulwich.repo import Repo
 
 from dfe_engine.auth.models import AuthContext
@@ -314,6 +313,7 @@ class TestSchemaRegistryCoverage:
             repo = Repo(str(tmp_path))
             head = repo[repo.head()]
             repo.close()
+            assert isinstance(head, Commit)
             assert head.author == b"admin <admin@dfe.local>"
             assert head.committer == COMMITTER_IDENTITY.encode("utf-8")
         finally:
@@ -332,6 +332,7 @@ class TestSchemaRegistryCoverage:
             repo = Repo(str(tmp_path))
             head = repo[repo.head()]
             repo.close()
+            assert isinstance(head, Commit)
             assert head.author == b"alice <alice@corp.com>"
             assert head.committer == COMMITTER_IDENTITY.encode("utf-8")
         finally:
@@ -507,7 +508,7 @@ class TestSchemaRegistryCoverage:
         def yaml_path_with_stat_failure(table: str) -> Path:
             path = orig_yaml_path(table)
             if table == "stat/break":
-                return _StatDeniedPath(path)  # type: ignore[return-value]
+                return _StatDeniedPath(path)  # ty: ignore[invalid-return-type]  # a stand-in path whose stat is refused
             return path
 
         monkeypatch.setattr(registry, "_yaml_path", yaml_path_with_stat_failure)

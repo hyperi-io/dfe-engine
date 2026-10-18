@@ -389,10 +389,6 @@ class SchemaBuilderV2:
 
     # -- Internal: loading -------------------------------------------
 
-    def _load_profile(self, source: Source) -> list[SchemaColumn]:
-        """Load the common header profile for the deployed source version."""
-        return self.load_profile_for_snapshot(source.source, source.version())
-
     def load_profile_for_snapshot(
         self, source_name: str, snap: SourceVersion
     ) -> list[SchemaColumn]:
@@ -420,10 +416,6 @@ class SchemaBuilderV2:
             raise SchemaBuildError(
                 f"Failed to load profile {profile_name!r} for source {source_name!r}: {e}"
             ) from e
-
-    def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
-        """Load source-specific schema columns for the deployed version."""
-        return self._load_source_columns_for_snapshot(source.source, source.version())
 
     def _load_source_columns_for_snapshot(
         self, source_name: str, snap: SourceVersion

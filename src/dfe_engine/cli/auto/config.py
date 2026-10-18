@@ -23,8 +23,6 @@ Resolution precedence (first wins):
   token : $DFE_API_KEY / $DFE_API_TOKEN  >  stored credential for the active account
 """
 
-from __future__ import annotations
-
 import configparser
 import json
 import os
@@ -54,10 +52,12 @@ class Credential:
 
     @property
     def is_api_key(self) -> bool:
+        """Whether this credential is an API key rather than a token."""
         return self.api_key is not None
 
     @property
     def value(self) -> str | None:
+        """The API key, else the token."""
         return self.api_key if self.api_key is not None else self.token
 
 
@@ -71,14 +71,17 @@ class Store:
 
     @property
     def configurations_dir(self) -> Path:
+        """The directory holding one config file per profile."""
         return self.home / "configurations"
 
     @property
     def active_config_file(self) -> Path:
+        """The file naming the active profile."""
         return self.home / "active_config"
 
     @property
     def credentials_file(self) -> Path:
+        """The file holding stored credentials."""
         return self.home / "credentials.json"
 
     def _profile_file(self, name: str) -> Path:
@@ -98,6 +101,7 @@ class Store:
     # -- active profile ------------------------------------------------------
 
     def active_profile(self) -> str:
+        """The active profile's name, else the default profile."""
         if self.active_config_file.exists():
             name = self.active_config_file.read_text(encoding="utf-8").strip()
             if name:
@@ -105,10 +109,12 @@ class Store:
         return _DEFAULT_PROFILE
 
     def set_active_profile(self, name: str) -> None:
+        """Make *name* the active profile."""
         self._ensure_home()
         self.active_config_file.write_text(name + "\n", encoding="utf-8")
 
     def list_profiles(self) -> list[str]:
+        """Every profile name, sorted."""
         if not self.configurations_dir.exists():
             return []
         names = [
@@ -119,6 +125,7 @@ class Store:
         return sorted(names)
 
     def create_profile(self, name: str) -> None:
+        """Create an empty profile, unless one of that name exists."""
         self._ensure_home()
         path = self._profile_file(name)
         if not path.exists():
@@ -128,6 +135,7 @@ class Store:
                 parser.write(fh)
 
     def delete_profile(self, name: str) -> None:
+        """Delete a profile, falling back to the default when it was active."""
         path = self._profile_file(name)
         if path.exists():
             path.unlink()
@@ -151,10 +159,12 @@ class Store:
         return parser
 
     def get_value(self, key: str, name: str | None = None) -> str | None:
+        """One key from a profile, the active one unless *name* is given."""
         parser = self._read_profile(name or self.active_profile())
         return parser["core"].get(key)
 
     def set_value(self, key: str, value: str, name: str | None = None) -> None:
+        """Set one key in a profile, the active one unless *name* is given."""
         self._ensure_home()
         profile = name or self.active_profile()
         parser = self._read_profile(profile)
@@ -163,6 +173,7 @@ class Store:
             parser.write(fh)
 
     def profile_items(self, name: str | None = None) -> dict[str, str]:
+        """Every key in a profile, the active one unless *name* is given."""
         parser = self._read_profile(name or self.active_profile())
         return dict(parser["core"])
 
@@ -195,6 +206,7 @@ class Store:
             pass
 
     def save_credential(self, cred: Credential) -> None:
+        """Store a credential under its account."""
         creds = self._read_credentials()
         entry: dict[str, str] = {}
         if cred.api_key is not None:
@@ -205,6 +217,7 @@ class Store:
         self._write_credentials(creds)
 
     def get_credential(self, account: str) -> Credential | None:
+        """The credential stored for *account*, or None."""
         entry = self._read_credentials().get(account)
         if not entry:
             return None
@@ -215,12 +228,14 @@ class Store:
         )
 
     def delete_credential(self, account: str) -> None:
+        """Remove the credential stored for *account*."""
         creds = self._read_credentials()
         if account in creds:
             del creds[account]
             self._write_credentials(creds)
 
     def list_accounts(self) -> list[str]:
+        """Every account with a stored credential, sorted."""
         return sorted(self._read_credentials().keys())
 
 

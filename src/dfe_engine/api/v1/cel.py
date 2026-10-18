@@ -23,8 +23,6 @@ structured results with:
 - ``POST /cel/check-batch`` -- validate a list of expressions in one call
 """
 
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -99,6 +97,7 @@ class CelCheckResponse(BaseModel):
 
     @classmethod
     def from_result(cls, result: SyntaxCheckResult) -> CelCheckResponse:
+        """Build the response from a syntax check, naming the filter tier it lands in."""
         tier_label = None
         if result.tier == FilterTier.TIER1:
             tier_label = "Tier 1 (SIMD)"

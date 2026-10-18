@@ -14,10 +14,9 @@ so a re-import is reliable (add / skip-unchanged / preserve-local-edit), which i
 exactly the reliability the operator asked for (spec section G).
 """
 
-from __future__ import annotations
-
 from datetime import datetime
 from pathlib import Path
+from typing import override
 
 from scalo.logger import logger
 
@@ -31,10 +30,12 @@ class LocalFilesProvider(SigmaProvider):
         super().__init__(config, secrets=secrets)
 
     @property
+    @override
     def origin(self) -> str:
         # The default import file is the canonical 'file' origin, not 'provider:<name>'.
         return "file"
 
+    @override
     async def fetch(self, since: datetime | None = None) -> list[SigmaRuleDoc]:
         directory = Path(str(self.config.options.get("directory", ""))).expanduser()
         docs: list[SigmaRuleDoc] = []

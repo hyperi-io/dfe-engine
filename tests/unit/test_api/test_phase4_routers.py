@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.support.accounts import OnboardedClient
+from tests.support.present import present
 
 # These apps run the production posture, which refuses to start on the shipped
 # admin password, so each injects one the way a deployment's secret store does.
@@ -156,7 +157,7 @@ class TestSchemasRouter:
         common_header = schemas_root / "common-header"
         common_header.mkdir()
         shutil.copy(
-            _resolve_package_schemas_root() / "common-header" / "minimal.yaml",
+            present(_resolve_package_schemas_root()) / "common-header" / "minimal.yaml",
             common_header / "minimal.yaml",
         )
         monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
@@ -255,7 +256,7 @@ class TestSchemasRouter:
         common_header = schemas_root / "common-header"
         common_header.mkdir()
         shutil.copy(
-            _resolve_package_schemas_root() / "common-header" / "minimal.yaml",
+            present(_resolve_package_schemas_root()) / "common-header" / "minimal.yaml",
             common_header / "minimal.yaml",
         )
         monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
@@ -427,7 +428,7 @@ class TestSchemasRouter:
         common_header = schemas_root / "common-header"
         common_header.mkdir()
         shutil.copy(
-            _resolve_package_schemas_root() / "common-header" / "minimal.yaml",
+            present(_resolve_package_schemas_root()) / "common-header" / "minimal.yaml",
             common_header / "minimal.yaml",
         )
         monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
@@ -569,7 +570,7 @@ class TestSchemasRouter:
         common_header = schemas_root / "common-header"
         common_header.mkdir()
         shutil.copy(
-            _resolve_package_schemas_root() / "common-header" / "minimal.yaml",
+            present(_resolve_package_schemas_root()) / "common-header" / "minimal.yaml",
             common_header / "minimal.yaml",
         )
         monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))

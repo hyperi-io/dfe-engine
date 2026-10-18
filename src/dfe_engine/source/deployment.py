@@ -207,10 +207,14 @@ class VersionedSourceArtifactDocument(BaseModel):
 
 
 class SourceBuildDocument(VersionedSourceArtifactDocument):
+    """Every stored build of one source, by version."""
+
     versions: dict[str, SourceBuildVersionRecord] = Field(default_factory=dict)
 
 
 class SourcePlanDocument(VersionedSourceArtifactDocument):
+    """Every stored plan of one source, by version."""
+
     versions: dict[str, SourcePlanVersionRecord] = Field(default_factory=dict)
 
 
@@ -254,6 +258,8 @@ def previous_deployed_version_ids(
 
 # Per-version views used by API helpers (flattened from documents).
 class SourceBuildArtifact(BaseModel):
+    """The DDL a build produced for one source version."""
+
     source_name: str
     version: str
     built_at: str
@@ -264,6 +270,8 @@ class SourceBuildArtifact(BaseModel):
 
 
 class SourcePlanArtifact(BaseModel):
+    """The statements a plan would run for one source version, and whether it is ready."""
+
     source_name: str
     version: str
     planned_at: str
@@ -326,6 +334,7 @@ def build_from_artifact(artifact: SourceBuildArtifact) -> SchemaBuildResult:
 
 
 def artifact_from_build(result: SchemaBuildResult, *, version: str) -> SourceBuildArtifact:
+    """The build artefact for *result* at *version*."""
     return SourceBuildArtifact(
         source_name=result.source_name,
         version=version,
@@ -646,6 +655,7 @@ class SourceDeploymentStore:
 
     @classmethod
     def from_settings(cls, settings: Any) -> SourceDeploymentStore:
+        """A store under the directories the settings name, beside the sources by default."""
         src = settings.source
         builds = Path(src.builds_dir or Path(src.sources_dir).parent / "source-builds")
         plans = Path(src.plans_dir or Path(src.sources_dir).parent / "source-plans")
@@ -730,6 +740,7 @@ class SourceDeploymentStore:
         return doc_class.model_validate(data)
 
     def save_build(self, artifact: SourceBuildArtifact, source: Source) -> Path:
+        """Store a build, keeping only the versions the source still has."""
         _assert_version_on_source(source, artifact.version)
         doc = self._read_document(
             self.builds_dir, source.source, SourceBuildDocument
@@ -779,12 +790,14 @@ class SourceDeploymentStore:
         return removed
 
     def load_build(self, source_name: str, version: str) -> SourceBuildArtifact | None:
+        """The stored build of a source version, or None."""
         doc = self._read_document(self.builds_dir, source_name, SourceBuildDocument)
         if doc is None or version not in doc.versions:
             return None
         return _build_artifact_from_record(source_name, version, doc.versions[version])
 
     def save_plan(self, artifact: SourcePlanArtifact, source: Source) -> Path:
+        """Store a plan, keeping only the versions the source still has."""
         _assert_version_on_source(source, artifact.version)
         doc = self._read_document(
             self.plans_dir, source.source, SourcePlanDocument
@@ -801,12 +814,14 @@ class SourceDeploymentStore:
         return path
 
     def load_plan(self, source_name: str, version: str) -> SourcePlanArtifact | None:
+        """The stored plan of a source version, or None."""
         doc = self._read_document(self.plans_dir, source_name, SourcePlanDocument)
         if doc is None or version not in doc.versions:
             return None
         return _plan_artifact_from_record(source_name, version, doc.versions[version])
 
     def save_deploy(self, result: SchemaDeployResult, source: Source) -> Path:
+        """Store a deploy result, recording its version as deployed when it applied."""
         _assert_version_on_source(source, result.version)
         doc = self._read_document(
             self.deploys_dir,
@@ -827,6 +842,7 @@ class SourceDeploymentStore:
         return path
 
     def load_deploy_document(self, source_name: str) -> SourceDeployDocument | None:
+        """Every stored deploy of a source, or None."""
         return self._read_document(
             self.deploys_dir,
             source_name,
@@ -835,6 +851,7 @@ class SourceDeploymentStore:
         )
 
     def load_deploy(self, source_name: str, version: str) -> SchemaDeployResult | None:
+        """The stored deploy of a source version, or None."""
         doc = self._read_document(
             self.deploys_dir,
             source_name,

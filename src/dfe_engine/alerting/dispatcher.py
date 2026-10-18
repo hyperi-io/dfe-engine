@@ -12,8 +12,6 @@ The real senders (Slack/email/...) will be a thin wrapper over a re-use library
 (Apprise is the candidate) - evaluated WHEN WE REACH this phase, not now.
 """
 
-from __future__ import annotations
-
 from typing import Protocol, runtime_checkable
 
 from scalo.logger import logger
@@ -27,7 +25,8 @@ class Sender(Protocol):
 
     kind: str
 
-    def send(self, destination: AlertDestination, subject: str, body: str) -> bool: ...
+    def send(self, destination: AlertDestination, subject: str, body: str) -> bool:
+        """Deliver one alert to *destination*, and say whether it was sent."""
 
 
 class LogSender:
@@ -36,6 +35,7 @@ class LogSender:
     kind = "log"
 
     def send(self, destination: AlertDestination, subject: str, body: str) -> bool:
+        """Log the alert instead of delivering it, and report it sent."""
         logger.info("alert.dispatch", destination=destination.name, subject=subject)
         return True
 
