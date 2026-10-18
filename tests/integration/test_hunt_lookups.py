@@ -44,12 +44,12 @@ def lookup_db(ch_client):
         ch_client.command(f"DROP DATABASE IF EXISTS `{db}`")
 
 
-def _fire_one(ch_client, dfe_db, tmp_path, hunt: str, lookups: tuple[str, ...]) -> int:
+def _fire_one(ch_client, dfe_db, tmp_path, lookups: tuple[str, ...], fire: int) -> int:
+    """Tick the runner just past *fire*, the slot the caller wrote its rows for."""
     coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
     coord.ensure_schema()
     specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules", lookup_databases=lookups)
     runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
-    fire = current_fire(hunt, _INTERVAL, int(time.time()))
     return runner.tick(fire + 1)
 
 
@@ -85,7 +85,7 @@ def test_a_hunt_matches_through_a_listed_lookup_and_only_for_its_orgs(
         f"INSERT INTO `{dfe_db}`.`main` (_timestamp_load, _timestamp, _org_id) VALUES {values}"
     )
 
-    assert _fire_one(ch_client, dfe_db, tmp_path, hunt, (lookup_db,)) == 1
+    assert _fire_one(ch_client, dfe_db, tmp_path, (lookup_db,), fire) == 1
 
     # The lookup holds the named and the other org, and the hunt reads the named and
     # one the lookup lacks, so only the named org's row is in both.
