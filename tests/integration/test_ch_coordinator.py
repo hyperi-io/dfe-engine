@@ -84,6 +84,40 @@ def test_release_frees_the_slot(ch_client, dfe_db):
     assert w2.try_claim("h", fire=1000, now=106) is True
 
 
+def test_claim_release_claim_release_of_one_fire_leaves_no_lease(ch_client, dfe_db):
+    """The runner re-claims a fire it released after a failure.
+
+    The second release writes the row the first one did, and a Replicated table drops
+    an insert identical to a recent one, so without the insert settings the re-claim
+    stays current: a phantom lease that blocks every other worker.
+    """
+    w1 = _coord(ch_client, dfe_db, "w1")
+    w1.ensure_schema()
+
+    assert w1.try_claim("h", fire=1000, now=100) is True
+    w1.release("h", fire=1000)
+    assert w1.try_claim("h", fire=1000, now=110) is True
+    w1.release("h", fire=1000)
+
+    assert w1.active_count(now=120) == 0
+    lease = w1.current_lease("h")
+    assert lease is not None
+    assert lease.lease_until == 0
+
+
+def test_a_claim_repeated_in_the_same_second_after_a_release_holds_the_hunt(ch_client, dfe_db):
+    """The repeat claim is the row the first claim wrote, and it has to land over the release."""
+    w1 = _coord(ch_client, dfe_db, "w1")
+    w1.ensure_schema()
+
+    assert w1.try_claim("h", fire=1000, now=100) is True
+    w1.release("h", fire=1000)
+    assert w1.try_claim("h", fire=1000, now=100) is True
+
+    assert w1.active_count(now=105) == 1
+    assert w1.current_lease("h").lease_until == 400
+
+
 def test_active_count_reflects_multiple_hunts(ch_client, dfe_db):
     w1 = _coord(ch_client, dfe_db, "w1")
     w1.ensure_schema()

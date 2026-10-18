@@ -18,20 +18,27 @@ That report is the point. A schema step that silently no-ops looks exactly like
 one that worked, and the three callers (the dfe-infra ArgoCD job, the dfe-docker
 one-shot service, the dfe-engine daemon) all run this on every deploy.
 
-Every statement takes its engine and its ``ON CLUSTER`` from the injected
-:class:`~dfe_engine.schema.engine_resolver.EngineResolver`, so a multi-node
-cluster gets the table on every replica rather than on whichever one the
-connection happened to land on.
+Every statement renders through dfe-schemas: the database is the one that
+replicates its own DDL, every table takes the argumentless ``Replicated`` engine,
+and nothing carries ``ON CLUSTER``, so a multi-node cluster gets the table on
+every replica rather than on whichever one the connection happened to land on.
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any, Literal
 
+from dfe_schemas.clickhouse import (
+    Platform,
+    create_database,
+    engine_clause,
+    parse_engine,
+    realign_settings,
+)
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.statements import StatementTooLargeError, ddl_settings
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError, DDLGenerator, quote_ident
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import TypeRegistry
@@ -48,8 +55,8 @@ _TTL_INTERVAL_RE = re.compile(
 _UNIT_SECONDS = {"second": 1, "minute": 60, "hour": 3_600, "day": 86_400, "week": 604_800}
 _DAY_SECONDS = 86_400
 
-# The resolver adds these to a variant for the topology; config never declares them.
-_TOPOLOGY_PREFIXES = ("Replicated", "Shared")
+# What the one DDL shape and Cloud's rewrite put before a variant. Config never declares them.
+_ENGINE_PREFIXES = ("Replicated", "Shared")
 
 # One `name = value` in engine_full's SETTINGS clause; a quoted value may hold a comma.
 _SETTING_RE = re.compile(r"(?P<name>\w+)\s*=\s*(?P<value>'(?:[^'\\]|\\.)*'|[^,\s]+)")
@@ -140,7 +147,6 @@ class TtlMove:
 def ttl_move(
     *,
     target: str,
-    on_cluster: str,
     cfg: DDLConfig,
     columns: list[SchemaColumn],
     live: LiveTtl | None,
@@ -153,7 +159,6 @@ def ttl_move(
 
     Args:
         target: The quoted ``database.table``.
-        on_cluster: The ``ON CLUSTER`` suffix, or "".
         cfg: The table's DDL configuration.
         columns: The columns the table has once the apply adds what it lacks.
         live: The table's TTL now; None when it has none.
@@ -165,7 +170,7 @@ def ttl_move(
         if live is None:
             return TtlMove()
         return TtlMove(
-            statement=f"ALTER TABLE {target}{on_cluster} REMOVE TTL",
+            statement=f"ALTER TABLE {target} REMOVE TTL",
             move=f"{live.describe()} -> none",
         )
     if live is not None and live.days == wanted:
@@ -177,7 +182,7 @@ def ttl_move(
     if clause is None:
         return TtlMove()
     return TtlMove(
-        statement=f"ALTER TABLE {target}{on_cluster} MODIFY {clause}",
+        statement=f"ALTER TABLE {target} MODIFY {clause}",
         move=f"{'none' if live is None else live.describe()} -> {wanted}",
         expires_rows=live is None or live.days is None or wanted < live.days,
     )
@@ -196,40 +201,31 @@ class SettingsMove:
     """What bringing a table's settings to the declared ones takes.
 
     Attributes:
-        statement: The ALTER TABLE that makes the move; empty when nothing moves.
-        assignments: ``name = value`` for each setting the statement sets.
+        statements: The ALTER TABLE statements that make the move, a MODIFY SETTING
+            and then a RESET SETTING, each only when it has work. ClickHouse refuses
+            the two in one ALTER (code 62). Empty when nothing moves.
+        assignments: ``name = value`` for each setting set, then ``reset name`` for
+            each one reset.
     """
 
-    statement: str = ""
+    statements: tuple[str, ...] = ()
     assignments: tuple[str, ...] = ()
 
 
-def settings_move(
-    *, target: str, on_cluster: str, wanted: dict[str, int], live: dict[str, str]
-) -> SettingsMove:
-    """The ``MODIFY SETTING`` that brings *live* to *wanted*, not run.
+def settings_move(*, target: str, wanted: Mapping[str, int], live: dict[str, str]) -> SettingsMove:
+    """The statements that bring *live* to *wanted*, not run.
 
-    Only the settings in *wanted* are compared, and one already at its value issues
-    nothing. A setting the live table carries and *wanted* omits is left alone.
+    dfe-schemas decides the move: a setting in *wanted* that differs is set, a
+    platform-only setting *wanted* omits is reset, and anything else the live table
+    carries is left alone. A Replicated database replicates either ALTER.
 
     Args:
         target: The quoted ``database.table``.
-        on_cluster: The ``ON CLUSTER`` suffix, or "". MODIFY SETTING is replica-local, so
-            a replicated table needs the same suffix its CREATE took.
-        wanted: Setting name to the value the table should carry.
+        wanted: Setting name to the value the table should carry on this platform.
         live: The table's settings now, as :func:`settings_from_engine_full` reads them.
     """
-    assignments = tuple(
-        f"{name} = {value}"
-        for name, value in sorted(wanted.items())
-        if live.get(name) != str(value)
-    )
-    if not assignments:
-        return SettingsMove()
-    return SettingsMove(
-        statement=f"ALTER TABLE {target}{on_cluster} MODIFY SETTING {', '.join(assignments)}",
-        assignments=assignments,
-    )
+    realign = realign_settings(wanted, live)
+    return SettingsMove(statements=realign.statements(target), assignments=realign.describe())
 
 
 def table_target(database: str, table: str) -> str:
@@ -242,7 +238,7 @@ class LiveTable:
     """A table as ClickHouse reports it in ``system.tables``.
 
     Attributes:
-        engine: The engine name, topology prefix included (``ReplicatedMergeTree``).
+        engine: The engine name, Replicated or Shared prefix included (``ReplicatedMergeTree``).
         ttl: The TTL interval, or None when the table has none.
     """
 
@@ -251,8 +247,8 @@ class LiveTable:
 
     @property
     def variant(self) -> str:
-        """The MergeTree-family variant, without the prefix the topology adds."""
-        for prefix in _TOPOLOGY_PREFIXES:
+        """The MergeTree-family variant, without the Replicated or Shared prefix."""
+        for prefix in _ENGINE_PREFIXES:
             if self.engine.startswith(prefix) and len(self.engine) > len(prefix):
                 return self.engine[len(prefix) :]
         return self.engine
@@ -327,12 +323,11 @@ def json_settings_move(
     database: str,
     table: str,
     columns: list[SchemaColumn],
-    cfg: DDLConfig,
 ) -> SettingsMove:
-    """The ``MODIFY SETTING`` that gives a table the settings its JSON columns declare.
+    """The statements that give a table the settings its JSON columns declare on its platform.
 
-    Takes the ON CLUSTER the TTL move takes. A table with no JSON column is not read
-    at all, and one already at the declared values moves nothing.
+    A table with no JSON column is not read at all, and one already at the declared
+    values moves nothing.
 
     Raises:
         SchemaApplyError: ClickHouse could not be read.
@@ -342,7 +337,6 @@ def json_settings_move(
         return SettingsMove()
     return settings_move(
         target=table_target(database, table),
-        on_cluster=ddl_gen.on_cluster(cfg),
         wanted=wanted,
         live=settings_from_engine_full(read_engine_full(client, database, table)),
     )
@@ -370,20 +364,18 @@ class TableChange:
     action: Action
     columns_added: tuple[str, ...] = ()
     engine: str = ""
-    on_cluster: str = ""
     # The TTL move in days, "none -> 90" or "30 -> 90"; empty when it did not change.
     ttl: str = ""
     # Why a declared TTL that differs from the live one could not be placed; empty otherwise.
     ttl_skipped: str = ""
-    # "name = value" for each table setting this pass set; empty when none moved.
+    # "name = value" set and "reset name" reset by this pass, empty when none moved.
     settings: tuple[str, ...] = ()
 
     def describe(self) -> str:
         """One line, in the past tense, for the apply log."""
         target = f"{self.database}.{self.table}"
-        cluster = self.on_cluster.strip() or "no cluster"
         if self.action == "created":
-            return f"created {target} ENGINE = {self.engine} ({cluster})"
+            return f"created {target} ENGINE = {self.engine}"
         if self.action == "altered":
             parts = []
             if self.columns_added:
@@ -391,10 +383,21 @@ class TableChange:
                 parts.append(f"added {len(self.columns_added)} column(s) [{cols}]")
             if self.ttl:
                 parts.append(f"TTL {self.ttl} days")
-            if self.settings:
-                parts.append(f"set {', '.join(self.settings)}")
+            parts.extend(describe_settings(self.settings))
             return f"altered {target}: {', '.join(parts)}"
         return f"unchanged {target}"
+
+
+def describe_settings(moves: tuple[str, ...]) -> list[str]:
+    """``set a = 1, b = 2`` and ``reset c`` for a settings move, each only when it has work."""
+    resets = [move.removeprefix("reset ") for move in moves if move.startswith("reset ")]
+    assignments = [move for move in moves if not move.startswith("reset ")]
+    phrases = []
+    if assignments:
+        phrases.append(f"set {', '.join(assignments)}")
+    if resets:
+        phrases.append(f"reset {', '.join(resets)}")
+    return phrases
 
 
 @dataclass
@@ -430,9 +433,9 @@ class ApplyReport:
 class SchemaApplier:
     """Applies schema DDL to a live ClickHouse and records what changed.
 
-    Construct one per apply pass with a live client and a resolver built from
-    that same client -- sensing is what emits ``ON CLUSTER``, and a resolver
-    without a client cannot sense.
+    Construct one per apply pass with a live client and the platform that
+    client's probe names, which picks the CREATE DATABASE and a JSON table's
+    platform-only settings.
 
     ``dry_run`` collects the statements into the report without executing any of
     them, so a caller can show the plan. The existence and column reads still
@@ -442,14 +445,14 @@ class SchemaApplier:
     def __init__(
         self,
         client: Any,
-        resolver: EngineResolver,
+        platform: Platform,
         *,
         registry: TypeRegistry | None = None,
         dry_run: bool = False,
     ) -> None:
         self._client = client
-        self._resolver = resolver
-        self._ddl_gen = DDLGenerator(registry or TypeRegistry.default(), resolver=resolver)
+        self._platform = platform
+        self._ddl_gen = DDLGenerator(registry or TypeRegistry.default(), platform=platform)
         self._dry_run = dry_run
         self.report = ApplyReport()
 
@@ -458,13 +461,12 @@ class SchemaApplier:
     def ensure_database(self, database: str) -> bool:
         """Create *database* if absent. Returns whether this pass created it.
 
-        Cluster-wide when the resolver senses a cluster: without that, ON CLUSTER
-        table DDL lands on nodes that have no database to put it in.
+        On self-hosted ClickHouse it is a Replicated database created on every
+        replica, which replicates each table DDL issued inside it from then on.
         """
         if self._database_exists(database):
             return False
-        on_cluster = self._resolver.resolve(parse_engine("MergeTree"), database).on_cluster
-        self._run(f"CREATE DATABASE IF NOT EXISTS {database}{on_cluster}")
+        self._run(create_database(database, self._platform))
         self.report.databases_created.append(database)
         return True
 
@@ -486,17 +488,19 @@ class SchemaApplier:
         """Create *table*, or add the columns it is missing and reconcile its TTL and settings.
 
         A declared ``config.ttl_days`` that differs from the live TTL is applied
-        with ``MODIFY TTL``, a declared 0 with ``REMOVE TTL``; an undeclared one
-        leaves the live TTL alone. A table with a JSON column takes dfe-schemas'
-        JSON table settings with ``MODIFY SETTING`` when it lacks them.
+        with ``MODIFY TTL``, a declared 0 with ``REMOVE TTL``, and an undeclared
+        one leaves the live TTL alone. A table with a JSON column is brought to
+        dfe-schemas' JSON table settings for this platform: ``MODIFY SETTING``
+        where it lacks one, ``RESET SETTING`` where it carries one the platform
+        does not take.
 
         Args:
-            database: Target database. Must be the REAL name -- the resolver
-                senses on it, and a ``{db}`` placeholder matches no database.
+            database: Target database. Must be the REAL name, because a ``{db}``
+                placeholder matches no database.
             table: Table name.
             columns: The columns the schema says the table should have.
             config: DDL configuration. Its ``db`` is forced to *database* so the
-                generated statements and the sensing agree.
+                generated statements and the reads agree.
             create_ddl: A pre-rendered CREATE TABLE to use instead of generating
                 one. Only consulted when the table is absent.
 
@@ -506,7 +510,7 @@ class SchemaApplier:
         cfg = config or DDLConfig()
         if cfg.db != database:
             cfg = replace_db(cfg, database)
-        resolved = self._resolver.resolve(parse_engine(cfg.engine), database)
+        engine = engine_clause(parse_engine(cfg.engine))
 
         if not self._table_exists(database, table):
             ddl = create_ddl or self._ddl_gen.generate_create_table(
@@ -514,13 +518,7 @@ class SchemaApplier:
             )
             self._run(ddl)
             return self._record(
-                TableChange(
-                    database=database,
-                    table=table,
-                    action="created",
-                    engine=resolved.clause,
-                    on_cluster=resolved.on_cluster,
-                )
+                TableChange(database=database, table=table, action="created", engine=engine)
             )
 
         existing = self._table_columns(database, table)
@@ -532,16 +530,17 @@ class SchemaApplier:
 
         # After the column adds: the TTL column may be one of them.
         ttl = self._reconcile_ttl(database, table, columns, cfg)
-        settings = self._reconcile_settings(database, table, columns, cfg)
+        settings = self._reconcile_settings(database, table, columns)
 
         return self._record(
             TableChange(
                 database=database,
                 table=table,
-                action="altered" if missing or ttl.statement or settings.statement else "unchanged",
+                action="altered"
+                if missing or ttl.statement or settings.statements
+                else "unchanged",
                 columns_added=tuple(col.name for col in missing),
-                engine=resolved.clause,
-                on_cluster=resolved.on_cluster,
+                engine=engine,
                 ttl=ttl.move,
                 ttl_skipped=ttl.skipped,
                 settings=settings.assignments,
@@ -558,7 +557,6 @@ class SchemaApplier:
         """Bring the live TTL to ``cfg.ttl_days``, as :func:`ttl_move` plans it."""
         move = ttl_move(
             target=table_target(database, table),
-            on_cluster=self._ddl_gen.on_cluster(cfg),
             cfg=cfg,
             columns=columns,
             live=self._table_ttl(database, table),
@@ -579,20 +577,15 @@ class SchemaApplier:
         database: str,
         table: str,
         columns: list[SchemaColumn],
-        cfg: DDLConfig,
     ) -> SettingsMove:
-        """Bring the live table settings to the ones its JSON columns declare."""
+        """Bring the live table settings to the ones its JSON columns declare on this platform."""
         move = json_settings_move(
-            self._client,
-            self._ddl_gen,
-            database=database,
-            table=table,
-            columns=columns,
-            cfg=cfg,
+            self._client, self._ddl_gen, database=database, table=table, columns=columns
         )
-        if move.statement:
-            logger.info(f"{database}.{table}: set {', '.join(move.assignments)}")
-            self._run(move.statement)
+        if move.statements:
+            logger.info(f"{database}.{table}: {'; '.join(describe_settings(move.assignments))}")
+        for statement in move.statements:
+            self._run(statement)
         return move
 
     def nullability_mismatches(

@@ -16,11 +16,11 @@ Usage:
 import re
 from dataclasses import dataclass, field
 
+from dfe_schemas.clickhouse import Platform, engine_clause, parse_engine
 from dfe_schemas.deploy_defaults import json_table_settings
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.quoting import quote_literal
-from dfe_engine.schema.engine_resolver import EngineResolver, ResolvedEngine, parse_engine
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import (
     LOW_CARDINALITY,
@@ -78,7 +78,7 @@ def _ident(name: str, *, what: str = "index name") -> str:
     """A name bare when ClickHouse reads it bare, else quoted through :func:`quote_ident`.
 
     For the positions the renderer has always written bare: index and projection
-    names, TTL columns and the ``ON CLUSTER`` name. A safe name stays bare so the
+    names and TTL columns. A safe name stays bare so the
     DDL text of a table already created does not change. A name taken
     from a dotted column such as ``event.action`` is one identifier only once
     quoted, and an unsafe one is refused.
@@ -120,16 +120,9 @@ class DDLConfig:
     """
 
     db: str = "{db}"
+    # The MergeTree-family variant. dfe-schemas renders it as the argumentless
+    # Replicated form every DFE table takes, on every platform.
     engine: str = "MergeTree"
-    # ClickHouse topology: "single" -> <engine>() standalone (keeperless, e.g.
-    # local dev); "replicated" -> argumentless Replicated<engine>, where the
-    # server supplies the znode path/replica from its default_replica_path /
-    # default_replica_name macros (infra-layer config, never in the DDL). The
-    # replicated form is portable across on-prem Replicated databases and CH
-    # Cloud (auto-substituted to SharedMergeTree). Only consulted when the
-    # generator has no injected resolver - it carries no ON CLUSTER intent, so a
-    # multi-node cluster needs the sensing resolver (see DDLGenerator.resolver).
-    topology: str = "single"
     # Retention is DECLARED, in dfe-schemas or a source's config, never defaulted
     # here: a default no operator can see is how a table ends up keeping
     # everything or dropping what it should not. None is undeclared; 0 declares no TTL.
@@ -155,7 +148,6 @@ class DDLConfig:
     extra_indexes: list[str] = field(default_factory=list)
     index_granularity: int = 2048
     ttl_only_drop_parts: bool = True
-    cluster: str | None = None
     sample_by: str | None = None
     # Off unless asked for: a SELECT * projection copies every column, so on a JSON-heavy
     # table it doubles the substream metadata ClickHouse holds in memory.
@@ -267,7 +259,7 @@ class DDLGenerator:
         registry: TypeRegistry,
         *,
         use_legacy_indexes: bool = False,
-        resolver: EngineResolver | None = None,
+        platform: Platform = Platform.SELF_HOSTED,
     ) -> None:
         """Initialize the DDL generator.
 
@@ -275,52 +267,18 @@ class DDLGenerator:
             registry: TypeRegistry for type resolution.
             use_legacy_indexes: Use tokenbf/ngrambf instead of text index
                                (for ClickHouse < v25.10).
-            resolver: Engine resolver to select the table engine. Pass one built
-                     with a live client to enable the sense layer - that is the
-                     ONLY way ON CLUSTER is ever emitted (a named topology from
-                     config cannot express it). When omitted, the engine is
-                     resolved from ``DDLConfig.topology`` alone, which suits the
-                     static/offline paths (reference SQL, gitops artefacts) that
-                     have no server to introspect.
+            platform: The ClickHouse platform the DDL is for, which picks a JSON
+                     table's platform-only settings. A live caller passes what its
+                     connection's probe names. Self-hosted, the probe's own
+                     default, suits the offline paths (reference SQL, gitops
+                     artefacts) that have no server to ask.
         """
         self._registry = registry
         self._index_templates = _INDEX_TEMPLATES_LEGACY if use_legacy_indexes else _INDEX_TEMPLATES
         self._key_search_templates = (
             _KEY_SEARCH_TEMPLATES_LEGACY if use_legacy_indexes else _KEY_SEARCH_TEMPLATES
         )
-        self._resolver = resolver
-
-    # -- engine resolution -------------------------------------------
-
-    def _resolve_engine(self, cfg: DDLConfig) -> ResolvedEngine:
-        """Resolve the engine for *cfg*, preferring an injected resolver.
-
-        The injected resolver carries whatever cascade inputs the caller has
-        (notably a live client, which is what enables sensing). Falling back to
-        ``DDLConfig.topology`` as an override keeps the static/offline callers -
-        reference SQL, gitops artefacts - rendering exactly as they always have.
-        """
-        spec = parse_engine(cfg.engine)
-        resolver = self._resolver or EngineResolver(override=cfg.topology)
-        return resolver.resolve(spec, cfg.db)
-
-    def on_cluster(self, cfg: DDLConfig) -> str:
-        """The ``ON CLUSTER`` suffix for any statement, or "".
-
-        An explicit ``cfg.cluster`` pin wins, else the resolver decides -- the
-        same order ``generate_create_table`` uses. Every statement that changes
-        a table's definition needs this, not just the CREATE: an ALTER or a
-        CREATE VIEW without it applies to the ONE node the connection landed on,
-        and the siblings behind a headless Service silently diverge. Without an
-        injected resolver this is always "" (a named topology from config
-        carries no ON CLUSTER intent), so the offline render paths are unchanged.
-
-        Raises:
-            DDLGenerationError: The pinned cluster name is unsafe in DDL.
-        """
-        if cfg.cluster:
-            return f" ON CLUSTER {_ident(cfg.cluster, what='cluster name')}"
-        return self._resolve_engine(cfg).on_cluster
+        self._platform = platform
 
     # -- CREATE TABLE ------------------------------------------------
 
@@ -346,45 +304,22 @@ class DDLGenerator:
         cfg = config or DDLConfig()
         lines: list[str] = []
 
-        # Resolve the engine first: it decides BOTH the ENGINE clause below and
-        # whether this table needs ON CLUSTER on the header.
-        resolved = self._resolve_engine(cfg)
-
         # Header comment
         lines.extend(
             [line for line in self._build_schema_header(cfg, table_name, generated_time) if line]
         )
 
-        # CREATE TABLE. ON CLUSTER comes from an explicit cfg.cluster pin, else
-        # from the resolver - which only ever senses it from a live server (a
-        # named topology from config carries no ON CLUSTER intent). Without it a
-        # Replicated table is created on the ONE node the connection landed on,
-        # and the siblings behind a headless service silently diverge.
+        # No ON CLUSTER: the Replicated database replicates the CREATE, and refuses
+        # ON CLUSTER on a table inside it (code 80).
         create = f"CREATE TABLE IF NOT EXISTS {_qualified(cfg.db, table_name, what='table name')}"
-        create += self.on_cluster(cfg)
         lines.append(f"{create}\n(")
 
         # Column + index + projection definitions
         body_lines = self._body_lines(columns, cfg)
         lines.append(",\n".join(body_lines))
 
-        # Close columns, ENGINE (topology-aware).
-        # "replicated" -> argumentless Replicated<engine>. We deliberately do NOT
-        # emit the ('/znode/path','{replica}') args: the znode path + replica name
-        # are the SERVER's job, supplied from its default_replica_path /
-        # default_replica_name macros (an infra-layer concern, not the DDL). This
-        # argumentless form is the only portable one - live-proven 2026-07-06:
-        # accepted on-prem inside a Replicated database (or via ON CLUSTER) yielding
-        # a real ReplicatedMergeTree, AND accepted on CH Cloud where it
-        # auto-substitutes to SharedMergeTree. The explicit-path form is REJECTED
-        # (code 36) by BOTH CH Cloud and on-prem Replicated databases, so we never
-        # produce it. "single" -> plain <engine>() for a keeperless standalone
-        # (local dev); on CH Cloud that too auto-substitutes to SharedMergeTree.
-        # The resolver genericises beyond plain MergeTree - ANY family variant with
-        # its params (ReplacingMergeTree(ver), SummingMergeTree(cols), ...) renders
-        # correctly: single -> <variant>(params); replicated -> argumentless
-        # Replicated<variant>(params) (no double-parens, no dropped ver).
-        lines.append(f")\nENGINE = {resolved.clause}")
+        # The one engine form, argumentless Replicated<variant>, from dfe-schemas.
+        lines.append(f")\nENGINE = {engine_clause(parse_engine(cfg.engine))}")
 
         # PARTITION BY -- a raw expression wins over the column + granularity.
         partition = None
@@ -463,7 +398,7 @@ class DDLGenerator:
         col_def = self._column_def(column)
         sql = (
             f"ALTER TABLE {_qualified(cfg.db, table_name, what='table name')}"
-            f"{self.on_cluster(cfg)} ADD COLUMN IF NOT EXISTS {col_def}"
+            f" ADD COLUMN IF NOT EXISTS {col_def}"
         )
         if after:
             sql += f" AFTER `{after}`"
@@ -489,7 +424,7 @@ class DDLGenerator:
         col_def = self._column_def(column)
         return (
             f"ALTER TABLE {_qualified(cfg.db, table_name, what='table name')}"
-            f"{self.on_cluster(cfg)} MODIFY COLUMN {col_def};\n"
+            f" MODIFY COLUMN {col_def};\n"
         )
 
     def generate_alter_add_indexes(
@@ -505,10 +440,7 @@ class DDLGenerator:
         """
         cfg = config or DDLConfig()
         qualified = _qualified(cfg.db, table_name, what="table name")
-        on_cluster = self.on_cluster(cfg)
-        return [
-            f"ALTER TABLE {qualified}{on_cluster} ADD {idx};\n" for idx in self._index_defs(column)
-        ]
+        return [f"ALTER TABLE {qualified} ADD {idx};\n" for idx in self._index_defs(column)]
 
     # -- Standard Views ---------------------------------------------
 
@@ -548,8 +480,7 @@ class DDLGenerator:
             select_parts = "    *"
 
         return (
-            f"CREATE OR REPLACE VIEW {_qualified(cfg.db, view_name, what='view name')}"
-            f"{self.on_cluster(cfg)} AS\n"
+            f"CREATE OR REPLACE VIEW {_qualified(cfg.db, view_name, what='view name')} AS\n"
             f"SELECT\n"
             f"{select_parts}\n"
             f"FROM {_qualified(cfg.db, table_name, what='table name')};\n"
@@ -710,7 +641,7 @@ class DDLGenerator:
         return ch_type, codec
 
     def json_settings(self, columns: list[SchemaColumn]) -> dict[str, int]:
-        """The table SETTINGS dfe-schemas declares for a table with a JSON column.
+        """The table SETTINGS dfe-schemas declares for a table with a JSON column on this platform.
 
         Empty when no column resolves to JSON. The CREATE emits these and the
         applier reconciles them onto a table that exists, so both read this one rule.
@@ -718,7 +649,9 @@ class DDLGenerator:
         Raises:
             TypeRegistryError: A column's type, attribute or override is not in the registry.
         """
-        return json_table_settings(self.resolve_type(col)[0] for col in columns)
+        return json_table_settings(
+            (self.resolve_type(col)[0] for col in columns), platform=self._platform
+        )
 
     @staticmethod
     def _default_expr(col: SchemaColumn) -> str | None:

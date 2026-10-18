@@ -343,10 +343,10 @@ class AlertStateManager:
     def get_ddl(self) -> str:
         """The table's CREATE as the schema phase applies it, for reference output.
 
-        Rendered from the manifest in the single-node form: sensing needs a live
-        client and this path has none, and the topology token is the only part
-        that differs.
+        Rendered from the manifest for self-hosted ClickHouse, because this path
+        has no client to probe. The alert-state table carries no JSON column, so
+        no platform-only setting differs.
         """
-        from dfe_engine.schema.plan import single_node_statement
+        from dfe_engine.schema.plan import reference_statement
 
-        return single_node_statement(_ALERT_STATE_ID, data_database=self._db)
+        return reference_statement(_ALERT_STATE_ID, data_database=self._db)

@@ -299,10 +299,21 @@ class TestSchemasRouter:
         (tmp_path / "services").mkdir()
         (tmp_path / "auth").mkdir()
 
+        # What a self-hosted single node with embedded Keeper answers the platform probe:
+        # no SharedMergeTree, Keeper configured, the three macros, a cluster of one.
+        probe_answers = {
+            "system.table_engines": [(0,)],
+            "system.tables": [(1,)],
+            "system.macros": [("cluster", "dfe"), ("shard", "01"), ("replica", "r1")],
+            "system.clusters": [(1,)],
+        }
+
+        def _answer(sql, *_args, **_kwargs):
+            rows = next((r for table, r in probe_answers.items() if table in sql), [(0,)])
+            return SimpleNamespace(result_rows=rows)
+
         mock_ch = MagicMock()
-        # The server answers every sensing query with the shard and replica macros
-        # of a cluster, so the deploy has to render the Replicated ON CLUSTER form.
-        mock_ch.query.return_value.result_rows = [("shard",), ("replica",)]
+        mock_ch.query.side_effect = _answer
         mock_manager = MagicMock()
         mock_manager.get_clickhouse_client.return_value = mock_ch
         monkeypatch.setattr(
@@ -347,10 +358,11 @@ class TestSchemasRouter:
                 assert resp.status_code == 200, resp.text
                 assert resp.json()["applied"] is True
                 create = resp.json()["create_table"]
-                assert "ON CLUSTER shard" in create, create
                 assert "ENGINE = ReplicatedMergeTree" in create, create
                 executed = [call.args[0] for call in mock_ch.execute.call_args_list]
-                assert any("ON CLUSTER shard" in stmt for stmt in executed), executed
+                assert executed, executed
+                # A Replicated database replicates the DDL and refuses ON CLUSTER inside it.
+                assert not any("ON CLUSTER" in stmt for stmt in [create, *executed]), executed
 
                 detail = tc.get("/api/v1/sources/dep-src", headers=headers)
                 assert detail.status_code == 200

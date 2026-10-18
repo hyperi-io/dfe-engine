@@ -11,14 +11,13 @@ Usage:
     written = writer.write_all(Path("schemas/ddl"))
 """
 
-from __future__ import annotations
-
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
+from dfe_schemas.clickhouse import Platform
+
 from ..source.type_registry import TypeRegistry
-from .engine_resolver import EngineResolver
 from .schema_ddl import DDLConfig, DDLGenerator, TableSpec
 from .schema_loader import SchemaLoader, _resolve_profiles_dir, _resolve_schemas_root
 from .table_loader import load_table_config, load_table_name
@@ -43,32 +42,23 @@ class DDLFileWriter:
         self,
         registry: TypeRegistry | None = None,
         *,
-        topology: str = "single",
-        resolver: EngineResolver | None = None,
+        platform: Platform = Platform.SELF_HOSTED,
         database: str = "{db}",
     ) -> None:
         """Initialise the writer.
 
         Args:
             registry: Type registry for primitive -> ClickHouse type resolution.
-            topology: "single" -> <engine>(); "replicated" -> Replicated<engine>.
-                     Ignored when *resolver* is given. Note this alone never
-                     yields ON CLUSTER - only sensing does.
-            resolver: Engine resolver to use instead of the static *topology*.
-                     Build one with a live client (see ``EngineResolver``) so the
-                     engine is sensed from the target server; that is the only
-                     path that emits ON CLUSTER, which a real multi-node cluster
-                     needs.
+            platform: The ClickHouse platform the DDL is for, which picks a JSON
+                     table's platform-only settings. A live caller passes what its
+                     connection's probe names.
             database: Target database. Defaults to the ``{db}`` placeholder, which
                      is what the reference-SQL output wants (the caller substitutes
-                     it). A LIVE caller must pass the REAL name: sensing keys on it
-                     to read the database's engine, and "{db}" matches no database,
-                     so a Replicated/Shared target would be misread as a plain one
-                     and wrongly get ON CLUSTER (it replicates on its own).
+                     it). A LIVE caller must pass the REAL name, because "{db}"
+                     matches no database.
         """
         self._registry = registry or TypeRegistry.default()
-        self._ddl_gen = DDLGenerator(self._registry, resolver=resolver)
-        self._topology = topology
+        self._ddl_gen = DDLGenerator(self._registry, platform=platform)
         self._database = database
         self._landing_table = load_table_name(LANDING_REF)
 
@@ -139,7 +129,6 @@ class DDLFileWriter:
             "profile_name": profile_name,
             "profile_version": profile_version,
             "description": description,
-            "topology": self._topology,
         }
         config = (
             self._core_config(config_ref, **overrides)
@@ -200,7 +189,6 @@ class DDLFileWriter:
             DETECTION_CHECKPOINT_REF,
             schema_version=detection_checkpoint_version,
             description="Hunt execution checkpoint tracking",
-            topology=self._topology,
         )
         return TableSpec(
             name=load_table_name(DETECTION_CHECKPOINT_REF),
@@ -255,7 +243,6 @@ class DDLFileWriter:
             profile_version=profile_version,
             schema_version=hunt_results_version,
             description="Hunt detection results (profile and hunts.results columns)",
-            topology=self._topology,
         )
         return TableSpec(name=load_table_name(DETECTION_REF), columns=all_columns, config=config)
 

@@ -17,14 +17,12 @@ a semicolon in it is quoted into the sampling query as an identifier, which is t
 one live caller that tripped it.
 """
 
-import uuid
-
 import pytest
 import yaml
+from dfe_schemas.clickhouse import PlatformProbe
 
 from dfe_engine.clickhouse.statements import CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE, ddl_settings
 from dfe_engine.schema.applier import SchemaApplier
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.services.schema.json_promotion_service import _fetch_samples, qualified_table
 from dfe_engine.source.deployment import deploy_statements_for_build, execute_ddl
@@ -37,19 +35,9 @@ WIDE_COLUMNS = 1500
 
 
 @pytest.fixture
-def database(ch_client):
-    """A throwaway database, dropped afterwards on every node it was created on."""
-    db = f"dfe_wide_ddl_{uuid.uuid4().hex[:8]}"
-    resolver = EngineResolver(client=ch_client)
-    SchemaApplier(ch_client, resolver).ensure_database(db)
-    try:
-        yield db
-    finally:
-        try:
-            on_cluster = resolver.resolve(parse_engine("MergeTree"), db).on_cluster
-            ch_client.command(f"DROP DATABASE IF EXISTS `{db}`{on_cluster} SYNC")
-        except Exception:
-            pass
+def database(clickhouse_test_database):
+    """A throwaway Replicated database, dropped afterwards."""
+    return clickhouse_test_database
 
 
 def _wide_schema(path) -> str:
@@ -84,7 +72,7 @@ def _wide_source(tmp_path) -> Source:
 
 
 def _deploy_statements(ch_client, manager_client, db: str, source: Source) -> list[str]:
-    builder = SchemaBuilderV2(resolver=EngineResolver(client=ch_client))
+    builder = SchemaBuilderV2(platform=PlatformProbe(ch_client).platform)
     result = builder.build(source)
     assert not result.validation_errors, result.validation_errors
     statements, _ = deploy_statements_for_build(
@@ -127,9 +115,9 @@ def test_the_schema_applier_creates_a_table_over_the_parse_limit(
     """The manifest and retention paths go through SchemaApplier, on a raw client."""
     source = _wide_source(tmp_path)
     create = _deploy_statements(ch_client, manager_client, database, source)[0]
-    assert ddl_settings(create), "the generated definition fits the default"
+    assert "max_query_size" in ddl_settings(create), "the generated definition fits the default"
 
-    applier = SchemaApplier(ch_client, EngineResolver(client=ch_client))
+    applier = SchemaApplier(ch_client, PlatformProbe(ch_client).platform)
     change = applier.ensure_table(database, source.table_name, [], create_ddl=create)
 
     assert change.action == "created"

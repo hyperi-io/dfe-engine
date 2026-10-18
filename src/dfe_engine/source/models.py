@@ -435,8 +435,8 @@ class SourceSchema(BaseModel):
         description=(
             "MergeTree-family engine VARIANT, optionally parameterised - e.g. "
             "MergeTree, ReplacingMergeTree, ReplacingMergeTree(version_col), "
-            "SummingMergeTree(a, b). Declare the base variant only: the topology "
-            "(single vs Replicated/Shared/Cloud) is resolved at DDL time, so do NOT "
+            "SummingMergeTree(a, b). Declare the base variant only: the Replicated "
+            "form every DFE table takes is added at DDL time, so do NOT "
             "prefix Replicated/Shared here. Empty (the default) means inherit the "
             "deployment default (DFE_CLICKHOUSE_DEFAULT_ENGINE, itself MergeTree "
             "unless overridden)."

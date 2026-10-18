@@ -11,11 +11,15 @@
 from ClickHouse's own tokens, so a ``;`` inside a string, a quoted identifier, a
 heredoc or a comment stays in the statement it belongs to.
 
-``ddl_settings`` gives a schema DDL statement the ``max_query_size`` it needs.
-ClickHouse refuses to parse a query longer than its 256 KiB default, and the
-generated table for a wide vendor schema runs to several times that. Only the
-schema DDL paths send it; a caller's own SQL stays on the server's limit.
+``ddl_settings`` gives a schema DDL statement what it needs to land: the
+``max_query_size`` to parse it, because ClickHouse refuses a query longer than its
+256 KiB default and a wide vendor schema's table runs to several times that, and
+``distributed_ddl_output_mode = throw_only_active``, so DDL in a Replicated
+database waits only for the replicas that are up. Only the schema DDL paths send
+these, and a caller's own SQL stays on the server's defaults.
 """
+
+from types import MappingProxyType
 
 from sqlglot.dialects.dialect import Dialect
 from sqlglot.errors import SqlglotError
@@ -28,6 +32,11 @@ CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE = 262_144
 
 # Headroom over the statement's own bytes, so a statement measured at the limit still parses.
 MAX_QUERY_SIZE_MARGIN = 4096
+
+# A down replica catches up on return, table DDL from the database's log and an ON
+# CLUSTER statement from the DDL task queue, so waiting for it only blocks for
+# distributed_ddl_task_timeout and then fails with a TIMEOUT.
+DDL_OUTPUT_MODE = MappingProxyType({"distributed_ddl_output_mode": "throw_only_active"})
 
 
 class StatementTooLargeError(ValueError):
@@ -64,12 +73,13 @@ def split_statements(script: str) -> list[str]:
     return [piece.strip() for piece in pieces if piece.strip()]
 
 
-def ddl_settings(statement: str, *, ceiling: int | None = None) -> dict[str, int]:
-    """The settings that let ClickHouse parse *statement* whole.
+def ddl_settings(statement: str, *, ceiling: int | None = None) -> dict[str, int | str]:
+    """The settings that let ClickHouse parse *statement* whole and apply it past a down replica.
 
-    A statement within ClickHouse's default gets none, so a server whose profile
-    raised the limit keeps its own value. A larger one gets its own byte length
-    plus a margin, sized per statement rather than one large constant for all.
+    Every statement gets :data:`DDL_OUTPUT_MODE`. A statement within ClickHouse's
+    default ``max_query_size`` gets no size, so a server whose profile raised the
+    limit keeps its own value. A larger one gets its own byte length plus a
+    margin, sized per statement rather than one large constant for all.
 
     Args:
         statement: The DDL statement about to be sent.
@@ -77,7 +87,7 @@ def ddl_settings(statement: str, *, ceiling: int | None = None) -> dict[str, int
             ``clickhouse.ddl_max_query_size``.
 
     Returns:
-        ``{"max_query_size": n}``, or an empty dict.
+        :data:`DDL_OUTPUT_MODE`, plus ``max_query_size`` where the statement needs it.
 
     Raises:
         StatementTooLargeError: The statement needs more than ``ceiling``.
@@ -85,7 +95,7 @@ def ddl_settings(statement: str, *, ceiling: int | None = None) -> dict[str, int
     size = len(statement.encode("utf-8"))
     needed = size + MAX_QUERY_SIZE_MARGIN
     if needed <= CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE:
-        return {}
+        return dict(DDL_OUTPUT_MODE)
     if ceiling is None:
         from dfe_engine.settings import get_settings
 
@@ -95,4 +105,4 @@ def ddl_settings(statement: str, *, ceiling: int | None = None) -> dict[str, int
             f"the DDL statement is {size} bytes, more than the {ceiling}-byte "
             "max_query_size ceiling allows (DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE)"
         )
-    return {"max_query_size": needed}
+    return {**DDL_OUTPUT_MODE, "max_query_size": needed}

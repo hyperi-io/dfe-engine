@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         test_repository_ddl.py
-#  Purpose:      Guards for the repository table spec (dedup invariants + topology)
+#  Purpose:      Guards for the repository table spec (dedup invariants + engine form)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -8,15 +8,11 @@
 
 """Guards for the repository table, rendered from its dfe-schemas definition.
 
-The definition is ``tables/internal/repository.yaml`` and the engine clause is
-not knowable until the target server is sensed, so what is asserted here are the
-invariants a rendering must never break: the dedup key, the absence of a
-partition, and the topology forms the resolver produces.
+The definition is ``tables/internal/repository.yaml``, so what is asserted here
+are the invariants a rendering must never break: the dedup key, the absence of a
+partition, and the one Replicated engine form with its version columns.
 """
 
-from __future__ import annotations
-
-from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_ddl import DDLGenerator
 from dfe_engine.schema.table_loader import load_table_spec
 from dfe_engine.source.type_registry import TypeRegistry
@@ -25,9 +21,9 @@ _DB = "dfe_internal"
 _REF = "tables/internal/repository"
 
 
-def _render(resolver: EngineResolver | None = None) -> str:
+def _render() -> str:
     spec = load_table_spec(_REF, _DB)
-    generator = DDLGenerator(TypeRegistry.default(), resolver=resolver)
+    generator = DDLGenerator(TypeRegistry.default())
     return generator.generate_create_table(
         table_name=spec.name, columns=spec.columns, config=spec.config
     )
@@ -49,16 +45,10 @@ def test_no_projection() -> None:
 
 
 def test_engine_and_key() -> None:
-    """Dedup invariants: ReplacingMergeTree(updated_at, is_deleted) + full scope key."""
+    """Dedup invariants: the version columns ride the Replicated form, and the full scope key."""
     ddl = _render()
-    assert "ENGINE = ReplacingMergeTree(updated_at, is_deleted)" in ddl
-    assert "ORDER BY (`scope`, `scope_id`, `namespace`, `key`)" in ddl
-
-
-def test_engine_follows_topology() -> None:
-    """A replicated topology keeps the version columns on the Replicated variant."""
-    ddl = _render(EngineResolver(override="replicated"))
     assert "ENGINE = ReplicatedReplacingMergeTree(updated_at, is_deleted)" in ddl
+    assert "ORDER BY (`scope`, `scope_id`, `namespace`, `key`)" in ddl
 
 
 def test_targets_the_internal_database() -> None:

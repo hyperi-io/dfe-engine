@@ -5,10 +5,10 @@ output and the engine's own state -- so both tables are asserted there.
 """
 
 import pytest
+from dfe_schemas.clickhouse import Platform, PlatformProbe
 
 from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.settings import get_clickhouse_config
 from tests.support.engine_stack import bootstrap_settings
 
@@ -24,10 +24,8 @@ def _table_names(*, client, database) -> set[str]:
 def bootstrap(clickhouse_test_database, ch_params):
     """Bootstrap the DB, then return the SAME manager connection it used.
 
-    On a load-balanced multi-node cluster a SEPARATE connection may hit a
-    different node where a single-topology (non-replicated) table is not visible;
-    keeping create + verify on the bootstrap's own connection makes the assertion
-    deterministic (fixes the multi-node flake - it is a wrong-setup, not a flake).
+    Keeping create and verify on the bootstrap's own connection means a
+    load-balanced multi-node target answers from the node that was written.
     """
 
     def run():
@@ -57,50 +55,31 @@ class TestBootstrapClickhouse:
         assert {"main", "detection"} <= tables
 
 
-class TestBootstrapMatchesServerTopology:
-    """The bootstrap must create tables shaped for the server it is talking to.
+class TestBootstrapTakesTheOneDDLShape:
+    """Every table the bootstrap creates is replicated, on every replica.
 
-    Adaptive across the CH target matrix (local single / cluster / cloud): the
-    expectation is derived by sensing the live server, not hardcoded. A clustered
-    deploy once created plain MergeTree tables on a 3-replica cluster - each node
-    independently, unreplicated - because the bootstrap never sensed. Rows then
-    scattered across replicas and reads returned whatever the connection happened to
-    land on.
+    A clustered deploy once created plain MergeTree tables on a 3-replica cluster,
+    each node independently and unreplicated. Rows then scattered across replicas
+    and reads returned whatever the connection happened to land on.
     """
 
-    def test_engine_matches_sensed_topology(self, clickhouse_test_database, bootstrap):
+    def test_every_table_takes_a_replicated_engine(self, clickhouse_test_database, bootstrap):
         client = bootstrap()
-        sensed = EngineResolver(client=client).resolve(
-            parse_engine("MergeTree"), clickhouse_test_database
-        )
         rows = client.query(
-            f"SELECT engine FROM system.tables WHERE database = '{clickhouse_test_database}' "
-            "AND name = 'main'"
+            "SELECT name, engine FROM system.tables WHERE database = {db:String} "
+            "AND engine NOT IN ('View', 'MaterializedView')",
+            parameters={"db": clickhouse_test_database},
         ).result_rows
-        assert rows, "bootstrap did not create the landing table"
-        engine = rows[0][0]
-        if sensed.topology == "replicated":
-            assert engine.startswith("Replicated"), (
-                f"server sensed as replicated but table was created as {engine!r} - "
-                "data will silently split across replicas"
-            )
-        else:
-            assert engine == "MergeTree"
+        assert rows, "bootstrap created no table"
+        plain = [(name, engine) for name, engine in rows if not engine.startswith("Replicated")]
+        assert not plain, f"tables that would split across replicas: {plain}"
 
     def test_table_exists_on_every_replica(self, clickhouse_test_database, bootstrap):
-        """On a real cluster the table must exist on ALL nodes, not just the one
-        the bootstrap connection landed on. clusterAllReplicas fans the check out.
-        """
+        """The table is on ALL nodes, not just the one the bootstrap connection reached."""
         client = bootstrap()
-        sensed = EngineResolver(client=client)
-        resolved = sensed.resolve(parse_engine("MergeTree"), clickhouse_test_database)
-        if not resolved.on_cluster:
-            pytest.skip("not an ON CLUSTER deployment - single-node/Replicated-db target")
-        cluster = resolved.on_cluster.removeprefix(" ON CLUSTER ")
-        # Both counts fan out the same way: system.one yields exactly one row per
-        # reachable node, so it is the node count. (system.clusters is NOT a valid
-        # denominator - it can list a replica more than once, e.g. one row per
-        # configured port.)
+        cluster = client.query("SELECT getMacro('cluster')").result_rows[0][0]
+        # system.one yields exactly one row per reachable node, so it is the node count.
+        # system.clusters is not, because it can list a replica once per configured port.
         replicas = client.query(
             f"SELECT count() FROM clusterAllReplicas('{cluster}', system.one)"
         ).result_rows[0][0]
@@ -111,20 +90,10 @@ class TestBootstrapMatchesServerTopology:
         assert found == replicas, f"landing table on {found}/{replicas} replicas"
 
 
-class TestTopologySensingBindsTheDatabaseName:
-    """The database name reaches the server as a bound parameter, never inside the SQL.
+def test_the_harness_probes_as_self_hosted_with_keeper(ch_client):
+    """No SharedMergeTree engine, and the Keeper and macros the Replicated database needs."""
+    probe = PlatformProbe(ch_client)
 
-    Spliced into the probe's literal, a quote made the probe a syntax error, so sensing
-    fell back to config; a crafted name widened the WHERE to every database on the
-    server and took the engine of whichever came back first.
-    """
-
-    @pytest.mark.parametrize("database", ["o'brien", "x' OR name != '", "dfe' OR 1 = 1 --"])
-    def test_a_name_holding_a_quote_is_sensed_like_any_absent_name(self, ch_client, database):
-        resolved = EngineResolver(client=ch_client).resolve(parse_engine("MergeTree"), database)
-        plain = EngineResolver(client=ch_client).resolve(
-            parse_engine("MergeTree"), "dfe_absent_database"
-        )
-
-        assert resolved.origin == "sensed"
-        assert resolved.topology == plain.topology
+    assert probe.platform is Platform.SELF_HOSTED
+    assert probe.origin == "probe"
+    probe.require_replication()

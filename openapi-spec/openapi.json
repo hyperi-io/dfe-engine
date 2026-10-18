@@ -36254,10 +36254,10 @@
             "title": "Engine Version",
             "description": "dfe-engine release that ran the pass"
           },
-          "topology": {
+          "platform": {
             "type": "string",
-            "title": "Topology",
-            "description": "single, replicated or replicated_on_cluster"
+            "title": "Platform",
+            "description": "cloud or self_hosted, probed from the server"
           },
           "database": {
             "type": "string",
@@ -36345,7 +36345,7 @@
           "converged",
           "schemas_version",
           "engine_version",
-          "topology",
+          "platform",
           "database",
           "holder",
           "started_at",
@@ -36672,18 +36672,21 @@
             },
             "type": "array",
             "title": "Assignments",
-            "description": "'name = value' for each setting the move sets"
+            "description": "'name = value' for each setting the move sets, 'reset name' for each it resets"
           },
-          "statement": {
-            "type": "string",
-            "title": "Statement",
-            "description": "The ALTER TABLE that makes the move"
+          "statements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statements",
+            "description": "The ALTER TABLE statements that make the move: a MODIFY SETTING, then a RESET SETTING, each present only when it has work"
           }
         },
         "type": "object",
         "required": [
           "assignments",
-          "statement"
+          "statements"
         ],
         "title": "SettingsChange",
         "description": "The table-settings move a deploy makes on a table that already exists."
@@ -36827,7 +36830,7 @@
           "default_engine": {
             "type": "string",
             "title": "Default Engine",
-            "description": "MergeTree-family engine variant a source's table gets when its schema names none (DFE_CLICKHOUSE_DEFAULT_ENGINE). The topology prefix (Replicated, Shared) is resolved against the server at DDL time, not here.",
+            "description": "MergeTree-family engine variant a source's table gets when its schema names none (DFE_CLICKHOUSE_DEFAULT_ENGINE). The Replicated prefix every DFE table takes is added at DDL time, not here.",
             "default": "MergeTree"
           },
           "admin_username": {
@@ -38264,7 +38267,7 @@
           "engine": {
             "type": "string",
             "title": "Engine",
-            "description": "MergeTree-family engine VARIANT, optionally parameterised - e.g. MergeTree, ReplacingMergeTree, ReplacingMergeTree(version_col), SummingMergeTree(a, b). Declare the base variant only: the topology (single vs Replicated/Shared/Cloud) is resolved at DDL time, so do NOT prefix Replicated/Shared here. Empty (the default) means inherit the deployment default (DFE_CLICKHOUSE_DEFAULT_ENGINE, itself MergeTree unless overridden).",
+            "description": "MergeTree-family engine VARIANT, optionally parameterised - e.g. MergeTree, ReplacingMergeTree, ReplacingMergeTree(version_col), SummingMergeTree(a, b). Declare the base variant only: the Replicated form every DFE table takes is added at DDL time, so do NOT prefix Replicated/Shared here. Empty (the default) means inherit the deployment default (DFE_CLICKHOUSE_DEFAULT_ENGINE, itself MergeTree unless overridden).",
             "default": ""
           }
         },
@@ -39549,7 +39552,7 @@
           },
           "engine": {
             "$ref": "#/components/schemas/StrDefault",
-            "description": "MergeTree-family variant, without a topology prefix."
+            "description": "MergeTree-family variant, without the Replicated or Shared prefix."
           },
           "editable": {
             "type": "boolean",
@@ -39638,7 +39641,7 @@
           },
           "engine": {
             "$ref": "#/components/schemas/StrDefault",
-            "description": "MergeTree-family variant, without a topology prefix."
+            "description": "MergeTree-family variant, without the Replicated or Shared prefix."
           },
           "editable": {
             "type": "boolean",

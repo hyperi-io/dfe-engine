@@ -13,12 +13,10 @@ to OFF rather than to the data-table defaults, and a missing schemas tree
 raises instead of yielding an empty table list.
 """
 
-from __future__ import annotations
-
 import pytest
 
 from dfe_engine.schema.schema_loader import SchemaLoadError
-from dfe_engine.schema.table_loader import load_table_spec, load_view_ddl
+from dfe_engine.schema.table_loader import load_table_spec
 
 TABLE_YAML = """\
 current: "1.0.0"
@@ -50,23 +48,6 @@ versions:
         max_dynamic_paths: inherit
 """
 
-VIEW_YAML = """\
-current: "1.0.0"
-versions:
-  "1.0.0":
-    table:
-      name: "widget_target"
-      engine: "MergeTree"
-    materialized_view:
-      name: "widget_mv"
-      to: "widget_target"
-      select: |-
-        SELECT a FROM {db}.widget
-    columns:
-      - name: "a"
-        ch_type: "String"
-"""
-
 
 def _schemas_tree(tmp_path, monkeypatch):
     """An empty tree complete enough to resolve, with ``tables/`` to write into.
@@ -84,10 +65,9 @@ def _schemas_tree(tmp_path, monkeypatch):
 
 @pytest.fixture
 def schemas_root(tmp_path, monkeypatch):
-    """A schemas tree holding the two definitions above."""
+    """A schemas tree holding the definition above."""
     tables = _schemas_tree(tmp_path, monkeypatch)
     (tables / "widget.yaml").write_text(TABLE_YAML, encoding="utf-8")
-    (tables / "view.yaml").write_text(VIEW_YAML, encoding="utf-8")
     return tmp_path
 
 
@@ -180,20 +160,3 @@ class TestResolution:
     def test_a_missing_file_names_the_path(self, schemas_root):
         with pytest.raises(SchemaLoadError, match="Table definition not found"):
             load_table_spec("tables/nope", "dfe")
-
-
-class TestView:
-    """A materialised view has a SELECT and a target, not columns."""
-
-    def test_the_database_is_substituted(self, schemas_root):
-        name, ddl = load_view_ddl("tables/view", "dfe")
-        assert name == "widget_mv"
-        assert "TO dfe.widget_target AS" in ddl
-        assert "FROM dfe.widget" in ddl
-
-    def test_on_cluster_lands_on_the_view_name(self, schemas_root):
-        _, ddl = load_view_ddl("tables/view", "dfe", " ON CLUSTER default")
-        assert "dfe.widget_mv ON CLUSTER default TO" in ddl
-
-    def test_a_table_without_one_returns_none(self, schemas_root):
-        assert load_view_ddl("tables/widget", "dfe") is None

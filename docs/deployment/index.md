@@ -199,9 +199,12 @@ DFE deploys its own data layer, mode-driven (`argocd/values/*.yaml` +
 cluster-secret annotations). Full swap matrix:
 [backing-services.md](backing-services.md).
 
-- **ClickHouse** - `single` (keeperless, MergeTree, small/test), `cluster`
-  (DFE-owned Keeper, ReplicatedMergeTree), or `external` (BYO / ClickHouse
-  Cloud; connect only, deploy nothing). Admin password generated in-cluster
+- **ClickHouse** - `single` (one node running Keeper embedded, small/test),
+  `cluster` (DFE-owned Keeper), or `external` (BYO or ClickHouse Cloud, connect
+  only and deploy nothing). Every self-hosted mode needs Keeper and the
+  `{cluster}`, `{shard}` and `{replica}` macros, because every DFE table is a
+  `ReplicatedMergeTree` in a Replicated database, and the engine refuses a server
+  without them. Admin password generated in-cluster
   by an ESO Password generator - no external secret backend required.
 - **Kafka** - Strimzi by default, Redpanda opt-in (BSL licence gate), or
   external (incl. MSK IAM). With gRPC transport, Kafka is omitted entirely.

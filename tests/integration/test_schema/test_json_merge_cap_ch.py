@@ -14,21 +14,15 @@ is made by creating it and then ``RESET SETTING``, which leaves exactly the shap
 deployment upgraded onto this release has.
 """
 
-import uuid
-
 import pytest
-from dfe_schemas.clickhouse import Topology
+from dfe_schemas.clickhouse import PlatformProbe
 from dfe_schemas.deploy_defaults import JSON_TABLE_SETTINGS
-from dfe_schemas.manifest import load_manifest
-from dfe_schemas.render import Renderer
 
 from dfe_engine.api.v1 import sources as sources_module
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.schema.applier import SchemaApplier
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
-from dfe_engine.schema.manifest_applier import ManifestApplier
 from dfe_engine.schema.phase import apply_plan
-from dfe_engine.schema.plan import build_plan, core_schemas_root
+from dfe_engine.schema.plan import build_plan
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoader
@@ -50,16 +44,13 @@ JSON_TABLES = ("main", "detection", "otel_logs")
 
 
 @pytest.fixture
-def database(ch_client):
-    """A throwaway database, dropped afterwards with the ON CLUSTER it was made with."""
-    name = f"dfe_json_cap_{uuid.uuid4().hex[:8]}"
-    resolver = EngineResolver(client=ch_client)
-    SchemaApplier(ch_client, resolver).ensure_database(name)
-    try:
-        yield name
-    finally:
-        on_cluster = resolver.resolve(parse_engine("MergeTree"), name).on_cluster
-        ch_client.command(f"DROP DATABASE IF EXISTS `{name}`{on_cluster} SYNC")
+def database(clickhouse_test_database):
+    """A throwaway Replicated database, dropped afterwards."""
+    return clickhouse_test_database
+
+
+def _platform(client):
+    return PlatformProbe(client).platform
 
 
 def _engine_full(client, database: str, table: str) -> str:
@@ -90,7 +81,7 @@ def _source_columns():
 
 
 def test_a_new_source_table_is_created_with_the_cap(ch_client, database):
-    gen = DDLGenerator(TypeRegistry.default(), resolver=EngineResolver(client=ch_client))
+    gen = DDLGenerator(TypeRegistry.default(), platform=_platform(ch_client))
 
     ch_client.command(
         gen.generate_create_table("s3probe", _source_columns(), DDLConfig(db=database))
@@ -101,13 +92,13 @@ def test_a_new_source_table_is_created_with_the_cap(ch_client, database):
 
 def test_a_source_table_without_the_cap_is_reconciled_once(ch_client, database):
     """The pass every engine start runs over deployed source tables adds it, then leaves it."""
-    resolver = EngineResolver(client=ch_client)
-    gen = DDLGenerator(TypeRegistry.default(), resolver=resolver)
+    platform = _platform(ch_client)
+    gen = DDLGenerator(TypeRegistry.default(), platform=platform)
     cfg = DDLConfig(db=database)
     ch_client.command(gen.generate_create_table("s3probe", _source_columns(), cfg))
     _uncap(ch_client, database, "s3probe")
 
-    first = SchemaApplier(ch_client, resolver)
+    first = SchemaApplier(ch_client, platform)
     change = first.ensure_table(database, "s3probe", _source_columns(), cfg)
 
     assert CAPPED in _engine_full(ch_client, database, "s3probe")
@@ -118,7 +109,7 @@ def test_a_source_table_without_the_cap_is_reconciled_once(ch_client, database):
     assert change.settings == (CAPPED,)
     assert f"set {CAPPED}" in change.describe()
 
-    second = SchemaApplier(ch_client, EngineResolver(client=ch_client))
+    second = SchemaApplier(ch_client, _platform(ch_client))
     again = second.ensure_table(database, "s3probe", _source_columns(), cfg)
 
     assert _settings_alters(second.report.statements) == []
@@ -132,32 +123,13 @@ def test_a_source_table_with_no_json_column_is_never_altered(ch_client, database
         SchemaColumn(name="message", type="text"),
     ]
     cfg = DDLConfig(db=database)
-    applier = SchemaApplier(ch_client, EngineResolver(client=ch_client))
+    applier = SchemaApplier(ch_client, _platform(ch_client))
     applier.ensure_table(database, "plain", columns, cfg)
 
     applier.ensure_table(database, "plain", columns, cfg)
 
     assert MERGE_CAP not in _engine_full(ch_client, database, "plain")
     assert _settings_alters(applier.report.statements) == []
-
-
-def test_a_cluster_pin_puts_on_cluster_on_the_settings_alter(ch_client, database):
-    """The same ON CLUSTER the TTL reconcile takes, so no replica keeps the old setting."""
-    resolver = EngineResolver(client=ch_client)
-    gen = DDLGenerator(TypeRegistry.default(), resolver=resolver)
-    ch_client.command(
-        gen.generate_create_table("s3probe", _source_columns(), DDLConfig(db=database))
-    )
-    _uncap(ch_client, database, "s3probe")
-
-    planning = SchemaApplier(ch_client, resolver, dry_run=True)
-    planning.ensure_table(
-        database, "s3probe", _source_columns(), DDLConfig(db=database, cluster="dfe_cluster")
-    )
-
-    assert _settings_alters(planning.report.statements) == [
-        f"ALTER TABLE `{database}`.`s3probe` ON CLUSTER dfe_cluster MODIFY SETTING {CAPPED}"
-    ]
 
 
 # -- source redeploy: plan_deploy_statements -------------------------------
@@ -169,7 +141,7 @@ def _redeploy_statements(client, database: str, source: Source) -> tuple[list[st
     *client* is the engine's manager wrapper, which is what the deploy endpoint hands
     the planner. The flag is whether the planner found the table.
     """
-    builder = SchemaBuilderV2(resolver=EngineResolver(client=client))
+    builder = SchemaBuilderV2(platform=_platform(client))
     result = builder.build(source)
     assert not result.validation_errors, result.validation_errors
     statements, table_exists = deploy_statements_for_build(
@@ -239,7 +211,7 @@ def test_a_dry_run_reports_the_settings_move_a_redeploy_would_make(
         ch_client.command(statement)
     _uncap(ch_client, database, source.table_name)
     deployed = source.model_copy(update={"deployed_version": source.current})
-    builder = SchemaBuilderV2(resolver=EngineResolver(client=ch_client))
+    builder = SchemaBuilderV2(platform=_platform(ch_client))
     result = builder.build(source)
     settings = DFESettings(
         config_dir=str(tmp_path),
@@ -275,9 +247,9 @@ def test_a_dry_run_reports_the_settings_move_a_redeploy_would_make(
     assert ttl_change is None
     assert settings_change == SettingsChange(
         assignments=[CAPPED],
-        statement=f"ALTER TABLE `{database}`.`{source.table_name}` MODIFY SETTING {CAPPED}",
+        statements=[f"ALTER TABLE `{database}`.`{source.table_name}` MODIFY SETTING {CAPPED}"],
     )
-    assert _settings_alters(planned) == [settings_change.statement]
+    assert _settings_alters(planned) == settings_change.statements
     assert error_after is None
     assert settings_after is None
 
@@ -323,33 +295,3 @@ def test_a_manifest_table_without_the_cap_is_reconciled_once(ch_client, database
 
     assert _settings_alters(third.statements) == []
     assert not [o.describe() for o in third.outcomes if o.action in ("created", "altered")]
-
-
-def test_a_cluster_render_puts_on_cluster_on_the_manifest_settings_alter(ch_client, database):
-    """The ALTER takes the ON CLUSTER the rendered CREATE carries, as the TTL reconcile does."""
-    manifest = load_manifest(root=core_schemas_root())
-    main = next(obj for obj in manifest.objects if obj.id == "data.main")
-    single = Renderer(manifest, data_database=database, default_ttl_days=90)
-    ch_client.command(single.render(main).statements[0])
-    _uncap(ch_client, database, "main")
-
-    on_cluster = Renderer(
-        manifest,
-        topology=Topology.REPLICATED_ON_CLUSTER,
-        data_database=database,
-        default_ttl_days=90,
-        cluster="dfe_cluster",
-    ).render(main)
-    planning = ManifestApplier(
-        ch_client,
-        ledger=None,
-        schemas_version="test",
-        engine_version="test",
-        topology=Topology.REPLICATED_ON_CLUSTER.value,
-        dry_run=True,
-    )
-    planning.apply(on_cluster)
-
-    assert _settings_alters(planning.report.statements) == [
-        f"ALTER TABLE `{database}`.`main` ON CLUSTER dfe_cluster MODIFY SETTING {CAPPED}"
-    ]

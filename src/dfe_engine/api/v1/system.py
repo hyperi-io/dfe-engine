@@ -177,7 +177,7 @@ class SchemaStatusResponse(BaseModel):
     )
     schemas_version: str = Field(description="dfe-schemas release the plan was rendered from")
     engine_version: str = Field(description="dfe-engine release that ran the pass")
-    topology: str = Field(description="single, replicated or replicated_on_cluster")
+    platform: str = Field(description="cloud or self_hosted, probed from the server")
     database: str = Field(description="The one database every DFE object lands in")
     holder: str = Field(description="Who held the bootstrap lease for this pass")
     started_at: str
@@ -674,7 +674,9 @@ class SystemDefaults(BaseModel):
     ttl_days: IntDefault
     common_header_type: StrDefault
     common_header_version: StrDefault
-    engine: StrDefault = Field(description="MergeTree-family variant, without a topology prefix.")
+    engine: StrDefault = Field(
+        description="MergeTree-family variant, without the Replicated or Shared prefix."
+    )
     editable: bool = Field(
         description="Whether this deployment can store an override. False without gitops."
     )

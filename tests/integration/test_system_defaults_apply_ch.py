@@ -173,7 +173,7 @@ def test_an_engine_change_needs_a_rebuild_and_stays_drift(ch_client, stack):
     body = _apply(stack, "syslog-engine")
 
     engine, _ = _table(ch_client, db, "syslog-engine")
-    assert engine == "MergeTree"
+    assert engine == "ReplicatedMergeTree"
     drift = _drift(stack)["syslog-engine"]
     assert drift["drifted"] == ["engine"]
     assert drift["engine"] == {

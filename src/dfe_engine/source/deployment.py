@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
 
+from dfe_schemas.clickhouse import Platform
 from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
 
@@ -17,7 +18,6 @@ from dfe_engine.schema.applier import (
     table_target,
     ttl_move,
 )
-from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
 from dfe_engine.source.models import Source, validate_source_name
@@ -77,9 +77,14 @@ class SettingsChange(BaseModel):
     """The table-settings move a deploy makes on a table that already exists."""
 
     assignments: list[str] = Field(
-        description="'name = value' for each setting the move sets",
+        description="'name = value' for each setting the move sets, 'reset name' for each it resets",
     )
-    statement: str = Field(description="The ALTER TABLE that makes the move")
+    statements: list[str] = Field(
+        description=(
+            "The ALTER TABLE statements that make the move: a MODIFY SETTING, then a "
+            "RESET SETTING, each present only when it has work"
+        )
+    )
 
 
 class SourcePlanVersionRecord(BaseModel):
@@ -357,7 +362,6 @@ def ttl_change_for_table(
     cfg = replace_db(builder.build_ddl_config_for_version(source, version_id), db)
     move = ttl_move(
         target=table_target(db, source.table_name),
-        on_cluster=builder.ddl_generator.on_cluster(cfg),
         cfg=cfg,
         columns=result.columns,
         live=live,
@@ -372,13 +376,12 @@ def ttl_change_for_table(
 def settings_change_for_table(
     builder: SchemaBuilderV2,
     source: Source,
-    version_id: str,
     result: SchemaBuildResult,
     *,
     db: str,
     client: Any,
 ) -> SettingsChange | None:
-    """The settings move a deploy of *version_id* makes on the table the server holds.
+    """The settings move a deploy of *result* makes on the table the server holds.
 
     None when the settings do not move, or the table has no JSON column to carry any.
 
@@ -391,11 +394,10 @@ def settings_change_for_table(
         database=db,
         table=source.table_name,
         columns=result.columns,
-        cfg=replace_db(builder.build_ddl_config_for_version(source, version_id), db),
     )
-    if not move.statement:
+    if not move.statements:
         return None
-    return SettingsChange(assignments=list(move.assignments), statement=move.statement)
+    return SettingsChange(assignments=list(move.assignments), statements=list(move.statements))
 
 
 def plan_deploy_statements(
@@ -448,10 +450,10 @@ def plan_deploy_statements(
         if ttl_change is not None:
             statements.append(ttl_change.statement)
         settings_change = settings_change_for_table(
-            builder, source, version_id, result, db=db, client=ch_client
+            builder, source, result, db=db, client=ch_client
         )
         if settings_change is not None:
-            statements.append(settings_change.statement)
+            statements.extend(settings_change.statements)
 
     for view_ddl in (result.view_ddls or {}).values():
         statements.append(view_ddl.strip())
@@ -849,7 +851,7 @@ def run_source_build(
     *,
     version_id: str,
     schemas_base_dir: str | Path | None,
-    resolver: EngineResolver | None = None,
+    platform: Platform = Platform.SELF_HOSTED,
     settings: Any | None = None,
     field_map_registry: FieldMapRegistry | None = None,
 ) -> SchemaBuildResult:
@@ -857,8 +859,9 @@ def run_source_build(
 
     A caller that has resolved the effective defaults passes its settings, so the
     build carries the retention, header and engine the deploy will apply.
+    ``platform`` is the ClickHouse platform the DDL is bound for.
     ``field_map_registry`` supplies the maps a source's declared views render
-    from; without it only a view's inline ``custom_mappings`` render.
+    from. Without it only a view's inline ``custom_mappings`` render.
     """
     from dfe_engine.schema.derived_registry import derived_reference_root
     from dfe_engine.schema.schema_builder_v2 import inherited_builder_kwargs
@@ -869,7 +872,7 @@ def run_source_build(
         TypeRegistry.default(),
         schemas_base_dir=schemas_base_dir or None,
         derived_base_dir=derived_reference_root(settings),
-        resolver=resolver,
+        platform=platform,
         field_map_registry=field_map_registry,
         **inherited_builder_kwargs(settings),
     )
@@ -883,16 +886,16 @@ def ensure_build_artifact(
     version_id: str,
     schemas_base_dir: str | Path | None,
     refresh: bool = False,
-    resolver: EngineResolver | None = None,
+    platform: Platform = Platform.SELF_HOSTED,
     settings: Any | None = None,
     field_map_registry: FieldMapRegistry | None = None,
 ) -> tuple[SchemaBuildResult, SourceBuildArtifact]:
     """Load build from source-builds or run build and persist.
 
-    ``resolver`` is the live server's engine resolver when the build is bound for
-    that server; the persisted artefact then carries the cluster form of the DDL.
-    ``settings`` and ``field_map_registry`` are what a fresh build runs under;
-    see :func:`run_source_build`.
+    ``platform`` is the live server's ClickHouse platform when the build is bound
+    for that server, and the persisted artefact then carries its settings.
+    ``settings`` and ``field_map_registry`` are what a fresh build runs under, as
+    :func:`run_source_build` describes.
     """
     if not refresh:
         existing = store.load_build(source.source, version_id)
@@ -903,7 +906,7 @@ def ensure_build_artifact(
         source,
         version_id=version_id,
         schemas_base_dir=schemas_base_dir,
-        resolver=resolver,
+        platform=platform,
         settings=settings,
         field_map_registry=field_map_registry,
     )

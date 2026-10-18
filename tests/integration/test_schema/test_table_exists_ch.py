@@ -13,15 +13,12 @@ that as a table to create, and skips the TTL and settings reconcile it owes an
 existing one.
 """
 
-import uuid
-
 import pytest
 from fastapi import HTTPException
 
 from dfe_engine.api.v1.schemas import _dedicated_source_table_ready
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-from dfe_engine.schema.applier import SchemaApplier, SchemaApplyError
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
+from dfe_engine.schema.applier import SchemaApplyError
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
 from dfe_engine.source.deployment import plan_deploy_statements
@@ -31,16 +28,9 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def database(ch_client):
-    """A throwaway database, dropped afterwards with the ON CLUSTER it was made with."""
-    name = f"dfe_table_exists_{uuid.uuid4().hex[:8]}"
-    resolver = EngineResolver(client=ch_client)
-    SchemaApplier(ch_client, resolver).ensure_database(name)
-    try:
-        yield name
-    finally:
-        on_cluster = resolver.resolve(parse_engine("MergeTree"), name).on_cluster
-        ch_client.command(f"DROP DATABASE IF EXISTS `{name}`{on_cluster} SYNC")
+def database(clickhouse_test_database):
+    """A throwaway Replicated database, dropped afterwards."""
+    return clickhouse_test_database
 
 
 @pytest.fixture
@@ -93,7 +83,7 @@ def test_an_unreachable_clickhouse_is_an_error_and_not_an_absent_table(unreachab
 
 def test_a_redeploy_plan_against_an_unreachable_clickhouse_raises(unreachable):
     source = _source("unreachable-probe")
-    builder = SchemaBuilderV2(resolver=EngineResolver())
+    builder = SchemaBuilderV2()
     result = builder.build(source)
     assert not result.validation_errors, result.validation_errors
 

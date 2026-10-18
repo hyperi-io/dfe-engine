@@ -338,8 +338,8 @@ class SetupStatus(BaseModel):
     default_engine: str = Field(
         default="MergeTree",
         description="MergeTree-family engine variant a source's table gets when its "
-        "schema names none (DFE_CLICKHOUSE_DEFAULT_ENGINE). The topology prefix "
-        "(Replicated, Shared) is resolved against the server at DDL time, not here.",
+        "schema names none (DFE_CLICKHOUSE_DEFAULT_ENGINE). The Replicated prefix "
+        "every DFE table takes is added at DDL time, not here.",
     )
     admin_username: str = Field(
         default="",
