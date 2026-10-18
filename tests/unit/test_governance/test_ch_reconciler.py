@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 
 import pytest
+from clickhouse_connect.driver.exceptions import OperationalError
 from scalo.logger import logger
 from scalo.secrets import SecretsManager
 
@@ -54,16 +55,26 @@ class _FakeAdminClient:
     Enough to exercise the whole ``reconcile`` apply path without a cluster: the
     empty result_rows mean no existing objects to drop, so only the rendered
     create/alter/grant DDL is executed - which is exactly what we assert on.
-    ``group_users`` stands in for the ``dfe_grp_*`` users already in ClickHouse.
+    ``group_users`` stands in for the ``dfe_grp_*`` users already in ClickHouse, and
+    ``meta_tables`` for the projection tables the schema phase made in ``dfe_meta``.
     """
 
-    def __init__(self, group_users: list[str] | None = None) -> None:
+    def __init__(
+        self, group_users: list[str] | None = None, meta_tables: list[str] | None = None
+    ) -> None:
         self.executed: list[str] = []
         self._group_users = group_users or []
+        self._meta_tables = meta_tables or []
 
     def query(self, sql: str, parameters: dict | None = None) -> SimpleNamespace:
-        if "system.users" in sql and (parameters or {}).get("prefix") == "dfe_grp_":
+        params = parameters or {}
+        if "system.users" in sql and params.get("prefix") == "dfe_grp_":
             return SimpleNamespace(result_rows=[(name,) for name in self._group_users])
+        if "system.tables" in sql and params.get("db") == "dfe_meta":
+            wanted = set(params.get("names", []))
+            return SimpleNamespace(
+                result_rows=[(name,) for name in self._meta_tables if name in wanted]
+            )
         return SimpleNamespace(result_rows=[])
 
     def command(self, stmt: str) -> None:
@@ -464,6 +475,65 @@ class TestReconcileServiceRoles:
             ).reconcile_service_roles(
                 [ChServiceRole(name="hunt_runner", mint_user=True, grants=["SELECT ON {db}.*"])]
             )
+
+
+class TestGovernanceProjection:
+    """The dfe_meta projection is written only once the schema phase has made its tables.
+
+    A write into a missing table fails the same way on every run, and the trigger
+    retries any run that left a statement failed, so it would never stand down.
+    """
+
+    _TIERS = [
+        ChTier(name="analyst_tier_2", kind="analyst", default=True, grants=["SELECT ON dfe.*"])
+    ]
+
+    def _reconcile(self, client: _FakeAdminClient):
+        return ChRbacReconciler(client).reconcile(
+            tiers=self._TIERS, service_roles=[], orgs=[_org("acme", ["acme"])], bindings=[]
+        )
+
+    def test_without_the_tables_the_run_applies_everything_else_and_reports_no_error(self):
+        client = _FakeAdminClient()
+        result = self._reconcile(client)
+
+        assert result.errors == []
+        assert not any("dfe_meta" in stmt for stmt in client.executed)
+        assert "CREATE ROLE IF NOT EXISTS `dfe_analyst_tier_2_role`" in client.executed
+        assert result.projection_missing == ["dfe_meta.ch_tiers", "dfe_meta.orgs"]
+
+    def test_one_missing_table_skips_the_whole_projection(self):
+        client = _FakeAdminClient(meta_tables=["orgs"])
+        result = self._reconcile(client)
+
+        assert result.errors == []
+        assert not any("dfe_meta" in stmt for stmt in client.executed)
+        assert result.projection_missing == ["dfe_meta.ch_tiers"]
+
+    def test_with_the_tables_the_projection_is_rewritten(self):
+        client = _FakeAdminClient(meta_tables=["orgs", "ch_tiers"])
+        result = self._reconcile(client)
+
+        assert result.errors == []
+        assert result.projection_missing == []
+        assert "TRUNCATE TABLE dfe_meta.orgs" in client.executed
+        assert "TRUNCATE TABLE dfe_meta.ch_tiers" in client.executed
+        assert any(stmt.startswith("INSERT INTO dfe_meta.orgs") for stmt in client.executed)
+        assert any(stmt.startswith("INSERT INTO dfe_meta.ch_tiers") for stmt in client.executed)
+
+    def test_a_server_that_cannot_be_read_fails_the_run_rather_than_skipping(self):
+        """Only absent tables skip the projection, so a lost connection is retried as a failed run."""
+
+        class _LosesTheProjectionCheck(_FakeAdminClient):
+            def query(self, sql: str, parameters: dict | None = None) -> SimpleNamespace:
+                if "system.tables" in sql and (parameters or {}).get("db") == "dfe_meta":
+                    raise OperationalError("HTTPConnectionPool: Connection refused")
+                return super().query(sql, parameters)
+
+        client = _LosesTheProjectionCheck()
+        with pytest.raises(OperationalError):
+            self._reconcile(client)
+        assert client.executed == []
 
 
 class TestDefaultTierName:

@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dfe_engine.governance.ch.models import TENANT_ROLE, org_user_name
+from dfe_engine.governance.ch.models import TENANT_ROLE, meta_projection, org_user_name
 from dfe_engine.schema.plan import render_one
 
 from .conftest import count_as, drop_safely
@@ -336,3 +336,15 @@ class TestReconcilerPinsTheTenant:
             ).result_rows[0][0]
             == 1
         )
+
+    def test_the_projection_lists_the_reconciled_orgs_and_tiers(self, reconciled_world, ch_client):
+        """The schema phase's tables are on this server, so the reconcile fills them."""
+        database, orgs_table, tiers_table = meta_projection()
+        orgs = {
+            r[0] for r in ch_client.query(f"SELECT name FROM {database}.{orgs_table}").result_rows
+        }
+        tiers = {
+            r[0] for r in ch_client.query(f"SELECT name FROM {database}.{tiers_table}").result_rows
+        }
+        assert {reconciled_world["org_a"], reconciled_world["org_b"]} <= orgs
+        assert tiers, "the tier projection is empty"

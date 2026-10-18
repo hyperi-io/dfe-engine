@@ -57,8 +57,10 @@ from .render import (
 )
 from .trigger import (
     TRIGGER_ATTRIBUTES,
+    ProjectionSkips,
     ReconcileMetrics,
     ReconcileTrigger,
+    note_ch_projection,
     note_ch_rbac_reconciled,
     request_ch_rbac_reconcile,
 )
@@ -73,12 +75,14 @@ __all__ = [
     "ChServiceRole",
     "ChTier",
     "GroupChBinding",
+    "ProjectionSkips",
     "ReconcileMetrics",
     "ReconcileResult",
     "ReconcileTrigger",
     "ch_admin_client",
     "compute_drops",
     "derive_group_bindings",
+    "note_ch_projection",
     "note_ch_rbac_reconciled",
     "org_user_name",
     "reconcile_ch_rbac",

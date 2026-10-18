@@ -35,6 +35,7 @@ from .reconciler import ReconcileResult
 RECONCILES = "ch_rbac_reconciles_total"
 RETRIES = "ch_rbac_reconcile_retries_total"
 UNCONVERGED = "ch_rbac_reconcile_unconverged"
+PROJECTION_SKIPS = "ch_rbac_projection_skips_total"
 
 # The worker thread's name, which a test reads to see whether one is still running.
 WORKER_THREAD_NAME = "ch-rbac-reconcile"
@@ -110,6 +111,47 @@ class ReconcileMetrics:
         if self._manager is None:
             return
         self._retries.labels(reconcile=reconcile).inc()
+
+
+class ProjectionSkips:
+    """Counts each reconcile that left the dfe_meta projection unwritten, and logs the first of a run.
+
+    One per app, so the background trigger and the governance endpoint share the
+    count and the log line.
+
+    Args:
+        manager: a scalo ``MetricsManager`` (anything exposing ``counter``). ``None``
+            means no backend, and nothing is counted.
+    """
+
+    def __init__(self, manager: Any | None = None) -> None:
+        """Register the counter on *manager*, or nothing when there is none."""
+        self._manager = manager
+        self._lock = threading.Lock()
+        # A skip has been logged and no reconcile has written the projection since.
+        self._logged = False
+        if manager is None:
+            return
+        self._skips = manager.counter(
+            PROJECTION_SKIPS,
+            "CH RBAC reconciles that left the dfe_meta projection unwritten because its tables were not on the server",
+        )
+
+    def note(self, result: ReconcileResult) -> None:
+        """Count a reconcile that skipped the projection, and log the first of a run of them."""
+        with self._lock:
+            if not result.projection_missing:
+                self._logged = False
+                return
+            first = not self._logged
+            self._logged = True
+        if self._manager is not None:
+            self._skips.inc()
+        if first:
+            logger.warning(
+                "CH RBAC projection left unwritten until the schema phase creates its tables",
+                missing=result.projection_missing,
+            )
 
 
 class ReconcileTrigger:
@@ -342,6 +384,18 @@ def request_ch_rbac_reconcile(state: Any) -> None:
 TRIGGER_ATTRIBUTES = ("ch_rbac_reconcile", "ch_service_role_reconcile")
 
 
+def note_ch_projection(state: Any, result: ReconcileResult) -> None:
+    """Count and log a full reconcile that left the projection unwritten, if the app counts them.
+
+    Args:
+        state: the FastAPI ``app.state`` ``create_app`` put the skip counter on.
+        result: what the full reconcile did.
+    """
+    skips = getattr(state, "ch_projection_skips", None)
+    if skips is not None:
+        skips.note(result)
+
+
 def note_ch_rbac_reconciled(state: Any) -> None:
     """Tell the app's trigger a full reconcile got through, so any retry stands down.
 
@@ -355,6 +409,7 @@ def note_ch_rbac_reconciled(state: Any) -> None:
 
 
 __all__ = [
+    "PROJECTION_SKIPS",
     "RECONCILES",
     "RETRIES",
     "RETRY_INITIAL_SECONDS",
@@ -363,10 +418,12 @@ __all__ = [
     "TRIGGER_ATTRIBUTES",
     "UNCONVERGED",
     "WORKER_THREAD_NAME",
+    "ProjectionSkips",
     "ReconcileKind",
     "ReconcileMetrics",
     "ReconcileOutcome",
     "ReconcileTrigger",
+    "note_ch_projection",
     "note_ch_rbac_reconciled",
     "request_ch_rbac_reconcile",
 ]
