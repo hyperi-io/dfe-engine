@@ -334,6 +334,10 @@ def drop_table(ch_client, db: str, name: str) -> None:
 NOT_THERE_YET = ("UNKNOWN_TABLE", "UNKNOWN_DATABASE", "does not exist", "doesn't exist")
 
 
+# The stored payload as text: _raw for a non-JSON payload, else _json.
+PAYLOAD_TEXT = "coalesce(_raw, toString(_json))"
+
+
 def count_rows(
     ch_client,
     table: str,
@@ -349,18 +353,22 @@ def count_rows(
     column's type will not take - otherwise reads as an empty table forever, and
     a test that can only report zero proves nothing.
 
-    The marker is matched on ``_raw``, the String copy of the payload. ``_json``
-    holds the same bytes as the ClickHouse JSON type, which LIKE refuses, and a
-    typed source table carries neither - such a table is counted with a delta
-    instead.
+    The marker is matched on ``PAYLOAD_TEXT``: a JSON payload lands in ``_json``
+    with ``_raw`` NULL, and a non-JSON one in ``_raw``, so the match reads
+    whichever holds it. A typed source table carries neither - such a table is
+    counted with a delta instead.
 
-    ``contains`` is a second ``_raw`` substring, bound the same way. A caller that
+    ``contains`` is a second ``PAYLOAD_TEXT`` substring, bound the same way. A caller that
     wrote the LIKE into *where* by hand would put a bare ``%`` into the SQL, which
     clickhouse-connect then reads as its own parameter placeholder.
     """
     clauses = [
         c
-        for c in (where, "_raw LIKE %(m)s" if marker else "", "_raw LIKE %(c)s" if contains else "")
+        for c in (
+            where,
+            f"{PAYLOAD_TEXT} LIKE %(m)s" if marker else "",
+            f"{PAYLOAD_TEXT} LIKE %(c)s" if contains else "",
+        )
         if c
     ]
     parameters: dict[str, str] = {}
