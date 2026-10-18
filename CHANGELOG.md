@@ -3,6 +3,17 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.48](https://github.com/hyperi-io/dfe-engine/compare/v1.22.47...v1.22.48) (2026-10-18)
+
+### Bug Fixes
+
+* clear the ty, vulture and docstring warnings ([#923](https://github.com/hyperi-io/dfe-engine/issues/923)) ([f87a47a](https://github.com/hyperi-io/dfe-engine/commit/f87a47aea93d986667c630c233ab9541795a9a81)), closes [#792](https://github.com/hyperi-io/dfe-engine/issues/792)
+* rebuild on scalo 2.31.18, dfe-schemas 0.2.15 ([#925](https://github.com/hyperi-io/dfe-engine/issues/925)) ([65ad394](https://github.com/hyperi-io/dfe-engine/commit/65ad394e830c857cd017983ac88b14a9423f475c))
+* **security:** refuse a values document that sets the egress app label ([#922](https://github.com/hyperi-io/dfe-engine/issues/922)) ([131cbdd](https://github.com/hyperi-io/dfe-engine/commit/131cbddcb47ccd4fda6253f5cb4d980c97ab4e10))
+* **tests:** match e2e markers on JSON payloads too ([#919](https://github.com/hyperi-io/dfe-engine/issues/919)) ([c8f29eb](https://github.com/hyperi-io/dfe-engine/commit/c8f29ebd0441a3cde93a460e1dd8857ab6029397))
+* **tests:** remove the dead docker fixture, fix the OIDC loop probe ([#920](https://github.com/hyperi-io/dfe-engine/issues/920)) ([dfb9e73](https://github.com/hyperi-io/dfe-engine/commit/dfb9e736c2afa452970732d3e65af109259b691c))
+* **tests:** wait for the hook as well as the group in the failing-tick test ([#921](https://github.com/hyperi-io/dfe-engine/issues/921)) ([200d259](https://github.com/hyperi-io/dfe-engine/commit/200d259c9e8dff493cacac376dadd59b4875e68a))
+
 ## [1.22.47](https://github.com/hyperi-io/dfe-engine/compare/v1.22.46...v1.22.47) (2026-10-18)
 
 ### Bug Fixes
