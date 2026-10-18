@@ -49,6 +49,12 @@ _DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
 # The value rules, named so a violation can be matched against the stored document's.
 RULE_UNPINNED_IMAGE = "unpinned_image"
 RULE_KEDA_REPLICAS = "keda_replicas"
+RULE_RESERVED_LABEL = "reserved_label"
+
+# The deployment's NetworkPolicies grant an app's egress on this pod label, which the
+# shared values set from the chart name, so a document setting it would claim another app's.
+_RESERVED_LABEL_PATHS = ("podLabels.dfe.hyperi.io/app", "commonLabels.dfe.hyperi.io/app")
+_RESERVED_LABEL_SUFFIXES = tuple(f".{p}" for p in _RESERVED_LABEL_PATHS)
 
 _ABSENT = object()
 
@@ -200,6 +206,8 @@ def document_violations(doc: dict, *, keda_by_default: bool) -> list[CommitPolic
     - A ``replicaCount`` is refused wherever KEDA owns the count: the chart omits
       ``replicas`` and the ScaledObject sets it, so Argo self-heal and KEDA would
       fight over it.
+    - The ``dfe.hyperi.io/app`` pod label is refused under ``podLabels`` or
+      ``commonLabels``: it selects the app's NetworkPolicy egress.
 
     Args:
         doc: The document as a write would leave it.
@@ -314,6 +322,13 @@ def validate_revert(stored: dict, path: str, *, keda_by_default: bool) -> list[C
 
 def _validate_leaf(path: str, value: object, *, keda_owns: bool) -> None:
     """Apply the value rules to one scalar at ``path``."""
+    if path in _RESERVED_LABEL_PATHS or path.endswith(_RESERVED_LABEL_SUFFIXES):
+        raise CommitPolicyError(
+            f"{path} is set by the deployment from the chart name and decides the pod's "
+            "network egress, so no values document may set it",
+            path=path,
+            rule=RULE_RESERVED_LABEL,
+        )
     leaf = path.rsplit(".", 1)[-1]
     if leaf in {"tag", "image"} and isinstance(value, str):
         v = value.strip()

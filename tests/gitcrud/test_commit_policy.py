@@ -152,6 +152,22 @@ def test_a_floating_image_ref_is_refused():
         _write("image", "ghcr.io/x/y:latest")
 
 
+@pytest.mark.parametrize("block", ["podLabels", "commonLabels"])
+@pytest.mark.parametrize("value", ["dfe-engine", "dfe-fetcher"])
+def test_an_overlay_cannot_set_the_label_network_policy_selects_on(block, value):
+    """The label grants an app's egress, so an overlay claiming it would take another app's."""
+    doc = {block: {"dfe.hyperi.io/app": value}}
+    with pytest.raises(CommitPolicyError) as exc:
+        commit_policy.validate_result({}, doc, keda_by_default=True)
+    assert exc.value.rule == commit_policy.RULE_RESERVED_LABEL
+    assert exc.value.path == f"{block}.dfe.hyperi.io/app"
+
+
+def test_other_pod_labels_pass():
+    doc = {"podLabels": {"team": "ingest"}, "commonLabels": {"dfe.hyperi.io/env": "dev"}}
+    commit_policy.validate_result({}, doc, keda_by_default=True)  # no raise
+
+
 def test_a_replica_count_is_refused_where_keda_runs_by_default():
     with pytest.raises(CommitPolicyError):
         _write("replicaCount", 3)
