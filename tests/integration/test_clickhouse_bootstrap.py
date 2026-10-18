@@ -9,24 +9,10 @@ import pytest
 from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
-from dfe_engine.settings import get_clickhouse_config, load_settings
+from dfe_engine.settings import get_clickhouse_config
+from tests.support.engine_stack import bootstrap_settings
 
 pytestmark = pytest.mark.integration
-
-
-def _bootstrap_settings(*, database, ch_params):
-    """Settings aimed at the harness's ClickHouse, never at whatever .env names."""
-    settings = load_settings()
-    settings.clickhouse.host = ch_params["host"]
-    settings.clickhouse.port = ch_params["port"]
-    settings.clickhouse.username = ch_params["username"]
-    settings.clickhouse.password = ch_params["password"]
-    settings.clickhouse.secure = ch_params["secure"]
-    settings.clickhouse.data_database = database
-    settings.clickhouse.bootstrap_tables = True
-    # These assert ClickHouse objects; the topic step would reach whatever broker .env names.
-    settings.kafka.bootstrap_topics = False
-    return settings
 
 
 def _table_names(*, client, database) -> set[str]:
@@ -46,7 +32,7 @@ def bootstrap(clickhouse_test_database, ch_params):
 
     def run():
         ClickHouseManager.reset_instance()
-        settings = _bootstrap_settings(database=clickhouse_test_database, ch_params=ch_params)
+        settings = bootstrap_settings(ch_params=ch_params, database=clickhouse_test_database)
         bootstrap_clickhouse(settings=settings)
         manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
         return manager.get_clickhouse_client()

@@ -64,7 +64,7 @@ _TIMEOUT_SECONDS = 5.0
 _RETRIES = 1
 # After the fork proves unreachable the breaker re-probes once this window elapses,
 # so a fork that boots after the engine recovers without an engine restart.
-_RETRY_AFTER_SECONDS = 60.0
+RETRY_AFTER_SECONDS = 60.0
 
 
 def _is_unreachable(exc: BaseException) -> bool:
@@ -98,7 +98,7 @@ class HyperDXClient:
         # callers are interactive requests that cannot afford a second one.
         self._breaker = CircuitBreaker(
             "hyperdx",
-            CircuitBreakerConfig(failure_threshold=1, reset_timeout=_RETRY_AFTER_SECONDS),
+            CircuitBreakerConfig(failure_threshold=1, reset_timeout=RETRY_AFTER_SECONDS),
         )
 
     # ------------------------------------------------------------------

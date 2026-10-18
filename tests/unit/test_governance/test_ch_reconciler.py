@@ -28,10 +28,17 @@ from dfe_engine.governance.ch.reconciler import (
     _default_tier_name,
     _tenant_granted_dbs,
     compute_drops,
+    fence_tables,
 )
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
 from tests.support.racing_stores import RacingSecrets
+from tests.unit.test_governance.ch_reconciler_cases import (
+    FENCE_TABLES_CASES,
+    ORG_TABLES,
+    REACHABLE_TABLES,
+    FenceTablesCase,
+)
 
 
 def _org(name: str, ids: list[str]) -> SimpleNamespace:
@@ -79,6 +86,18 @@ class _FakeAdminClient:
 
     def command(self, stmt: str) -> None:
         self.executed.append(stmt)
+
+
+class _DiscoveringAdminClient(_FakeAdminClient):
+    """Records executed DDL; the fence's discovery finds ``ORG_TABLES`` carrying ``_org_id`` and ``REACHABLE_TABLES`` in the granted database."""
+
+    def query(self, sql: str, parameters: dict | None = None) -> SimpleNamespace:
+        """Answer the fence's two discovery reads, and every other read as the base client does."""
+        if "FROM system.columns" in sql:
+            return SimpleNamespace(result_rows=ORG_TABLES)
+        if "FROM system.tables" in sql:
+            return SimpleNamespace(result_rows=REACHABLE_TABLES)
+        return super().query(sql=sql, parameters=parameters)
 
 
 def _rec() -> ChRbacReconciler:
@@ -865,3 +884,16 @@ class TestComputeDrops:
             [("dfe", "hunt_lease")],
         )
         assert drops == []
+
+
+class TestFenceTables:
+    @pytest.mark.parametrize(
+        "case", FENCE_TABLES_CASES, ids=[case["id"] for case in FENCE_TABLES_CASES]
+    )
+    def test_matches_expected(self, case: FenceTablesCase):
+        client = _DiscoveringAdminClient()
+
+        applied = fence_tables(admin_client=client, database="dfe", tables=case["tables"])
+
+        policies = [stmt for stmt in client.executed if "ROW POLICY" in stmt]
+        assert (applied, policies) == (case["expected_applied"], case["expected_policies"])

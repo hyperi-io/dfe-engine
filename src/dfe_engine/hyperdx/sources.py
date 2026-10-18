@@ -30,13 +30,12 @@ never fail a source deploy.
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Protocol
 
 from scalo.logger import logger
 
-from dfe_engine.hyperdx.client import HyperDXClient
-
 __all__ = [
+    "DfeSourcesClient",
     "ensure_source",
     "list_sources_by_team",
     "remove_source",
@@ -52,6 +51,19 @@ _TIMESTAMP_COLUMNS = ("_timestamp", "_timestamp_load")
 # exception (captured only when asked for) and may be NULL, so it is never the
 # body, the implicit search column or the default view.
 _PAYLOAD_COLUMN = "_json"
+
+
+class DfeSourcesClient(Protocol):
+    """The calls on the fork's ``/dfe/sources`` routes that write, remove and list DFE sources; ``HyperDXClient`` is the real one."""
+
+    async def delete_dfe_source(self, name: str) -> dict[str, Any] | None:
+        """Remove one DFE source from every team holding it; None on failure."""
+
+    async def list_dfe_sources(self) -> dict[str, Any] | None:
+        """List every team and the DFE sources it holds; None on failure."""
+
+    async def put_dfe_source(self, name: str, spec: dict[str, Any]) -> dict[str, Any] | None:
+        """Create or replace one DFE source on every team; None on failure."""
 
 
 def timestamp_column(columns: Iterable[str]) -> str | None:
@@ -98,12 +110,13 @@ def source_spec(*, database: str, table: str, timestamp: str) -> dict[str, Any]:
 
 
 async def ensure_source(
-    client: HyperDXClient,
+    client: DfeSourcesClient,
     *,
     name: str,
     database: str,
     table: str,
     columns: Iterable[str],
+    timestamp: str | None = None,
 ) -> list[str] | None:
     """Create or update the HyperDX source for one DFE source, on every team.
 
@@ -113,13 +126,15 @@ async def ensure_source(
         database: ClickHouse database the table was deployed into.
         table: ClickHouse table name.
         columns: Column names on the deployed table.
+        timestamp: Column to read as the event time; None picks it from *columns*.
 
     Returns:
         The teams the source now sits on, or None when nothing was written
         (HyperDX unreachable, no timestamp column, or the name belongs to the
         fork's own seeded set).
     """
-    timestamp = timestamp_column(columns)
+    if timestamp is None:
+        timestamp = timestamp_column(columns=columns)
     if timestamp is None:
         logger.warning("No timestamp column for a HyperDX source", source=name)
         return None
@@ -140,7 +155,7 @@ async def ensure_source(
     return written
 
 
-async def remove_source(client: HyperDXClient, *, name: str) -> bool:
+async def remove_source(client: DfeSourcesClient, *, name: str) -> bool:
     """Delete the HyperDX source for a DFE source that is going away.
 
     Args:
@@ -159,7 +174,7 @@ async def remove_source(client: HyperDXClient, *, name: str) -> bool:
     return True
 
 
-async def list_sources_by_team(client: HyperDXClient) -> list[dict[str, Any]] | None:
+async def list_sources_by_team(client: DfeSourcesClient) -> list[dict[str, Any]] | None:
     """Read back which teams hold which DFE sources.
 
     Returns:

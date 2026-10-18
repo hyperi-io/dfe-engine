@@ -238,6 +238,9 @@ def render_pinned_user(
         bad = [i for i in org_ids if "," in i]
         if bad:
             raise ValueError(f"org ids must not contain commas: {bad}")
+        # An empty id pins '' and matches every row whose _org_id defaulted to empty.
+        if "" in org_ids:
+            raise ValueError(f"org ids must not be empty: {org_ids!r}")
         stmts.append(f"GRANT {_bq(TENANT_ROLE)} TO {qu}")
         pin = _sq(",".join(org_ids))
         stmts.append(f"ALTER USER {qu} SETTINGS {TENANT_SETTING} = {pin} READONLY")

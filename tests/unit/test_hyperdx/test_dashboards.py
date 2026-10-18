@@ -21,15 +21,25 @@ import json
 
 import pytest
 
+from dfe_engine.clickhouse.all_sources import ALL_SOURCES
 from dfe_engine.hyperdx.dashboards import (
     dashboard_files,
     dashboard_names,
     export_dashboards,
 )
+from tests.unit.test_hyperdx.dashboards_cases import EPOCH_GUARD_CASES, EpochGuardCase
 
-# Sources the fork seeds on EVERY team (org-connection.ts). A dashboard built
-# only from these resolves for a tenant as well as the platform team.
-TENANT_SOURCES = {"main", "hunts"}
+# Sources the fork seeds on EVERY team (org-connection.ts).
+SEEDED_TENANT_SOURCES = {"main", "hunts"}
+
+# The Merge table over `main` and every per-source table, which the engine registers on EVERY team through the fork's /dfe/sources fan-out.
+MERGE_SOURCE = ALL_SOURCES
+
+# A dashboard built only from these resolves for a tenant as well as the platform team.
+TENANT_SOURCES = SEEDED_TENANT_SOURCES | {MERGE_SOURCE}
+
+# The epoch-0 value a Merge table returns for a DateTime64 column its member table lacks.
+EPOCH_ZERO = "toDateTime64(0, 3, 'UTC')"
 
 # Additionally seeded on the platform/admin team only.
 PLATFORM_SOURCES = {"otel_logs", "otel_traces", "otel_metrics", "clickhouse_system"}
@@ -75,20 +85,25 @@ COUNTER_SERIES_KEY = (
 )
 
 
-def _tile_sources(dashboard: dict) -> set[str]:
-    return {
-        tile["config"]["source"]
-        for tile in dashboard["tiles"]
-        if "source" in tile.get("config", {})
-    }
+def _dashboards() -> dict[str, dict]:
+    return {name: json.loads(text) for name, text in dashboard_files().items()}
 
 
 def _sql_tiles(dashboard: dict) -> list[dict]:
     return [t for t in dashboard["tiles"] if t["config"].get("configType") == "sql"]
 
 
-def _dashboards() -> dict[str, dict]:
-    return {name: json.loads(text) for name, text in dashboard_files().items()}
+def _throughput_tiles() -> dict[str, dict]:
+    """Map each DFE Throughput tile id to its tile."""
+    return {tile["id"]: tile for tile in _dashboards()["dfe-throughput.json"]["tiles"]}
+
+
+def _tile_sources(dashboard: dict) -> set[str]:
+    return {
+        tile["config"]["source"]
+        for tile in dashboard["tiles"]
+        if "source" in tile.get("config", {})
+    }
 
 
 def test_dashboards_are_shipped():
@@ -133,8 +148,8 @@ def test_tiles_are_well_formed(filename):
 
 
 @pytest.mark.parametrize("filename", sorted(dashboard_files()))
-def test_tiles_reference_only_seeded_sources(filename):
-    """A tile naming an unseeded source resolves to nothing and renders dead.
+def test_tiles_reference_only_known_sources(filename):
+    """A tile naming a source no team holds resolves to nothing and renders dead.
 
     With ``DASHBOARD_PROVISIONER_REQUIRE_REFS=true`` the whole dashboard is
     skipped instead, so a typo here means a dashboard that never appears on any
@@ -143,7 +158,7 @@ def test_tiles_reference_only_seeded_sources(filename):
     dashboard = json.loads(dashboard_files()[filename])
     unknown = _tile_sources(dashboard) - KNOWN_SOURCES
 
-    assert not unknown, f"{filename} references unseeded sources: {sorted(unknown)}"
+    assert not unknown, f"{filename} references unknown sources: {sorted(unknown)}"
 
 
 def test_names_are_unique():
@@ -163,6 +178,22 @@ def test_the_tenant_dashboard_uses_only_tenant_sources():
     throughput = json.loads(dashboard_files()["dfe-throughput.json"])
 
     assert _tile_sources(throughput) <= TENANT_SOURCES
+
+
+def test_every_throughput_tile_names_all_sources():
+    tiles = _throughput_tiles()
+
+    assert [
+        tile_id for tile_id, tile in tiles.items() if tile["config"].get("source") != MERGE_SOURCE
+    ] == []
+
+
+@pytest.mark.parametrize("case", EPOCH_GUARD_CASES, ids=[case["id"] for case in EPOCH_GUARD_CASES])
+def test_throughput_time_maths_skips_epoch_defaults(case: EpochGuardCase):
+    config = _throughput_tiles()[case["tile_id"]]["config"]
+    guard = f"{case['column']} > {EPOCH_ZERO}"
+
+    assert (config["whereLanguage"], guard in config["where"]) == ("sql", True)
 
 
 @pytest.mark.parametrize("filename", sorted(dashboard_files()))

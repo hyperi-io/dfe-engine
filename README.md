@@ -231,7 +231,7 @@ moves.
 
 | repo | how it interacts |
 |---|---|
-| dfe-infra | Pins this engine's image in THREE places -- the dfe-engine chart, the dfe-schema chart (which runs an engine entry point), and the hyperdx chart (which runs the engine image as its dashboards init container). All three move together. |
+| dfe-infra | Pins this engine's image in TWO places: the dfe-engine chart and the hyperdx chart, which runs the engine image as its dashboards init container. Both move together. There is no schema-apply workload; the engine applies schema at its own startup. |
 | dfe-ui | Vendors this repo's OpenAPI spec and generates its scope types from an engine module. A workflow here re-vendors it by PR on a push to main. |
 
 **The consequence, and it is the reason this section exists:** dfe-engine is the

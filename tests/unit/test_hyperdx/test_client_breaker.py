@@ -30,7 +30,7 @@ TEAM = {"_id": "team-1"}
 @pytest.fixture
 def reprobe_at_once(monkeypatch: pytest.MonkeyPatch) -> None:
     """A zero re-probe window, so the call after a failure is the probe."""
-    monkeypatch.setattr(client_module, "_RETRY_AFTER_SECONDS", 0.0)
+    monkeypatch.setattr(client_module, "RETRY_AFTER_SECONDS", 0.0)
 
 
 @pytest.fixture

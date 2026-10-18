@@ -21,19 +21,22 @@ with ``DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false``, which reports the schema state a
 unknown and gates nothing. A pass ClickHouse failed for load or reachability runs
 again in the background (:class:`SchemaRetry`), so one transient error does not hold
 the pod NotReady until a restart.
+
+A converged pass also rebuilds the ``all_sources`` Merge table (:mod:`dfe_engine.clickhouse.all_sources`), so a retried pass rebuilds it too. So does a boot with the phase switched off, since nothing else would create the table HyperDX is pointed at; a failed pass does not.
 """
 
 import math
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 from scalo.resilience import ReconnectingResilience, ResilienceConfig
 
 from dfe_engine.backoff import jittered
+from dfe_engine.clickhouse.all_sources import try_rebuild_all_sources
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-from dfe_engine.schema.phase import STATE_FAILED, SchemaBootstrapState, run_bootstrap
+from dfe_engine.schema.phase import STATE_FAILED, STATE_UNKNOWN, SchemaBootstrapState, run_bootstrap
 from dfe_engine.settings import ClickHouseResilienceSettings, DFESettings, get_clickhouse_config
 
 if TYPE_CHECKING:
@@ -41,47 +44,54 @@ if TYPE_CHECKING:
     from dfe_engine.source.models import Source
 
 
-def _reconcile_sources(*, client: object, settings: DFESettings, sources: list[Source]) -> None:
-    """Bring deployed source tables to the default TTL; a failure here never fails the phase."""
+def _reconcile_sources(
+    *, load_sources: Callable[[], Iterable[Source]], settings: DFESettings
+) -> None:
+    """Bring the deployed source tables the registry holds now to the default TTL; a failure here never fails the phase."""
     from dfe_engine.schema.retention import reconcile_source_ttls
 
+    # The schema is applied, so neither an unreadable registry nor a TTL fault may undo that.
     try:
-        outcome = reconcile_source_ttls(client, settings=settings, sources=sources)
-    except Exception as exc:
-        logger.error(f"source TTL reconcile failed: {exc}")
-        return
-    logger.info(f"bootstrap sources: {outcome.report.summary()}")
-    if outcome.sources_skipped:
-        logger.warning(
-            "source TTL reconcile left sources to their next deploy",
-            count=outcome.sources_skipped,
+        sources = list(load_sources())
+        if not (sources):
+            return
+        manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
+        outcome = reconcile_source_ttls(
+            manager.get_clickhouse_client(), settings=settings, sources=sources
         )
+        logger.info(f"bootstrap sources: {outcome.report.summary()}")
+        if outcome.sources_skipped:
+            logger.warning(
+                "source TTL reconcile left sources to their next deploy",
+                count=outcome.sources_skipped,
+            )
+    except Exception as exc:
+        logger.error("source TTL reconcile failed", error=str(exc))
 
 
 def bootstrap_clickhouse(
     *,
-    settings: DFESettings,
-    sources: list[Source] | None = None,
+    load_sources: Callable[[], Iterable[Source]] | None = None,
     metrics: SchemaMetrics | None = None,
+    settings: DFESettings,
 ) -> SchemaBootstrapState:
-    """Apply the manifest, then reconcile the deployed source tables' TTL.
+    """Apply the manifest, reconcile the deployed source tables' TTL, then rebuild all_sources.
 
     Returns the phase state. ``state.ready`` is what the readiness check reads,
     and ``state.converged`` is what says the objects exist -- a caller must not
     report a core table as deployed unless that one is true. ``metrics`` is where
     the phase reports its outcome; ``None`` reports nothing.
+
+    Both source passes read the registry through ``load_sources`` when they run, so a retried pass sees the sources deployed since the boot. ``load_sources`` of None runs neither pass. A pass with the phase switched off (state ``unknown``) still rebuilds all_sources, and a failed pass runs neither.
     """
     state = run_bootstrap(settings=settings, metrics=metrics)
-    if not state.converged or not sources:
+    rebuilds = (state.converged) or (state.state == STATE_UNKNOWN)
+    if (load_sources is None) or (not (rebuilds)):
         return state
 
-    try:
-        manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
-        _reconcile_sources(
-            client=manager.get_clickhouse_client(), settings=settings, sources=sources
-        )
-    except Exception as exc:  # the schema is applied; a TTL pass must not undo that
-        logger.error(f"source TTL reconcile could not run: {exc}")
+    if state.converged:
+        _reconcile_sources(load_sources=load_sources, settings=settings)
+    try_rebuild_all_sources(load_sources=load_sources, settings=settings)
     return state
 
 
