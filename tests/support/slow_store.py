@@ -17,22 +17,23 @@ from tests.support.event_loop import HELD_SECONDS
 class SlowSecretStore(DfeSecrets):
     """A store that answers every read with ``value``, once the test opens ``gate``.
 
-    A read that reaches the store sets ``arrived`` and waits at ``gate``. A read made
-    on the event loop holds the loop too, so the wait times out and records ``False``.
-    ``read_threads`` holds the thread id of each read.
+    A read that reaches the store sets ``arrived`` and waits at ``gate`` for at most
+    ``hold_seconds``. A read made on the event loop holds the loop too, so the wait times
+    out and records ``False``. ``read_threads`` holds the thread id of each read.
     """
 
-    def __init__(self, value: str) -> None:
+    def __init__(self, value: str, *, hold_seconds: float = HELD_SECONDS) -> None:
         """Hold no backend: every read is answered here."""
         self.arrived = threading.Event()
         self.gate = threading.Event()
         self.gate_opened_by_test: list[bool] = []
         self.read_threads: list[int] = []
+        self._hold_seconds = hold_seconds
         self._value = value
 
     def get(self, path: str) -> str:
         """Wait at the gate, then answer."""
         self.read_threads.append(threading.get_ident())
         self.arrived.set()
-        self.gate_opened_by_test.append(self.gate.wait(timeout=HELD_SECONDS))
+        self.gate_opened_by_test.append(self.gate.wait(timeout=self._hold_seconds))
         return self._value
