@@ -308,14 +308,13 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
             )
 
     try:
-        # scalo-py#126: run_blocking's ParamSpec signature rejects every forwarded argument.
         auth_ctx = await run_blocking(
             provider.authenticate,
-            body.username,  # ty: ignore[invalid-argument-type]
-            body.password,  # ty: ignore[invalid-argument-type]
-            request_id=request.headers.get("X-Request-ID"),  # ty: ignore[invalid-argument-type]
-            client_ip=client_ip,  # ty: ignore[invalid-argument-type]
-            user_agent=request.headers.get("User-Agent"),  # ty: ignore[invalid-argument-type]
+            body.username,
+            body.password,
+            request_id=request.headers.get("X-Request-ID"),
+            client_ip=client_ip,
+            user_agent=request.headers.get("User-Agent"),
         )
     except AuthenticationError as exc:
         throttle.failed(body.username, client_ip)

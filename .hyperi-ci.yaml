@@ -56,8 +56,10 @@ quality:
     # hit is api/v1/queries.py:232, a raw-query endpoint behind
     # require_action(query_execute), where taking a caller's SQL is the point.
     semgrep: warn
-    vulture: warn
-    ty: warn
+    # Above hyperi-ci's warn default: these three are at zero, so a new finding fails the PR.
+    vulture: blocking
+    ty: blocking
+    ruff_docstrings: blocking
   ignore:
     - tool: pip-audit
       ids:

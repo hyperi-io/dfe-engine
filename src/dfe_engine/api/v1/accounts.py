@@ -484,8 +484,7 @@ async def _reset_stored_password(
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
     _refuse_external(existing)
-    # scalo-py#126: run_blocking's ParamSpec signature rejects every forwarded argument.
-    if not await run_blocking(_write_new_password, store, existing, new_password):  # ty: ignore[invalid-argument-type]
+    if not await run_blocking(_write_new_password, store, existing, new_password):
         raise HTTPException(
             status_code=400,
             detail={
@@ -889,8 +888,7 @@ async def reset_current_user_password(
     wait = throttle.retry_after(account.username, client_ip)
     if wait:
         raise throttled(request, wait)
-    # scalo-py#126: run_blocking's ParamSpec signature rejects every forwarded argument.
-    if not await run_blocking(store.verify_password, account.username, body.current_password):  # ty: ignore[invalid-argument-type]
+    if not await run_blocking(store.verify_password, account.username, body.current_password):
         throttle.failed(account.username, client_ip)
         audit_login_denied(user.user_id, "password_change", client_ip, "wrong_current_password")
         raise HTTPException(
