@@ -104,6 +104,30 @@ class _FakeAdmin(TopicAdmin):
         self.shapes[name] = (total, rf)
 
 
+class _RefusesCompression(_FakeAdmin):
+    """A broker that answers INVALID_CONFIG to any request naming a refused config."""
+
+    def __init__(self, refused=("compression.type",), **kwargs):
+        super().__init__(**kwargs)
+        self.refused = set(refused)
+
+    def _check(self, config) -> None:
+        if self.refused & set(config or {}):
+            raise KafkaException(
+                KafkaError(KafkaError.INVALID_CONFIG, 'cannot set "compression.type"')
+            )
+
+    def create(self, name, *, partitions, replication_factor, config=None, timeout=30.0) -> None:
+        self._check(config)
+        super().create(
+            name, partitions=partitions, replication_factor=replication_factor, config=config
+        )
+
+    def alter_config(self, name, changes, *, timeout=30.0) -> None:
+        self._check(changes)
+        super().alter_config(name, changes)
+
+
 class _UnreachableAdmin(TopicAdmin):
     def __init__(self) -> None:
         """Opens no client: every call fails the way an unreachable broker does."""
@@ -257,6 +281,33 @@ class TestEnsureTopics:
 
         assert result.failed == [
             ("t", "the broker refused it (POLICY_VIOLATION); the engine log has the reason")
+        ]
+
+    def test_a_broker_refusing_compression_type_still_gets_the_topic(self):
+        """Redpanda Cloud answers INVALID_CONFIG to a topic-level compression.type."""
+        admin = _RefusesCompression()
+        spec = TopicSpec(
+            "t", 3, 1, {"max.message.bytes": "2097152", "compression.type": "producer"}
+        )
+
+        result = ensure_topics([spec], admin=admin)
+
+        assert result.created == ["t"]
+        assert result.failed == []
+        assert admin.created_config["t"] == {"max.message.bytes": "2097152"}
+
+    def test_a_refused_required_config_still_fails_the_topic(self):
+        """Only the optional keys are dropped. A refused max.message.bytes is a real failure."""
+        admin = _RefusesCompression(refused={"max.message.bytes"})
+        spec = TopicSpec(
+            "t", 3, 1, {"max.message.bytes": "2097152", "compression.type": "producer"}
+        )
+
+        result = ensure_topics([spec], admin=admin)
+
+        assert result.created == []
+        assert result.failed == [
+            ("t", "the broker refused it (INVALID_CONFIG); the engine log has the reason")
         ]
 
     def test_dry_run_creates_nothing(self):
@@ -586,6 +637,34 @@ class TestTopicStatus:
 
 class TestUpdateTopics:
     """Converge: alter the configs the spec names, widen partitions, refuse the rest."""
+
+    def test_a_refused_compression_type_still_converges_the_rest(self):
+        admin = _RefusesCompression(
+            present=["t"],
+            shapes={"t": (3, 1)},
+            configs={"t": {"retention.ms": "604800000", "compression.type": "zstd"}},
+        )
+        spec = TopicSpec("t", 3, 1, {"retention.ms": "86400000", "compression.type": "producer"})
+
+        result = update_topics([spec], admin=admin)
+
+        assert result.failed == []
+        assert result.altered == ["t"]
+        assert admin.altered["t"] == {"retention.ms": "86400000"}
+
+    def test_only_a_refused_compression_type_drifting_changes_nothing(self):
+        admin = _RefusesCompression(
+            present=["t"], shapes={"t": (3, 1)}, configs={"t": {"compression.type": "zstd"}}
+        )
+
+        result = update_topics(
+            [TopicSpec("t", 3, 1, {"compression.type": "producer"})], admin=admin
+        )
+
+        assert result.failed == []
+        assert result.altered == []
+        assert result.unchanged == ["t"]
+        assert "t" not in admin.altered
 
     def test_a_drifted_config_is_altered(self):
         admin = _FakeAdmin(
