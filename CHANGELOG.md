@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.50](https://github.com/hyperi-io/dfe-engine/compare/v1.22.49...v1.22.50) (2026-10-19)
+
+### Bug Fixes
+
+* report usage per org and deployment-wide, with an Overview dashboard ([#927](https://github.com/hyperi-io/dfe-engine/issues/927)) ([0022d56](https://github.com/hyperi-io/dfe-engine/commit/0022d56aa2b5f5341065b66daf9cb31c1e9c8f7b))
+
 ## [1.22.49](https://github.com/hyperi-io/dfe-engine/compare/v1.22.48...v1.22.49) (2026-10-19)
 
 ### Bug Fixes
