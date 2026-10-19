@@ -8619,7 +8619,7 @@
           "System"
         ],
         "summary": "Get Schema Status",
-        "description": "What the last schema bootstrap pass did, object by object.\n\nThis is the operator's record of the schema apply, replacing the completed\nArgoCD Job the engine took over from. ``state`` is what readiness follows:\nconverged or observed is ready, failed leaves the pod up and NotReady with\nthe stage that failed here and the cause in the engine log.",
+        "description": "What the last schema bootstrap pass did, object by object.\n\nThis is the operator's record of the schema apply, replacing the completed\nArgoCD Job the engine took over from. ``state`` is what readiness follows:\nconverged is ready, failed leaves the pod up and NotReady with the stage that\nfailed here and the cause in the engine log, and observed -- another applier\nheld the lease for the whole wait -- stays NotReady until a later pass converges.",
         "operationId": "get_schema_status_api_v1_system_schema_get",
         "responses": {
           "200": {
