@@ -50,8 +50,8 @@ ALL_BYTES = ACME_BYTES + BETA_BYTES + GAMMA_BYTES
 # acme's busiest minute is m1: 0.5 + 2.0. Its tenants' own peaks, 1.0 and 2.0, sum to 3.0.
 ACME_PEAK_EPS, BETA_PEAK_EPS, ALL_PEAK_EPS = 2.5, 1.5, 12.5
 
-# Running DFE containers at the one tick, and the cores of the two nodes running them.
-CORES_DEPLOYED, NODE_CORES = 2.75, 12.0
+# Every running container at the one tick, and the cores of the three nodes running them.
+CORES_DEPLOYED, NODE_CORES = 10.75, 28.0
 
 # HyperDX's expansion of $__dateFilter (dfe-hyperdx packages/common-utils/src/macros.ts).
 _DATE_FILTER = re.compile(r"\$__dateFilter\((\w+)\)")
@@ -119,13 +119,12 @@ def _map(attributes: dict[str, str]) -> str:
     return f"map({pairs})"
 
 
-def _container(pod: str, container: str, node: str, part_of: str = usage.PART_OF_VALUE) -> str:
+def _container(pod: str, container: str, node: str) -> str:
     return _map(
         {
             usage.K8S_POD_UID_ATTRIBUTE: pod,
             usage.K8S_CONTAINER_NAME_ATTRIBUTE: container,
             usage.K8S_NODE_NAME_ATTRIBUTE: node,
-            usage.PART_OF_ATTRIBUTE: part_of,
         }
     )
 
@@ -146,7 +145,7 @@ def _insert_telemetry(client, db: str, m0: str) -> None:
         (request, _container("pa", "recv", "node-a"), 0.5),
         (request, _container("pa", "side", "node-a"), 0.25),
         (request, _container("pb", "load", "node-b"), 2.0),
-        (request, _container("pc", "other", "node-c", part_of="other"), 8.0),
+        (request, _container("pc", "other", "node-c"), 8.0),
         (phase, _pod("pa", "node-a"), 2),
         (phase, _pod("pb", "node-b"), 2),
         (phase, _pod("pc", "node-c"), 2),
