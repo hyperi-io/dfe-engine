@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.49](https://github.com/hyperi-io/dfe-engine/compare/v1.22.48...v1.22.49) (2026-10-19)
+
+### Bug Fixes
+
+* **tests:** retry the e2e engine client while the engine is unreachable ([#926](https://github.com/hyperi-io/dfe-engine/issues/926)) ([1e8c739](https://github.com/hyperi-io/dfe-engine/commit/1e8c739454ef45222b1f7856c65aa129bb01a840))
+
 ## [1.22.48](https://github.com/hyperi-io/dfe-engine/compare/v1.22.47...v1.22.48) (2026-10-18)
 
 ### Bug Fixes
