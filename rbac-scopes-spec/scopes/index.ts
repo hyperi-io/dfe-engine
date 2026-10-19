@@ -177,6 +177,10 @@ const transform_scopes = {
   transform_test: "transform:test",
 } as const;
 
+const usage_scopes = {
+  usage_read: "usage:read",
+} as const;
+
 const governance_scopes = {
   governance_read: "governance:read",
   governance_write: "governance:write",
@@ -236,6 +240,7 @@ export const scopes = {
   ...system_scopes,
   ...tasks_scopes,
   ...transform_scopes,
+  ...usage_scopes,
   ...governance_scopes,
   ...helmvars_scopes,
   ...library_scopes,

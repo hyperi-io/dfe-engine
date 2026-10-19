@@ -74,6 +74,15 @@ POINT_IN_TIME_TILES = {
     "storage-widest",
 }
 
+# The Overview's licence numbers: the 7 UTC days to today, whatever the picker shows.
+FIXED_WINDOW_TILES = {
+    "highest-cores-deployed",
+    "highest-node-cores",
+    "highest-ingested-bytes",
+    "highest-events-per-second",
+}
+SEVEN_DAYS_TO_TODAY = "day >= toDate(now(), 'UTC') - 6"
+
 # The Kafka transport writes a revoked partition's committed offset as 0, because the
 # recorder cannot drop one series.
 COMMITTED_OFFSET_METRIC = "rdkafka_topic_partition_committed_offset"
@@ -218,12 +227,47 @@ def test_raw_sql_tiles_respect_the_time_range(filename):
     dashboard = json.loads(dashboard_files()[filename])
 
     for tile in _sql_tiles(dashboard):
-        if tile["id"] in POINT_IN_TIME_TILES:
+        if tile["id"] in POINT_IN_TIME_TILES | FIXED_WINDOW_TILES:
             continue
         sql = tile["config"]["sqlTemplate"]
         assert any(macro in sql for macro in TIME_MACROS), (
             f"{filename}:{tile['id']} has no time-range macro"
         )
+
+
+def _overview_tiles() -> dict[str, dict]:
+    return {tile["id"]: tile for tile in _dashboards()["dfe-overview.json"]["tiles"]}
+
+
+def test_the_overview_is_named_overview():
+    """The provisioner upserts on the name, so a rename seeds a second dashboard."""
+    assert _dashboards()["dfe-overview.json"]["name"] == "Overview"
+
+
+def test_each_fixed_window_tile_reads_the_seven_days_to_today():
+    tiles = _overview_tiles()
+
+    assert FIXED_WINDOW_TILES <= set(tiles)
+    for tile_id in FIXED_WINDOW_TILES:
+        sql = tiles[tile_id]["config"]["sqlTemplate"]
+        assert SEVEN_DAYS_TO_TODAY in sql, tile_id
+        # max() over no rows answers 0, which would read as a measured zero.
+        assert "maxOrNull(value)" in sql, tile_id
+
+
+def test_the_overview_titles_match_the_usage_api():
+    """The console strip and the dashboard name each number the same way."""
+    from dfe_engine.api.v1.usage import HIGHEST_LABEL, METRIC_LABELS
+
+    dashboard = _dashboards()["dfe-overview.json"]
+    containers = {container["id"]: container["title"] for container in dashboard["containers"]}
+    tiles = _overview_tiles()
+    assert containers["highest"] == HIGHEST_LABEL
+    for metric, label in METRIC_LABELS.items():
+        slug = metric.replace("_", "-")
+        assert tiles[f"highest-{slug}"]["config"]["name"] == label
+        assert tiles[f"per-day-{slug}"]["config"]["name"] == label
+        assert f"metric = '{metric}'" in tiles[f"per-day-{slug}"]["config"]["sqlTemplate"]
 
 
 def test_committed_offset_tiles_skip_the_revoke_marker():
@@ -296,6 +340,7 @@ def test_tiles_reference_declared_containers(filename):
         "dfe-clickhouse-internals.json",
         "dfe-services.json",
         "dfe-kafka.json",
+        "dfe-overview.json",
     ],
 )
 def test_platform_dashboards_are_fenced_by_their_sources(filename):

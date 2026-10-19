@@ -22,10 +22,9 @@ How a file reaches a running HyperDX:
    on a one-minute cron, resolves each source NAME against the team's sources, and
    upserts a dashboard marked ``provisioned``.
 
-Kubernetes only, for now. dfe-docker runs HyperDX with
-``NEXT_PUBLIC_IS_LOCAL_MODE=true``, where dashboards and sources live in the
-browser's localStorage rather than the database the provisioner writes -- so
-mounting the same directory there would seed nothing (dfe-docker#31).
+dfe-docker runs the same command as its one-shot ``dfe-dashboards`` service, into
+the volume its HyperDX reads as ``DASHBOARD_PROVISIONER_DIR``, so both deploys
+seed the same files.
 
 Two consequences follow from that reconcile loop, and both are deliberate:
 

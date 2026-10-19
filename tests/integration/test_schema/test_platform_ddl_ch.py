@@ -51,9 +51,10 @@ pytestmark = pytest.mark.integration
 WRITE_MARKS = "write_marks_for_substreams_in_compact_parts"
 JSON_TABLES = ("main", "detection", "otel_logs")
 META_DATABASE = "dfe_meta"
-# Engines that hold no rows of their own: a view stores nothing, and every DFE
-# materialised view writes TO a replicated table rather than an inner one.
-NO_DATA_ENGINES = ("View", "MaterializedView")
+# Engines that hold no rows of their own: a view stores nothing, every DFE
+# materialised view writes TO a replicated table rather than an inner one, and a
+# Merge table reads the tables it names.
+NO_DATA_ENGINES = ("View", "MaterializedView", "Merge")
 
 
 def _settings(params: dict, database: str):
