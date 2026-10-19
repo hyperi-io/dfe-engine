@@ -73,6 +73,21 @@ BROKER_UNREACHABLE = "broker unreachable; the engine log has the reason"
 BROKER_REFUSED = "the broker refused it; the engine log has the reason"
 KAFKA_CONFIG_REJECTED = "kafka config rejected; the engine log has the reason"
 
+# Topic configs DFE prefers but a topic works without. A managed broker that refuses
+# one at the topic level (Redpanda Cloud refuses compression.type) keeps its own value.
+OPTIONAL_TOPIC_CONFIGS = frozenset({"compression.type"})
+
+
+def _invalid_config(exc: Exception) -> bool:
+    """Whether the broker refused a request for a config it does not accept."""
+    error = exc.args[0] if isinstance(exc, KafkaException) and exc.args else None
+    return isinstance(error, KafkaError) and error.code() == KafkaError.INVALID_CONFIG
+
+
+def _required_only(config: dict[str, str]) -> dict[str, str]:
+    """*config* without the keys a topic can do without."""
+    return {key: value for key, value in config.items() if key not in OPTIONAL_TOPIC_CONFIGS}
+
 
 def _unreachable(exc: Exception) -> str:
     """The reason recorded for a broker that could not be reached, its own text logged."""
@@ -689,12 +704,27 @@ def ensure_topics(
             result.existing.append(spec.name)
             continue
         try:
-            admin.create(
-                spec.name,
-                partitions=spec.partitions,
-                replication_factor=spec.replication_factor,
-                config=spec.config,
-            )
+            try:
+                admin.create(
+                    spec.name,
+                    partitions=spec.partitions,
+                    replication_factor=spec.replication_factor,
+                    config=spec.config,
+                )
+            except Exception as exc:
+                required = _required_only(spec.config)
+                if not _invalid_config(exc) or required == spec.config:
+                    raise
+                admin.create(
+                    spec.name,
+                    partitions=spec.partitions,
+                    replication_factor=spec.replication_factor,
+                    config=required,
+                )
+                logger.warning(
+                    f"Kafka topic {spec.name}: the broker refused "
+                    f"{sorted(set(spec.config) - set(required))}, so it keeps its own"
+                )
             result.created.append(spec.name)
             logger.info(
                 f"Kafka topic created: {spec.name} "
@@ -905,12 +935,25 @@ def update_topics(
         changed = False
         if drifted and not dry_run:
             try:
-                admin.alter_config(spec.name, drifted)
+                try:
+                    admin.alter_config(spec.name, drifted)
+                except Exception as exc:
+                    required = _required_only(drifted)
+                    if not _invalid_config(exc) or required == drifted:
+                        raise
+                    if required:
+                        admin.alter_config(spec.name, required)
+                    logger.warning(
+                        f"Kafka topic {spec.name}: the broker refused "
+                        f"{sorted(set(drifted) - set(required))}, so it keeps its own"
+                    )
+                    drifted = required
             except Exception as exc:
                 result.failed.append((spec.name, _refused(exc)))
                 logger.error(f"Kafka topic config alter failed: {spec.name} - {exc}")
                 continue
-            logger.info(f"Kafka topic config altered: {spec.name} ({sorted(drifted)})")
+            if drifted:
+                logger.info(f"Kafka topic config altered: {spec.name} ({sorted(drifted)})")
         if drifted:
             result.altered.append(spec.name)
             changed = True
