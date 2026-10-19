@@ -50,6 +50,7 @@ CORE_DIRS = (
     "tables/internal",
     "tables/meta",
     "tables/otel",
+    "tables/usage",
     "topics",
     "views",
 )

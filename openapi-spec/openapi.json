@@ -11483,6 +11483,219 @@
         ]
       }
     },
+    "/api/v1/usage/overview": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Get Usage Overview",
+        "description": "Every usage metric per UTC day over the last 30 days, and its highest in the last 7.\n\nThe whole deployment for a caller that reads every org, else the caller's own\norgs combined, with the two core counts ``not_permitted``. Events per second over\nmore than one tenant id is the busiest minute of their sum, read from the minute\ntable, which keeps 7 days.",
+        "operationId": "get_usage_overview_api_v1_usage_overview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageOverviewResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No usage:read, or the caller is held to its orgs and holds no registered one",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ClickHouse could not read the usage tables",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/usage": {
+      "get": {
+        "tags": [
+          "usage"
+        ],
+        "summary": "Get Usage",
+        "description": "One usage metric per UTC day over a range, for the whole deployment or one org.\n\nEvents per second over more than one tenant id is the busiest minute of their\nsum, read from the minute table, which keeps 7 days.",
+        "operationId": "get_usage_api_v1_usage_get",
+        "parameters": [
+          {
+            "name": "metric",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "The metric to read",
+              "enum": [
+                "cores_deployed",
+                "node_cores",
+                "ingested_bytes",
+                "events_per_second"
+              ],
+              "title": "Metric"
+            },
+            "description": "The metric to read"
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The first UTC day, 29 days before `to` when absent",
+              "title": "From"
+            },
+            "description": "The first UTC day, 29 days before `to` when absent"
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The last UTC day, today when absent",
+              "title": "To"
+            },
+            "description": "The last UTC day, today when absent"
+          },
+          {
+            "name": "org",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "One org to read. Absent reads the whole deployment, or every org the caller holds",
+              "title": "Org"
+            },
+            "description": "One org to read. Absent reads the whole deployment, or every org the caller holds"
+          },
+          {
+            "name": "granularity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "const": "day",
+              "type": "string",
+              "description": "Per UTC day, the only granularity the rollup keeps",
+              "default": "day",
+              "title": "Granularity"
+            },
+            "description": "Per UTC day, the only granularity the rollup keeps"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageSeriesResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "No usage:read, or the caller is held to its orgs and does not hold the one named",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "An unknown metric or org, a range ending before it starts, or an org named for a metric kept only for the whole deployment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "ClickHouse could not read the usage tables",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/discovery/databases": {
       "get": {
         "tags": [
@@ -40947,6 +41160,93 @@
         "title": "UpdateRoleRequest",
         "description": "Body for updating a custom role, where an omitted field keeps its value."
       },
+      "UsageDay": {
+        "properties": {
+          "day": {
+            "type": "string",
+            "format": "date",
+            "title": "Day",
+            "description": "The UTC day"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value",
+            "description": "The day's total for ingested_bytes, else the day's highest minute"
+          }
+        },
+        "type": "object",
+        "required": [
+          "day",
+          "value"
+        ],
+        "title": "UsageDay",
+        "description": "One UTC day of one metric."
+      },
+      "UsageMetricOverview": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric",
+            "description": "The metric: cores_deployed, node_cores, ingested_bytes, events_per_second"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "What a tile showing the metric is titled"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit",
+            "description": "What value counts: cores, bytes or events/s"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UsageStatus",
+            "description": "not_measured when the range holds no row for the metric, and not_permitted when the caller is held to its orgs and the metric is not kept per org"
+          },
+          "highest_7d": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageDay"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The highest day in the last 7 UTC days, today included, and when"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageDay"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most recent day in the series"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/UsageDay"
+            },
+            "type": "array",
+            "title": "Series",
+            "description": "One entry per UTC day with a row, oldest first"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "label",
+          "unit",
+          "status",
+          "highest_7d",
+          "latest",
+          "series"
+        ],
+        "title": "UsageMetricOverview",
+        "description": "One metric on the overview."
+      },
       "UsageModel": {
         "properties": {
           "service": {
@@ -40985,6 +41285,152 @@
         ],
         "title": "UsageModel",
         "description": "One file that links an artefact."
+      },
+      "UsageOverviewResponse": {
+        "properties": {
+          "orgs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Orgs",
+            "description": "The orgs the numbers cover, empty for the whole deployment"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "title": "From",
+            "description": "The series' first UTC day"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "title": "To",
+            "description": "The series' last UTC day, today"
+          },
+          "highest_7d_label": {
+            "type": "string",
+            "title": "Highest 7D Label",
+            "description": "What the highest_7d number is captioned"
+          },
+          "metrics": {
+            "items": {
+              "$ref": "#/components/schemas/UsageMetricOverview"
+            },
+            "type": "array",
+            "title": "Metrics"
+          }
+        },
+        "type": "object",
+        "required": [
+          "orgs",
+          "from",
+          "to",
+          "highest_7d_label",
+          "metrics"
+        ],
+        "title": "UsageOverviewResponse",
+        "description": "Every usage metric over the last 30 UTC days."
+      },
+      "UsageSeriesResponse": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit"
+          },
+          "status": {
+            "$ref": "#/components/schemas/UsageStatus"
+          },
+          "granularity": {
+            "type": "string",
+            "const": "day",
+            "title": "Granularity"
+          },
+          "orgs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Orgs",
+            "description": "The orgs the numbers cover, empty for the whole deployment"
+          },
+          "from": {
+            "type": "string",
+            "format": "date",
+            "title": "From",
+            "description": "The range's first UTC day"
+          },
+          "to": {
+            "type": "string",
+            "format": "date",
+            "title": "To",
+            "description": "The range's last UTC day"
+          },
+          "highest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageDay"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The highest day in the range, and when"
+          },
+          "latest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UsageDay"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most recent day in the series"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/UsageDay"
+            },
+            "type": "array",
+            "title": "Series",
+            "description": "One entry per UTC day with a row, oldest first"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "label",
+          "unit",
+          "status",
+          "granularity",
+          "orgs",
+          "from",
+          "to",
+          "highest",
+          "latest",
+          "series"
+        ],
+        "title": "UsageSeriesResponse",
+        "description": "One usage metric per UTC day over a range."
+      },
+      "UsageStatus": {
+        "type": "string",
+        "enum": [
+          "measured",
+          "not_measured",
+          "not_permitted"
+        ],
+        "title": "UsageStatus",
+        "description": "Whether a metric has a number for this caller."
       },
       "UserResponse": {
         "properties": {

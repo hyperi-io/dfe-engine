@@ -14,6 +14,9 @@ from tests.support.engine_stack import bootstrap_settings
 
 pytestmark = pytest.mark.integration
 
+# A Merge table stores no rows, so no replica can hold data another lacks.
+DATALESS_ENGINES = ("Merge",)
+
 
 def _table_names(*, client, database) -> set[str]:
     rows = client.query(f"SELECT name FROM system.tables WHERE database = '{database}'").result_rows
@@ -71,7 +74,11 @@ class TestBootstrapTakesTheOneDDLShape:
             parameters={"db": clickhouse_test_database},
         ).result_rows
         assert rows, "bootstrap created no table"
-        plain = [(name, engine) for name, engine in rows if not engine.startswith("Replicated")]
+        plain = [
+            (name, engine)
+            for name, engine in rows
+            if not engine.startswith("Replicated") and engine not in DATALESS_ENGINES
+        ]
         assert not plain, f"tables that would split across replicas: {plain}"
 
     def test_table_exists_on_every_replica(self, clickhouse_test_database, bootstrap):

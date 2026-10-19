@@ -44,6 +44,7 @@ from dfe_engine.api.v1.synthetic_data import router as synthetic_data_router
 from dfe_engine.api.v1.system import router as system_router
 from dfe_engine.api.v1.tasks import router as tasks_router
 from dfe_engine.api.v1.transforms import router as transforms_router
+from dfe_engine.api.v1.usage import router as usage_router
 from dfe_engine.clickhouse.attribution import tags_context
 from dfe_engine.gitops.repo import read_scope
 from dfe_engine.settings import DFESettings
@@ -122,6 +123,8 @@ def build_v1_router(settings: DFESettings) -> APIRouter:
     v1_router.include_router(synthetic_data_router)
     v1_router.include_router(pipeline_router)
     v1_router.include_router(tasks_router)
+    # The licence numbers: cores, node cores, bytes and events per second
+    v1_router.include_router(usage_router)
     v1_router.include_router(discovery_router)
     # Ahead of schemas_router: /definitions/derived/... would otherwise be swallowed
     # by its /definitions/{schema_path:path} routes.

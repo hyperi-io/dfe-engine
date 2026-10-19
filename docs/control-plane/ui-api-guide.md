@@ -357,6 +357,92 @@ exposes the set. Three mechanisms, in order of preference:
 A free-text input for any of these is a contract bug - report it against the
 engine rather than hiding it behind a UI that accepts anything.
 
+## Usage (`/api/v1/usage`)
+
+The numbers a deployment is sized and licensed on: cores deployed, worker-node cores, data ingested and events per second. Both endpoints need `usage:read` ([rbac.md](rbac.md#the-usage-scope)) and read the usage rollup in ClickHouse.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/usage/overview` | Every metric per UTC day over the last 30 days, and its highest in the last 7 |
+| GET | `/usage` | One metric per UTC day over a range, for the deployment or one org |
+
+`/usage` takes these query parameters:
+
+| Parameter | Default | Meaning |
+|-----------|---------|---------|
+| `metric` | required | `cores_deployed`, `node_cores`, `ingested_bytes` or `events_per_second` |
+| `from` | 29 days before `to` | First UTC day, `YYYY-MM-DD` |
+| `to` | today (UTC) | Last UTC day, `YYYY-MM-DD` |
+| `org` | all orgs | One registered org name |
+| `granularity` | `day` | Only `day` exists |
+
+`/usage/overview` takes none.
+
+What each metric counts:
+
+| Metric | Unit | A day is |
+|--------|------|----------|
+| `cores_deployed` | cores | The highest minute of the CPU requested by every running container on the cluster |
+| `node_cores` | cores | The highest minute of the logical CPUs on the nodes running a container |
+| `ingested_bytes` | bytes | The decoded payload bytes of records accepted at the first hop, summed over the day |
+| `events_per_second` | events/s | The busiest minute of the day |
+
+Only `ingested_bytes` and `events_per_second` are kept per org. The two core counts are measured for the deployment.
+
+### Response
+
+Both endpoints return a status for each metric:
+
+- `measured`: the series holds a number.
+- `not_measured`: the range holds no rows. The value is absent, never 0. Render it as "no data".
+- `not_permitted`: the caller is held to its orgs and the metric is not kept per org.
+
+The series holds one entry per UTC day that has a row, oldest first, so a gap is a missing entry. `highest_7d` is the highest day among today and the 6 days before. `latest` is the last entry in the series. `orgs` is empty for the whole deployment.
+
+`GET /api/v1/usage/overview` as a platform caller:
+
+```json
+{
+  "orgs": [],
+  "from": "2026-09-20",
+  "to": "2026-10-19",
+  "highest_7d_label": "Highest in the last 7 days",
+  "metrics": [
+    {
+      "metric": "cores_deployed",
+      "label": "Cores deployed",
+      "unit": "cores",
+      "status": "measured",
+      "highest_7d": {"day": "2026-10-17", "value": 38.5},
+      "latest": {"day": "2026-10-19", "value": 36.0},
+      "series": [{"day": "2026-09-20", "value": 31.0}, {"day": "2026-10-19", "value": 36.0}]
+    }
+  ]
+}
+```
+
+The real response lists all four metrics in the order `cores_deployed`, `node_cores`, `ingested_bytes`, `events_per_second`, and the series is cut to two entries here. `/usage` returns one metric's fields at the top level (`metric`, `label`, `unit`, `status`, `granularity`, `orgs`, `from`, `to`, `highest`, `latest`, `series`), where `highest` is the highest day in the whole range.
+
+### Who sees what
+
+A caller whose grant reads every org sees the whole deployment and may name any registered org. A caller held to its orgs sees those orgs added together. Its core counts come back `not_permitted`, and naming an org it does not hold answers `403 org_not_granted`. Details are in [rbac-engine-reads.md](rbac-engine-reads.md#usage-reads).
+
+### Errors
+
+| Status | Code | When |
+|--------|------|------|
+| 403 | `org_not_granted` | A held caller names an org it does not hold, registered or not |
+| 403 | `no_org` | A held caller holds no registered org |
+| 422 | `unknown_metric` | `metric` is none of the four |
+| 422 | `bad_range` | `from` is after `to` |
+| 422 | `unknown_org` | A platform caller names an unregistered org |
+| 422 | `not_per_org` | A platform caller names an org for `cores_deployed` or `node_cores` |
+| 503 | `usage_unavailable` | ClickHouse could not read the usage tables |
+
+Events per second over more than one tenant id (several orgs, or an org that declares several) is the busiest minute of their sum. The minute table keeps 7 days, so days older than that have no entry.
+
+The CLI generates `dfe usage list` for `/usage` and `dfe usage overview list` for `/usage/overview`. The HyperDX "Overview" dashboard (`src/dfe_engine/hyperdx/dashboards/dfe-overview.json`) reads the same rollup for the whole deployment, without going through the API.
+
 ## Repository (UI preferences + small objects)
 
 A scope-aligned small-object store for the UI: preferences (light/dark

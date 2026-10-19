@@ -1,0 +1,157 @@
+{
+  "version": "0.1.0",
+  "name": "Overview",
+  "description": "The numbers this deployment is licensed on: cores deployed, worker-node cores, data ingested and events per second, per UTC day.",
+  "tags": ["dfe", "provisioned", "platform", "usage"],
+  "containers": [
+    {
+      "id": "highest",
+      "title": "Highest in the last 7 days",
+      "collapsed": false,
+      "collapsible": false
+    },
+    {
+      "id": "per-day",
+      "title": "Per day",
+      "collapsed": false
+    }
+  ],
+  "tiles": [
+    {
+      "id": "highest-cores-deployed",
+      "containerId": "highest",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 2,
+      "config": {
+        "name": "Cores deployed",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "number", "mantissa": 2, "unit": "cores" },
+        "sqlTemplate": "-- The 7 UTC days to today whatever the picker shows. No rows read as NULL, never 0.\nSELECT maxOrNull(value) AS \"Cores deployed\"\nFROM dfe.usage_daily FINAL\nWHERE metric = 'cores_deployed' AND _org_id = '' AND day >= toDate(now(), 'UTC') - 6"
+      }
+    },
+    {
+      "id": "highest-node-cores",
+      "containerId": "highest",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 2,
+      "config": {
+        "name": "Worker-node cores",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "number", "mantissa": 0, "unit": "cores" },
+        "sqlTemplate": "-- The 7 UTC days to today whatever the picker shows. No rows read as NULL, never 0.\nSELECT maxOrNull(value) AS \"Worker-node cores\"\nFROM dfe.usage_daily FINAL\nWHERE metric = 'node_cores' AND _org_id = '' AND day >= toDate(now(), 'UTC') - 6"
+      }
+    },
+    {
+      "id": "highest-ingested-bytes",
+      "containerId": "highest",
+      "x": 12,
+      "y": 0,
+      "w": 6,
+      "h": 2,
+      "config": {
+        "name": "Data ingested",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "byte", "numericUnit": "bytes_si", "mantissa": 2 },
+        "sqlTemplate": "-- The 7 UTC days to today whatever the picker shows. No rows read as NULL, never 0.\nSELECT maxOrNull(value) AS \"Data ingested\"\nFROM dfe.usage_daily FINAL\nWHERE metric = 'ingested_bytes' AND _org_id = '' AND day >= toDate(now(), 'UTC') - 6"
+      }
+    },
+    {
+      "id": "highest-events-per-second",
+      "containerId": "highest",
+      "x": 18,
+      "y": 0,
+      "w": 6,
+      "h": 2,
+      "config": {
+        "name": "Events per second",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "number", "mantissa": 1, "thousandSeparated": true, "unit": "events/s" },
+        "sqlTemplate": "-- The 7 UTC days to today whatever the picker shows. No rows read as NULL, never 0.\nSELECT maxOrNull(value) AS \"Events per second\"\nFROM dfe.usage_daily FINAL\nWHERE metric = 'events_per_second' AND _org_id = '' AND day >= toDate(now(), 'UTC') - 6"
+      }
+    },
+    {
+      "id": "per-day-cores-deployed",
+      "containerId": "per-day",
+      "x": 0,
+      "y": 2,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Cores deployed",
+        "configType": "sql",
+        "displayType": "stacked_bar",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "number", "mantissa": 2, "unit": "cores" },
+        "sqlTemplate": "-- The day's highest minute of the CPU requested by the containers the usage rollup counts.\nSELECT toDateTime(day, 'UTC') AS ts, value AS \"Cores deployed\"\nFROM dfe.usage_daily FINAL\nWHERE metric = 'cores_deployed' AND _org_id = '' AND $__dateFilter(day)\nORDER BY ts"
+      }
+    },
+    {
+      "id": "per-day-node-cores",
+      "containerId": "per-day",
+      "x": 12,
+      "y": 2,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Worker-node cores",
+        "configType": "sql",
+        "displayType": "stacked_bar",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "number", "mantissa": 0, "unit": "cores" },
+        "sqlTemplate": "-- The day's highest minute of the logical CPUs on the nodes running those containers.\nSELECT toDateTime(day, 'UTC') AS ts, value AS \"Worker-node cores\"\nFROM dfe.usage_daily FINAL\nWHERE metric = 'node_cores' AND _org_id = '' AND $__dateFilter(day)\nORDER BY ts"
+      }
+    },
+    {
+      "id": "per-day-ingested-bytes",
+      "containerId": "per-day",
+      "x": 0,
+      "y": 6,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Data ingested",
+        "configType": "sql",
+        "displayType": "stacked_bar",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "byte", "numericUnit": "bytes_si", "mantissa": 2 },
+        "sqlTemplate": "-- The day's decoded payload bytes accepted at the first hop.\nSELECT toDateTime(day, 'UTC') AS ts, value AS \"Data ingested\"\nFROM dfe.usage_daily FINAL\nWHERE metric = 'ingested_bytes' AND _org_id = '' AND $__dateFilter(day)\nORDER BY ts"
+      }
+    },
+    {
+      "id": "per-day-events-per-second",
+      "containerId": "per-day",
+      "x": 12,
+      "y": 6,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Events per second",
+        "configType": "sql",
+        "displayType": "stacked_bar",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "number", "mantissa": 1, "thousandSeparated": true, "unit": "events/s" },
+        "sqlTemplate": "-- The day's busiest minute, as its average events loaded per second.\nSELECT toDateTime(day, 'UTC') AS ts, value AS \"Events per second\"\nFROM dfe.usage_daily FINAL\nWHERE metric = 'events_per_second' AND _org_id = '' AND $__dateFilter(day)\nORDER BY ts"
+      }
+    }
+  ]
+}

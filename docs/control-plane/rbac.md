@@ -266,9 +266,16 @@ A role write grants only what its caller already holds. Creating a role, or chan
 | `helm` | `compile`, `execute_ddl`, `create_topics`, `*` | No |
 | `deployment` | `read`, `write`, `*` | No |
 | `org` | `read`, `write`, `*` | No |
+| `usage` | `read` | No |
 | `argo` | `{resource}:{action}` (open-ended) | No |
 
 The routes enforce more domains than this table lists (accounts, groups, API keys, roles, OIDC providers, governance, and others). The full catalogue is `src/dfe_engine/auth/rbac_scopes/scope_constants.py`.
+
+#### The usage scope
+
+`usage:read` opens `GET /api/v1/usage` and `GET /api/v1/usage/overview` ([ui-api-guide.md](ui-api-guide.md#usage-apiv1usage)). Four built-in roles carry it: `infra_admin`, `infra_viewer`, `dfe_operator` and `org_viewer`. `admin` holds it through `*`. Built-in grants reach fresh deploys only, see [2.2](#22-role-definitions).
+
+A holder whose grant reads every org sees the whole deployment and may name any org. Any other holder is held to its own orgs. `org_viewer` is scoped, so it is always held. The reads are described in [rbac-engine-reads.md](rbac-engine-reads.md#usage-reads).
 
 ### 2.4 Wildcard Permission Matching
 

@@ -1,0 +1,45 @@
+# Usage query catalogue. Same conventions as appmgmt/queries.yaml: `__DB__` is the
+# validated data database, and every value is a ClickHouse bind, so nothing is
+# string-interpolated.
+#
+# Reads the usage rollup and nothing else: usage_daily and usage_minute, declared in
+# dfe-schemas tables/usage/. Both are ReplacingMergeTree(computed_at), where a
+# refresh appends a recomputed row, so every read takes FINAL.
+#
+# Per-query keys:
+#   sql              ClickHouse SQL, where __DB__ is the resolved database
+#   timeout_seconds  ClickHouse max_execution_time
+queries:
+  # One metric per UTC day over a set of scopes, summed across them. A scope is one
+  # _org_id, '' for the whole deployment. Exact for a summed metric over any set,
+  # and for every metric over one scope.
+  daily:
+    sql: >
+      SELECT day, sum(value) AS value
+      FROM __DB__.usage_daily FINAL
+      WHERE metric = {metric:String}
+        AND _org_id IN {scopes:Array(String)}
+        AND day >= {first_day:Date}
+        AND day <= {last_day:Date}
+      GROUP BY day
+      ORDER BY day
+    timeout_seconds: 10
+
+  # A metric whose day is its highest minute, over several scopes: the highest
+  # minute of their sum, which the per-scope daily rows cannot give. usage_minute
+  # keeps seven days, so the days before that read nothing.
+  daily_peak_of_minutes:
+    sql: >
+      SELECT toDate(minute, 'UTC') AS day, max(scopes_value) AS value
+      FROM (
+        SELECT minute, sum(value) AS scopes_value
+        FROM __DB__.usage_minute FINAL
+        WHERE metric = {metric:String}
+          AND _org_id IN {scopes:Array(String)}
+          AND minute >= toDateTime({first_day:Date}, 'UTC')
+          AND minute < toDateTime({last_day:Date} + 1, 'UTC')
+        GROUP BY minute
+      )
+      GROUP BY day
+      ORDER BY day
+    timeout_seconds: 10
