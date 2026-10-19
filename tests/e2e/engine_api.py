@@ -12,12 +12,15 @@ now, and a second copy of this would be a second place for the token handling or
 the TLS posture to drift.
 """
 
-from __future__ import annotations
-
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+
+# Covers a rollout or a node consolidation rescheduling the engine pod, which
+# takes it off the air for about 90s.
+TRANSPORT_RETRY_WINDOW = 180.0
 
 
 @dataclass
@@ -56,12 +59,33 @@ class EngineAPI:
             self._complete_forced_change()
         return self.token
 
+    def _send(self, method: str, url: str, body: Any, headers: dict[str, str]) -> httpx.Response:
+        """Send one request, retrying while the engine is unreachable.
+
+        Only a dropped or refused connection is retried. Any answer the engine
+        gives, 5xx included, goes back to the caller, because several cases
+        assert a status.
+        """
+        deadline = time.monotonic() + TRANSPORT_RETRY_WINDOW
+        while True:
+            try:
+                with self._client() as client:
+                    return client.request(method, url, json=body, headers=headers)
+            except httpx.TransportError as exc:
+                if time.monotonic() >= deadline:
+                    raise AssertionError(
+                        f"the engine never answered {method} {url} "
+                        f"within {TRANSPORT_RETRY_WINDOW}s: {exc}"
+                    ) from exc
+                time.sleep(2.0)
+
     def _login(self, password: str) -> httpx.Response:
-        with self._client() as client:
-            return client.post(
-                f"{self.base}/api/v1/auth/login",
-                json={"username": self.user, "password": password},
-            )
+        return self._send(
+            "POST",
+            f"{self.base}/api/v1/auth/login",
+            {"username": self.user, "password": password},
+            {},
+        )
 
     def _complete_forced_change(self) -> None:
         """Replace the issued password, as the account's owner must before anything else."""
@@ -97,10 +121,7 @@ class EngineAPI:
         return response
 
     def _request(self, method: str, url: str, body: Any) -> httpx.Response:
-        with self._client() as client:
-            return client.request(
-                method, url, json=body, headers={"Authorization": f"Bearer {self.token}"}
-            )
+        return self._send(method, url, body, {"Authorization": f"Bearer {self.token}"})
 
     def json(self, method: str, path: str, body: Any = None) -> Any:
         """One API call that must succeed, decoded."""
