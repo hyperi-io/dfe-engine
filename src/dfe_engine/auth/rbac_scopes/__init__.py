@@ -49,6 +49,7 @@ from dfe_engine.auth.rbac_scopes.scope_constants import (
     system_scopes,
     tasks_scopes,
     transform_scopes,
+    usage_scopes,
 )
 from dfe_engine.auth.roles import RoleConfig
 
@@ -84,6 +85,7 @@ scopes_dict = {
     **system_scopes,
     **tasks_scopes,
     **transform_scopes,
+    **usage_scopes,
     **governance_scopes,
     **helmvars_scopes,
     **dryrun_scopes,

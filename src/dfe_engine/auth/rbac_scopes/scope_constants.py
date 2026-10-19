@@ -187,6 +187,11 @@ transform_scopes = {
     "transform_test": "transform:test",
 }
 
+# A grant held to its orgs reads only their bytes and events per second.
+usage_scopes = {
+    "usage_read": "usage:read",
+}
+
 governance_scopes = {
     "governance_read": "governance:read",
     "governance_write": "governance:write",

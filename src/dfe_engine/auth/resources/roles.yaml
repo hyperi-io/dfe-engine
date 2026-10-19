@@ -65,6 +65,7 @@ roles:
       - "org:*"
       - "group:*"
       - "repository:*"
+      - "usage:read"
   dfe_operator:
     description: "Curated operational dials - invoke shipped actions, read governed state"
     resource_type: core
@@ -74,6 +75,7 @@ roles:
       - "deployment:read"
       - "library:read"
       - "service:*:metrics:read"
+      - "usage:read"
   infra_viewer:
     description: "Infrastructure read-only"
     resource_type: core
@@ -88,6 +90,7 @@ roles:
       - "service_surface:read"
       - "service:read"
       - "org:read"
+      - "usage:read"
   org_viewer:
     description: "Org-restricted data viewer"
     resource_type: core
@@ -96,4 +99,5 @@ roles:
       - "source:read"
       - "sampler:read"
       - "dashboard:read"
+      - "usage:read"
     scoped: true

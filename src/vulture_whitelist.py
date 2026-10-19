@@ -41,6 +41,7 @@ from dfe_engine.api.v1 import sigma as api_v1_sigma
 from dfe_engine.api.v1 import sources as api_v1_sources
 from dfe_engine.api.v1 import system as api_v1_system
 from dfe_engine.api.v1 import transforms as api_v1_transforms
+from dfe_engine.api.v1 import usage as api_v1_usage
 from dfe_engine.appmgmt import contract as appmgmt_contract
 from dfe_engine.appmgmt import library as appmgmt_library
 from dfe_engine.appmgmt import operations as appmgmt_operations
@@ -222,6 +223,9 @@ api_v1_system.SystemDefaults.editable
 api_v1_system.VersionResponse.python_version
 api_v1_transforms.CompileResponse.wasm_bytes
 api_v1_transforms.TestResponse.wasm_memory_bytes
+api_v1_usage.UsageMetricOverview.highest_7d
+api_v1_usage.UsageOverviewResponse.highest_7d_label
+api_v1_usage.UsageSeriesResponse.highest
 auth_accounts.Account.last_login_at
 auth_models.AuthContext.connection_id
 auth_models.AuthzRequest.principal
