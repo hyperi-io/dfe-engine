@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.51](https://github.com/hyperi-io/dfe-engine/compare/v1.22.50...v1.22.51) (2026-10-19)
+
+### Bug Fixes
+
+* **kafka:** create and converge topics a broker refuses compression.type on ([#928](https://github.com/hyperi-io/dfe-engine/issues/928)) ([ecc6efa](https://github.com/hyperi-io/dfe-engine/commit/ecc6efa840697f6ba0f93747b1020ddadd7933d0))
+
 ## [1.22.50](https://github.com/hyperi-io/dfe-engine/compare/v1.22.49...v1.22.50) (2026-10-19)
 
 ### Bug Fixes
