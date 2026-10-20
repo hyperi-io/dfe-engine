@@ -307,8 +307,8 @@ class TestSchemasRouter:
             "system.tables": [(1,)],
             "system.macros": [("cluster", "dfe"), ("shard", "01"), ("replica", "r1")],
             "system.clusters": [(1,)],
-            # An untaken schema lease: argMax over no rows answers each column's default.
-            "schema_lock": [("", None, 0)],
+            # An untaken schema lease: the FINAL read finds no rows, so read() answers None.
+            "schema_lock": [],
         }
 
         def _answer(sql, *_args, **_kwargs):
