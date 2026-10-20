@@ -935,11 +935,9 @@ def create_source(
     ``header`` is optional: when omitted, no common-header profile is stored on the
     version (DDL compose uses meta/derived columns only until a header is set).
 
-    A schema pin naming a schema that does not exist is ACCEPTED here and REFUSED
-    by ``/sources/import`` (#501), so the same stored document is valid or invalid
-    depending on how it arrived. That asymmetry is known and undecided -- #504.
-    Authoring a source before its schema is a real ordering, and making this path
-    as strict as import forbids it.
+    A schema pin naming nothing is accepted here so a source can be written before
+    its schema, while ``/sources/import`` refuses one because an exported bundle
+    brings every schema it pins.
     """
     name = body.source
 
@@ -2201,8 +2199,9 @@ def update_source(
     A field the body omits keeps its stored value (``header``, ``schema``, ``views``,
     ``transform``, ``transport``, ``archive``); ``null``, ``[]`` or ``false`` clears it.
 
-    A schema pin naming nothing is accepted here and refused by ``/sources/import``.
-    See ``create_source`` and #504; the asymmetry is known and undecided.
+    A schema pin naming nothing is accepted here so a source can be written before
+    its schema, while ``/sources/import`` refuses one because an exported bundle
+    brings every schema it pins.
     """
     from dfe_engine.source.registry import SourceNotFoundError
 
