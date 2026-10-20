@@ -80,6 +80,20 @@ def test_an_if_match_write_whose_push_lost_the_race_conflicts(replicas, monkeypa
     assert crud_b.get("sources", "syslog") == _THEIRS
 
 
+def test_an_if_match_write_in_a_batch_whose_push_lost_the_race_conflicts(replicas, monkeypatch):
+    crud_a, crud_b = replicas
+    crud_a.put("sources", "syslog", _OURS, actor="kaz")
+    _, base = crud_b.get_with_revision("sources", "syslog")
+    _race_before(monkeypatch, crud_b.repo, "_push_refspec", _theirs_lands(crud_a))
+
+    with pytest.raises(ConcurrencyConflictError) as raised, crud_b.batch("edit sources"):
+        crud_b.set_key("sources", "syslog", "enabled", False, actor="kay", base_revision=base)
+
+    assert (raised.value.cls, raised.value.name) == ("sources", "syslog")
+    assert raised.value.current == _THEIRS
+    assert crud_a.get("sources", "syslog") == _THEIRS
+
+
 def test_an_if_match_write_the_remote_moved_under_before_its_commit_conflicts(
     replicas, monkeypatch
 ):

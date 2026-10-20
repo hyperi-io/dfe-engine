@@ -23,11 +23,11 @@ Three things are proven here:
   every boot
 """
 
-from __future__ import annotations
-
+import threading
 import time
 import uuid
 
+import clickhouse_connect
 import pytest
 
 from dfe_engine.schema.ledger import MigrationLedger
@@ -195,3 +195,30 @@ def test_a_second_holder_waits_and_reports_rather_than_applying(ch_client, empty
     first.release()
     assert second.acquire(wait_seconds=0.0) is True
     second.release()
+
+
+def test_appliers_that_find_the_lease_free_together_leave_one_holder(
+    ch_params, ch_client, empty_database, plan
+):
+    """Claims written in the same instant: the latest stands and every other caller reports."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+    racers = 4
+    start = threading.Barrier(racers)
+    outcomes: list[bool] = []
+
+    def race(holder: str) -> None:
+        client = clickhouse_connect.get_client(**ch_params)
+        lock = SchemaLock(
+            client, database=empty_database, table=table, holder=holder, lease_seconds=60
+        )
+        start.wait()
+        outcomes.append(lock.acquire(wait_seconds=0.0))
+
+    threads = [threading.Thread(target=race, args=(f"pod-{n}",)) for n in range(racers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert sorted(outcomes) == [False] * (racers - 1) + [True]

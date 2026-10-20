@@ -20,8 +20,9 @@ every doc-level operation keeps working against the manifest unchanged.
 """
 
 import builtins
-from collections.abc import Mapping
-from contextlib import AbstractContextManager
+from collections.abc import Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,11 @@ from .commit_policy import validate_name, validate_resource_path
 from .registry import ResourceClass, ResourceClassRegistry, default_registry
 
 _MISSING = object()
+
+# The resources an open batch wrote conditionally, so a push that loses its race names one.
+_BATCH_CONDITIONAL: ContextVar[list[tuple[str, str]] | None] = ContextVar(
+    "gitcrud_batch_conditional", default=None
+)
 
 
 class ResourceNotFoundError(FileNotFoundError):
@@ -227,13 +233,32 @@ class GitCrud:
         """
         return self._repo.read_locked()
 
-    def batch(self, message: str) -> AbstractContextManager[None]:
+    @contextmanager
+    def batch(self, message: str) -> Iterator[None]:
         """Land every write in the block as one commit and one push (GitopsRepo.batch).
 
-        Every write stays a whole-document operation and reads in the block see it;
-        only the commit and the push wait for the block to end.
+        Every write stays a whole-document operation and reads in the block see it.
+        Only the commit and the push wait for the block to end.
+
+        Raises:
+            ConcurrencyConflictError: A write in the block carried a base revision and
+                the push found the head moved off it. It names the first such write.
         """
-        return self._repo.batch(message)
+        if _BATCH_CONDITIONAL.get() is not None:
+            with self._repo.batch(message):
+                yield
+            return
+        conditional: list[tuple[str, str]] = []
+        token = _BATCH_CONDITIONAL.set(conditional)
+        try:
+            with self._repo.batch(message):
+                yield
+        except GitopsHeadMovedError as exc:
+            if not conditional:
+                raise
+            raise self._conflict(*conditional[0]) from exc
+        finally:
+            _BATCH_CONDITIONAL.reset(token)
 
     def list(self, cls_name: str) -> builtins.list[str]:
         """Enumerate resource names in a class.
@@ -344,6 +369,9 @@ class GitCrud:
         Raises:
             ConcurrencyConflictError: The head moved off base_revision.
         """
+        pending = _BATCH_CONDITIONAL.get()
+        if base_revision is not None and pending is not None:
+            pending.append((cls_name, name))
         try:
             return self._repo.publish(
                 artifacts,
