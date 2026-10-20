@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.52](https://github.com/hyperi-io/dfe-engine/compare/v1.22.51...v1.22.52) (2026-10-20)
+
+### Bug Fixes
+
+* hold schema readiness, If-Match and deploy DDL to the schema lease ([#929](https://github.com/hyperi-io/dfe-engine/issues/929)) ([9585aad](https://github.com/hyperi-io/dfe-engine/commit/9585aad054f48a8f6e52c8997bfac541ee75d642))
+
 ## [1.22.51](https://github.com/hyperi-io/dfe-engine/compare/v1.22.50...v1.22.51) (2026-10-19)
 
 ### Bug Fixes
