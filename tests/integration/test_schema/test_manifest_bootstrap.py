@@ -23,20 +23,26 @@ Proven here:
   every boot
 * the schema lease leaves one holder when claimers wait, race, tie to the
   millisecond, or release after their lease was taken over
+* every lease read and write carries the settings that make a claim visible on
+  every replica once it is acknowledged, so claimers on two replicas, or on two
+  replicas that cannot fetch from each other, never both hold
+* a claim that cannot reach its quorum is not taken, and does not raise
 """
 
 import threading
 import time
 import uuid
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import clickhouse_connect
 import pytest
+from dfe_schemas.clickhouse import Platform, create_database
 
 from dfe_engine.schema.ledger import MigrationLedger
 from dfe_engine.schema.lock import SchemaLock, holder_name
 from dfe_engine.schema.phase import apply_plan
-from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, build_plan
+from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, build_plan, render_one
 
 pytestmark = pytest.mark.integration
 
@@ -309,3 +315,184 @@ def test_a_release_after_the_lease_was_taken_over_leaves_the_takeover_held(
     assert latest is not None
     assert (latest.holder, latest.released) == ("pod-n", False)
     assert lock("pod-x", 60).acquire(wait_seconds=0) is False
+
+
+def _lease_queries(client, database: str, table: str) -> list[tuple[str, dict[str, str]]]:
+    """Every finished SELECT and INSERT this server ran against the lease table, with its settings."""
+    client.command("SYSTEM FLUSH LOGS")
+    rows = client.query(
+        "SELECT query_kind, Settings FROM system.query_log "
+        "WHERE type = 'QueryFinish' AND has(tables, {t:String}) "
+        "AND query_kind IN ('Select', 'Insert') ORDER BY event_time_microseconds",
+        parameters={"t": f"{database}.{table}"},
+    ).result_rows
+    return [(str(kind), dict(settings)) for kind, settings in rows]
+
+
+def _assert_consistent(queries: list[tuple[str, dict[str, str]]], *, quorum: str) -> None:
+    reads = [settings for kind, settings in queries if kind == "Select"]
+    writes = [settings for kind, settings in queries if kind == "Insert"]
+    assert reads, queries
+    assert writes, queries
+    for settings in reads:
+        assert settings.get("select_sequential_consistency") == "1", settings
+    for settings in writes:
+        assert settings.get("insert_quorum") == quorum, settings
+        assert settings.get("insert_quorum_parallel") == "0", settings
+        assert settings.get("async_insert") == "0", settings
+        # A claim acknowledged after its own lease lapsed would be held by nobody who knows it.
+        assert int(settings.get("insert_quorum_timeout", "600000")) < 60_000, settings
+
+
+def test_lease_reads_and_writes_carry_the_consistency_settings(ch_client, empty_database, plan):
+    """One node: a quorum of one, which ClickHouse treats as no quorum wait at all."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+    lock = SchemaLock(
+        ch_client, database=empty_database, table=table, holder="pod-s", lease_seconds=60
+    )
+
+    assert lock.acquire() is True
+    lock.release()
+
+    queries = _lease_queries(ch_client, empty_database, table)
+    assert [kind for kind, _ in queries].count("Insert") == 2, queries
+    _assert_consistent(queries, quorum="1")
+
+
+@pytest.fixture
+def replicated_lease(two_replicas):
+    """The lease table on both replicas of a Replicated database, and a lock factory per replica."""
+    database = f"dfe_lease_{uuid.uuid4().hex[:8]}"
+    table = render_one(LOCK_ID, data_database=database).name
+    r1 = clickhouse_connect.get_client(**two_replicas.first)
+    r2 = clickhouse_connect.get_client(**two_replicas.second)
+    r1.command(create_database(database, Platform.SELF_HOSTED))
+    for statement in render_one(LOCK_ID, data_database=database).statements:
+        r1.command(statement)
+
+    def registered() -> int:
+        r2.command(f"SYSTEM SYNC DATABASE REPLICA `{database}`")
+        rows = r1.query(
+            "SELECT total_replicas FROM system.replicas WHERE database = {db:String} "
+            "AND table = {tbl:String}",
+            parameters={"db": database, "tbl": table},
+        ).result_rows
+        return int(rows[0][0]) if rows else 0
+
+    deadline = time.monotonic() + 60
+    while registered() < 2:
+        if time.monotonic() >= deadline:
+            pytest.fail("the lease table did not reach replica 2")
+        time.sleep(0.5)
+
+    def lock(params: dict, holder: str) -> SchemaLock:
+        return SchemaLock(
+            clickhouse_connect.get_client(**params),
+            database=database,
+            table=table,
+            holder=holder,
+            lease_seconds=60,
+        )
+
+    return SimpleNamespace(
+        database=database,
+        table=table,
+        target=f"`{database}`.`{table}`",
+        r1=r1,
+        r2=r2,
+        lock=lock,
+    )
+
+
+def _race(params: list[tuple[dict, str]], build) -> dict[str, bool | Exception]:
+    """Start one acquire per (params, holder) at the same instant, and collect each outcome."""
+    start = threading.Barrier(len(params), timeout=60)
+    outcomes: dict[str, bool | Exception] = {}
+
+    def race(server: dict, holder: str) -> None:
+        try:
+            lock = build(server, holder)
+            start.wait()
+            outcomes[holder] = lock.acquire(wait_seconds=0.0)
+        except Exception as exc:  # a racer that raises must fail the test, not drop out of it
+            start.abort()
+            outcomes[holder] = exc
+
+    threads = [threading.Thread(target=race, args=pair) for pair in params]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    return outcomes
+
+
+def test_claimers_racing_across_two_replicas_leave_one_holder(two_replicas, replicated_lease):
+    """Each claim reaches both replicas before it is acknowledged, so every racer reads every claim."""
+    lease = replicated_lease
+    servers = [two_replicas.first, two_replicas.second] * 2
+    outcomes = _race([(server, f"pod-{n}") for n, server in enumerate(servers)], lease.lock)
+
+    errors = [outcome for outcome in outcomes.values() if isinstance(outcome, Exception)]
+    assert not errors, errors
+    assert len(outcomes) == len(servers)
+    assert list(outcomes.values()).count(True) == 1, outcomes
+    queries = _lease_queries(lease.r1, lease.database, lease.table)
+    queries += _lease_queries(lease.r2, lease.database, lease.table)
+    _assert_consistent(queries, quorum="2")
+
+
+def test_claimers_on_replicas_that_cannot_fetch_from_each_other_never_both_hold(
+    two_replicas, replicated_lease
+):
+    """Replication stalled both ways: each replica sees only its own claim, so neither may stand."""
+    lease = replicated_lease
+    for client in (lease.r1, lease.r2):
+        client.command(f"SYSTEM STOP FETCHES {lease.target}")
+    try:
+        outcomes = _race(
+            [(two_replicas.first, "pod-r1"), (two_replicas.second, "pod-r2")], lease.lock
+        )
+    finally:
+        for client in (lease.r1, lease.r2):
+            client.command(f"SYSTEM START FETCHES {lease.target}")
+
+    errors = [outcome for outcome in outcomes.values() if isinstance(outcome, Exception)]
+    assert not errors, errors
+    assert outcomes == {"pod-r1": False, "pod-r2": False}, outcomes
+
+
+def test_a_claim_short_of_its_quorum_is_not_taken_and_is_once_the_replica_returns(
+    two_replicas, replicated_lease
+):
+    """A replica down is a missed attempt that retries within the wait, never a raise."""
+    lease = replicated_lease
+    two_replicas.stop_second()
+
+    def active() -> int:
+        rows = lease.r1.query(
+            "SELECT active_replicas FROM system.replicas WHERE database = {db:String} "
+            "AND table = {tbl:String}",
+            parameters={"db": lease.database, "tbl": lease.table},
+        ).result_rows
+        return int(rows[0][0])
+
+    # A claim written while replica 2 still counts as active would wait out its quorum instead.
+    deadline = time.monotonic() + 60
+    while active() > 1:
+        if time.monotonic() >= deadline:
+            pytest.fail("replica 2 still counts as active after it stopped")
+        time.sleep(0.5)
+
+    lock = lease.lock(two_replicas.first, "pod-q")
+    started = time.monotonic()
+    assert lock.acquire(wait_seconds=3.0) is False
+    elapsed = time.monotonic() - started
+    assert lock.acquired is False
+    assert elapsed >= 3.0, f"gave up after {elapsed:.1f}s, before its wait ran out"
+    assert lock.read() is None, "a claim short of its quorum became visible"
+
+    two_replicas.start_second()
+
+    assert lock.acquire(wait_seconds=60.0) is True
+    lock.release()

@@ -25,6 +25,11 @@ earlier one goes back to waiting. Reads use ``FINAL``, so a same-millisecond tie
 resolves to the row a merge keeps, before and after that merge. Each lock instance
 writes its own holder name, so two claimers on one pod still tell their claims apart.
 
+Every claim reaches a majority of the table's replicas before ClickHouse acknowledges
+it, and every read answers only from a replica holding all of them, so a re-read that
+lands on a lagging replica still sees the claim that beat it. A claim that cannot
+reach its majority, with a replica down, is a missed attempt retried within the wait.
+
 The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 """
 
@@ -39,6 +44,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.errors import parse_code
 from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.schema.plan import LOCK_ID, render_one
 
@@ -48,6 +54,16 @@ _POLL_SECONDS = 2.0
 
 # Longer than a racing claimer takes between finding the lease free and writing.
 _SETTLE_SECONDS = 0.5
+
+# A lease read answers only from a replica holding every claim a quorum acknowledged.
+_READ_SETTINGS = {"select_sequential_consistency": 1}
+
+# Ends a quorum wait well inside the shortest lease, where the server's default waits ten minutes.
+_QUORUM_TIMEOUT_MS = 10_000
+
+# A missed quorum, which acquire retries within its wait: TOO_FEW_LIVE_REPLICAS,
+# UNSATISFIED_QUORUM_FOR_PREVIOUS_WRITE, REPLICA_IS_NOT_IN_QUORUM, UNKNOWN_STATUS_OF_INSERT.
+_QUORUM_REFUSALS = frozenset({285, 286, 289, 319})
 
 
 class SchemaLockError(Exception):
@@ -64,6 +80,21 @@ class SchemaLockBusyError(SchemaLockError):
     def __init__(self, holder: str) -> None:
         super().__init__(f"the schema lease is held by {holder or 'another applier'}")
         self.holder = holder
+
+
+class SchemaLockQuorumError(SchemaLockError):
+    """A lease read or write missed its quorum of replicas, so that attempt did not complete."""
+
+
+def _lock_error(action: str, exc: Exception) -> SchemaLockError:
+    """*exc* as a lease error, with a missed quorum kept apart so a claimer retries it."""
+    kind = SchemaLockQuorumError if parse_code(exc) in _QUORUM_REFUSALS else SchemaLockError
+    return kind(f"{action}: {exc}")
+
+
+def _majority(replicas: int) -> int:
+    """A majority of *replicas*: 1 on one node, which ClickHouse reads as no quorum wait."""
+    return max(replicas, 1) // 2 + 1
 
 
 def lease_seconds(wait_seconds: float) -> int:
@@ -142,7 +173,8 @@ class SchemaLock:
         """The latest claim on the lock name, or None when nothing has ever taken it.
 
         ``FINAL`` keeps the row a merge would keep, so readers name the same claim
-        of a tie whether or not it has merged yet.
+        of a tie whether or not it has merged yet. A replica missing an acknowledged
+        claim refuses the read rather than answer without it.
         """
         target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         sql = (
@@ -150,9 +182,12 @@ class SchemaLock:
             "WHERE lock_name = {lock:String}"
         )
         try:
-            rows = list(self._client.query(sql, parameters={"lock": LOCK_NAME}).result_rows)
+            result = self._client.query(
+                sql, parameters={"lock": LOCK_NAME}, settings=_READ_SETTINGS
+            )
+            rows = list(result.result_rows)
         except Exception as exc:
-            raise SchemaLockError(f"could not read the schema lock: {exc}") from exc
+            raise _lock_error("could not read the schema lock", exc) from exc
         if not rows or rows[0][0] in (None, ""):
             return None
         expires, acquired = rows[0][1], rows[0][3]
@@ -170,28 +205,42 @@ class SchemaLock:
 
         Returns whether this process now holds it. False means another process is
         mid-apply and this one must report rather than apply -- the schema is
-        somebody else's to converge, not this caller's to race on.
+        somebody else's to converge, not this caller's to race on. An attempt that
+        misses its quorum, with a replica down or another claim still reaching its
+        own, is retried within the wait and gives False once the wait runs out.
         """
         deadline = time.monotonic() + max(wait_seconds, 0.0)
+        missed_quorum = False
         while True:
-            state = self.read()
-            now = datetime.now(UTC)
-            if state is None or not state.held_at(now):
-                claimed_at = self._claim(now)
-                time.sleep(_SETTLE_SECONDS)
-                if self._claim_stands(claimed_at):
-                    self._claimed_at = claimed_at
-                    self.acquired = True
-                    return True
-                if time.monotonic() >= deadline:
-                    return False
-                continue
+            try:
+                state = self.read()
+                now = datetime.now(UTC)
+                if state is None or not state.held_at(now):
+                    claimed_at = self._claim(now)
+                    time.sleep(_SETTLE_SECONDS)
+                    if self._claim_stands(claimed_at):
+                        self._claimed_at = claimed_at
+                        self.acquired = True
+                        return True
+                    if time.monotonic() >= deadline:
+                        return False
+                    continue
+            except SchemaLockQuorumError as exc:
+                # Once per wait: a replica that is down stays down for every attempt in it.
+                if not missed_quorum:
+                    logger.warning(
+                        "schema lease attempt missed its ClickHouse quorum; retrying within the wait",
+                        error=str(exc),
+                    )
+                missed_quorum = True
+                state = None
             if time.monotonic() >= deadline:
-                logger.info(
-                    "schema lock held elsewhere; reporting without applying",
-                    holder=state.holder,
-                    expires_at=state.expires_at.isoformat(),
-                )
+                if state is not None:
+                    logger.info(
+                        "schema lock held elsewhere; reporting without applying",
+                        holder=state.holder,
+                        expires_at=state.expires_at.isoformat(),
+                    )
                 return False
             time.sleep(_POLL_SECONDS)
 
@@ -220,16 +269,40 @@ class SchemaLock:
             return True
         return state.acquired_at == claimed_at and state.holder == self._holder
 
+    def _write_settings(self) -> dict[str, int]:
+        """Settings that hold a write until a majority of the table's replicas has it.
+
+        ``insert_quorum = 'auto'`` never resolves on a single replica and refuses every
+        later write behind it, so the majority is counted here. ClickHouse refuses a
+        sequential quorum on an async insert, so the write is synchronous.
+        """
+        try:
+            rows = self._client.query(
+                "SELECT total_replicas FROM system.replicas "
+                "WHERE database = {db:String} AND table = {tbl:String}",
+                parameters={"db": self._database, "tbl": self._table},
+            ).result_rows
+        except Exception as exc:
+            raise _lock_error("could not count the schema lock's replicas", exc) from exc
+        return {
+            "insert_quorum": _majority(int(rows[0][0]) if rows else 1),
+            "insert_quorum_parallel": 0,
+            "insert_quorum_timeout": _QUORUM_TIMEOUT_MS,
+            "async_insert": 0,
+        }
+
     def _write(self, acquired: datetime, *, expires: datetime, released: int) -> None:
+        settings = self._write_settings()
         try:
             self._client.insert(
                 self._table,
                 [[LOCK_NAME, self._holder, acquired, expires.replace(microsecond=0), released]],
                 column_names=["lock_name", "holder", "acquired_at", "expires_at", "released"],
                 database=self._database,
+                settings=settings,
             )
         except Exception as exc:
-            raise SchemaLockError(f"could not write the schema lock: {exc}") from exc
+            raise _lock_error("could not write the schema lock", exc) from exc
 
     def __enter__(self) -> SchemaLock:
         return self
