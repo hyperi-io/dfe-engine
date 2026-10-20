@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.54](https://github.com/hyperi-io/dfe-engine/compare/v1.22.53...v1.22.54) (2026-10-20)
+
+### Bug Fixes
+
+* default the loader org_id_field to _org_id, matching the loader ([#931](https://github.com/hyperi-io/dfe-engine/issues/931)) ([9c4cb37](https://github.com/hyperi-io/dfe-engine/commit/9c4cb3701b4ba720baf74c5d8711d6f1405092f3))
+
 ## [1.22.53](https://github.com/hyperi-io/dfe-engine/compare/v1.22.52...v1.22.53) (2026-10-20)
 
 ### Bug Fixes
