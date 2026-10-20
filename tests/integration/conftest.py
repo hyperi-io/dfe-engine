@@ -51,16 +51,22 @@ The document store resolves separately (``mongo_uri``): ``DFE_TEST_MONGO_URI`` i
 set, else one FerretDB per xdist worker on the same docker host, named
 `dfe-engine-test-integration-<worker>-<pid>-ferretdb` and removed at session end.
 DFE_TEST_KEEP does not apply to it.
+
+The Kafka broker resolves the same way (``kafka_bootstrap``): ``DFE_TEST_KAFKA_BOOTSTRAP``
+if set, else one KRaft broker per xdist worker on local docker, named
+`dfe-engine-test-integration-<worker>-<pid>-kafka` and removed at session end.
 """
 
 import base64
+import functools
 import os
 import secrets
 import shlex
 import subprocess
 import time
 import warnings
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -92,6 +98,12 @@ _FERRETDB_TAG = "2.7.0"
 _FERRETDB_DIGEST = "sha256:1bf47a449dd65839aabfc1a535d1370c98326f8a90de20437eda0aeb30bd8dd5"
 _FERRETDB_IMAGE = f"ghcr.io/ferretdb/ferretdb-eval:{_FERRETDB_TAG}@{_FERRETDB_DIGEST}"
 _FERRETDB_USER = "dfe"
+
+# The broker dfe-infra runs on the docker path, at the digest versions.yaml pins for the tag.
+# renovate: datasource=docker depName=apache/kafka
+_KAFKA_TAG = "4.3.1"
+_KAFKA_DIGEST = "sha256:77e3df9054047a88b520d0cc46e16696d3b22022e1d580aeccd2632df6532837"
+_KAFKA_IMAGE = f"apache/kafka:{_KAFKA_TAG}@{_KAFKA_DIGEST}"
 
 # The cluster name the {cluster} macro carries on every container this suite starts.
 _CLUSTER = "dfe"
@@ -911,6 +923,109 @@ def stack(
     """
     import uuid
 
+    from tests.support.engine_stack import api_settings
+
+    database = f"dfe_engine_api_{uuid.uuid4().hex[:8]}"
+    settings = api_settings(ch_params=ch_params, database=database, tmp_path=tmp_path)
+    yield from _engine_api(
+        ch_client=ch_client,
+        database=database,
+        monkeypatch=monkeypatch,
+        settings=settings,
+        tmp_path=tmp_path,
+    )
+
+
+def _kafka_settings(*, ch_params: dict, kafka_bootstrap: str, tmp_path: Path) -> tuple[str, Any]:
+    """A fresh database name and the ``stack`` settings with source topics managed on *kafka_bootstrap*."""
+    import uuid
+
+    from dfe_engine.settings import KafkaSettings
+    from tests.support.engine_stack import api_settings
+
+    database = f"dfe_engine_api_{uuid.uuid4().hex[:8]}"
+    settings = api_settings(ch_params=ch_params, database=database, tmp_path=tmp_path)
+    settings.kafka = KafkaSettings(
+        bootstrap_servers=kafka_bootstrap,
+        bootstrap_topics=False,
+        ensure_topics=True,
+        topic_partitions=2,
+        topic_replication_factor=1,
+    )
+    # Production+team routes the derived app writes to a review PR, and this stack has no forge.
+    settings.gitops.mode = "solo"
+    return database, settings
+
+
+@pytest.fixture
+def kafka_stack(
+    ch_client: Any,
+    ch_params: dict,
+    kafka_bootstrap: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Iterator[SimpleNamespace]:
+    """The ``stack`` engine API with its sources' topics managed on a real Kafka broker."""
+    database, settings = _kafka_settings(
+        ch_params=ch_params, kafka_bootstrap=kafka_bootstrap, tmp_path=tmp_path
+    )
+    yield from _engine_api(
+        ch_client=ch_client,
+        database=database,
+        monkeypatch=monkeypatch,
+        settings=settings,
+        tmp_path=tmp_path,
+    )
+
+
+@pytest.fixture
+def kafka_engine_restarts(
+    ch_client: Any,
+    ch_params: dict,
+    kafka_bootstrap: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Iterator[Callable[[], AbstractContextManager[SimpleNamespace]]]:
+    """Start the ``kafka_stack`` engine API more than once over one deployment.
+
+    Gitops is on, so every process opens the same deploy repo at startup and reads
+    the sources and app instances the last one left. Yields a callable whose
+    context is one running process.
+    """
+    database, settings = _kafka_settings(
+        ch_params=ch_params, kafka_bootstrap=kafka_bootstrap, tmp_path=tmp_path
+    )
+    settings.gitops.enabled = True
+    settings.gitops.local_path = str(tmp_path / "deploy")
+    settings.gitops.push = False
+    _prepare_engine(ch_client=ch_client, monkeypatch=monkeypatch, settings=settings)
+    try:
+        yield functools.partial(
+            _engine_process, database=database, settings=settings, tmp_path=tmp_path
+        )
+    finally:
+        drop_database_and_policies(client=ch_client, database=database)
+
+
+def _prepare_engine(*, ch_client: Any, monkeypatch: pytest.MonkeyPatch, settings: Any) -> None:
+    """Give the harness's ClickHouse the core tables *settings* name, as the engine expects at start."""
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.schema.phase import apply_plan
+    from dfe_engine.schema.plan import build_plan
+
+    # The build and plan routes read the process settings rather than the app's.
+    monkeypatch.setattr("dfe_engine.settings._settings", settings)
+    ClickHouseManager.reset_instance()
+    report = apply_plan(client=ch_client, plan=build_plan(client=ch_client, settings=settings))
+    assert not (report.refused), [outcome.describe() for outcome in report.refused]
+
+
+@contextmanager
+def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Iterator[SimpleNamespace]:
+    """One engine API process over *settings*, its admin signed in.
+
+    Without gitops on, the process gets a local deploy repo once it has started.
+    """
     from fastapi.testclient import TestClient
 
     from dfe_engine.api.app import create_app
@@ -918,17 +1033,8 @@ def stack(
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
     from dfe_engine.gitcrud import GitCrud, default_registry
     from dfe_engine.gitops.repo import GitopsRepo
-    from dfe_engine.schema.phase import apply_plan
-    from dfe_engine.schema.plan import build_plan
-    from tests.support.engine_stack import ADMIN_PASSWORD, api_settings
+    from tests.support.engine_stack import ADMIN_PASSWORD
 
-    database = f"dfe_engine_api_{uuid.uuid4().hex[:8]}"
-    settings = api_settings(ch_params=ch_params, database=database, tmp_path=tmp_path)
-    # The build and plan routes read the process settings rather than the app's.
-    monkeypatch.setattr("dfe_engine.settings._settings", settings)
-    ClickHouseManager.reset_instance()
-    report = apply_plan(client=ch_client, plan=build_plan(client=ch_client, settings=settings))
-    assert not (report.refused), [outcome.describe() for outcome in report.refused]
     app = create_app(settings=settings)
     token = create_access_token(
         data={"org_id": "test-org", "roles": ["admin"], "sub": "admin"}, settings=settings
@@ -937,11 +1043,13 @@ def stack(
         with TestClient(app, raise_server_exceptions=False) as client:
             # Off the issued password, which refuses every other call until changed.
             app.state.account_store.reset_password(new_password=ADMIN_PASSWORD, username="admin")
-            crud = GitCrud(
-                registry=default_registry(),
-                repo=GitopsRepo(local_path=str(tmp_path / "deploy"), push=False),
-            )
-            app.state.gitcrud = crud
+            crud = app.state.gitcrud
+            if crud is None:
+                crud = GitCrud(
+                    registry=default_registry(),
+                    repo=GitopsRepo(local_path=str(tmp_path / "deploy"), push=False),
+                )
+                app.state.gitcrud = crud
             yield SimpleNamespace(
                 client=client,
                 crud=crud,
@@ -951,6 +1059,22 @@ def stack(
     finally:
         _registries.clear()
         ClickHouseManager.reset_instance()
+
+
+def _engine_api(
+    *,
+    ch_client: Any,
+    database: str,
+    monkeypatch: pytest.MonkeyPatch,
+    settings: Any,
+    tmp_path: Path,
+) -> Iterator[SimpleNamespace]:
+    """The engine API built from *settings*, over a ClickHouse given the core tables first."""
+    _prepare_engine(ch_client=ch_client, monkeypatch=monkeypatch, settings=settings)
+    try:
+        with _engine_process(database=database, settings=settings, tmp_path=tmp_path) as stack:
+            yield stack
+    finally:
         drop_database_and_policies(client=ch_client, database=database)
 
 
@@ -1038,5 +1162,106 @@ def mongo_uri():
         _unavailable(f"FerretDB on '{spec}' did not come up: {exc}; container log: {tail}")
     try:
         yield uri
+    finally:
+        teardown()
+
+
+def _kafka_env(port: int) -> list[str]:
+    """The ``-e`` arguments for a one-node KRaft broker that advertises the host port it is published on."""
+    env = {
+        "KAFKA_NODE_ID": "1",
+        "KAFKA_PROCESS_ROLES": "broker,controller",
+        "KAFKA_LISTENERS": f"PLAINTEXT://:{port},CONTROLLER://:9093",
+        "KAFKA_ADVERTISED_LISTENERS": f"PLAINTEXT://127.0.0.1:{port}",
+        "KAFKA_CONTROLLER_LISTENER_NAMES": "CONTROLLER",
+        "KAFKA_LISTENER_SECURITY_PROTOCOL_MAP": "CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT",
+        "KAFKA_CONTROLLER_QUORUM_VOTERS": "1@localhost:9093",
+        "KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR": "1",
+        "KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR": "1",
+        "KAFKA_TRANSACTION_STATE_LOG_MIN_ISR": "1",
+        "KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS": "0",
+        # DFE creates every topic it uses, so a produce to a deleted one must not bring it back.
+        "KAFKA_AUTO_CREATE_TOPICS_ENABLE": "false",
+    }
+    args: list[str] = []
+    for key, value in env.items():
+        args.extend(["-e", f"{key}={value}"])
+    return args
+
+
+def _broker_when_ready(bootstrap: str, timeout: float = 90.0, delay: float = 0.5) -> None:
+    """Poll until the broker answers metadata and has a group coordinator, raising once *timeout* passes.
+
+    The coordinator lookup makes a fresh broker create its offsets topic, which
+    the first group commit otherwise races and loses with NOT_COORDINATOR.
+    """
+    from confluent_kafka.admin import AdminClient
+
+    admin = AdminClient({"bootstrap.servers": bootstrap})
+    probe = "dfe-engine-test-coordinator-probe"
+    deadline = time.monotonic() + timeout
+    last: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            admin.list_topics(timeout=2)
+            admin.describe_consumer_groups([probe], request_timeout=2)[probe].result()
+            return
+        except Exception as exc:  # broker or coordinator still starting
+            last = exc
+            time.sleep(delay)
+    raise last if last is not None else RuntimeError("Kafka unreachable")
+
+
+@pytest.fixture(scope="session")
+def kafka_bootstrap() -> Iterator[str]:
+    """A real Kafka broker's bootstrap address: ``DFE_TEST_KAFKA_BOOTSTRAP``, else one broker on local docker.
+
+    Session-scoped, so each xdist worker starts one broker and its tests share it,
+    each naming its own topics. Local docker only, because the broker advertises
+    the port it is published on and only this host can be asked for a free one.
+    """
+    import socket
+
+    configured = os.environ.get("DFE_TEST_KAFKA_BOOTSTRAP", "").strip()
+    if configured:
+        yield configured
+        return
+
+    docker = _docker_prefix("local")
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    name = _container_name(f"{worker}-{os.getpid()}", "kafka")
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    run_cmd = [
+        *docker,
+        "run",
+        "-d",
+        "--name",
+        name,
+        *_container_labels("kafka"),
+        "-p",
+        f"127.0.0.1:{port}:{port}",
+        *_kafka_env(port),
+        _KAFKA_IMAGE,
+    ]
+
+    def teardown() -> None:
+        _remove_container(docker, name)
+
+    try:
+        _run(run_cmd, timeout=240)  # first image pull can be slow
+    except (subprocess.SubprocessError, FileNotFoundError) as exc:
+        teardown()
+        _unavailable(f"local docker cannot start Kafka: {exc}")
+    bootstrap = f"127.0.0.1:{port}"
+    try:
+        _broker_when_ready(bootstrap)
+    except Exception as exc:
+        tail = _log_tail(docker, name)
+        teardown()
+        _unavailable(f"Kafka on local docker did not come up: {exc}; container log: {tail}")
+    try:
+        yield bootstrap
     finally:
         teardown()

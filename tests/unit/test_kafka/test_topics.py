@@ -7,10 +7,15 @@ from confluent_kafka import KafkaError, KafkaException
 
 from dfe_engine.kafka.contract import KafkaContractError
 from dfe_engine.kafka.topics import (
+    BACKLOG_UNKNOWN,
+    BROKER_REFUSED,
     BROKER_UNREACHABLE,
+    WRITER_UNDESCRIBED,
+    WRITER_UNKNOWN,
     TopicAdmin,
     TopicSpec,
     admin_config,
+    clear_stranded_topics,
     ensure_all_source_topics,
     ensure_topics,
     remove_topics,
@@ -1052,3 +1057,168 @@ class TestStrandedSourceTopics:
             )
             == []
         )
+
+
+WRITER = "dfe-transform-vector-syslog"
+
+
+class _BacklogBroker:
+    """A broker holding ``syslog_load``: its watermarks, each group's commits and state, and the deletes asked of it."""
+
+    def __init__(
+        self,
+        marks: dict[int, tuple[int, int]],
+        groups: dict[str, dict[int, int]] | None = None,
+        *,
+        refuse_delete: bool = False,
+        silent: bool = False,
+        writer: tuple[str, int] | None = ("empty", 0),
+    ) -> None:
+        self.marks = marks
+        self.groups = groups or {}
+        self.refuse_delete = refuse_delete
+        self.silent = silent
+        self.writer = writer
+        self.deleted: list[str] = []
+        self.asked: list[str] = []
+
+    def list_topic_names(self) -> set[str]:
+        return {"syslog_land", "syslog_load"} - set(self.deleted)
+
+    def describe_group(self, group: str) -> tuple[str, int]:
+        self.asked.append(f"describe {group}")
+        if self.writer is None:
+            raise KafkaException(KafkaError(KafkaError._TIMED_OUT))
+        return self.writer
+
+    def watermarks(self, name: str) -> dict[int, tuple[int, int]]:
+        self.asked.append(f"watermarks {name}")
+        if self.silent:
+            raise KafkaException(KafkaError(KafkaError._TIMED_OUT))
+        return self.marks
+
+    def committed_offsets(self, name: str, partitions: list[int]) -> dict[str, dict[int, int]]:
+        assert partitions == list(self.marks)
+        return self.groups
+
+    def delete(self, name: str) -> None:
+        if self.refuse_delete:
+            raise RuntimeError("deletion refused")
+        self.deleted.append(name)
+
+
+class TestClearStrandedTopics:
+    """A stranded ``_load`` topic goes only once its writer is idle and no reader has records left on it."""
+
+    @staticmethod
+    def _clear(broker: _BacklogBroker, writers: list[str] | None = None):
+        return clear_stranded_topics(
+            ["syslog_load"],
+            admin=broker,  # ty: ignore[invalid-argument-type]  # a stand-in admin carrying only the calls this path makes
+            writers=[WRITER] if writers is None else writers,
+        )
+
+    def test_the_writer_is_asked_before_the_backlog(self):
+        broker = _BacklogBroker({0: (0, 5)}, {"dfe-loader": {0: 5}})
+
+        self._clear(broker)
+
+        assert broker.asked == [f"describe {WRITER}", "watermarks syslog_load"]
+
+    @pytest.mark.parametrize(
+        ("writer", "reason"),
+        [
+            (("stable", 1), f"consumer group {WRITER} is stable with 1 members"),
+            (("empty", 1), f"consumer group {WRITER} is empty with 1 members"),
+            (
+                ("preparing_rebalancing", 0),
+                f"consumer group {WRITER} is preparing_rebalancing with 0 members",
+            ),
+            (("unknown", 0), f"consumer group {WRITER} is unknown with 0 members"),
+            (None, WRITER_UNDESCRIBED),
+        ],
+        ids=["live-member", "member-in-empty", "rebalancing", "unknown-state", "undescribed"],
+    )
+    def test_a_writer_not_provably_gone_keeps_even_a_drained_topic(self, writer, reason):
+        broker = _BacklogBroker({0: (0, 5)}, {"dfe-loader": {0: 5}}, writer=writer)
+
+        result = self._clear(broker)
+
+        assert [(t.name, t.unread, t.reason) for t in result.held] == [
+            ("syslog_load", None, reason)
+        ]
+        assert broker.deleted == []
+        assert "watermarks syslog_load" not in broker.asked
+
+    def test_a_writer_with_no_group_to_name_keeps_the_topic(self):
+        broker = _BacklogBroker({0: (0, 5)}, {"dfe-loader": {0: 5}})
+
+        result = self._clear(broker, writers=[])
+
+        assert [t.reason for t in result.held] == [WRITER_UNKNOWN]
+        assert broker.asked == []
+
+    def test_a_dead_writer_group_lets_a_drained_topic_go(self):
+        broker = _BacklogBroker({0: (0, 5)}, {"dfe-loader": {0: 5}}, writer=("dead", 0))
+
+        assert self._clear(broker).removed == ["syslog_load"]
+
+    def test_a_drained_topic_is_deleted(self):
+        broker = _BacklogBroker({0: (0, 5), 1: (2, 4)}, {"dfe-loader": {0: 5, 1: 4}})
+
+        result = self._clear(broker)
+
+        assert (result.removed, result.held) == (["syslog_load"], [])
+        assert broker.deleted == ["syslog_load"]
+
+    def test_records_a_group_has_not_read_keep_the_topic(self):
+        broker = _BacklogBroker({0: (0, 5), 1: (2, 4)}, {"dfe-loader": {0: 3, 1: 4}})
+
+        result = self._clear(broker)
+
+        assert result.removed == []
+        assert [(t.name, t.unread) for t in result.held] == [("syslog_load", 2)]
+        assert broker.deleted == []
+
+    def test_the_largest_backlog_of_any_group_counts(self):
+        # "other" read 1 of partition 0 and never committed partition 1, which counts from its start.
+        groups = {"dfe-loader": {0: 5, 1: 4}, "other": {0: 1}}
+        broker = _BacklogBroker({0: (0, 5), 1: (2, 4)}, groups)
+
+        result = self._clear(broker)
+
+        assert [t.unread for t in result.held] == [6]
+
+    def test_a_topic_no_group_has_read_keeps_every_record_it_holds(self):
+        broker = _BacklogBroker({0: (0, 5), 1: (2, 4)})
+
+        result = self._clear(broker)
+
+        assert [t.unread for t in result.held] == [7]
+
+    def test_an_empty_topic_no_group_has_read_is_deleted(self):
+        broker = _BacklogBroker({0: (3, 3)})
+
+        assert self._clear(broker).removed == ["syslog_load"]
+
+    def test_a_commit_behind_the_retained_records_counts_from_the_first_one(self):
+        broker = _BacklogBroker({0: (10, 12)}, {"dfe-loader": {0: 4}})
+
+        assert [t.unread for t in self._clear(broker).held] == [2]
+
+    def test_a_backlog_the_broker_did_not_report_keeps_the_topic(self):
+        """An unknown backlog is not an empty one."""
+        broker = _BacklogBroker({0: (0, 5)}, silent=True)
+
+        result = self._clear(broker)
+
+        assert [(t.unread, t.reason) for t in result.held] == [(None, BACKLOG_UNKNOWN)]
+        assert broker.deleted == []
+
+    def test_a_refused_delete_keeps_the_topic_with_the_reason(self):
+        broker = _BacklogBroker({0: (0, 5)}, {"dfe-loader": {0: 5}}, refuse_delete=True)
+
+        result = self._clear(broker)
+
+        assert result.removed == []
+        assert [(t.unread, t.reason) for t in result.held] == [(0, BROKER_REFUSED)]

@@ -855,6 +855,30 @@ class TestNaming:
         }
 
 
+class TestTransformGroup:
+    """The consumer group a transform instance reads its source's landing topic in."""
+
+    @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-elastic"])
+    def test_a_binding_naming_a_group_is_what_the_instance_runs_in(self, service):
+        app = catalogue.descriptor(service)
+
+        assert catalogue.transform_group(app, "auth") == f"{service}-auth"
+        assert catalogue.render_source_binding(app, "auth")["config.source.group_id"] == (
+            catalogue.transform_group(app, "auth")
+        )
+
+    def test_a_binding_naming_none_takes_the_transform_role_default(self):
+        # dfe-transform-vector derives dfe-transform-vector-<dfe_source> itself.
+        vector = catalogue.descriptor("dfe-transform-vector")
+
+        assert "config.source.group_id" not in vector.source_binding
+        assert catalogue.transform_group(vector, "auth") == "dfe-transform-vector-auth"
+
+    @pytest.mark.parametrize("service", ["dfe-receiver", "dfe-loader", "dfe-fetcher"])
+    def test_an_app_that_is_not_a_transform_has_no_group_to_name(self, service):
+        assert catalogue.transform_group(catalogue.descriptor(service), "auth") is None
+
+
 class TestMeshAddressing:
     """A deployment whose pools sit behind listeners, addressed by the same rule."""
 

@@ -69,6 +69,7 @@ from .operations import (
 )
 from .routing import (
     LOADER_COMPILER,
+    TRANSFORM_COMPILER,
     RoutingNotCompiledError,
     RoutingStatus,
     UnknownRoutingCompilerError,
@@ -105,6 +106,7 @@ __all__ = [
     "InvalidDialError",
     "InvalidFilenameError",
     "LOADER_COMPILER",
+    "TRANSFORM_COMPILER",
     "InvalidInstanceError",
     "LifecycleState",
     "Link",

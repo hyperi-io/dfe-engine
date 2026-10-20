@@ -26,6 +26,10 @@ routing blocks are recompiled, and a fetcher-based source gains or loses its
 fetcher instance. The reconcile never fails the source write; its outcome is
 reported, and ``reconcile-apps`` retries it.
 
+The reconcile also deletes the ``_load`` topic a dropped transform left, once its
+transform instance was already gone before the pass, the transform's consumer
+group has no live member, and nothing on the topic is unread.
+
 A deploy also points HyperDX at the table it just made, and a delete takes that
 source away again. Like the reconcile, neither ever fails the source write.
 """
@@ -69,12 +73,14 @@ from dfe_engine.api.v1.apps import commit_overlay, metrics_unavailable, remove_o
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import (
     LOADER_COMPILER,
+    TRANSFORM_COMPILER,
     MetricsUnavailableError,
     OperationalReader,
     appconfig,
     derived,
     instances,
 )
+from dfe_engine.appmgmt import catalogue as app_catalogue
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.exchange.models import SourceBundle, SourceImportResult
@@ -270,6 +276,22 @@ class AppsReconcileResponse(BaseModel):
             "One command per app whose running process cannot take this change where it stands."
         ),
     )
+    topics_removed: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Stranded _load topics deleted: no transform instance writing one was in "
+            "the deploy repo before this pass, the transform's consumer group had no "
+            "live member, and nothing on it was unread"
+        ),
+    )
+    topics_pending_removal: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Stranded _load topics kept, because a transform instance writing one was "
+            "in the deploy repo before this pass, the transform's consumer group has a "
+            "live member or cannot be named, or a consumer group has records left on it"
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,6 +301,8 @@ class AppsSync:
     changes: list[str]
     error: str | None = None
     restart_required: list[str] = field(default_factory=list)
+    topics_removed: list[str] = field(default_factory=list)
+    topics_pending_removal: list[str] = field(default_factory=list)
 
 
 def _source_response(
@@ -321,6 +345,10 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
     through: by the time the reconcile renders again the file is already current,
     so an app whose config only that write changed would be reported as needing
     nothing and a Compose stack would leave it on the source it started with.
+
+    A stranded ``_load`` topic is judged on the transform instances the deploy
+    repo carried BEFORE this pass's writes, so the pass that removes an instance
+    never deletes the topic its still-running process may write.
     """
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
@@ -329,7 +357,9 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
     done: list[str] = []
     hints: list[str] = []
     try:
-        for change in derived.plan(gc, registry, settings):
+        changes = derived.plan(gc, registry, settings)
+        transforms = transform_instances(gc)
+        for change in changes:
             if change.action == "remove":
                 written = remove_overlay(request, user, change.app)
             else:
@@ -356,7 +386,13 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
     # Re-rendered even when the reconcile wrote nothing: a source deploy changes
     # the loader's table map through the same overlay the plan found in step.
     hints += appconfig.render_and_report(gc, settings)
-    return AppsSync(changes=done, restart_required=_one_per_app(hints))
+    removed, pending = sweep_stranded_topics(registry, settings, transforms, actor=user.user_id)
+    return AppsSync(
+        changes=done,
+        restart_required=_one_per_app(hints),
+        topics_removed=removed,
+        topics_pending_removal=pending,
+    )
 
 
 async def _sync_hyperdx_source(
@@ -1446,18 +1482,224 @@ class _TopicsNotCreatedError(Exception):
         self.ensured = ensured
 
 
+class _SourceTopics(NamedTuple):
+    """What a deploy did to its source's Kafka topics."""
+
+    ensured: list[str]
+    failed: list[str]
+    removed: list[str]
+    pending: list[str]
+
+
+def _rides_bus(source: Any, settings: Any, version_id: str | None) -> bool:
+    """Whether *source* at this version, else its deployed one, moves its records over the bus."""
+    declared = source.version(version_id).transport if version_id else source.transport
+    return settings.transport.bus_present and (declared or settings.transport.default) == "bus"
+
+
+def transform_instances(gc: Any) -> set[str] | None:
+    """The instance names of every transform app in the deploy repo, or None without one.
+
+    A transform instance is named for the source whose ``_load`` topic it writes.
+    """
+    if gc is None:
+        return None
+    return {app.instance for app in instances.instances_routed_by(gc, TRANSFORM_COMPILER)}
+
+
+def _owner(source: Any, registry: Any) -> Any:
+    """The source whose ``_load`` topic *source* is judged on, or None where none is registered.
+
+    That is the source *source* lands under, which is *source* itself unless it
+    lands on another's topic.
+    """
+    label = source.landing_label()
+    if label == source.source:
+        return source
+    if registry is None or not registry.source_exists(label):
+        return None
+    return registry.get_source(label)
+
+
+def _load_topic_made(source: Any, registry: Any) -> bool:
+    """Whether the engine ever created the ``_load`` topic *source* is judged on.
+
+    The engine creates it for each version of the topic's owner with a transform.
+    """
+    owner = _owner(source, registry)
+    return owner is not None and any(version.transform for version in owner.versions.values())
+
+
+def _writer_groups(source: Any, registry: Any) -> list[str]:
+    """The consumer group of every transform that can have written *source*'s ``_load`` topic.
+
+    One for each transform engine a version of the topic's owner names. Empty
+    where any of them has no group the app manifest can name, which holds the topic.
+    """
+    owner = _owner(source, registry)
+    if owner is None:
+        return []
+    engines = {version.transform.engine for version in owner.versions.values() if version.transform}
+    groups: list[str] = []
+    for engine in sorted(engines):
+        try:
+            app = app_catalogue.descriptor(app_catalogue.transform_service(engine))
+        except app_catalogue.UnknownAppError:
+            return []
+        group = app_catalogue.transform_group(app, owner.source)
+        if not group:
+            return []
+        groups.append(group)
+    return groups
+
+
+def _settle_stranded(
+    source: Any,
+    topics: list[str],
+    *,
+    transforms: set[str] | None,
+    admin: Any,
+    settings: Any,
+    registry: Any,
+) -> tuple[list[str], list[str]]:
+    """Delete each stranded topic nothing writes and nothing has left to read, and keep the rest.
+
+    ``transforms`` is the transform instances the deploy repo carries. None means
+    there is no deploy repo, so whether a transform still writes the topic cannot
+    be seen and every topic is kept. An instance gone from the deploy repo can
+    still be running, so its transform's consumer group must also be idle.
+
+    Returns:
+        The topics removed and the ones pending removal.
+    """
+    from dfe_engine.kafka.topics import build_admin, clear_stranded_topics
+
+    if transforms is None or source.landing_label() in transforms:
+        logger.info(
+            "stranded topic kept while a transform instance may still write it",
+            source=source.source,
+            topics=",".join(topics),
+        )
+        return [], list(topics)
+    cleared = clear_stranded_topics(
+        topics,
+        admin=admin or build_admin(settings=settings),
+        writers=_writer_groups(source, registry),
+    )
+    for topic in cleared.held:
+        logger.info(
+            "stranded topic kept", source=source.source, topic=topic.name, reason=topic.reason
+        )
+    if cleared.removed:
+        logger.info(
+            "stranded topic removed so the loader reads the source's landing topic",
+            source=source.source,
+            removed=",".join(cleared.removed),
+        )
+    return cleared.removed, [topic.name for topic in cleared.held]
+
+
+def sweep_stranded_topics(
+    registry: Any, settings: Any, transforms: set[str] | None, *, actor: str
+) -> tuple[list[str], list[str]]:
+    """Settle the stranded ``_load`` topic of every live source on the bus. Never raises.
+
+    Only a source whose ``_load`` topic the engine ever created is looked up, so a
+    deployment that never dropped a transform makes no broker call here.
+    ``transforms`` is as :func:`_settle_stranded` takes it, and ``actor`` is who
+    each deletion is audited as.
+
+    Returns:
+        The topics removed and the ones still pending removal.
+    """
+    from dfe_engine.kafka.topics import build_admin, stranded_source_topics, topics_managed
+
+    removed: list[str] = []
+    pending: list[str] = []
+    try:
+        if not topics_managed(settings):
+            return removed, pending
+        live = [
+            source
+            for source in registry.get_all_sources(states=("active",))
+            if source.deployed_version
+            and _rides_bus(source, settings, None)
+            and _load_topic_made(source, registry)
+        ]
+        admin = build_admin(settings=settings) if live else None
+        for source in live:
+            found = stranded_source_topics(source, settings=settings, admin=admin) or []
+            # Sources landing under one label share its topic, so it is settled once.
+            topics = [topic for topic in found if topic not in removed + pending]
+            if not topics or _another_transform_writes(source, registry):
+                continue
+            gone, kept = _settle_stranded(
+                source,
+                topics,
+                transforms=transforms,
+                admin=admin,
+                settings=settings,
+                registry=registry,
+            )
+            if gone:
+                audit_resource_change(
+                    actor,
+                    "schema",
+                    source.source,
+                    "topics_removed",
+                    details={"topics_removed": gone},
+                )
+            removed += gone
+            pending += kept
+    except Exception as exc:  # the apps are reconciled whatever the broker answers
+        logger.warning("stranded topics not settled", error=str(exc))
+    return removed, pending
+
+
+def _another_transform_writes(source: Any, registry: Any) -> bool:
+    """Whether another source's running transform still writes the ``_load`` topic *source* is judged on.
+
+    A source landing on another's topic is judged on that source's ``_load`` one. The
+    engine runs a transform only for an active, deployed source, so only such an
+    owner still writes it.
+    """
+    owner = source.landing_label()
+    if registry is None or owner == source.source or not registry.source_exists(owner):
+        return False
+    other = registry.get_source(owner)
+    if not (other.enabled and other.deployed_version):
+        return False
+    return bool(other.version(other.deployed_version).transform)
+
+
 def _ensure_source_topics(
-    source: Any, settings: Any, version_id: str | None = None
-) -> tuple[list[str], list[str], list[str]]:
-    """Create the ``_land``/``_load`` topics this source needs.
+    source: Any,
+    settings: Any,
+    version_id: str | None = None,
+    registry: Any = None,
+    gc: Any = None,
+) -> _SourceTopics:
+    """Create the ``_land``/``_load`` topics this source needs, and settle a stranded one.
 
     Fatal where the source rides the bus: its receiver answers 503 for every
     record until the topic exists, so a deploy reporting success would be wrong.
     Off the bus (a brokerless or direct deployment) no stage reads the topics,
     and a failure is reported on the response instead.
 
+    On the bus a ``_load`` topic left by a version that had a transform stops the
+    loader reading the source's ``_land`` one. It is deleted here only where the
+    deploy repo ``gc`` already carries no transform instance writing it, the
+    transform's consumer group holds no live member, and no consumer group has
+    records left to read on it. Otherwise it is reported as pending for a later
+    apps reconcile to delete. The deploy goes ahead either way.
+
     Blocking librdkafka calls run in here, so callers on the event loop hand it to
     a thread. ``version_id`` is the version being deployed, not the deployed one.
+    ``registry`` names the topic's owner and its transforms.
+
+    Returns:
+        The topics ensured, the ones not created, the stranded ones removed and
+        the stranded ones pending removal.
 
     Raises:
         _TopicsNotCreatedError: The source rides the bus and a topic was not created.
@@ -1473,7 +1715,7 @@ def _ensure_source_topics(
     )
 
     if not topics_managed(settings):
-        return [], [], []
+        return _SourceTopics([], [], [], [])
 
     # One admin for every pass. Each builds its own otherwise, and an unreachable
     # broker then costs another full librdkafka timeout on the request path.
@@ -1490,31 +1732,32 @@ def _ensure_source_topics(
         version_id=version_id,
     )
     outcome = ensure_topics(specs, admin=admin, settings=settings)
+    ensured = outcome.created + outcome.existing
+    rides_bus = _rides_bus(source, settings, version_id)
     if outcome.failed:
         logger.warning(
             f"Kafka topics not ensured for source '{source.source}': "
             f"{', '.join(f'{n} ({e})' for n, e in outcome.failed)}"
         )
-        declared = source.version(version_id).transport if version_id else source.transport
-        rides_bus = (declared or settings.transport.default) == "bus"
-        if settings.transport.bus_present and rides_bus:
-            raise _TopicsNotCreatedError(
-                failed=outcome.failed, ensured=outcome.created + outcome.existing
-            )
-    stranded = stranded_source_topics(source, version_id=version_id, settings=settings, admin=admin)
-    if stranded:
-        logger.warning(
-            "source produces to a topic the loader suppresses; it will not load",
-            source=source.source,
-            stranded=",".join(stranded),
-            suppressed=source.topic_land,
+        if rides_bus:
+            raise _TopicsNotCreatedError(failed=outcome.failed, ensured=ensured)
+    removed: list[str] = []
+    pending: list[str] = []
+    if rides_bus:
+        # None means the broker could not be asked, which the ensure above has already refused.
+        stranded = stranded_source_topics(
+            source, version_id=version_id, settings=settings, admin=admin
         )
-    return (
-        outcome.created + outcome.existing,
-        [name for name, _ in outcome.failed],
-        # None is "could not ask the broker", which is not the same as "clean".
-        [] if stranded is None else stranded,
-    )
+        if stranded and not _another_transform_writes(source, registry):
+            removed, pending = _settle_stranded(
+                source,
+                stranded,
+                transforms=transform_instances(gc),
+                admin=admin,
+                settings=settings,
+                registry=registry,
+            )
+    return _SourceTopics(ensured, [name for name, _ in outcome.failed], removed, pending)
 
 
 def _remove_source_topics(source: Any, settings: Any) -> tuple[list[str], list[str]]:
@@ -1566,9 +1809,10 @@ async def _execute_source_deploy(
 
     # Off the event loop: the admin calls block for their full timeout when no
     # broker answers, which is the norm on the Kafka-less profile.
+    gc = getattr(request.app.state, "gitcrud", None)
     try:
-        topics_ensured, topics_failed, topics_stranded = await asyncio.to_thread(
-            _ensure_source_topics, source, settings, version_id
+        topics = await asyncio.to_thread(
+            _ensure_source_topics, source, settings, version_id, registry, gc
         )
     except _TopicsNotCreatedError as exc:
         # The DDL and any topic created before the refusal changed state, so the attempt is audited.
@@ -1595,9 +1839,10 @@ async def _execute_source_deploy(
         views=views,
         validation_errors=[],
         statements_applied=statements_applied,
-        topics_ensured=topics_ensured,
-        topics_failed=topics_failed,
-        topics_stranded=topics_stranded,
+        topics_ensured=topics.ensured,
+        topics_failed=topics.failed,
+        topics_removed=topics.removed,
+        topics_pending_removal=topics.pending,
         ttl_change=ttl_change,
     )
     store = SourceDeploymentStore.from_settings(settings)
@@ -1642,9 +1887,10 @@ async def _execute_source_deploy(
         "deployed",
         details={
             "version": version_id,
-            "topics_ensured": topics_ensured,
-            "topics_failed": topics_failed,
-            "topics_stranded": topics_stranded,
+            "topics_ensured": topics.ensured,
+            "topics_failed": topics.failed,
+            "topics_removed": topics.removed,
+            "topics_pending_removal": topics.pending,
             "apps_synced": apps.changes,
         },
     )
@@ -2545,7 +2791,8 @@ def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Request):
     Recompiles every stack-scoped routing block (receiver, loader, archiver) and
     deploys, syncs or removes the instances of every instance-scoped app (a fetcher
     per active fetcher-based source). Every source write does this on its own; this
-    route is the retry when one reported ``apps_sync_error``.
+    route is the retry when one reported ``apps_sync_error``, and the pass that
+    deletes a stranded ``_load`` topic a deploy reported in ``topics_pending_removal``.
     """
     if getattr(request.app.state, "gitcrud", None) is None:
         raise HTTPException(
@@ -2558,7 +2805,12 @@ def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Request):
             status_code=502,
             detail={"code": "reconcile_failed", "message": apps.error, "changes": apps.changes},
         )
-    return AppsReconcileResponse(changes=apps.changes, restart_required=apps.restart_required)
+    return AppsReconcileResponse(
+        changes=apps.changes,
+        restart_required=apps.restart_required,
+        topics_removed=apps.topics_removed,
+        topics_pending_removal=apps.topics_pending_removal,
+    )
 
 
 @router.post(

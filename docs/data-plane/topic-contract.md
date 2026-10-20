@@ -6,7 +6,7 @@ whole life, so nothing here depends on the broker's `auto.create.topics.enable` 
 which creates a mis-partitioned, unmanaged topic on first produce, and is
 unavailable on Confluent Cloud's non-Dedicated tiers anyway.
 
-The deploy creates a source's topics and the delete removes them. Everything else
+The deploy creates a source's topics and the delete removes them. The old `_load` topic of a version that dropped its transform goes once its transform instance has left the deploy repo, the transform's consumer group has no live member, and no consumer group has records left to read on it. The apps reconcile after a later source write, `POST /api/v1/sources/reconcile-apps`, or the engine's next start deletes it. A transform with no consumer group the engine can name keeps the topic. Everything else
 is `/api/v1/kafka/topics`.
 
 A fetcher source pushing to the main topic is the exception at both ends: it arrives on the landing source's `main_land`, so it creates no landing topic on deploy and removes none on delete. Deleting it otherwise takes `main_land` out from under the receiver's default flow and every other source landing there.
@@ -73,7 +73,4 @@ TLS-off listener the deploy charts stand up is `strimzi-no-tls` or
 challenge-response, so the password never reaches the wire on that listener; no
 PLAIN or OAUTHBEARER provider has a TLS-off key.
 
-Neither a deploy nor a delete ever fails on the topic step: the schema is already
-live by the time the topics are ensured, and the source is already gone by the
-time they are removed, so an unreachable broker is reported on the response
-instead.
+A delete never fails on the topic step: the source is already gone by the time its topics are removed, so an unreachable broker is reported on the response instead. A deploy of a source on the bus does fail on it, with 502 `topics_not_created` for a topic the broker did not create. An old `_load` topic never fails it: the deploy reports one it could not delete yet in `topics_pending_removal`.

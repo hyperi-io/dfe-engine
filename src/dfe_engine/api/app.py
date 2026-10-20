@@ -211,13 +211,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     source_registry = get_source_registry_optional()
     if gitcrud is not None and source_registry is not None:
+        from dfe_engine.api.v1.sources import sweep_stranded_topics, transform_instances
         from dfe_engine.appmgmt import derived
 
         try:
+            transforms = transform_instances(gitcrud)
             for line in derived.reconcile(gitcrud, source_registry, settings):
                 logger.info("Reconciled app overlay with the sources", change=line)
         except Exception as exc:  # the apps are still reconciled on the next source write
             logger.warning("apps not reconciled with the sources at startup", error=str(exc))
+        else:
+            # A topic left pending clears on restart without waiting for a source write.
+            removed, pending = await asyncio.to_thread(
+                sweep_stranded_topics,
+                source_registry,
+                settings,
+                transforms,
+                actor=derived.ENGINE_ACTOR,
+            )
+            if removed or pending:
+                logger.info("stranded topics settled at startup", removed=removed, pending=pending)
 
     # Where no chart renders the overlay into the app's own config file, the
     # engine does it -- and it must happen before the containers that mount the
