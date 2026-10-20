@@ -13,14 +13,16 @@ the rule asks. A mock would agree with whatever the applier believes, and the
 failures this replaces -- a table on one replica, an engine clause the server
 rejects, a create that silently no-ops -- are all server behaviour.
 
-Three things are proven here:
+Proven here:
 
 * one pass over an empty database creates every ClickHouse object the manifest
   declares, and nothing else creates any of them
 * every applied object is recorded in ``schema_migrations`` with the checksum of
-  the statement that ran
+  the statement that ran, and an identical record still lands
 * a second pass changes nothing, which is what makes the phase safe to run on
   every boot
+* the schema lease leaves one holder when claimers wait, race, or tie to the
+  millisecond, before and after a merge
 """
 
 import threading
@@ -232,12 +234,13 @@ def test_appliers_that_find_the_lease_free_together_leave_one_holder(
     assert outcomes.count(True) == 1, outcomes
 
 
-def test_claims_in_the_same_millisecond_leave_the_holder_every_reader_names(
+def test_claims_in_the_same_millisecond_keep_one_holder_through_a_merge(
     ch_params, ch_client, empty_database, plan
 ):
-    """Two claimers on one pod at one instant: the larger holder stands, as both read it."""
+    """Two claimers on one pod at one instant: one stands, both name it, and a merge keeps it."""
     apply_plan(ch_client, plan)
     table = plan.by_id(LOCK_ID).name
+    target = f"`{empty_database}`.`{table}`"
     locks = [
         SchemaLock(
             clickhouse_connect.get_client(**ch_params),
@@ -247,6 +250,8 @@ def test_claims_in_the_same_millisecond_leave_the_holder_every_reader_names(
         )
         for _ in range(2)
     ]
+    # The larger holder writes first, so a merge keeps the claim a holder-ordered tie-break loses.
+    locks.sort(key=lambda lock: lock.holder, reverse=True)
     holders = [lock.holder for lock in locks]
     assert holders[0] != holders[1]
     assert all(holder.startswith(f"{holder_name()}/") for holder in holders), holders
@@ -255,9 +260,22 @@ def test_claims_in_the_same_millisecond_leave_the_holder_every_reader_names(
     now = datetime.now(UTC)
     claimed = [lock._claim(now) for lock in locks]
     assert claimed[0] == claimed[1]
-    stands = [lock._claim_stands(at) for lock, at in zip(locks, claimed, strict=True)]
 
-    winner = max(holders)
-    assert stands == [holder == winner for holder in holders], (holders, stands)
-    seen = [lock.read() for lock in locks]
-    assert [state.holder if state is not None else None for state in seen] == [winner, winner]
+    def outcome() -> tuple[list[bool], list[str | None]]:
+        stands = [lock._claim_stands(at) for lock, at in zip(locks, claimed, strict=True)]
+        seen = [lock.read() for lock in locks]
+        return stands, [state.holder if state is not None else None for state in seen]
+
+    def stored_rows() -> int:
+        return ch_client.query(f"SELECT count() FROM {target}").result_rows[0][0]
+
+    assert stored_rows() == 2, "the tie merged before it could be read unmerged"
+    stands, named = outcome()
+    assert stands.count(True) == 1, (holders, stands)
+    winner = holders[stands.index(True)]
+    assert named == [winner, winner]
+
+    ch_client.command(f"OPTIMIZE TABLE {target} FINAL")
+
+    assert stored_rows() == 1, "OPTIMIZE did not fold the tie"
+    assert outcome() == (stands, [winner, winner])

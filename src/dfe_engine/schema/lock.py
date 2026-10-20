@@ -20,10 +20,10 @@ over rather than waited on, so a crashed holder does not block the next boot.
 
 The table keeps the latest write per lock name, so two callers that both found the
 lease free both write a claim. Each re-reads after a settle delay and keeps the
-lease only if no claim sorting after its own is visible, so the later claim wins and
-the earlier one goes back to waiting. Claims sort by time, then holder, so every
-reader breaks a same-millisecond tie the same way. Each lock instance writes its own
-holder name, so two claimers on one pod still sort apart.
+lease only if the latest claim is still its own, so the later claim wins and the
+earlier one goes back to waiting. Reads use ``FINAL``, so a same-millisecond tie
+resolves to the row a merge keeps, before and after that merge. Each lock instance
+writes its own holder name, so two claimers on one pod still tell their claims apart.
 
 The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 """
@@ -140,14 +140,12 @@ class SchemaLock:
     def read(self) -> LockState | None:
         """The latest claim on the lock name, or None when nothing has ever taken it.
 
-        Latest is the largest ``(acquired_at, holder)``: ``argMax`` over a time alone
-        picks among equal times non-deterministically, so two readers could disagree.
+        ``FINAL`` keeps the row a merge would keep, so readers name the same claim
+        of a tie whether or not it has merged yet.
         """
         target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         sql = (
-            "SELECT argMax(holder, (acquired_at, holder)), "  # noqa: S608 - quoted database and manifest table; values bound
-            "argMax(expires_at, (acquired_at, holder)), "
-            f"argMax(released, (acquired_at, holder)), max(acquired_at) FROM {target} "
+            f"SELECT holder, expires_at, released, acquired_at FROM {target} FINAL "  # noqa: S608 - quoted database and manifest table; values bound
             "WHERE lock_name = {lock:String}"
         )
         try:
@@ -209,16 +207,14 @@ class SchemaLock:
         return acquired
 
     def _claim_stands(self, claimed_at: datetime) -> bool:
-        """Whether the latest visible claim is this one, or one that sorts before it.
+        """Whether the latest visible claim is this one, or one written before it.
 
-        A latest claim sorting before this one means this claim is not visible yet,
-        which is no sign of a later one.
+        An earlier claim means this one is not visible yet, which is no sign of a later one.
         """
         state = self.read()
-        if state is None:
+        if state is None or state.acquired_at < claimed_at:
             return True
-        # UTF-8 byte order is code point order, so str order matches ClickHouse String order.
-        return (state.acquired_at, state.holder) <= (claimed_at, self._holder)
+        return state.acquired_at == claimed_at and state.holder == self._holder
 
     def _write(self, acquired: datetime, *, expires: datetime, released: int) -> None:
         try:
