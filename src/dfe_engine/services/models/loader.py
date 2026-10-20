@@ -177,7 +177,7 @@ class LoaderRoutingConfig(BaseModel):
     default_db: str = "dfe"
     # The key names the fallback mechanism; its value is the landing table's name.
     default_table: str = DEFAULT_LANDING_LABEL
-    org_id_field: str | None = "org_id"
+    org_id_field: str | None = "_org_id"
     org_routes: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Per-org database routing {org_id, database?}; unlisted orgs use default_db",
