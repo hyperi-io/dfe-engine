@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.55](https://github.com/hyperi-io/dfe-engine/compare/v1.22.54...v1.22.55) (2026-10-20)
+
+### Bug Fixes
+
+* **security:** update certifi to 2026.10.19 for GHSA-6q48-6c7w-9gw2 ([#933](https://github.com/hyperi-io/dfe-engine/issues/933)) ([1d0556d](https://github.com/hyperi-io/dfe-engine/commit/1d0556d0c830a151d3dba051e609c6bfd2169734))
+
 ## [1.22.54](https://github.com/hyperi-io/dfe-engine/compare/v1.22.53...v1.22.54) (2026-10-20)
 
 ### Bug Fixes
