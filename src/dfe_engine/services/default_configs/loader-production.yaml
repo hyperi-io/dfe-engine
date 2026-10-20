@@ -45,7 +45,7 @@ routing:
     - _source
   default_db: dfe
   default_table: main
-  org_id_field: org_id
+  org_id_field: _org_id
   org_routes: []
   source_to_table: {}
   topic_suffixes:
