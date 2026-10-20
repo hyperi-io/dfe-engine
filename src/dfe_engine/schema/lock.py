@@ -20,12 +20,15 @@ over rather than waited on, so a crashed holder does not block the next boot.
 
 The table keeps the latest write per lock name, so two callers that both found the
 lease free both write a claim. Each re-reads after a settle delay and keeps the
-lease only if the latest claim is still its own, so the later claim wins and the
-earlier one goes back to waiting.
+lease only if no claim sorting after its own is visible, so the later claim wins and
+the earlier one goes back to waiting. Claims sort by time, then holder, so every
+reader breaks a same-millisecond tie the same way. Each lock instance writes its own
+holder name, so two claimers on one pod still sort apart.
 
 The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 """
 
+import secrets
 import socket
 import time
 from collections.abc import Iterator
@@ -88,7 +91,7 @@ def _utc(value: datetime) -> datetime:
 
 
 def holder_name() -> str:
-    """Who this process is in the lease: the pod hostname, which is what an operator reads."""
+    """The pod hostname, which every holder name this process writes starts with."""
     return socket.gethostname()
 
 
@@ -96,7 +99,8 @@ class SchemaLock:
     """Take, hold and release the bootstrap lease.
 
     Construct with the table's real name, which the caller reads off the rendered
-    manifest object -- this module names no table of its own.
+    manifest object -- this module names no table of its own. With no *holder*,
+    the instance writes the hostname plus a suffix of its own.
     """
 
     def __init__(
@@ -111,7 +115,8 @@ class SchemaLock:
         self._client = client
         self._database = database
         self._table = table
-        self._holder = holder or holder_name()
+        # Concurrent deploys on one pod each build a lock, and a tie needs their names to differ.
+        self._holder = holder or f"{holder_name()}/{secrets.token_hex(4)}"
         self._lease_seconds = max(lease_seconds, 1)
         self.acquired = False
 
@@ -133,11 +138,16 @@ class SchemaLock:
         return bool(rows)
 
     def read(self) -> LockState | None:
-        """The latest claim on the lock name, or None when nothing has ever taken it."""
+        """The latest claim on the lock name, or None when nothing has ever taken it.
+
+        Latest is the largest ``(acquired_at, holder)``: ``argMax`` over a time alone
+        picks among equal times non-deterministically, so two readers could disagree.
+        """
         target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         sql = (
-            "SELECT argMax(holder, acquired_at), argMax(expires_at, acquired_at), "  # noqa: S608 - quoted database and manifest table; values bound
-            f"argMax(released, acquired_at), max(acquired_at) FROM {target} "
+            "SELECT argMax(holder, (acquired_at, holder)), "  # noqa: S608 - quoted database and manifest table; values bound
+            "argMax(expires_at, (acquired_at, holder)), "
+            f"argMax(released, (acquired_at, holder)), max(acquired_at) FROM {target} "
             "WHERE lock_name = {lock:String}"
         )
         try:
@@ -199,14 +209,16 @@ class SchemaLock:
         return acquired
 
     def _claim_stands(self, claimed_at: datetime) -> bool:
-        """Whether no other claimer wrote at or after this claim, so the latest is still ours.
+        """Whether the latest visible claim is this one, or one that sorts before it.
 
-        A read that does not show this claim yet is no sign of a later one.
+        A latest claim sorting before this one means this claim is not visible yet,
+        which is no sign of a later one.
         """
         state = self.read()
-        if state is None or state.acquired_at < claimed_at:
+        if state is None:
             return True
-        return state.holder == self._holder and state.acquired_at == claimed_at
+        # UTF-8 byte order is code point order, so str order matches ClickHouse String order.
+        return (state.acquired_at, state.holder) <= (claimed_at, self._holder)
 
     def _write(self, acquired: datetime, *, expires: datetime, released: int) -> None:
         try:

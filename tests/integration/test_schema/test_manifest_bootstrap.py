@@ -26,12 +26,13 @@ Three things are proven here:
 import threading
 import time
 import uuid
+from datetime import UTC, datetime
 
 import clickhouse_connect
 import pytest
 
 from dfe_engine.schema.ledger import MigrationLedger
-from dfe_engine.schema.lock import SchemaLock
+from dfe_engine.schema.lock import SchemaLock, holder_name
 from dfe_engine.schema.phase import apply_plan
 from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, build_plan
 
@@ -204,16 +205,20 @@ def test_appliers_that_find_the_lease_free_together_leave_one_holder(
     apply_plan(ch_client, plan)
     table = plan.by_id(LOCK_ID).name
     racers = 4
-    start = threading.Barrier(racers)
-    outcomes: list[bool] = []
+    start = threading.Barrier(racers, timeout=60)
+    outcomes: list[bool | Exception] = []
 
     def race(holder: str) -> None:
-        client = clickhouse_connect.get_client(**ch_params)
-        lock = SchemaLock(
-            client, database=empty_database, table=table, holder=holder, lease_seconds=60
-        )
-        start.wait()
-        outcomes.append(lock.acquire(wait_seconds=0.0))
+        try:
+            client = clickhouse_connect.get_client(**ch_params)
+            lock = SchemaLock(
+                client, database=empty_database, table=table, holder=holder, lease_seconds=60
+            )
+            start.wait()
+            outcomes.append(lock.acquire(wait_seconds=0.0))
+        except Exception as exc:  # a racer that raises must fail the test, not drop out of it
+            start.abort()
+            outcomes.append(exc)
 
     threads = [threading.Thread(target=race, args=(f"pod-{n}",)) for n in range(racers)]
     for thread in threads:
@@ -221,4 +226,38 @@ def test_appliers_that_find_the_lease_free_together_leave_one_holder(
     for thread in threads:
         thread.join()
 
-    assert sorted(outcomes) == [False] * (racers - 1) + [True]
+    errors = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+    assert not errors, errors
+    assert len(outcomes) == racers
+    assert outcomes.count(True) == 1, outcomes
+
+
+def test_claims_in_the_same_millisecond_leave_the_holder_every_reader_names(
+    ch_params, ch_client, empty_database, plan
+):
+    """Two claimers on one pod at one instant: the larger holder stands, as both read it."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+    locks = [
+        SchemaLock(
+            clickhouse_connect.get_client(**ch_params),
+            database=empty_database,
+            table=table,
+            lease_seconds=60,
+        )
+        for _ in range(2)
+    ]
+    holders = [lock.holder for lock in locks]
+    assert holders[0] != holders[1]
+    assert all(holder.startswith(f"{holder_name()}/") for holder in holders), holders
+
+    # Private calls: no public path can make two claims share one timestamp.
+    now = datetime.now(UTC)
+    claimed = [lock._claim(now) for lock in locks]
+    assert claimed[0] == claimed[1]
+    stands = [lock._claim_stands(at) for lock, at in zip(locks, claimed, strict=True)]
+
+    winner = max(holders)
+    assert stands == [holder == winner for holder in holders], (holders, stands)
+    seen = [lock.read() for lock in locks]
+    assert [state.holder if state is not None else None for state in seen] == [winner, winner]

@@ -528,6 +528,7 @@ def run_bootstrap(
             table=lock_object.name,
             lease_seconds=lease_seconds(wait),
         )
+        state.holder = lock.holder
         report = _apply_under_lock(
             client, plan, lock, wait=wait, allow_drift=allow_drift, state=state
         )
