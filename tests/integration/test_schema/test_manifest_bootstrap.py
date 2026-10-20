@@ -21,8 +21,8 @@ Proven here:
   the statement that ran, and an identical record still lands
 * a second pass changes nothing, which is what makes the phase safe to run on
   every boot
-* the schema lease leaves one holder when claimers wait, race, or tie to the
-  millisecond, before and after a merge
+* the schema lease leaves one holder when claimers wait, race, tie to the
+  millisecond, or release after their lease was taken over
 """
 
 import threading
@@ -279,3 +279,33 @@ def test_claims_in_the_same_millisecond_keep_one_holder_through_a_merge(
 
     assert stored_rows() == 1, "OPTIMIZE did not fold the tie"
     assert outcome() == (stands, [winner, winner])
+
+
+def test_a_release_after_the_lease_was_taken_over_leaves_the_takeover_held(
+    ch_params, ch_client, empty_database, plan
+):
+    """A holder that ran past its expiry and then releases must not free its successor's lease."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+
+    def lock(holder: str, lease_seconds: int) -> SchemaLock:
+        return SchemaLock(
+            clickhouse_connect.get_client(**ch_params),
+            database=empty_database,
+            table=table,
+            holder=holder,
+            lease_seconds=lease_seconds,
+        )
+
+    stale = lock("pod-h", 1)
+    assert stale.acquire() is True
+    time.sleep(1.5)
+    takeover = lock("pod-n", 60)
+    assert takeover.acquire() is True, "the lapsed lease was not taken over"
+
+    stale.release()
+
+    latest = takeover.read()
+    assert latest is not None
+    assert (latest.holder, latest.released) == ("pod-n", False)
+    assert lock("pod-x", 60).acquire(wait_seconds=0) is False

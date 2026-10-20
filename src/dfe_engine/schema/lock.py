@@ -118,6 +118,7 @@ class SchemaLock:
         # Concurrent deploys on one pod each build a lock, and a tie needs their names to differ.
         self._holder = holder or f"{holder_name()}/{secrets.token_hex(4)}"
         self._lease_seconds = max(lease_seconds, 1)
+        self._claimed_at: datetime | None = None
         self.acquired = False
 
     @property
@@ -179,6 +180,7 @@ class SchemaLock:
                 claimed_at = self._claim(now)
                 time.sleep(_SETTLE_SECONDS)
                 if self._claim_stands(claimed_at):
+                    self._claimed_at = claimed_at
                     self.acquired = True
                     return True
                 if time.monotonic() >= deadline:
@@ -195,9 +197,11 @@ class SchemaLock:
 
     def release(self) -> None:
         """Soft-release the lease. A completed pass needs no delete."""
-        if not self.acquired:
+        if not self.acquired or self._claimed_at is None:
             return
-        self._write(datetime.now(UTC), expires=datetime.now(UTC), released=1)
+        # The claim's own version, so a takeover written after this claim lapsed still outranks it.
+        self._write(self._claimed_at, expires=datetime.now(UTC), released=1)
+        self._claimed_at = None
         self.acquired = False
 
     def _claim(self, now: datetime) -> datetime:
