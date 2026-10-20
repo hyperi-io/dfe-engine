@@ -84,9 +84,11 @@ from dfe_engine.git_identity import git_author
 from dfe_engine.manifest import ManifestError
 from dfe_engine.schema.applier import SchemaApplyError, live_tables
 from dfe_engine.schema.derived_registry import derived_reference_root
+from dfe_engine.schema.lock import SchemaLockBusyError, SchemaLockError, ddl_lease
 from dfe_engine.settings import get_settings
 from dfe_engine.source import catalogue as source_catalogue_module
 from dfe_engine.source.deployment import (
+    DeployStatements,
     SchemaDeployResult,
     SettingsChange,
     SourceBuildArtifact,
@@ -1831,6 +1833,60 @@ def _dry_run_table_moves(
     return ttl_change, settings_change, None
 
 
+def _plan_and_apply_ddl(
+    builder: Any,
+    source: Source,
+    version_id: str,
+    result: Any,
+    *,
+    ch: Any,
+    db: str,
+    name: str,
+    platform: Any,
+) -> tuple[DeployStatements, int]:
+    """Plan a source version's DDL against the live table, then apply it.
+
+    Returns:
+        The plan, and how many of its statements ClickHouse took.
+
+    Raises:
+        HTTPException: 503 when ClickHouse could not be read, 502 when it rejected a statement.
+    """
+    try:
+        planned = plan_deploy_statements(
+            builder,
+            source,
+            version_id,
+            result,
+            db=db,
+            ch_client=ch,
+        )
+    except SchemaApplyError as exc:
+        raise _ch_unreadable(exc, name) from exc
+    applied = 0
+    try:
+        # Through the applier, which creates the Replicated database every
+        # replica holds rather than a plain one on the replica this connection reached.
+        from dfe_engine.schema.applier import SchemaApplier
+
+        SchemaApplier(ch, platform).ensure_database(db)
+        for stmt in planned.statements:
+            execute_ddl(ch, stmt)
+            applied += 1
+    except Exception as exc:
+        raise backend_failure(
+            502,
+            "ddl_apply_error",
+            f"ClickHouse rejected DDL after {applied} statement(s); the engine log has "
+            "ClickHouse's reason",
+            exc,
+            event="source deploy: ClickHouse rejected DDL",
+            source=name,
+            applied=applied,
+        ) from exc
+    return planned, applied
+
+
 def _apply_source_schema(
     name: str, registry: Any, settings: Any, version: str | None, dry_run: bool
 ) -> SchemaDeployResult | _AppliedSchema:
@@ -1946,38 +2002,28 @@ def _apply_source_schema(
     # need no server, and before the first statement reaches one.
     _require_replication(probe, name)
     db = settings.clickhouse.effective_data_database
+    # Planned under the lease too, so the columns it diffs against are the ones the DDL meets.
     try:
-        planned = plan_deploy_statements(
-            builder,
-            source,
-            version_id,
-            result,
-            db=db,
-            ch_client=ch,
-        )
-    except SchemaApplyError as exc:
-        raise _ch_unreadable(exc, name) from exc
-    applied = 0
-    try:
-        # Through the applier, which creates the Replicated database every
-        # replica holds rather than a plain one on the replica this connection reached.
-        from dfe_engine.schema.applier import SchemaApplier
-
-        SchemaApplier(ch, platform).ensure_database(db)
-        for stmt in planned.statements:
-            execute_ddl(ch, stmt)
-            applied += 1
-    except Exception as exc:
-        raise backend_failure(
-            502,
-            "ddl_apply_error",
-            f"ClickHouse rejected DDL after {applied} statement(s); the engine log has "
-            "ClickHouse's reason",
-            exc,
-            event="source deploy: ClickHouse rejected DDL",
-            source=name,
-            applied=applied,
+        with ddl_lease(
+            ch, data_database=db, wait_seconds=settings.clickhouse.bootstrap_wait_seconds
+        ):
+            planned, applied = _plan_and_apply_ddl(
+                builder, source, version_id, result, ch=ch, db=db, name=name, platform=platform
+            )
+    except SchemaLockBusyError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "schema_locked",
+                "message": (
+                    "another schema apply held the ClickHouse schema lease for the whole "
+                    "wait, so retry once it finishes"
+                ),
+                "holder": exc.holder,
+            },
         ) from exc
+    except SchemaLockError as exc:
+        raise _ch_unreadable(exc, name) from exc
 
     # The tier grant is database-wide, so the new table is readable the moment it
     # exists while its row policy would otherwise wait for the next reconcile.

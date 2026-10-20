@@ -100,7 +100,11 @@ def plan_cmd(as_json: bool) -> None:
 )
 @click.option("--json", "as_json", is_flag=True, help="Emit the outcome as JSON.")
 def apply_cmd(allow_drift: bool, as_json: bool) -> None:
-    """Run the boot phase by hand, under the same lease. Exits 2 on a refusal."""
+    """Run the boot phase by hand, under the same lease.
+
+    Exits 1 when the pass failed or another applier held the lease for the whole
+    wait, and 2 on a refusal.
+    """
     from dfe_engine.schema import metrics
     from dfe_engine.schema.phase import run_bootstrap
 
@@ -124,7 +128,7 @@ def apply_cmd(allow_drift: bool, as_json: bool) -> None:
             click.echo(f"topics skipped: {state.topics_skipped}")
         if state.error:
             click.echo(f"error: {state.error}", err=True)
-    if state.state == "failed":
+    if not state.ready:
         raise click.exceptions.Exit(1)
     if state.refused:
         raise click.exceptions.Exit(2)

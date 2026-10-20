@@ -14,15 +14,17 @@ second engine replica, a hunt runner and an operator running ``dfe schema apply`
 by hand all reach the same tables.
 
 The lease is a holder plus an expiry, the shape the hunt runner already trusts. A
-caller that cannot take it waits for the holder to finish, then reports without
-applying. An expired lease is taken over rather than waited on, so a crashed
-holder does not block the next boot.
-"""
+caller that cannot take it waits for the holder to finish and then takes it. One
+still waiting when its wait runs out applies nothing. An expired lease is taken
+over rather than waited on, so a crashed holder does not block the next boot.
 
-from __future__ import annotations
+The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
+"""
 
 import socket
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -30,6 +32,7 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.quoting import quote_identifier
+from dfe_engine.schema.plan import LOCK_ID, render_one
 
 LOCK_NAME = "schema_bootstrap"
 
@@ -38,6 +41,23 @@ _POLL_SECONDS = 2.0
 
 class SchemaLockError(Exception):
     """The lease could not be read or written."""
+
+
+class SchemaLockBusyError(SchemaLockError):
+    """Another applier held the lease for the whole wait.
+
+    Attributes:
+        holder: Who held it when the wait ran out, empty when that could not be read.
+    """
+
+    def __init__(self, holder: str) -> None:
+        super().__init__(f"the schema lease is held by {holder or 'another applier'}")
+        self.holder = holder
+
+
+def lease_seconds(wait_seconds: float) -> int:
+    """A claim's length: twice a peer's wait, so a live holder is waited on, never taken over."""
+    return int(max(wait_seconds, 60.0) * 2)
 
 
 @dataclass(frozen=True)
@@ -85,6 +105,18 @@ class SchemaLock:
     def holder(self) -> str:
         """The holder name this lock writes."""
         return self._holder
+
+    def table_exists(self) -> bool:
+        """Whether the lease table is on the server, which it is not before a first boot."""
+        try:
+            rows = self._client.query(
+                "SELECT 1 FROM system.tables WHERE database = {db:String} "
+                "AND name = {tbl:String} LIMIT 1",
+                parameters={"db": self._database, "tbl": self._table},
+            ).result_rows
+        except Exception as exc:
+            raise SchemaLockError(f"could not read the schema lock table: {exc}") from exc
+        return bool(rows)
 
     def read(self) -> LockState | None:
         """The latest claim on the lock name, or None when nothing has ever taken it."""
@@ -157,3 +189,42 @@ class SchemaLock:
 
     def __exit__(self, *_exc: object) -> None:
         self.release()
+
+
+@contextmanager
+def ddl_lease(client: Any, *, data_database: str, wait_seconds: float) -> Iterator[None]:
+    """Hold the schema lease around DDL applied outside the boot phase.
+
+    A server without the lease table has never run the phase, so there is no lease
+    to take and the block runs unheld, the same answer the phase gives a first boot.
+
+    Args:
+        client: A live ClickHouse client.
+        data_database: The deployment's data database, which carries the lease table.
+        wait_seconds: How long to wait for a live holder to finish.
+
+    Raises:
+        SchemaLockBusyError: Another applier held the lease for the whole wait.
+        SchemaLockError: The lease could not be read or taken.
+    """
+    lock_object = render_one(LOCK_ID, data_database=data_database)
+    lock = SchemaLock(
+        client,
+        database=lock_object.database or data_database,
+        table=lock_object.name,
+        lease_seconds=lease_seconds(wait_seconds),
+    )
+    if not lock.table_exists():
+        yield
+        return
+    if not lock.acquire(wait_seconds=wait_seconds):
+        held = lock.read()
+        raise SchemaLockBusyError(held.holder if held is not None else "")
+    try:
+        yield
+    finally:
+        # A failed release only delays the next applier until the claim lapses.
+        try:
+            lock.release()
+        except SchemaLockError as exc:
+            logger.warning("schema lease not released; it lapses at its expiry", error=str(exc))

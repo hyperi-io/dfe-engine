@@ -20,7 +20,8 @@ The phase is a GATE, not best-effort: its outcome decides readiness. Disable it
 with ``DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false``, which reports the schema state as
 unknown and gates nothing. A pass ClickHouse failed for load or reachability runs
 again in the background (:class:`SchemaRetry`), so one transient error does not hold
-the pod NotReady until a restart.
+the pod NotReady until a restart. So does a pass that gave up waiting on another
+applier's lease, which stays NotReady until a later pass takes the lease itself.
 
 A converged pass also rebuilds the ``all_sources`` Merge table (:mod:`dfe_engine.clickhouse.all_sources`), so a retried pass rebuilds it too. So does a boot with the phase switched off, since nothing else would create the table HyperDX is pointed at; a failed pass does not.
 """
@@ -36,7 +37,7 @@ from scalo.resilience import ReconnectingResilience, ResilienceConfig
 from dfe_engine.backoff import jittered
 from dfe_engine.clickhouse.all_sources import try_rebuild_all_sources
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-from dfe_engine.schema.phase import STATE_FAILED, STATE_UNKNOWN, SchemaBootstrapState, run_bootstrap
+from dfe_engine.schema.phase import STATE_UNKNOWN, SchemaBootstrapState, run_bootstrap
 from dfe_engine.settings import ClickHouseResilienceSettings, DFESettings, get_clickhouse_config
 
 if TYPE_CHECKING:
@@ -96,7 +97,7 @@ def bootstrap_clickhouse(
 
 
 class _TransientPass(Exception):
-    """A pass ClickHouse failed for load or reachability; it carries the pass's state."""
+    """A pass a later one can clear, carrying the pass's state."""
 
     def __init__(self, state: SchemaBootstrapState) -> None:
         super().__init__(state.error)
@@ -108,12 +109,14 @@ class _RetryStopped(Exception):
 
 
 class SchemaRetry:
-    """Run the schema phase again, on a background thread, after a pass failed transiently.
+    """Run the schema phase again, on a background thread, after a pass a later one can clear.
 
-    Passes are spaced on ``clickhouse.resilience``'s back-off steps, each jittered,
-    with no budget: readiness stays false until a pass ends any other way, and the
-    process never exits over it. A pass that converges calls ``on_converged``; one
-    that fails for any other reason ends the retry and leaves the failure reported.
+    That is a transient ClickHouse failure, or a wait that ran out on another
+    applier's lease. Passes are spaced on ``clickhouse.resilience``'s back-off
+    steps, each jittered, with no budget: readiness stays false until a pass ends
+    any other way, and the process never exits over it. A pass that converges calls
+    ``on_converged``, and one that fails for any other reason ends the retry and
+    leaves the failure reported.
 
     Args:
         run_pass: One pass of the phase, returning its state.
@@ -155,7 +158,7 @@ class SchemaRetry:
 
         def attempt() -> SchemaBootstrapState:
             state = self._run_pass()
-            if state.state == STATE_FAILED and state.transient:
+            if state.transient:
                 raise _TransientPass(state)
             return state
 
@@ -185,7 +188,7 @@ class SchemaRetry:
         return state
 
     def _run(self) -> None:
-        logger.warning("schema bootstrap failed transiently; running it again with back-off")
+        logger.warning("schema bootstrap did not converge; running it again with back-off")
         state = self.run()
         if state is not None:
             logger.info("schema bootstrap retry finished", state=state.state)

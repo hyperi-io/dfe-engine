@@ -34,7 +34,7 @@ from scalo.logger import logger
 from dfe_engine import __version__ as engine_version
 from dfe_engine.clickhouse.errors import is_retryable_error, parse_code
 from dfe_engine.schema.ledger import LedgerError, MigrationLedger
-from dfe_engine.schema.lock import SchemaLock, SchemaLockError, holder_name
+from dfe_engine.schema.lock import SchemaLock, SchemaLockError, holder_name, lease_seconds
 from dfe_engine.schema.manifest_applier import (
     ManifestApplier,
     ManifestApplyError,
@@ -152,16 +152,19 @@ class SchemaBootstrapState:
     counts: dict[str, int] = field(default_factory=dict)
     # Not on the status route: it decides whether the daemon runs the pass again.
     transient: bool = False
-    """The pass failed because ClickHouse did not answer or refused for load, which a later pass can clear."""
+    """A later pass can clear what stopped this one.
+
+    ClickHouse not answering or refusing for load, or another applier's lease.
+    """
 
     @property
     def converged(self) -> bool:
         """Whether the manifest's objects are known to exist on this deployment.
 
-        ``observed`` counts: another replica held the lease and converged the
-        schema, and this one read the result rather than applying it.
+        ``observed`` does not count: the lease's holder was still applying when
+        this pass stopped waiting, so what it was applying may not exist yet.
         """
-        return self.state in (STATE_CONVERGED, STATE_OBSERVED)
+        return self.state == STATE_CONVERGED
 
     @property
     def ready(self) -> bool:
@@ -169,9 +172,10 @@ class SchemaBootstrapState:
 
         ``unknown`` is ready: the phase was switched off, and off means the engine
         reports the schema state as unknown and GATES nothing rather than holding
-        the deployment down over a dial an operator set deliberately.
+        the deployment down over a dial an operator set deliberately. ``observed``
+        is not, until a later pass converges.
         """
-        return self.state not in (STATE_FAILED, STATE_RUNNING)
+        return self.state not in (STATE_FAILED, STATE_RUNNING, STATE_OBSERVED)
 
     @property
     def gauge(self) -> int:
@@ -214,8 +218,9 @@ def current_state() -> SchemaBootstrapState:
 def schema_ready() -> bool:
     """The readiness check ``/readyz`` registers. Never consulted by ``/livez``.
 
-    False only where the pass FAILED or is still running, so a pod with a broken
-    schema stays up and NotReady with the cause on the status route.
+    False where the pass FAILED, is still running, or gave up waiting on another
+    applier's lease, so a pod with a broken or unapplied schema stays up and
+    NotReady with the cause on the status route.
     """
     return _state.ready
 
@@ -521,7 +526,7 @@ def run_bootstrap(
             client,
             database=lock_object.database or plan.data_database,
             table=lock_object.name,
-            lease_seconds=int(max(wait, 60.0) * 2),
+            lease_seconds=lease_seconds(wait),
         )
         report = _apply_under_lock(
             client, plan, lock, wait=wait, allow_drift=allow_drift, state=state
@@ -544,6 +549,11 @@ def run_bootstrap(
         state.error = _failed_stage(exc)
         state.transient = is_transient_failure(exc)
         logger.exception("schema bootstrap failed; the engine stays up and NotReady")
+        _finish(state, started, metrics)
+        return state
+
+    # The holder creates the topics too, so a pass that applied nothing leaves them to it.
+    if state.state == STATE_OBSERVED:
         _finish(state, started, metrics)
         return state
 
@@ -584,8 +594,7 @@ def run_bootstrap(
         _finish(state, started, metrics)
         return state
 
-    if state.state != STATE_OBSERVED:
-        state.state = STATE_CONVERGED
+    state.state = STATE_CONVERGED
     _finish(state, started, metrics)
     return state
 
@@ -599,13 +608,17 @@ def _apply_under_lock(
     allow_drift: bool,
     state: SchemaBootstrapState,
 ) -> ManifestReport | None:
-    """Take the lease and apply, or wait for the holder and report what it left.
+    """Take the lease and apply, waiting for a live holder to finish first.
 
     The lease table is itself a manifest object, so it has to exist before it can
     be read. A server that does not carry it yet is a first boot, and this pass
     is the one that creates it.
+
+    A pass whose wait runs out while the holder is still live applies nothing and
+    is marked ``observed`` and transient: the holder may still be mid-apply, so
+    readiness waits for a later pass that takes the lease itself.
     """
-    if _table_absent(client, plan):
+    if _table_absent(lock):
         return apply_plan(client, plan, allow_drift=allow_drift)
 
     with lock:
@@ -613,25 +626,22 @@ def _apply_under_lock(
             held = lock.read()
             state.state = STATE_OBSERVED
             state.holder = held.holder if held is not None else ""
+            state.error = "another applier held the schema lease for the whole wait"
+            state.transient = True
+            logger.warning(
+                "schema lease held elsewhere for the whole wait; NotReady until a later pass",
+                holder=state.holder,
+            )
             return None
         return apply_plan(client, plan, allow_drift=allow_drift)
 
 
-def _table_absent(client: Any, plan: SchemaPlan) -> bool:
+def _table_absent(lock: SchemaLock) -> bool:
     """Whether the lease table is missing, which is what a first boot looks like."""
-    lock_object = plan.by_id(LOCK_ID)
     try:
-        rows = client.query(
-            "SELECT 1 FROM system.tables WHERE database = {db:String} "
-            "AND name = {tbl:String} LIMIT 1",
-            parameters={
-                "db": lock_object.database or plan.data_database,
-                "tbl": lock_object.name,
-            },
-        ).result_rows
-    except Exception:
+        return not lock.table_exists()
+    except SchemaLockError:
         return True
-    return not rows
 
 
 def _finish(state: SchemaBootstrapState, started: datetime, metrics: SchemaMetrics | None) -> None:

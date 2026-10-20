@@ -20,11 +20,12 @@ every doc-level operation keeps working against the manifest unchanged.
 """
 
 import builtins
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any
 
-from dfe_engine.gitops.repo import GitopsRepo, PublishResult
+from dfe_engine.gitops.repo import GitopsHeadMovedError, GitopsRepo, PublishResult
 from dfe_engine.yaml_utils import yaml_dump_string, yaml_load, yaml_load_string
 
 from .commit_policy import validate_name, validate_resource_path
@@ -308,13 +309,51 @@ class GitCrud:
         """Raise ConcurrencyConflictError if base_revision is stale (HEAD moved)."""
         if base_revision is None:
             return
-        cls = self._cls(cls_name)
         with self.reading():
             head = self._repo.head_revision()
-            if head is None or head == base_revision:
-                return
+        if head is None or head == base_revision:
+            return
+        raise self._conflict(cls_name, name)
+
+    def _conflict(self, cls_name: str, name: str) -> ConcurrencyConflictError:
+        """The conflict a stale base revision answers, carrying the doc the current head holds."""
+        cls = self._cls(cls_name)
+        # One guard over both, so the doc handed back is the one at that head.
+        with self.reading():
+            head = self._repo.head_revision()
             current = self._read_doc(cls, name) if self._file(cls, name).is_file() else {}
-        raise ConcurrencyConflictError(cls_name, name, current, head)
+        return ConcurrencyConflictError(cls_name, name, current, head)
+
+    def _publish(
+        self,
+        cls_name: str,
+        name: str,
+        artifacts: Mapping[str, str | bytes],
+        message: str,
+        *,
+        base_revision: str | None,
+        branch: str,
+        deletions: builtins.list[str] | None = None,
+    ) -> PublishResult:
+        """Publish one resource's write, conditional on base_revision through the push.
+
+        The guard before the write reads the head once. The remote can move between
+        that read and the push, and a write re-applied over that move would overwrite
+        it, so the deploy repo re-checks the head wherever it lands the write.
+
+        Raises:
+            ConcurrencyConflictError: The head moved off base_revision.
+        """
+        try:
+            return self._repo.publish(
+                artifacts,
+                message,
+                deletions=deletions,
+                branch=branch or None,
+                expected_head=base_revision,
+            )
+        except GitopsHeadMovedError as exc:
+            raise self._conflict(cls_name, name) from exc
 
     def put(
         self,
@@ -335,7 +374,14 @@ class GitCrud:
         cls = self._cls(cls_name)
         msg = message or f"{cls.name}({name}): update by {actor}"
         rel = self._rel(cls, name)
-        return self._repo.publish({rel: self._yaml(rel, doc)}, msg, branch=branch or None)
+        return self._publish(
+            cls_name,
+            name,
+            {rel: self._yaml(rel, doc)},
+            msg,
+            base_revision=base_revision,
+            branch=branch,
+        )
 
     def put_many(
         self,
@@ -413,7 +459,15 @@ class GitCrud:
             artifacts[self._rel_payload(cls, name, relpath)] = content
         deletions = [self._rel_payload(cls, name, r) for r in (removals or [])]
         msg = message or f"{cls.name}({name}): update by {actor}"
-        return self._repo.publish(artifacts, msg, deletions=deletions, branch=branch or None)
+        return self._publish(
+            cls_name,
+            name,
+            artifacts,
+            msg,
+            base_revision=base_revision,
+            branch=branch,
+            deletions=deletions,
+        )
 
     def _require_bundle(self, cls_name: str) -> ResourceClass:
         cls = self._cls(cls_name)
@@ -441,7 +495,15 @@ class GitCrud:
             doc = self._read_doc(cls, name) if self._file(cls, name).is_file() else {}
         _set_path(doc, dotpath, value)
         msg = message or f"{cls.name}({name}): set {dotpath} by {actor}"
-        return self.put(cls_name, name, doc, actor, msg, branch=branch)
+        rel = self._rel(cls, name)
+        return self._publish(
+            cls_name,
+            name,
+            {rel: self._yaml(rel, doc)},
+            msg,
+            base_revision=base_revision,
+            branch=branch,
+        )
 
     def delete_key(
         self,
@@ -491,4 +553,12 @@ class GitCrud:
                     self._rel_payload(cls, name, p) for p in self._payload_names(cls, name)
                 ]
         msg = message or f"{cls.name}({name}): delete by {actor}"
-        return self._repo.publish({}, msg, deletions=deletions, branch=branch or None)
+        return self._publish(
+            cls_name,
+            name,
+            {},
+            msg,
+            base_revision=base_revision,
+            branch=branch,
+            deletions=deletions,
+        )

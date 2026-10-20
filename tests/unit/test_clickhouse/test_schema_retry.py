@@ -20,6 +20,7 @@ from dfe_engine.schema.manifest_applier import ManifestApplyError
 from dfe_engine.schema.phase import (
     STATE_CONVERGED,
     STATE_FAILED,
+    STATE_OBSERVED,
     SchemaBootstrapState,
     is_transient_failure,
     run_bootstrap,
@@ -108,6 +109,11 @@ def _transient() -> SchemaBootstrapState:
     return SchemaBootstrapState(state=STATE_FAILED, error="lock write refused", transient=True)
 
 
+def _observed() -> SchemaBootstrapState:
+    """What a pass reports when another applier held the lease for its whole wait."""
+    return SchemaBootstrapState(state=STATE_OBSERVED, holder="pod-a", transient=True)
+
+
 class TestSchemaRetry:
     def test_a_bootstrap_that_fails_twice_then_succeeds_becomes_ready(self):
         phase._set_state(_transient())
@@ -127,6 +133,24 @@ class TestSchemaRetry:
         retry.close(10)
 
         assert ready_before == [False, False, False]
+        assert schema_ready() is True
+
+    def test_a_pass_that_outwaited_another_holders_lease_runs_again_not_ready(self):
+        phase._set_state(_observed())
+        ready_before: list[bool] = []
+        converged = threading.Event()
+        retry = SchemaRetry(
+            _passes([_observed(), SchemaBootstrapState(state=STATE_CONVERGED)], ready_before),
+            resilience=FAST,
+            on_converged=converged.set,
+        )
+
+        final = retry.run()
+
+        assert final is not None
+        assert final.state == STATE_CONVERGED
+        assert ready_before == [False, False]
+        assert converged.is_set()
         assert schema_ready() is True
 
     def test_a_failure_no_pass_can_clear_ends_the_retry(self):
