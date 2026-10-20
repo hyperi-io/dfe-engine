@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.53](https://github.com/hyperi-io/dfe-engine/compare/v1.22.52...v1.22.53) (2026-10-20)
+
+### Bug Fixes
+
+* keep one schema lease holder and answer a batch push race with 409 ([#930](https://github.com/hyperi-io/dfe-engine/issues/930)) ([5954f0d](https://github.com/hyperi-io/dfe-engine/commit/5954f0df423db8b1e404aea17652e092ad790f30))
+
 ## [1.22.52](https://github.com/hyperi-io/dfe-engine/compare/v1.22.51...v1.22.52) (2026-10-20)
 
 ### Bug Fixes
