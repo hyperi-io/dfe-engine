@@ -374,22 +374,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         metrics=app.state.oidc_login_metrics,
     )
 
-    # Bootstrap connection registry for multi-tenant ClickHouse
-    from dfe_engine.connections.config import ConnectionConfigLoader
-    from dfe_engine.connections.registry import ConnectionRegistry
-
-    conn_config_path = (
-        Path(settings.config_dir or os.environ.get("DFE_CONFIG_DIR", ""))
-        / "rbac"
-        / "connections.yaml"
-    )
-    if conn_config_path.exists():
-        conn_config = ConnectionConfigLoader.load(conn_config_path)
-        logger.info(f"Loaded connection config from {conn_config_path}")
-    else:
-        conn_config = ConnectionConfigLoader.load_default()
-    app.state.connection_registry = ConnectionRegistry(conn_config, settings.clickhouse)
-
     # Bootstrap org registry
     from dfe_engine.orgs.registry import OrgRegistry
 

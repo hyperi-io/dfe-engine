@@ -25,7 +25,6 @@ from dfe_engine.api.v1 import app_contracts as api_v1_app_contracts
 from dfe_engine.api.v1 import apps as api_v1_apps
 from dfe_engine.api.v1 import auth as api_v1_auth
 from dfe_engine.api.v1 import backing_services as api_v1_backing_services
-from dfe_engine.api.v1 import discovery as api_v1_discovery
 from dfe_engine.api.v1 import fieldmaps as api_v1_fieldmaps
 from dfe_engine.api.v1 import gitops as api_v1_gitops
 from dfe_engine.api.v1 import hunts as api_v1_hunts
@@ -165,9 +164,6 @@ api_v1_backing_services.ObservedSizing.provider_replicas
 api_v1_backing_services.ProviderLimit.as_of
 api_v1_backing_services.ProviderLimit.source_url
 api_v1_backing_services.ProviderLimit.used
-api_v1_discovery.ColumnInfo.default_expression
-api_v1_discovery.ColumnInfo.default_kind
-api_v1_discovery.TableInfo.total_bytes
 api_v1_fieldmaps.FieldMapSummary.mapping_count
 api_v1_gitops.ClassInfo.action_writable
 api_v1_hunts.HuntEngineStatus.hunt_count

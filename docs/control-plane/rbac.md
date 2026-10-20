@@ -757,10 +757,6 @@ graph TD
         APP["app.py<br/>lifespan bootstrap"]
     end
 
-    subgraph "connections/"
-        CONN_REG["registry.py<br/>ConnectionRegistry"]
-    end
-
     subgraph "governance/ch/"
         CH_RBAC["reconciler.py<br/>tenant role, row policies,<br/>pinned org users"]
     end
@@ -837,7 +833,6 @@ Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
 | Account storage | Hardcoded dict in `LocalAuthProvider` | `config/auth/accounts/*.yaml` with full CRUD |
 | Group mapping | `AuthSettings.group_role_mapping` | `config/auth/groups/*.yaml` |
 | Auth paths | JWT Bearer only | OIDC headers + API key + JWT Bearer + disabled |
-| CH connections | Single global client | `ConnectionRegistry` (multi-client, tenant-scoped) |
 | Deep merge | `deepmerge` pip package | `dfe_engine.yaml_utils.deep_merge()` (vendored) |
 
 ---
