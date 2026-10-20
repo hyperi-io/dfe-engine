@@ -432,8 +432,9 @@ async def get_schema_status(user: CurrentUser, settings: Settings) -> SchemaStat
 
     This is the operator's record of the schema apply, replacing the completed
     ArgoCD Job the engine took over from. ``state`` is what readiness follows:
-    converged or observed is ready, failed leaves the pod up and NotReady with
-    the stage that failed here and the cause in the engine log.
+    converged is ready, failed leaves the pod up and NotReady with the stage that
+    failed here and the cause in the engine log, and observed -- another applier
+    held the lease for the whole wait -- stays NotReady until a later pass converges.
     """
     from dfe_engine.schema.phase import current_state
 

@@ -228,6 +228,20 @@ class GitopsDivergedError(GitopsRemoteError):
         self.remote = remote
 
 
+class GitopsHeadMovedError(Exception):
+    """A conditional write found the deploy repo's head moved off the revision it was made on.
+
+    Attributes:
+        expected: The revision the write was made against.
+        head: The head this clone holds now.
+    """
+
+    def __init__(self, *, expected: str, head: str) -> None:
+        super().__init__(f"the deploy repo moved from {expected[:12]} to {head[:12]}")
+        self.expected = expected
+        self.head = head
+
+
 @dataclass
 class PublishResult:
     """Outcome of a publish: what changed and the resulting commit."""
@@ -264,6 +278,8 @@ class _Batch:
     artifacts: dict[str, str | bytes] = field(default_factory=dict)
     deletions: set[str] = field(default_factory=set)
     subjects: list[str] = field(default_factory=list)
+    # Set by a conditional write, so a push that loses its race raises rather than re-applies.
+    expected_head: str | None = None
 
     def record(self, artifacts: Mapping[str, str | bytes], deletions: list[str]) -> None:
         """Fold one write into the net set: the last write or removal of a path wins."""
@@ -1138,7 +1154,12 @@ class GitopsRepo:
             self._pushing = self._pushes()
         written = sorted([*batch.artifacts, *batch.deletions])
         return self._push_tracked(
-            sha, written, dict(batch.artifacts), sorted(batch.deletions), batch.commit_message()
+            sha,
+            written,
+            dict(batch.artifacts),
+            sorted(batch.deletions),
+            batch.commit_message(),
+            expected_head=batch.expected_head,
         )
 
     def _has_staged(self) -> bool:
@@ -1219,9 +1240,13 @@ class GitopsRepo:
         artifacts: Mapping[str, str | bytes],
         message: str,
         deletions: list[str] | None,
+        expected_head: str | None = None,
     ) -> PublishResult:
         """Stage one write into the open batch, whose commit waits for the block to end."""
         batch = cast("_Batch", self._batch)
+        self._require_head(expected_head)
+        if expected_head is not None:
+            batch.expected_head = expected_head
         changed = self._differs(artifacts, deletions)
         # Recorded first, so a write that fails part way is discarded with the batch.
         batch.record(artifacts, list(deletions or []))
@@ -1245,6 +1270,7 @@ class GitopsRepo:
         message: str,
         deletions: list[str] | None = None,
         branch: str | None = None,
+        expected_head: str | None = None,
     ) -> PublishResult:
         """Write artifacts, optionally remove files, commit-if-changed, push-if-set.
 
@@ -1258,12 +1284,19 @@ class GitopsRepo:
           HEAD, push only that branch, and leave the tracked branch untouched
           locally and remotely -- a reviewer merges the PR. This is how a
           production+team write is kept off main (see gitcrud/routing.py).
+
+        ``expected_head`` makes the write conditional on that revision. A head that
+        has moved off it, when the write fetches or after a refused push, raises
+        instead of writing on top, and nothing of this write is left committed.
+
+        Raises:
+            GitopsHeadMovedError: The head moved off ``expected_head``.
         """
         # The tree lock is taken inside for the local work only, so a read waits for
         # the commit and never for the fetch or the push.
         with self._write_lock:
             try:
-                return self._publish_locked(artifacts, message, deletions, branch)
+                return self._publish_locked(artifacts, message, deletions, branch, expected_head)
             finally:
                 # This clone just wrote, so the next read in this scope asks the
                 # remote again instead of reusing the head from before the write.
@@ -1310,18 +1343,20 @@ class GitopsRepo:
         message: str,
         deletions: list[str] | None,
         branch: str | None,
+        expected_head: str | None,
     ) -> PublishResult:
         """The publish body. Caller holds the writer lock."""
         if self._batch is not None:
             if not branch:
                 with self._lock:
-                    return self._stage_into_batch(artifacts, message, deletions)
+                    return self._stage_into_batch(artifacts, message, deletions, expected_head)
             self._split_batch()
 
         # The write goes on the remote's head, never on whatever this clone last saw.
         remote_head = self._fetch_head(write=True) if self._pushes() else None
         with self._lock:
             self._settle_onto(remote_head)
+            self._require_head(expected_head)
 
             # Capture the base BEFORE staging so PR mode can restore the tracked
             # branch to it after committing. An empty repo has no base to branch from.
@@ -1343,7 +1378,24 @@ class GitopsRepo:
 
         if branch:
             return self._push_review_branch(sha_str, branch, written)
-        return self._push_tracked(sha_str, written, artifacts, deletions, message)
+        return self._push_tracked(
+            sha_str, written, artifacts, deletions, message, expected_head=expected_head
+        )
+
+    def _require_head(self, expected: str | None) -> None:
+        """Refuse a conditional write once this clone's head is not the one it was made against.
+
+        An empty repo has no head to compare, the same answer gitcrud's own check gives.
+        Caller holds the tree lock.
+
+        Raises:
+            GitopsHeadMovedError: The head is another revision.
+        """
+        if expected is None:
+            return
+        head = self.head_revision()
+        if head is not None and head != expected:
+            raise GitopsHeadMovedError(expected=expected, head=head)
 
     def _push_tracked(
         self,
@@ -1352,15 +1404,22 @@ class GitopsRepo:
         artifacts: Mapping[str, str | bytes],
         deletions: list[str] | None,
         message: str,
+        *,
+        expected_head: str | None = None,
     ) -> PublishResult:
         """Push a tracked-branch commit, re-applying the write once if the remote moved.
 
         A refused push is re-applied only when the remote's history lacks the commit.
         When it holds it, the push landed and only its answer was lost, and a peer may
-        already have written on top: re-applying would revert that write.
+        already have written on top: re-applying would revert that write. A write
+        conditional on ``expected_head`` is never re-applied: the moved remote is a
+        conflict, and this clone is left on the remote's head without the commit.
 
         Caller holds the writer lock and not the tree lock, so reads carry on over
         the committed tree while the push is in flight.
+
+        Raises:
+            GitopsHeadMovedError: The push was refused and the write is conditional.
         """
         if not self._pushes():
             logger.info(
@@ -1388,7 +1447,9 @@ class GitopsRepo:
                         )
                     elif self._move_onto(remote_head, discard_local=True):
                         # The remote moved between the fetch and the push without this
-                        # commit, so it is orphaned: re-apply the write on the new head.
+                        # commit, so it is orphaned: a conditional write is a conflict
+                        # now, and any other is re-applied on the new head.
+                        self._require_head(expected_head)
                         logger.warning(
                             "Gitops push rejected; re-applying the write on the remote head",
                             error=str(exc),

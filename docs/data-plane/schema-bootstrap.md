@@ -35,8 +35,7 @@ The phase sits inside the API lifespan, ahead of readiness
    `task_max_lifetime` (7 days by default) misses it. Every rendered object carries a checksum taken
    with the platform token removed, so one schema reads as one checksum on either
    platform. The pattern is at <https://github.com/hyperi-io/dfe-schemas/blob/main/docs/clickhouse-platform.md>
-4. **Take the lease** in `schema_lock`. A second replica waits, then reports what
-   the holder left without applying. An expired lease is taken over.
+4. **Take the lease** in `schema_lock`. A second replica waits for the holder to finish, then takes the lease and applies. One whose wait runs out first applies nothing, reports `observed` and stays NotReady, and the engine runs the pass again in the background. An expired lease is taken over. A source deploy takes the same lease around its DDL, waits for it up to `DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS`, and answers 503 `schema_locked` when the wait runs out.
 5. **Compare** against `schema_migrations` and against the live catalogue, and
    apply what is additive.
 6. **Record** every applied object: its kind, the dfe-schemas release, the engine
@@ -79,7 +78,7 @@ rebuilt.
 ## Readiness
 
 `/readyz` gains a `schema` check beside the ClickHouse ping. Ready means the last
-pass converged, or the phase is switched off and gates nothing. A FAILED pass
+pass converged, or the phase is switched off and gates nothing. An `observed` pass is not ready: the holder may still be applying. A FAILED pass
 leaves the pod UP and NotReady with the cause on `GET /api/v1/system/schema`, so
 an operator reads it off the API rather than off a crash loop. `/livez` is never
 consulted -- the pod is not restarted out from under whoever is reading it.
