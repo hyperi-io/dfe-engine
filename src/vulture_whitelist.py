@@ -93,7 +93,6 @@ from dfe_engine.schema import schema_builder_v2 as schema_schema_builder_v2
 from dfe_engine.schema import schema_loader as schema_schema_loader
 from dfe_engine.schema import schema_manager as schema_schema_manager
 from dfe_engine.schema import table_loader as schema_table_loader
-from dfe_engine.services import descriptor as services_descriptor
 from dfe_engine.services import plugins as services_plugins
 from dfe_engine.services import registry as services_registry
 from dfe_engine.services.models import archiver as services_models_archiver
@@ -511,13 +510,6 @@ ai_interface.LogParser.Output
 ai_interface.QueryGenerator.Output
 ai_interface.QueryOptimiser.Output
 ai_interface.SchemaOptimiser.Output
-services_descriptor.ServiceDescriptor.consumer_group
-services_descriptor.ServiceDescriptor.default_port
-services_descriptor.ServiceDescriptor.image
-services_descriptor.ServiceDescriptor.kafka_role
-services_descriptor.ServiceDescriptor.liveness_paths
-services_descriptor.ServiceDescriptor.metrics_port
-services_descriptor.ServiceDescriptor.readiness_paths
 
 # dfe-schemas' validate_schemas.py calls these.
 schema_table_loader.load_table_spec

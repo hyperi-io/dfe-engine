@@ -5,24 +5,12 @@ Consolidates archiver-specific descriptor, validation, and template overrides.
 
 from typing import Any
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 
 descriptor = ServiceDescriptor(
     name="archiver",
     display_name="DFE Archiver",
-    image="ghcr.io/hyperi-io/dfe-archiver",
-    default_port=8080,
-    metrics_port=9090,
-    kafka_role=KafkaRole.CONSUMER,
-    consumer_group="dfe-archiver",
-    # Served by scalo's metrics server on metrics_port, same as every other
-    # service. The old note here claimed the archiver had no health API and
-    # probed /metrics as a stand-in; it does have one, and probing the scrape
-    # handler meant a liveness check that passed whenever the exporter answered
-    # and shipped a full metrics payload every period.
-    liveness_paths=("/livez",),
-    readiness_paths=("/readyz",),
     description="Kafka consumer -- archives events to S3/file storage.",
 )
 

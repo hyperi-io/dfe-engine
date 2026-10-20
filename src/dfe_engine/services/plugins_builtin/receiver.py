@@ -6,20 +6,13 @@ Consolidates receiver-specific descriptor, validation, and template overrides.
 import copy
 from typing import Any
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 
 descriptor = ServiceDescriptor(
     name="receiver",
     display_name="DFE Receiver",
-    image="ghcr.io/hyperi-io/dfe-receiver",
-    default_port=8080,
-    metrics_port=9090,
-    kafka_role=KafkaRole.PRODUCER,
-    liveness_paths=("/livez",),
-    readiness_paths=("/readyz",),
     description="HTTP/gRPC ingestion gateway -- receives events and routes to Kafka.",
-    extra_ports={"grpc": 6000},
 )
 
 

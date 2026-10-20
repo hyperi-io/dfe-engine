@@ -11,9 +11,8 @@ server:
   auth:
     mode: none
 
-grpc:
+grpc:  # bind_address is the receiver's own default
   enabled: false
-  bind_address: "0.0.0.0:6000"
 
 validation:
   require_json: true
@@ -47,8 +46,7 @@ kafka:
     acks: all
     retries: 5
 
-loader:
-  address: "localhost:6000"
+loader:  # address is the app manifest's loader push listener
   transport: kafka
   timeout_ms: 20000  # inside the 25 s a listener holds its answer
 

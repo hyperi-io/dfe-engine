@@ -7,19 +7,12 @@ with instance-specific config tree (vector-only pattern).
 
 from typing import Any
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 
 descriptor = ServiceDescriptor(
     name="transform-vector",
     display_name="DFE Transform (Vector)",
-    image="ghcr.io/hyperi-io/dfe-transform-vector",
-    default_port=8080,
-    metrics_port=9090,
-    kafka_role=KafkaRole.BOTH,
-    consumer_group="dfe-transform-vector",
-    liveness_paths=("/livez",),
-    readiness_paths=("/readyz",),
     description="Kafka-to-Kafka transform using vector.dev pipelines. Multi-source with config tree.",
 )
 

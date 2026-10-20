@@ -30,10 +30,10 @@ Usage:
     # Plugin system
     all_services = valid_services()  # dynamic set from all registered plugins
     plugin = get_plugin("receiver")
-    print(plugin.descriptor.image)
+    print(plugin.descriptor.display_name)
 """
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.models import (
     SERVICE_ARCHIVER,
     SERVICE_CONFIG_CLASSES,
@@ -56,7 +56,6 @@ from dfe_engine.services.validators import ValidationResult, validate_config
 
 __all__ = [
     # Plugin system
-    "KafkaRole",
     "ServiceDescriptor",
     "ServicePlugin",
     # Base
