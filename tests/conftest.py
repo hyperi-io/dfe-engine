@@ -67,15 +67,14 @@ os.environ.setdefault("VERSION_CHECK__ENABLED", "false")
 os.environ.setdefault("DFE_ENV", "test")
 os.environ.setdefault("DFE_AUTH_ENABLED", "false")
 
-# Load .env file if present (before any other imports that might use settings).
-# Only this tree's own: a worktree never reads the main checkout's, and no parent
-# directory's .env is loaded into the test process.
+# Load this tree's own .env, filling only what the shell and the guards above left
+# unset, so a developer .env cannot flip the test posture.
 try:
     from dotenv import load_dotenv
 
     env_path = Path(__file__).parent.parent / ".env"
     if env_path.exists():
-        load_dotenv(env_path, override=True)
+        load_dotenv(env_path, override=False)
         logger.info(f"Loaded environment from {env_path}")
 except ImportError:
     pass  # python-dotenv not installed, rely on shell-exported vars
