@@ -15,7 +15,13 @@ are proven against ClickHouse in tests/integration/test_schema/test_manifest_boo
 import pytest
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 
-from dfe_engine.schema.lock import SchemaLockError, SchemaLockQuorumError, _lock_error, _majority
+from dfe_engine.schema.lock import (
+    SchemaLockError,
+    SchemaLockQuorumError,
+    _lock_error,
+    _majority,
+    _write_settings_for,
+)
 
 
 @pytest.mark.parametrize(
@@ -25,6 +31,21 @@ from dfe_engine.schema.lock import SchemaLockError, SchemaLockQuorumError, _lock
 def test_the_quorum_is_a_majority_and_one_replica_waits_for_none(replicas, quorum):
     """A quorum of one is the server's no-quorum value, which ``auto`` never gives one replica."""
     assert _majority(replicas) == quorum
+
+
+@pytest.mark.parametrize("engine", ["ReplicatedReplacingMergeTree", "ReplacingMergeTree"])
+def test_a_replicated_or_plain_table_takes_a_counted_quorum_and_a_synchronous_write(engine):
+    assert _write_settings_for(engine, 3) == {
+        "insert_quorum": 2,
+        "insert_quorum_parallel": 0,
+        "insert_quorum_timeout": 10_000,
+        "async_insert": 0,
+    }
+
+
+def test_a_shared_table_carries_no_quorum_settings_and_still_writes_synchronously():
+    """Every SharedMergeTree insert is a quorum insert, so Cloud is never asked to read them."""
+    assert _write_settings_for("SharedReplacingMergeTree", 3) == {"async_insert": 0}
 
 
 @pytest.mark.parametrize(

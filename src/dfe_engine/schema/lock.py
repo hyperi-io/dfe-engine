@@ -30,7 +30,8 @@ it, and every read answers only from a replica holding all of them, so a re-read
 lands on a lagging replica still sees the claim that beat it. A claim that cannot
 reach its majority, with a replica down, is a missed attempt retried within the wait.
 So is one acknowledged a settle or more after its free read: a rival's re-read may
-have missed it, so it is soft-released rather than kept.
+have missed it, so it is not kept. It lapses at its expiry unreleased, because a
+release at its version could free a rival that stood while it waited.
 
 The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 """
@@ -90,7 +91,7 @@ class SchemaLockQuorumError(SchemaLockError):
 
 
 class _SlowClaim(Exception):
-    """A claim acknowledged a settle or more after its free read, so it was not kept."""
+    """A claim acknowledged a settle or more after its free read, left to lapse unkept."""
 
 
 def is_quorum_refusal(exc: BaseException) -> bool:
@@ -107,6 +108,25 @@ def _lock_error(action: str, exc: Exception) -> SchemaLockError:
 def _majority(replicas: int) -> int:
     """A majority of *replicas*: 1 on one node, which ClickHouse reads as no quorum wait."""
     return max(replicas, 1) // 2 + 1
+
+
+def _write_settings_for(engine: str, replicas: int) -> dict[str, int]:
+    """What a lease write carries on a table of *engine* with *replicas* replicas.
+
+    Every SharedMergeTree insert is already a quorum insert and ClickHouse documents
+    the quorum settings as not applicable to it, so they are left off there.
+    ``insert_quorum = 'auto'`` never resolves on a single replica and refuses every
+    later write behind it, so elsewhere the majority is counted. ClickHouse refuses a
+    sequential quorum on an async insert, so every write is synchronous.
+    """
+    if engine.startswith("Shared"):
+        return {"async_insert": 0}
+    return {
+        "insert_quorum": _majority(replicas),
+        "insert_quorum_parallel": 0,
+        "insert_quorum_timeout": _QUORUM_TIMEOUT_MS,
+        "async_insert": 0,
+    }
 
 
 def lease_seconds(wait_seconds: float) -> int:
@@ -280,12 +300,11 @@ class SchemaLock:
 
         Raises:
             _SlowClaim: The claim was acknowledged a settle or more after *started*,
-                the free read's start, so it was soft-released instead.
+                the free read's start, so it was left to lapse at its expiry.
         """
         claimed_at = self._claim(now)
         landed = time.monotonic() - started
         if landed >= _SETTLE_SECONDS:
-            self._abandon(claimed_at)
             raise _SlowClaim(f"the claim landed {landed:.2f}s after its free read")
         time.sleep(_SETTLE_SECONDS)
         if not self._claim_stands(claimed_at):
@@ -293,12 +312,6 @@ class SchemaLock:
         self._claimed_at = claimed_at
         self.acquired = True
         return True
-
-    def _abandon(self, claimed_at: datetime) -> None:
-        """Soft-release a claim too slow to stand, unless a later claim already outranks it."""
-        state = self.read()
-        if state is not None and (state.acquired_at, state.holder) == (claimed_at, self._holder):
-            self._write(claimed_at, expires=datetime.now(UTC), released=1)
 
     def _claim(self, now: datetime) -> datetime:
         """Write a claim and return its acquired_at as the table stores it (milliseconds)."""
@@ -317,26 +330,25 @@ class SchemaLock:
         return state.acquired_at == claimed_at and state.holder == self._holder
 
     def _write_settings(self) -> dict[str, int]:
-        """Settings that hold a write until a majority of the table's replicas has it.
-
-        ``insert_quorum = 'auto'`` never resolves on a single replica and refuses every
-        later write behind it, so the majority is counted here. ClickHouse refuses a
-        sequential quorum on an async insert, so the write is synchronous.
-        """
+        """The settings :func:`_write_settings_for` picks for the lease table as it stands."""
+        parameters = {"db": self._database, "tbl": self._table}
         try:
-            rows = self._client.query(
+            engines = self._client.query(
+                "SELECT engine FROM system.tables WHERE database = {db:String} "
+                "AND name = {tbl:String}",
+                parameters=parameters,
+            ).result_rows
+            engine = str(engines[0][0]) if engines else ""
+            if engine.startswith("Shared"):
+                return _write_settings_for(engine, 0)
+            replicas = self._client.query(
                 "SELECT total_replicas FROM system.replicas "
                 "WHERE database = {db:String} AND table = {tbl:String}",
-                parameters={"db": self._database, "tbl": self._table},
+                parameters=parameters,
             ).result_rows
         except Exception as exc:
-            raise _lock_error("could not count the schema lock's replicas", exc) from exc
-        return {
-            "insert_quorum": _majority(int(rows[0][0]) if rows else 1),
-            "insert_quorum_parallel": 0,
-            "insert_quorum_timeout": _QUORUM_TIMEOUT_MS,
-            "async_insert": 0,
-        }
+            raise _lock_error("could not read the schema lock's engine and replicas", exc) from exc
+        return _write_settings_for(engine, int(replicas[0][0]) if replicas else 1)
 
     def _write(self, acquired: datetime, *, expires: datetime, released: int) -> None:
         settings = self._write_settings()

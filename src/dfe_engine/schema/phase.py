@@ -624,14 +624,18 @@ def _apply_under_lock(
 
     The lease table is itself a manifest object, so it has to exist before it can
     be read. A server that does not carry it yet is a first boot, and this pass
-    is the one that creates it.
+    is the one that creates it. A check that cannot be answered raises, because
+    reading it as absent would apply unleased beside a live holder.
 
     A pass whose wait runs out while the holder is still live applies nothing and
     is marked ``observed`` and transient: the holder may still be mid-apply, so
     readiness waits for a later pass that takes the lease itself. A release that
     fails after the apply keeps the apply's result: the lease lapses at its expiry.
+
+    Raises:
+        SchemaLockError: The lease table's presence or the lease could not be read.
     """
-    if _table_absent(lock):
+    if not lock.table_exists():
         return apply_plan(client, plan, allow_drift=allow_drift)
 
     if not lock.acquire(wait_seconds=wait):
@@ -650,14 +654,6 @@ def _apply_under_lock(
     finally:
         if not lock.release_or_lapse():
             state.lease_release_failed = True
-
-
-def _table_absent(lock: SchemaLock) -> bool:
-    """Whether the lease table is missing, which is what a first boot looks like."""
-    try:
-        return not lock.table_exists()
-    except SchemaLockError:
-        return True
 
 
 def _finish(state: SchemaBootstrapState, started: datetime, metrics: SchemaMetrics | None) -> None:

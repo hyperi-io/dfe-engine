@@ -45,7 +45,7 @@ from dfe_schemas.clickhouse import Platform, create_database
 from dfe_engine.schema import lock as lock_module
 from dfe_engine.schema import phase
 from dfe_engine.schema.ledger import MigrationLedger
-from dfe_engine.schema.lock import SchemaLock, holder_name
+from dfe_engine.schema.lock import SchemaLock, SchemaLockError, holder_name
 from dfe_engine.schema.phase import apply_plan
 from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, build_plan, render_one
 
@@ -512,7 +512,7 @@ def test_a_claim_short_of_its_quorum_is_not_taken_and_is_once_the_replica_return
 
 
 def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, replicated_lease):
-    """A rival's re-read may have missed a slow claim, so it is released, never kept."""
+    """A rival's re-read may have missed a slow claim, so it is not kept, and it lapses unreleased."""
     lease = replicated_lease
     held_back = lock_module._SETTLE_SECONDS + 1.0
     lease.fetches("STOP", two_replicas.second)
@@ -532,8 +532,85 @@ def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, 
     assert taken is False, "a claim that landed after the settle stood"
     latest = slow.read()
     assert latest is not None
-    assert (latest.holder, latest.released) == ("pod-slow", True), latest
-    assert lease.lock(two_replicas.second, "pod-next").acquire(wait_seconds=_RIDE_OUT) is True
+    # Releasing it could free a rival that stood while it waited, so it holds until it lapses.
+    assert (latest.holder, latest.released) == ("pod-slow", False), latest
+    assert lease.lock(two_replicas.second, "pod-next").acquire(wait_seconds=0.0) is False
+
+
+def test_a_slow_claim_never_frees_a_rival_that_stood(two_replicas, replicated_lease):
+    """Y stands while X's later-versioned claim waits on its quorum, so X must not release it."""
+    lease = replicated_lease
+    y = lease.lock(two_replicas.first, "pod-y")
+    x = lease.lock(two_replicas.second, "pod-x")
+    observer = lease.lock(two_replicas.first, "pod-observer")
+    # Replica 1 stops fetching, so X's claim on replica 2 waits for its quorum.
+    lease.fetches("STOP", two_replicas.first)
+    try:
+        # Both find the lease free, Y first, so X's claim carries the later version.
+        started_y = time.monotonic()
+        assert y.read() is None
+        now_y = datetime.now(UTC)
+        time.sleep(0.01)
+        started_x = time.monotonic()
+        assert x.read() is None
+        now_x = datetime.now(UTC)
+        outcomes: dict[str, bool | Exception] = {}
+
+        # Private steps: no public path makes X write between Y's ack and Y's re-read.
+        def claim(name: str, lock: SchemaLock, now: datetime, started: float) -> None:
+            try:
+                outcomes[name] = lock._try_claim(now, started=started)
+            except Exception as exc:  # X's refusal is the outcome under test
+                outcomes[name] = exc
+
+        y_claims = threading.Thread(target=claim, args=("y", y, now_y, started_y))
+        y_claims.start()
+        deadline = time.monotonic() + 30
+        while observer.read() is None:
+            if time.monotonic() >= deadline:
+                pytest.fail("Y's claim never landed")
+            time.sleep(0.05)
+        x_claims = threading.Thread(target=claim, args=("x", x, now_x, started_x))
+        x_claims.start()
+        y_claims.join()
+    finally:
+        lease.fetches("START", two_replicas.first)
+    x_claims.join()
+
+    assert outcomes["y"] is True, outcomes
+    assert isinstance(outcomes["x"], lock_module._SlowClaim), outcomes
+    taken = lease.lock(two_replicas.first, "pod-z").acquire(wait_seconds=0.0)
+    holders = [name for name, held in (("pod-y", outcomes["y"]), ("pod-z", taken)) if held is True]
+    assert holders == ["pod-y"], f"two holders: {holders}"
+
+
+def test_an_unreadable_lease_table_fails_the_pass_rather_than_applying_unleased(
+    ch_client, ch_params, empty_database, plan
+):
+    """A pass that cannot tell whether the lease table exists must not apply as if it did not."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+    holder = SchemaLock(
+        ch_client, database=empty_database, table=table, holder="pod-a", lease_seconds=60
+    )
+    assert holder.acquire(wait_seconds=_RIDE_OUT) is True
+    refused = clickhouse_connect.get_client(**ch_params)
+    # Every query this client sends is now refused for memory, a refusal a later pass can clear.
+    refused.set_client_setting("max_untracked_memory", 0)
+    refused.set_client_setting("max_memory_usage", 1)
+    lock = SchemaLock(
+        refused, database=empty_database, table=table, holder="pod-b", lease_seconds=60
+    )
+    state = phase.SchemaBootstrapState(state=phase.STATE_RUNNING)
+
+    with pytest.raises(SchemaLockError) as raised:
+        phase._apply_under_lock(ch_client, plan, lock, wait=0.0, allow_drift=False, state=state)
+
+    assert str(raised.value).startswith("could not read the schema lock table"), raised.value
+    assert phase.is_transient_failure(raised.value) is True, raised.value
+    held = holder.read()
+    assert held is not None
+    assert (held.holder, held.released) == ("pod-a", False)
 
 
 def test_a_release_that_fails_after_the_apply_keeps_the_apply(
