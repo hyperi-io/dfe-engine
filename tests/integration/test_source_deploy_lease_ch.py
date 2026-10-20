@@ -84,7 +84,8 @@ def test_a_source_deploy_waits_for_the_schema_lease(ch_client, stack):
     assert _table_exists(ch_client, stack.database, name)
     latest = holder.read()
     assert latest is not None
-    assert (latest.holder, latest.released) == (holder_name(), True)
+    assert latest.released is True
+    assert latest.holder.startswith(f"{holder_name()}/"), latest.holder
 
 
 def test_a_source_deploy_that_outwaits_the_lease_answers_503_and_applies_nothing(

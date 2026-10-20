@@ -13,25 +13,28 @@ the rule asks. A mock would agree with whatever the applier believes, and the
 failures this replaces -- a table on one replica, an engine clause the server
 rejects, a create that silently no-ops -- are all server behaviour.
 
-Three things are proven here:
+Proven here:
 
 * one pass over an empty database creates every ClickHouse object the manifest
   declares, and nothing else creates any of them
 * every applied object is recorded in ``schema_migrations`` with the checksum of
-  the statement that ran
+  the statement that ran, and an identical record still lands
 * a second pass changes nothing, which is what makes the phase safe to run on
   every boot
+* the schema lease leaves one holder when claimers wait, race, tie to the
+  millisecond, or release after their lease was taken over
 """
 
-from __future__ import annotations
-
+import threading
 import time
 import uuid
+from datetime import UTC, datetime
 
+import clickhouse_connect
 import pytest
 
 from dfe_engine.schema.ledger import MigrationLedger
-from dfe_engine.schema.lock import SchemaLock
+from dfe_engine.schema.lock import SchemaLock, holder_name
 from dfe_engine.schema.phase import apply_plan
 from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, build_plan
 
@@ -195,3 +198,114 @@ def test_a_second_holder_waits_and_reports_rather_than_applying(ch_client, empty
     first.release()
     assert second.acquire(wait_seconds=0.0) is True
     second.release()
+
+
+def test_appliers_that_find_the_lease_free_together_leave_one_holder(
+    ch_params, ch_client, empty_database, plan
+):
+    """Claims written in the same instant: the latest stands and every other caller reports."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+    racers = 4
+    start = threading.Barrier(racers, timeout=60)
+    outcomes: list[bool | Exception] = []
+
+    def race(holder: str) -> None:
+        try:
+            client = clickhouse_connect.get_client(**ch_params)
+            lock = SchemaLock(
+                client, database=empty_database, table=table, holder=holder, lease_seconds=60
+            )
+            start.wait()
+            outcomes.append(lock.acquire(wait_seconds=0.0))
+        except Exception as exc:  # a racer that raises must fail the test, not drop out of it
+            start.abort()
+            outcomes.append(exc)
+
+    threads = [threading.Thread(target=race, args=(f"pod-{n}",)) for n in range(racers)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    errors = [outcome for outcome in outcomes if isinstance(outcome, Exception)]
+    assert not errors, errors
+    assert len(outcomes) == racers
+    assert outcomes.count(True) == 1, outcomes
+
+
+def test_claims_in_the_same_millisecond_keep_one_holder_through_a_merge(
+    ch_params, ch_client, empty_database, plan
+):
+    """Two claimers on one pod at one instant: one stands, both name it, and a merge keeps it."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+    target = f"`{empty_database}`.`{table}`"
+    locks = [
+        SchemaLock(
+            clickhouse_connect.get_client(**ch_params),
+            database=empty_database,
+            table=table,
+            lease_seconds=60,
+        )
+        for _ in range(2)
+    ]
+    # The larger holder writes first, so a merge keeps the claim a holder-ordered tie-break loses.
+    locks.sort(key=lambda lock: lock.holder, reverse=True)
+    holders = [lock.holder for lock in locks]
+    assert holders[0] != holders[1]
+    assert all(holder.startswith(f"{holder_name()}/") for holder in holders), holders
+
+    # Private calls: no public path can make two claims share one timestamp.
+    now = datetime.now(UTC)
+    claimed = [lock._claim(now) for lock in locks]
+    assert claimed[0] == claimed[1]
+
+    def outcome() -> tuple[list[bool], list[str | None]]:
+        stands = [lock._claim_stands(at) for lock, at in zip(locks, claimed, strict=True)]
+        seen = [lock.read() for lock in locks]
+        return stands, [state.holder if state is not None else None for state in seen]
+
+    def stored_rows() -> int:
+        return ch_client.query(f"SELECT count() FROM {target}").result_rows[0][0]
+
+    assert stored_rows() == 2, "the tie merged before it could be read unmerged"
+    stands, named = outcome()
+    assert stands.count(True) == 1, (holders, stands)
+    winner = holders[stands.index(True)]
+    assert named == [winner, winner]
+
+    ch_client.command(f"OPTIMIZE TABLE {target} FINAL")
+
+    assert stored_rows() == 1, "OPTIMIZE did not fold the tie"
+    assert outcome() == (stands, [winner, winner])
+
+
+def test_a_release_after_the_lease_was_taken_over_leaves_the_takeover_held(
+    ch_params, ch_client, empty_database, plan
+):
+    """A holder that ran past its expiry and then releases must not free its successor's lease."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+
+    def lock(holder: str, lease_seconds: int) -> SchemaLock:
+        return SchemaLock(
+            clickhouse_connect.get_client(**ch_params),
+            database=empty_database,
+            table=table,
+            holder=holder,
+            lease_seconds=lease_seconds,
+        )
+
+    stale = lock("pod-h", 1)
+    assert stale.acquire() is True
+    time.sleep(1.5)
+    takeover = lock("pod-n", 60)
+    assert takeover.acquire() is True, "the lapsed lease was not taken over"
+
+    stale.release()
+
+    latest = takeover.read()
+    assert latest is not None
+    assert (latest.holder, latest.released) == ("pod-n", False)
+    assert lock("pod-x", 60).acquire(wait_seconds=0) is False

@@ -18,9 +18,17 @@ caller that cannot take it waits for the holder to finish and then takes it. One
 still waiting when its wait runs out applies nothing. An expired lease is taken
 over rather than waited on, so a crashed holder does not block the next boot.
 
+The table keeps the latest write per lock name, so two callers that both found the
+lease free both write a claim. Each re-reads after a settle delay and keeps the
+lease only if the latest claim is still its own, so the later claim wins and the
+earlier one goes back to waiting. Reads use ``FINAL``, so a same-millisecond tie
+resolves to the row a merge keeps, before and after that merge. Each lock instance
+writes its own holder name, so two claimers on one pod still tell their claims apart.
+
 The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 """
 
+import secrets
 import socket
 import time
 from collections.abc import Iterator
@@ -37,6 +45,9 @@ from dfe_engine.schema.plan import LOCK_ID, render_one
 LOCK_NAME = "schema_bootstrap"
 
 _POLL_SECONDS = 2.0
+
+# Longer than a racing claimer takes between finding the lease free and writing.
+_SETTLE_SECONDS = 0.5
 
 
 class SchemaLockError(Exception):
@@ -67,14 +78,20 @@ class LockState:
     holder: str
     expires_at: datetime
     released: bool
+    acquired_at: datetime
 
     def held_at(self, now: datetime) -> bool:
         """Whether this row is a live claim rather than a finished or lapsed one."""
         return not self.released and self.expires_at > now
 
 
+def _utc(value: datetime) -> datetime:
+    """*value* as an aware UTC time, since the driver hands back naive UTC times."""
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
 def holder_name() -> str:
-    """Who this process is in the lease: the pod hostname, which is what an operator reads."""
+    """The pod hostname, which every holder name this process writes starts with."""
     return socket.gethostname()
 
 
@@ -82,7 +99,8 @@ class SchemaLock:
     """Take, hold and release the bootstrap lease.
 
     Construct with the table's real name, which the caller reads off the rendered
-    manifest object -- this module names no table of its own.
+    manifest object -- this module names no table of its own. With no *holder*,
+    the instance writes the hostname plus a suffix of its own.
     """
 
     def __init__(
@@ -97,8 +115,10 @@ class SchemaLock:
         self._client = client
         self._database = database
         self._table = table
-        self._holder = holder or holder_name()
+        # Concurrent deploys on one pod each build a lock, and a tie needs their names to differ.
+        self._holder = holder or f"{holder_name()}/{secrets.token_hex(4)}"
         self._lease_seconds = max(lease_seconds, 1)
+        self._claimed_at: datetime | None = None
         self.acquired = False
 
     @property
@@ -119,11 +139,14 @@ class SchemaLock:
         return bool(rows)
 
     def read(self) -> LockState | None:
-        """The latest claim on the lock name, or None when nothing has ever taken it."""
+        """The latest claim on the lock name, or None when nothing has ever taken it.
+
+        ``FINAL`` keeps the row a merge would keep, so readers name the same claim
+        of a tie whether or not it has merged yet.
+        """
         target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         sql = (
-            "SELECT argMax(holder, acquired_at), argMax(expires_at, acquired_at), "  # noqa: S608 - quoted database and manifest table; values bound
-            f"argMax(released, acquired_at) FROM {target} "
+            f"SELECT holder, expires_at, released, acquired_at FROM {target} FINAL "  # noqa: S608 - quoted database and manifest table; values bound
             "WHERE lock_name = {lock:String}"
         )
         try:
@@ -132,12 +155,15 @@ class SchemaLock:
             raise SchemaLockError(f"could not read the schema lock: {exc}") from exc
         if not rows or rows[0][0] in (None, ""):
             return None
-        expires = rows[0][1]
-        if not isinstance(expires, datetime):
+        expires, acquired = rows[0][1], rows[0][3]
+        if not isinstance(expires, datetime) or not isinstance(acquired, datetime):
             return None
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=UTC)
-        return LockState(holder=str(rows[0][0]), expires_at=expires, released=bool(rows[0][2]))
+        return LockState(
+            holder=str(rows[0][0]),
+            expires_at=_utc(expires),
+            released=bool(rows[0][2]),
+            acquired_at=_utc(acquired),
+        )
 
     def acquire(self, *, wait_seconds: float = 0.0) -> bool:
         """Take the lease, waiting up to *wait_seconds* for a live holder to finish.
@@ -151,9 +177,15 @@ class SchemaLock:
             state = self.read()
             now = datetime.now(UTC)
             if state is None or not state.held_at(now):
-                self._claim(now)
-                self.acquired = True
-                return True
+                claimed_at = self._claim(now)
+                time.sleep(_SETTLE_SECONDS)
+                if self._claim_stands(claimed_at):
+                    self._claimed_at = claimed_at
+                    self.acquired = True
+                    return True
+                if time.monotonic() >= deadline:
+                    return False
+                continue
             if time.monotonic() >= deadline:
                 logger.info(
                     "schema lock held elsewhere; reporting without applying",
@@ -165,13 +197,28 @@ class SchemaLock:
 
     def release(self) -> None:
         """Soft-release the lease. A completed pass needs no delete."""
-        if not self.acquired:
+        if not self.acquired or self._claimed_at is None:
             return
-        self._write(datetime.now(UTC), expires=datetime.now(UTC), released=1)
+        # The claim's own version, so a takeover written after this claim lapsed still outranks it.
+        self._write(self._claimed_at, expires=datetime.now(UTC), released=1)
+        self._claimed_at = None
         self.acquired = False
 
-    def _claim(self, now: datetime) -> None:
-        self._write(now, expires=now + timedelta(seconds=self._lease_seconds), released=0)
+    def _claim(self, now: datetime) -> datetime:
+        """Write a claim and return its acquired_at as the table stores it (milliseconds)."""
+        acquired = now.replace(microsecond=now.microsecond // 1000 * 1000)
+        self._write(acquired, expires=now + timedelta(seconds=self._lease_seconds), released=0)
+        return acquired
+
+    def _claim_stands(self, claimed_at: datetime) -> bool:
+        """Whether the latest visible claim is this one, or one written before it.
+
+        An earlier claim means this one is not visible yet, which is no sign of a later one.
+        """
+        state = self.read()
+        if state is None or state.acquired_at < claimed_at:
+            return True
+        return state.acquired_at == claimed_at and state.holder == self._holder
 
     def _write(self, acquired: datetime, *, expires: datetime, released: int) -> None:
         try:
