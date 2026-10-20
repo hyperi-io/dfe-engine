@@ -91,7 +91,8 @@ def test_a_pass_that_outwaits_a_live_lease_stays_not_ready_until_it_applies(
         holder="pod-a",
         lease_seconds=300,
     )
-    assert holder.acquire() is True
+    # A claim held up by a server stall is a missed attempt, so taking the lease here waits.
+    assert holder.acquire(wait_seconds=10.0) is True
     run_pass = functools.partial(
         phase.run_bootstrap, settings=_settings(local_ch, database), wait_seconds=1.0
     )

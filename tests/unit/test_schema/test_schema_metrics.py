@@ -15,6 +15,7 @@ expose the same names.
 import pytest
 from scalo.metrics import create_metrics
 
+from dfe_engine.schema import phase
 from dfe_engine.schema.metrics import SchemaMetrics
 
 NAMES = (
@@ -41,6 +42,20 @@ def test_the_gauges_land_as_dfe_schema_whatever_the_managers_namespace(namespace
     for name in NAMES:
         assert any(row.startswith(name) for row in rows), exposition
     assert "dfe_dfe_" not in exposition
+
+
+def test_a_pass_whose_lease_release_failed_is_counted():
+    manager = create_metrics(
+        "schema-metrics-release", backend="prometheus", enable_auto_update=False, metric_prefix=""
+    )
+    metrics = SchemaMetrics(manager)
+    unreleased = phase.SchemaBootstrapState(state=phase.STATE_CONVERGED, lease_release_failed=True)
+
+    phase._report_metrics(unreleased, metrics)
+    phase._report_metrics(phase.SchemaBootstrapState(state=phase.STATE_CONVERGED), metrics)
+
+    rows = [row for row in manager.metrics_text.splitlines() if not row.startswith("#")]
+    assert "dfe_schema_lease_release_failures_total 1.0" in rows, rows
 
 
 def test_no_manager_records_nothing():

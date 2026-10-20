@@ -35,7 +35,7 @@ The phase sits inside the API lifespan, ahead of readiness
    `task_max_lifetime` (7 days by default) misses it. Every rendered object carries a checksum taken
    with the platform token removed, so one schema reads as one checksum on either
    platform. The pattern is at <https://github.com/hyperi-io/dfe-schemas/blob/main/docs/clickhouse-platform.md>
-4. **Take the lease** in `schema_lock`. A second replica waits for the holder to finish, then takes the lease and applies. One whose wait runs out first applies nothing, reports `observed` and stays NotReady, and the engine runs the pass again in the background. An expired lease is taken over. A source deploy takes the same lease around its DDL, waits for it up to `DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS`, and answers 503 `schema_locked` when the wait runs out.
+4. **Take the lease** in `schema_lock`. A second replica waits for the holder to finish, then takes the lease and applies. One whose wait runs out first applies nothing, reports `observed` and stays NotReady, and the engine runs the pass again in the background. An expired lease is taken over. A source deploy takes the same lease around its DDL, waits for it up to `DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS`, and answers 503 `schema_locked` when the wait runs out. Claims wait for a majority of ClickHouse replicas, so with a majority down the lease cannot be taken and the pass reports `observed`. A two-replica cluster cannot take the lease while either replica is down, because a majority of 2 is 2.
 5. **Compare** against `schema_migrations` and against the live catalogue, and
    apply what is additive.
 6. **Record** every applied object: its kind, the dfe-schemas release, the engine
@@ -124,7 +124,9 @@ engine, no tables.
   came from
 - `dfe_schema_bootstrap_state` (0 unknown, 1 converged, 2 failed, 3 running,
   4 observed), `dfe_schema_bootstrap_duration_seconds`,
-  `dfe_schema_version_info`, `dfe_schema_objects_refused`
+  `dfe_schema_version_info`, `dfe_schema_objects_refused`,
+  `dfe_schema_lease_release_failures_total` (a pass that applied but could not
+  release the lease, which then lapses at its expiry)
 
 ## What the engine still renders itself
 

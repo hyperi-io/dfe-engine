@@ -27,8 +27,11 @@ Proven here:
   every replica once it is acknowledged, so claimers on two replicas, or on two
   replicas that cannot fetch from each other, never both hold
 * a claim that cannot reach its quorum is not taken, and does not raise
+* a claim that lands slower than the settle does not stand, and is released
+* a lease release that fails after the apply keeps the apply's result
 """
 
+import secrets
 import threading
 import time
 import uuid
@@ -39,6 +42,8 @@ import clickhouse_connect
 import pytest
 from dfe_schemas.clickhouse import Platform, create_database
 
+from dfe_engine.schema import lock as lock_module
+from dfe_engine.schema import phase
 from dfe_engine.schema.ledger import MigrationLedger
 from dfe_engine.schema.lock import SchemaLock, holder_name
 from dfe_engine.schema.phase import apply_plan
@@ -48,6 +53,9 @@ pytestmark = pytest.mark.integration
 
 # Kinds that land in the data or meta database and are visible in system.tables.
 _TABLE_KINDS = ("table", "materialized_view", "view")
+
+# A claim held up by a server stall is a missed attempt, so a caller that must take the lease waits.
+_RIDE_OUT = 10.0
 
 
 @pytest.fixture
@@ -199,10 +207,10 @@ def test_a_second_holder_waits_and_reports_rather_than_applying(ch_client, empty
         ch_client, database=empty_database, table=lock_object.name, holder="pod-b", lease_seconds=60
     )
 
-    assert first.acquire() is True
+    assert first.acquire(wait_seconds=_RIDE_OUT) is True
     assert second.acquire(wait_seconds=0.0) is False
     first.release()
-    assert second.acquire(wait_seconds=0.0) is True
+    assert second.acquire(wait_seconds=_RIDE_OUT) is True
     second.release()
 
 
@@ -223,7 +231,7 @@ def test_appliers_that_find_the_lease_free_together_leave_one_holder(
                 client, database=empty_database, table=table, holder=holder, lease_seconds=60
             )
             start.wait()
-            outcomes.append(lock.acquire(wait_seconds=0.0))
+            outcomes.append(lock.acquire(wait_seconds=_RIDE_OUT))
         except Exception as exc:  # a racer that raises must fail the test, not drop out of it
             start.abort()
             outcomes.append(exc)
@@ -304,10 +312,10 @@ def test_a_release_after_the_lease_was_taken_over_leaves_the_takeover_held(
         )
 
     stale = lock("pod-h", 1)
-    assert stale.acquire() is True
+    assert stale.acquire(wait_seconds=_RIDE_OUT) is True
     time.sleep(1.5)
     takeover = lock("pod-n", 60)
-    assert takeover.acquire() is True, "the lapsed lease was not taken over"
+    assert takeover.acquire(wait_seconds=_RIDE_OUT) is True, "the lapsed lease was not taken over"
 
     stale.release()
 
@@ -352,11 +360,11 @@ def test_lease_reads_and_writes_carry_the_consistency_settings(ch_client, empty_
         ch_client, database=empty_database, table=table, holder="pod-s", lease_seconds=60
     )
 
-    assert lock.acquire() is True
+    assert lock.acquire(wait_seconds=_RIDE_OUT) is True
     lock.release()
 
     queries = _lease_queries(ch_client, empty_database, table)
-    assert [kind for kind, _ in queries].count("Insert") == 2, queries
+    assert [kind for kind, _ in queries].count("Insert") >= 2, queries
     _assert_consistent(queries, quorum="1")
 
 
@@ -395,17 +403,16 @@ def replicated_lease(two_replicas):
             lease_seconds=60,
         )
 
-    return SimpleNamespace(
-        database=database,
-        table=table,
-        target=f"`{database}`.`{table}`",
-        r1=r1,
-        r2=r2,
-        lock=lock,
-    )
+    def fetches(verb: str, *servers: dict) -> None:
+        # A fresh client each time: a quorum wait outlasts the server's HTTP keep-alive.
+        for params in servers:
+            client = clickhouse_connect.get_client(**params)
+            client.command(f"SYSTEM {verb} FETCHES `{database}`.`{table}`")
+
+    return SimpleNamespace(database=database, table=table, lock=lock, fetches=fetches)
 
 
-def _race(params: list[tuple[dict, str]], build) -> dict[str, bool | Exception]:
+def _race(params: list[tuple[dict, str]], build, *, wait: float) -> dict[str, bool | Exception]:
     """Start one acquire per (params, holder) at the same instant, and collect each outcome."""
     start = threading.Barrier(len(params), timeout=60)
     outcomes: dict[str, bool | Exception] = {}
@@ -414,7 +421,7 @@ def _race(params: list[tuple[dict, str]], build) -> dict[str, bool | Exception]:
         try:
             lock = build(server, holder)
             start.wait()
-            outcomes[holder] = lock.acquire(wait_seconds=0.0)
+            outcomes[holder] = lock.acquire(wait_seconds=wait)
         except Exception as exc:  # a racer that raises must fail the test, not drop out of it
             start.abort()
             outcomes[holder] = exc
@@ -431,14 +438,18 @@ def test_claimers_racing_across_two_replicas_leave_one_holder(two_replicas, repl
     """Each claim reaches both replicas before it is acknowledged, so every racer reads every claim."""
     lease = replicated_lease
     servers = [two_replicas.first, two_replicas.second] * 2
-    outcomes = _race([(server, f"pod-{n}") for n, server in enumerate(servers)], lease.lock)
+    outcomes = _race(
+        [(server, f"pod-{n}") for n, server in enumerate(servers)], lease.lock, wait=_RIDE_OUT
+    )
 
     errors = [outcome for outcome in outcomes.values() if isinstance(outcome, Exception)]
     assert not errors, errors
     assert len(outcomes) == len(servers)
     assert list(outcomes.values()).count(True) == 1, outcomes
-    queries = _lease_queries(lease.r1, lease.database, lease.table)
-    queries += _lease_queries(lease.r2, lease.database, lease.table)
+    queries: list[tuple[str, dict[str, str]]] = []
+    for params in (two_replicas.first, two_replicas.second):
+        client = clickhouse_connect.get_client(**params)
+        queries += _lease_queries(client, lease.database, lease.table)
     _assert_consistent(queries, quorum="2")
 
 
@@ -447,15 +458,16 @@ def test_claimers_on_replicas_that_cannot_fetch_from_each_other_never_both_hold(
 ):
     """Replication stalled both ways: each replica sees only its own claim, so neither may stand."""
     lease = replicated_lease
-    for client in (lease.r1, lease.r2):
-        client.command(f"SYSTEM STOP FETCHES {lease.target}")
+    servers = (two_replicas.first, two_replicas.second)
+    lease.fetches("STOP", *servers)
     try:
         outcomes = _race(
-            [(two_replicas.first, "pod-r1"), (two_replicas.second, "pod-r2")], lease.lock
+            [(two_replicas.first, "pod-r1"), (two_replicas.second, "pod-r2")],
+            lease.lock,
+            wait=0.0,
         )
     finally:
-        for client in (lease.r1, lease.r2):
-            client.command(f"SYSTEM START FETCHES {lease.target}")
+        lease.fetches("START", *servers)
 
     errors = [outcome for outcome in outcomes.values() if isinstance(outcome, Exception)]
     assert not errors, errors
@@ -467,10 +479,11 @@ def test_a_claim_short_of_its_quorum_is_not_taken_and_is_once_the_replica_return
 ):
     """A replica down is a missed attempt that retries within the wait, never a raise."""
     lease = replicated_lease
+    first = clickhouse_connect.get_client(**two_replicas.first)
     two_replicas.stop_second()
 
     def active() -> int:
-        rows = lease.r1.query(
+        rows = first.query(
             "SELECT active_replicas FROM system.replicas WHERE database = {db:String} "
             "AND table = {tbl:String}",
             parameters={"db": lease.database, "tbl": lease.table},
@@ -496,3 +509,75 @@ def test_a_claim_short_of_its_quorum_is_not_taken_and_is_once_the_replica_return
 
     assert lock.acquire(wait_seconds=60.0) is True
     lock.release()
+
+
+def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, replicated_lease):
+    """A rival's re-read may have missed a slow claim, so it is released, never kept."""
+    lease = replicated_lease
+    held_back = lock_module._SETTLE_SECONDS + 1.0
+    lease.fetches("STOP", two_replicas.second)
+    # Replica 2 resumes fetching after the claim is written, so its quorum lands that late.
+    resume = threading.Timer(held_back, lease.fetches, args=("START", two_replicas.second))
+    slow = lease.lock(two_replicas.first, "pod-slow")
+    resume.start()
+    try:
+        started = time.monotonic()
+        taken = slow.acquire(wait_seconds=0.0)
+        elapsed = time.monotonic() - started
+    finally:
+        resume.join()
+        lease.fetches("START", two_replicas.second)
+
+    assert elapsed >= held_back, f"the claim landed after {elapsed:.2f}s, not held back"
+    assert taken is False, "a claim that landed after the settle stood"
+    latest = slow.read()
+    assert latest is not None
+    assert (latest.holder, latest.released) == ("pod-slow", True), latest
+    assert lease.lock(two_replicas.second, "pod-next").acquire(wait_seconds=_RIDE_OUT) is True
+
+
+def test_a_release_that_fails_after_the_apply_keeps_the_apply(
+    ch_client, ch_params, empty_database, plan
+):
+    """The lease lapses at its expiry, so a refused release must not fail a converged apply."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+    suffix = uuid.uuid4().hex[:8]
+    user, quota, password = f"lease_{suffix}", f"lease_one_insert_{suffix}", secrets.token_hex(16)
+    ch_client.command(f"CREATE USER `{user}` IDENTIFIED WITH sha256_password BY '{password}'")
+    try:
+        ch_client.command(f"GRANT SELECT, INSERT ON `{empty_database}`.`{table}` TO `{user}`")
+        ch_client.command(f"GRANT SELECT ON system.replicas TO `{user}`")
+        # The claim is this user's one insert, so its release is refused.
+        ch_client.command(
+            f"CREATE QUOTA `{quota}` FOR INTERVAL 1 hour MAX query_inserts = 1 TO `{user}`"
+        )
+        lock = SchemaLock(
+            clickhouse_connect.get_client(
+                host=ch_params["host"],
+                port=ch_params["port"],
+                username=user,
+                password=password,
+                secure=ch_params["secure"],
+            ),
+            database=empty_database,
+            table=table,
+            holder="pod-r",
+            lease_seconds=60,
+        )
+        state = phase.SchemaBootstrapState(state=phase.STATE_RUNNING)
+
+        report = phase._apply_under_lock(
+            ch_client, plan, lock, wait=0.0, allow_drift=False, state=state
+        )
+
+        assert report is not None
+        assert not report.refused, [outcome.describe() for outcome in report.refused]
+        assert state.state == phase.STATE_RUNNING, state.error
+        assert state.lease_release_failed is True
+        held = lock.read()
+        assert held is not None
+        assert (held.holder, held.released) == ("pod-r", False), "the refused release landed"
+    finally:
+        ch_client.command(f"DROP QUOTA IF EXISTS `{quota}`")
+        ch_client.command(f"DROP USER IF EXISTS `{user}`")
