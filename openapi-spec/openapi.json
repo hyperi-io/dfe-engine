@@ -4422,7 +4422,7 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).\n\nA schema pin naming a schema that does not exist is ACCEPTED here and REFUSED\nby ``/sources/import`` (#501), so the same stored document is valid or invalid\ndepending on how it arrived. That asymmetry is known and undecided -- #504.\nAuthoring a source before its schema is a real ordering, and making this path\nas strict as import forbids it.",
+        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.",
         "operationId": "create_source_api_v1_sources_post",
         "requestBody": {
           "required": true,
@@ -5343,7 +5343,7 @@
           "Sources"
         ],
         "summary": "Update Source",
-        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and a\ntable-shaping field changes: schema pins (``meta_schema``, ``meta_schema_version``,\n``derived_schema``, ``additional_fields``), ``ttl_days``, ``engine``, common-header\ntype/version, ``views``, or ``transform``. Draft versions (``current`` not deployed)\nupdate in place.\n\nOrigin (receiver vs fetcher) cannot change, and a pinned ``meta_schema`` cannot be\ncleared: once a source owns its own table it cannot move back onto ``main``.\n\nA field the body omits keeps its stored value (``header``, ``schema``, ``views``,\n``transform``, ``transport``, ``archive``); ``null``, ``[]`` or ``false`` clears it.\n\nA schema pin naming nothing is accepted here and refused by ``/sources/import``.\nSee ``create_source`` and #504; the asymmetry is known and undecided.",
+        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and a\ntable-shaping field changes: schema pins (``meta_schema``, ``meta_schema_version``,\n``derived_schema``, ``additional_fields``), ``ttl_days``, ``engine``, common-header\ntype/version, ``views``, or ``transform``. Draft versions (``current`` not deployed)\nupdate in place.\n\nOrigin (receiver vs fetcher) cannot change, and a pinned ``meta_schema`` cannot be\ncleared: once a source owns its own table it cannot move back onto ``main``.\n\nA field the body omits keeps its stored value (``header``, ``schema``, ``views``,\n``transform``, ``transport``, ``archive``); ``null``, ``[]`` or ``false`` clears it.\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.",
         "operationId": "update_source_api_v1_sources__name__put",
         "parameters": [
           {
@@ -5898,7 +5898,7 @@
           "Sources"
         ],
         "summary": "Reconcile Apps",
-        "description": "Bring the deploy repo's derived app state into step with the sources.\n\nRecompiles every stack-scoped routing block (receiver, loader, archiver) and\ndeploys, syncs or removes the instances of every instance-scoped app (a fetcher\nper active fetcher-based source). Every source write does this on its own; this\nroute is the retry when one reported ``apps_sync_error``.",
+        "description": "Bring the deploy repo's derived app state into step with the sources.\n\nRecompiles every stack-scoped routing block (receiver, loader, archiver) and\ndeploys, syncs or removes the instances of every instance-scoped app (a fetcher\nper active fetcher-based source). Every source write does this on its own; this\nroute is the retry when one reported ``apps_sync_error``, and the pass that\ndeletes a stranded ``_load`` topic a deploy reported in ``topics_pending_removal``.",
         "operationId": "reconcile_apps_api_v1_sources_reconcile_apps_post",
         "responses": {
           "200": {
@@ -11684,234 +11684,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
-    "/api/v1/discovery/databases": {
-      "get": {
-        "tags": [
-          "discovery"
-        ],
-        "summary": "List Databases",
-        "description": "List all ClickHouse databases.",
-        "operationId": "list_databases_api_v1_discovery_databases_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/DatabaseInfo"
-                  },
-                  "type": "array",
-                  "title": "Response List Databases Api V1 Discovery Databases Get"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
-    "/api/v1/discovery/tables": {
-      "get": {
-        "tags": [
-          "discovery"
-        ],
-        "summary": "List Tables",
-        "description": "List tables in a ClickHouse database.",
-        "operationId": "list_tables_api_v1_discovery_tables_get",
-        "parameters": [
-          {
-            "name": "database",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Database to list tables from",
-              "default": "default",
-              "title": "Database"
-            },
-            "description": "Database to list tables from"
-          },
-          {
-            "name": "engine",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter by engine type",
-              "title": "Engine"
-            },
-            "description": "Filter by engine type"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TableInfo"
-                  },
-                  "title": "Response List Tables Api V1 Discovery Tables Get"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
-    "/api/v1/discovery/tables/{table_name}/columns": {
-      "get": {
-        "tags": [
-          "discovery"
-        ],
-        "summary": "List Columns",
-        "description": "List columns for a specific table.",
-        "operationId": "list_columns_api_v1_discovery_tables__table_name__columns_get",
-        "parameters": [
-          {
-            "name": "table_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Table Name"
-            }
-          },
-          {
-            "name": "database",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "description": "Database containing the table",
-              "default": "default",
-              "title": "Database"
-            },
-            "description": "Database containing the table"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ColumnInfo"
-                  },
-                  "title": "Response List Columns Api V1 Discovery Tables  Table Name  Columns Get"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -24493,6 +24265,22 @@
             "type": "array",
             "title": "Restart Required",
             "description": "One command per app whose running process cannot take this change where it stands."
+          },
+          "topics_removed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics Removed",
+            "description": "Stranded _load topics deleted: no transform instance writing one was in the deploy repo before this pass, the transform's consumer group had no live member, and nothing on it was unread"
+          },
+          "topics_pending_removal": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics Pending Removal",
+            "description": "Stranded _load topics kept, because a transform instance writing one was in the deploy repo before this pass, the transform's consumer group has a live member or cannot be named, or a consumer group has records left on it"
           }
         },
         "type": "object",
@@ -25966,40 +25754,6 @@
         "title": "CloudServiceStateResponse",
         "description": "CH Cloud service control-plane state."
       },
-      "ColumnInfo": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "type": {
-            "type": "string",
-            "title": "Type"
-          },
-          "default_kind": {
-            "type": "string",
-            "title": "Default Kind",
-            "default": ""
-          },
-          "default_expression": {
-            "type": "string",
-            "title": "Default Expression",
-            "default": ""
-          },
-          "comment": {
-            "type": "string",
-            "title": "Comment",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "type"
-        ],
-        "title": "ColumnInfo",
-        "description": "A column in a ClickHouse table."
-      },
       "CompileRequest": {
         "properties": {
           "language": {
@@ -27030,25 +26784,6 @@
         ],
         "title": "DDLResult",
         "description": "Generated DDL output."
-      },
-      "DatabaseInfo": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "engine": {
-            "type": "string",
-            "title": "Engine",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "DatabaseInfo",
-        "description": "Summary of a ClickHouse database."
       },
       "DeclaredValue": {
         "properties": {
@@ -36397,13 +36132,21 @@
             "title": "Topics Failed",
             "description": "Kafka topics that could not be created. Never fails the deploy - the schema is live and Kafka may not be in the path at all."
           },
-          "topics_stranded": {
+          "topics_removed": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Topics Stranded",
-            "description": "Topics on the broker this version has no consumer for. A ``_load`` topic left by a version that dropped its transform suppresses the source's ``_land`` topic in the loader, so the source silently stops loading. Reported, never deleted: records may still be in flight on it."
+            "title": "Topics Removed",
+            "description": "Kafka topics this deploy deleted: the ``_load`` topic an earlier version with a transform wrote, which stops the loader reading the source's ``_land`` topic. Deleted once the deploy repo carries no transform instance writing it, the transform's consumer group has no live member, and no consumer group has records left to read on it."
+          },
+          "topics_pending_removal": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Topics Pending Removal",
+            "description": "Stranded ``_load`` topics kept because a transform instance writing them is still in the deploy repo, the transform's consumer group has a live member or cannot be named, or a consumer group has records left to read on them. The apps reconcile after a later source write, POST /api/v1/sources/reconcile-apps, or the engine's next start deletes each once all three clear. Without a deploy repo the engine cannot see the instance, so the topic is kept."
           },
           "apps_synced": {
             "items": {
@@ -40117,57 +39860,6 @@
         ],
         "title": "TableEngineObject",
         "description": "One table engine a source may select, as the console offers it."
-      },
-      "TableInfo": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "database": {
-            "type": "string",
-            "title": "Database"
-          },
-          "engine": {
-            "type": "string",
-            "title": "Engine",
-            "default": ""
-          },
-          "total_rows": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Rows"
-          },
-          "total_bytes": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Bytes"
-          },
-          "comment": {
-            "type": "string",
-            "title": "Comment",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "database"
-        ],
-        "title": "TableInfo",
-        "description": "Summary of a ClickHouse table."
       },
       "TagRequest": {
         "properties": {

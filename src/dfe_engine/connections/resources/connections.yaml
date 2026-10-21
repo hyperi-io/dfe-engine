@@ -1,7 +1,0 @@
-connections:
-  default:
-    host: localhost
-    port: 8123
-    database: dfe
-    user: default
-    password_env: CH_DEFAULT_PASSWORD

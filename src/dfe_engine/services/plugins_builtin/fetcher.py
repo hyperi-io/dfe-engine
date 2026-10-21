@@ -7,18 +7,12 @@ SaaS APIs and routes events to Kafka like a receiver.
 
 from typing import Any
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 
 descriptor = ServiceDescriptor(
     name="fetcher",
     display_name="DFE Fetcher",
-    image="ghcr.io/hyperi-io/dfe-fetcher",
-    default_port=8080,
-    metrics_port=9090,
-    kafka_role=KafkaRole.PRODUCER,
-    liveness_paths=("/livez",),
-    readiness_paths=("/readyz",),
     description="SaaS API fetcher -- pulls from cloud APIs and routes to Kafka.",
 )
 

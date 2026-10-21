@@ -180,6 +180,16 @@ class TestRoundTripIntoACleanDeployment:
 class TestAPinWithNoDefinition:
     """The import mirrors the export: a pin resolves, or the whole bundle is refused."""
 
+    def test_create_accepts_the_pin_the_import_refuses(self, deployment):
+        # A source may be written before its schema, which only the import rules out.
+        client, headers = deployment("beta", schemas={"meta/core_tpl": CORE_SCHEMA})
+        with client:
+            created = client.post("/api/v1/sources", json=SOURCE_BODY, headers=headers)
+            landed = client.get("/api/v1/sources/cisco-ios", headers=headers)
+
+        assert created.status_code == 201, created.text
+        assert landed.json()["versions"]["1.0.0"]["schema"]["meta_schema"] == "meta/cisco_ios"
+
     def test_a_pin_neither_side_carries_refuses_the_whole_bundle(self, deployment):
         bundle = _export_from_alpha(deployment)
         bundle["schema"]["definitions"] = []

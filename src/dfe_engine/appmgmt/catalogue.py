@@ -1276,3 +1276,19 @@ def transform_engines() -> set[str]:
     engine it does not list has nothing to deploy.
     """
     return {app.transform_engine for app in APP_CATALOGUE.values() if app.transform_engine}
+
+
+def transform_group(app: AppDescriptor, source: str) -> str | None:
+    """The consumer group *app*'s instance for *source* reads its input in, None for a non-transform.
+
+    The group the source binding compiles in, where it names a ``group_id``. A
+    transform app whose binding names none derives it the way scalo's transform
+    role does, ``dfe-transform-<engine>-<source>``, which is ``instance_name``,
+    and the deploy charts default the instance's group to the same name.
+    """
+    if not app.transform_engine:
+        return None
+    for path, value in render_source_binding(app, source).items():
+        if path.rsplit(".", 1)[-1] == "group_id" and isinstance(value, str) and value:
+            return value
+    return instance_name(app, source)

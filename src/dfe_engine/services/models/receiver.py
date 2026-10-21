@@ -345,6 +345,13 @@ class ReceiverKafkaConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _loader_push_address() -> str:
+    """Where the app manifest puts the loader's push listener, as ``host:port``."""
+    from dfe_engine.appmgmt import catalogue
+
+    return catalogue.push_address(catalogue.descriptor("dfe-loader"))
+
+
 class LoaderConnectionConfig(BaseModel):
     """Connection configuration for dfe-loader transport.
 
@@ -354,7 +361,10 @@ class LoaderConnectionConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    address: str = "dfe-loader:6000"
+    address: str = Field(
+        default_factory=_loader_push_address,
+        description="The loader's push listener on its own Service, as the app manifest declares it",
+    )
     transport: str = Field(default="kafka", description="kafka or grpc")
     # Inside the 25 s a listener holds its answer, so a delivery settles before it.
     timeout_ms: int = Field(

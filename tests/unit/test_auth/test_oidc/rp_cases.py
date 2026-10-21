@@ -188,20 +188,44 @@ EXTRACT_IDENTITY_CASES: list[ExtractIdentityCase] = [
     {
         "id": "empty_name_falls_back_to_preferred_username",
         "claims": {"sub": "s", "name": "", "preferred_username": "jane"},
-        "expected_identity": make_normalized_identity(email="jane", name="jane", subject="s"),
+        "expected_identity": make_normalized_identity(name="jane", subject="s"),
         "provider": make_oidc_provider(),
     },
     {
         "id": "whitespace_name_falls_back_to_preferred_username",
         "claims": {"sub": "s", "name": "   ", "preferred_username": " jane "},
-        "expected_identity": make_normalized_identity(email=" jane ", name="jane", subject="s"),
+        "expected_identity": make_normalized_identity(name="jane", subject="s"),
         "provider": make_oidc_provider(),
     },
     {
         "id": "non_string_name_is_ignored",
         "claims": {"sub": "s", "name": {"given": "Jane"}, "preferred_username": "jane"},
-        "expected_identity": make_normalized_identity(email="jane", name="jane", subject="s"),
+        "expected_identity": make_normalized_identity(name="jane", subject="s"),
         "provider": make_oidc_provider(),
+    },
+    {
+        "id": "a_username_that_is_not_an_address_leaves_email_blank",
+        "claims": {"sub": "kc-subject-1", "preferred_username": "jdoe"},
+        "expected_identity": make_normalized_identity(name="jdoe", subject="kc-subject-1"),
+        "provider": make_oidc_provider(issuer="https://sso.acme.com/realms/dfe"),
+    },
+    {
+        "id": "a_upn_that_is_not_an_address_leaves_email_blank",
+        "claims": {"sub": "guid-123", "upn": "ACME\\jdoe"},
+        "expected_identity": make_normalized_identity(subject="guid-123"),
+        "provider": make_oidc_provider(
+            issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"
+        ),
+    },
+    {
+        "id": "a_bare_username_falls_through_to_an_address_upn",
+        "claims": {"sub": "guid-123", "preferred_username": "jdoe", "upn": "jdoe@acme.com"},
+        "expected_identity": make_normalized_identity(
+            email="jdoe@acme.com", name="jdoe", subject="guid-123"
+        ),
+        "provider": make_oidc_provider(
+            issuer="https://login.microsoftonline.com/tid/v2.0", type="entra_id"
+        ),
     },
     {
         "id": "email_falls_back_to_upn_without_preferred_username",

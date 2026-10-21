@@ -127,10 +127,12 @@ def test_the_receiver_model_accepts_no_header_by_default():
     assert _app_default("contract", "dfe-receiver", "server")["auth"]["accepted_headers"] == []
 
 
-def test_the_production_receiver_dials_the_loader_the_app_manifest_places():
+@pytest.mark.parametrize(("name", "text"), _RECEIVER, ids=[n for n, _ in _RECEIVER])
+def test_every_shipped_receiver_dials_the_loader_the_app_manifest_places(name: str, text: str):
     # The Service name with no namespace resolves wherever the suite is installed.
-    production = yaml_load_string(dict(_RECEIVER)["receiver-production.yaml"]) or {}
-    assert production["loader"]["address"] == catalogue.push_address(
+    shipped = yaml_load_string(text) or {}
+    assert "address" not in shipped["loader"], f"{name} pins the loader address"
+    assert ReceiverConfig.model_validate(shipped).loader.address == catalogue.push_address(
         catalogue.descriptor("dfe-loader")
     )
 

@@ -106,11 +106,7 @@ class NormalizedIdentity(BaseModel):
     """The IdP ``sub`` claim - the stable user identifier."""
 
     email: str = ""
-    """The ``email`` claim, else ``preferred_username``, else ``upn``, else empty.
-
-    Not necessarily an address: see ``extract_identity`` for why the fallback
-    exists, and dfe-engine#429 for the proposal to drop it.
-    """
+    """The ``email`` claim, else the first of ``preferred_username`` and ``upn`` that holds an ``@``, else empty."""
 
     name: str = ""
     """The display name: the ``name`` claim, else ``preferred_username``, else empty."""
@@ -180,7 +176,7 @@ def needs_userinfo(*, claims: dict[str, Any]) -> bool:
     """Whether the ID token is too thin to name the user: no display name, or no email.
 
     A token with a name and no email would otherwise skip userinfo, and the email
-    would fall back to ``preferred_username`` even where the IdP holds the address.
+    would fall back to the username claims even where the IdP holds the address.
     """
     return not (_display_name(claims=claims)) or not (_claim_text(claims=claims, name="email"))
 
@@ -192,10 +188,10 @@ def extract_identity(
     """Pure claim-extraction: map validated id_token claims to a NormalizedIdentity.
 
     ``sub`` is read from its standard OIDC claim. ``email`` falls back to
-    ``preferred_username`` and then ``upn``: Entra emits no ``email`` for a
-    cloud-only user with no mailbox, and the UPN is the identifier an operator
-    recognises, so without the fallback such a user lands with a blank email.
-    The display name is ``name``, falling back to ``preferred_username``. Groups
+    ``preferred_username`` and then ``upn``, taking the first that holds an ``@``:
+    Entra emits no ``email`` for a cloud-only user with no mailbox, and its UPN is
+    an address, while a bare username such as Keycloak's is not one and leaves the
+    email blank. The display name is ``name``, falling back to ``preferred_username``. Groups
     come from the claim named by ``provider.groups.claim_name`` (default
     ``groups``), matching the token_claim resolution mode used across the DFE
     auth paths. A provider in ``manual`` mode yields no groups at all, because its users' membership is managed in dfe-engine and the token grants nothing.
@@ -210,11 +206,12 @@ def extract_identity(
         A NormalizedIdentity with subject, email, and groups.
     """
     subject = str(userinfo_claims.get("sub") or "")
-    email = ""
-    for claim in ("email", "preferred_username", "upn"):
-        email = str(userinfo_claims.get(claim) or "")
-        if email:
-            break
+    email = str(userinfo_claims.get("email") or "")
+    if not email:
+        usernames = (
+            str(userinfo_claims.get(claim) or "") for claim in ("preferred_username", "upn")
+        )
+        email = next((value for value in usernames if "@" in value), "")
     name = _display_name(claims=userinfo_claims)
     groups = []
     overflowed = False

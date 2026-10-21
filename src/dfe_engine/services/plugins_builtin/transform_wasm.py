@@ -7,19 +7,12 @@ with flat source list (no config tree -- tree is vector-only).
 
 from typing import Any
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 
 descriptor = ServiceDescriptor(
     name="transform-wasm",
     display_name="DFE Transform (WASM)",
-    image="ghcr.io/hyperi-io/dfe-transform-wasm",
-    default_port=8080,
-    metrics_port=9090,
-    kafka_role=KafkaRole.BOTH,
-    consumer_group="dfe-transform-wasm",
-    liveness_paths=("/livez",),
-    readiness_paths=("/readyz",),
     description="Kafka-to-Kafka transform using WASM modules. Multi-source, flat list.",
 )
 

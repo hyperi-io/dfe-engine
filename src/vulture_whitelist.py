@@ -25,7 +25,6 @@ from dfe_engine.api.v1 import app_contracts as api_v1_app_contracts
 from dfe_engine.api.v1 import apps as api_v1_apps
 from dfe_engine.api.v1 import auth as api_v1_auth
 from dfe_engine.api.v1 import backing_services as api_v1_backing_services
-from dfe_engine.api.v1 import discovery as api_v1_discovery
 from dfe_engine.api.v1 import fieldmaps as api_v1_fieldmaps
 from dfe_engine.api.v1 import gitops as api_v1_gitops
 from dfe_engine.api.v1 import hunts as api_v1_hunts
@@ -94,7 +93,6 @@ from dfe_engine.schema import schema_builder_v2 as schema_schema_builder_v2
 from dfe_engine.schema import schema_loader as schema_schema_loader
 from dfe_engine.schema import schema_manager as schema_schema_manager
 from dfe_engine.schema import table_loader as schema_table_loader
-from dfe_engine.services import descriptor as services_descriptor
 from dfe_engine.services import plugins as services_plugins
 from dfe_engine.services import registry as services_registry
 from dfe_engine.services.models import archiver as services_models_archiver
@@ -165,9 +163,6 @@ api_v1_backing_services.ObservedSizing.provider_replicas
 api_v1_backing_services.ProviderLimit.as_of
 api_v1_backing_services.ProviderLimit.source_url
 api_v1_backing_services.ProviderLimit.used
-api_v1_discovery.ColumnInfo.default_expression
-api_v1_discovery.ColumnInfo.default_kind
-api_v1_discovery.TableInfo.total_bytes
 api_v1_fieldmaps.FieldMapSummary.mapping_count
 api_v1_gitops.ClassInfo.action_writable
 api_v1_hunts.HuntEngineStatus.hunt_count
@@ -257,6 +252,7 @@ source_deployment.SchemaDeployResult.apps_synced
 source_deployment.SchemaDeployResult.create_table
 source_deployment.SchemaDeployResult.hyperdx_source_error
 source_deployment.SchemaDeployResult.hyperdx_source_teams
+source_deployment.SchemaDeployResult.topics_ensured
 source_models.SourceSummaryObject.current_table_topic_type
 source_models.SourceSummaryObject.has_fetcher
 source_models.SourceSummaryObject.has_transform
@@ -515,13 +511,6 @@ ai_interface.LogParser.Output
 ai_interface.QueryGenerator.Output
 ai_interface.QueryOptimiser.Output
 ai_interface.SchemaOptimiser.Output
-services_descriptor.ServiceDescriptor.consumer_group
-services_descriptor.ServiceDescriptor.default_port
-services_descriptor.ServiceDescriptor.image
-services_descriptor.ServiceDescriptor.kafka_role
-services_descriptor.ServiceDescriptor.liveness_paths
-services_descriptor.ServiceDescriptor.metrics_port
-services_descriptor.ServiceDescriptor.readiness_paths
 
 # dfe-schemas' validate_schemas.py calls these.
 schema_table_loader.load_table_spec

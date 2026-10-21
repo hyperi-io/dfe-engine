@@ -177,6 +177,8 @@ class TestFetcherInstancesFollowTheSources:
         assert resp.json() == {
             "changes": ["dfe-receiver/main: sync routing"],
             "restart_required": [],
+            "topics_removed": [],
+            "topics_pending_removal": [],
         }
         assert _rules(gc) == ["kvproof"]
 
@@ -277,4 +279,9 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
         resp = client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
 
         assert resp.status_code == 200, resp.text
-        assert resp.json() == {"changes": [], "restart_required": []}
+        assert resp.json() == {
+            "changes": [],
+            "restart_required": [],
+            "topics_removed": [],
+            "topics_pending_removal": [],
+        }

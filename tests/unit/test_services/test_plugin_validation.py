@@ -8,9 +8,12 @@
 
 """Tests for plugin validation functions — pure logic, no external deps."""
 
+from dataclasses import replace
+
 import pytest
 from pydantic import SecretStr, ValidationError
 
+from dfe_engine.appmgmt import catalogue
 from dfe_engine.services.models.archiver import ArchiverConfig
 from dfe_engine.services.models.common import SaslConfig
 from dfe_engine.services.models.fetcher import FetcherConfig, FetcherSourceConfig
@@ -278,6 +281,29 @@ class TestValidateLoaderTransport:
         config = self._make_grpc(listen="127.0.0.1")
         errors, _ = run_loader_validation(config)
         assert any("port number" in e for e in errors)
+
+    def test_the_listen_port_is_the_app_manifests_push_port(self, monkeypatch):
+        # The receiver dials what the manifest declares, so a deployment that moves
+        # the push port moves the listen port the check accepts with it.
+        loader = catalogue.APP_CATALOGUE["dfe-loader"]
+        moved = replace(
+            loader, endpoints={catalogue.PUSH_ENDPOINT: catalogue.AppEndpoint(port=7000)}
+        )
+        monkeypatch.setitem(catalogue.APP_CATALOGUE, "dfe-loader", moved)
+
+        accepted, _ = run_loader_validation(self._make_grpc(listen="0.0.0.0:7000"))
+        refused, _ = run_loader_validation(self._make_grpc(listen="0.0.0.0:6000"))
+
+        assert accepted == []
+        assert any("6000" in e and "7000" in e for e in refused)
+
+    def test_a_manifest_without_a_push_endpoint_is_refused(self, monkeypatch):
+        loader = catalogue.APP_CATALOGUE["dfe-loader"]
+        monkeypatch.setitem(catalogue.APP_CATALOGUE, "dfe-loader", replace(loader, endpoints={}))
+
+        errors, _ = run_loader_validation(self._make_grpc())
+
+        assert any(catalogue.PUSH_ENDPOINT in e for e in errors)
 
     def test_grpc_still_requires_clickhouse_hosts(self):
         # ClickHouse is the sink on both transports.
