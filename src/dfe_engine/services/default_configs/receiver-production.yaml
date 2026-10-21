@@ -20,16 +20,45 @@ server:
     ca_file: /etc/tls/ca.crt
     client_auth: none
     refresh_interval_secs: 3600
+  # Each bearer listener reads the <id>:<token> lines the engine writes for every
+  # ingest credential it accepts, under the engine's KV mount (DFE_SECRETS_MOUNT).
   auth:
     mode: bearer
     bearer:
-      # The <id>:<token> lines the engine writes for every ingest credential the
-      # http listener accepts, under the engine's KV mount (DFE_SECRETS_MOUNT).
       secret_source: "vault:dfe/ingest/bearer-tokens/http:value"
       refresh_interval_secs: 300
 
 grpc:  # bind_address is the receiver's own default
   enabled: false
+  auth:
+    mode: bearer
+    bearer:
+      secret_source: "vault:dfe/ingest/bearer-tokens/grpc:value"
+      refresh_interval_secs: 300
+
+otlp:
+  enabled: false
+  auth:
+    mode: bearer
+    bearer:
+      secret_source: "vault:dfe/ingest/bearer-tokens/otlp:value"
+      refresh_interval_secs: 300
+
+splunk_hec:
+  enabled: false
+  auth:
+    mode: bearer
+    bearer:
+      secret_source: "vault:dfe/ingest/bearer-tokens/splunk_hec:value"
+      refresh_interval_secs: 300
+
+prometheus_rw:
+  enabled: false
+  auth:
+    mode: bearer
+    bearer:
+      secret_source: "vault:dfe/ingest/bearer-tokens/prometheus_rw:value"
+      refresh_interval_secs: 300
 
 validation:
   require_json: true

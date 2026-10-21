@@ -37,6 +37,15 @@ IngestListener = Literal["http", "grpc", "otlp", "splunk_hec", "prometheus_rw"]
 
 BEARER_LISTENERS: tuple[IngestListener, ...] = get_args(IngestListener)
 
+LISTENER_SECTIONS: dict[IngestListener, str] = {
+    "http": "server",
+    "grpc": "grpc",
+    "otlp": "otlp",
+    "splunk_hec": "splunk_hec",
+    "prometheus_rw": "prometheus_rw",
+}
+"""The dfe-receiver config section whose ``auth`` block authenticates each listener."""
+
 
 class IngestCredential(BaseModel):
     """One ingest credential, as it is stored.

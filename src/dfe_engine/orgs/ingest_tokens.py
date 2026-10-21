@@ -49,6 +49,11 @@ def bearer_secret_path(listener: str) -> str:
     return f"{BEARER_SECRET_PREFIX}/{listener}"
 
 
+def bearer_secret_source(listener: str, mount: str) -> str:
+    """dfe-receiver's ``secret_source`` for *listener*'s bearer secret on the OpenBao KV *mount*."""
+    return f"vault:{mount}/{bearer_secret_path(listener)}:value"
+
+
 def mint_token() -> str:
     """A new bearer token."""
     return random_tokens.token_urlsafe(_TOKEN_BYTES)

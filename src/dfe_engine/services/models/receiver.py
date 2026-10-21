@@ -69,7 +69,7 @@ class BearerConfig(BaseModel):
 
 
 class AuthConfig(BaseModel):
-    """Authentication configuration for the HTTP server."""
+    """Authentication configuration for one listener."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -115,10 +115,35 @@ class GrpcConfig(BaseModel):
 
     enabled: bool = False
     bind_address: str = "0.0.0.0:6000"
+    auth: AuthConfig = Field(default_factory=AuthConfig)
     max_message_size: int = Field(
         default=16 * 1024 * 1024, ge=0, description="Largest decoded push accepted, in bytes"
     )
     acknowledgements: AcknowledgementsConfig = Field(default_factory=AcknowledgementsConfig)
+
+
+class BearerListenerConfig(BaseModel):
+    """A listener the engine wires bearer auth on, modelled as far as ``enabled`` and ``auth``.
+
+    Its other keys pass through for dfe-receiver to validate.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    enabled: bool = False
+    auth: AuthConfig = Field(default_factory=AuthConfig)
+
+
+class OtlpConfig(BearerListenerConfig):
+    """The OTLP gRPC and HTTP listeners."""
+
+
+class SplunkHecConfig(BearerListenerConfig):
+    """The Splunk HTTP Event Collector listener."""
+
+
+class PrometheusRwConfig(BearerListenerConfig):
+    """The Prometheus Remote Write listener."""
 
 
 # ---------------------------------------------------------------------------
@@ -509,6 +534,9 @@ class ReceiverConfig(BaseServiceConfig):
 
     server: ServerConfig = Field(default_factory=ServerConfig)
     grpc: GrpcConfig = Field(default_factory=GrpcConfig)
+    otlp: OtlpConfig = Field(default_factory=OtlpConfig)
+    splunk_hec: SplunkHecConfig = Field(default_factory=SplunkHecConfig)
+    prometheus_rw: PrometheusRwConfig = Field(default_factory=PrometheusRwConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
     routing: ReceiverRoutingConfig = Field(default_factory=ReceiverRoutingConfig)
     rules: RuleSet = Field(default_factory=RuleSet)

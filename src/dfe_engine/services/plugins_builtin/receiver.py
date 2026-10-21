@@ -24,10 +24,14 @@ def _validate_receiver(config: Any, errors: list[str], warnings: list[str]) -> N
     if config.destinations.default == "kafka" and not config.kafka.brokers:
         errors.append("kafka.brokers is required when destinations.default is 'kafka'")
 
-    if config.server.auth.mode == "bearer" and (
-        not config.server.auth.bearer.tokens and not config.server.auth.bearer.secret_source
-    ):
-        warnings.append("auth.mode is 'bearer' but no tokens or secret_source configured")
+    from dfe_engine.orgs.ingest_credentials import LISTENER_SECTIONS
+
+    for section in LISTENER_SECTIONS.values():
+        auth = getattr(config, section).auth
+        if auth.mode == "bearer" and not auth.bearer.tokens and not auth.bearer.secret_source:
+            warnings.append(
+                f"{section}.auth.mode is 'bearer' but no tokens or secret_source configured"
+            )
 
     if config.server.auth.mode == "mtls" and not config.server.tls.enabled:
         errors.append("auth.mode is 'mtls' but TLS is not enabled")
@@ -61,12 +65,6 @@ _template_overrides: dict[str, dict[str, Any]] = {
                 "ca_secret": None,
                 "refresh_interval_secs": 3600,
             },
-            "auth": {
-                "mode": "bearer",
-                "bearer": {
-                    "secret_source": "vault:secret/dfe/receiver:bearer_tokens",
-                },
-            },
         },
         "kafka": {
             "sasl": {
@@ -98,11 +96,31 @@ _template_overrides: dict[str, dict[str, Any]] = {
 }
 
 
+def _bearer_auth() -> dict[str, dict[str, Any]]:
+    """Each bearer listener's auth block, reading the secret the engine writes for it."""
+    from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, LISTENER_SECTIONS
+    from dfe_engine.orgs.ingest_tokens import bearer_secret_source
+    from dfe_engine.settings import SecretsSettings
+
+    mount = SecretsSettings().mount
+    return {
+        LISTENER_SECTIONS[listener]: {
+            "auth": {
+                "mode": "bearer",
+                "bearer": {"secret_source": bearer_secret_source(listener, mount)},
+            }
+        }
+        for listener in BEARER_LISTENERS
+    }
+
+
 def _make_plugin() -> ServicePlugin:
     from dfe_engine.appmgmt import catalogue
     from dfe_engine.services.models.receiver import ReceiverConfig
+    from dfe_engine.yaml_utils import deep_merge
 
     overrides = copy.deepcopy(_template_overrides)
+    deep_merge(overrides["production"], _bearer_auth())
     loader = catalogue.push_address(catalogue.descriptor("dfe-loader"))
     overrides["k8s"]["loader"] = {"address": loader}
     return ServicePlugin(
