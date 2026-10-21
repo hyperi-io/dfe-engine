@@ -18,6 +18,7 @@ from dfe_engine.orgs.ingest_tokens import (
     accepted_credentials,
     bearer_entries,
     bearer_secret_path,
+    bearer_secret_source,
     credential_secret_path,
     drop_token,
     mint_token,
@@ -245,6 +246,35 @@ class TestTokens:
         assert entries["otlp"] == "acme-agents:token-a\n"
         assert entries["splunk_hec"] == "beta-hec:token-b\n"
         assert set(entries) == set(BEARER_LISTENERS)
+
+    @pytest.mark.parametrize(
+        ("backend", "source"),
+        [
+            (
+                SecretsSettings(provider="aws", region="ap-southeast-2", name_prefix="dfe-a"),
+                "aws:dfe-a/ingest/bearer-tokens/http",
+            ),
+            (
+                SecretsSettings(provider="openbao", mount="kv-dfe"),
+                "vault:kv-dfe/ingest/bearer-tokens/http:value",
+            ),
+            (
+                SecretsSettings(provider="vault", mount="kv-dfe"),
+                "vault:kv-dfe/ingest/bearer-tokens/http:value",
+            ),
+            (
+                SecretsSettings(provider="file", path="/app/config/.secrets"),
+                "file:/app/config/.secrets/ingest/bearer-tokens/http",
+            ),
+        ],
+        ids=["aws", "openbao", "vault", "file"],
+    )
+    def test_the_receiver_reads_the_secret_where_the_backend_holds_it(self, backend, source):
+        assert bearer_secret_source("http", backend) == source
+
+    def test_an_ansible_vault_backend_has_no_source_the_receiver_reads(self):
+        # The receiver cannot decrypt an ansible-vault file.
+        assert bearer_secret_source("http", SecretsSettings(provider="ansible_vault")) is None
 
     def test_a_listener_no_credential_names_holds_no_token(self, secrets):
         # Never empty, so a backend that refuses an empty value still takes it.

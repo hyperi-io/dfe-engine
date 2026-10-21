@@ -22,6 +22,7 @@ that mints it.
 
 import secrets as random_tokens
 from collections.abc import Iterable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scalo.logger import logger
@@ -31,6 +32,7 @@ from dfe_engine.secrets import DfeSecrets
 
 if TYPE_CHECKING:
     from dfe_engine.orgs.registry import OrgRegistry
+    from dfe_engine.settings import SecretsSettings
 
 CREDENTIAL_SECRET_PREFIX = "ingest/credentials"
 BEARER_SECRET_PREFIX = "ingest/bearer-tokens"
@@ -49,9 +51,29 @@ def bearer_secret_path(listener: str) -> str:
     return f"{BEARER_SECRET_PREFIX}/{listener}"
 
 
-def bearer_secret_source(listener: str, mount: str) -> str:
-    """dfe-receiver's ``secret_source`` for *listener*'s bearer secret on the OpenBao KV *mount*."""
-    return f"vault:{mount}/{bearer_secret_path(listener)}:value"
+def bearer_secret_source(listener: str, backend: SecretsSettings) -> str | None:
+    """dfe-receiver's ``secret_source`` for *listener*'s bearer secret, where *backend* holds it.
+
+    The spec names the secret as :class:`~dfe_engine.secrets.DfeSecrets` writes it: under
+    the KV mount on OpenBao, under the name prefix on AWS Secrets Manager, under the root
+    directory for ``file``. An ``aws:`` spec resolves only in a receiver built with
+    scalo's ``secrets-aws``, and a ``file:`` one only where the receiver mounts that
+    directory.
+
+    Returns:
+        The spec, or None for ``ansible_vault``, whose encrypted file the receiver
+        cannot read.
+    """
+    path = bearer_secret_path(listener)
+    match backend.provider:
+        case "openbao" | "vault":
+            return f"vault:{backend.mount}/{path}:value"
+        case "aws":
+            return f"aws:{backend.name_prefix}/{path}"
+        case "file":
+            return f"file:{Path(backend.path) / path}"
+        case _:
+            return None
 
 
 def mint_token() -> str:

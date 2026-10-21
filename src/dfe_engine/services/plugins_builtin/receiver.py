@@ -4,10 +4,13 @@ Consolidates receiver-specific descriptor, validation, and template overrides.
 """
 
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
+
+if TYPE_CHECKING:
+    from dfe_engine.settings import SecretsSettings
 
 descriptor = ServiceDescriptor(
     name="receiver",
@@ -96,31 +99,33 @@ _template_overrides: dict[str, dict[str, Any]] = {
 }
 
 
-def _bearer_auth() -> dict[str, dict[str, Any]]:
-    """Each bearer listener's auth block, reading the secret the engine writes for it."""
+def _bearer_auth(backend: SecretsSettings) -> dict[str, dict[str, Any]]:
+    """Each bearer listener's auth block, on the secret the engine writes for it on *backend*.
+
+    A backend the receiver cannot read wires nothing, so the deployment names its own.
+    """
     from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, LISTENER_SECTIONS
     from dfe_engine.orgs.ingest_tokens import bearer_secret_source
-    from dfe_engine.settings import SecretsSettings
 
-    mount = SecretsSettings().mount
-    return {
-        LISTENER_SECTIONS[listener]: {
-            "auth": {
-                "mode": "bearer",
-                "bearer": {"secret_source": bearer_secret_source(listener, mount)},
-            }
-        }
-        for listener in BEARER_LISTENERS
-    }
+    wired: dict[str, dict[str, Any]] = {}
+    for listener in BEARER_LISTENERS:
+        source = bearer_secret_source(listener, backend)
+        if source is not None:
+            bearer = {"secret_source": source}
+            wired[LISTENER_SECTIONS[listener]] = {"auth": {"mode": "bearer", "bearer": bearer}}
+    return wired
 
 
 def _make_plugin() -> ServicePlugin:
     from dfe_engine.appmgmt import catalogue
     from dfe_engine.services.models.receiver import ReceiverConfig
+    from dfe_engine.settings import SecretsSettings
     from dfe_engine.yaml_utils import deep_merge
 
     overrides = copy.deepcopy(_template_overrides)
-    deep_merge(overrides["production"], _bearer_auth())
+    # The production profile is a reference for an OpenBao deployment, as the shipped
+    # receiver-production.yaml is, so it reads no process settings.
+    deep_merge(overrides["production"], _bearer_auth(SecretsSettings(provider="openbao")))
     loader = catalogue.push_address(catalogue.descriptor("dfe-loader"))
     overrides["k8s"]["loader"] = {"address": loader}
     return ServicePlugin(
