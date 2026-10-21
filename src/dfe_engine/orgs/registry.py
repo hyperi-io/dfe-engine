@@ -40,7 +40,7 @@ from dfe_engine.orgs.models import (
     ReservedOrgError,
 )
 from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids
-from dfe_engine.yaml_utils import yaml_dump, yaml_load
+from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump, yaml_load
 
 
 class OrgBoundError(ValueError):
@@ -260,11 +260,15 @@ class OrgRegistry:
         """The file org *name* lives in.
 
         Raises:
-            KeyError: No org can hold *name*, so it is looked up nowhere.
+            KeyError: No org can hold *name*, or its file resolves outside the
+                directory, so it is looked up nowhere.
         """
         if re.fullmatch(ORG_NAME_PATTERN, name) is None:
             raise KeyError(name)
-        return self._dir / f"{name}.yaml"
+        path = contained_yaml_file(self._dir, name)
+        if path is None:
+            raise KeyError(name)
+        return path
 
     def _read(self, path: Path) -> Org:
         """Load an Org from a YAML file.
