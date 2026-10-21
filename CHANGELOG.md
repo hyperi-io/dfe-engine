@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.58](https://github.com/hyperi-io/dfe-engine/compare/v1.22.57...v1.22.58) (2026-10-21)
+
+### Bug Fixes
+
+* engine GA batch for [#431](https://github.com/hyperi-io/dfe-engine/issues/431) [#493](https://github.com/hyperi-io/dfe-engine/issues/493) [#503](https://github.com/hyperi-io/dfe-engine/issues/503) [#589](https://github.com/hyperi-io/dfe-engine/issues/589) and the startup topic ensure ([#937](https://github.com/hyperi-io/dfe-engine/issues/937)) ([478130f](https://github.com/hyperi-io/dfe-engine/commit/478130f8986f51d7191a1f4933d01456dadf0c00))
+
 ## [1.22.57](https://github.com/hyperi-io/dfe-engine/compare/v1.22.56...v1.22.57) (2026-10-21)
 
 ### Bug Fixes
