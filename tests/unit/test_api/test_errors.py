@@ -214,3 +214,71 @@ class TestAnUnexpectedFailure:
             "message": "An unexpected error occurred",
             "errors": [],
         }
+
+
+class TestScaloApiHelpersAnswerInTheEnvelope:
+    """A refusal from scalo.api's write and list helpers reaches the caller as ErrorResponse."""
+
+    @staticmethod
+    def _client() -> TestClient:
+        from fastapi import FastAPI
+        from scalo.api import ListParams, PreconditionHeaders, ProblemError, paginate
+
+        from dfe_engine.api.errors import install_exception_handlers
+
+        app = FastAPI()
+        install_exception_handlers(app)
+
+        @app.put("/things/{name}")
+        def _apply(name: str, pre: PreconditionHeaders) -> dict:
+            pre.check('"current"')
+            return {"name": name}
+
+        @app.get("/things")
+        def _list(query: ListParams) -> dict:
+            return paginate(["a", "b", "c"], query).model_dump()
+
+        @app.get("/fields")
+        def _fields() -> None:
+            from scalo.api import FieldError as ProblemField
+
+            raise ProblemError(
+                422,
+                "bad",
+                code="invalid",
+                errors=[ProblemField(field="spec.size", detail="too big")],
+            )
+
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_a_stale_etag_is_412_with_the_current_one(self):
+        resp = self._client().put("/things/x", headers={"If-Match": '"stale"'})
+
+        assert resp.status_code == 412
+        assert resp.json() == {
+            "code": "etag_mismatch",
+            "message": "If-Match does not match the current ETag",
+            "errors": [],
+            "context": {"etag": '"current"'},
+        }
+
+    def test_a_write_with_no_precondition_is_428(self):
+        resp = self._client().put("/things/x")
+
+        assert resp.status_code == 428
+        assert resp.json()["code"] == "precondition_required"
+
+    def test_a_page_token_from_elsewhere_is_400(self):
+        resp = self._client().get("/things", params={"page_token": "not-ours"})
+
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "invalid_page_token"
+        assert "context" not in resp.json()
+
+    def test_field_errors_keep_their_field(self):
+        resp = self._client().get("/fields")
+
+        assert resp.status_code == 422
+        assert resp.json()["errors"] == [
+            {"field": "spec.size", "message": "too big", "code": ErrorCode.VALIDATION_ERROR}
+        ]

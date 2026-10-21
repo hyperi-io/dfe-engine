@@ -665,7 +665,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "requests" },
     { name = "ruamel-yaml" },
-    { name = "scalo", extra = ["expression", "http", "metrics"] },
+    { name = "scalo", extra = ["api", "expression", "http", "metrics"] },
     { name = "scim2-models" },
     { name = "sqlglot" },
     { name = "sse-starlette" },
@@ -730,7 +730,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.31.18,<3" },
+    { name = "scalo", extras = ["api", "expression", "http", "metrics"], specifier = ">=2.31.21,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.22.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -2389,7 +2389,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.31.18"
+version = "2.31.21"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2407,12 +2407,16 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/80/b1/460b262f50fcaa30b7047e95c94b5f403f12f006bde8f6fe6db765847ca0/scalo-2.31.18.tar.gz", hash = "sha256:ecebd6658ac20bf39f72023251d54743134e693cae8be72546dce1002051db37", size = 369513, upload-time = "2026-10-18T21:34:29.78Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bc/49/21dcbb102d85fd243a7d703696e2cbc25dcbc0829233832e2970664dff1f/scalo-2.31.21.tar.gz", hash = "sha256:c77447d65262328f2b9151ae9be87ee05584b4165a7853fd5fed613a516aa5de", size = 420792, upload-time = "2026-10-21T03:30:14.309Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/d8/70/e62d4f964dcd00756bccf5610959a28d1ecb235ab3a571187ccff8da0fa4/scalo-2.31.18-py3-none-any.whl", hash = "sha256:037b9d6e7cc1415091a80cd2556d72ac79c81bd668d3ba058e56f15a5d01a1e3", size = 441768, upload-time = "2026-10-18T21:34:27.512Z" },
+    { url = "https://files.pythonhosted.org/packages/72/23/09e397df9a256b282649c4ae8db7d2728583a7ad48cd9a9e5172d9f88221/scalo-2.31.21-py3-none-any.whl", hash = "sha256:566601458df4d4022467ccca8ecb5cd43d9de00cb370952596276f1674a2852a", size = 493051, upload-time = "2026-10-21T03:30:12.149Z" },
 ]
 
 [package.optional-dependencies]
+api = [
+    { name = "fastapi" },
+    { name = "pydantic" },
+]
 expression = [
     { name = "common-expression-language" },
 ]

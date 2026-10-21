@@ -40,10 +40,9 @@ All checks are fast (<1ms) -- suitable for live validation as the user
 types in the UI.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 
+from scalo.expression import ProfileConfig
 from scalo.expression import validate as scalo_validate
 
 from dfe_engine.cel.classify import (
@@ -51,6 +50,9 @@ from dfe_engine.cel.classify import (
     Tier1Op,
     classify_expression,
 )
+
+# Classifying reports a regex, iteration or time call as Tier 3, so only its syntax can fail it.
+_SYNTAX_ONLY = ProfileConfig(allow_regex=True, allow_iteration=True, allow_time=True)
 
 
 @dataclass
@@ -131,19 +133,10 @@ def check_syntax(
     # parser check for them -- scalo-rs accepts `has(bareword)` even though real
     # CEL requires `has(qualified.path)`.
     if classification.tier != FilterTier.TIER1:
-        scalo_errors = scalo_validate(expression)
+        # None is the config cascade's profile, which refuses regex, iteration and time.
+        scalo_errors = scalo_validate(expression, None if check_profile else _SYNTAX_ONLY)
         if scalo_errors:
-            if not check_profile:
-                # Filter out profile violations -- we want to classify Tier 3
-                # expressions, not reject them.
-                profile_errors = [
-                    e for e in scalo_errors if "not allowed in the DFE expression profile" in e
-                ]
-                syntax_errors = [e for e in scalo_errors if e not in profile_errors]
-                if syntax_errors:
-                    return SyntaxCheckResult(valid=False, errors=syntax_errors)
-            else:
-                return SyntaxCheckResult(valid=False, errors=scalo_errors)
+            return SyntaxCheckResult(valid=False, errors=scalo_errors)
 
     result = SyntaxCheckResult(
         valid=True,
