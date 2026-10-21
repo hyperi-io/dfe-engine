@@ -11,6 +11,12 @@ is `/api/v1/kafka/topics`.
 
 A fetcher source pushing to the main topic is the exception at both ends: it arrives on the landing source's `main_land`, so it creates no landing topic on deploy and removes none on delete. Deleting it otherwise takes `main_land` out from under the receiver's default flow and every other source landing there.
 
+## Deleting a stranded `_load` topic
+
+Those checks stop the delete while a writer runs, but not when one starts again in the sub-second gap between the backlog read and the delete. With the broker's `auto.create.topics.enable` off, its records are refused. With it on, its first produce re-creates `_load` at broker defaults, which suppresses `_land` again and strands what lands there until retention. dfe-infra's cluster profile turns auto-create off, while its single profile and dfe-docker's default turn it on.
+
+Once `_load` is gone the loader reads `_land` from `earliest`, the scalo-rs consumer default, so the source's retained `_land` records load a second time. Those are duplicates, which the at-least-once contract allows, and never loss.
+
 ## The surface
 
 | Route | What it does |
