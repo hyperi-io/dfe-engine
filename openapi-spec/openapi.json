@@ -5858,7 +5858,7 @@
           "Sources"
         ],
         "summary": "Bulk Action",
-        "description": "Perform a bulk action on multiple sources.\n\n``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.\n``deploy`` submits one ``source:deploy`` background task per accepted source\n(poll ``GET /tasks/{task_id}``); refused names land in ``failed``.",
+        "description": "Perform a bulk action on multiple sources.\n\n``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.\n``deploy`` submits one ``source:deploy`` background task per accepted source\n(poll ``GET /tasks/{task_id}``); refused names land in ``failed``.\n\nAn action that applies immediately reports the one reconcile it ends with, as\na single-source write does.",
         "operationId": "bulk_action_api_v1_sources_bulk_post",
         "requestBody": {
           "content": {
@@ -24987,6 +24987,34 @@
             "type": "array",
             "title": "Deployments",
             "description": "Deploy only: one ``source:deploy`` task per accepted source. Poll via GET /tasks/{task_id}."
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes made so the apps follow this change (service/instance: action)"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps could not be brought into step; reconcile-apps retries it"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app the change leaves to apply where this deployment renders the app config itself, including taking away the container of an instance a source no longer has. Empty where a GitOps controller applies it."
           }
         },
         "type": "object",
@@ -37740,7 +37768,7 @@
             },
             "type": "array",
             "title": "Apps Synced",
-            "description": "Deploy-repo writes made so the apps follow the delete (service/instance: action)"
+            "description": "Deploy-repo writes made so the apps follow this change (service/instance: action)"
           },
           "apps_sync_error": {
             "anyOf": [
@@ -37760,7 +37788,7 @@
             },
             "type": "array",
             "title": "Restart Required",
-            "description": "One command per app the delete leaves to apply where this deployment renders the app config itself, including taking away the container of an instance the source no longer has. Empty where a GitOps controller prunes it."
+            "description": "One command per app the change leaves to apply where this deployment renders the app config itself, including taking away the container of an instance a source no longer has. Empty where a GitOps controller applies it."
           }
         },
         "type": "object",

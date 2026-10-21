@@ -352,6 +352,40 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
         again = client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
         assert again.json()["restart_required"] == []
 
+    def test_a_bulk_delete_names_the_same_command(self, client, app, admin_headers, tmp_path):
+        from dfe_engine.appmgmt import appconfig
+
+        gc = self._compose(app, tmp_path)
+        appconfig.render_and_report(gc, app.state.settings)
+        self._deployed_transform_source(client, admin_headers, "elreg")
+        client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+
+        resp = client.post(
+            "/api/v1/sources/bulk",
+            json={"action": "delete", "sources": ["elreg"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["succeeded"] == ["elreg"]
+        assert f"{self.TRANSFORM}/elreg: undeploy instance" in resp.json()["apps_synced"]
+        assert resp.json()["restart_required"].count(appconfig.REMOVE_HINT) == 1
+        assert resp.json()["apps_sync_error"] is None
+
+    def test_a_bulk_state_change_reports_its_reconcile(self, client, app, admin_headers, tmp_path):
+        self._compose(app, tmp_path)
+        self._deployed_transform_source(client, admin_headers, "elreg")
+        client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+
+        resp = client.post(
+            "/api/v1/sources/bulk",
+            json={"action": "dormant", "sources": ["elreg"]},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert f"{self.TRANSFORM}/elreg: undeploy instance" in resp.json()["apps_synced"]
+
     def test_the_deploying_write_reports_it_only_once(self, client, app, admin_headers, tmp_path):
         from dfe_engine.appmgmt import appconfig
 

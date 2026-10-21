@@ -247,27 +247,39 @@ class SourceResponse(BaseModel):
     )
 
 
+def _apps_synced_field() -> Any:
+    return Field(
+        default_factory=list,
+        description="Deploy-repo writes made so the apps follow this change (service/instance: action)",
+    )
+
+
+def _apps_sync_error_field() -> Any:
+    return Field(
+        default=None,
+        description="Why the apps could not be brought into step; reconcile-apps retries it",
+    )
+
+
+def _apply_hints_field() -> Any:
+    return Field(
+        default_factory=list,
+        description=(
+            "One command per app the change leaves to apply where this deployment renders "
+            "the app config itself, including taking away the container of an instance a "
+            "source no longer has. Empty where a GitOps controller applies it."
+        ),
+    )
+
+
 class SourceDeleteResponse(BaseModel):
     """A deleted source, and what the apps now need to follow the delete."""
 
     source: str
     message: str = "deleted"
-    apps_synced: list[str] = Field(
-        default_factory=list,
-        description="Deploy-repo writes made so the apps follow the delete (service/instance: action)",
-    )
-    apps_sync_error: str | None = Field(
-        default=None,
-        description="Why the apps could not be brought into step; reconcile-apps retries it",
-    )
-    restart_required: list[str] = Field(
-        default_factory=list,
-        description=(
-            "One command per app the delete leaves to apply where this deployment renders "
-            "the app config itself, including taking away the container of an instance the "
-            "source no longer has. Empty where a GitOps controller prunes it."
-        ),
-    )
+    apps_synced: list[str] = _apps_synced_field()
+    apps_sync_error: str | None = _apps_sync_error_field()
+    restart_required: list[str] = _apply_hints_field()
 
 
 class SourceImportResponse(SourceImportResult):
@@ -629,6 +641,9 @@ class BulkActionResponse(BaseModel):
             "Poll via GET /tasks/{task_id}."
         ),
     )
+    apps_synced: list[str] = _apps_synced_field()
+    apps_sync_error: str | None = _apps_sync_error_field()
+    restart_required: list[str] = _apply_hints_field()
 
 
 class SeedResponse(BaseModel):
@@ -2675,6 +2690,9 @@ async def bulk_action(
     ``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.
     ``deploy`` submits one ``source:deploy`` background task per accepted source
     (poll ``GET /tasks/{task_id}``); refused names land in ``failed``.
+
+    An action that applies immediately reports the one reconcile it ends with, as
+    a single-source write does.
     """
     action_to_state = {"enable": "active", "disable": "disabled", "dormant": "dormant"}
     if body.action not in (*action_to_state, "delete", "deploy"):
@@ -2697,10 +2715,10 @@ async def bulk_action(
         functools.partial(_apply_bulk, body, action_to_state, user, registry, settings)
     )
 
-    result = BulkActionResponse(action=body.action, succeeded=succeeded, failed=failed)
+    apps = AppsSync(changes=[])
     if succeeded:
         audit_resource_change(user.user_id, "source", ",".join(succeeded), body.action)
-        await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
+        apps = await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
         for source in deleted:
             # One pass per source: the delete is already done, and a broker that
             # cannot be reached must not cost the next source its cleanup.
@@ -2710,7 +2728,14 @@ async def bulk_action(
                 await _remove_hyperdx_source(request, name)
             # Once for the batch: each rebuild reads the whole registry.
             await _rebuild_all_sources(registry=registry, settings=settings, sources=succeeded)
-    return result
+    return BulkActionResponse(
+        action=body.action,
+        succeeded=succeeded,
+        failed=failed,
+        apps_synced=apps.changes,
+        apps_sync_error=apps.error,
+        restart_required=apps.restart_required,
+    )
 
 
 def _submit_bulk_deploys(
