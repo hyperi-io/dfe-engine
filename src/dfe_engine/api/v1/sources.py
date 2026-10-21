@@ -1894,6 +1894,15 @@ async def _execute_source_deploy(
             "apps_synced": apps.changes,
         },
     )
+    # Every stranded-topic deletion is audited under one action, whichever path made it.
+    if topics.removed:
+        audit_resource_change(
+            user.user_id,
+            "schema",
+            name,
+            "topics_removed",
+            details={"topics_removed": topics.removed},
+        )
     return deploy_result
 
 

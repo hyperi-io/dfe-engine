@@ -586,6 +586,27 @@ class TestTheDeployRoute:
         assert (body["topics_removed"], body["topics_pending_removal"]) == ([f"{name}_load"], [])
         assert bus.deleted == [f"{name}_load"]
 
+    def test_a_deletion_on_the_deploy_is_audited_as_the_sweep_audits_one(
+        self, client, admin_headers, sample_source, monkeypatch, audit_events
+    ):
+        name, _, _ = self._stranded_deploy(
+            client, admin_headers, sample_source, monkeypatch, unread=0, transforms=set()
+        )
+
+        removals = [e for e in audit_events if e.get("event") == "resource.schema.topics_removed"]
+        assert [(e["resource_name"], e["details"]) for e in removals] == [
+            (name, {"topics_removed": [f"{name}_load"]})
+        ]
+
+    def test_a_deploy_that_deletes_nothing_audits_no_removal(
+        self, client, admin_headers, sample_source, monkeypatch, audit_events
+    ):
+        self._stranded_deploy(
+            client, admin_headers, sample_source, monkeypatch, unread=4, transforms=set()
+        )
+
+        assert not [e for e in audit_events if e.get("event") == "resource.schema.topics_removed"]
+
     def test_a_drained_topic_its_transform_instance_writes_is_pending(
         self, client, admin_headers, sample_source, monkeypatch
     ):
