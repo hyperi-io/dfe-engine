@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.56](https://github.com/hyperi-io/dfe-engine/compare/v1.22.55...v1.22.56) (2026-10-21)
+
+### Bug Fixes
+
+* read the schema lease with sequential consistency ([#934](https://github.com/hyperi-io/dfe-engine/issues/934)) ([e468b83](https://github.com/hyperi-io/dfe-engine/commit/e468b83c502a61163de1c7859fbe70c5552492cf))
+
 ## [1.22.55](https://github.com/hyperi-io/dfe-engine/compare/v1.22.54...v1.22.55) (2026-10-20)
 
 ### Bug Fixes
