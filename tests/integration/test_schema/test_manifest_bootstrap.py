@@ -625,9 +625,11 @@ def test_a_release_that_fails_after_the_apply_keeps_the_apply(
     try:
         ch_client.command(f"GRANT SELECT, INSERT ON `{empty_database}`.`{table}` TO `{user}`")
         ch_client.command(f"GRANT SELECT ON system.replicas TO `{user}`")
-        # The claim is this user's one insert, so its release is refused.
+        # The claim is this user's one insert, so its release is refused. A quota
+        # window resets at fixed moments, so a year-long one keeps the claim and the
+        # release in the same window.
         ch_client.command(
-            f"CREATE QUOTA `{quota}` FOR INTERVAL 1 hour MAX query_inserts = 1 TO `{user}`"
+            f"CREATE QUOTA `{quota}` FOR INTERVAL 1 year MAX query_inserts = 1 TO `{user}`"
         )
         lock = SchemaLock(
             clickhouse_connect.get_client(
