@@ -4422,7 +4422,7 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.",
+        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.\n\n201 when the apps follow the new source, 202 when the source is stored and the\nreconcile that brings the apps into step with it did not complete.",
         "operationId": "create_source_api_v1_sources_post",
         "requestBody": {
           "required": true,
@@ -4437,6 +4437,16 @@
         "responses": {
           "201": {
             "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The source was stored and the apps were not brought into step with it: apps_sync_error says why, and POST /sources/reconcile-apps retries it",
             "content": {
               "application/json": {
                 "schema": {
@@ -4732,6 +4742,16 @@
         "responses": {
           "201": {
             "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The source was stored and the apps were not brought into step with it: apps_sync_error says why, and POST /sources/reconcile-apps retries it",
             "content": {
               "application/json": {
                 "schema": {

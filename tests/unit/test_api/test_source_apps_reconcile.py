@@ -113,6 +113,66 @@ class TestReceiverRoutingFollowsTheSources:
         assert resp.json()["apps_sync_error"] is None
 
 
+def _refuse_overlay_writes(app) -> None:
+    """Production with team review and no forge: every overlay write is refused, source writes are not."""
+    app.state.settings.env = "production"
+    app.state.settings.gitops.mode = "team"
+    app.state.forge = None
+
+
+class TestACreateTheAppsDidNotFollowIsAccepted:
+    """A stored source whose reconcile failed answers 202, so the status alone tells the two apart."""
+
+    def test_the_create_answers_202_and_says_why(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        _refuse_overlay_writes(app)
+
+        resp = client.post("/api/v1/sources", json=_receiver_body("kvproof"), headers=admin_headers)
+
+        assert resp.status_code == 202, resp.text
+        assert "review PR is required" in resp.json()["apps_sync_error"]
+        assert resp.json()["source"] == "kvproof"
+        assert client.get("/api/v1/sources/kvproof", headers=admin_headers).status_code == 200
+        assert _rules(gc) == []
+
+    def test_the_retry_then_brings_the_apps_into_step(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        _refuse_overlay_writes(app)
+        client.post("/api/v1/sources", json=_receiver_body("kvproof"), headers=admin_headers)
+        app.state.settings.env = "dev"
+
+        resp = client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert _rules(gc) == ["kvproof"]
+
+    def test_a_catalogue_create_answers_the_same(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        from pathlib import Path
+
+        from dfe_engine.source import catalogue as sc
+
+        shipped = Path(__file__).parents[2] / "fixtures" / "catalogue" / "sources.yaml"
+        monkeypatch.setenv(sc.CATALOGUE_FILE_ENV, str(shipped))
+        sc.reload_source_catalogue()
+        try:
+            _wire(app, tmp_path)
+            _refuse_overlay_writes(app)
+
+            resp = client.post(
+                "/api/v1/sources/from-catalogue/okta",
+                json={"intake": "beats"},
+                headers=admin_headers,
+            )
+        finally:
+            monkeypatch.delenv(sc.CATALOGUE_FILE_ENV, raising=False)
+            sc.reload_source_catalogue()
+
+        assert resp.status_code == 202, resp.text
+        assert resp.json()["apps_sync_error"]
+
+
 class TestFetcherInstancesFollowTheSources:
     def test_a_fetcher_source_gets_its_rule_but_no_instance_before_deploy(
         self, client, app, admin_headers, tmp_path

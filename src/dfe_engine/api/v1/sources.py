@@ -944,11 +944,21 @@ def list_sources(
     )
 
 
+_CREATED_APPS_NOT_SYNCED = {
+    "model": SourceResponse,
+    "description": (
+        "The source was stored and the apps were not brought into step with it: "
+        "apps_sync_error says why, and POST /sources/reconcile-apps retries it"
+    ),
+}
+
+
 @router.post(
     "",
     response_model=SourceResponse,
     status_code=201,
     responses={
+        202: _CREATED_APPS_NOT_SYNCED,
         409: {
             "model": SourceCreateConflictResponse,
             "description": (
@@ -965,6 +975,7 @@ def create_source(
     user: CurrentUser,
     registry: SourceReg,
     request: Request,
+    response: Response,
 ):
     """Create a new source from a flat source definition (initial version ``1.0.0``).
 
@@ -974,6 +985,9 @@ def create_source(
     A schema pin naming nothing is accepted here so a source can be written before
     its schema, while ``/sources/import`` refuses one because an exported bundle
     brings every schema it pins.
+
+    201 when the apps follow the new source, 202 when the source is stored and the
+    reconcile that brings the apps into step with it did not complete.
     """
     name = body.source
 
@@ -1000,9 +1014,10 @@ def create_source(
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "created")
-    return _source_response(
-        source, message="created", apps=_reconcile_apps(request, user, registry)
-    )
+    apps = _reconcile_apps(request, user, registry)
+    if apps.error is not None:
+        response.status_code = 202
+    return _source_response(source, message="created", apps=apps)
 
 
 @router.get(
@@ -1094,6 +1109,7 @@ def list_table_engines(
     response_model=SourceResponse,
     status_code=201,
     responses={
+        202: _CREATED_APPS_NOT_SYNCED,
         409: {
             "model": SourceCreateConflictResponse,
             "description": (
@@ -1111,6 +1127,7 @@ def create_source_from_catalogue(
     registry: SourceReg,
     settings: Settings,
     request: Request,
+    response: Response,
 ):
     """Create a source from a catalogue entry, on the intake it arrives by.
 
@@ -1151,7 +1168,7 @@ def create_source_from_catalogue(
             status_code=422,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
-    return create_source(write, user, registry, request)
+    return create_source(write, user, registry, request, response)
 
 
 @router.get(
