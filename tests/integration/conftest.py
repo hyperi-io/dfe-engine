@@ -1051,6 +1051,7 @@ def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Iterator
                 )
                 app.state.gitcrud = crud
             yield SimpleNamespace(
+                app=app,
                 client=client,
                 crud=crud,
                 database=database,

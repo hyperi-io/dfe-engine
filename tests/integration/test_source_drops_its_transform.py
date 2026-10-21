@@ -261,7 +261,14 @@ def test_a_restart_deletes_a_topic_left_pending(kafka_engine_restarts, kafka_boo
         _loader_reads_to(kafka_bootstrap, f"{name}_load", RECORDS)
         _deploy_without_it(first, kafka_bootstrap, name)
 
-    with kafka_engine_restarts():
+    with kafka_engine_restarts() as second:
+        # Startup hands the sweep to a background task rather than waiting on the broker.
+        sweep = second.app.state.stranded_topic_sweep
+        deadline = time.monotonic() + 60
+        while not sweep.done():
+            assert time.monotonic() < deadline, "the startup sweep never finished"
+            time.sleep(0.2)
+        assert sweep.result() == ([f"{name}_load"], [])
         topics = _topics(kafka_bootstrap)
 
     assert f"{name}_load" not in topics
