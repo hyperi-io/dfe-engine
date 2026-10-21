@@ -50,6 +50,27 @@ class TestEnsure:
         assert ensure_default_org(registry) is False
         assert registry.get(DEFAULT_ORG_NAME).display_name == "Unassigned"
 
+    def test_a_replica_that_loses_the_create_race_still_boots(self, tmp_path, monkeypatch):
+        # Both replicas read the org as missing, and the other one writes it first.
+        winner = OrgRegistry(tmp_path / "orgs")
+        loser = OrgRegistry(tmp_path / "orgs")
+        read = loser.get
+        raced: list[str] = []
+
+        def get(name: str):
+            if not raced:
+                raced.append(name)
+                ensure_default_org(winner)
+                return None
+            return read(name)
+
+        monkeypatch.setattr(loser, "get", get)
+
+        assert ensure_default_org(loser) is False
+        org = read(DEFAULT_ORG_NAME)
+        assert org is not None
+        assert org_tenant_ids(org) == [DEFAULT_ORG_ID]
+
     def test_another_org_holding_the_tenant_id_stops_it(self, registry):
         # That org would read every record that names no org.
         registry.create("acme", org_ids=[DEFAULT_ORG_ID])

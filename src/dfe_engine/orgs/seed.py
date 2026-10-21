@@ -23,6 +23,7 @@ from scalo.logger import logger
 from dfe_engine.auth.audit import audit_org_change
 from dfe_engine.gitops.repo import GitopsRemoteError
 from dfe_engine.orgs.models import DEFAULT_ORG_ID, DEFAULT_ORG_NAME
+from dfe_engine.orgs.registry import OrgExistsError
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
 
 if TYPE_CHECKING:
@@ -50,7 +51,11 @@ def ensure_default_org(registry: OrgRegistry) -> bool:
     """
     held = registry.get(DEFAULT_ORG_NAME)
     if held is None:
-        registry.create(DEFAULT_ORG_NAME, org_ids=[DEFAULT_ORG_ID], display_name="Default")
+        try:
+            registry.create(DEFAULT_ORG_NAME, org_ids=[DEFAULT_ORG_ID], display_name="Default")
+        except OrgExistsError:
+            # A replica booting beside this one wrote it between the read and the create.
+            return ensure_default_org(registry)
         audit_org_change(admin_id=SEED_ACTOR, change="created", org_name=DEFAULT_ORG_NAME)
         logger.info("Created the reserved default organisation", org=DEFAULT_ORG_NAME)
         return True

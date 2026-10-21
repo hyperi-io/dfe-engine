@@ -47,6 +47,10 @@ class OrgBoundError(ValueError):
     """Another org's ingest credential still binds the org a delete names."""
 
 
+class OrgExistsError(ValueError):
+    """An org with the name a create names is already stored."""
+
+
 class OrgRegistry:
     """YAML-backed store for customer organisations.
 
@@ -104,16 +108,16 @@ class OrgRegistry:
             The newly created Org.
 
         Raises:
-            ValueError: If the name is not a valid org name, an org with this name
-                already exists, the name or any tenant id collides with another
-                org's name or tenant ids, or a tenant id does not match
-                ``TENANT_ID_PATTERN``.
+            OrgExistsError: If an org with this name already exists.
+            ValueError: If the name is not a valid org name, the name or any tenant
+                id collides with another org's name or tenant ids, or a tenant id
+                does not match ``TENANT_ID_PATTERN``.
         """
         if re.fullmatch(ORG_NAME_PATTERN, name) is None:
             raise ValueError(f"Invalid org name: {name!r}")
         path = self._path(name)
         if path.exists():
-            raise ValueError(f"Org already exists: {name}")
+            raise OrgExistsError(f"Org already exists: {name}")
         other = colliding_org(name, org_ids or [], self.list())
         if other is not None:
             raise ValueError(f"Org '{name}' collides with tenant-fenced org '{other.name}'")
