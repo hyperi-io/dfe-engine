@@ -45,6 +45,9 @@ HELMVARS_CLASS = "helmvars"
 
 _OVERLAY_SUFFIX = "-values"
 
+_PARKED_SUFFIX = "-parked"
+"""Outside the ApplicationSet's ``values/*-values.yaml`` glob, so a parked copy deploys nothing."""
+
 # A DNS-1123 label: the instance ends up in Argo Application and Kubernetes object
 # names, so anything wider than this fails at deploy time rather than here.
 _INSTANCE_RE = re.compile(r"[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?")
@@ -69,6 +72,11 @@ class AppInstance:
     def overlay_name(self) -> str:
         """The gitcrud resource name for this instance's overlay."""
         return f"{self.service}-{self.instance}{_OVERLAY_SUFFIX}"
+
+    @property
+    def parked_name(self) -> str:
+        """The gitcrud resource name for the authored files kept while the instance is away."""
+        return f"{self.service}-{self.instance}{_PARKED_SUFFIX}"
 
     @property
     def telemetry_name(self) -> str:
@@ -122,9 +130,13 @@ def parse_overlay_name(name: str) -> AppInstance | None:
     hand-written overlay for something else is listed by the raw helm API but does
     not masquerade as a managed instance here.
     """
-    if not name.endswith(_OVERLAY_SUFFIX):
+    return _parse_name(name, _OVERLAY_SUFFIX)
+
+
+def _parse_name(name: str, suffix: str) -> AppInstance | None:
+    if not name.endswith(suffix):
         return None
-    stem = name[: -len(_OVERLAY_SUFFIX)]
+    stem = name[: -len(suffix)]
     # Longest service name first: dfe-transform-vrl must win over any shorter
     # service that happens to be a prefix of it.
     for service in sorted(services(), key=len, reverse=True):
@@ -143,6 +155,12 @@ def list_instances(gc: GitCrud, service: str | None = None) -> list[AppInstance]
         (i for i in found if i is not None and (service is None or i.service == service)),
         key=lambda i: (i.service, i.instance),
     )
+
+
+def list_parked(gc: GitCrud) -> list[AppInstance]:
+    """Every instance whose authored files the deploy repo keeps while the instance is away."""
+    found = (_parse_name(name, _PARKED_SUFFIX) for name in gc.list(HELMVARS_CLASS))
+    return sorted((i for i in found if i is not None), key=lambda i: (i.service, i.instance))
 
 
 def instances_routed_by(gc: GitCrud, compiler: str) -> list[AppInstance]:

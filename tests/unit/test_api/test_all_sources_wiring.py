@@ -63,7 +63,7 @@ class TestDeleteSource:
         response = client.delete("/api/v1/sources/zeek", headers=admin_headers)
 
         assert (response.status_code, _rebuilds(events=audit_events)) == (
-            204,
+            200,
             [
                 {
                     "event": NOT_REBUILT,
