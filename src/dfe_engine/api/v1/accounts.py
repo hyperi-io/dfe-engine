@@ -28,6 +28,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
+from scalo.api import scalo_extra
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
@@ -650,7 +651,8 @@ async def get_current_user_account(
     return response
 
 
-@router.put("/me", response_model=AccountResponse)
+# Declared, since the path alone names the same action as GET /me.
+@router.put("/me", response_model=AccountResponse, openapi_extra=scalo_extra(verb="update-me"))
 async def update_current_user_account(
     body: UpdateOwnAccountRequest,
     user: CurrentUser,
@@ -842,10 +844,12 @@ async def update_account(
     return _account_response(request, account, group_store.list())
 
 
+# Declared, since the path alone names the same action as the admin reset on /{username}.
 @router.post(
     "/reset-password",
     status_code=200,
     response_model=ResetPasswordResponse,
+    openapi_extra=scalo_extra(verb="change-password"),
     responses={
         403: {
             "model": ErrorResponse,

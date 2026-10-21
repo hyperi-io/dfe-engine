@@ -1,0 +1,528 @@
+{
+  "repos": {
+    "dfe-ui": {
+      "ref": "origin/main",
+      "commit": "973f7139f0308aa19420cb81d3b080ebdbadfe32"
+    },
+    "dfe-infra": {
+      "ref": "origin/main",
+      "commit": "a235b788df2aede92c608deff004d8a352f079ef"
+    },
+    "dfe-docker": {
+      "ref": "origin/main",
+      "commit": "4ba5d7ab78f7c2c9d4c3b347bead11579d491cf2"
+    },
+    "dfe-engine": {
+      "ref": "HEAD",
+      "commit": "79d5bffd23334a3d9f5f1a18cd00a40c2af16ff7"
+    }
+  },
+  "counts": {
+    "/api/v1/alerts/destinations": {
+      "dfe-ui": 2
+    },
+    "/api/v1/alerts/destinations/{name}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps": {
+      "dfe-infra": 2,
+      "dfe-ui": 4
+    },
+    "/api/v1/apps/{service}/instances": {
+      "dfe-ui": 3
+    },
+    "/api/v1/apps/{service}/{instance}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/config": {
+      "dfe-ui": 3
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}": {
+      "dfe-ui": 3
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/copy": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/dry-run": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/link": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/links": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/relink": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/{filename}": {
+      "dfe-ui": 3
+    },
+    "/api/v1/apps/{service}/{instance}/history": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/metrics": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/metrics/series": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/routing": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/routing/sync": {
+      "dfe-ui": 2
+    },
+    "/api/v1/apps/{service}/{instance}/scaling": {
+      "dfe-ui": 5
+    },
+    "/api/v1/apps/{service}/{instance}/status": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/accounts": {
+      "dfe-engine": 1,
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/accounts/me": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/accounts/reset-password": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/accounts/{username}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/accounts/{username}/reset-password": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/api-keys": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/api-keys/{short_token}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/groups": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/groups/{name}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/groups/{name}/members": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/groups/{name}/members/{username}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/login": {
+      "dfe-docker": 1,
+      "dfe-engine": 1,
+      "dfe-infra": 1,
+      "dfe-ui": 6
+    },
+    "/api/v1/auth/logout": {
+      "dfe-ui": 3
+    },
+    "/api/v1/auth/me": {
+      "dfe-engine": 1,
+      "dfe-ui": 7
+    },
+    "/api/v1/auth/oidc-providers": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/oidc-providers/{name}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/oidc-providers/{name}/sync": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/oidc-providers/{name}/test": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/oidc-providers/{name}/verify-login": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/oidc/{provider}/callback": {
+      "dfe-infra": 3,
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/oidc/{provider}/login": {
+      "dfe-infra": 1,
+      "dfe-ui": 3
+    },
+    "/api/v1/auth/permissions": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/refresh": {
+      "dfe-ui": 5
+    },
+    "/api/v1/auth/roles": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/roles/scopes": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/roles/{name}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/auth/setup-status": {
+      "dfe-docker": 3,
+      "dfe-infra": 5,
+      "dfe-ui": 4
+    },
+    "/api/v1/auth/setup/retire-admin": {
+      "dfe-docker": 1
+    },
+    "/api/v1/backing-services": {
+      "dfe-infra": 1,
+      "dfe-ui": 2
+    },
+    "/api/v1/backing-services/overlays/{name}/vars/{path}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/config/client": {
+      "dfe-infra": 1,
+      "dfe-ui": 2
+    },
+    "/api/v1/deployment/admin-links": {
+      "dfe-infra": 1,
+      "dfe-ui": 3
+    },
+    "/api/v1/field-maps": {
+      "dfe-infra": 1,
+      "dfe-ui": 2
+    },
+    "/api/v1/field-maps/seed": {
+      "dfe-ui": 2
+    },
+    "/api/v1/field-maps/{standard}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/field-maps/{standard}/{source}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/gitops/auto-merge": {
+      "dfe-ui": 3
+    },
+    "/api/v1/gitops/log": {
+      "dfe-ui": 2
+    },
+    "/api/v1/governance/actions": {
+      "dfe-ui": 2
+    },
+    "/api/v1/governance/actions/{name}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/governance/actions/{name}/invoke": {
+      "dfe-ui": 3
+    },
+    "/api/v1/governance/admin/actions": {
+      "dfe-ui": 3
+    },
+    "/api/v1/governance/admin/actions/{name}": {
+      "dfe-ui": 3
+    },
+    "/api/v1/governance/admin/policies": {
+      "dfe-ui": 2
+    },
+    "/api/v1/governance/admin/policies/{name}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/governance/ch-rbac/reconcile": {
+      "dfe-ui": 2
+    },
+    "/api/v1/governance/policies": {
+      "dfe-ui": 2
+    },
+    "/api/v1/governance/policies/{name}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/helm/files": {
+      "dfe-ui": 2
+    },
+    "/api/v1/helm/files/{name}/vars": {
+      "dfe-ui": 2
+    },
+    "/api/v1/helm/files/{name}/vars/{path}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/hunts": {
+      "dfe-infra": 1,
+      "dfe-ui": 4
+    },
+    "/api/v1/hunts/status": {
+      "dfe-ui": 2
+    },
+    "/api/v1/hunts/{name}": {
+      "dfe-ui": 4
+    },
+    "/api/v1/hunts/{name}/run": {
+      "dfe-ui": 2
+    },
+    "/api/v1/hyperdx/sources": {
+      "dfe-ui": 1
+    },
+    "/api/v1/kafka/topics": {
+      "dfe-infra": 1
+    },
+    "/api/v1/library": {
+      "dfe-infra": 1,
+      "dfe-ui": 3
+    },
+    "/api/v1/library/kinds": {
+      "dfe-ui": 2
+    },
+    "/api/v1/library/{artifact}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/library/{artifact}/rollback": {
+      "dfe-ui": 2
+    },
+    "/api/v1/library/{artifact}/state": {
+      "dfe-ui": 2
+    },
+    "/api/v1/library/{artifact}/tags/{tag}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/library/{artifact}/usage": {
+      "dfe-ui": 2
+    },
+    "/api/v1/library/{artifact}/versions": {
+      "dfe-ui": 2
+    },
+    "/api/v1/library/{artifact}/versions/{version}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/lifecycle": {
+      "dfe-infra": 1,
+      "dfe-ui": 2
+    },
+    "/api/v1/lifecycle/{name}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/orgs": {
+      "dfe-engine": 1,
+      "dfe-infra": 1,
+      "dfe-ui": 5
+    },
+    "/api/v1/orgs/{name}": {
+      "dfe-ui": 3
+    },
+    "/api/v1/repository/objects/{scope}/{scope_id}/{namespace}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/repository/objects/{scope}/{scope_id}/{namespace}/{key}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/repository/preferences": {
+      "dfe-ui": 2
+    },
+    "/api/v1/rules": {
+      "dfe-infra": 1,
+      "dfe-ui": 3
+    },
+    "/api/v1/rules/validate": {
+      "dfe-ui": 2
+    },
+    "/api/v1/rules/{name}": {
+      "dfe-ui": 3
+    },
+    "/api/v1/sample": {
+      "dfe-infra": 1
+    },
+    "/api/v1/samples": {
+      "dfe-infra": 1
+    },
+    "/api/v1/schemas": {
+      "dfe-infra": 1,
+      "dfe-ui": 2
+    },
+    "/api/v1/schemas/definitions/{schema_path}": {
+      "dfe-ui": 5
+    },
+    "/api/v1/schemas/definitions/{schema_path}/versions": {
+      "dfe-ui": 2
+    },
+    "/api/v1/schemas/definitions/{schema_path}/versions/columns": {
+      "dfe-ui": 3
+    },
+    "/api/v1/schemas/definitions/{schema_path}/versions/{version}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/schemas/elastic-converter": {
+      "dfe-ui": 2
+    },
+    "/api/v1/schemas/{source_name}/json-paths": {
+      "dfe-ui": 3
+    },
+    "/api/v1/schemas/{source_name}/promote-field": {
+      "dfe-ui": 3
+    },
+    "/api/v1/schemas/{source_name}/sample-rows": {
+      "dfe-ui": 2
+    },
+    "/api/v1/scim/v2/Users": {
+      "dfe-infra": 1
+    },
+    "/api/v1/services": {
+      "dfe-infra": 1
+    },
+    "/api/v1/sources": {
+      "dfe-docker": 1,
+      "dfe-infra": 4,
+      "dfe-ui": 5
+    },
+    "/api/v1/sources/bulk": {
+      "dfe-ui": 2
+    },
+    "/api/v1/sources/catalogue": {
+      "dfe-ui": 2
+    },
+    "/api/v1/sources/engines": {
+      "dfe-ui": 2
+    },
+    "/api/v1/sources/from-catalogue/{entry}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/sources/seed": {
+      "dfe-ui": 2
+    },
+    "/api/v1/sources/{name}": {
+      "dfe-docker": 1,
+      "dfe-infra": 2,
+      "dfe-ui": 8
+    },
+    "/api/v1/sources/{name}/build": {
+      "dfe-ui": 2
+    },
+    "/api/v1/sources/{name}/columns": {
+      "dfe-ui": 2
+    },
+    "/api/v1/sources/{name}/deploy": {
+      "dfe-infra": 1,
+      "dfe-ui": 4
+    },
+    "/api/v1/sources/{name}/flow": {
+      "dfe-ui": 2
+    },
+    "/api/v1/sources/{name}/plan": {
+      "dfe-ui": 2
+    },
+    "/api/v1/sources/{name}/versions/{version}": {
+      "dfe-ui": 2
+    },
+    "/api/v1/system/clickhouse-cloud": {
+      "dfe-ui": 2
+    },
+    "/api/v1/system/clickhouse-cloud/start": {
+      "dfe-ui": 2
+    },
+    "/api/v1/system/clickhouse-cloud/stop": {
+      "dfe-ui": 2
+    },
+    "/api/v1/system/defaults": {
+      "dfe-ui": 2
+    },
+    "/api/v1/system/defaults/apply": {
+      "dfe-ui": 2
+    },
+    "/api/v1/system/defaults/drift": {
+      "dfe-ui": 2
+    },
+    "/api/v1/system/deployment": {
+      "dfe-infra": 2
+    },
+    "/api/v1/system/retention": {
+      "dfe-ui": 2
+    },
+    "/api/v1/system/schema": {
+      "dfe-docker": 3,
+      "dfe-infra": 98
+    },
+    "/api/v1/system/settings": {
+      "dfe-ui": 2
+    },
+    "/api/v1/system/version": {
+      "dfe-infra": 1,
+      "dfe-ui": 3
+    },
+    "/api/v1/tasks": {
+      "dfe-infra": 1
+    },
+    "/api/v1/transforms/compile": {
+      "dfe-ui": 2
+    },
+    "/api/v1/transforms/test": {
+      "dfe-ui": 2
+    }
+  },
+  "unmatched": {
+    "dfe-ui": [
+      "/api/v1/backing-services/overlays/",
+      "/api/v1/repository/objects/{scope}/",
+      "/api/v1/schemas/definitions/aws/cloudtrail"
+    ],
+    "dfe-infra": [
+      "/api/v1/alerts",
+      "/api/v1/app-contracts",
+      "/api/v1/auth",
+      "/api/v1/auth/oidc/{wiring.provider}",
+      "/api/v1/auth/token/smoke",
+      "/api/v1/authoring",
+      "/api/v1/cel",
+      "/api/v1/crates/",
+      "/api/v1/crates/{crate}",
+      "/api/v1/deployment",
+      "/api/v1/gitops",
+      "/api/v1/governance",
+      "/api/v1/helm",
+      "/api/v1/hyperdx",
+      "/api/v1/logs",
+      "/api/v1/me",
+      "/api/v1/namespaces/",
+      "/api/v1/namespaces/dfe-other/pods",
+      "/api/v1/namespaces/dfe-test/pods",
+      "/api/v1/namespaces/dfe/configmaps",
+      "/api/v1/namespaces/dfe/pods",
+      "/api/v1/namespaces/dfe/pods/dfe-loader-1/log",
+      "/api/v1/namespaces/dfe/pods/p/exec",
+      "/api/v1/namespaces/dfe/pods/p/log/x",
+      "/api/v1/namespaces/dfe/secrets",
+      "/api/v1/namespaces/dfe/secrets/dfe-kafka-user",
+      "/api/v1/namespaces/kube-system/pods",
+      "/api/v1/namespaces/{NAMESPACE}/pods",
+      "/api/v1/namespaces/{NAMESPACE}/pods/p/log",
+      "/api/v1/namespaces/{NAMESPACE}/pods/{CRASHED}/log",
+      "/api/v1/namespaces/{namespace}/pods",
+      "/api/v1/namespaces/{run.namespace}/pods/{pod}/log",
+      "/api/v1/nodes/node-b/proxy/logs/aws-routed-eni/plugin",
+      "/api/v1/nodes/{node}/proxy/logs/aws-routed-eni/{log}",
+      "/api/v1/pipeline",
+      "/api/v1/pods",
+      "/api/v1/queries",
+      "/api/v1/repos/{owner}/{args.repo}/contents/{args.path}",
+      "/api/v1/repository",
+      "/api/v1/scim/v2",
+      "/api/v1/sigma",
+      "/api/v1/synthetic-data",
+      "/api/v1/system",
+      "/api/v1/transforms"
+    ],
+    "dfe-docker": [
+      "/api/v1/",
+      "/api/v1/alerts",
+      "/api/v1/auth/oidc/",
+      "/api/v1/config",
+      "/api/v1/dashboards",
+      "/api/v1/events",
+      "/api/v1/events/export",
+      "/api/v1/events/search",
+      "/api/v1/events/stream",
+      "/api/v1/health",
+      "/api/v1/hyperdx/",
+      "/api/v1/pipelines",
+      "/api/v1/roles",
+      "/api/v1/users"
+    ],
+    "dfe-engine": []
+  }
+}
