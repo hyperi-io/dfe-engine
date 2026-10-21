@@ -108,6 +108,28 @@ class TestExceptionHandlers:
             assert resp.status_code == 404, f"{path} still answers ({resp.status_code})"
 
 
+class TestTheRouterAnswersInTheEnvelope:
+    """A path no route matches, or a method its route does not take, answers ErrorResponse."""
+
+    def test_an_unknown_path(self, client: TestClient):
+        resp = client.get("/api/v1/no-such-route")
+
+        assert resp.status_code == 404
+        assert resp.json() == {"code": "request_error", "message": "Not Found", "errors": []}
+
+    def test_a_method_the_route_does_not_take(self, client: TestClient, admin_headers: dict):
+        resp = client.patch("/api/v1/sources", headers=admin_headers)
+
+        assert resp.status_code == 405
+        assert resp.json() == {
+            "code": "request_error",
+            "message": "Method Not Allowed",
+            "errors": [],
+        }
+        # The router's Allow header survives the envelope.
+        assert resp.headers["allow"]
+
+
 class TestServiceUnavailable:
     """scalo ServiceUnavailable (CH resilience budget exhausted) -> 503, never 500."""
 

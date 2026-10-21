@@ -231,6 +231,80 @@ class TestAPinWithNoDefinition:
         assert "meta/cisco_ios" in {entry["name"] for entry in schemas.json()["items"]}
 
 
+def _refused_and_absent(deployment, bundle: dict) -> tuple[Any, set[str], set[str]]:
+    """Import into a clean deployment, and return the answer and the sources and schemas left."""
+    client, headers = deployment("beta", schemas={"meta/core_tpl": CORE_SCHEMA})
+    with client:
+        imported = client.post("/api/v1/sources/import", json=bundle, headers=headers)
+        listed = client.get("/api/v1/sources", headers=headers)
+        schemas = client.get("/api/v1/schemas?per_page=-1", headers=headers)
+    sources = {entry["name"] for entry in listed.json()["items"]}
+    return imported, sources, {entry["name"] for entry in schemas.json()["items"]}
+
+
+class TestAPinnedVersionWithNoDefinition:
+    """A pin's version resolves as its path does, or the whole bundle is refused."""
+
+    def test_a_core_version_the_target_does_not_carry_refuses_the_whole_bundle(self, deployment):
+        bundle = _export_from_alpha(deployment, source_body=CORE_PINNED_BODY)
+        bundle["schema"]["definitions"] = []
+        bundle["schema"]["pins"]["meta_schema_version"] = "9.9.9"
+
+        imported, sources, _schemas = _refused_and_absent(deployment, bundle)
+
+        assert imported.status_code == 422, imported.text
+        assert imported.json()["code"] == "unresolved_reference"
+        assert "'9.9.9'" in imported.json()["message"]
+        assert "cisco-ios" not in sources
+
+    def test_a_core_reference_at_another_version_does_not_satisfy_the_pin(self, deployment):
+        bundle = _export_from_alpha(deployment, source_body=CORE_PINNED_BODY)
+        bundle["schema"]["pins"]["meta_schema_version"] = "9.9.9"
+        assert bundle["schema"]["definitions"][0]["reference"]["version"] == "2.0.0"
+
+        imported, sources, _schemas = _refused_and_absent(deployment, bundle)
+
+        assert imported.status_code == 422, imported.text
+        assert imported.json()["code"] == "unresolved_reference"
+        assert "cisco-ios" not in sources
+
+    def test_a_custom_version_the_bundle_does_not_define_refuses_it(self, deployment):
+        bundle = _export_from_alpha(deployment)
+        bundle["schema"]["pins"]["meta_schema_version"] = "1.2.0"
+
+        imported, sources, schemas = _refused_and_absent(deployment, bundle)
+
+        assert imported.status_code == 422, imported.text
+        assert imported.json()["code"] == "unresolved_reference"
+        assert "'1.2.0'" in imported.json()["message"]
+        # Nothing was written: the check runs before the first write.
+        assert "cisco-ios" not in sources
+        assert "meta/cisco_ios" not in schemas
+
+    def test_a_derived_schema_version_is_held_to_the_same_rule(self, deployment):
+        bundle = _export_from_alpha(deployment)
+        bundle["schema"]["pins"]["derived_schema"] = "meta/core_tpl"
+        bundle["schema"]["pins"]["derived_schema_version"] = "9.9.9"
+
+        imported, sources, schemas = _refused_and_absent(deployment, bundle)
+
+        assert imported.status_code == 422, imported.text
+        assert imported.json()["code"] == "unresolved_reference"
+        assert "'9.9.9'" in imported.json()["message"]
+        assert "cisco-ios" not in sources
+        assert "meta/cisco_ios" not in schemas
+
+    def test_a_pinned_version_the_bundle_defines_is_accepted(self, deployment):
+        bundle = _export_from_alpha(deployment)
+        bundle["schema"]["pins"]["meta_schema_version"] = "1.0.0"
+
+        client, headers = deployment("beta", schemas={"meta/core_tpl": CORE_SCHEMA})
+        with client:
+            imported = client.post("/api/v1/sources/import", json=bundle, headers=headers)
+
+        assert imported.status_code == 201, imported.text
+
+
 class TestCoreSourceTravelsAsAReference:
     """``main`` is the landing source the engine reconciles from its own settings."""
 

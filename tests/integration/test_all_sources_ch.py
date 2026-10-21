@@ -925,7 +925,7 @@ def test_deleting_sources_through_the_api_drops_them_from_all_sources(
     assert observed == {
         "at boot": f"^({LANDING})$",
         "bulk delete": (200, [BULK_A, BULK_B]),
-        "delete": 204,
+        "delete": 200,
         "member patterns": [
             f"^({BULK_A}|{BULK_B}|{DEPLOYED}|{LANDING})$",
             f"^({BULK_A}|{BULK_B}|{LANDING})$",

@@ -55,7 +55,7 @@ def _pin_targets(pins: SourceSchema) -> list[tuple[str, str, str | None]]:
     """
     declared: list[tuple[str | None, str | None]] = [
         (pins.meta_schema, pins.meta_schema_version),
-        (pins.derived_schema, None),
+        (pins.derived_schema, pins.derived_schema_version),
         (pins.additional_fields, None),
     ]
     targets: list[tuple[str, str, str | None]] = []
@@ -121,21 +121,39 @@ def _require_pins_resolve(
     schema travels as a reference and never as a copy, so a bundle may pin one
     and define nothing, and only the registry says whether it is here.
 
+    A pinned version is held to the same rule. A custom definition the bundle
+    carries must define it, and anything else is a schema this deployment holds,
+    which must already carry it.
+
     Raises:
-        ExchangeUnresolvedError: A pin is satisfied by neither.
+        ExchangeUnresolvedError: A pin, or the version it pins, is satisfied by neither.
     """
-    carried = {key for document in definitions if (key := _registry_key(document.path))}
-    for reference, path, _version in _pin_targets(pins):
+    carried = {key: document for document in definitions if (key := _registry_key(document.path))}
+    for reference, path, version in _pin_targets(pins):
         key = _registry_key(path)
-        if key is not None and (
-            key in carried or schema_registry.find_schema_at_location(key) is not None
-        ):
+        held = schema_registry.find_schema_at_location(key) if key is not None else None
+        if key is None or (key not in carried and held is None):
+            raise ExchangeUnresolvedError(
+                f"Schema pin {reference!r} names {path!r}, which the bundle does not define "
+                "and this deployment does not carry, so the source would land with a pin and "
+                "no definition"
+            )
+        if not version:
             continue
-        raise ExchangeUnresolvedError(
-            f"Schema pin {reference!r} names {path!r}, which the bundle does not define and "
-            "this deployment does not carry, so the source would land with a pin and no "
-            "definition"
-        )
+        document = carried.get(key)
+        if document is not None and document.resource_type == "custom":
+            defined = version in (document.versions or {})
+        elif held is not None:
+            defined = schema_registry.schema_version_exists(held, version)
+        else:
+            # A carried core reference to a schema not held here is refused by its own resolve.
+            continue
+        if not defined:
+            raise ExchangeUnresolvedError(
+                f"Schema pin {reference!r} asks for version {version!r} of {path!r}, which "
+                "neither the bundle nor this deployment defines, so the source would land "
+                "pinned to a version that does not exist"
+            )
 
 
 def build_source_bundle(

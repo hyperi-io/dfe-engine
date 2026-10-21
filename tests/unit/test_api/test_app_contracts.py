@@ -527,6 +527,235 @@ class TestWritingConfig:
         assert gc.head_revision() == before
 
 
+def _clear(client, headers, *paths: str, base: str = CONFIG, etag: str | None = None):
+    """DELETE the config paths, with If-Match only where the caller passes one."""
+    sent = dict(headers)
+    if etag is not None:
+        sent["If-Match"] = etag
+    return client.delete(base, params=[("path", p) for p in paths], headers=sent)
+
+
+class TestClearingConfig:
+    """A cleared option is unset again, not an override that matches today's default."""
+
+    CHUNK = "config.batch_processing.max_chunk_size"
+
+    def _field(self, client, headers, path: str) -> dict:
+        return {f["path"]: f for f in client.get(CONFIG, headers=headers).json()["fields"]}[path]
+
+    def test_a_cleared_option_reads_back_unset_on_the_default(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        _write(client, admin_headers, {self.CHUNK: 5000})
+
+        resp = _clear(client, admin_headers, self.CHUNK, etag=_etag(client, admin_headers))
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["changed"] is True
+        assert gc.head_revision() == resp.json()["commit_sha"]
+        cleared = self._field(client, admin_headers, self.CHUNK)
+        assert (cleared["provenance"], cleared["value"], cleared["set"]) == (
+            "default",
+            10000,
+            False,
+        )
+
+    def test_the_mapping_the_clear_emptied_goes_with_it(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        _write(client, admin_headers, {self.CHUNK: 5000})
+
+        _clear(client, admin_headers, self.CHUNK)
+
+        stored = gc.get("helmvars", "dfe-loader-default-values")
+        assert "batch_processing" not in stored.get("config", {})
+
+    def test_a_sibling_the_clear_did_not_name_stays(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        _write(
+            client,
+            admin_headers,
+            {self.CHUNK: 5000, "config.batch_processing.parse_error_action": "dlq"},
+        )
+
+        _clear(client, admin_headers, self.CHUNK)
+
+        stored = gc.get("helmvars", "dfe-loader-default-values")["config"]["batch_processing"]
+        assert stored == {"parse_error_action": "dlq"}
+
+    def test_several_options_clear_in_one_commit(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        _write(
+            client,
+            admin_headers,
+            {self.CHUNK: 5000, "config.batch_processing.parse_error_action": "dlq"},
+        )
+        before = gc.head_revision()
+
+        resp = _clear(
+            client, admin_headers, self.CHUNK, "config.batch_processing.parse_error_action"
+        )
+
+        assert resp.status_code == 200, resp.text
+        history = client.get(f"/api/v1/apps/{LOADER}/default/history", headers=admin_headers)
+        shas = [entry["sha"] for entry in history.json()]
+        assert shas.index(before) == 1
+
+    def test_an_option_that_was_never_set_commits_nothing(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        before = gc.head_revision()
+
+        resp = _clear(client, admin_headers, self.CHUNK)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["changed"] is False
+        assert gc.head_revision() == before
+
+    @pytest.mark.parametrize("path", ["image.tag", "config", "config.", "extraEnv"])
+    def test_a_path_outside_both_roots_is_refused(self, client, app, admin_headers, tmp_path, path):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        before = gc.head_revision()
+
+        resp = _clear(client, admin_headers, path)
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_path"
+        assert resp.json()["context"]["path"] == path
+        assert gc.head_revision() == before
+
+    def test_a_clear_names_at_least_one_path(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        assert client.delete(CONFIG, headers=admin_headers).status_code == 422
+
+    def test_an_if_match_that_has_gone_stale_is_refused(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        stale = _etag(client, admin_headers)
+        _write(client, admin_headers, {self.CHUNK: 5000})
+
+        resp = _clear(client, admin_headers, self.CHUNK, etag=stale)
+
+        assert resp.status_code == 412, resp.text
+        assert resp.json()["code"] == "stale_etag"
+
+    def test_a_custom_env_key_clears_the_same_way(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        _write(client, admin_headers, {"extraEnv.FEATURE_FLAG": "on"})
+
+        resp = _clear(client, admin_headers, "extraEnv.FEATURE_FLAG")
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["custom_env"]
+        assert client.get(CONFIG, headers=admin_headers).json()["custom"] == []
+
+    def test_clearing_config_needs_the_helmvars_write(
+        self, client, app, viewer_headers, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        _write(client, admin_headers, {self.CHUNK: 5000})
+        assert _clear(client, viewer_headers, self.CHUNK).status_code == 403
+
+    def test_a_protected_option_is_not_cleared_without_the_override(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        from tests.unit.test_api.test_governed_ops import _scoped_headers
+
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        _write(client, admin_headers, {self.CHUNK: 5000})
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={"name": "lock", "protected": [f"helmvars:*:{self.CHUNK}"]},
+            headers=admin_headers,
+        )
+        writer = _scoped_headers(
+            app,
+            api_settings,
+            username="cfgclearer",
+            role="cfg-clearer",
+            permissions=["helmvars:read", "helmvars:write"],
+        )
+        before = gc.head_revision()
+
+        resp = _clear(client, writer, self.CHUNK)
+
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "protected_var"
+        assert gc.head_revision() == before
+
+
+class TestClearingBesideACredential:
+    """Clearing a field puts the app's default where it was, which moves a credential as a write does."""
+
+    BASE = "/api/v1/apps/dfe-fetcher/alpha/config"
+    ENTRY = {"url": "https://api.example", "topic": "t", "auth": {"token": "rest-tok-7741"}}
+
+    def _deploy_with_a_token(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        _deploy_fetcher(client, admin_headers, "alpha")
+        written = client.put(
+            self.BASE,
+            json={"changes": {"config.sources.rest": {"primary": self.ENTRY}}},
+            headers=admin_headers,
+        )
+        assert written.status_code == 200, written.text
+        return gc
+
+    def _stored(self, gc) -> dict:
+        return gc.get("helmvars", "dfe-fetcher-alpha-values")["config"]["sources"]["rest"]
+
+    @pytest.mark.usefixtures("_held")
+    def test_a_field_beside_a_stored_credential_is_refused(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = self._deploy_with_a_token(client, app, admin_headers, tmp_path)
+        before = gc.head_revision()
+
+        resp = _clear(client, admin_headers, "config.sources.rest.primary.url", base=self.BASE)
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "credential_reentry_required"
+        assert resp.json()["context"]["path"] == "config.sources.rest.primary.url"
+        assert gc.head_revision() == before
+        assert "rest-tok-7741" not in resp.text
+
+    @pytest.mark.usefixtures("_held")
+    def test_clearing_the_credential_with_it_is_taken(self, client, app, admin_headers, tmp_path):
+        gc = self._deploy_with_a_token(client, app, admin_headers, tmp_path)
+
+        resp = _clear(
+            client,
+            admin_headers,
+            "config.sources.rest.primary.url",
+            "config.sources.rest.primary.auth.token",
+            base=self.BASE,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert self._stored(gc) == {"primary": {"topic": "t"}}
+
+    @pytest.mark.usefixtures("_held")
+    def test_the_whole_entry_holding_it_clears(self, client, app, admin_headers, tmp_path):
+        gc = self._deploy_with_a_token(client, app, admin_headers, tmp_path)
+
+        resp = _clear(client, admin_headers, "config.sources.rest.primary", base=self.BASE)
+
+        assert resp.status_code == 200, resp.text
+        doc = gc.get("helmvars", "dfe-fetcher-alpha-values")
+        assert "rest" not in doc["config"].get("sources", {})
+
+
 class TestArchiverChartDerivedPaths:
     """The archiver reads its own bare env family, not DFE_ARCHIVER_* -- #381."""
 

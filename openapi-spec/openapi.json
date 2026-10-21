@@ -4422,7 +4422,7 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.",
+        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.\n\n201 when the apps follow the new source, 202 when the source is stored and the\nreconcile that brings the apps into step with it did not complete.",
         "operationId": "create_source_api_v1_sources_post",
         "requestBody": {
           "required": true,
@@ -4437,6 +4437,16 @@
         "responses": {
           "201": {
             "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The source was stored and the apps were not brought into step with it: apps_sync_error says why, and POST /sources/reconcile-apps retries it",
             "content": {
               "application/json": {
                 "schema": {
@@ -4732,6 +4742,16 @@
         "responses": {
           "201": {
             "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The source was stored and the apps were not brought into step with it: apps_sync_error says why, and POST /sources/reconcile-apps retries it",
             "content": {
               "application/json": {
                 "schema": {
@@ -5545,7 +5565,7 @@
           "Sources"
         ],
         "summary": "Delete Source",
-        "description": "Delete a source by name. Its fetcher instance, receiver rule and topics go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.",
+        "description": "Delete a source by name. Its fetcher instance, receiver rule and topics go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.\n\nThe answer reports the reconcile as a create or an update does: on a\ndeployment that renders the app config itself, ``restart_required`` names the\ncommand that takes away the containers the source's instances ran in.",
         "operationId": "delete_source_api_v1_sources__name__delete",
         "parameters": [
           {
@@ -5559,8 +5579,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Successful Response"
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDeleteResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
@@ -5831,7 +5858,7 @@
           "Sources"
         ],
         "summary": "Bulk Action",
-        "description": "Perform a bulk action on multiple sources.\n\n``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.\n``deploy`` submits one ``source:deploy`` background task per accepted source\n(poll ``GET /tasks/{task_id}``); refused names land in ``failed``.",
+        "description": "Perform a bulk action on multiple sources.\n\n``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.\n``deploy`` submits one ``source:deploy`` background task per accepted source\n(poll ``GET /tasks/{task_id}``); refused names land in ``failed``.\n\nAn action that applies immediately reports the one reconcile it ends with, as\na single-source write does.",
         "operationId": "bulk_action_api_v1_sources_bulk_post",
         "requestBody": {
           "content": {
@@ -5992,7 +6019,7 @@
           "Sources"
         ],
         "summary": "Import Source",
-        "description": "Import a source bundle exported from another deployment.\n\nThe bundle's meta-schema definitions are written first, then the source, both\nthrough the registries that commit to git. A definition marked\n``resource_type: core`` is resolved against what dfe-schemas already put here\nand never written, so the read-only schema is not forked.\n\nEvery check runs before the first write: a bundle applied halfway would leave\nthe source's schema pins with no definitions behind them.",
+        "description": "Import a source bundle exported from another deployment.\n\nThe bundle's meta-schema definitions are written first, then the source, both\nthrough the registries that commit to git. A definition marked\n``resource_type: core`` is resolved against what dfe-schemas already put here\nand never written, so the read-only schema is not forked.\n\nEvery check runs before the first write: a bundle applied halfway would leave\nthe source's schema pins with no definitions behind them. A schema pin, or a\nversion it pins, that neither the bundle nor this deployment defines is a 422\n``unresolved_reference``.",
         "operationId": "import_source_api_v1_sources_import_post",
         "requestBody": {
           "content": {
@@ -18250,6 +18277,111 @@
             "BearerAuth": []
           }
         ]
+      },
+      "delete": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Clear App Config",
+        "description": "Remove options from the overlay, so the app runs its own default for each.\n\nA cleared option reads back unset with provenance ``default``, so it follows the\ndefault when the default next moves. Writing the default back would instead\nleave an override that only matches it today, and a PUT of null stores null,\nwhich many options take as a value of its own.\n\nA path the overlay does not hold is already clear and commits nothing. Clearing\na field beside a stored credential in the same mapping is a 400\n``credential_reentry_required``, as the PUT of a new value there is, unless the\nrequest clears that credential too.",
+        "operationId": "clear_app_config_api_v1_apps__service___instance__config_delete",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "An option to put back to the app's default, as the config route reports it: `config.<option>` or `extraEnv.<NAME>`. Repeat it to clear several in one commit.",
+              "title": "Path"
+            },
+            "description": "An option to put back to the app's default, as the config route reports it: `config.<option>` or `extraEnv.<NAME>`. Repeat it to clear several in one commit."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigWriteResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/apps/{service}/{instance}/scaling": {
@@ -24855,6 +24987,34 @@
             "type": "array",
             "title": "Deployments",
             "description": "Deploy only: one ``source:deploy`` task per accepted source. Poll via GET /tasks/{task_id}."
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes made so the apps follow this change (service/instance: action)"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps could not be brought into step; reconcile-apps retries it"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app the change leaves to apply where this deployment renders the app config itself, including taking away the container of an instance a source no longer has. Empty where a GitOps controller applies it."
           }
         },
         "type": "object",
@@ -37590,6 +37750,53 @@
         ],
         "title": "SourceDefaultDrift",
         "description": "One source whose deployed table or stored values differ from the defaults."
+      },
+      "SourceDeleteResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "deleted"
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes made so the apps follow this change (service/instance: action)"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps could not be brought into step; reconcile-apps retries it"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app the change leaves to apply where this deployment renders the app config itself, including taking away the container of an instance a source no longer has. Empty where a GitOps controller applies it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "SourceDeleteResponse",
+        "description": "A deleted source, and what the apps now need to follow the delete."
       },
       "SourceDetailResponse": {
         "properties": {

@@ -13,7 +13,7 @@ Or via CLI::
 import functools
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +24,9 @@ from scalo.logger import logger
 from dfe_engine import __version__
 from dfe_engine.fastapi_telemetry import FASTAPI_TELEMETRY
 from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture, load_settings
+
+if TYPE_CHECKING:
+    from dfe_engine.kafka.topics import TopicEnsureResult
 
 
 def docs_served(settings: DFESettings) -> bool:
@@ -55,6 +58,29 @@ async def _sweep_stranded_topics(
     if removed or pending:
         logger.info("stranded topics settled at startup", removed=removed, pending=pending)
     return removed, pending
+
+
+async def _ensure_startup_topics(
+    sources: list[Any], settings: DFESettings
+) -> TopicEnsureResult | None:
+    """Startup's ensure pass over every carried source's topics, off the event loop. Never raises.
+
+    Returns what the pass did, or None where it could not run at all.
+    """
+    import asyncio
+
+    from dfe_engine.kafka.topics import ensure_all_source_topics
+
+    try:
+        ensured = await asyncio.to_thread(ensure_all_source_topics, sources, settings)
+    except Exception as exc:  # a broker still coming up must never break startup
+        logger.warning("kafka topics not ensured at startup", error=str(exc))
+        return None
+    if ensured.created:
+        logger.info("Kafka topics created at startup", topics=ensured.created)
+    for name, error in ensured.failed:
+        logger.warning("kafka topic not ensured at startup", topic=name, error=error)
+    return ensured
 
 
 @asynccontextmanager
@@ -189,19 +215,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Every carried source's topics, at boot rather than at its next deploy: a
     # deployment restored from its config repo otherwise has topics only for the
     # sources somebody happens to redeploy, and the rest produce into nothing.
-    if source_registry is not None:
-        from dfe_engine.kafka.topics import ensure_all_source_topics
+    from dfe_engine.kafka.topics import topics_managed_at_startup
 
+    if source_registry is not None and topics_managed_at_startup(settings):
         try:
-            ensured = await asyncio.to_thread(
-                ensure_all_source_topics, source_registry.get_all_sources(), settings
-            )
-            if ensured.created:
-                logger.info("Kafka topics created at startup", topics=ensured.created)
-            for name, error in ensured.failed:
-                logger.warning("kafka topic not ensured at startup", topic=name, error=error)
-        except Exception as exc:  # a broker still coming up must never break startup
+            carried = source_registry.get_all_sources()
+        except Exception as exc:  # an unreadable registry must never break startup
             logger.warning("kafka topics not ensured at startup", error=str(exc))
+        else:
+            # Not awaited: nothing is served until startup returns, and each broker call can stall.
+            app.state.startup_topic_ensure = asyncio.create_task(
+                _ensure_startup_topics(carried, settings), name="startup-topic-ensure"
+            )
 
     # Ahead of the reconcile below because a source's overlay may link a shipped
     # artefact, which has to exist before the link resolves.
@@ -630,6 +655,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if stranded_topic_sweep is not None:
         stranded_topic_sweep.cancel()
         await asyncio.gather(stranded_topic_sweep, return_exceptions=True)
+    startup_topic_ensure = getattr(app.state, "startup_topic_ensure", None)
+    if startup_topic_ensure is not None:
+        startup_topic_ensure.cancel()
+        await asyncio.gather(startup_topic_ensure, return_exceptions=True)
     from dfe_engine.governance.ch import TRIGGER_ATTRIBUTES
 
     for attribute in TRIGGER_ATTRIBUTES:

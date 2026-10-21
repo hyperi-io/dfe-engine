@@ -1107,7 +1107,14 @@ class TestDeleteSource:
     def test_delete_success(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.delete("/api/v1/sources/test-source", headers=admin_headers)
-        assert resp.status_code == 204
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {
+            "source": "test-source",
+            "message": "deleted",
+            "apps_synced": [],
+            "apps_sync_error": None,
+            "restart_required": [],
+        }
 
         # Verify it's gone
         get_resp = client.get("/api/v1/sources/test-source", headers=admin_headers)
@@ -1128,7 +1135,7 @@ class TestDeleteSource:
         store = _record_deploy(api_settings, "test-source")
 
         assert (
-            client.delete("/api/v1/sources/test-source", headers=admin_headers).status_code == 204
+            client.delete("/api/v1/sources/test-source", headers=admin_headers).status_code == 200
         )
         recreated = client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
 
@@ -1158,7 +1165,7 @@ class TestDeleteSource:
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
 
         assert (
-            client.delete("/api/v1/sources/test-source", headers=admin_headers).status_code == 204
+            client.delete("/api/v1/sources/test-source", headers=admin_headers).status_code == 200
         )
         assert removed == ["test-source_land"]
 

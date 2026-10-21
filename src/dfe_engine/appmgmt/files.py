@@ -24,6 +24,7 @@ write goes through the same policy and review routing as every other helm-var ch
 """
 
 import re
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 from scalo.logger import logger
@@ -226,6 +227,33 @@ def _warn_on_orphaned_entries(doc: dict, file_set: ConsumedFileSet, name: str) -
                 missing_file=name,
                 path=path,
             )
+
+
+def _authored_paths(file_set: ConsumedFileSet) -> tuple[str, ...]:
+    return tuple(p for p in (file_set.values_path, file_set.links_path, file_set.entries_path) if p)
+
+
+def authored_content(file_sets: Iterable[ConsumedFileSet], doc: dict) -> dict:
+    """Each set's files, links and table entries in ``doc``, as a document of their own.
+
+    Empty when the overlay carries none of them.
+    """
+    kept: dict = {}
+    for file_set in file_sets:
+        for path in _authored_paths(file_set):
+            value = get_path(doc, path, default=None)
+            if value:
+                set_path(kept, path, value)
+    return kept
+
+
+def restore_authored_content(file_sets: Iterable[ConsumedFileSet], doc: dict, kept: dict) -> None:
+    """Write back into ``doc`` every path :func:`authored_content` kept. Mutates ``doc``."""
+    for file_set in file_sets:
+        for path in _authored_paths(file_set):
+            value = get_path(kept, path, default=None)
+            if value:
+                set_path(doc, path, value)
 
 
 def table_name(filename: str) -> str:

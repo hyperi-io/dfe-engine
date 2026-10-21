@@ -247,6 +247,41 @@ class SourceResponse(BaseModel):
     )
 
 
+def _apps_synced_field() -> Any:
+    return Field(
+        default_factory=list,
+        description="Deploy-repo writes made so the apps follow this change (service/instance: action)",
+    )
+
+
+def _apps_sync_error_field() -> Any:
+    return Field(
+        default=None,
+        description="Why the apps could not be brought into step; reconcile-apps retries it",
+    )
+
+
+def _apply_hints_field() -> Any:
+    return Field(
+        default_factory=list,
+        description=(
+            "One command per app the change leaves to apply where this deployment renders "
+            "the app config itself, including taking away the container of an instance a "
+            "source no longer has. Empty where a GitOps controller applies it."
+        ),
+    )
+
+
+class SourceDeleteResponse(BaseModel):
+    """A deleted source, and what the apps now need to follow the delete."""
+
+    source: str
+    message: str = "deleted"
+    apps_synced: list[str] = _apps_synced_field()
+    apps_sync_error: str | None = _apps_sync_error_field()
+    restart_required: list[str] = _apply_hints_field()
+
+
 class SourceImportResponse(SourceImportResult):
     """A bundle applied, plus what the apps now need to follow it."""
 
@@ -360,13 +395,21 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
         changes = derived.plan(gc, registry, settings)
         transforms = transform_instances(gc)
         for change in changes:
+            if change.action == "forget":
+                derived.drop_parked(gc, change.app, user.user_id)
+                done.append(change.describe())
+                continue
             if change.action == "remove":
+                derived.keep_parked(gc, change, user.user_id)
                 written = remove_overlay(request, user, change.app)
             else:
                 # No _enforce: compiled from the sources, and resolve_mode PRs it in production.
                 written = commit_overlay(
                     request, user, change.app, change.doc or {}, summary=change.summary
                 )
+                # A restore held for review keeps its parked copy until the overlay lands.
+                if change.unpark and not written.review_required:
+                    derived.drop_parked(gc, change.app, user.user_id)
             # Each write renders the app config itself, so its hint is the only
             # report of that change: the render below finds the file current.
             hints += written.restart_required
@@ -606,6 +649,9 @@ class BulkActionResponse(BaseModel):
             "Poll via GET /tasks/{task_id}."
         ),
     )
+    apps_synced: list[str] = _apps_synced_field()
+    apps_sync_error: str | None = _apps_sync_error_field()
+    restart_required: list[str] = _apply_hints_field()
 
 
 class SeedResponse(BaseModel):
@@ -944,11 +990,21 @@ def list_sources(
     )
 
 
+_CREATED_APPS_NOT_SYNCED = {
+    "model": SourceResponse,
+    "description": (
+        "The source was stored and the apps were not brought into step with it: "
+        "apps_sync_error says why, and POST /sources/reconcile-apps retries it"
+    ),
+}
+
+
 @router.post(
     "",
     response_model=SourceResponse,
     status_code=201,
     responses={
+        202: _CREATED_APPS_NOT_SYNCED,
         409: {
             "model": SourceCreateConflictResponse,
             "description": (
@@ -965,6 +1021,7 @@ def create_source(
     user: CurrentUser,
     registry: SourceReg,
     request: Request,
+    response: Response,
 ):
     """Create a new source from a flat source definition (initial version ``1.0.0``).
 
@@ -974,6 +1031,9 @@ def create_source(
     A schema pin naming nothing is accepted here so a source can be written before
     its schema, while ``/sources/import`` refuses one because an exported bundle
     brings every schema it pins.
+
+    201 when the apps follow the new source, 202 when the source is stored and the
+    reconcile that brings the apps into step with it did not complete.
     """
     name = body.source
 
@@ -1000,9 +1060,10 @@ def create_source(
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "created")
-    return _source_response(
-        source, message="created", apps=_reconcile_apps(request, user, registry)
-    )
+    apps = _reconcile_apps(request, user, registry)
+    if apps.error is not None:
+        response.status_code = 202
+    return _source_response(source, message="created", apps=apps)
 
 
 @router.get(
@@ -1094,6 +1155,7 @@ def list_table_engines(
     response_model=SourceResponse,
     status_code=201,
     responses={
+        202: _CREATED_APPS_NOT_SYNCED,
         409: {
             "model": SourceCreateConflictResponse,
             "description": (
@@ -1111,6 +1173,7 @@ def create_source_from_catalogue(
     registry: SourceReg,
     settings: Settings,
     request: Request,
+    response: Response,
 ):
     """Create a source from a catalogue entry, on the intake it arrives by.
 
@@ -1151,7 +1214,7 @@ def create_source_from_catalogue(
             status_code=422,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
-    return create_source(write, user, registry, request)
+    return create_source(write, user, registry, request, response)
 
 
 @router.get(
@@ -2546,7 +2609,7 @@ def patch_source_enabled(
 
 @router.delete(
     "/{name}",
-    status_code=204,
+    response_model=SourceDeleteResponse,
     responses={
         409: {
             "model": CoreResourceConflictErrorResponse,
@@ -2557,11 +2620,15 @@ def patch_source_enabled(
 )
 async def delete_source(
     name: str, user: CurrentUser, registry: SourceReg, settings: Settings, request: Request
-):
+) -> SourceDeleteResponse:
     """Delete a source by name. Its fetcher instance, receiver rule and topics go with it.
 
     An engine-owned source -- the landing table's own -- is refused with 409
     ``conflict``, the same answer PUT and PATCH give.
+
+    The answer reports the reconcile as a create or an update does: on a
+    deployment that renders the app config itself, ``restart_required`` names the
+    command that takes away the containers the source's instances ran in.
     """
     source = await run_blocking(
         functools.partial(_delete_stored_source, name, user, registry, settings)
@@ -2578,10 +2645,16 @@ async def delete_source(
         "deleted",
         details={"topics_removed": topics_removed, "topics_failed": topics_failed},
     )
-    await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
+    apps = await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
     await _remove_hyperdx_source(request, name)
     # The table stays in ClickHouse; leaving the registry is what takes it out of all_sources.
     await _rebuild_all_sources(registry=registry, settings=settings, sources=[name])
+    return SourceDeleteResponse(
+        source=name,
+        apps_synced=apps.changes,
+        apps_sync_error=apps.error,
+        restart_required=apps.restart_required,
+    )
 
 
 def _delete_stored_source(name: str, user: Any, registry: Any, settings: Any) -> Source:
@@ -2625,6 +2698,9 @@ async def bulk_action(
     ``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.
     ``deploy`` submits one ``source:deploy`` background task per accepted source
     (poll ``GET /tasks/{task_id}``); refused names land in ``failed``.
+
+    An action that applies immediately reports the one reconcile it ends with, as
+    a single-source write does.
     """
     action_to_state = {"enable": "active", "disable": "disabled", "dormant": "dormant"}
     if body.action not in (*action_to_state, "delete", "deploy"):
@@ -2647,10 +2723,10 @@ async def bulk_action(
         functools.partial(_apply_bulk, body, action_to_state, user, registry, settings)
     )
 
-    result = BulkActionResponse(action=body.action, succeeded=succeeded, failed=failed)
+    apps = AppsSync(changes=[])
     if succeeded:
         audit_resource_change(user.user_id, "source", ",".join(succeeded), body.action)
-        await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
+        apps = await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
         for source in deleted:
             # One pass per source: the delete is already done, and a broker that
             # cannot be reached must not cost the next source its cleanup.
@@ -2660,7 +2736,14 @@ async def bulk_action(
                 await _remove_hyperdx_source(request, name)
             # Once for the batch: each rebuild reads the whole registry.
             await _rebuild_all_sources(registry=registry, settings=settings, sources=succeeded)
-    return result
+    return BulkActionResponse(
+        action=body.action,
+        succeeded=succeeded,
+        failed=failed,
+        apps_synced=apps.changes,
+        apps_sync_error=apps.error,
+        restart_required=apps.restart_required,
+    )
 
 
 def _submit_bulk_deploys(
@@ -2864,7 +2947,9 @@ def import_source(
     and never written, so the read-only schema is not forked.
 
     Every check runs before the first write: a bundle applied halfway would leave
-    the source's schema pins with no definitions behind them.
+    the source's schema pins with no definitions behind them. A schema pin, or a
+    version it pins, that neither the bundle nor this deployment defines is a 422
+    ``unresolved_reference``.
     """
     try:
         result = apply_source_bundle(

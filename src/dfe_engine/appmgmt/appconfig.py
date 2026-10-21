@@ -114,6 +114,9 @@ RESTART_HINT = f"restart required: {APPLY_COMMAND}"
 RECREATE_HINT = f"recreate required: {APPLY_COMMAND}"
 """Compose reads env_file at up time, so a restart keeps the old environment."""
 
+REMOVE_HINT = "removal required: make apply"
+"""Named without SERVICES, because the target then only removes the containers the index dropped."""
+
 
 class AppConfigError(RuntimeError):
     """Raised when a rendered config cannot be written."""
@@ -147,6 +150,9 @@ class RenderedApp:
     created: bool = False
     """Whether this instance is new here, so no container is running it yet."""
 
+    removed: bool = False
+    """Whether this instance left the deploy repo, so its container has no config left to read."""
+
     @property
     def container(self) -> str:
         """The Compose service carrying this render, which is what an operator acts on."""
@@ -155,6 +161,8 @@ class RenderedApp:
     @property
     def restart_hint(self) -> str:
         """The command that applies this change, or empty when none is needed."""
+        if self.removed:
+            return REMOVE_HINT
         # A changed env file changes the service definition, which `up` recreates
         # on, and `up` is also what CREATES the container a new instance lacks.
         if self.custom_env_changed or self.created:
@@ -677,19 +685,22 @@ def renderable(settings: Any) -> list[AppDescriptor]:
     )
 
 
-def _prune_instance_dirs(app_root: Path, keep: list[str]) -> None:
-    """Drop the directories of instances this deployment no longer has.
+def _prune_instance_dirs(app_root: Path, keep: list[str]) -> list[str]:
+    """Drop the directories of instances this deployment no longer has, and name them.
 
     A source deleted here has to take its rendered config with it: the deployer
     reads the index to stop declaring the container, and a config left behind
     would come back the moment anything re-declared one by that name.
     """
     if not app_root.is_dir():
-        return
+        return []
     wanted = set(keep)
-    for path in app_root.iterdir():
+    dropped: list[str] = []
+    for path in sorted(app_root.iterdir()):
         if path.is_dir() and path.name not in wanted:
             shutil.rmtree(path)
+            dropped.append(path.name)
+    return dropped
 
 
 def _prune_custom_env(settings: Any, service: str, keep: list[str]) -> None:
@@ -741,7 +752,21 @@ def render(gc: GitCrud, settings: Any) -> list[RenderedApp]:
             continue
         names = [i.instance for i in found if i is not None]
         # An app-level render's file-set directories share this parent with the instances.
-        _prune_instance_dirs(out_root / app.service, [*names, *(fs.name for fs in app.files)])
+        dropped = _prune_instance_dirs(
+            out_root / app.service, [*names, *(fs.name for fs in app.files)]
+        )
+        written.extend(
+            RenderedApp(
+                service=app.service,
+                instance=name,
+                directory=out_root / app.service / name,
+                changed=True,
+                restart_required=False,
+                per_instance=True,
+                removed=True,
+            )
+            for name in dropped
+        )
         _prune_custom_env(settings, app.service, names)
         write_instance_index(settings, app.service, names)
         _clear_app_level_custom_env(settings, app)
@@ -768,6 +793,15 @@ def render_and_report(gc: GitCrud | None, settings: Any) -> list[str]:
         return []
     for entry in rendered:
         if not entry.changed:
+            continue
+        if entry.removed:
+            logger.info(
+                "Removed the rendered config of an instance the deploy repo dropped",
+                app=entry.service,
+                instance=entry.instance,
+                container=entry.container,
+                restart=entry.restart_hint,
+            )
             continue
         logger.info(
             "Rendered an app's config for its running container",

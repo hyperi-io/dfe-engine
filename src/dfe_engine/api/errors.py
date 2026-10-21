@@ -13,6 +13,7 @@ from fastapi.openapi.constants import REF_TEMPLATE
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from scalo.logger import logger
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import BaseRoute
 
 from dfe_engine.api.middleware.access_log import route_template
@@ -290,8 +291,9 @@ def install_exception_handlers(app: FastAPI) -> None:
     """Register all exception handlers on the app."""
     from dfe_engine.api.password_floor import count_floor_refusal, is_floor_refusal
 
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(_request: Request, exc: HTTPException):
+    # Starlette's base class, so the router's own 404 and 405 answer this envelope too.
+    @app.exception_handler(StarletteHTTPException)
+    async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
         if isinstance(exc.detail, str):
             body = ErrorResponse(code="request_error", message=exc.detail)
         elif isinstance(exc.detail, dict):
