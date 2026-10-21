@@ -127,7 +127,7 @@ def _keep_bearer_tokens_in_step(app: FastAPI) -> None:
     secrets = app.state.dfe_secrets
 
     def sync() -> None:
-        sync_bearer_tokens(registry.ingest_credentials.list(), secrets)
+        sync_bearer_tokens(registry, secrets)
 
     try:
         sync()

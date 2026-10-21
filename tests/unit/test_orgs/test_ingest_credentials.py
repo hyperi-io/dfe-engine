@@ -15,6 +15,7 @@ from dfe_engine.orgs.ingest_credentials import (
     IngestCredential,
 )
 from dfe_engine.orgs.ingest_tokens import (
+    accepted_credentials,
     bearer_entries,
     bearer_secret_path,
     credential_secret_path,
@@ -212,25 +213,35 @@ class TestTokens:
     def test_a_credential_with_no_stored_token_is_left_out(self, secrets):
         assert bearer_entries([_credential()], secrets)["http"] == "\n"
 
-    def test_a_sync_rewrites_only_what_changed(self, secrets):
+    def test_a_sync_rewrites_only_what_changed(self, registry, secrets):
         credential = _credential()
+        registry.ingest_credentials.put(credential)
         store_token(secrets, credential.name, "token-a")
 
-        first = sync_bearer_tokens([credential], secrets)
-        second = sync_bearer_tokens([credential], secrets)
+        first = sync_bearer_tokens(registry, secrets)
+        second = sync_bearer_tokens(registry, secrets)
 
         assert first == list(BEARER_LISTENERS)
         assert second == []
         assert secrets.get(bearer_secret_path("http")) == "acme-agents:token-a\n"
 
-    def test_a_deleted_credential_s_token_leaves_every_listener(self, secrets):
+    def test_a_deleted_credential_s_token_leaves_every_listener(self, registry, secrets):
         credential = _credential(listeners=list(BEARER_LISTENERS))
+        registry.ingest_credentials.put(credential)
         store_token(secrets, credential.name, "token-a")
-        sync_bearer_tokens([credential], secrets)
+        sync_bearer_tokens(registry, secrets)
 
+        registry.ingest_credentials.delete(credential.name)
         drop_token(secrets, credential.name)
-        sync_bearer_tokens([], secrets)
+        sync_bearer_tokens(registry, secrets)
 
         assert secrets.get_or_none(credential_secret_path(credential.name)) is None
         for listener in BEARER_LISTENERS:
             assert "token-a" not in secrets.get(bearer_secret_path(listener))
+
+    def test_a_disabled_org_s_credential_is_not_accepted(self, registry, secrets):
+        registry.ingest_credentials.put(_credential())
+        registry.ingest_credentials.put(_credential("beta-hec", org="beta"))
+        registry.update("acme", enabled=False)
+
+        assert [c.name for c in accepted_credentials(registry)] == ["beta-hec"]

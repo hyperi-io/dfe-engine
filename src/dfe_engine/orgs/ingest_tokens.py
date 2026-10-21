@@ -13,8 +13,8 @@ receiver reads one secret per listener, ``ingest/bearer-tokens/<listener>``, hol
 an ``<id>:<token>`` line for every credential that listener accepts, so the id in
 front of the token names the binding the receiver holds the record to. The
 per-listener secrets are derived: :func:`sync_bearer_tokens` rewrites them from the
-credentials after every change, so a deleted credential's token stops working
-whichever writer removed it.
+credentials after every change, so a deleted credential's token, or a disabled org's,
+stops working whichever writer made the change.
 
 No token is ever logged, and none is read back out of the API after the request
 that mints it.
@@ -22,11 +22,15 @@ that mints it.
 
 import secrets as random_tokens
 from collections.abc import Iterable
+from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
 from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, IngestCredential
 from dfe_engine.secrets import DfeSecrets
+
+if TYPE_CHECKING:
+    from dfe_engine.orgs.registry import OrgRegistry
 
 CREDENTIAL_SECRET_PREFIX = "ingest/credentials"
 BEARER_SECRET_PREFIX = "ingest/bearer-tokens"
@@ -88,18 +92,24 @@ def bearer_entries(credentials: Iterable[IngestCredential], secrets: DfeSecrets)
     }
 
 
-def sync_bearer_tokens(credentials: Iterable[IngestCredential], secrets: DfeSecrets) -> list[str]:
-    """Rewrite each listener's bearer secret that no longer matches the credentials.
+def accepted_credentials(registry: OrgRegistry) -> list[IngestCredential]:
+    """The credentials the receiver accepts: those whose owning org is registered and enabled."""
+    enabled = {org.name for org in registry.list() if org.enabled}
+    return [c for c in registry.ingest_credentials.list() if c.org in enabled]
+
+
+def sync_bearer_tokens(registry: OrgRegistry, secrets: DfeSecrets) -> list[str]:
+    """Rewrite each listener's bearer secret that no longer matches the accepted credentials.
 
     Args:
-        credentials: Every ingest credential.
+        registry: The org registry holding the credentials.
         secrets: The secrets seam.
 
     Returns:
         The listeners whose secret was rewritten.
     """
     rewritten = []
-    for listener, content in bearer_entries(credentials, secrets).items():
+    for listener, content in bearer_entries(accepted_credentials(registry), secrets).items():
         path = bearer_secret_path(listener)
         if secrets.get_or_none(path) == content:
             continue

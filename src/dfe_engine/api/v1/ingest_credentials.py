@@ -273,7 +273,7 @@ def _sync_tokens(request: Request) -> None:
         HTTPException: 503 ``secrets_unavailable`` when the secrets backend refuses.
     """
     try:
-        sync_bearer_tokens(_registry(request).ingest_credentials.list(), _secrets(request))
+        sync_bearer_tokens(_registry(request), _secrets(request))
     except SecretsError as exc:
         raise _secrets_failure(exc) from exc
 

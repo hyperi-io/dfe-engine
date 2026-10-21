@@ -258,6 +258,33 @@ class TestDeleteAndRotate:
         assert _secret(app, credential_secret_path("agents")) == created["token"]
 
 
+class TestADisabledOrg:
+    def test_its_tokens_stop_authenticating_until_it_is_enabled_again(
+        self, client, app, admin_headers, orgs
+    ):
+        token = _create(client, admin_headers).json()["token"]
+
+        disabled = client.put("/api/v1/orgs/acme", json={"enabled": False}, headers=admin_headers)
+
+        assert disabled.status_code == 200, disabled.text
+        assert token not in _bearer(app, "http")
+        assert _secret(app, credential_secret_path("agents")) == token
+
+        enabled = client.put("/api/v1/orgs/acme", json={"enabled": True}, headers=admin_headers)
+
+        assert enabled.status_code == 200, enabled.text
+        assert _bearer(app, "http") == f"agents:{token}\n"
+
+    def test_a_credential_write_while_it_is_disabled_reaches_no_listener(
+        self, client, app, admin_headers, orgs
+    ):
+        client.put("/api/v1/orgs/acme", json={"enabled": False}, headers=admin_headers)
+
+        token = _create(client, admin_headers).json()["token"]
+
+        assert token not in _bearer(app, "http")
+
+
 class TestReads:
     def test_the_list_is_the_org_s_own_and_never_a_token(self, client, admin_headers, orgs):
         _create(client, admin_headers)
