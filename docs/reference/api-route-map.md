@@ -10,11 +10,11 @@ One row per operation the engine serves today. **New** is where it goes, and its
 |---|---|---|
 | moved | 89 | A new path, method or both |
 | merged into | 9 | Folded into the operation **New** names |
-| unchanged | 25 | Same method and path |
+| unchanged | 30 | Same method and path |
 | frozen | 54 | Kept as it is |
 | decide | 130 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 307 | |
+| total | 312 | |
 
 ## Questions
 
@@ -142,6 +142,11 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | `DELETE /api/v1/orgs/{name}` | `DELETE /api/v1/orgs/{org}` | `orgs.delete` | `dfe orgs delete` | `dfe_orgs_delete` | moved | ui 3 | Same URL: the path parameter is renamed. |
 | `GET /api/v1/orgs/{name}` | `GET /api/v1/orgs/{org}` | `orgs.get` | `dfe orgs get` | `dfe_orgs_get` | moved | ui 3 | Same URL: the path parameter is renamed. |
 | `PUT /api/v1/orgs/{name}` | `PUT /api/v1/orgs/{org}` | `orgs.apply` | `dfe orgs apply` | `dfe_orgs_apply` | moved | ui 3 | Same URL: the path parameter is renamed. |
+| `GET /api/v1/orgs/{org}/ingest-credentials` | `GET /api/v1/orgs/{org}/ingest-credentials` | `orgs.ingest-credentials.list` | `dfe orgs ingest-credentials list` | `dfe_orgs_ingest_credentials_list` | unchanged | 0 |  |
+| `DELETE /api/v1/orgs/{org}/ingest-credentials/{credential}` | `DELETE /api/v1/orgs/{org}/ingest-credentials/{credential}` | `orgs.ingest-credentials.delete` | `dfe orgs ingest-credentials delete` | `dfe_orgs_ingest_credentials_delete` | unchanged | 0 |  |
+| `GET /api/v1/orgs/{org}/ingest-credentials/{credential}` | `GET /api/v1/orgs/{org}/ingest-credentials/{credential}` | `orgs.ingest-credentials.get` | `dfe orgs ingest-credentials get` | `dfe_orgs_ingest_credentials_get` | unchanged | 0 |  |
+| `PUT /api/v1/orgs/{org}/ingest-credentials/{credential}` | `PUT /api/v1/orgs/{org}/ingest-credentials/{credential}` | `orgs.ingest-credentials.apply` | `dfe orgs ingest-credentials apply` | `dfe_orgs_ingest_credentials_apply` | unchanged | 0 |  |
+| `POST /api/v1/orgs/{org}/ingest-credentials/{credential}/rotate` | `POST /api/v1/orgs/{org}/ingest-credentials/{credential}/rotate` | `orgs.ingest-credentials.rotate` | `dfe orgs ingest-credentials rotate` | `dfe_orgs_ingest_credentials_rotate` | unchanged | 0 |  |
 
 ## schemas
 

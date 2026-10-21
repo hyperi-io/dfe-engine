@@ -387,7 +387,7 @@ class TestUnauthoredHeader:
         names = [c.name for c in result.columns]
 
         assert cfg.profile_name == "timeseries"
-        assert cfg.profile_version == "1.0.0"
+        assert cfg.profile_version == "1.0.3"
         # The retention the config declares rides a column the table now carries.
         assert cfg.ttl_columns == ["_timestamp_load"]
         assert "_timestamp_load" in names

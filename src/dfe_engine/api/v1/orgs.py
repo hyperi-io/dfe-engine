@@ -24,14 +24,21 @@ deploy-repo change, before the org itself is written. A create or update is refu
 a tenant id a hunt still reads for another org, on main or on a review branch not yet
 merged, because in production+team the org is written while its hunts' rewrite waits
 on review.
+
+The ``default`` org is reserved: every record that names no org lands in it, so it
+cannot be deleted, disabled or lose its tenant id. An org another org's ingest
+credential binds, or a fetched source names, cannot be deleted either. The apps'
+tenancy is compiled from the orgs, so an update or delete is followed by the same
+reconcile a source write runs.
 """
 
 import functools
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from scalo.concurrency import run_blocking
+from scalo.logger import logger
 
 from dfe_engine.api.deps import (
     ClickHouseClient,
@@ -39,6 +46,7 @@ from dfe_engine.api.deps import (
     OptionalHuntConfigReg,
     Settings,
     check_action,
+    get_source_registry_optional,
     is_action_allowed,
     require_action,
 )
@@ -58,9 +66,18 @@ from dfe_engine.gitcrud.routing import WriteOutcome
 from dfe_engine.orgs.available_ids import DEFAULT_LIMIT, OrgIdDiscoveryError
 from dfe_engine.orgs.available_ids import available_org_ids as discover_available_org_ids
 from dfe_engine.orgs.lifecycle import OrgLifecycleManager
-from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org, TenantId
-from dfe_engine.orgs.registry import OrgRegistry
+from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org, ReservedOrgError, TenantId
+from dfe_engine.orgs.registry import (
+    OrgBoundError,
+    OrgRegistry,
+    refuse_bound_delete,
+    refuse_reserved_delete,
+    refuse_reserved_update,
+)
 from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids
+
+if TYPE_CHECKING:
+    from dfe_engine.api.v1.sources import AppsSync
 
 # Writes take turns with the hunt routes, whose hunts an org write rewrites.
 router = APIRouter(prefix="/orgs", tags=["Organisations"], dependencies=[WRITE_TURN])
@@ -295,6 +312,8 @@ async def update_org(
     org, outcome = await run_blocking(
         functools.partial(_update_org, registry, hunts, name, body, user.user_id)
     )
+    if body.org_ids is not None:
+        await run_blocking(functools.partial(reconcile_tenancy, request, user))
     apply_review_headers(response, outcome)
     return _org_response(org)
 
@@ -305,8 +324,10 @@ def _update_org(
     """Store the org's tenant ids in its hunts, then write the org.
 
     Raises:
-        HTTPException: 404 ``not_found``, 409 ``conflict`` for a tenant id another org
-            holds, or 409 ``tenant_id_held`` for one a hunt still reads for another org.
+        HTTPException: 404 ``not_found``, 409 ``reserved_org`` for an update that would
+            disable the default org or take its tenant id, 409 ``conflict`` for a
+            tenant id another org holds, or 409 ``tenant_id_held`` for one a hunt
+            still reads for another org.
     """
     existing = registry.get(name)
     if existing is None:
@@ -314,6 +335,12 @@ def _update_org(
             status_code=404,
             detail={"code": "not_found", "message": f"Org '{name}' not found"},
         )
+    try:
+        refuse_reserved_update(existing.model_copy(update=body.model_dump(exclude_none=True)))
+    except ReservedOrgError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "reserved_org", "message": str(exc)}
+        ) from exc
     if body.org_ids is not None:
         other = colliding_org(name, body.org_ids, registry.list())
         if other is not None:
@@ -355,12 +382,15 @@ async def delete_org(
     response: Response,
     hunts: OptionalHuntConfigReg,
 ):
-    """Delete an organisation (admin only).
+    """Delete an organisation (admin only), and the ingest credentials it owns.
 
     Every hunt naming the org loses its stored tenant ids first and keeps the name,
     so it fails as ``unknown_customers`` and holds its watermark until it is edited,
     rather than reading the rows the org left behind. A production+team posture
     routes that hunt change to review, and the ``X-DFE-Review-Required`` header says so.
+
+    The reserved ``default`` org cannot be deleted, nor can an org another org's
+    ingest credential binds or a fetched source names: each answers 409.
     """
     registry: OrgRegistry = request.app.state.org_registry
     outcome = await run_blocking(
@@ -369,23 +399,85 @@ async def delete_org(
 
     lifecycle: OrgLifecycleManager = request.app.state.org_lifecycle
     await lifecycle.delete_org(name, admin_id=user.user_id)
+    await run_blocking(functools.partial(reconcile_tenancy, request, user))
     apply_review_headers(response, outcome)
 
 
 def _delete_hunts_first(
     registry: OrgRegistry, hunts: Any, name: str, actor: str
 ) -> WriteOutcome | None:
-    """Take the org's tenant ids out of its hunts before the org goes.
+    """Refuse a delete the org's dependants forbid, then take its tenant ids out of its hunts.
 
     Raises:
-        HTTPException: 404 ``not_found``.
+        HTTPException: 404 ``not_found``, 409 ``reserved_org`` for the default org,
+            409 ``org_bound`` for one another org's ingest credential binds, or 409
+            ``org_in_use`` for one a fetched source names.
     """
     if registry.get(name) is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Org '{name}' not found"},
         )
+    try:
+        refuse_reserved_delete(name)
+        refuse_bound_delete(name, registry.ingest_credentials)
+    except ReservedOrgError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "reserved_org", "message": str(exc)}
+        ) from exc
+    except OrgBoundError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "org_bound", "message": str(exc)}
+        ) from exc
+    refuse_org_named_by_sources(name)
     return store_hunt_tenant_ids(hunts, name, None, actor)
+
+
+def refuse_org_named_by_sources(name: str) -> None:
+    """Refuse to remove an org a fetched source names, in any of its versions.
+
+    Its fetcher would otherwise be compiled for an org that is gone and stop.
+
+    Raises:
+        HTTPException: 409 ``org_in_use`` naming each source.
+    """
+    registry = get_source_registry_optional()
+    if registry is None:
+        return
+    named = sorted(
+        source.source
+        for source in registry.get_all_sources()
+        if any(v.fetcher is not None and v.fetcher.org == name for v in source.versions.values())
+    )
+    if named:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "org_in_use",
+                "message": f"Org '{name}' is the org of fetched source(s) "
+                f"{', '.join(named)}: move them to another org first",
+            },
+        )
+
+
+def reconcile_tenancy(request: Request, user: Any) -> AppsSync | None:
+    """Recompile the tenancy the orgs and ingest credentials feed the apps. Never raises.
+
+    A failure is logged, and the next org, credential or source write retries it.
+
+    Returns:
+        The overlay writes made and why they stopped, if they did. None for a
+        deployment with no source registry, which has nothing to recompile.
+    """
+    from dfe_engine.api.v1.sources import reconcile_derived_apps
+
+    registry = get_source_registry_optional()
+    if registry is None:
+        return None
+    synced = reconcile_derived_apps(request, user, registry)
+    if synced.error:
+        logger.error("apps not reconciled with the orgs", error=synced.error)
+    return synced
 
 
 # -- Helpers -----------------------------------------------------------------

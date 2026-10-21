@@ -66,7 +66,8 @@ def test_pagination_auto_follow_all_pages(harness):
     harness.seed_admin()
     for i in range(5):
         _create_org(harness, f"p{i}")
-    # page-size 2 with auto-follow should walk pages and accumulate everything.
+    # page-size 2 with auto-follow should walk pages and accumulate everything,
+    # the reserved default org included.
     everything = harness.invoke(["--format", "json", "orgs", "list", "--page-size", "2"])
     assert everything.exit_code == 0, everything.output
-    assert len(json.loads(everything.output)) == 5
+    assert len(json.loads(everything.output)) == 6

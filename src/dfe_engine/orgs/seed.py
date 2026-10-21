@@ -22,6 +22,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.audit import audit_org_change
 from dfe_engine.gitops.repo import GitopsRemoteError
+from dfe_engine.orgs.models import DEFAULT_ORG_ID, DEFAULT_ORG_NAME
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
 
 if TYPE_CHECKING:
@@ -29,6 +30,40 @@ if TYPE_CHECKING:
     from dfe_engine.settings import SeedOrg
 
 SEED_ACTOR = "engine"
+
+
+def ensure_default_org(registry: OrgRegistry) -> bool:
+    """Create the reserved default org, or restore its tenant id and enable it.
+
+    Every app stamps ``DEFAULT_ORG_ID`` on a record that names no org, so the org
+    holding that tenant id has to exist for those rows to belong to anyone.
+
+    Args:
+        registry: The org registry.
+
+    Returns:
+        Whether anything was written.
+
+    Raises:
+        ValueError: Another org already holds the reserved name's tenant id, so the
+            default org's rows would be that org's to read.
+    """
+    held = registry.get(DEFAULT_ORG_NAME)
+    if held is None:
+        registry.create(DEFAULT_ORG_NAME, org_ids=[DEFAULT_ORG_ID], display_name="Default")
+        audit_org_change(admin_id=SEED_ACTOR, change="created", org_name=DEFAULT_ORG_NAME)
+        logger.info("Created the reserved default organisation", org=DEFAULT_ORG_NAME)
+        return True
+    if held.enabled and DEFAULT_ORG_ID in org_tenant_ids(held):
+        return False
+    org_ids = [*held.org_ids, DEFAULT_ORG_ID] if held.org_ids else [DEFAULT_ORG_ID]
+    registry.update(DEFAULT_ORG_NAME, org_ids=list(dict.fromkeys(org_ids)), enabled=True)
+    audit_org_change(admin_id=SEED_ACTOR, change="updated", org_name=DEFAULT_ORG_NAME)
+    logger.warning(
+        "Restored the reserved default organisation's tenant id and enabled it",
+        org=DEFAULT_ORG_NAME,
+    )
+    return True
 
 
 def seed_orgs(

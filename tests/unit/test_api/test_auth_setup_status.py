@@ -360,7 +360,7 @@ def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path
             assert body["initial_setup"]["complete"] is True
             assert body["organisations"] == []
             listed = client.get("/api/v1/orgs", headers=admin).json()
-            assert [o["name"] for o in listed["items"]] == ["northwind"]
+            assert [o["name"] for o in listed["items"]] == ["default", "northwind"]
     finally:
         _registries.clear()
 

@@ -85,6 +85,57 @@ async def _ensure_startup_topics(
     return ensured
 
 
+def _bootstrap_orgs(app: FastAPI, settings: DFESettings) -> None:
+    """Build the org registry, then make sure the reserved default org exists and seed the rest.
+
+    Raises:
+        ValueError: Another org holds the default org's tenant id, so every record
+            that names no org would be that org's to read.
+    """
+    import os
+    from pathlib import Path
+
+    from dfe_engine.api.deps import get_hunt_config_registry_optional
+    from dfe_engine.orgs.registry import OrgRegistry
+    from dfe_engine.orgs.seed import ensure_default_org, seed_orgs
+
+    config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
+    orgs_dir = Path(config_dir) / "orgs" if config_dir else Path("config") / "orgs"
+    app.state.org_registry = OrgRegistry(orgs_dir)
+    ensure_default_org(app.state.org_registry)
+
+    try:
+        seed_orgs(
+            registry=app.state.org_registry,
+            seeds=settings.orgs.seed_orgs,
+            hunts=get_hunt_config_registry_optional(),
+        )
+    except Exception as exc:  # a failed seed must never break startup
+        logger.warning("organisations not seeded at startup", error=str(exc))
+
+
+def _keep_bearer_tokens_in_step(app: FastAPI) -> None:
+    """Rewrite the receiver's bearer secrets now, and after every org or credential write.
+
+    Every writer goes through the org registry, so a credential removed by any of
+    them stops working. A secrets backend that is down never breaks startup or a
+    write: the next change, or the next boot, rewrites them.
+    """
+    from dfe_engine.orgs.ingest_tokens import sync_bearer_tokens
+
+    registry = app.state.org_registry
+    secrets = app.state.dfe_secrets
+
+    def sync() -> None:
+        sync_bearer_tokens(registry.ingest_credentials.list(), secrets)
+
+    try:
+        sync()
+    except Exception as exc:  # the secrets backend may come up after the engine
+        logger.warning("receiver bearer tokens not rewritten at startup", error=str(exc))
+    registry.on_change(sync)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: bootstrap registries on startup, cleanup on shutdown."""
@@ -252,6 +303,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         except Exception as exc:  # the deploy repo is seeded again on the next start
             logger.warning("default app instances not seeded at startup", error=str(exc))
 
+    # Ahead of the reconcile below, which compiles the orgs into the apps' tenancy,
+    # and of the CH RBAC reconcile, so a seeded org is fenced on this boot.
+    _bootstrap_orgs(app, settings)
+
     # The deploy repo's derived app state follows the sources, and a fresh deploy
     # seeds its apps with none: compile it in now, or the receiver has no
     # destination until somebody writes a source.
@@ -261,10 +316,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if gitcrud is not None and source_registry is not None:
         from dfe_engine.api.v1.sources import transform_instances
         from dfe_engine.appmgmt import derived
+        from dfe_engine.orgs.tenancy import Tenancy
 
         try:
             transforms = transform_instances(gitcrud)
-            for line in derived.reconcile(gitcrud, source_registry, settings):
+            tenancy = Tenancy.read(app.state.org_registry)
+            for line in derived.reconcile(gitcrud, source_registry, settings, tenancy=tenancy):
                 logger.info("Reconciled app overlay with the sources", change=line)
         except Exception as exc:  # the apps are still reconciled on the next source write
             logger.warning("apps not reconciled with the sources at startup", error=str(exc))
@@ -399,6 +456,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # The one seam for secrets the engine mints - OIDC provider credentials and
     # sigma provider tokens resolve through it, never through a backend SDK.
     app.state.dfe_secrets = build_secrets(settings.secrets)
+    _keep_bearer_tokens_in_step(app)
 
     from dfe_engine.governance import PolicyStore
 
@@ -429,30 +487,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         secrets=app.state.dfe_secrets,
         metrics=app.state.oidc_login_metrics,
     )
-
-    # Bootstrap org registry
-    from dfe_engine.orgs.registry import OrgRegistry
-
-    orgs_dir_str = ""
-    config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
-    if config_dir:
-        orgs_dir_str = str(Path(config_dir) / "orgs")
-    else:
-        orgs_dir_str = str(Path("config") / "orgs")
-    app.state.org_registry = OrgRegistry(Path(orgs_dir_str))
-
-    # Ahead of the CH RBAC reconcile below, so a seeded org is fenced on this boot.
-    from dfe_engine.api.deps import get_hunt_config_registry_optional
-    from dfe_engine.orgs.seed import seed_orgs
-
-    try:
-        seed_orgs(
-            registry=app.state.org_registry,
-            seeds=settings.orgs.seed_orgs,
-            hunts=get_hunt_config_registry_optional(),
-        )
-    except Exception as exc:  # a failed seed must never break startup
-        logger.warning("organisations not seeded at startup", error=str(exc))
 
     # Bootstrap HyperDX client (optional)
     if settings.hyperdx.enabled and settings.hyperdx.base_url:

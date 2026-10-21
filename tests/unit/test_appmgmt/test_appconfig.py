@@ -164,12 +164,12 @@ class TestWhatTheContainerReads:
         # The engine owns a routing block WHOLE, so an appended base rule would
         # route records the sources no longer name.
         settings = _settings(tmp_path)
-        _base(settings, RECEIVER, "routing:\n  source_rules:\n    - field: _source\n")
-        _deploy(crud, RECEIVER, config__routing__source_rules=[{"field": "app"}])
+        _base(settings, RECEIVER, "rules:\n  rules:\n    - id: base\n")
+        _deploy(crud, RECEIVER, config__rules__rules=[{"id": "app"}])
 
         appconfig.render(crud, settings)
 
-        assert _rendered(settings, RECEIVER)["routing"]["source_rules"] == [{"field": "app"}]
+        assert _rendered(settings, RECEIVER)["rules"]["rules"] == [{"id": "app"}]
 
     def test_a_setting_the_sources_do_not_derive_survives_a_source_deploy(self, crud, tmp_path):
         # The deployment turns the loader's dead letter off in its base config;
@@ -211,8 +211,10 @@ class TestWhatTheContainerReads:
         assert config["kafka"] == {"topics": []}
         assert "default_db" not in config.get("routing", {})
 
-    def test_a_rule_compiled_with_no_value_names_no_match_value(self, crud, tmp_path):
-        # dfe-receiver's SourceRule.match_value is Option<String> with a serde default.
+    def test_a_row_compiled_with_no_value_names_no_value(self, crud, tmp_path):
+        # scalo-rs MatchConfig.value is Option<String> with a serde default.
+        from dfe_engine.orgs.tenancy import Tenancy
+
         settings = _settings(tmp_path)
         source = Source.model_validate(
             {
@@ -223,14 +225,18 @@ class TestWhatTheContainerReads:
         )
         app = instances.instance_of(RECEIVER, "default")
         doc = instances.initial_overlay(app)
-        routing.sync(app.descriptor, doc, FakeRegistry([source]), settings)
+        routing.sync(app.descriptor, doc, FakeRegistry([source]), settings, tenancy=Tenancy())
         _put(crud, app, doc)
 
         appconfig.render(crud, settings)
 
         config = _rendered(settings, RECEIVER)
-        assert config["routing"]["source_rules"] == [
-            {"field": "edr.vendor", "mode": "key_present", "source": "edr"}
+        assert config["rules"]["rules"] == [
+            {
+                "id": "source.edr",
+                "match": {"field": "edr.vendor", "op": "exists"},
+                "set": {"_source": {"value": "edr"}},
+            }
         ]
         assert _null_paths(config) == []
 

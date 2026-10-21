@@ -23,7 +23,9 @@ server:
   auth:
     mode: bearer
     bearer:
-      secret_source: "vault:secret/dfe/receiver:bearer_tokens"
+      # The <id>:<token> lines the engine writes for every ingest credential the
+      # http listener accepts, under the engine's KV mount (DFE_SECRETS_MOUNT).
+      secret_source: "vault:dfe/ingest/bearer-tokens/http:value"
       refresh_interval_secs: 300
 
 grpc:  # bind_address is the receiver's own default
@@ -34,9 +36,11 @@ validation:
   required_fields: []
   dlq_on_invalid: true
 
+# The rules and ingest_bindings sections are compiled by the engine from the
+# Source definitions and the ingest credentials.
 routing:
-  source_rules: []  # compiled from Source definitions by the engine
   default_source: main
+  default_org_id: default
   topic_suffix: _land
   source_to_topic: {}
   dlq:
@@ -45,7 +49,6 @@ routing:
 
 destinations:
   default: kafka
-  rules: []
 
 kafka:
   brokers: []  # every deployment names its own brokers

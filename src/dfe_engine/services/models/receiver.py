@@ -8,6 +8,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from dfe_engine.orgs.models import DEFAULT_ORG_ID
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
     AcknowledgementsConfig,
@@ -139,52 +140,148 @@ class ValidationConfig(BaseModel):
 # Routing
 # ---------------------------------------------------------------------------
 
-ReceiverMatchMode = Literal["key_present", "key_value_set", "key_value_use"]
-"""The receiver hot-path router's whole mode set (dfe-receiver ``src/config/mod.rs``)."""
+SOURCE_FIELD = "_source"
+ORG_FIELD = "_org_id"
+
+RULE_TARGETS = (SOURCE_FIELD, ORG_FIELD)
+"""The fields the receiver's rules set, in the order it evaluates them."""
+
+SourceOrgId = Literal["disallow", "allow"]
+"""Whether the receiver keeps an ``_org_id`` the sender wrote, held to the sender's binding."""
+
+MatchOp = Literal[
+    "equals",
+    "starts_with",
+    "ends_with",
+    "contains",
+    "prefix_and_suffix",
+    "length",
+    "exists",
+    "regex",
+]
+"""scalo-rs ``rules::MatchOp``: the native tests a rule row can run."""
 
 
-class SourceRule(BaseModel):
-    """One `_source` stamping rule - the dfe-receiver ``SourceRule`` serde contract.
+class RuleMatch(BaseModel):
+    """scalo-rs ``rules::MatchConfig``: a native test on one field, or ``all`` of several."""
 
-    Field names and semantics mirror dfe-receiver ``src/config/mod.rs`` EXACTLY
-    (first match wins; only evaluated when the common header is on):
+    model_config = ConfigDict(extra="forbid")
 
-    - ``key_present``:   field exists            -> ``_source = source``
-    - ``key_value_set``: field value==match_value -> ``_source = source``
-    - ``key_value_use``: field exists            -> ``_source = <field value>``
+    field: str | None = Field(default=None, description="Dotted path of the field tested")
+    op: MatchOp | None = None
+    value: str | None = Field(default=None, description="Operand of the text tests")
+    prefix: str | None = None
+    suffix: str | None = None
+    min: int | None = Field(default=None, ge=0)
+    max: int | None = Field(default=None, ge=0)
+    negate: bool = Field(default=False, description="Invert the result")
+    all: list[RuleMatch] = Field(default_factory=list, description="Every one of these")
+
+
+class RuleSetAction(BaseModel):
+    """scalo-rs ``rules::SetAction``: how a matching row finds the value it sets."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, serialize_by_alias=True)
+
+    value: str | None = Field(default=None, description="This literal text")
+    from_field: str | None = Field(default=None, alias="from", description="This field's text")
+    lookup: str | None = Field(default=None, description="The lookup table `from` maps through")
+
+
+class Rule(BaseModel):
+    """scalo-rs ``rules::RuleConfig``: one row, setting one target field when it matches."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(min_length=1, description="Stable id: the rule metric label")
+    match: RuleMatch | None = Field(default=None, description="A native test")
+    when: str | None = Field(default=None, description="A CEL Fast condition, in place of match")
+    set: dict[str, RuleSetAction] = Field(description="Exactly one target field and its value")
+
+    @field_validator("set")
+    @classmethod
+    def _one_target(cls, v: dict[str, RuleSetAction]) -> dict[str, RuleSetAction]:
+        """Refuse a row that sets no field, several, or one the receiver does not set."""
+        if len(v) != 1:
+            raise ValueError("a rule sets exactly one field")
+        target = next(iter(v))
+        if target not in RULE_TARGETS:
+            raise ValueError(f"a receiver rule sets one of {', '.join(RULE_TARGETS)}, not {target}")
+        return v
+
+
+class RuleSet(BaseModel):
+    """scalo-rs ``rules::RuleSetConfig``: per target field, the first matching row sets it.
+
+    dfe-receiver reads it as ``rules`` and sets ``_source`` then ``_org_id``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    field: str = Field(..., description="JSON field path (dot notation for nested)")
-    mode: ReceiverMatchMode = Field(
-        ..., description="Match mode (key_present | key_value_set | key_value_use)"
+    name: str = "rules"
+    targets: list[str] = Field(default_factory=list, description="Empty is _source, _org_id")
+    lookups: dict[str, dict[str, str]] = Field(default_factory=dict)
+    rules: list[Rule] = Field(default_factory=list, description="The rows, in declared order")
+
+    @field_validator("targets")
+    @classmethod
+    def _receiver_targets(cls, v: list[str]) -> list[str]:
+        """Refuse targets the receiver would refuse: anything but _source then _org_id."""
+        if v and tuple(v) != RULE_TARGETS:
+            raise ValueError(f"the receiver sets {', '.join(RULE_TARGETS)}, in that order")
+        return v
+
+
+class OrgBinding(BaseModel):
+    """dfe-receiver ``OrgBinding``: the orgs one principal's records may land in."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    orgs: list[str] = Field(min_length=1, description="Tenant ids its records may land in")
+    default_org: str | None = Field(
+        default=None, description="The tenant a record takes when no rule picks one of orgs"
     )
-    match_value: str | None = Field(
-        default=None, description="Value to match against (key_value_set only)"
+
+    @model_validator(mode="after")
+    def _default_in_orgs(self) -> Self:
+        """Refuse a default outside the binding, which the receiver refuses at load."""
+        if self.default_org is not None and self.default_org not in self.orgs:
+            raise ValueError(f"default_org {self.default_org!r} is not one of orgs")
+        return self
+
+
+class IngestBindingsConfig(BaseModel):
+    """dfe-receiver ``IngestBindingsConfig``: the orgs each credential and listener may write.
+
+    A credential or listener with no entry may land records in the default org alone.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    credentials: dict[str, OrgBinding] = Field(
+        default_factory=dict, description="By credential id, the id before ':' in a token entry"
     )
-    source: str | None = Field(
-        default=None,
-        description="_source to stamp (key_present + key_value_set; ignored for key_value_use)",
+    listeners: dict[str, OrgBinding] = Field(
+        default_factory=dict, description="By listener, for a request that names no credential"
     )
 
 
 class ReceiverRoutingConfig(BaseModel):
     """Message routing configuration - the dfe-receiver ``RoutingConfig`` contract.
 
-    The engine EMITS this shape (compiled from Source definitions); the
-    receiver deserialises it verbatim. Topic = ``source_to_topic[_source]``
-    else ``{_source}{topic_suffix}``.
+    The receiver refuses a key it does not know here. Topic is
+    ``source_to_topic[_source]`` else ``{_source}{topic_suffix}``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    source_rules: list[SourceRule] = Field(
-        default_factory=list,
-        description="_source stamping rules, first match wins (compiled from Source.match)",
-    )
     default_source: str = Field(
         default=DEFAULT_LANDING_LABEL, description="_source when no rule matches"
+    )
+    default_org_id: str = Field(
+        default=DEFAULT_ORG_ID,
+        min_length=1,
+        description="_org_id an unbound sender's records take, and the only org they may land in",
     )
     topic_suffix: str = Field(
         default="_land", description="Suffix appended to _source to form the topic"
@@ -193,9 +290,9 @@ class ReceiverRoutingConfig(BaseModel):
         default_factory=dict,
         description="Optional per-source topic overrides ({source: topic})",
     )
-    legacy_compat: bool = Field(
-        default=False,
-        description="Receiver appends pre-2.2 key_value_use rules when true",
+    source_org_id: SourceOrgId = Field(
+        default="disallow",
+        description="disallow strips a sender's _org_id; allow keeps it, held to its binding",
     )
     dlq: DlqConfig = Field(default_factory=DlqConfig)
 
@@ -226,27 +323,19 @@ def destination_names(ref: DestinationRef) -> list[str]:
     return [ref] if isinstance(ref, str) else list(ref)
 
 
-class DestinationRule(BaseModel):
-    """Destination routing rule."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    match_field: str
-    match_value: str
-    destination: DestinationRef
-
-
 class DestinationsConfig(BaseModel):
     """Destination selection, plus the endpoint of every destination it names.
 
     ``kafka`` and ``loader`` are the receiver's built-in destinations. Any other
     name is a NAMED endpoint sitting beside these keys as
     ``<name>: {grpc: {endpoint: uri}}``, which is why extras are allowed here: a
-    rule sends a matched record to a transform instance by name. The names the
+    source sends its records to a transform instance by name. The names the
     engine compiles are ``loader``, ``dfe-archiver`` and ``dfe-transform-*``
-    instances, so none of them can collide with ``default`` or ``rules``.
+    instances, so none of them can collide with ``default`` or ``sources``.
 
-    A rule may name several at once, which is how an archived source reaches the
+    ``sources`` keys on the ``_source`` the rules set, so the one rule evaluation
+    that labels a record also picks where it goes. A source may name several
+    destinations at once, which is how an archived source reaches the
     archiver beside the stage that loads it. The archiver's entry is
     ``dfe-archiver: {grpc: {endpoint: uri, confirms_delivery: false}}``: its Push
     listener answers once a record is queued, not written, so the receiver must not
@@ -264,7 +353,10 @@ class DestinationsConfig(BaseModel):
         default=BUS_DESTINATION,
         description="kafka, loader, a named destination, or a list of them to fan out",
     )
-    rules: list[DestinationRule] = []
+    sources: dict[str, DestinationRef] = Field(
+        default_factory=dict,
+        description="Destinations by the _source a rule set; any other _source takes default",
+    )
 
     @model_validator(mode="after")
     def validate_destinations(self) -> Self:
@@ -278,17 +370,17 @@ class DestinationsConfig(BaseModel):
                     f"grpc.endpoint; the receiver refuses a bare grpc string"
                 )
                 raise ValueError(msg)
-        # An empty fan-out names nowhere to deliver to, so every record the rule
-        # matched is accepted and dropped.
-        for ref in [self.default, *(r.destination for r in self.rules)]:
+        # An empty fan-out names nowhere to deliver to, so every record the source
+        # labels is accepted and dropped.
+        for ref in [self.default, *self.sources.values()]:
             if not destination_names(ref):
                 msg = "A destination reference must name at least one destination"
                 raise ValueError(msg)
         # A destination the receiver cannot resolve silently drops every record
-        # the rule matched, so nothing may name one that is neither built in nor
+        # sent to it, so nothing may name one that is neither built in nor
         # declared above.
         known = BUILT_IN_DESTINATIONS | set(named)
-        unknown = {n for r in self.rules for n in destination_names(r.destination)} | set(
+        unknown = {n for ref in self.sources.values() for n in destination_names(ref)} | set(
             destination_names(self.default)
         )
         if unknown - known:
@@ -419,6 +511,8 @@ class ReceiverConfig(BaseServiceConfig):
     grpc: GrpcConfig = Field(default_factory=GrpcConfig)
     validation: ValidationConfig = Field(default_factory=ValidationConfig)
     routing: ReceiverRoutingConfig = Field(default_factory=ReceiverRoutingConfig)
+    rules: RuleSet = Field(default_factory=RuleSet)
+    ingest_bindings: IngestBindingsConfig = Field(default_factory=IngestBindingsConfig)
     destinations: DestinationsConfig = Field(default_factory=DestinationsConfig)
     kafka: ReceiverKafkaConfig = Field(default_factory=ReceiverKafkaConfig)
     loader: LoaderConnectionConfig = Field(default_factory=LoaderConnectionConfig)

@@ -29,9 +29,14 @@ LANDING_DEFINITION: dict[str, Any] = {
     "resource_type": "core",
     "description": "Where the loader puts a record it has nowhere else to send",
     "state": "active",
-    "deployed_version": "1.0.1",
-    "current": "1.0.1",
+    "deployed_version": "1.0.2",
+    "current": "1.0.2",
     "versions": {
+        "1.0.2": {
+            "date_time": "2026-10-21",
+            "header": {"type": "timeseries", "version": "1.0.3"},
+            "schema": {},
+        },
         "1.0.1": {
             "date_time": "2026-09-15",
             "header": {"type": "timeseries", "version": "1.0.1"},
