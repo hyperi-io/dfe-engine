@@ -357,6 +357,54 @@ class TestTransformInstances:
         assert [(c.app.service, c.action) for c in changes] == [(VRL, "remove")]
 
 
+class TestTheStartupReconcileParksAuthoredFiles:
+    """The engine's own reconcile keeps and restores a program as the API's does."""
+
+    PROGRAM = {"name": "010_probe.vrl", "content": ".a = 1\n"}
+
+    def _deploy_with_a_program(self, crud, settings):
+        source = _receiver_source(transform={"engine": "vrl"})
+        derived.reconcile(crud, _Registry([source]), settings)
+        app = instances.instance_of(VRL, "filebeat")
+        doc = instances.read_overlay(crud, app)
+        doc["fileSets"] = {"transforms": {"files": [dict(self.PROGRAM)]}}
+        _put(crud, app, doc)
+        return app
+
+    def test_a_dormant_source_parks_its_program(self, crud, direct_settings):
+        app = self._deploy_with_a_program(crud, direct_settings)
+        dormant = _receiver_source(state="dormant", transform={"engine": "vrl"})
+
+        done = derived.reconcile(crud, _Registry([dormant]), direct_settings)
+
+        assert done == [f"{VRL}/filebeat: undeploy instance"]
+        parked = crud.get(instances.HELMVARS_CLASS, app.parked_name)
+        assert parked == {"fileSets": {"transforms": {"files": [self.PROGRAM]}}}
+
+    def test_the_next_deploy_restores_it_and_drops_the_copy(self, crud, direct_settings):
+        app = self._deploy_with_a_program(crud, direct_settings)
+        dormant = _receiver_source(state="dormant", transform={"engine": "vrl"})
+        derived.reconcile(crud, _Registry([dormant]), direct_settings)
+
+        derived.reconcile(
+            crud, _Registry([_receiver_source(transform={"engine": "vrl"})]), direct_settings
+        )
+
+        restored = instances.read_overlay(crud, app)
+        assert get_path(restored, "fileSets.transforms.files") == [self.PROGRAM]
+        assert app.parked_name not in crud.list(instances.HELMVARS_CLASS)
+
+    def test_a_parked_copy_whose_source_is_gone_is_forgotten(self, crud, direct_settings):
+        app = self._deploy_with_a_program(crud, direct_settings)
+        dormant = _receiver_source(state="dormant", transform={"engine": "vrl"})
+        derived.reconcile(crud, _Registry([dormant]), direct_settings)
+
+        done = derived.reconcile(crud, _Registry([]), direct_settings)
+
+        assert f"{VRL}/filebeat: drop parked files" in done
+        assert app.parked_name not in crud.list(instances.HELMVARS_CLASS)
+
+
 class TestDescribe:
     def test_the_report_line_names_the_instance_and_the_action(self):
         change = derived.DerivedChange(instances.instance_of(FETCHER, "x"), "deploy", {})

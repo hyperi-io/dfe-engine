@@ -395,13 +395,21 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
         changes = derived.plan(gc, registry, settings)
         transforms = transform_instances(gc)
         for change in changes:
+            if change.action == "forget":
+                derived.drop_parked(gc, change.app, user.user_id)
+                done.append(change.describe())
+                continue
             if change.action == "remove":
+                derived.keep_parked(gc, change, user.user_id)
                 written = remove_overlay(request, user, change.app)
             else:
                 # No _enforce: compiled from the sources, and resolve_mode PRs it in production.
                 written = commit_overlay(
                     request, user, change.app, change.doc or {}, summary=change.summary
                 )
+                # A restore held for review keeps its parked copy until the overlay lands.
+                if change.unpark and not written.review_required:
+                    derived.drop_parked(gc, change.app, user.user_id)
             # Each write renders the app config itself, so its hint is the only
             # report of that change: the render below finds the file current.
             hints += written.restart_required

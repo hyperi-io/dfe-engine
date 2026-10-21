@@ -82,6 +82,7 @@ Adding a service instance is a git write of one
 `values/<service>-<instance>-values.yaml` file - the git-files ApplicationSet
 generator fans out one Argo Application per values file. Removing the file
 removes the app. The engine declares instances; the appset deploys them.
+An instance removed while its source still exists leaves the files authored into it in `values/<service>-<instance>-parked.yaml`, which the glob does not match, and its next deploy restores them.
 Depth: [deployment/index.md](deployment/index.md) and
 [control-plane/governed-ops-design.md](control-plane/governed-ops-design.md).
 
