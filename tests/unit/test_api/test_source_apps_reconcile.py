@@ -88,7 +88,10 @@ class TestReceiverRoutingFollowsTheSources:
         gc = _wire(app, tmp_path)
         client.post("/api/v1/sources", json=_receiver_body("kvproof"), headers=admin_headers)
 
-        assert client.delete("/api/v1/sources/kvproof", headers=admin_headers).status_code == 204
+        resp = client.delete("/api/v1/sources/kvproof", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["apps_synced"] == ["dfe-receiver/main: sync routing"]
         assert _rules(gc) == []
 
     def test_an_unchanged_write_is_not_a_commit(self, client, app, admin_headers, tmp_path):
@@ -327,6 +330,27 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
         ]
         doc = gc.get("helmvars", f"{self.TRANSFORM}-elreg-values")
         assert doc["config"]["source"]["name"] == "filebeat.cisco_ios.default"
+
+    def test_a_delete_names_the_command_that_takes_the_container_away(
+        self, client, app, admin_headers, tmp_path
+    ):
+        from dfe_engine.appmgmt import appconfig
+
+        gc = self._compose(app, tmp_path)
+        appconfig.render_and_report(gc, app.state.settings)
+        self._deployed_transform_source(client, admin_headers, "elreg")
+        client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+        rendered = tmp_path / "app-config" / self.TRANSFORM / "elreg"
+        assert rendered.is_dir()
+
+        resp = client.delete("/api/v1/sources/elreg", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        assert f"{self.TRANSFORM}/elreg: undeploy instance" in resp.json()["apps_synced"]
+        assert resp.json()["restart_required"].count(appconfig.REMOVE_HINT) == 1
+        assert not rendered.exists()
+        again = client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+        assert again.json()["restart_required"] == []
 
     def test_the_deploying_write_reports_it_only_once(self, client, app, admin_headers, tmp_path):
         from dfe_engine.appmgmt import appconfig

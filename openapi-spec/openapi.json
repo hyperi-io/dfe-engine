@@ -5565,7 +5565,7 @@
           "Sources"
         ],
         "summary": "Delete Source",
-        "description": "Delete a source by name. Its fetcher instance, receiver rule and topics go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.",
+        "description": "Delete a source by name. Its fetcher instance, receiver rule and topics go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.\n\nThe answer reports the reconcile as a create or an update does: on a\ndeployment that renders the app config itself, ``restart_required`` names the\ncommand that takes away the containers the source's instances ran in.",
         "operationId": "delete_source_api_v1_sources__name__delete",
         "parameters": [
           {
@@ -5579,8 +5579,15 @@
           }
         ],
         "responses": {
-          "204": {
-            "description": "Successful Response"
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDeleteResponse"
+                }
+              }
+            }
           },
           "401": {
             "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
@@ -37610,6 +37617,53 @@
         ],
         "title": "SourceDefaultDrift",
         "description": "One source whose deployed table or stored values differ from the defaults."
+      },
+      "SourceDeleteResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "deleted"
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes made so the apps follow the delete (service/instance: action)"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps could not be brought into step; reconcile-apps retries it"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app the delete leaves to apply where this deployment renders the app config itself, including taking away the container of an instance the source no longer has. Empty where a GitOps controller prunes it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "SourceDeleteResponse",
+        "description": "A deleted source, and what the apps now need to follow the delete."
       },
       "SourceDetailResponse": {
         "properties": {

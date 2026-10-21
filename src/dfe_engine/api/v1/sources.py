@@ -247,6 +247,29 @@ class SourceResponse(BaseModel):
     )
 
 
+class SourceDeleteResponse(BaseModel):
+    """A deleted source, and what the apps now need to follow the delete."""
+
+    source: str
+    message: str = "deleted"
+    apps_synced: list[str] = Field(
+        default_factory=list,
+        description="Deploy-repo writes made so the apps follow the delete (service/instance: action)",
+    )
+    apps_sync_error: str | None = Field(
+        default=None,
+        description="Why the apps could not be brought into step; reconcile-apps retries it",
+    )
+    restart_required: list[str] = Field(
+        default_factory=list,
+        description=(
+            "One command per app the delete leaves to apply where this deployment renders "
+            "the app config itself, including taking away the container of an instance the "
+            "source no longer has. Empty where a GitOps controller prunes it."
+        ),
+    )
+
+
 class SourceImportResponse(SourceImportResult):
     """A bundle applied, plus what the apps now need to follow it."""
 
@@ -2563,7 +2586,7 @@ def patch_source_enabled(
 
 @router.delete(
     "/{name}",
-    status_code=204,
+    response_model=SourceDeleteResponse,
     responses={
         409: {
             "model": CoreResourceConflictErrorResponse,
@@ -2574,11 +2597,15 @@ def patch_source_enabled(
 )
 async def delete_source(
     name: str, user: CurrentUser, registry: SourceReg, settings: Settings, request: Request
-):
+) -> SourceDeleteResponse:
     """Delete a source by name. Its fetcher instance, receiver rule and topics go with it.
 
     An engine-owned source -- the landing table's own -- is refused with 409
     ``conflict``, the same answer PUT and PATCH give.
+
+    The answer reports the reconcile as a create or an update does: on a
+    deployment that renders the app config itself, ``restart_required`` names the
+    command that takes away the containers the source's instances ran in.
     """
     source = await run_blocking(
         functools.partial(_delete_stored_source, name, user, registry, settings)
@@ -2595,10 +2622,16 @@ async def delete_source(
         "deleted",
         details={"topics_removed": topics_removed, "topics_failed": topics_failed},
     )
-    await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
+    apps = await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
     await _remove_hyperdx_source(request, name)
     # The table stays in ClickHouse; leaving the registry is what takes it out of all_sources.
     await _rebuild_all_sources(registry=registry, settings=settings, sources=[name])
+    return SourceDeleteResponse(
+        source=name,
+        apps_synced=apps.changes,
+        apps_sync_error=apps.error,
+        restart_required=apps.restart_required,
+    )
 
 
 def _delete_stored_source(name: str, user: Any, registry: Any, settings: Any) -> Source:
