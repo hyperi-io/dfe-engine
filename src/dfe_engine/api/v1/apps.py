@@ -14,6 +14,7 @@ DELETE /api/v1/apps/{service}/{instance}              undeploy an instance
 GET    /api/v1/apps/{service}/{instance}/values       the instance's overlay values, secrets masked
 GET    /api/v1/apps/{service}/{instance}/config       every declared option, with provenance
 PUT    /api/v1/apps/{service}/{instance}/config       write options, and custom env beside them
+DELETE /api/v1/apps/{service}/{instance}/config       put options back to the app's default (?path=...)
 GET    /api/v1/apps/{service}/{instance}/scaling      the scaling dials
 PUT    /api/v1/apps/{service}/{instance}/scaling      set the scaling dials
 GET    /api/v1/apps/{service}/{instance}/files/{set}  list the files it consumes
@@ -47,6 +48,7 @@ operational surface is ``service:{service}:metrics:read`` - reading telemetry is
 the same privilege as reading configuration.
 """
 
+import copy
 import functools
 from dataclasses import asdict
 from typing import Any
@@ -104,7 +106,7 @@ from dfe_engine.gitcrud.commit_policy import (
     build_message,
     validate_result,
 )
-from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, set_path
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, get_path, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 from dfe_engine.sampling import SampleMode, SampleRequest, SamplerError
@@ -1436,6 +1438,106 @@ def set_app_config(
         **result.model_dump(exclude={"reload", "validation"}),
         reload=_reload_mode(request, result),
         custom_env=_custom_env_delivery(request, env_changes),
+    )
+
+
+def _clear(doc: dict, path: str) -> bool:
+    """Remove ``path`` and each mapping above it the removal emptied, short of the root.
+
+    An emptied mapping left behind still reaches the app as an empty section, which
+    an app need not read the way it reads an absent one.
+    """
+    if not del_path(doc, path):
+        return False
+    parts = path.split(".")
+    for depth in range(len(parts) - 1, 1, -1):
+        parent = ".".join(parts[:depth])
+        if get_path(doc, parent) != {}:
+            break
+        del_path(doc, parent)
+    return True
+
+
+def _refuse_clears_beside_credentials(doc: dict, paths: list[str]) -> None:
+    """Refuse a clear that leaves a stored credential beside a field it took away.
+
+    Each path is judged with the request's other clears already made, so clearing a
+    credential in the same request as the field beside it is not refused.
+    """
+    for target in paths:
+        rest = copy.deepcopy(doc)
+        for other in paths:
+            if other != target:
+                _clear(rest, other)
+        try:
+            contract.require_clear_keeps_credentials(rest, target)
+        except contract.MaskedValueError as exc:
+            raise _refuse(400, exc.code, target, str(exc)) from exc
+
+
+@router.delete(
+    "/{service}/{instance}/config", response_model=ConfigWriteResult, dependencies=[_WRITE]
+)
+def clear_app_config(
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    path: list[str] = Query(
+        description=(
+            "An option to put back to the app's default, as the config route reports it: "
+            "`config.<option>` or `extraEnv.<NAME>`. Repeat it to clear several in one commit."
+        ),
+    ),
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> ConfigWriteResult:
+    """Remove options from the overlay, so the app runs its own default for each.
+
+    A cleared option reads back unset with provenance ``default``, so it follows the
+    default when the default next moves. Writing the default back would instead
+    leave an override that only matches it today, and a PUT of null stores null,
+    which many options take as a value of its own.
+
+    A path the overlay does not hold is already clear and commits nothing. Clearing
+    a field beside a stored credential in the same mapping is a 400
+    ``credential_reentry_required``, as the PUT of a new value there is, unless the
+    request clears that credential too.
+    """
+    app = _resolve(service, instance)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
+    _require_fresh(gc, if_match)
+    for target in path:
+        root, _, option = target.partition(".")
+        if root not in (appconfig.CONFIG_ROOT, appconfig.ENV_ROOT) or not option:
+            raise _refuse(
+                400,
+                "invalid_path",
+                target,
+                f"a clear addresses {appconfig.CONFIG_ROOT}.<option> or "
+                f"{appconfig.ENV_ROOT}.<NAME>",
+            )
+    _refuse_clears_beside_credentials(doc, path)
+    cleared = [target for target in path if _clear(doc, target)]
+    if not cleared:
+        return ConfigWriteResult(changed=False)
+
+    protected = _enforce(request, user, app.overlay_name, doc)
+    result = commit_overlay(
+        request,
+        user,
+        app,
+        doc,
+        summary="clear config",
+        protected=protected,
+        if_match=if_match,
+    )
+    env_prefix = f"{appconfig.ENV_ROOT}."
+    env_cleared = {t.removeprefix(env_prefix): None for t in cleared if t.startswith(env_prefix)}
+    return ConfigWriteResult(
+        **result.model_dump(exclude={"reload", "validation"}),
+        reload=_reload_mode(request, result),
+        custom_env=_custom_env_delivery(request, env_cleared),
     )
 
 

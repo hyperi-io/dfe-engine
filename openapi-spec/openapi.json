@@ -18277,6 +18277,111 @@
             "BearerAuth": []
           }
         ]
+      },
+      "delete": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Clear App Config",
+        "description": "Remove options from the overlay, so the app runs its own default for each.\n\nA cleared option reads back unset with provenance ``default``, so it follows the\ndefault when the default next moves. Writing the default back would instead\nleave an override that only matches it today, and a PUT of null stores null,\nwhich many options take as a value of its own.\n\nA path the overlay does not hold is already clear and commits nothing. Clearing\na field beside a stored credential in the same mapping is a 400\n``credential_reentry_required``, as the PUT of a new value there is, unless the\nrequest clears that credential too.",
+        "operationId": "clear_app_config_api_v1_apps__service___instance__config_delete",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "path",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "An option to put back to the app's default, as the config route reports it: `config.<option>` or `extraEnv.<NAME>`. Repeat it to clear several in one commit.",
+              "title": "Path"
+            },
+            "description": "An option to put back to the app's default, as the config route reports it: `config.<option>` or `extraEnv.<NAME>`. Repeat it to clear several in one commit."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigWriteResult"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/apps/{service}/{instance}/scaling": {

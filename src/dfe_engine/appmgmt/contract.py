@@ -1069,6 +1069,20 @@ def restore_masked_at(doc: dict, path: str, value: Any) -> Any:
     return restored
 
 
+def require_clear_keeps_credentials(doc: dict, path: str) -> None:
+    """Refuse clearing ``path`` where that changes the mapping it sits in beside a credential.
+
+    A cleared field runs the app's default instead, which moves a stored credential
+    beside it as surely as a new value does. Clearing the credential itself, or the
+    whole mapping that holds it, sends it nowhere new.
+
+    Raises:
+        CredentialReentryError: ``path`` sits beside a credential in the same mapping.
+    """
+    if not credential_var(doc, path):
+        _require_unchanged_enclosing_holder(doc, path, MISSING)
+
+
 def _require_unchanged_enclosing_holder(doc: dict, path: str, value: Any) -> None:
     """Refuse a write at ``path`` that changes the mapping it sits in beside a credential.
 
@@ -1076,7 +1090,8 @@ def _require_unchanged_enclosing_holder(doc: dict, path: str, value: Any) -> Non
     a write of it, so ``kafka.brokers`` is refused beside ``kafka.sasl.password`` and
     ``kafka.producer.retries`` is not. A document root is never judged, per
     :data:`_DOCUMENT_ROOTS`. The mapping is judged as a read showed it with ``value``
-    written in, so every credential in it stands masked beside the change.
+    written in, so every credential in it stands masked beside the change. A
+    :data:`MISSING` value is judged as the field removed.
 
     Raises:
         CredentialReentryError: ``value`` changes a field beside that credential, or
@@ -1100,7 +1115,10 @@ def _require_unchanged_enclosing_holder(doc: dict, path: str, value: Any) -> Non
             f"written alone: write {holder} in full"
         )
     written = copy.deepcopy(shown)
-    set_path(written, parts[-1], value)
+    if isinstance(value, _Missing):
+        written.pop(parts[-1], None)
+    else:
+        set_path(written, parts[-1], value)
     _require_unchanged_holder(
         written,
         stored,
