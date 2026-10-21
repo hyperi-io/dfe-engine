@@ -2914,7 +2914,9 @@ def import_source(
     and never written, so the read-only schema is not forked.
 
     Every check runs before the first write: a bundle applied halfway would leave
-    the source's schema pins with no definitions behind them.
+    the source's schema pins with no definitions behind them. A schema pin, or a
+    version it pins, that neither the bundle nor this deployment defines is a 422
+    ``unresolved_reference``.
     """
     try:
         result = apply_source_bundle(

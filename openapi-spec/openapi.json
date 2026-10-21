@@ -6019,7 +6019,7 @@
           "Sources"
         ],
         "summary": "Import Source",
-        "description": "Import a source bundle exported from another deployment.\n\nThe bundle's meta-schema definitions are written first, then the source, both\nthrough the registries that commit to git. A definition marked\n``resource_type: core`` is resolved against what dfe-schemas already put here\nand never written, so the read-only schema is not forked.\n\nEvery check runs before the first write: a bundle applied halfway would leave\nthe source's schema pins with no definitions behind them.",
+        "description": "Import a source bundle exported from another deployment.\n\nThe bundle's meta-schema definitions are written first, then the source, both\nthrough the registries that commit to git. A definition marked\n``resource_type: core`` is resolved against what dfe-schemas already put here\nand never written, so the read-only schema is not forked.\n\nEvery check runs before the first write: a bundle applied halfway would leave\nthe source's schema pins with no definitions behind them. A schema pin, or a\nversion it pins, that neither the bundle nor this deployment defines is a 422\n``unresolved_reference``.",
         "operationId": "import_source_api_v1_sources_import_post",
         "requestBody": {
           "content": {
