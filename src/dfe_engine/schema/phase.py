@@ -34,7 +34,13 @@ from scalo.logger import logger
 from dfe_engine import __version__ as engine_version
 from dfe_engine.clickhouse.errors import is_retryable_error, parse_code
 from dfe_engine.schema.ledger import LedgerError, MigrationLedger
-from dfe_engine.schema.lock import SchemaLock, SchemaLockError, holder_name, lease_seconds
+from dfe_engine.schema.lock import (
+    SchemaLock,
+    SchemaLockError,
+    holder_name,
+    is_quorum_refusal,
+    lease_seconds,
+)
 from dfe_engine.schema.manifest_applier import (
     ManifestApplier,
     ManifestApplyError,
@@ -108,19 +114,22 @@ def is_transient_failure(exc: BaseException) -> bool:
     Each stage wraps the driver's error, so the whole cause chain is read. The query
     retry rule never retries 241, because the same query meets the same ceiling at
     once; a pass runs again only after a back-off, and its writes are small, so the
-    server's memory pressure may have passed by then.
+    server's memory pressure may have passed by then. A missed lease quorum clears
+    once the replica that was down or lagging catches up.
 
     Args:
         exc: What failed the pass.
 
     Returns:
-        True when any error in the chain is a connection outage, a rate limit or 241.
+        True when any error in the chain is a connection outage, a rate limit, 241,
+        or a missed lease quorum.
     """
     seen: set[int] = set()
     link: BaseException | None = exc
     while link is not None and id(link) not in seen:
         seen.add(id(link))
-        if is_retryable_error(link) or parse_code(link) == _MEMORY_LIMIT_EXCEEDED:
+        load_or_reach = is_retryable_error(link) or parse_code(link) == _MEMORY_LIMIT_EXCEEDED
+        if load_or_reach or is_quorum_refusal(link):
             return True
         link = link.__cause__ or link.__context__
     return False
@@ -150,6 +159,8 @@ class SchemaBootstrapState:
     # no topic, and a non-empty ``refused`` exits the CLI 2.
     topics_drift: list[str] = field(default_factory=list)
     counts: dict[str, int] = field(default_factory=dict)
+    # Not on the status route: the pass still converged, and the lease lapses at its expiry.
+    lease_release_failed: bool = False
     # Not on the status route: it decides whether the daemon runs the pass again.
     transient: bool = False
     """A later pass can clear what stopped this one.
@@ -613,36 +624,36 @@ def _apply_under_lock(
 
     The lease table is itself a manifest object, so it has to exist before it can
     be read. A server that does not carry it yet is a first boot, and this pass
-    is the one that creates it.
+    is the one that creates it. A check that cannot be answered raises, because
+    reading it as absent would apply unleased beside a live holder.
 
     A pass whose wait runs out while the holder is still live applies nothing and
     is marked ``observed`` and transient: the holder may still be mid-apply, so
-    readiness waits for a later pass that takes the lease itself.
+    readiness waits for a later pass that takes the lease itself. A release that
+    fails after the apply keeps the apply's result: the lease lapses at its expiry.
+
+    Raises:
+        SchemaLockError: The lease table's presence or the lease could not be read.
     """
-    if _table_absent(lock):
+    if not lock.table_exists():
         return apply_plan(client, plan, allow_drift=allow_drift)
 
-    with lock:
-        if not lock.acquire(wait_seconds=wait):
-            held = lock.read()
-            state.state = STATE_OBSERVED
-            state.holder = held.holder if held is not None else ""
-            state.error = "another applier held the schema lease for the whole wait"
-            state.transient = True
-            logger.warning(
-                "schema lease held elsewhere for the whole wait; NotReady until a later pass",
-                holder=state.holder,
-            )
-            return None
-        return apply_plan(client, plan, allow_drift=allow_drift)
-
-
-def _table_absent(lock: SchemaLock) -> bool:
-    """Whether the lease table is missing, which is what a first boot looks like."""
+    if not lock.acquire(wait_seconds=wait):
+        held = lock.read()
+        state.state = STATE_OBSERVED
+        state.holder = held.holder if held is not None else ""
+        state.error = "another applier held the schema lease for the whole wait"
+        state.transient = True
+        logger.warning(
+            "schema lease held elsewhere for the whole wait; NotReady until a later pass",
+            holder=state.holder,
+        )
+        return None
     try:
-        return not lock.table_exists()
-    except SchemaLockError:
-        return True
+        return apply_plan(client, plan, allow_drift=allow_drift)
+    finally:
+        if not lock.release_or_lapse():
+            state.lease_release_failed = True
 
 
 def _finish(state: SchemaBootstrapState, started: datetime, metrics: SchemaMetrics | None) -> None:
@@ -663,5 +674,7 @@ def _report_metrics(state: SchemaBootstrapState, metrics: SchemaMetrics) -> None
             schemas_version=state.schemas_version,
             refused=len(state.refused),
         )
+        if state.lease_release_failed:
+            metrics.lease_release_failed()
     except Exception as exc:
         logger.debug("schema bootstrap metrics not reported", error=str(exc))

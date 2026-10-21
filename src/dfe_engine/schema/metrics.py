@@ -27,6 +27,7 @@ BOOTSTRAP_STATE = "schema_bootstrap_state"
 BOOTSTRAP_DURATION = "schema_bootstrap_duration_seconds"
 VERSION_INFO = "schema_version_info"
 REFUSED = "schema_objects_refused"
+LEASE_RELEASE_FAILURES = "schema_lease_release_failures_total"
 
 
 def _registered_name(manager: Any, name: str) -> str:
@@ -72,6 +73,10 @@ class SchemaMetrics:
             _registered_name(manager, REFUSED),
             "Objects whose change the last pass declined as drift",
         )
+        self._lease_release_failures = manager.counter(
+            _registered_name(manager, LEASE_RELEASE_FAILURES),
+            "Passes whose schema lease release failed, leaving it to lapse at its expiry",
+        )
 
     @property
     def enabled(self) -> bool:
@@ -89,6 +94,12 @@ class SchemaMetrics:
         self._refused.set(refused)
         if schemas_version:
             self._version.labels(schemas_version=schemas_version).set(1)
+
+    def lease_release_failed(self) -> None:
+        """Count a pass whose lease release failed after it applied."""
+        if self._manager is None:
+            return
+        self._lease_release_failures.inc()
 
 
 def create(app_name: str = "dfe-engine") -> SchemaMetrics:
@@ -120,6 +131,7 @@ def create(app_name: str = "dfe-engine") -> SchemaMetrics:
 __all__ = [
     "BOOTSTRAP_DURATION",
     "BOOTSTRAP_STATE",
+    "LEASE_RELEASE_FAILURES",
     "REFUSED",
     "VERSION_INFO",
     "SchemaMetrics",

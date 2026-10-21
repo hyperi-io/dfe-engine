@@ -25,6 +25,14 @@ earlier one goes back to waiting. Reads use ``FINAL``, so a same-millisecond tie
 resolves to the row a merge keeps, before and after that merge. Each lock instance
 writes its own holder name, so two claimers on one pod still tell their claims apart.
 
+Every claim reaches a majority of the table's replicas before ClickHouse acknowledges
+it, and every read answers only from a replica holding all of them, so a re-read that
+lands on a lagging replica still sees the claim that beat it. A claim that cannot
+reach its majority, with a replica down, is a missed attempt retried within the wait.
+So is one acknowledged a settle or more after its free read: a rival's re-read may
+have missed it, so it is not kept. It lapses at its expiry unreleased, because a
+release at its version could free a rival that stood while it waited.
+
 The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 """
 
@@ -39,6 +47,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.clickhouse.errors import parse_code
 from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.schema.plan import LOCK_ID, render_one
 
@@ -46,8 +55,19 @@ LOCK_NAME = "schema_bootstrap"
 
 _POLL_SECONDS = 2.0
 
-# Longer than a racing claimer takes between finding the lease free and writing.
-_SETTLE_SECONDS = 0.5
+# A claim stands only if acknowledged within this long of its free read, so every rival sees it.
+# A quorum write to a second replica takes up to about a second, so this clears it twice over.
+_SETTLE_SECONDS = 2.0
+
+# A lease read answers only from a replica holding every claim a quorum acknowledged.
+_READ_SETTINGS = {"select_sequential_consistency": 1}
+
+# A claim acknowledged after its lease lapsed could be taken over, so this ends well inside a lease.
+_QUORUM_TIMEOUT_MS = 10_000
+
+# A missed quorum, which acquire retries within its wait: TOO_FEW_LIVE_REPLICAS,
+# UNSATISFIED_QUORUM_FOR_PREVIOUS_WRITE, REPLICA_IS_NOT_IN_QUORUM, UNKNOWN_STATUS_OF_INSERT.
+_QUORUM_REFUSALS = frozenset({285, 286, 289, 319})
 
 
 class SchemaLockError(Exception):
@@ -64,6 +84,49 @@ class SchemaLockBusyError(SchemaLockError):
     def __init__(self, holder: str) -> None:
         super().__init__(f"the schema lease is held by {holder or 'another applier'}")
         self.holder = holder
+
+
+class SchemaLockQuorumError(SchemaLockError):
+    """A lease read or write missed its quorum of replicas, so that attempt did not complete."""
+
+
+class _SlowClaim(Exception):
+    """A claim acknowledged a settle or more after its free read, left to lapse unkept."""
+
+
+def is_quorum_refusal(exc: BaseException) -> bool:
+    """Whether *exc* is ClickHouse refusing a missed quorum, which a later attempt can clear."""
+    return parse_code(exc) in _QUORUM_REFUSALS
+
+
+def _lock_error(action: str, exc: Exception) -> SchemaLockError:
+    """*exc* as a lease error, with a missed quorum kept apart so a claimer retries it."""
+    kind = SchemaLockQuorumError if is_quorum_refusal(exc) else SchemaLockError
+    return kind(f"{action}: {exc}")
+
+
+def _majority(replicas: int) -> int:
+    """A majority of *replicas*: 1 on one node, which ClickHouse reads as no quorum wait."""
+    return max(replicas, 1) // 2 + 1
+
+
+def _write_settings_for(engine: str, replicas: int) -> dict[str, int]:
+    """What a lease write carries on a table of *engine* with *replicas* replicas.
+
+    Every SharedMergeTree insert is already a quorum insert and ClickHouse documents
+    the quorum settings as not applicable to it, so they are left off there.
+    ``insert_quorum = 'auto'`` never resolves on a single replica and refuses every
+    later write behind it, so elsewhere the majority is counted. ClickHouse refuses a
+    sequential quorum on an async insert, so every write is synchronous.
+    """
+    if engine.startswith("Shared"):
+        return {"async_insert": 0}
+    return {
+        "insert_quorum": _majority(replicas),
+        "insert_quorum_parallel": 0,
+        "insert_quorum_timeout": _QUORUM_TIMEOUT_MS,
+        "async_insert": 0,
+    }
 
 
 def lease_seconds(wait_seconds: float) -> int:
@@ -142,7 +205,8 @@ class SchemaLock:
         """The latest claim on the lock name, or None when nothing has ever taken it.
 
         ``FINAL`` keeps the row a merge would keep, so readers name the same claim
-        of a tie whether or not it has merged yet.
+        of a tie whether or not it has merged yet. A replica missing an acknowledged
+        claim refuses the read rather than answer without it.
         """
         target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         sql = (
@@ -150,9 +214,12 @@ class SchemaLock:
             "WHERE lock_name = {lock:String}"
         )
         try:
-            rows = list(self._client.query(sql, parameters={"lock": LOCK_NAME}).result_rows)
+            result = self._client.query(
+                sql, parameters={"lock": LOCK_NAME}, settings=_READ_SETTINGS
+            )
+            rows = list(result.result_rows)
         except Exception as exc:
-            raise SchemaLockError(f"could not read the schema lock: {exc}") from exc
+            raise _lock_error("could not read the schema lock", exc) from exc
         if not rows or rows[0][0] in (None, ""):
             return None
         expires, acquired = rows[0][1], rows[0][3]
@@ -170,28 +237,39 @@ class SchemaLock:
 
         Returns whether this process now holds it. False means another process is
         mid-apply and this one must report rather than apply -- the schema is
-        somebody else's to converge, not this caller's to race on.
+        somebody else's to converge, not this caller's to race on. An attempt that
+        misses its quorum, with a replica down or another claim still reaching its
+        own, or whose claim lands too slowly to stand, is retried within the wait and
+        gives False once the wait runs out.
         """
         deadline = time.monotonic() + max(wait_seconds, 0.0)
+        missed: set[type[Exception]] = set()
         while True:
-            state = self.read()
-            now = datetime.now(UTC)
-            if state is None or not state.held_at(now):
-                claimed_at = self._claim(now)
-                time.sleep(_SETTLE_SECONDS)
-                if self._claim_stands(claimed_at):
-                    self._claimed_at = claimed_at
-                    self.acquired = True
-                    return True
-                if time.monotonic() >= deadline:
-                    return False
-                continue
+            try:
+                started = time.monotonic()
+                state = self.read()
+                now = datetime.now(UTC)
+                if state is None or not state.held_at(now):
+                    if self._try_claim(now, started=started):
+                        return True
+                    if time.monotonic() >= deadline:
+                        return False
+                    continue
+            except (SchemaLockQuorumError, _SlowClaim) as exc:
+                # Once per wait and cause: a down replica stays down for every attempt in it.
+                if type(exc) not in missed:
+                    logger.warning(
+                        "schema lease attempt missed; retrying within the wait", reason=str(exc)
+                    )
+                missed.add(type(exc))
+                state = None
             if time.monotonic() >= deadline:
-                logger.info(
-                    "schema lock held elsewhere; reporting without applying",
-                    holder=state.holder,
-                    expires_at=state.expires_at.isoformat(),
-                )
+                if state is not None:
+                    logger.info(
+                        "schema lock held elsewhere; reporting without applying",
+                        holder=state.holder,
+                        expires_at=state.expires_at.isoformat(),
+                    )
                 return False
             time.sleep(_POLL_SECONDS)
 
@@ -203,6 +281,37 @@ class SchemaLock:
         self._write(self._claimed_at, expires=datetime.now(UTC), released=1)
         self._claimed_at = None
         self.acquired = False
+
+    def release_or_lapse(self) -> bool:
+        """Release the lease, or log that it lapses at its expiry when the release fails.
+
+        Returns:
+            Whether the release was written. A failed one only delays the next applier.
+        """
+        try:
+            self.release()
+        except SchemaLockError as exc:
+            logger.warning("schema lease not released; it lapses at its expiry", error=str(exc))
+            return False
+        return True
+
+    def _try_claim(self, now: datetime, *, started: float) -> bool:
+        """Claim, let racing claimers land theirs, and keep the claim if it is still the latest.
+
+        Raises:
+            _SlowClaim: The claim was acknowledged a settle or more after *started*,
+                the free read's start, so it was left to lapse at its expiry.
+        """
+        claimed_at = self._claim(now)
+        landed = time.monotonic() - started
+        if landed >= _SETTLE_SECONDS:
+            raise _SlowClaim(f"the claim landed {landed:.2f}s after its free read")
+        time.sleep(_SETTLE_SECONDS)
+        if not self._claim_stands(claimed_at):
+            return False
+        self._claimed_at = claimed_at
+        self.acquired = True
+        return True
 
     def _claim(self, now: datetime) -> datetime:
         """Write a claim and return its acquired_at as the table stores it (milliseconds)."""
@@ -220,16 +329,39 @@ class SchemaLock:
             return True
         return state.acquired_at == claimed_at and state.holder == self._holder
 
+    def _write_settings(self) -> dict[str, int]:
+        """The settings :func:`_write_settings_for` picks for the lease table as it stands."""
+        parameters = {"db": self._database, "tbl": self._table}
+        try:
+            engines = self._client.query(
+                "SELECT engine FROM system.tables WHERE database = {db:String} "
+                "AND name = {tbl:String}",
+                parameters=parameters,
+            ).result_rows
+            engine = str(engines[0][0]) if engines else ""
+            if engine.startswith("Shared"):
+                return _write_settings_for(engine, 0)
+            replicas = self._client.query(
+                "SELECT total_replicas FROM system.replicas "
+                "WHERE database = {db:String} AND table = {tbl:String}",
+                parameters=parameters,
+            ).result_rows
+        except Exception as exc:
+            raise _lock_error("could not read the schema lock's engine and replicas", exc) from exc
+        return _write_settings_for(engine, int(replicas[0][0]) if replicas else 1)
+
     def _write(self, acquired: datetime, *, expires: datetime, released: int) -> None:
+        settings = self._write_settings()
         try:
             self._client.insert(
                 self._table,
                 [[LOCK_NAME, self._holder, acquired, expires.replace(microsecond=0), released]],
                 column_names=["lock_name", "holder", "acquired_at", "expires_at", "released"],
                 database=self._database,
+                settings=settings,
             )
         except Exception as exc:
-            raise SchemaLockError(f"could not write the schema lock: {exc}") from exc
+            raise _lock_error("could not write the schema lock", exc) from exc
 
     def __enter__(self) -> SchemaLock:
         return self
@@ -270,8 +402,4 @@ def ddl_lease(client: Any, *, data_database: str, wait_seconds: float) -> Iterat
     try:
         yield
     finally:
-        # A failed release only delays the next applier until the claim lapses.
-        try:
-            lock.release()
-        except SchemaLockError as exc:
-            logger.warning("schema lease not released; it lapses at its expiry", error=str(exc))
+        lock.release_or_lapse()

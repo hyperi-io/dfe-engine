@@ -15,7 +15,7 @@ from clickhouse_connect.driver.exceptions import DatabaseError
 
 from dfe_engine.clickhouse.bootstrap import SchemaRetry
 from dfe_engine.schema import phase
-from dfe_engine.schema.lock import SchemaLockError
+from dfe_engine.schema.lock import SchemaLockError, SchemaLockQuorumError
 from dfe_engine.schema.manifest_applier import ManifestApplyError
 from dfe_engine.schema.phase import (
     STATE_CONVERGED,
@@ -75,6 +75,35 @@ class TestWhatAnotherPassCanClear:
     )
     def test_a_fault_no_pass_can_clear_is_not(self, exc):
         assert is_transient_failure(exc) is False
+
+    @pytest.mark.parametrize(
+        ("code", "name"),
+        [
+            (285, "TOO_FEW_LIVE_REPLICAS"),
+            (286, "UNSATISFIED_QUORUM_FOR_PREVIOUS_WRITE"),
+            (289, "REPLICA_IS_NOT_IN_QUORUM"),
+            (319, "UNKNOWN_STATUS_OF_INSERT"),
+        ],
+    )
+    def test_a_missed_lease_quorum_is_transient(self, code, name):
+        cause = DatabaseError(f"Code: {code}. DB::Exception: quorum. ({name})", code=code)
+
+        assert is_transient_failure(_caused_by(SchemaLockQuorumError("lease"), cause)) is True
+
+    def test_a_pass_stopped_by_a_missed_quorum_runs_again(self, monkeypatch):
+        """Recorded transient, the daemon's retry runs it again instead of leaving it NotReady."""
+        cause = DatabaseError("Code: 289. DB::Exception: not in quorum. (REPLICA_IS_NOT_IN_QUORUM)")
+
+        def refused(settings, *, wait_seconds):
+            raise SchemaLockQuorumError("could not read the schema lock") from cause
+
+        monkeypatch.setattr(phase, "_connect", refused)
+        settings = DFESettings(env="dev", clickhouse=ClickHouseSettings(bootstrap_tables=True))
+
+        state = run_bootstrap(settings=settings, wait_seconds=0)
+
+        assert (state.state, state.transient) == (STATE_FAILED, True)
+        assert schema_ready() is False
 
     def test_the_pass_records_a_transient_failure(self, monkeypatch):
         def refused(settings, *, wait_seconds):

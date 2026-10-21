@@ -48,7 +48,8 @@ def _held_by(ch_client, database: str, holder: str) -> SchemaLock:
         holder=holder,
         lease_seconds=300,
     )
-    assert lock.acquire() is True
+    # A claim held up by a server stall is a missed attempt, so taking the lease here waits.
+    assert lock.acquire(wait_seconds=10.0) is True
     return lock
 
 
