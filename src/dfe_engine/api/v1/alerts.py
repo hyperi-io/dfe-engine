@@ -25,6 +25,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
+from scalo.api import scalo_extra
 
 from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
@@ -152,11 +153,13 @@ async def list_destinations(
     return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
+# Declared, since the path alone names the same action as GET /destinations.
 @router.post(
     "/destinations",
     response_model=AlertDestination,
     status_code=201,
     dependencies=[Depends(require_action(scopes_dict["alert_write"]))],
+    openapi_extra=scalo_extra(verb="create-destination"),
 )
 async def create_destination(
     body: AlertDestination,

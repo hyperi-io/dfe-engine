@@ -22,13 +22,18 @@ placeholder (a generator run on a versionless machine wrote ``0.0.0`` over
 ``1.8.0`` and shipped it), and that it equals the repo's version (the specs sat
 at ``1.20.19`` against a ``VERSION`` of ``1.21.2`` with every test green).
 
+The route map (``docs/reference/api-route-map.md``) is generated from the same app,
+so it is held to the app the same way.
+
 Regenerate with ``uv run python openapi-spec/generate.py``.
 """
 
 import json
 from pathlib import Path
+from types import ModuleType
 
 import pytest
+from common.openapi_tools import load_route_map
 
 from dfe_engine.api.app import create_app
 from dfe_engine.settings import SigmaSettings, load_settings, reset_settings
@@ -75,6 +80,11 @@ def generated(monkeypatch) -> dict:
 @pytest.fixture
 def committed() -> dict:
     return json.loads(SPEC_FILE.read_text())
+
+
+@pytest.fixture
+def route_map() -> ModuleType:
+    return load_route_map()
 
 
 def test_committed_spec_has_the_same_operations(committed, generated):
@@ -190,6 +200,13 @@ def test_source_writes_say_why_they_accept_a_pin_the_import_refuses(committed, p
     description = committed["paths"][path][method]["description"]
 
     assert "an exported bundle brings every schema it pins" in " ".join(description.split())
+
+
+def test_committed_route_map_matches_the_app(generated, route_map):
+    """``docs/reference/api-route-map.md`` is generated: a route or plan change needs a regenerate."""
+    on_disk = route_map.MAP_FILE.read_text(encoding="utf-8")
+
+    assert on_disk == route_map.build(generated), f"api-route-map.md is stale -- {REGENERATE}"
 
 
 def test_committed_e2e_spec_matches_its_builder():

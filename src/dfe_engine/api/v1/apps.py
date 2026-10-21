@@ -56,6 +56,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from scalo.api import scalo_extra
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api import body_limits
@@ -1609,7 +1610,12 @@ def _file_set(service: str, set_name: str):
         raise HTTPException(404, detail={"code": "unknown_file_set", "message": str(exc)}) from exc
 
 
-@router.get("/{service}/{instance}/files/{set_name}", dependencies=[_READ])
+# The path reads as a get on {set_name}, which would share an id with the file read below.
+@router.get(
+    "/{service}/{instance}/files/{set_name}",
+    dependencies=[_READ],
+    openapi_extra=scalo_extra(verb="list"),
+)
 def list_app_files(
     service: str, instance: str, set_name: str, user: CurrentUser, request: Request
 ) -> list[FileSummary]:

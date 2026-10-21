@@ -7,11 +7,14 @@ Run after any model/route changes::
 Writes:
 - ``openapi.json`` — product API (committed; frontend types, CLI, Prism)
 - ``openapi.e2e.json`` — Playwright helpers for ``make e2e-server``
+- ``docs/reference/api-route-map.md`` -- where each operation moves (``route_map.py``)
 """
 
 import json
 import os
 from pathlib import Path
+
+import route_map
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.e2e_docs import build_e2e_spec
@@ -60,7 +63,8 @@ def _spec_version(reported: str) -> str:
     )
 
 
-def main() -> None:
+def product_spec() -> dict:
+    """The product spec, stamped with the release version, as the committed file holds it."""
     # Schema export only — avoid production posture guard on dev JWT placeholder.
     os.environ["DFE_ENV"] = "dev"
     # The spec describes every operation a deployment can switch on, sigma included.
@@ -77,14 +81,25 @@ def main() -> None:
     spec = app.openapi()
     if any(path.startswith("/api/e2e") for path in spec.get("paths", {})):
         raise SystemExit("refusing to commit e2e-server paths into openapi.json")
-    version = _spec_version(spec.get("info", {}).get("version", ""))
-    spec["info"]["version"] = version
+    spec["info"]["version"] = _spec_version(spec.get("info", {}).get("version", ""))
+    return spec
+
+
+def main() -> None:
+    """Write both specs and the route map."""
+    spec = product_spec()
+    version = spec["info"]["version"]
     _dump(SPEC_FILE, spec)
     print(f"OpenAPI spec written to {SPEC_FILE} ({len(spec.get('paths', {}))} paths, v{version})")
 
     e2e_spec = build_e2e_spec(version=version)
     _dump(E2E_SPEC_FILE, e2e_spec)
     print(f"E2E OpenAPI spec written to {E2E_SPEC_FILE} ({len(e2e_spec.get('paths', {}))} paths)")
+
+    try:
+        print(f"Route map written to {route_map.write(spec)}")
+    except route_map.RouteMapError as exc:
+        raise SystemExit(f"route map refused, fix openapi-spec/route-plan.toml:\n{exc}") from exc
 
 
 if __name__ == "__main__":

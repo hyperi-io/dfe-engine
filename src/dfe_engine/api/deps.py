@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, iter_route_contexts
+from scalo.api import permission
 from scalo.logger import logger
 from starlette.routing import BaseRoute
 
@@ -1049,6 +1050,9 @@ def require_action(action: str, *, scope: Scope | None = None):
     Pass a Scope for endpoints whose target scope is static; use
     check_action() inside the handler when it depends on the request.
 
+    The spec names ``action`` as ``x-scalo.action`` on every route this guards,
+    so a UI, CLI or MCP client can hide what a caller cannot do.
+
     Usage::
 
         @router.post("/sources")
@@ -1058,6 +1062,7 @@ def require_action(action: str, *, scope: Scope | None = None):
         ): ...
     """
 
+    @permission(action)
     async def _check(
         request: Request,
         user: AuthContext = Depends(get_current_user),

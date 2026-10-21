@@ -39,11 +39,26 @@ Usage:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .rule_rewriter import ParsedRule, RuleRewriter
+
+if TYPE_CHECKING:
+    from scalo.expression import ProfileConfig
+
+
+def _hunt_profile() -> ProfileConfig:
+    """The CEL profile a rule's filter is held to: regex allowed, iteration and time refused.
+
+    The filter is transpiled to ClickHouse SQL, where ``matches()`` becomes ``match()``.
+    scalo's default refuses regex for the Rust services' per-record path, which a hunt
+    filter never takes.
+    """
+    from scalo.expression import ProfileConfig
+
+    return ProfileConfig(allow_regex=True)
 
 
 class RuleCreate(BaseModel):
@@ -187,7 +202,7 @@ class Rule(BaseModel):
         if create.cel_filter:
             from scalo.expression import transpile_to_clickhouse
 
-            cel_sql = transpile_to_clickhouse(create.cel_filter)
+            cel_sql = transpile_to_clickhouse(create.cel_filter, _hunt_profile())
 
             if where_clause.strip():
                 # Both SQL and CEL -- AND them together
@@ -245,7 +260,7 @@ class Rule(BaseModel):
         if self.cel_filter:
             from scalo.expression import validate as validate_cel
 
-            cel_errors = validate_cel(self.cel_filter)
+            cel_errors = validate_cel(self.cel_filter, _hunt_profile())
             if cel_errors:
                 errors.append(f"CEL filter validation failed: {'; '.join(cel_errors)}")
 

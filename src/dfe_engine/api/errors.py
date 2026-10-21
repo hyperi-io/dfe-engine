@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.constants import REF_TEMPLATE
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from scalo.api import ProblemError
 from scalo.logger import logger
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import BaseRoute
@@ -335,6 +336,27 @@ def install_exception_handlers(app: FastAPI) -> None:
             errors=field_errors,
         )
         return JSONResponse(status_code=422, content=_error_response_json(body))
+
+    # scalo.api's precondition and page-token helpers raise this, answered in the same envelope.
+    @app.exception_handler(ProblemError)
+    async def problem_error_handler(_request: Request, exc: ProblemError):
+        problem = exc.problem
+        body = ErrorResponse(
+            code=problem.code or "request_error",
+            message=problem.detail or problem.title,
+            errors=[
+                FieldError(
+                    field=error.field,
+                    message=error.detail,
+                    code=error.code or ErrorCode.VALIDATION_ERROR,
+                )
+                for error in problem.errors
+            ],
+            context=problem.model_extra or None,
+        )
+        return JSONResponse(
+            status_code=exc.status, content=_error_response_json(body), headers=exc.headers
+        )
 
     # Import engine exceptions here to avoid circular imports at module level
     from dfe_engine.api.v1.scim import SCIM_ROOT, scim_error

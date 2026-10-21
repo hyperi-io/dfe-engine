@@ -76,7 +76,7 @@ DFE uses a **subset** of CEL. Expressions outside this profile are rejected at v
 | `contains()` | Substring check | `message.contains("error")` |
 | `startsWith()` | Prefix check | `path.startsWith("/api/")` |
 | `endsWith()` | Suffix check | `file.endsWith(".log")` |
-| `matches()` | Regex match | `hostname.matches("^web-[0-9]+$")` |
+| `matches()` | Regex match. A hunt rule's filter takes it. A scoring or alert condition takes it only when the config cascade sets `expression.allow_regex: true` | `hostname.matches("^web-[0-9]+$")` |
 | `size()` | Length of string or list | `size(tags) > 0` |
 | `has()` | Field existence | `has(event.user_id)` |
 | `int()` | Cast to integer | `int(port_str) == 443` |

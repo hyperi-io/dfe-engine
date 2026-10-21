@@ -10,6 +10,7 @@ POST   /api/v1/field-maps/seed             -> Seed built-in defaults
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from scalo.api import scalo_extra
 
 from dfe_engine.api.deps import CurrentUser, FieldMapReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
@@ -126,10 +127,12 @@ async def get_default_field_map(standard: str, user: CurrentUser, registry: Fiel
     return fm
 
 
+# Declared, since the path alone names the same get as /{standard}.
 @router.get(
     "/{standard}/{source}",
     response_model=FieldMap,
     dependencies=[Depends(require_action(scopes_dict["fieldmap_read"]))],
+    openapi_extra=scalo_extra(verb="get-for-source"),
 )
 async def get_source_field_map(
     standard: str, source: str, user: CurrentUser, registry: FieldMapReg

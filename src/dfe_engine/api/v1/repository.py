@@ -27,6 +27,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Body, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from scalo.api import scalo_extra
 from scalo.logger import logger
 
 from dfe_engine.api import body_limits
@@ -300,10 +301,11 @@ async def patch_preferences(
 # -- Objects (generic) ----------------------------------------
 
 
+# The path reads as a get on {namespace}, which would share an id with the object read below.
 @router.get(
     "/objects/{scope}/{scope_id}/{namespace}",
     response_model=list[ObjectEntry],
-    openapi_extra=CLI_HIDDEN,
+    openapi_extra={**CLI_HIDDEN, **scalo_extra(verb="list")},
 )
 async def list_objects(
     scope: RepositoryScope,

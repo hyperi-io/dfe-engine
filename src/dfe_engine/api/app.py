@@ -18,10 +18,12 @@ from typing import TYPE_CHECKING, Any
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from scalo.api import install
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
 from dfe_engine import __version__
+from dfe_engine.api.conventions import HIERARCHY
 from dfe_engine.fastapi_telemetry import FASTAPI_TELEMETRY
 from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture, load_settings
 
@@ -729,6 +731,8 @@ def create_app(
         openapi_tags=openapi_tags,
         # The request histogram is scalo's middleware below; FastAPI's own would count each twice.
         telemetry={**FASTAPI_TELEMETRY, "metrics": False},
+        # Every operation id comes from its path, so the UI, CLI and MCP share one name for it.
+        generate_unique_id_function=HIERARCHY.unique_id,
     )
 
     app.state.settings = settings
@@ -912,6 +916,8 @@ def create_app(
         return app.openapi_schema
 
     app.openapi = custom_openapi  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
+    # Wraps custom_openapi, so it must follow it. Errors keep the ErrorResponse envelope dfe-ui parses.
+    install(app, HIERARCHY, problem_handlers=False)
 
     if e2e_docs:
         from dfe_engine.api.e2e_docs import install_e2e_swagger
