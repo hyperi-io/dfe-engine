@@ -313,13 +313,12 @@ def _mint(request: Request, credential: IngestCredential, token: str, *, created
 
 
 def _delete(request: Request, credential: IngestCredential) -> None:
-    """Remove the credential, rewrite the bearer secrets without it, then drop its token."""
+    """Remove the credential and rewrite the bearer secrets without it.
+
+    The org registry's removal listener drops its token, as it does for an org's cascade.
+    """
     _registry(request).ingest_credentials.delete(credential.name)
     _sync_tokens(request)
-    try:
-        drop_token(_secrets(request), credential.name)
-    except SecretsError as exc:
-        raise _secrets_failure(exc) from exc
 
 
 # -- Endpoints ---------------------------------------------------------------

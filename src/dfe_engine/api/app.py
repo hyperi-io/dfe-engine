@@ -118,10 +118,11 @@ def _keep_bearer_tokens_in_step(app: FastAPI) -> None:
     """Rewrite the receiver's bearer secrets now, and after every org or credential write.
 
     Every writer goes through the org registry, so a credential removed by any of
-    them stops working. A secrets backend that is down never breaks startup or a
-    write: the next change, or the next boot, rewrites them.
+    them stops working and its token secret is dropped. A secrets backend that is
+    down never breaks startup or a write: the next change, or the next boot,
+    rewrites the bearer secrets.
     """
-    from dfe_engine.orgs.ingest_tokens import sync_bearer_tokens
+    from dfe_engine.orgs.ingest_tokens import drop_token, sync_bearer_tokens
 
     registry = app.state.org_registry
     secrets = app.state.dfe_secrets
@@ -134,6 +135,7 @@ def _keep_bearer_tokens_in_step(app: FastAPI) -> None:
     except Exception as exc:  # the secrets backend may come up after the engine
         logger.warning("receiver bearer tokens not rewritten at startup", error=str(exc))
     registry.on_change(sync)
+    registry.on_credential_removed(functools.partial(drop_token, secrets))
 
 
 @asynccontextmanager

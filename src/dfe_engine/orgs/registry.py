@@ -66,8 +66,9 @@ class OrgRegistry:
         self._dir = Path(orgs_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._listeners: list[Callable[[], None]] = []
+        self._removal_listeners: list[Callable[[str], None]] = []
         self.ingest_credentials = IngestCredentialRegistry(
-            self._dir / "ingest-credentials", self._changed
+            self._dir / "ingest-credentials", self._changed, self._credential_removed
         )
 
     # ------------------------------------------------------------------
@@ -90,6 +91,23 @@ class OrgRegistry:
                 listener()
             except Exception as exc:
                 logger.warning("org change listener failed", org=name, error=str(exc))
+
+    def on_credential_removed(self, listener: Callable[[str], None]) -> None:
+        """Call ``listener`` with the id of every ingest credential deleted.
+
+        An org delete's cascade counts. A listener that raises is logged and never
+        fails the delete.
+        """
+        self._removal_listeners.append(listener)
+
+    def _credential_removed(self, name: str) -> None:
+        for listener in self._removal_listeners:
+            try:
+                listener(name)
+            except Exception as exc:
+                logger.warning(
+                    "ingest credential removal listener failed", ingest_id=name, error=str(exc)
+                )
 
     def create(
         self,

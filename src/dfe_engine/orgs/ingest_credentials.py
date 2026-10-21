@@ -75,12 +75,19 @@ class IngestCredentialRegistry:
 
     Built by :class:`~dfe_engine.orgs.registry.OrgRegistry`, whose change listeners
     it calls after every write, so a listener sees credential and org writes alike.
+    ``removed`` is called with each deleted credential's id, after ``changed``.
     """
 
-    def __init__(self, directory: Path, changed: Callable[[str], None]) -> None:
+    def __init__(
+        self,
+        directory: Path,
+        changed: Callable[[str], None],
+        removed: Callable[[str], None],
+    ) -> None:
         self._dir = directory
         self._dir.mkdir(parents=True, exist_ok=True)
         self._changed = changed
+        self._removed = removed
 
     def get(self, name: str) -> IngestCredential | None:
         """The credential named *name*, or None when there is none."""
@@ -129,6 +136,7 @@ class IngestCredentialRegistry:
             raise KeyError(name)
         self._path(held).unlink()
         self._changed(held.org)
+        self._removed(held.name)
 
     def _path(self, credential: IngestCredential) -> Path:
         return self._dir / f"{credential.name}.yaml"

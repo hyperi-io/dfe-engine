@@ -124,6 +124,17 @@ class TestOrgDelete:
             registry.delete("beta")
         assert registry.get("beta") is not None
 
+    def test_every_credential_the_cascade_removes_is_reported(self, registry):
+        removed: list[str] = []
+        registry.on_credential_removed(removed.append)
+        registry.ingest_credentials.put(_credential())
+        registry.ingest_credentials.put(_credential("acme-hec"))
+        registry.ingest_credentials.put(_credential("beta-hec", org="beta"))
+
+        registry.delete("acme")
+
+        assert removed == ["acme-agents", "acme-hec"]
+
 
 class TestBindings:
     """The golden ``ingest_bindings`` block dfe-receiver holds each record to."""

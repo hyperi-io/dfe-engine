@@ -446,3 +446,4 @@ class TestTheDefaultOrg:
         assert resp.status_code == 204, resp.text
         assert app.state.org_registry.ingest_credentials.get("agents") is None
         assert token not in _bearer(app, "http")
+        assert _secret(app, credential_secret_path("agents")) is None
