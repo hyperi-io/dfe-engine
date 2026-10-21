@@ -69,10 +69,6 @@ deployment_scopes = {
     "deployment_admin_links_read": "deployment:admin_links:read",
 }
 
-discovery_scopes = {
-    "discovery_read": "discovery:read",
-}
-
 fieldmap_scopes = {
     "fieldmap_read": "fieldmap:read",
     "fieldmap_write": "fieldmap:write",

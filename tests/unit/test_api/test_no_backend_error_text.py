@@ -180,41 +180,6 @@ class TestQueries:
         assert_logged(audit_events)
 
 
-class TestDiscovery:
-    def test_a_connection_failure_is_503_without_clickhouses_text(
-        self, app, client, admin_headers, audit_events
-    ):
-        app.state.connection_registry = SimpleNamespace(get_client=_refuse)
-
-        resp = client.get("/api/v1/discovery/databases", headers=admin_headers)
-
-        assert resp.status_code == 503, resp.text
-        assert resp.json()["code"] == "connection_error"
-        assert_hidden(resp.text)
-        assert_logged(audit_events)
-
-    @pytest.mark.parametrize(
-        "path",
-        [
-            "/api/v1/discovery/databases",
-            "/api/v1/discovery/tables",
-            "/api/v1/discovery/tables/events/columns",
-        ],
-    )
-    def test_a_query_failure_is_500_without_clickhouses_text(
-        self, app, client, admin_headers, audit_events, path
-    ):
-        failing = SimpleNamespace(query=_refuse)
-        app.state.connection_registry = SimpleNamespace(get_client=lambda _name: failing)
-
-        resp = client.get(path, headers=admin_headers)
-
-        assert resp.status_code == 500, resp.text
-        assert resp.json()["code"] == "query_error"
-        assert_hidden(resp.text)
-        assert_logged(audit_events)
-
-
 class TestOrgs:
     def test_tenant_discovery_hides_clickhouses_text(
         self, app, client, admin_headers, monkeypatch, audit_events

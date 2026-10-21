@@ -5,46 +5,43 @@ Consolidates loader-specific descriptor, validation, and template overrides.
 
 from typing import Any
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 
 descriptor = ServiceDescriptor(
     name="loader",
     display_name="DFE Loader",
-    image="ghcr.io/hyperi-io/dfe-loader",
-    default_port=9000,
-    metrics_port=9090,
-    kafka_role=KafkaRole.CONSUMER,
-    liveness_paths=("/livez",),
-    readiness_paths=("/readyz",),
     description="Kafka consumer or gRPC server -- loads events into ClickHouse.",
-    # Bound only when transport is 'grpc': the loader listens for Push RPCs from
-    # dfe-receiver. Port 6000 per the dfe-loader GrpcConfig.listen doc example
-    # (src/config/kafka.rs:80) and dfe-receiver's own loader endpoint example
-    # (src/error.rs:257, "grpc://loader.internal:6000").
-    extra_ports={"grpc": 6000},
 )
 
 
 def _check_listen_port(listen: str, errors: list[str]) -> None:
     """Refuse a listen port the receiver will not dial.
 
-    The engine compiles the receiver's destination from ``extra_ports["grpc"]``
-    but takes ``grpc.listen`` from whatever the base config says, so the two
+    The engine compiles the receiver's destination from the app manifest's push
+    port but takes ``grpc.listen`` from whatever the base config says, so the two
     ends of one connection had different authors and could disagree. They did,
     for three days: the receiver answered HTTP 202 and every record was dropped
     into a closed port with nothing logged.
     """
-    expected = descriptor.extra_ports["grpc"]
+    from dfe_engine.appmgmt import catalogue
+
+    push = catalogue.descriptor("dfe-loader").endpoints.get(catalogue.PUSH_ENDPOINT)
+    if push is None:
+        errors.append(
+            f"the app manifest declares no {catalogue.PUSH_ENDPOINT!r} endpoint for "
+            "dfe-loader, so no sender dials grpc.listen"
+        )
+        return
     _, _, port = listen.rpartition(":")
     if not port.isdigit():
         errors.append(f"grpc.listen {listen!r} must end in a port number")
         return
-    if int(port) != expected:
+    if int(port) != push.port:
         errors.append(
             f"grpc.listen is on port {port}, but dfe-receiver is told to dial "
-            f"{expected} -- the engine compiles that endpoint from this app's "
-            f"declared grpc port, so a different listen port drops every record "
+            f"{push.port} -- the engine compiles that endpoint from the app "
+            f"manifest's push port, so a different listen port drops every record "
             f"behind an HTTP 202."
         )
 

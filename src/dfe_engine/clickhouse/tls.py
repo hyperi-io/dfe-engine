@@ -8,7 +8,7 @@
 
 """One TLS setting, resolved once, for every clickhouse-connect client the engine mints.
 
-``ClickHouseManager``, ``ConnectionRegistry``, the restricted query client,
+``ClickHouseManager``, the restricted query client,
 the hunt-runner CLI and the KEDA shim each build their own clickhouse-connect
 client; every one of them resolves its secure/verify/ca_cert kwargs through
 :func:`resolve_clickhouse_tls` so a CA path or a verify override applies

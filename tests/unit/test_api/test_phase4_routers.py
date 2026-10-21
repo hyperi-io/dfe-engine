@@ -1,12 +1,12 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_api/test_phase4_routers.py
-#  Purpose:      Tests for Phase 4 routers (discovery, sigma, schemas)
+#  Purpose:      Tests for Phase 4 routers (sigma, schemas)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Tests for Phase 4: discovery, sigma, and schemas routers.
+"""Tests for Phase 4: sigma and schemas routers.
 
 These tests exercise the router-level behaviour without real ClickHouse.
 All CH-dependent endpoints return 503 (not configured) by design — the
@@ -26,36 +26,19 @@ from tests.support.present import present
 ADMIN_PASSWORD = "test-admin-pw"
 
 
-@pytest.fixture
-def discovery_client(app, client: TestClient) -> TestClient:
-    """Discovery router tests without ClickHouse (hermetic — not host-dependent)."""
-    app.state.connection_registry = None
-    return client
+class TestNoDiscoveryRoutes:
+    """HyperDX browses the ClickHouse catalogue, so the engine serves no discovery routes."""
 
-
-class TestDiscoveryRouter:
-    """GET /api/v1/discovery endpoints."""
-
-    def test_databases_no_clickhouse_returns_503(self, discovery_client, admin_headers):
-        """Returns 503 when ClickHouse is not reachable."""
-        resp = discovery_client.get("/api/v1/discovery/databases", headers=admin_headers)
-        assert resp.status_code == 503
-        assert resp.json()["code"] in ("not_configured", "connection_error")
-
-    def test_tables_no_clickhouse_returns_503(self, discovery_client, admin_headers):
-        resp = discovery_client.get("/api/v1/discovery/tables", headers=admin_headers)
-        assert resp.status_code == 503
-
-    def test_columns_no_clickhouse_returns_503(self, discovery_client, admin_headers):
-        resp = discovery_client.get(
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/v1/discovery/databases",
+            "/api/v1/discovery/tables",
             "/api/v1/discovery/tables/my_table/columns",
-            headers=admin_headers,
-        )
-        assert resp.status_code == 503
-
-    def test_requires_auth(self, client):
-        resp = client.get("/api/v1/discovery/databases")
-        assert resp.status_code == 401
+        ],
+    )
+    def test_a_discovery_path_answers_404(self, client: TestClient, admin_headers, path):
+        assert client.get(path, headers=admin_headers).status_code == 404
 
 
 class TestSigmaRouter:

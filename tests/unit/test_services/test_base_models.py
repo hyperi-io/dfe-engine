@@ -2,7 +2,7 @@
 
 import pytest
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.models.base import BaseServiceConfig
 
 
@@ -45,32 +45,11 @@ class TestServiceDescriptor:
     """Test ServiceDescriptor frozen dataclass."""
 
     def test_create_descriptor(self):
-        d = ServiceDescriptor(
-            name="test",
-            display_name="Test Service",
-            image="test:latest",
-        )
+        d = ServiceDescriptor(name="test", display_name="Test Service")
         assert d.name == "test"
-        assert d.default_port == 8080
-        assert d.metrics_port == 9090
-        assert d.kafka_role == KafkaRole.NONE
+        assert d.description == ""
 
     def test_descriptor_is_frozen(self):
-        d = ServiceDescriptor(name="test", display_name="Test", image="test:latest")
+        d = ServiceDescriptor(name="test", display_name="Test")
         with pytest.raises(AttributeError):
             d.name = "changed"  # ty: ignore[invalid-assignment]  # the refused write is the point of the test
-
-    def test_kafka_role_enum(self):
-        assert KafkaRole.PRODUCER.value == "producer"
-        assert KafkaRole.CONSUMER.value == "consumer"
-        assert KafkaRole.BOTH.value == "both"
-        assert KafkaRole.NONE.value == "none"
-
-    def test_extra_ports(self):
-        d = ServiceDescriptor(
-            name="test",
-            display_name="Test",
-            image="test:latest",
-            extra_ports={"grpc": 6000, "admin": 9091},
-        )
-        assert d.extra_ports["grpc"] == 6000

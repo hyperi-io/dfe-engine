@@ -30,7 +30,9 @@ source owns that one.
 
 Deleting a source removes the same pair. Left behind they cost a partition
 assignment in every loader forever, and a record that still lands on one has no
-table to go to.
+table to go to. The ``_load`` topic a dropped transform left is removed once the
+transform's consumer group holds no live member and no consumer group has records
+left to read on it.
 
 The admin config is built from the credential contract (``kafka.contract``), so
 the provider DERIVES security.protocol and sasl.mechanism. Building it any other
@@ -41,13 +43,16 @@ standard.
 scalo pin here it exposes only config-alter operations on topics that already
 exist - not create/delete/list. This module fills that gap against the same
 underlying ``confluent_kafka`` AdminClient, built with the identical config
-shape. Collapse onto KafkaAdmin once scalo grows that surface.
+shape. Collapse onto KafkaAdmin once scalo grows that surface. scalo's
+``KafkaClient.get_consumer_lag`` reads one named group, and a stranded topic is
+judged on every group that reads it, so that read is here as well, beside the
+consumer-group describe that says whether its transform still runs.
 """
 
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from confluent_kafka import KafkaError, KafkaException
+from confluent_kafka import ConsumerGroupTopicPartitions, KafkaError, KafkaException, TopicPartition
 from confluent_kafka.admin import (
     AdminClient,
     AlterConfigOpType,
@@ -55,6 +60,7 @@ from confluent_kafka.admin import (
     ConfigResource,
     NewPartitions,
     NewTopic,
+    OffsetSpec,
 )
 from scalo.logger import logger
 
@@ -72,6 +78,14 @@ if TYPE_CHECKING:
 BROKER_UNREACHABLE = "broker unreachable; the engine log has the reason"
 BROKER_REFUSED = "the broker refused it; the engine log has the reason"
 KAFKA_CONFIG_REJECTED = "kafka config rejected; the engine log has the reason"
+BACKLOG_UNKNOWN = "the broker did not report its backlog; the engine log has the reason"
+WRITER_UNKNOWN = "no consumer group can be named for the transform that wrote it"
+WRITER_UNDESCRIBED = (
+    "the broker did not describe the transform's consumer group; the engine log has the reason"
+)
+
+# The only states in which a consumer group holds no live consumer.
+IDLE_GROUP_STATES = frozenset({"empty", "dead"})
 
 # Topic configs DFE prefers but a topic works without. A managed broker that refuses
 # one at the topic level (Redpanda Cloud refuses compression.type) keeps its own value.
@@ -161,6 +175,27 @@ class TopicRemoveResult:
     def ok(self) -> bool:
         """Whether no topic failed."""
         return not self.failed
+
+
+@dataclass
+class HeldTopic:
+    """A stranded topic left in place, with why.
+
+    ``unread`` is None where the broker did not report the backlog, which is not
+    the same answer as an empty one.
+    """
+
+    name: str
+    unread: int | None
+    reason: str
+
+
+@dataclass
+class StrandedTopicResult:
+    """Outcome of a pass over stranded topics: each one removed, or held."""
+
+    removed: list[str] = field(default_factory=list)
+    held: list[HeldTopic] = field(default_factory=list)
 
 
 @dataclass
@@ -356,6 +391,53 @@ class TopicAdmin:
             [NewPartitions(name, total)], request_timeout=timeout
         )
         futures[name].result()
+
+    def watermarks(self, name: str, *, timeout: float = 10.0) -> dict[int, tuple[int, int]]:
+        """``(low, high)`` offsets for every partition of one existing topic."""
+        metadata = self._admin.list_topics(topic=name, timeout=timeout)
+        partitions = list(metadata.topics[name].partitions)
+        low = self._offsets(name, partitions, OffsetSpec.earliest(), timeout)
+        high = self._offsets(name, partitions, OffsetSpec.latest(), timeout)
+        return {partition: (low[partition], high[partition]) for partition in partitions}
+
+    def _offsets(
+        self, name: str, partitions: list[int], spec: OffsetSpec, timeout: float
+    ) -> dict[int, int]:
+        request = {TopicPartition(name, partition): spec for partition in partitions}
+        futures = self._admin.list_offsets(request, request_timeout=timeout)
+        return {tp.partition: future.result().offset for tp, future in futures.items()}
+
+    def committed_offsets(
+        self, name: str, partitions: list[int], *, timeout: float = 10.0
+    ) -> dict[str, dict[int, int]]:
+        """Each consumer group's committed offsets on one topic, for the groups holding any.
+
+        Raises when the broker cannot list every group, because a group it left
+        out could be the one with records still to read.
+        """
+        listed = self._admin.list_consumer_groups(request_timeout=timeout).result()
+        if listed.errors:
+            raise listed.errors[0]
+        committed: dict[str, dict[int, int]] = {}
+        for group in listed.valid or []:
+            request = ConsumerGroupTopicPartitions(
+                group.group_id, [TopicPartition(name, partition) for partition in partitions]
+            )
+            futures = self._admin.list_consumer_group_offsets([request], request_timeout=timeout)
+            answer = futures[group.group_id].result()
+            offsets = {tp.partition: tp.offset for tp in answer.topic_partitions if tp.offset >= 0}
+            if offsets:
+                committed[group.group_id] = offsets
+        return committed
+
+    def describe_group(self, group: str, *, timeout: float = 10.0) -> tuple[str, int]:
+        """One consumer group's state, lower-cased (``stable``, ``empty``, ``dead``), and its member count.
+
+        A group the broker never saw reads as ``dead`` with no members.
+        """
+        futures = self._admin.describe_consumer_groups([group], request_timeout=timeout)
+        described = futures[group].result()
+        return described.state.name.lower(), len(described.members)
 
 
 def build_admin(
@@ -594,8 +676,8 @@ def source_topic_names(source: Source) -> list[str]:
 
     The inverse of ``source_topic_specs``, and it walks the versions rather than
     one of them: a version that added a transform had its ``_load`` topic created
-    at its deploy, and a later version dropping the transform does not take the
-    topic with it.
+    at its deploy, and a later version dropping the transform removes the topic
+    only once it is drained.
     """
     # Never the shared landing topic: removing one source that lands on it would
     # take the topic out from under the receiver's default flow and every other
@@ -627,8 +709,8 @@ def stranded_source_topics(
     ``aws-cloudtrail_load`` suppresses nothing. The two names coincide exactly
     when ``owns_landing_topic``.
 
-    Reported rather than deleted: records may still be in flight on it, and
-    whether the engine may remove a topic mid-life is not this function's call.
+    Found here and never deleted here: :func:`clear_stranded_topics` decides,
+    because records may still be in flight on it.
 
     Returns None where the broker could not be asked, because "nothing is
     stranded" and "I could not look" call for opposite reactions.
@@ -657,6 +739,88 @@ def stranded_source_topics(
         )
         return None
     return [load_topic] if load_topic in present else []
+
+
+def unread_records(name: str, *, admin: TopicAdmin) -> int:
+    """Records on one topic that a consumer group reading it has not committed past.
+
+    The largest backlog of any group holding offsets on the topic, or every record
+    the topic holds when no group has read it. A partition a group never committed
+    counts from its first offset.
+
+    Raises:
+        Exception: The broker did not report the watermarks or a group's offsets.
+    """
+    marks = admin.watermarks(name)
+    groups = admin.committed_offsets(name, list(marks))
+    if not groups:
+        return sum(high - low for low, high in marks.values())
+    return max(_backlog(marks, offsets) for offsets in groups.values())
+
+
+def _backlog(marks: dict[int, tuple[int, int]], committed: dict[int, int]) -> int:
+    """Records after one group's committed offsets on a topic with these watermarks."""
+    total = 0
+    for partition, (low, high) in marks.items():
+        # Retention may have moved the start past an old commit.
+        position = max(committed.get(partition, low), low)
+        total += max(high - position, 0)
+    return total
+
+
+def _live_writer(groups: list[str], *, admin: TopicAdmin) -> str:
+    """Why a transform may still write, or "" once every one of its consumer groups is idle.
+
+    Idle is ``empty`` or ``dead`` with no members. A transform that consumes its
+    input in a group holds a member there for as long as it runs, so a group the
+    broker did not describe, or no group at all, counts as a writer still live.
+    """
+    if not groups:
+        return WRITER_UNKNOWN
+    for group in groups:
+        try:
+            state, members = admin.describe_group(group)
+        except Exception as exc:
+            logger.warning("transform consumer group not described", group=group, error=str(exc))
+            return WRITER_UNDESCRIBED
+        if members or state not in IDLE_GROUP_STATES:
+            return f"consumer group {group} is {state} with {members} members"
+    return ""
+
+
+def clear_stranded_topics(
+    names: list[str], *, admin: TopicAdmin, writers: list[str]
+) -> StrandedTopicResult:
+    """Delete each stranded topic its transform no longer writes and that holds nothing unread.
+
+    DESTRUCTIVE, but only for a topic every ``writers`` group is idle on and every
+    reader has drained, so no record goes with it. ``writers`` is the consumer
+    group of each transform that wrote the topics, and an empty list holds them
+    all. A topic with a backlog, or whose backlog the broker did not report, is
+    held for a later pass rather than drop records.
+    """
+    result = StrandedTopicResult()
+    # Liveness first: a writer leaving its group after this read shows its last writes as backlog.
+    live = _live_writer(writers, admin=admin)
+    if live:
+        result.held.extend(HeldTopic(name=name, unread=None, reason=live) for name in names)
+        return result
+    for name in names:
+        try:
+            unread = unread_records(name, admin=admin)
+        except Exception as exc:
+            logger.warning("stranded topic backlog unknown", topic=name, error=str(exc))
+            result.held.append(HeldTopic(name=name, unread=None, reason=BACKLOG_UNKNOWN))
+            continue
+        if unread:
+            result.held.append(
+                HeldTopic(name=name, unread=unread, reason=f"{unread} records not yet read")
+            )
+            continue
+        outcome = remove_topics([name], admin=admin)
+        result.held.extend(HeldTopic(name=n, unread=0, reason=r) for n, r in outcome.failed)
+        result.removed.extend(outcome.removed)
+    return result
 
 
 def ensure_topics(

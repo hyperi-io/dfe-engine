@@ -91,7 +91,7 @@ The source records bus-versus-direct only. Which bus (Kafka today) and which dir
 | Service and port per app | manifest `endpoints` | apps.yaml |
 | unmatched records | source `main`, table `main` | the main flow |
 
-The engine sets `<source>_load` only when the source has a transform, and the loader's topic discovery suppresses `_land` whenever a `_load` topic for the same source exists. So a `_load` topic left on the broker after a transform is removed starves the source until the topic is deleted; the engine deletes it on the same reconcile. Deployers never type a topic or an endpoint into an app's values file.
+The engine sets `<source>_load` only when the source has a transform, and the loader's topic discovery suppresses `_land` whenever a `_load` topic for the same source exists. So a `_load` topic left on the broker after a transform is removed starves the source until the topic is deleted. The deploy of the version without the transform goes ahead and reports the topic in `topics_pending_removal`. A later apps reconcile, or the engine's next start, deletes it once all three hold: the deploy repo carried no transform instance writing it before that pass, the transform's consumer group has no live member, and no consumer group has records left to read on it. Deployers never type a topic or an endpoint into an app's values file.
 
 Those topics are the engine's for the source's whole life, and nothing depends on the broker's `auto.create.topics.enable`: [topic-contract.md](topic-contract.md) covers ensure, converge, status and remove.
 

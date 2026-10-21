@@ -764,7 +764,8 @@ class KafkaSettings(BaseModel):
             "when the source is. Unset follows ``transport.bus_present``, so a "
             "brokerless profile asks for nothing without a second dial being set to "
             "match. True or false is the operator's override on top of that fact. "
-            "Neither a deploy nor a delete fails on the topic step either way."
+            "A delete never fails on the topic step. A deploy of a source on the bus "
+            "fails when a topic is not created."
         ),
     )
     bootstrap_topics: bool = Field(

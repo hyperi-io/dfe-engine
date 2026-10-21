@@ -14,6 +14,7 @@ engine writes nothing and the app decides.
 """
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -234,3 +235,35 @@ class TestReceiverNextHopDeadline:
         app = _schema_default("contract-main", "dfe-receiver", "loader")["address"]
         manifest = catalogue.push_address(catalogue.descriptor("dfe-loader"))
         assert ReceiverConfig().loader.address == app == manifest
+
+
+DEFAULT_CONFIGS = Path(__file__).parents[3] / "src" / "dfe_engine" / "services" / "default_configs"
+
+
+class TestReceiverPorts:
+    """The loader port is the app manifest's, and the receiver's own listener is the receiver's."""
+
+    @pytest.fixture
+    def moved_loader(self, monkeypatch):
+        """A deployment manifest that puts the loader's push listener on 7000."""
+        loader = catalogue.APP_CATALOGUE["dfe-loader"]
+        moved = replace(
+            loader, endpoints={catalogue.PUSH_ENDPOINT: catalogue.AppEndpoint(port=7000)}
+        )
+        monkeypatch.setitem(catalogue.APP_CATALOGUE, "dfe-loader", moved)
+
+    def test_the_loader_address_follows_the_manifest(self, moved_loader):
+        assert ReceiverConfig().loader.address == "dfe-loader:7000"
+
+    @pytest.mark.parametrize("profile", ["receiver-default.yaml", "receiver-production.yaml"])
+    def test_a_seeded_config_takes_the_loader_address_from_the_manifest(
+        self, moved_loader, profile: str
+    ):
+        seeded = ReceiverConfig.model_validate(yaml_load(DEFAULT_CONFIGS / profile))
+        assert seeded.loader.address == "dfe-loader:7000"
+
+    @pytest.mark.parametrize("profile", ["receiver-default.yaml", "receiver-production.yaml"])
+    def test_a_seeded_config_takes_the_grpc_listener_from_the_receiver(self, profile: str):
+        app = _schema_default("contract-main", "dfe-receiver", "grpc")["bind_address"]
+        seeded = ReceiverConfig.model_validate(yaml_load(DEFAULT_CONFIGS / profile))
+        assert seeded.grpc.bind_address == ReceiverConfig().grpc.bind_address == app

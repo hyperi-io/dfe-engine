@@ -8,24 +8,16 @@ Simpler config: flat source/sink Kafka, VRL transforms directory.
 
 from typing import Any
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 
 descriptor = ServiceDescriptor(
     name="transform-vrl",
     display_name="DFE Transform (VRL)",
-    image="ghcr.io/hyperi-io/dfe-transform-vrl",
-    default_port=9000,
-    metrics_port=9090,
-    kafka_role=KafkaRole.BOTH,
-    consumer_group="dfe-transform-vrl",
-    liveness_paths=("/livez",),
-    readiness_paths=("/readyz",),
     description=(
         "Kafka-to-Kafka transform using embedded VRL engine. "
         "Single pipeline with wrapper-controlled source/sink."
     ),
-    extra_ports={"health": 9000},
 )
 
 

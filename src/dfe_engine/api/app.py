@@ -36,6 +36,27 @@ def docs_served(settings: DFESettings) -> bool:
     return is_dev_posture(settings.env)
 
 
+async def _sweep_stranded_topics(
+    registry: Any, settings: DFESettings, transforms: set[str] | None
+) -> tuple[list[str], list[str]]:
+    """Startup's pass over the stranded ``_load`` topics, off the event loop. Never raises.
+
+    A topic a deploy left pending clears after a restart without waiting for a
+    source write. Returns the topics removed and the ones still pending.
+    """
+    import asyncio
+
+    from dfe_engine.api.v1.sources import sweep_stranded_topics
+    from dfe_engine.appmgmt.derived import ENGINE_ACTOR
+
+    removed, pending = await asyncio.to_thread(
+        sweep_stranded_topics, registry, settings, transforms, actor=ENGINE_ACTOR
+    )
+    if removed or pending:
+        logger.info("stranded topics settled at startup", removed=removed, pending=pending)
+    return removed, pending
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: bootstrap registries on startup, cleanup on shutdown."""
@@ -211,13 +232,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     source_registry = get_source_registry_optional()
     if gitcrud is not None and source_registry is not None:
+        from dfe_engine.api.v1.sources import transform_instances
         from dfe_engine.appmgmt import derived
 
         try:
+            transforms = transform_instances(gitcrud)
             for line in derived.reconcile(gitcrud, source_registry, settings):
                 logger.info("Reconciled app overlay with the sources", change=line)
         except Exception as exc:  # the apps are still reconciled on the next source write
             logger.warning("apps not reconciled with the sources at startup", error=str(exc))
+        else:
+            # Not awaited: nothing is served until startup returns, and each broker call can stall.
+            app.state.stranded_topic_sweep = asyncio.create_task(
+                _sweep_stranded_topics(source_registry, settings, transforms),
+                name="stranded-topic-sweep",
+            )
 
     # Where no chart renders the overlay into the app's own config file, the
     # engine does it -- and it must happen before the containers that mount the
@@ -373,22 +402,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         secrets=app.state.dfe_secrets,
         metrics=app.state.oidc_login_metrics,
     )
-
-    # Bootstrap connection registry for multi-tenant ClickHouse
-    from dfe_engine.connections.config import ConnectionConfigLoader
-    from dfe_engine.connections.registry import ConnectionRegistry
-
-    conn_config_path = (
-        Path(settings.config_dir or os.environ.get("DFE_CONFIG_DIR", ""))
-        / "rbac"
-        / "connections.yaml"
-    )
-    if conn_config_path.exists():
-        conn_config = ConnectionConfigLoader.load(conn_config_path)
-        logger.info(f"Loaded connection config from {conn_config_path}")
-    else:
-        conn_config = ConnectionConfigLoader.load_default()
-    app.state.connection_registry = ConnectionRegistry(conn_config, settings.clickhouse)
 
     # Bootstrap org registry
     from dfe_engine.orgs.registry import OrgRegistry
@@ -613,6 +626,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if all_sources_registration is not None:
         all_sources_registration.cancel()
         await asyncio.gather(all_sources_registration, return_exceptions=True)
+    stranded_topic_sweep = getattr(app.state, "stranded_topic_sweep", None)
+    if stranded_topic_sweep is not None:
+        stranded_topic_sweep.cancel()
+        await asyncio.gather(stranded_topic_sweep, return_exceptions=True)
     from dfe_engine.governance.ch import TRIGGER_ATTRIBUTES
 
     for attribute in TRIGGER_ATTRIBUTES:

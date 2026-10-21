@@ -8,7 +8,7 @@ Usage:
     from dfe_engine.services.plugins import get_plugin, valid_services
 
     plugin = get_plugin("receiver")
-    print(plugin.descriptor.image)
+    print(plugin.descriptor.display_name)
 
     all_services = valid_services()  # {"receiver", "loader", "archiver", ...}
 """

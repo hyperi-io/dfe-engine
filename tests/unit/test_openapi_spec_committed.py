@@ -182,6 +182,16 @@ def test_post_sources_409_documents_the_core_landing_conflict(committed):
     }
 
 
+@pytest.mark.parametrize(
+    ("path", "method"), [("/api/v1/sources", "post"), ("/api/v1/sources/{name}", "put")]
+)
+def test_source_writes_say_why_they_accept_a_pin_the_import_refuses(committed, path, method):
+    """Create and update accept a pin the import refuses on purpose, so the spec gives the reason."""
+    description = committed["paths"][path][method]["description"]
+
+    assert "an exported bundle brings every schema it pins" in " ".join(description.split())
+
+
 def test_committed_e2e_spec_matches_its_builder():
     """Synced to dfe-ui by the same workflow, so it goes stale the same way."""
     from dfe_engine.api.e2e_docs import build_e2e_spec

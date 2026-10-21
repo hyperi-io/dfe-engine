@@ -212,14 +212,6 @@ View execution returns **JSON** (`QueryResponse`) with fields:
 `rows`, `columns`, `row_count`, `query_duration_ms`, `has_more`,
 `next_offset`, `request_id`.
 
-### Discovery (`/api/v1/discovery`)
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/discovery/databases` | List ClickHouse databases |
-| GET | `/discovery/tables` | List tables (filter by database, engine) |
-| GET | `/discovery/tables/{name}/columns` | Table column metadata |
-
 ### Sigma (`/api/v1/sigma`)
 
 | Method | Path | Purpose |

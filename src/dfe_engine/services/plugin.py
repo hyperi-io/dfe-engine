@@ -27,7 +27,7 @@ class ServicePlugin:
     templates.py look up the plugin instead of branching on service name strings.
 
     Attributes:
-        descriptor: Static service metadata (name, image, ports, health paths).
+        descriptor: Static service metadata (name, display name, description).
         config_class: Pydantic model for the service runtime config (YAML).
         validate_config: Optional cross-field validation callback.
             Signature: ``(config: BaseModel, errors: list[str], warnings: list[str]) -> None``

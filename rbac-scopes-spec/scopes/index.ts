@@ -60,10 +60,6 @@ const deployment_scopes = {
   deployment_admin_links_read: "deployment:admin_links:read",
 } as const;
 
-const discovery_scopes = {
-  discovery_read: "discovery:read",
-} as const;
-
 const fieldmap_scopes = {
   fieldmap_read: "fieldmap:read",
   fieldmap_write: "fieldmap:write",
@@ -219,7 +215,6 @@ export const scopes = {
   ...clickhouse_cloud_scopes,
   ...dashboard_scopes,
   ...deployment_scopes,
-  ...discovery_scopes,
   ...fieldmap_scopes,
   ...hunt_scopes,
   ...oidc_scopes,

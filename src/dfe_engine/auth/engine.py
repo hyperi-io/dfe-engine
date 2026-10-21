@@ -39,7 +39,6 @@ API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
         "config:write",
         "deployment:read",
         "deployment:write",
-        "discovery:read",
         "fieldmap:read",
         "fieldmap:write",
         "hunt:execute",

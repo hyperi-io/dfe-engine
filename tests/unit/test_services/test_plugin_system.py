@@ -2,7 +2,7 @@
 
 import pytest
 
-from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 from dfe_engine.services.plugins import (
     all_plugins,
@@ -69,11 +69,7 @@ class TestPluginRegistration:
         class DummyConfig(BaseModel):
             value: str = "test"
 
-        desc = ServiceDescriptor(
-            name="custom-test",
-            display_name="Custom Test",
-            image="test:latest",
-        )
+        desc = ServiceDescriptor(name="custom-test", display_name="Custom Test")
         plugin = ServicePlugin(descriptor=desc, config_class=DummyConfig)
         register("custom-test", plugin)
 
@@ -107,28 +103,4 @@ class TestDescriptors:
         d = plugin.descriptor
         assert d.name == service
         assert d.display_name
-        assert d.image == f"ghcr.io/hyperi-io/dfe-{service}"
-        assert d.default_port > 0
-        assert d.metrics_port > 0
-        assert isinstance(d.kafka_role, KafkaRole)
-
-    def test_receiver_is_producer(self):
-        assert get_plugin("receiver").descriptor.kafka_role == KafkaRole.PRODUCER
-
-    def test_loader_is_consumer(self):
-        assert get_plugin("loader").descriptor.kafka_role == KafkaRole.CONSUMER
-
-    def test_archiver_is_consumer(self):
-        assert get_plugin("archiver").descriptor.kafka_role == KafkaRole.CONSUMER
-
-    def test_transforms_are_both(self):
-        assert get_plugin("transform-vector").descriptor.kafka_role == KafkaRole.BOTH
-        assert get_plugin("transform-wasm").descriptor.kafka_role == KafkaRole.BOTH
-
-    def test_fetcher_is_producer(self):
-        assert get_plugin("fetcher").descriptor.kafka_role == KafkaRole.PRODUCER
-
-    def test_receiver_has_grpc_port(self):
-        d = get_plugin("receiver").descriptor
-        assert "grpc" in d.extra_ports
-        assert d.extra_ports["grpc"] == 6000
+        assert d.description

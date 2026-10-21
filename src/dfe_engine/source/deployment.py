@@ -132,13 +132,26 @@ class SchemaDeployResult(BaseModel):
             "schema is live and Kafka may not be in the path at all."
         ),
     )
-    topics_stranded: list[str] = Field(
+    topics_removed: list[str] = Field(
         default_factory=list,
         description=(
-            "Topics on the broker this version has no consumer for. A ``_load`` topic "
-            "left by a version that dropped its transform suppresses the source's "
-            "``_land`` topic in the loader, so the source silently stops loading. "
-            "Reported, never deleted: records may still be in flight on it."
+            "Kafka topics this deploy deleted: the ``_load`` topic an earlier version "
+            "with a transform wrote, which stops the loader reading the source's "
+            "``_land`` topic. Deleted once the deploy repo carries no transform "
+            "instance writing it, the transform's consumer group has no live member, "
+            "and no consumer group has records left to read on it."
+        ),
+    )
+    topics_pending_removal: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Stranded ``_load`` topics kept because a transform instance writing them "
+            "is still in the deploy repo, the transform's consumer group has a live "
+            "member or cannot be named, or a consumer group has records left to read on "
+            "them. The apps reconcile after a later source write, POST "
+            "/api/v1/sources/reconcile-apps, or the engine's next start deletes each "
+            "once all three clear. Without a deploy repo the engine cannot see the "
+            "instance, so the topic is kept."
         ),
     )
     apps_synced: list[str] = Field(

@@ -18,10 +18,18 @@ from dfe_engine.api.v1.sources import (
     _ensure_source_topics,
     _remove_source_topics,
     _TopicsNotCreatedError,
+    sweep_stranded_topics,
 )
+from dfe_engine.appmgmt.instances import instance_of
 from dfe_engine.kafka.topics import TopicEnsureResult, TopicRemoveResult
 from dfe_engine.settings import KafkaSettings, TransportSettings
-from dfe_engine.source.models import Source, SourceMatch, SourceTransform, _topic_policy
+from dfe_engine.source.models import (
+    Source,
+    SourceFetcher,
+    SourceMatch,
+    SourceTransform,
+    _topic_policy,
+)
 from dfe_engine.transport import SourceTransport
 
 REFUSED = "the broker refused it (POLICY_VIOLATION); the engine log has the reason"
@@ -53,7 +61,7 @@ class TestOffSwitch:
             raise AssertionError("ensure_topics called while it was switched off")
 
         monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _boom)
-        assert _ensure_source_topics(_source(), _settings(ensure_topics=False)) == ([], [], [])
+        assert _ensure_source_topics(_source(), _settings(ensure_topics=False)) == ([], [], [], [])
 
     def test_a_brokerless_deployment_reaches_no_broker_either(self, monkeypatch):
         """No bus is the fact the unset switch follows, so one dial does it."""
@@ -62,7 +70,7 @@ class TestOffSwitch:
             raise AssertionError("ensure_topics called on a deployment with no bus")
 
         monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _boom)
-        assert _ensure_source_topics(_source(), _settings(bus_present=False)) == ([], [], [])
+        assert _ensure_source_topics(_source(), _settings(bus_present=False)) == ([], [], [], [])
 
     def test_an_explicit_yes_overrides_the_brokerless_fact(self, monkeypatch):
         """An operator pointing at a broker the profile does not know about."""
@@ -70,7 +78,7 @@ class TestOffSwitch:
             "dfe_engine.kafka.topics.ensure_topics",
             lambda specs, **kw: TopicEnsureResult(created=[s.name for s in specs]),
         )
-        ensured, failed, _ = _ensure_source_topics(
+        ensured, failed, *_ = _ensure_source_topics(
             _source(), _settings(bus_present=False, ensure_topics=True)
         )
 
@@ -86,7 +94,7 @@ class TestReporting:
                 created=["filebeat_load"], existing=["filebeat_land"]
             ),
         )
-        ensured, failed, _ = _ensure_source_topics(_source(), _settings())
+        ensured, failed, *_ = _ensure_source_topics(_source(), _settings())
         assert ensured == ["filebeat_load", "filebeat_land"]
         assert failed == []
 
@@ -234,7 +242,7 @@ class TestOffTheBusAFailureIsReported:
     def test_a_brokerless_deployment_told_to_manage_topics_reports_it(self, monkeypatch):
         monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _half_refused)
 
-        ensured, failed, _ = _ensure_source_topics(
+        ensured, failed, *_ = _ensure_source_topics(
             _source(), _settings(bus_present=False, ensure_topics=True)
         )
 
@@ -243,13 +251,252 @@ class TestOffTheBusAFailureIsReported:
     def test_a_bus_deployment_whose_stages_run_direct_reports_it(self, monkeypatch):
         monkeypatch.setattr("dfe_engine.kafka.topics.ensure_topics", _half_refused)
 
-        ensured, failed, _ = _ensure_source_topics(_source(), _settings(default="direct"))
+        ensured, failed, *_ = _ensure_source_topics(_source(), _settings(default="direct"))
 
         assert (ensured, failed) == (["filebeat_land"], ["filebeat_load"])
 
 
+class _StrandedBus:
+    """A one-broker bus still holding the ``_load`` topic a dropped transform wrote."""
+
+    def __init__(
+        self, load: str, *, unread: int, land: str = "", writer: tuple[str, int] = ("empty", 0)
+    ) -> None:
+        self.present = {land or load.replace("_load", "_land"), load}
+        self.load = load
+        self.unread = unread
+        self.writer = writer
+        self.described: list[str] = []
+        self.deleted: list[str] = []
+
+    def node_count(self, **_kwargs) -> int:
+        return 1
+
+    def list_topic_names(self, **_kwargs) -> set[str]:
+        return self.present - set(self.deleted)
+
+    def describe_group(self, group: str) -> tuple[str, int]:
+        self.described.append(group)
+        return self.writer
+
+    def watermarks(self, name: str) -> dict[int, tuple[int, int]]:
+        return {0: (0, 10)}
+
+    def committed_offsets(self, name: str, partitions: list[int]) -> dict[str, dict[int, int]]:
+        return {"dfe-loader": {0: 10 - self.unread}}
+
+    def delete(self, name: str) -> None:
+        self.deleted.append(name)
+
+
+class _Sources:
+    """The registry's view of these sources."""
+
+    def __init__(self, *sources: Source) -> None:
+        self.by_name = {source.source: source for source in sources}
+
+    def get_all_sources(self, states=None) -> list[Source]:
+        return list(self.by_name.values())
+
+    def source_exists(self, name: str) -> bool:
+        return name in self.by_name
+
+    def get_source(self, name: str) -> Source:
+        return self.by_name[name]
+
+
+class _DeployRepo:
+    """A deploy repo carrying a transform instance for each source named."""
+
+    def __init__(self, *running: str) -> None:
+        self.names: list[str] = [
+            instance_of("dfe-transform-vector", name).overlay_name for name in running
+        ]
+
+    def list(self, _resource_class: str):
+        return self.names
+
+
+def _main_lander() -> Source:
+    return Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
+        source="aws-cloudtrail", fetcher=SourceFetcher(source_type="aws", topic="main")
+    )
+
+
+def _dropped(name: str = "syslog") -> Source:
+    """A source deployed at a version without the transform its first version had."""
+    source = _source(name)
+    source.versions["2.0.0"] = source.versions[source.current].model_copy(
+        update={"transform": None}
+    )
+    source.current = "2.0.0"
+    source.deployed_version = "2.0.0"
+    return source
+
+
+class TestAStrandedLoadTopic:
+    """The loader skips ``_land`` while ``_load`` exists, so a dropped transform's topic must go."""
+
+    def _deploy(
+        self, monkeypatch, bus: _StrandedBus, *, gc, source=None, settings=None, registry=None
+    ):
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", lambda **_kw: bus)
+        return _ensure_source_topics(
+            source or _dropped(),
+            settings or _settings(),
+            registry=registry,
+            gc=gc,
+        )
+
+    def test_a_drained_topic_no_transform_instance_writes_is_deleted(self, monkeypatch):
+        bus = _StrandedBus("syslog_load", unread=0)
+
+        topics = self._deploy(monkeypatch, bus, gc=_DeployRepo())
+
+        assert (topics.removed, topics.pending) == (["syslog_load"], [])
+        assert bus.deleted == ["syslog_load"]
+        assert bus.described == ["dfe-transform-vector-syslog"]
+
+    def test_a_live_member_in_the_transforms_group_keeps_a_drained_topic(self, monkeypatch):
+        # Gone from the deploy repo, but its pod still runs until Argo syncs and it drains.
+        bus = _StrandedBus("syslog_load", unread=0, writer=("stable", 1))
+
+        topics = self._deploy(monkeypatch, bus, gc=_DeployRepo())
+
+        assert (topics.removed, topics.pending, bus.deleted) == ([], ["syslog_load"], [])
+
+    def test_a_topic_whose_writer_has_no_group_to_name_is_kept(self, monkeypatch):
+        # No version names a transform, so nothing says which group wrote the topic.
+        bus = _StrandedBus("syslog_load", unread=0)
+
+        topics = self._deploy(
+            monkeypatch, bus, gc=_DeployRepo(), source=_source("syslog", transform=False)
+        )
+
+        assert (topics.removed, topics.pending, bus.described) == ([], ["syslog_load"], [])
+
+    def test_a_topic_with_unread_records_is_pending_and_the_deploy_goes_ahead(self, monkeypatch):
+        bus = _StrandedBus("syslog_load", unread=3)
+
+        topics = self._deploy(monkeypatch, bus, gc=_DeployRepo())
+
+        assert (topics.ensured, topics.removed, topics.pending) == (
+            ["syslog_land"],
+            [],
+            ["syslog_load"],
+        )
+        assert bus.deleted == []
+
+    def test_a_drained_topic_its_transform_instance_still_writes_is_pending(self, monkeypatch):
+        # The instance leaves the deploy repo after this step, and its pod later still.
+        bus = _StrandedBus("syslog_load", unread=0)
+
+        topics = self._deploy(monkeypatch, bus, gc=_DeployRepo("syslog"))
+
+        assert (topics.removed, topics.pending, bus.deleted) == ([], ["syslog_load"], [])
+
+    def test_without_a_deploy_repo_a_drained_topic_is_pending(self, monkeypatch):
+        bus = _StrandedBus("syslog_load", unread=0)
+
+        topics = self._deploy(monkeypatch, bus, gc=None)
+
+        assert (topics.removed, topics.pending, bus.deleted) == ([], ["syslog_load"], [])
+
+    def test_off_the_bus_nothing_reads_it_so_it_is_left_alone(self, monkeypatch):
+        bus = _StrandedBus("syslog_load", unread=3)
+
+        topics = self._deploy(
+            monkeypatch, bus, gc=_DeployRepo(), settings=_settings(default="direct")
+        )
+
+        assert (topics.removed, topics.pending, bus.deleted) == ([], [], [])
+
+    def test_a_topic_another_sources_live_transform_writes_is_kept(self, monkeypatch):
+        # main_load is main's own output while main is deployed with a transform.
+        owner = _source("main")
+        owner.deployed_version = owner.current
+        bus = _StrandedBus("main_load", unread=0)
+
+        topics = self._deploy(
+            monkeypatch, bus, gc=_DeployRepo(), source=_main_lander(), registry=_Sources(owner)
+        )
+
+        assert (topics.removed, topics.pending, bus.deleted) == ([], [], [])
+
+    def test_a_topic_whose_owner_no_longer_transforms_is_deleted(self, monkeypatch):
+        bus = _StrandedBus("main_load", unread=0)
+
+        topics = self._deploy(
+            monkeypatch,
+            bus,
+            gc=_DeployRepo(),
+            source=_main_lander(),
+            registry=_Sources(_dropped("main")),
+        )
+
+        assert topics.removed == ["main_load"]
+        assert bus.described == ["dfe-transform-vector-main"]
+
+
+class TestTheLaterPass:
+    """The apps reconcile deletes a pending topic once the instance left before it ran."""
+
+    def _sweep(self, monkeypatch, bus, registry, transforms: set[str]):
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", lambda **_kw: bus)
+        return sweep_stranded_topics(registry, _settings(), transforms, actor="admin")
+
+    def test_a_drained_topic_whose_instance_had_gone_is_deleted_and_audited(
+        self, monkeypatch, audit_events
+    ):
+        bus = _StrandedBus("syslog_load", unread=0)
+
+        swept = self._sweep(monkeypatch, bus, _Sources(_dropped()), transforms=set())
+
+        assert swept == (["syslog_load"], [])
+        assert bus.deleted == ["syslog_load"]
+        (audit,) = [e for e in audit_events if e.get("event") == "resource.schema.topics_removed"]
+        assert (audit["resource_name"], audit["details"]) == (
+            "syslog",
+            {"topics_removed": ["syslog_load"]},
+        )
+
+    def test_the_pass_that_removes_the_instance_keeps_the_topic(self, monkeypatch):
+        bus = _StrandedBus("syslog_load", unread=0)
+
+        swept = self._sweep(monkeypatch, bus, _Sources(_dropped()), transforms={"syslog"})
+
+        assert (swept, bus.deleted) == (([], ["syslog_load"]), [])
+
+    def test_a_topic_with_unread_records_is_never_deleted(self, monkeypatch):
+        bus = _StrandedBus("syslog_load", unread=2)
+
+        swept = self._sweep(monkeypatch, bus, _Sources(_dropped()), transforms=set())
+
+        assert (swept, bus.deleted) == (([], ["syslog_load"]), [])
+
+    def test_a_deployment_that_never_dropped_a_transform_asks_no_broker(self, monkeypatch):
+        def _boom(**_kwargs):
+            raise AssertionError("the broker was asked with no _load topic ever made")
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", _boom)
+        registry = _Sources(_source("syslog", transform=False))
+
+        assert sweep_stranded_topics(registry, _settings(), set(), actor="admin") == ([], [])
+
+    def test_an_unreachable_broker_never_fails_the_reconcile(self, monkeypatch):
+        def _unreachable(**_kwargs):
+            raise RuntimeError("no broker")
+
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", _unreachable)
+
+        assert sweep_stranded_topics(_Sources(_dropped()), _settings(), set(), actor="admin") == (
+            [],
+            [],
+        )
+
+
 class TestTheDeployRoute:
-    """The route answers 502 naming the topic, and the source is not marked deployed."""
+    """A topic not created answers 502 undeployed, and a stranded one never stops the deploy."""
 
     def _fake_ddl(self, monkeypatch) -> None:
         """The ClickHouse step as a deploy that applied one statement."""
@@ -288,6 +535,88 @@ class TestTheDeployRoute:
         assert stored["deployed_version"] is None
         (audit,) = [e for e in audit_events if e.get("event") == "resource.schema.deploy_failed"]
         assert audit["details"]["topics_failed"] == [f"{name}_land"]
+
+    def _stranded_deploy(
+        self, client, admin_headers, sample_source, monkeypatch, *, unread: int, transforms
+    ):
+        """Deploy *sample_source* with a transform, then without it over a bus still holding its ``_load`` topic."""
+        name = sample_source["source"]
+        vector = {"engine": "vector", "config_file": f"/etc/vector/{name}.yaml"}
+        created = client.post(
+            "/api/v1/sources", json={**sample_source, "transform": vector}, headers=admin_headers
+        )
+        assert created.status_code == 201, created.text
+        self._fake_ddl(monkeypatch)
+        bus = _StrandedBus(f"{name}_load", unread=unread)
+        monkeypatch.setattr("dfe_engine.kafka.topics.build_admin", lambda **_kw: bus)
+        monkeypatch.setattr(sources_api, "transform_instances", lambda _gc: transforms)
+        first = client.post(f"/api/v1/sources/{name}/deploy", headers=admin_headers)
+        assert first.status_code == 200, first.text
+        dropped = client.put(
+            f"/api/v1/sources/{name}",
+            json={**sample_source, "transform": None},
+            headers=admin_headers,
+        )
+        assert dropped.status_code == 200, dropped.text
+        resp = client.post(f"/api/v1/sources/{name}/deploy", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        stored = client.get(f"/api/v1/sources/{name}", headers=admin_headers).json()
+        assert stored["deployed_version"] == stored["current"]
+        return name, resp.json(), bus
+
+    def test_a_stranded_topic_with_records_is_pending_and_the_source_deploys(
+        self, client, admin_headers, sample_source, monkeypatch, audit_events
+    ):
+        name, body, bus = self._stranded_deploy(
+            client, admin_headers, sample_source, monkeypatch, unread=4, transforms=set()
+        )
+
+        assert (body["topics_removed"], body["topics_pending_removal"]) == ([], [f"{name}_load"])
+        assert bus.deleted == []
+        *_, audit = [e for e in audit_events if e.get("event") == "resource.schema.deployed"]
+        assert audit["details"]["topics_pending_removal"] == [f"{name}_load"]
+
+    def test_a_drained_stranded_topic_is_deleted_and_the_deploy_goes_ahead(
+        self, client, admin_headers, sample_source, monkeypatch
+    ):
+        name, body, bus = self._stranded_deploy(
+            client, admin_headers, sample_source, monkeypatch, unread=0, transforms=set()
+        )
+
+        assert (body["topics_removed"], body["topics_pending_removal"]) == ([f"{name}_load"], [])
+        assert bus.deleted == [f"{name}_load"]
+
+    def test_a_deletion_on_the_deploy_is_audited_as_the_sweep_audits_one(
+        self, client, admin_headers, sample_source, monkeypatch, audit_events
+    ):
+        name, _, _ = self._stranded_deploy(
+            client, admin_headers, sample_source, monkeypatch, unread=0, transforms=set()
+        )
+
+        removals = [e for e in audit_events if e.get("event") == "resource.schema.topics_removed"]
+        assert [(e["resource_name"], e["details"]) for e in removals] == [
+            (name, {"topics_removed": [f"{name}_load"]})
+        ]
+
+    def test_a_deploy_that_deletes_nothing_audits_no_removal(
+        self, client, admin_headers, sample_source, monkeypatch, audit_events
+    ):
+        self._stranded_deploy(
+            client, admin_headers, sample_source, monkeypatch, unread=4, transforms=set()
+        )
+
+        assert not [e for e in audit_events if e.get("event") == "resource.schema.topics_removed"]
+
+    def test_a_drained_topic_its_transform_instance_writes_is_pending(
+        self, client, admin_headers, sample_source, monkeypatch
+    ):
+        name = sample_source["source"]
+        _, body, bus = self._stranded_deploy(
+            client, admin_headers, sample_source, monkeypatch, unread=0, transforms={name}
+        )
+
+        assert (body["topics_removed"], body["topics_pending_removal"]) == ([], [f"{name}_load"])
+        assert bus.deleted == []
 
 
 class TestTheDeleteHook:
