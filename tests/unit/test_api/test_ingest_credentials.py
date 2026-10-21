@@ -14,6 +14,7 @@ secret of every listener it is scoped to.
 
 import pytest
 
+from dfe_engine.api.deps import create_access_token
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
@@ -256,6 +257,67 @@ class TestDeleteAndRotate:
 
         assert resp.json()["token"] is None
         assert _secret(app, credential_secret_path("agents")) == created["token"]
+
+
+@pytest.fixture
+def acme_admin(client, app, admin_headers, api_settings, orgs) -> dict[str, str]:
+    """A user holding the admin role in acme alone."""
+    if app.state.account_store.get("acme-admin") is None:
+        app.state.account_store.create("acme-admin", "pw-acme-admin")
+    resp = client.post(
+        "/api/v1/auth/groups",
+        json={
+            "name": "acme-admins",
+            "roles": ["admin"],
+            "scope": "org:acme",
+            "members": ["acme-admin"],
+        },
+        headers=admin_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    token = create_access_token(
+        data={"sub": "acme-admin", "org_id": "default"}, settings=api_settings
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+class TestBindingAnotherOrg:
+    """Binding an org through the body takes ``org:write`` there, as the path org does."""
+
+    def test_an_org_admin_may_not_bind_an_org_it_does_not_hold(
+        self, client, app, admin_headers, acme_admin
+    ):
+        resp = _create(client, acme_admin, orgs=["acme", "beta"])
+
+        assert resp.status_code == 403, resp.text
+        assert client.get(f"{BASE}/agents", headers=admin_headers).status_code == 404
+        assert _secret(app, credential_secret_path("agents")) is None
+
+    def test_an_org_admin_may_not_widen_a_binding_to_another_org(
+        self, client, admin_headers, acme_admin
+    ):
+        created = _create(client, admin_headers)
+
+        resp = client.put(
+            f"{BASE}/agents",
+            json={"orgs": ["acme", "beta"]},
+            headers={**acme_admin, "If-Match": created.headers["ETag"]},
+        )
+
+        assert resp.status_code == 403, resp.text
+        assert client.get(f"{BASE}/agents", headers=admin_headers).json()["orgs"] == ["acme"]
+
+    def test_an_org_admin_may_bind_its_own_org(self, client, acme_admin):
+        resp = _create(client, acme_admin)
+
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["orgs"] == ["acme"]
+
+    def test_a_system_admin_may_bind_any_org(self, client, admin_headers, orgs):
+        resp = _create(client, admin_headers, orgs=["acme", "beta"])
+
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["orgs"] == ["acme", "beta"]
 
 
 class TestADisabledOrg:
