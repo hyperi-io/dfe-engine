@@ -440,6 +440,22 @@ class TestTheReceiverFollows:
             "credentials": {}
         }
 
+    def test_disabling_a_bound_org_takes_it_out_of_the_receiver_s_binding(
+        self, client, app, admin_headers, orgs, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _create(client, admin_headers, orgs=["acme", "beta"], default_org="beta")
+
+        resp = client.put("/api/v1/orgs/beta", json={"enabled": False}, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        bound = gc.get("helmvars", RECEIVER_OVERLAY)["config"]["ingest_bindings"]
+        assert bound == {
+            "credentials": {
+                "agents": {"orgs": ["acme-prod", "acme-dev"], "default_org": "acme-prod"}
+            }
+        }
+
     def test_an_org_s_new_tenant_id_reaches_the_binding(
         self, client, app, admin_headers, orgs, tmp_path
     ):

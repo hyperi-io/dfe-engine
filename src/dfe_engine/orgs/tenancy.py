@@ -48,16 +48,24 @@ class Tenancy:
         """The registry's orgs and ingest credentials, as they are now."""
         return cls(tuple(registry.list()), tuple(registry.ingest_credentials.list()))
 
+    def org(self, name: str) -> Org:
+        """The registered org named *name*.
+
+        Raises:
+            UnknownOrgError: No registered org is named *name*.
+        """
+        for registered in self.orgs:
+            if registered.name == name:
+                return registered
+        raise UnknownOrgError(name)
+
     def tenant_ids(self, org: str) -> list[str]:
         """The ``_org_id`` values the org named *org* owns, in declared order.
 
         Raises:
             UnknownOrgError: No registered org is named *org*.
         """
-        for registered in self.orgs:
-            if registered.name == org:
-                return org_tenant_ids(registered)
-        raise UnknownOrgError(org)
+        return org_tenant_ids(self.org(org))
 
     def tenant_id(self, org: str | None) -> str:
         """The one ``_org_id`` a record bound to *org* is stamped with: its first tenant id.
@@ -74,25 +82,31 @@ class Tenancy:
 
 
 def _binding(tenancy: Tenancy, credential: IngestCredential) -> dict[str, Any]:
-    """One credential's ``ingest_bindings`` entry, as tenant ids.
+    """One credential's ``ingest_bindings`` entry, as the tenant ids of its enabled orgs.
+
+    A disabled default gives way to the owning org, which the caller has checked is
+    enabled, so the default is always one of ``orgs``.
 
     Raises:
         UnknownOrgError: The credential binds an org the registry does not hold.
     """
     orgs: list[str] = []
-    for org in credential.orgs:
-        orgs.extend(tenancy.tenant_ids(org))
-    return {
-        "orgs": list(dict.fromkeys(orgs)),
-        "default_org": tenancy.tenant_id(credential.default_org),
-    }
+    for name in credential.orgs:
+        if tenancy.org(name).enabled:
+            orgs.extend(tenancy.tenant_ids(name))
+    default = credential.default_org
+    if not tenancy.org(default).enabled:
+        default = credential.org
+    return {"orgs": list(dict.fromkeys(orgs)), "default_org": tenancy.tenant_id(default)}
 
 
 def compile_ingest_bindings(tenancy: Tenancy) -> dict[str, Any]:
-    """dfe-receiver's ``ingest_bindings`` block: each credential's orgs as tenant ids.
+    """dfe-receiver's ``ingest_bindings`` block: each credential's enabled orgs as tenant ids.
 
     A credential binding an org the registry no longer holds is left out, so its
-    records may land in the default org alone, never in an org it was not given.
+    records may land in the default org alone, never in an org it was not given. So
+    is a credential whose owning org is disabled, whose token no listener accepts. A
+    disabled org is left out of every other binding, so no record lands in it.
 
     Args:
         tenancy: The orgs and credentials to compile.
@@ -103,6 +117,8 @@ def compile_ingest_bindings(tenancy: Tenancy) -> dict[str, Any]:
     credentials: dict[str, Any] = {}
     for credential in sorted(tenancy.credentials, key=lambda c: c.name):
         try:
+            if not tenancy.org(credential.org).enabled:
+                continue
             credentials[credential.name] = _binding(tenancy, credential)
         except UnknownOrgError as exc:
             logger.warning(

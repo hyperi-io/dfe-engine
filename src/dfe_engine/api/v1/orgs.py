@@ -312,7 +312,7 @@ async def update_org(
     org, outcome = await run_blocking(
         functools.partial(_update_org, registry, hunts, name, body, user.user_id)
     )
-    if body.org_ids is not None:
+    if body.org_ids is not None or body.enabled is not None:
         await run_blocking(functools.partial(reconcile_tenancy, request, user))
     apply_review_headers(response, outcome)
     return _org_response(org)

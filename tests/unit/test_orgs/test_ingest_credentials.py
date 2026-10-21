@@ -183,6 +183,35 @@ class TestBindings:
 
         assert compile_ingest_bindings(tenancy) == {"credentials": {}}
 
+    def test_a_disabled_org_leaves_every_binding_that_names_it(self, registry):
+        registry.ingest_credentials.put(_credential(orgs=["acme", "beta"]))
+        registry.ingest_credentials.put(_credential("beta-hec", org="beta"))
+        registry.update("beta", enabled=False)
+
+        assert compile_ingest_bindings(Tenancy.read(registry)) == {
+            "credentials": {
+                "acme-agents": {"orgs": ["acme-prod", "acme-dev"], "default_org": "acme-prod"}
+            }
+        }
+
+    def test_a_disabled_default_falls_to_the_owning_org(self, registry):
+        # The receiver clamps a record to default_org, which has to be one of orgs.
+        registry.ingest_credentials.put(_credential(orgs=["acme", "beta"], default_org="beta"))
+        registry.update("beta", enabled=False)
+
+        bound = compile_ingest_bindings(Tenancy.read(registry))["credentials"]["acme-agents"]
+
+        assert bound == {"orgs": ["acme-prod", "acme-dev"], "default_org": "acme-prod"}
+
+    def test_a_re_enabled_org_is_bound_again(self, registry):
+        registry.ingest_credentials.put(_credential(orgs=["acme", "beta"], default_org="beta"))
+        registry.update("beta", enabled=False)
+        registry.update("beta", enabled=True)
+
+        bound = compile_ingest_bindings(Tenancy.read(registry))["credentials"]["acme-agents"]
+
+        assert bound == {"orgs": ["acme-prod", "acme-dev", "beta"], "default_org": "beta"}
+
     def test_every_binding_is_one_the_receiver_accepts(self, registry):
         from dfe_engine.services.models.receiver import IngestBindingsConfig
 
