@@ -18,6 +18,14 @@ A kind submitted with ``max_active`` takes one of that many claims in
 :data:`SLOTS_COLLECTION`, so the limit counts every replica's tasks. A claim held by a
 task that has ended, or lost its owner, is taken back by the next submit that needs it.
 
+A result is kept apart from its record, as ordered chunks of its JSON in
+:data:`RESULTS_COLLECTION`, so no result is too large for one document. The owner writes
+the set's header, then its chunks, then the record naming the set and its chunk count,
+so a record never names a chunk that was not written. A reader on any replica checks it
+got every chunk the record counts. A set no record names, left by an owner that stopped
+between its chunks and its record, is swept once its header is older than
+:data:`OWNER_LOST_SECONDS` and its task can no longer come to name it.
+
 Every store call runs on a worker thread, so a stalled store holds up only the call
 waiting on it, never the event loop and the probes. The owner's writes have a worker
 thread of their own, so reads stalled on every shared one still leave its heartbeat
@@ -26,8 +34,11 @@ beating.
 
 import asyncio
 import builtins
+import itertools
 import json
+import math
 import time
+import uuid
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -48,6 +59,7 @@ from dfe_engine.api.task_manager import (
     TaskManager,
     TaskStatus,
     _held,
+    _json_safe,
     _Task,
     _visible,
 )
@@ -56,6 +68,8 @@ from dfe_engine.store.documents import REV, DocumentConflictError, DocuStore
 
 TASKS_COLLECTION = "tasks"
 SLOTS_COLLECTION = "task_slots"
+RESULTS_COLLECTION = "task_results"
+RESULT_SETS_COLLECTION = "task_result_sets"
 
 # Every replica judges a heartbeat against the same window, so it is not a setting.
 # The age compares this replica's clock with the owner's, so replicas need clocks synced by NTP.
@@ -64,8 +78,8 @@ OWNER_LOST_SECONDS = 30.0
 HEARTBEAT_SECONDS = 5.0
 # How often an owner reads for cancels and writes progress, so a cancel lands within two.
 WATCH_SECONDS = 1.0
-# Half the 16 MiB document the store takes, so the record holding the largest result fits.
-MAX_RESULT_BYTES = 8 * 1024 * 1024
+# A quarter of the 16 MiB document the store takes. The JSON is ASCII, so a character is a byte.
+RESULT_CHUNK_BYTES = 4 * 1024 * 1024
 
 _ENDED = [status.value for status in TaskStatus if status.is_terminal]
 
@@ -84,7 +98,9 @@ class TaskRecord(BaseModel):
         completed_at: ISO 8601 end time.
         progress: Percentage done.
         message: Human-readable status.
-        result: The result as JSON text, so its keys need not suit the store.
+        result_set: The chunk set in :data:`RESULTS_COLLECTION` holding the result as
+            JSON. None for no result.
+        result_chunks: How many chunks the set holds.
         error: Why it failed.
         heartbeat_at: When the owner last wrote the record, in seconds since the epoch.
         cancel_requested: A replica other than the owner asked for a cancel.
@@ -100,10 +116,15 @@ class TaskRecord(BaseModel):
     completed_at: str | None = None
     progress: int = 0
     message: str = ""
-    result: str | None = None
+    result_set: str | None = None
+    result_chunks: int = 0
     error: str | None = None
     heartbeat_at: float
     cancel_requested: bool = False
+
+
+class TaskResultMissingError(RuntimeError):
+    """A stored task names result chunks the store does not hold every one of."""
 
 
 class _UnwritableError(Exception):
@@ -121,6 +142,18 @@ class _Outcome(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class _ResultSet:
+    """One result as written: the chunk set holding its JSON, and how many chunks it took."""
+
+    set_id: str
+    count: int
+
+    def chunk_ids(self) -> list[str]:
+        """The ids of the set's chunks, in order."""
+        return [f"{self.set_id}/{n}" for n in range(self.count)]
+
+
+@dataclass(frozen=True, slots=True)
 class _Write:
     """One owner write, taken on the event loop and made on a worker thread."""
 
@@ -129,6 +162,19 @@ class _Write:
     revision: int
     slot: str | None
     ends: bool
+    result: Any
+    """The task's result, made into JSON on the worker thread, since a large one takes a while."""
+    result_set: _ResultSet | None
+    """The result's chunks, when an earlier attempt wrote every one."""
+
+
+@dataclass(frozen=True, slots=True)
+class _Flushed:
+    """What became of one owner write, and the result chunks it leaves written."""
+
+    outcome: _Outcome
+    error: str | None
+    result_set: _ResultSet | None
 
 
 @dataclass(slots=True)
@@ -140,6 +186,66 @@ class _Held:
     beat_at: float = 0.0
     done: bool = False
     """Nothing is left to write: the end is recorded, or another replica ended the task."""
+    result_set: _ResultSet | None = None
+    """The result's chunks, once written, so a record write that failed reuses them."""
+
+
+class _Results:
+    """Task results as ordered chunks of their JSON, one set per result.
+
+    Each set has a small header in :data:`RESULT_SETS_COLLECTION`, written before its
+    first chunk and deleted after its last, so a sweep finds every set without reading a
+    chunk.
+    """
+
+    def __init__(self, store: DocuStore) -> None:
+        self._chunks = store.collection(RESULTS_COLLECTION)
+        self._headers = store.collection(RESULT_SETS_COLLECTION)
+
+    def write(self, task_id: str, text: str) -> _ResultSet:
+        """Write ``text`` as a new set of ``task_id``'s: its header, then its chunks in order.
+
+        Raises:
+            PyMongoError: The store refused a write or could not be reached. What was
+                written before it is left for a sweep.
+        """
+        size = RESULT_CHUNK_BYTES
+        written = _ResultSet(uuid.uuid4().hex, math.ceil(len(text) / size))
+        self._headers.insert_one(
+            {
+                "_id": written.set_id,
+                "task_id": task_id,
+                "chunks": written.count,
+                "written_at": time.time(),
+            }
+        )
+        chunks = (
+            {"_id": chunk_id, "data": text[n * size : (n + 1) * size]}
+            for n, chunk_id in enumerate(written.chunk_ids())
+        )
+        self._chunks.insert_many(chunks, ordered=True)
+        return written
+
+    def read(self, sets: Iterable[_ResultSet]) -> dict[str, str]:
+        """The JSON of each of ``sets`` the store holds every chunk of, keyed by set id."""
+        wanted = {result_set.set_id: result_set.chunk_ids() for result_set in sets}
+        ids = list(itertools.chain.from_iterable(wanted.values()))
+        found = {doc["_id"]: doc["data"] for doc in self._chunks.find({"_id": {"$in": ids}})}
+        texts: dict[str, str] = {}
+        for set_id, chunk_ids in wanted.items():
+            if all(chunk_id in found for chunk_id in chunk_ids):
+                texts[set_id] = "".join(found[chunk_id] for chunk_id in chunk_ids)
+        return texts
+
+    def drop(self, result_set: _ResultSet) -> None:
+        """Delete a set's chunks, then its header, so a drop cut short leaves it to a sweep."""
+        self._chunks.delete_many({"_id": {"$in": result_set.chunk_ids()}})
+        self._headers.delete_one({"_id": result_set.set_id})
+
+    def written_before(self, cutoff: float) -> list[tuple[_ResultSet, str]]:
+        """Each set whose header was written before ``cutoff``, and the task it belongs to."""
+        found = self._headers.find({"written_at": {"$lt": cutoff}})
+        return [(_ResultSet(doc["_id"], int(doc["chunks"])), str(doc["task_id"])) for doc in found]
 
 
 def _skip_invalid(doc: dict, exc: ValidationError) -> None:
@@ -161,7 +267,7 @@ def _from_stored(doc: dict) -> TaskRecord | None:
         return None
 
 
-def _info(record: TaskRecord) -> TaskInfo:
+def _info(record: TaskRecord, result: Any) -> TaskInfo:
     return TaskInfo(
         id=record.id,
         kind=record.kind,
@@ -171,23 +277,33 @@ def _info(record: TaskRecord) -> TaskInfo:
         completed_at=record.completed_at,
         progress=max(0, min(100, record.progress)),
         message=record.message,
-        result=None if record.result is None else json.loads(record.result),
+        result=result,
         error=record.error,
     )
 
 
 def _fields(task: _Task) -> dict[str, Any]:
-    """The record fields the owner writes from its live ``task``."""
-    info = task.to_info()
+    """The record fields the owner writes from its live ``task``, all but its result."""
     return {
-        "status": info.status,
-        "started_at": info.started_at,
-        "completed_at": info.completed_at,
-        "progress": info.progress,
-        "message": info.message,
-        "result": None if info.result is None else json.dumps(info.result),
-        "error": info.error,
+        "status": task.status,
+        "started_at": task.started_at,
+        "completed_at": task.completed_at,
+        "progress": max(0, min(100, int(task.progress))),
+        "message": task.message,
+        "error": task.error,
     }
+
+
+def _result_text(result: Any) -> str:
+    """``result`` as JSON, as the in-memory manager hands it to a reader."""
+    return json.dumps(_json_safe(result), default=str)
+
+
+def _naming(result_set: _ResultSet | None) -> dict[str, Any]:
+    """The record fields that name ``result_set``, or no result for None."""
+    if result_set is None:
+        return {"result_set": None, "result_chunks": 0}
+    return {"result_set": result_set.set_id, "result_chunks": result_set.count}
 
 
 def _lost(record: TaskRecord, now: float) -> bool:
@@ -220,14 +336,9 @@ class DocumentTaskManager(TaskManager):
 
     Reads, lists and cancels go to the store, so every replica sees every task. This
     replica's own tasks keep their coroutine and live progress in memory until the
-    store holds how each ended.
-
-    A result over :data:`MAX_RESULT_BYTES` as JSON fails its task with
-    :data:`~dfe_engine.api.task_manager.TASK_RESULT_TOO_LARGE`, since the record
-    holding it would not fit in the store.
+    store holds how each ended. Results are kept in chunks apart from the records, so a
+    result of any size reads back on every replica.
     """
-
-    _result_limit = MAX_RESULT_BYTES
 
     def __init__(
         self, store: DocuStore, *, owner: str | None = None, max_completed: int = 1000
@@ -247,6 +358,7 @@ class DocumentTaskManager(TaskManager):
         )
         self._raw = store.collection(TASKS_COLLECTION)
         self._slots = store.claims(SLOTS_COLLECTION)
+        self._results = _Results(store)
         self._held_by_id: dict[str, _Held] = {}
         # One owner write at a time, so a heartbeat never races the write that ends a task.
         self._writing = asyncio.Lock()
@@ -260,13 +372,21 @@ class DocumentTaskManager(TaskManager):
     async def get(
         self, task_id: str, *, reader_orgs: Iterable[str] | None = None
     ) -> TaskInfo | None:
-        """See base class. Reads the store, so it answers for every replica's tasks."""
+        """See base class. Reads the store, so it answers for every replica's tasks.
+
+        Raises:
+            TaskResultMissingError: The task names result chunks the store does not hold.
+        """
         return await run_blocking(self._stored, task_id, _held(reader_orgs))
 
     async def list(
         self, kind: str | None = None, *, reader_orgs: Iterable[str] | None = None
     ) -> builtins.list[TaskInfo]:
-        """See base class. Reads the store, so it answers for every replica's tasks."""
+        """See base class. Reads the store, so it answers for every replica's tasks.
+
+        Raises:
+            TaskResultMissingError: A task names result chunks the store does not hold.
+        """
         return await run_blocking(self._listed, kind, _held(reader_orgs))
 
     async def cancel(self, task_id: str) -> bool:
@@ -307,13 +427,45 @@ class DocumentTaskManager(TaskManager):
         record = self._records.get(task_id)
         if record is None or not _visible(_held(record.held_to), reader_orgs):
             return None
-        return _info(self._settle(record))
+        found = self._with_results([self._settle(record)])
+        return found[0] if found else None
 
     def _listed(
         self, kind: str | None, reader_orgs: frozenset[str] | None
     ) -> builtins.list[TaskInfo]:
         records = self._find({"kind": kind} if kind else {})
-        return [_info(self._settle(r)) for r in records if _visible(_held(r.held_to), reader_orgs)]
+        visible = [self._settle(r) for r in records if _visible(_held(r.held_to), reader_orgs)]
+        return self._with_results(visible)
+
+    def _with_results(self, records: builtins.list[TaskRecord]) -> builtins.list[TaskInfo]:
+        """Each of ``records`` with its result read back from its chunks.
+
+        A record deleted while its chunks were read is left out, since the prune deletes
+        a record before its chunks.
+
+        Raises:
+            TaskResultMissingError: A record still stored names chunks the store does not
+                hold every one of.
+        """
+        sets = [
+            _ResultSet(r.result_set, r.result_chunks) for r in records if r.result_set is not None
+        ]
+        texts = self._results.read(sets) if sets else {}
+        infos: builtins.list[TaskInfo] = []
+        for record in records:
+            if record.result_set is None:
+                infos.append(_info(record, None))
+            elif record.result_set in texts:
+                infos.append(_info(record, json.loads(texts[record.result_set])))
+            elif self._records.exists(record.id):
+                logger.error(
+                    "task result chunks missing from the store",
+                    task_id=record.id,
+                    result_set=record.result_set,
+                    result_chunks=record.result_chunks,
+                )
+                raise TaskResultMissingError(f"task {record.id} names result chunks not stored")
+        return infos
 
     def _ask_owner_to_cancel(self, task_id: str) -> bool:
         """Mark another replica's task for its owner to cancel. False once it has ended."""
@@ -334,19 +486,11 @@ class DocumentTaskManager(TaskManager):
     def _settle(self, record: TaskRecord) -> TaskRecord:
         """``record``, failed for a lost owner once its heartbeat runs out, and recorded so.
 
-        The check is made again against the stored record, so an owner that beat in
-        between keeps its task. A store that cannot take the write still reads the task
-        as failed.
+        A store that cannot take the write still reads the task as failed.
         """
         now = time.time()
-        if not _lost(record, now):
-            return record
-
-        def fail_if_lost(stored: TaskRecord) -> TaskRecord:
-            return _failed_for_lost_owner(stored, now) if _lost(stored, now) else stored
-
         try:
-            return self._records.mutate(record.id, fail_if_lost)
+            return self._record_if_lost(record, now)
         except KeyError:
             return _failed_for_lost_owner(record, now)
         except (PyMongoError, DocumentConflictError) as exc:
@@ -354,6 +498,25 @@ class DocumentTaskManager(TaskManager):
                 "a lost task read as failed, not recorded", task_id=record.id, error=str(exc)
             )
             return _failed_for_lost_owner(record, now)
+
+    def _record_if_lost(self, record: TaskRecord, now: float) -> TaskRecord:
+        """``record``, failed for a lost owner and recorded so, once its heartbeat has run out.
+
+        The check is made again against the stored record, so an owner that beat in
+        between keeps its task.
+
+        Raises:
+            KeyError: The record is gone.
+            DocumentConflictError: Concurrent writes beat every attempt to record it.
+            PyMongoError: The store could not take the write.
+        """
+        if not _lost(record, now):
+            return record
+
+        def fail_if_lost(stored: TaskRecord) -> TaskRecord:
+            return _failed_for_lost_owner(stored, now) if _lost(stored, now) else stored
+
+        return self._records.mutate(record.id, fail_if_lost)
 
     # -- the owner's side -------------------------------------------------------
 
@@ -433,8 +596,8 @@ class DocumentTaskManager(TaskManager):
         async with self._writing:
             write = self._write_for(task)
             if write is not None:
-                flushed, error = await run_blocking(self._flush, write, limiter=self._writer)
-                self._apply(task, write, flushed, error, time.time())
+                flushed = await run_blocking(self._flush, write, limiter=self._writer)
+                self._apply(task, write, flushed, time.time())
             self._forget_if_done(task)
 
     def _evict_completed(self) -> None:
@@ -473,14 +636,14 @@ class DocumentTaskManager(TaskManager):
             if not writes and not polled:
                 return
             try:
-                outcomes, cancels = await run_blocking(
+                flushed, cancels = await run_blocking(
                     self._watch_store, [w for _, w in writes], polled, limiter=self._writer
                 )
             except (PyMongoError, DocumentConflictError) as exc:
                 self._note_store(str(exc))
                 return
-            for (task, write), (flushed, error) in zip(writes, outcomes, strict=True):
-                self._apply(task, write, flushed, error, now)
+            for (task, write), outcome in zip(writes, flushed, strict=True):
+                self._apply(task, write, outcome, now)
                 self._forget_if_done(task)
             for task_id in cancels:
                 task = self._tasks.get(task_id)
@@ -498,21 +661,22 @@ class DocumentTaskManager(TaskManager):
             revision=task.revision,
             slot=held.slot,
             ends=task.status.is_terminal,
+            result=task.result,
+            result_set=held.result_set,
         )
 
-    def _apply(
-        self, task: _Task, write: _Write, flushed: _Outcome, error: str | None, now: float
-    ) -> None:
+    def _apply(self, task: _Task, write: _Write, flushed: _Flushed, now: float) -> None:
         """Note on the event loop what became of ``write``."""
         held = self._held_by_id.get(task.id)
         if held is None:
             return
-        self._note_store(error)
-        if flushed is _Outcome.WRITTEN:
+        held.result_set = flushed.result_set
+        self._note_store(flushed.error)
+        if flushed.outcome is _Outcome.WRITTEN:
             held.written = write.revision
             held.beat_at = now
             held.done = write.ends
-        elif flushed is _Outcome.LOST:
+        elif flushed.outcome is _Outcome.LOST:
             held.done = True
             if not task.status.is_terminal:
                 logger.warning(
@@ -540,28 +704,37 @@ class DocumentTaskManager(TaskManager):
 
     def _watch_store(
         self, writes: builtins.list[_Write], polled: builtins.list[str]
-    ) -> tuple[builtins.list[tuple[_Outcome, str | None]], set[str]]:
+    ) -> tuple[builtins.list[_Flushed], set[str]]:
         """Make ``writes``, then read which of ``polled`` another replica asked to cancel."""
-        outcomes = [self._flush(write) for write in writes]
+        flushed = [self._flush(write) for write in writes]
         cancels: set[str] = set()
         if polled:
             found = self._raw.find(
                 {"id": {"$in": polled}, "cancel_requested": True}, {"id": 1, "_id": 0}
             )
             cancels = {doc["id"] for doc in found}
-        return outcomes, cancels
+        return flushed, cancels
 
-    def _flush(self, write: _Write) -> tuple[_Outcome, str | None]:
-        """Make ``write``. A write that ends the task frees its slot and prunes old records."""
+    def _flush(self, write: _Write) -> _Flushed:
+        """Make ``write``.
+
+        A write that ends the task writes its result's chunks before the record that
+        names them, frees its slot, prunes old records and sweeps sets no record names.
+        Chunks written in full are kept for the next attempt when the record write fails.
+        """
+        result_set = write.result_set
         try:
-            flushed = self._write_record(write.task_id, write.fields)
-            if write.slot is not None and (write.ends or flushed is _Outcome.LOST):
+            if write.ends and result_set is None and write.result is not None:
+                result_set = self._results.write(write.task_id, _result_text(write.result))
+            outcome = self._write_record(write.task_id, write.fields | _naming(result_set))
+            if write.slot is not None and (write.ends or outcome is _Outcome.LOST):
                 self._slots.release(write.slot, write.task_id)
             if write.ends:
                 self._prune()
+                self._sweep()
         except (PyMongoError, DocumentConflictError) as exc:
-            return _Outcome.FAILED, str(exc)
-        return flushed, None
+            return _Flushed(_Outcome.FAILED, str(exc), result_set)
+        return _Flushed(outcome, None, result_set)
 
     def _write_record(self, task_id: str, fields: dict[str, Any]) -> _Outcome:
         now = time.time()
@@ -578,14 +751,49 @@ class DocumentTaskManager(TaskManager):
         return _Outcome.WRITTEN
 
     def _prune(self) -> None:
-        """Delete the ended records beyond the newest ``max_completed``."""
+        """Delete the ended records beyond the newest ``max_completed``, each before its result."""
         beyond = (
-            self._raw.find({"status": {"$in": _ENDED}}, {"id": 1, "_id": 0})
+            self._raw.find(
+                {"status": {"$in": _ENDED}},
+                {"id": 1, "result_set": 1, "result_chunks": 1, "_id": 0},
+            )
             .sort("completed_at", DESCENDING)
             .skip(self._max_completed)
         )
         for doc in builtins.list(beyond):
-            self._records.delete(doc["id"], only_if={"status": {"$in": _ENDED}})
+            if not self._records.delete(doc["id"], only_if={"status": {"$in": _ENDED}}):
+                continue
+            if doc.get("result_set"):
+                self._results.drop(_ResultSet(doc["result_set"], int(doc["result_chunks"])))
+
+    def _sweep(self) -> None:
+        """Drop each result set no record names, once its header is older than the window.
+
+        A set whose task still runs on a fresh heartbeat is kept, since its owner may yet
+        write the record that names it. A task whose owner is lost is recorded failed
+        first, so its owner's write can no longer land and name the set.
+        """
+        now = time.time()
+        old = self._results.written_before(now - OWNER_LOST_SECONDS)
+        if not old:
+            return
+        old_ids = [result_set.set_id for result_set, _ in old]
+        found = self._raw.find({"result_set": {"$in": old_ids}}, {"result_set": 1, "_id": 0})
+        named = {doc["result_set"] for doc in found}
+        for result_set, task_id in old:
+            if result_set.set_id not in named and not self._may_name(task_id, result_set, now):
+                self._results.drop(result_set)
+
+    def _may_name(self, task_id: str, result_set: _ResultSet, now: float) -> bool:
+        """Whether ``task_id``'s record names ``result_set``, or its owner may yet make it."""
+        record = self._records.get(task_id)
+        if record is None:
+            return False
+        try:
+            record = self._record_if_lost(record, now)
+        except KeyError:
+            return False
+        return not record.status.is_terminal or record.result_set == result_set.set_id
 
 
 def _watcher_ended(watcher: asyncio.Task) -> None:

@@ -45,7 +45,6 @@ from scalo.logger import logger
 
 TASK_FAILED_MESSAGE = "The task failed; the engine log has the reason"
 TASK_STOPPED_MESSAGE = "The engine running the task stopped before it finished"
-TASK_RESULT_TOO_LARGE = "The task finished, but its result is too large to keep"
 CLOSE_TIMEOUT_SECONDS = 5.0
 """How long :meth:`TaskManager.aclose` waits for cancelled tasks to record how they ended."""
 
@@ -75,11 +74,6 @@ def _json_safe(value: Any) -> Any:
         return value
     except TypeError:
         return str(value)
-
-
-def _result_size(value: Any) -> int:
-    """The bytes ``value`` takes as the JSON a task result is kept as, ASCII-escaped."""
-    return len(json.dumps(_json_safe(value), default=str))
 
 
 def _held(org_ids: Iterable[str] | None) -> frozenset[str] | None:
@@ -203,9 +197,6 @@ class TaskManager:
     ``max_completed`` to prevent unbounded memory growth.
     """
 
-    _result_limit: int | None = None
-    """The most bytes a result may take as JSON, or None for no limit."""
-
     def __init__(self, max_completed: int = 1000) -> None:
         self._tasks: dict[str, _Task] = {}
         self._max_completed = max_completed
@@ -262,23 +253,10 @@ class TaskManager:
                 task.message = "Running"
                 await self._record(task)
                 result = await coro_fn(*args, task=task, **kwargs)
-                oversize = self._oversize(result)
-                if oversize is not None:
-                    logger.warning(
-                        "background task result too large to keep",
-                        task_id=task.id,
-                        kind=kind,
-                        size_bytes=oversize,
-                        limit_bytes=self._result_limit,
-                    )
-                    task.status = TaskStatus.FAILED
-                    task.error = TASK_RESULT_TOO_LARGE
-                    task.message = f"Failed: {TASK_RESULT_TOO_LARGE}"
-                else:
-                    task.status = TaskStatus.COMPLETED
-                    task.progress = 100
-                    task.result = result
-                    task.message = "Completed"
+                task.status = TaskStatus.COMPLETED
+                task.progress = 100
+                task.result = result
+                task.message = "Completed"
             except asyncio.CancelledError:
                 self._end_cancelled(task)
             except Exception as exc:
@@ -322,13 +300,6 @@ class TaskManager:
         )
         if active >= max_active:
             raise TaskLimitError(task.kind, max_active)
-
-    def _oversize(self, result: Any) -> int | None:
-        """The bytes ``result`` takes as JSON when that is over the limit, else None."""
-        if self._result_limit is None:
-            return None
-        size = _result_size(result)
-        return size if size > self._result_limit else None
 
     def _submitted(self, task: _Task) -> None:
         """Called once ``task`` is running in the background. Nothing more to do in memory."""

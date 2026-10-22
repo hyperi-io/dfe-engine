@@ -13,7 +13,6 @@ import json
 
 import pytest
 
-from dfe_engine.api.document_tasks import MAX_RESULT_BYTES
 from dfe_engine.api.task_manager import (
     TASK_FAILED_MESSAGE,
     TASK_STOPPED_MESSAGE,
@@ -269,23 +268,6 @@ class TestMaxActive:
         await manager.await_terminal(held[0].id, 2.0)
         await manager.submit("test:capped", slow, max_active=2)
         await manager.aclose()
-
-
-class TestResultSize:
-    @pytest.mark.asyncio
-    async def test_a_result_over_the_document_store_limit_is_kept_in_memory(
-        self, manager: TaskManager
-    ):
-        async def huge(*, task):
-            # JSON adds two quotes, so this is one byte over the document store's limit.
-            return "x" * (MAX_RESULT_BYTES - 1)
-
-        info = await manager.submit("test:huge", huge)
-        settled = await manager.await_terminal(info.id, 10.0)
-
-        assert settled is not None
-        assert settled.status == TaskStatus.COMPLETED, settled.error
-        assert settled.result == "x" * (MAX_RESULT_BYTES - 1)
 
 
 class TestClose:

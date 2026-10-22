@@ -12,10 +12,13 @@ DocumentDB on docker), each test in a throwaway database dropped on teardown. Ea
 replica has its own client and its own owner id, so only the store carries a task from
 one to the other. The killed-owner test runs its owner as a child process and SIGKILLs
 it, so nothing records how its task ended. The stalled-store test reaches the store
-through a relay it holds (:mod:`tests.support.pausable_relay`).
+through a relay it holds (:mod:`tests.support.pausable_relay`). The crash between a
+result's chunks and its record holds the owner's record write, and backdates the
+heartbeat and the set's header as the window passing would.
 """
 
 import asyncio
+import json
 import logging
 import os
 import signal
@@ -34,16 +37,18 @@ import anyio
 import pytest
 from pymongo.collection import Collection
 
+from dfe_engine.api import document_tasks
 from dfe_engine.api.document_tasks import (
     HEARTBEAT_SECONDS,
-    MAX_RESULT_BYTES,
     OWNER_LOST_SECONDS,
+    RESULT_SETS_COLLECTION,
+    RESULTS_COLLECTION,
     TASKS_COLLECTION,
     WATCH_SECONDS,
     DocumentTaskManager,
+    TaskResultMissingError,
 )
 from dfe_engine.api.task_manager import (
-    TASK_RESULT_TOO_LARGE,
     TASK_STOPPED_MESSAGE,
     TaskInfo,
     TaskLimitError,
@@ -67,6 +72,12 @@ RACE_ROUNDS = 10
 SUBMITS_PER_REPLICA = 4
 # Well under the stall, so a write made during it fails rather than waiting it out.
 RELAYED_SOCKET_TIMEOUT = 2.0
+# Rows of 1000 characters, so the result is about 20 MB of JSON: more than one document holds.
+LARGE_ROWS = 20_000
+# Small chunks, so a short result spans several.
+SMALL_CHUNK = 64
+# 300 characters, so its JSON is 302: four full small chunks and a fifth of 46.
+SPANNING = "y" * 300
 
 
 @pytest.fixture
@@ -452,36 +463,185 @@ async def _admitted(store: DocuStore, owner: str, kind: str, barrier: threading.
     return admitted
 
 
-class TestResultSize:
-    """A result over the limit fails here as in memory, and one at the limit fits the store."""
+class TestLargeResult:
+    """A result more than one document holds still reads back whole on another replica."""
 
-    async def test_a_result_over_the_limit_reads_failed_on_b(self, replicas):
+    async def test_a_20_mb_result_written_on_a_reads_back_whole_on_b(self, replicas):
         a, b = replicas
+        rows = [f"{n:08d}{'x' * 992}" for n in range(LARGE_ROWS)]
 
-        async def huge(*, task: Any) -> str:
-            # JSON adds two quotes, so this is one byte over.
-            return "x" * (MAX_RESULT_BYTES - 1)
+        async def sample(*, task: Any) -> dict:
+            return {"count": LARGE_ROWS, "rows": rows}
 
-        info = await a.submit("test:huge", huge)
+        info = await a.submit("test:large", sample)
         ended = await _until(
-            lambda: b.get(info.id), lambda i: i.status.is_terminal, timeout=30.0, what="end"
-        )
-        assert ended.status is TaskStatus.FAILED
-        assert ended.error == TASK_RESULT_TOO_LARGE
-        assert ended.result is None
-
-    async def test_a_result_at_the_limit_round_trips_through_the_store(self, replicas):
-        a, b = replicas
-
-        async def largest(*, task: Any) -> str:
-            return "x" * (MAX_RESULT_BYTES - 2)
-
-        info = await a.submit("test:largest", largest)
-        ended = await _until(
-            lambda: b.get(info.id), lambda i: i.status.is_terminal, timeout=30.0, what="end"
+            lambda: b.get(info.id), lambda i: i.status.is_terminal, timeout=60.0, what="end"
         )
         assert ended.status is TaskStatus.COMPLETED, ended.error
-        assert ended.result == "x" * (MAX_RESULT_BYTES - 2)
+        assert ended.result == {"count": LARGE_ROWS, "rows": rows}
+
+
+def _returning(value: Any) -> Callable[..., Awaitable[Any]]:
+    async def run(*, task: Any) -> Any:
+        return value
+
+    return run
+
+
+async def _until_written(manager: TaskManager, task_id: str) -> None:
+    """Wait until ``manager`` has written how its task ended, its prune and sweep included."""
+    await _until_true(lambda: task_id not in manager._tasks, what=f"the end of {task_id} written")
+
+
+def _chunks_of(chunks: Collection, set_id: str) -> list[str]:
+    """The ids of every stored chunk of ``set_id``."""
+    return sorted(doc["_id"] for doc in chunks.find({"_id": {"$regex": f"^{set_id}/"}}))
+
+
+class TestResultChunks:
+    """A result goes into ordered chunks the record counts, and a short read is an error."""
+
+    async def test_a_result_is_written_as_ordered_chunks_its_record_counts(
+        self, replicas, stores, monkeypatch
+    ):
+        monkeypatch.setattr(document_tasks, "RESULT_CHUNK_BYTES", SMALL_CHUNK)
+        a, b = replicas
+        info = await a.submit("test:chunks", _returning(SPANNING))
+        await _until_written(a, info.id)
+
+        record = stores[1].collection(TASKS_COLLECTION).find_one({"id": info.id})
+        set_id = record["result_set"]
+        assert record["result_chunks"] == 5
+        found = stores[1].collection(RESULTS_COLLECTION).find({"_id": {"$regex": f"^{set_id}/"}})
+        data = {doc["_id"]: doc["data"] for doc in found}
+        assert sorted(data) == [f"{set_id}/{n}" for n in range(5)]
+        assert [len(data[f"{set_id}/{n}"]) for n in range(5)] == [64, 64, 64, 64, 46]
+        assert "".join(data[f"{set_id}/{n}"] for n in range(5)) == json.dumps(SPANNING)
+        header = stores[1].collection(RESULT_SETS_COLLECTION).find_one({"_id": set_id})
+        assert (header["task_id"], header["chunks"]) == (info.id, 5)
+
+        read = await b.get(info.id)
+        assert read is not None
+        assert read.result == SPANNING
+
+    async def test_a_missing_chunk_is_an_error_never_a_short_result(
+        self, replicas, stores, monkeypatch
+    ):
+        monkeypatch.setattr(document_tasks, "RESULT_CHUNK_BYTES", SMALL_CHUNK)
+        a, b = replicas
+        info = await a.submit("test:missing", _returning(SPANNING))
+        await _until_written(a, info.id)
+        record = stores[1].collection(TASKS_COLLECTION).find_one({"id": info.id})
+        chunks = stores[1].collection(RESULTS_COLLECTION)
+        assert chunks.delete_one({"_id": f"{record['result_set']}/2"}).deleted_count == 1
+
+        with pytest.raises(TaskResultMissingError):
+            await b.get(info.id)
+        with pytest.raises(TaskResultMissingError):
+            await b.list(kind="test:missing")
+
+    async def test_a_task_pruned_while_its_result_is_read_reads_as_gone(
+        self, replicas, stores, monkeypatch
+    ):
+        a, b = replicas
+        info = await a.submit("test:pruned", _returning("gone soon"))
+        await _until_written(a, info.id)
+        tasks = stores[1].collection(TASKS_COLLECTION)
+        set_id = tasks.find_one({"id": info.id})["result_set"]
+        stall = Stall()
+        monkeypatch.setattr(b._results, "read", stall.call(b._results.read))
+
+        reading = asyncio.create_task(b.get(info.id))
+        try:
+            assert await asyncio.to_thread(stall.reached.wait, 10), "the read never reached"
+            # As the prune deletes them: the record, then its chunks, then the header.
+            tasks.delete_one({"id": info.id})
+            stores[1].collection(RESULTS_COLLECTION).delete_one({"_id": f"{set_id}/0"})
+            stores[1].collection(RESULT_SETS_COLLECTION).delete_one({"_id": set_id})
+        finally:
+            stall.release.set()
+
+        assert await reading is None
+
+    async def test_pruning_a_record_drops_its_chunks_and_header(self, stores):
+        a = DocumentTaskManager(stores[0], owner="replica-a", max_completed=2)
+        try:
+            for n in range(4):
+                info = await a.submit("test:prune-results", _returning(f"result {n}"))
+                await _until_written(a, info.id)
+        finally:
+            await a.aclose()
+
+        ended = stores[1].collection(TASKS_COLLECTION).find({"kind": "test:prune-results"})
+        kept = {doc["result_set"] for doc in ended}
+        headers = {doc["_id"] for doc in stores[1].collection(RESULT_SETS_COLLECTION).find()}
+        chunk_sets = {
+            doc["_id"].split("/")[0] for doc in stores[1].collection(RESULTS_COLLECTION).find()
+        }
+        assert len(kept) == 2
+        assert headers == kept
+        assert chunk_sets == kept
+
+
+class TestCrashBetweenChunksAndRecord:
+    """Chunks written by an owner that stops before its record are never named, and get swept."""
+
+    async def test_the_chunks_name_no_task_and_go_once_the_owner_is_lost(
+        self, replicas, stores, monkeypatch
+    ):
+        monkeypatch.setattr(document_tasks, "RESULT_CHUNK_BYTES", SMALL_CHUNK)
+        a, b = replicas
+        tasks = stores[1].collection(TASKS_COLLECTION)
+        chunks = stores[1].collection(RESULTS_COLLECTION)
+        headers = stores[1].collection(RESULT_SETS_COLLECTION)
+        stall = Stall()
+        record_write = a._write_record
+
+        def stopped_before_naming(task_id: str, fields: dict[str, Any]) -> Any:
+            if fields.get("result_set"):
+                stall.wait()
+            return record_write(task_id, fields)
+
+        monkeypatch.setattr(a, "_write_record", stopped_before_naming)
+        info = await a.submit("test:crashed", _returning(SPANNING))
+        try:
+            assert await asyncio.to_thread(stall.reached.wait, 10), "the owner never wrote"
+            set_id = headers.find_one({"task_id": info.id})["_id"]
+            assert len(_chunks_of(chunks, set_id)) == 5
+            assert tasks.find_one({"id": info.id})["result_set"] is None
+            seen = await b.get(info.id)
+            assert seen is not None
+            assert (seen.status, seen.result) == (TaskStatus.RUNNING, None)
+
+            # Older than the window, but its task's heartbeat is fresh: the owner may yet name it.
+            old = time.time() - OWNER_LOST_SECONDS - 1
+            headers.update_one({"_id": set_id}, {"$set": {"written_at": old}})
+            await _end_one(b, "test:sweeper")
+            assert len(_chunks_of(chunks, set_id)) == 5
+
+            # The owner's heartbeat runs out too: the sweep records it failed, then drops the set.
+            tasks.update_one({"id": info.id}, {"$set": {"heartbeat_at": old}})
+            await _end_one(b, "test:sweeper")
+            assert _chunks_of(chunks, set_id) == []
+            assert headers.find_one({"_id": set_id}) is None
+        finally:
+            stall.release.set()
+
+        await _until_written(a, info.id)
+        failed = await b.get(info.id)
+        assert failed is not None
+        assert (failed.status, failed.error, failed.result) == (
+            TaskStatus.FAILED,
+            TASK_STOPPED_MESSAGE,
+            None,
+        )
+        assert tasks.find_one({"id": info.id})["result_set"] is None
+
+
+async def _end_one(manager: TaskManager, kind: str) -> None:
+    """Run one task to its end on ``manager``, so its ending write prunes and sweeps."""
+    info = await manager.submit(kind, _returning("ok"))
+    await _until_written(manager, info.id)
 
 
 class TestPrune:
