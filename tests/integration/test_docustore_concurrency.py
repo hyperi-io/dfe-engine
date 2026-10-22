@@ -29,6 +29,8 @@ pytestmark = pytest.mark.integration
 THREADS_PER_CLIENT = 50
 INCREMENTS_PER_THREAD = 4
 RACE_ROUNDS = 100
+# Each round waits on DocumentDB's index-build schedule, which runs every 2 s.
+INDEX_ROUNDS = 10
 
 
 class Counter(BaseModel):
@@ -191,7 +193,7 @@ class TestIndexes:
     """Two replicas booting at once each make a fresh collection's unique indexes."""
 
     def test_two_clients_indexing_one_new_collection_at_once_both_succeed(self, clients):
-        for round_ in range(RACE_ROUNDS):
+        for round_ in range(INDEX_ROUNDS):
             name = f"boot_{round_}"
             results = _race(
                 [
