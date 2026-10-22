@@ -90,6 +90,17 @@ def bootstrap_settings(
     return settings
 
 
+def default_header(stack: SimpleNamespace) -> dict[str, str]:
+    """The common header a source inherits on *stack*, as the engine's own defaults report it."""
+    resp = stack.client.get("/api/v1/system/defaults", headers=stack.headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    return {
+        "type": body["common_header_type"]["effective"],
+        "version": body["common_header_version"]["effective"],
+    }
+
+
 def deploy_source(
     *,
     header: dict[str, str] | None = None,
@@ -97,14 +108,14 @@ def deploy_source(
     schema: dict[str, Any] | None = None,
     stack: SimpleNamespace,
 ) -> None:
-    """Create a source through the engine API and deploy it, on the timeseries profile and the syslog meta-schema unless told otherwise."""
+    """Create a source through the engine API and deploy it, on the stack's default header and the syslog meta-schema unless told otherwise."""
     created = stack.client.post(
         "/api/v1/sources",
         headers=stack.headers,
         json={
             "display_name": name,
             "enabled": True,
-            "header": header or {"type": "timeseries", "version": "1.0.0"},
+            "header": header or default_header(stack),
             "match": {"field": "tags.collector.type", "value": name},
             "schema": schema or {"meta_schema": "meta/syslog"},
             "source": name,
