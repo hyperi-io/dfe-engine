@@ -2217,7 +2217,7 @@ async def _sample_events(
         )
     # A dry run reads the newest rows inline, not the default mode's gated logreducer reduction.
     req = SampleRequest(mode=SampleMode.RECENT, source=source, limit=limit)
-    org_ids = sample_org_scope(request, user)
+    org_ids = await run_blocking(sample_org_scope, request, user)
     try:
         await run_blocking(functools.partial(sampler.resolve_or_raise, req, source_registry))
     except SamplerError as exc:

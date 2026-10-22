@@ -21,6 +21,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
     CurrentUser,
@@ -1124,8 +1125,9 @@ async def propagate(
     inline. 422 ``unknown_org`` when ``hunt_customers`` names no registered org.
     """
     options = body or PropagateRequest()
-    refuse_unknown_orgs(request, options.hunt_customers)
-    propagator = _propagator(request, rules, hunts, user.user_id)
+    # The org registry may be a remote store, so both reads of it run off the event loop.
+    await run_blocking(refuse_unknown_orgs, request, options.hunt_customers)
+    propagator = await run_blocking(_propagator, request, rules, hunts, user.user_id)
     manager = _task_manager(request)
     info = manager.submit("sigma:propagate", _run_propagate, propagator, options)
     audit_resource_change(user.user_id, "sigma_propagation", "selection", "propagated")
@@ -1162,7 +1164,7 @@ async def list_bindings(
     drift: bool | None = Query(None, description="Filter by drift state"),
 ) -> PaginatedResponse[BindingSummary]:
     """Paginated list of the generated sigma-bound rules, with live drift state."""
-    propagator = _propagator(request, rules, hunts, user.user_id)
+    propagator = await run_blocking(_propagator, request, rules, hunts, user.user_id)
     rows = await asyncio.to_thread(propagator.list_bindings)
     items = [BindingSummary(**row) for row in rows]
     if source is not None:
@@ -1178,7 +1180,7 @@ async def get_binding(
     rule_id: str, request: Request, user: CurrentUser, rules: RuleReg, hunts: HuntConfigReg
 ) -> BindingSummary:
     """Get one generated sigma-bound rule (with live drift state)."""
-    propagator = _propagator(request, rules, hunts, user.user_id)
+    propagator = await run_blocking(_propagator, request, rules, hunts, user.user_id)
     row = await asyncio.to_thread(propagator.get_binding, rule_id)
     if row is None:
         raise HTTPException(
@@ -1202,7 +1204,7 @@ async def delete_binding(
     compiling the binding until that branch is merged; ``X-DFE-Review-Required``
     says so.
     """
-    propagator = _propagator(request, rules, hunts, user.user_id)
+    propagator = await run_blocking(_propagator, request, rules, hunts, user.user_id)
     routing = await asyncio.to_thread(propagator.delete_binding, rule_id)
     if routing is None:
         raise HTTPException(
