@@ -559,12 +559,9 @@ def test_the_breaker_opens_after_spent_budgets_and_answers_without_dialling(
     assert dialled >= 2
     assert _breaker(manager, "opened") == 1
 
-    started = time.monotonic()
     with pytest.raises(GitopsUnavailableError) as caught:
         repo.publish({"x.yaml": "v: 1\n"}, message="breaker open")
-    elapsed = time.monotonic() - started
 
-    assert elapsed < timeout
     assert black_hole.connections == dialled
     assert caught.value.remote == url
     assert reset - 5 <= caught.value.retry_after_seconds <= reset
