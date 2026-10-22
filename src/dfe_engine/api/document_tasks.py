@@ -52,6 +52,7 @@ TASKS_COLLECTION = "tasks"
 SLOTS_COLLECTION = "task_slots"
 
 # Every replica judges a heartbeat against the same window, so it is not a setting.
+# The age compares this replica's clock with the owner's, so replicas need clocks synced by NTP.
 OWNER_LOST_SECONDS = 30.0
 # Six beats inside the window, so one slow write or a short store outage loses no task.
 HEARTBEAT_SECONDS = 5.0
