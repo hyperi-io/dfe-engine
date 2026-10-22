@@ -90,7 +90,7 @@ from dfe_engine.exchange.schemas import ExchangeError
 from dfe_engine.exchange.sources import apply_source_bundle, build_source_bundle
 from dfe_engine.git_identity import git_author
 from dfe_engine.manifest import ManifestError
-from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError
+from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError, resync_bearer_tokens
 from dfe_engine.schema.applier import SchemaApplyError, live_tables
 from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.schema.lock import SchemaLockBusyError, SchemaLockError, ddl_lease
@@ -397,8 +397,16 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
     A stranded ``_load`` topic is judged on the transform instances the deploy
     repo carried BEFORE this pass's writes, so the pass that removes an instance
     never deletes the topic its still-running process may write.
+
+    The receiver's bearer secrets are rewritten first, so the auth this pass compiles
+    reads tokens that are there: a mirror Secret recreated empty is refilled here.
     """
-    gc = getattr(request.app.state, "gitcrud", None)
+    state = request.app.state
+    if getattr(state, "org_registry", None) is not None and hasattr(state, "dfe_secrets"):
+        resync_bearer_tokens(
+            state.org_registry, state.dfe_secrets, getattr(state, "bearer_mirror", None)
+        )
+    gc = getattr(state, "gitcrud", None)
     if gc is None:
         return AppsSync(changes=[])
     settings = request.app.state.settings

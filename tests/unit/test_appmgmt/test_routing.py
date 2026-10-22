@@ -339,17 +339,24 @@ class TestReceiverGolden:
             "destinations": {"default": "kafka", "sources": {}},
             "server_auth": {
                 "mode": "bearer",
-                "bearer": {"secret_source": "file:/var/run/secrets/dfe/ingest-bearer-tokens/http"},
+                "bearer": {
+                    "secret_source": "file:/var/run/secrets/dfe/ingest-bearer-tokens/http",
+                    "refresh_interval_secs": 60,
+                },
             },
             "grpc_auth": {"mode": "none"},
             "otlp_auth": {
                 "mode": "bearer",
-                "bearer": {"secret_source": "file:/var/run/secrets/dfe/ingest-bearer-tokens/otlp"},
+                "bearer": {
+                    "secret_source": "file:/var/run/secrets/dfe/ingest-bearer-tokens/otlp",
+                    "refresh_interval_secs": 60,
+                },
             },
             "splunk_hec_auth": {
                 "mode": "bearer",
                 "bearer": {
-                    "secret_source": "file:/var/run/secrets/dfe/ingest-bearer-tokens/splunk_hec"
+                    "secret_source": "file:/var/run/secrets/dfe/ingest-bearer-tokens/splunk_hec",
+                    "refresh_interval_secs": 60,
                 },
             },
             "prometheus_rw_auth": {"mode": "none"},

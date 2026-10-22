@@ -44,6 +44,7 @@ from scalo.api import (
     paginate,
 )
 from scalo.concurrency import run_blocking
+from scalo.logger import logger
 from scalo.secrets.exceptions import SecretsError
 
 from dfe_engine.api.deps import CurrentUser, check_action, require_org_action
@@ -299,8 +300,8 @@ def _sync_tokens(request: Request) -> None:
         raise _secrets_failure(exc) from exc
 
 
-def _put(request: Request, credential: IngestCredential) -> None:
-    """Store *credential*, then rewrite the bearer secrets its listeners change.
+def _store(request: Request, credential: IngestCredential) -> None:
+    """Store *credential*.
 
     Raises:
         HTTPException: 409 ``credential_id_taken`` when another org took the id first.
@@ -311,14 +312,35 @@ def _put(request: Request, credential: IngestCredential) -> None:
         raise HTTPException(
             status_code=409, detail={"code": "credential_id_taken", "message": str(exc)}
         ) from exc
+
+
+def _put(request: Request, credential: IngestCredential) -> None:
+    """Store *credential*, then rewrite the bearer secrets its listeners change.
+
+    Raises:
+        HTTPException: 409 ``credential_id_taken`` when another org took the id first,
+            503 ``secrets_unavailable`` when the secrets backend refuses.
+    """
+    _store(request, credential)
     _sync_tokens(request)
+
+
+def _take_back_token(secrets: DfeSecrets, name: str) -> None:
+    """Drop the token a create stored, logging a backend that refuses: the caller's error stands."""
+    try:
+        drop_token(secrets, name)
+    except SecretsError as exc:
+        logger.warning("ingest credential token not taken back", ingest_id=name, error=str(exc))
 
 
 def _mint(request: Request, credential: IngestCredential, token: str, *, created: bool) -> None:
     """Store *token* as the credential's, then the credential, then the bearer secrets.
 
     The token goes first, so a credential is never stored with nothing a sender
-    could present. A create whose record write fails takes its token back out.
+    could present. A create that cannot finish takes back everything it wrote, the
+    record as well as the token. Its caller got no token, so a record left behind is
+    a credential the API lists that no sender can use, and the API and the receiver
+    agree only once nothing of it remains.
     """
     secrets = _secrets(request)
     try:
@@ -326,10 +348,23 @@ def _mint(request: Request, credential: IngestCredential, token: str, *, created
     except SecretsError as exc:
         raise _secrets_failure(exc) from exc
     try:
-        _put(request, credential)
+        _store(request, credential)
     except HTTPException:
         if created:
-            drop_token(secrets, credential.name)
+            _take_back_token(secrets, credential.name)
+        raise
+    try:
+        _sync_tokens(request)
+    except HTTPException:
+        if created:
+            try:
+                # Fires the org listeners, so the bearer secrets are rewritten without it.
+                _registry(request).ingest_credentials.delete(credential.name)
+            except (KeyError, OSError) as exc:
+                logger.warning(
+                    "ingest credential not taken back", ingest_id=credential.name, error=str(exc)
+                )
+            _take_back_token(secrets, credential.name)
         raise
 
 

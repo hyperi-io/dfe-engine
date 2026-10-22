@@ -38,6 +38,9 @@ FILE_MOUNT = "/var/run/secrets/dfe/ingest-bearer-tokens"
 
 NONE = {"mode": "none"}
 
+# A revoked credential's token stops within this plus the kubelet sync of a mounted Secret.
+REFRESH = 60
+
 # The receiver config section of each bearer listener, by the block the compile emits for it.
 BLOCKS = {
     "server_auth": "server",
@@ -99,7 +102,7 @@ def _auth(settings, tenancy: Tenancy) -> dict:
 
 def _bearer(backend: str, listener: str) -> dict:
     source = SOURCES[backend].format(listener=listener)
-    return {"mode": "bearer", "bearer": {"secret_source": source}}
+    return {"mode": "bearer", "bearer": {"secret_source": source, "refresh_interval_secs": REFRESH}}
 
 
 def _overlay() -> dict:
@@ -129,7 +132,10 @@ class TestGolden:
         auth = _auth(_on(settings, BACKENDS["aws"]), TENANCY)
         assert auth["server_auth"] == {
             "mode": "bearer",
-            "bearer": {"secret_source": "aws:dfe/dev/engine/ingest/bearer-tokens/http"},
+            "bearer": {
+                "secret_source": "aws:dfe/dev/engine/ingest/bearer-tokens/http",
+                "refresh_interval_secs": REFRESH,
+            },
         }
 
     @pytest.mark.parametrize("backend", sorted(BACKENDS))
@@ -140,7 +146,8 @@ class TestGolden:
         backend = SecretsSettings(provider="openbao", addr="https://bao:8200", mount="")
         auth = _auth(_on(settings, backend), TENANCY)
         assert auth["server_auth"]["bearer"] == {
-            "secret_source": "vault:ingest/bearer-tokens/http:value"
+            "secret_source": "vault:ingest/bearer-tokens/http:value",
+            "refresh_interval_secs": REFRESH,
         }
 
 

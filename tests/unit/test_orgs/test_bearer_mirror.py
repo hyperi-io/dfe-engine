@@ -22,6 +22,7 @@ from dfe_engine.orgs.ingest_tokens import (
     bearer_secret_path,
     build_bearer_mirror,
     drop_token,
+    resync_bearer_tokens,
     store_token,
     sync_bearer_tokens,
 )
@@ -156,6 +157,27 @@ class TestMirror:
 
         assert sync_bearer_tokens(registry, secrets) == list(BEARER_LISTENERS)
         assert kube.requests == []
+
+
+class TestResync:
+    def test_a_secret_recreated_empty_is_refilled(self, registry, secrets, kube, token_file):
+        _credential(registry, secrets, ["http"])
+        kube.create_empty()
+        mirror = mirror_for(kube, token_file)
+        sync_bearer_tokens(registry, secrets, mirror)
+        kube.create_empty()
+
+        resync_bearer_tokens(registry, secrets, mirror)
+
+        assert kube.data()["http"] == "acme-agents:token-a\n"
+
+    def test_a_refused_resync_is_logged_never_raised(self, registry, secrets, kube, token_file):
+        _credential(registry, secrets, ["http"])
+
+        resync_bearer_tokens(registry, secrets, mirror_for(kube, token_file))
+
+        assert kube.puts() == 0
+        assert secrets.get(bearer_secret_path("http")) == "acme-agents:token-a\n"
 
 
 class TestBuild:

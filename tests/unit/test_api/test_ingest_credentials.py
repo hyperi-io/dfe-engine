@@ -586,6 +586,47 @@ class TestTheMirrorSecret:
             assert resp.json()["code"] == "secrets_unavailable"
             assert client.get("/api/v1/orgs", headers=admin_headers).status_code == 200
 
+    def test_a_create_the_bearer_secrets_refuse_leaves_nothing_behind(
+        self, client, app, admin_headers, orgs, tmp_path
+    ):
+        # The caller got no token, so a record left behind is a credential no sender can use.
+        token_file = tmp_path / "sa-token"
+        token_file.write_text(self.SA_TOKEN, encoding="utf-8")
+        with local_kube_api(self.SA_TOKEN) as kube:
+            app.state.bearer_mirror = mirror_for(kube, token_file)
+
+            refused = _create(client, admin_headers, listeners=["http"])
+
+            assert refused.status_code == 503, refused.text
+            assert client.get(f"{BASE}/agents", headers=admin_headers).status_code == 404
+            assert _secret(app, credential_secret_path("agents")) is None
+            assert "agents:" not in _bearer(app, "http")
+
+            kube.create_empty()
+            retried = _create(client, admin_headers, listeners=["http"])
+
+            assert retried.status_code == 201, retried.text
+            assert kube.data()["http"] == f"agents:{retried.json()['token']}\n"
+
+    def test_a_secret_recreated_empty_is_refilled_by_the_next_reconcile(
+        self, client, app, admin_headers, orgs, tmp_path
+    ):
+        _wire(app, tmp_path)
+        token_file = tmp_path / "sa-token"
+        token_file.write_text(self.SA_TOKEN, encoding="utf-8")
+        with local_kube_api(self.SA_TOKEN) as kube:
+            kube.create_empty()
+            app.state.bearer_mirror = mirror_for(kube, token_file)
+            token = _create(client, admin_headers, listeners=["http"]).json()["token"]
+            # As Argo's self-heal recreates it after a delete: empty, no credential write behind it.
+            kube.create_empty()
+
+            resp = client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)
+
+            assert resp.status_code == 200, resp.text
+            assert kube.data()["http"] == f"agents:{token}\n"
+            assert kube.data()["otlp"] == "\n"
+
     def test_a_mirror_with_no_api_server_never_stops_startup(self, api_settings, monkeypatch):
         monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
         monkeypatch.delenv("KUBERNETES_SERVICE_PORT", raising=False)

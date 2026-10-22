@@ -23,7 +23,8 @@ and ``mode: none`` otherwise, under which a record lands in the default org.
 On Kubernetes the ``file`` backend writes under the engine's own volume, which no
 receiver pod can mount. With ``DFE_INGEST_BEARER_SECRET`` set, :func:`sync_bearer_tokens`
 also writes each listener's content into that Kubernetes Secret, keyed by listener, and
-the receiver mounts it at :data:`RECEIVER_BEARER_MOUNT`.
+the receiver mounts it at :data:`RECEIVER_BEARER_MOUNT`. Every startup and every apps
+reconcile syncs again, so a Secret recreated empty is refilled without a credential write.
 
 No token is ever logged, and none is read back out of the API after the request
 that mints it.
@@ -34,7 +35,12 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
-from scalo.secrets import SecretAlreadyExistsError, SecretNotFoundError, SecretsManager
+from scalo.secrets import (
+    SecretAlreadyExistsError,
+    SecretNotFoundError,
+    SecretsError,
+    SecretsManager,
+)
 
 from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, IngestCredential, IngestListener
 from dfe_engine.orgs.tenancy import Tenancy
@@ -57,6 +63,10 @@ backend's ``ingest/bearer-tokens`` directory on docker, the mirror Secret on Kub
 
 MIRROR_PROVIDER = "kubernetes"
 """The scalo secrets provider that writes the mirror Secret's keys."""
+
+BEARER_REFRESH_SECONDS = 60
+"""How often dfe-receiver re-reads a listener's bearer secret: a deleted, disabled or
+rotated credential's token stops within this, plus a mounted Secret's kubelet sync."""
 
 # 32 random bytes, URL-safe base64: no ':' and no line break, the receiver's two separators.
 _TOKEN_BYTES = 32
@@ -119,7 +129,8 @@ def compile_listener_auth(
     ``mode: bearer`` on the listener's secret while an accepted credential lists the
     listener, else ``mode: none``, under which the receiver lands a record in the
     default org. :func:`sync_bearer_tokens` writes the secret from the same accepted
-    credentials, so the mode and the secret agree on which ones a listener takes.
+    credentials, so the mode and the secret agree on which ones a listener takes. The
+    receiver re-reads it every :data:`BEARER_REFRESH_SECONDS`.
 
     Args:
         tenancy: The orgs and credentials to compile.
@@ -140,8 +151,11 @@ def compile_listener_auth(
         if listener not in listed:
             blocks[listener] = {"mode": "none"}
             continue
-        source = bearer_secret_source(listener, backend)
-        blocks[listener] = {"mode": "bearer", "bearer": {"secret_source": source}}
+        bearer = {
+            "secret_source": bearer_secret_source(listener, backend),
+            "refresh_interval_secs": BEARER_REFRESH_SECONDS,
+        }
+        blocks[listener] = {"mode": "bearer", "bearer": bearer}
     return blocks
 
 
@@ -276,3 +290,19 @@ def sync_bearer_tokens(
     if mirror is not None:
         rewritten.update(mirror_bearer_tokens(entries, mirror))
     return [listener for listener in BEARER_LISTENERS if listener in rewritten]
+
+
+def resync_bearer_tokens(
+    registry: OrgRegistry, secrets: DfeSecrets, mirror: SecretsManager | None
+) -> None:
+    """Bring the bearer secrets back into step with no credential write behind it. Never raises.
+
+    A refusal is logged and left to the next startup, reconcile or credential write.
+    """
+    try:
+        rewritten = sync_bearer_tokens(registry, secrets, mirror)
+    except SecretsError as exc:
+        logger.warning("receiver bearer tokens not brought back into step", error=str(exc))
+        return
+    if rewritten:
+        logger.info("receiver bearer tokens brought back into step", listeners=rewritten)
