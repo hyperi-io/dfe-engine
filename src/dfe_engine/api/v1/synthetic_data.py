@@ -21,13 +21,11 @@ Streams are TaskManager tasks: poll here or subscribe to
 ``GET /tasks/{task_id}/stream`` (SSE) for the UI.
 """
 
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
-from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
+from dfe_engine.api.task_manager import TaskInfo, TaskLimitError, TaskManager, TaskStatus
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.synthetic_data.models import (
@@ -139,22 +137,25 @@ async def start_stream(
         raise _bad_request(exc) from exc
 
     manager = _task_manager(request)
-    active = [
-        t
-        for t in manager.list(kind=_TASK_KIND)
-        if t.status in (TaskStatus.PENDING, TaskStatus.RUNNING)
-    ]
     cap = service.settings.max_concurrent_streams
-    if len(active) >= cap:
+    try:
+        # The manager counts every replica's streams against the cap.
+        info = manager.submit(
+            _TASK_KIND,
+            service.run_stream,
+            body,
+            reportable=(SyntheticDataError,),
+            max_active=cap,
+        )
+    except TaskLimitError as exc:
         raise HTTPException(
             409,
             detail={
                 "code": "too_many_streams",
-                "message": f"{len(active)} streams already running (cap {cap}) - "
+                "message": f"{cap} streams already running (the cap) - "
                 "cancel one or raise synthetic_data.max_concurrent_streams",
             },
-        )
-    info = manager.submit(_TASK_KIND, service.run_stream, body, reportable=(SyntheticDataError,))
+        ) from exc
     audit_resource_change(
         user.user_id,
         "synthetic-data",

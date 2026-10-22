@@ -13,7 +13,13 @@ import json
 
 import pytest
 
-from dfe_engine.api.task_manager import TASK_FAILED_MESSAGE, TaskManager, TaskStatus
+from dfe_engine.api.task_manager import (
+    TASK_FAILED_MESSAGE,
+    TASK_STOPPED_MESSAGE,
+    TaskLimitError,
+    TaskManager,
+    TaskStatus,
+)
 
 
 @pytest.fixture
@@ -108,6 +114,21 @@ class TestTaskSubmitAndGet:
         result = manager.get(info.id)
         assert result is not None
         assert result.status == TaskStatus.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_a_task_cancelled_before_its_first_step_ends_cancelled(
+        self, manager: TaskManager
+    ):
+        async def never_runs(*, task):
+            raise AssertionError("cancelled before it started")
+
+        info = manager.submit("test:unstarted", never_runs)
+        assert manager.cancel(info.id) is True
+
+        settled = await manager.await_terminal(info.id, 2.0)
+        assert settled is not None
+        assert settled.status == TaskStatus.CANCELLED
+        assert settled.completed_at is not None
 
     @pytest.mark.asyncio
     async def test_cancel_nonexistent_returns_false(self, manager: TaskManager):
@@ -225,6 +246,55 @@ class TestHeldTasks:
         assert manager.list(reader_orgs=["org-a"]) == manager.list()
         assert {t.id for t in manager.list(reader_orgs=["org-a"])} == set(kept)
         assert [t.held_to for t in manager._tasks.values()] == [frozenset({"org-a"})] * 2
+
+
+class TestMaxActive:
+    @pytest.mark.asyncio
+    async def test_a_kind_at_its_limit_refuses_another_and_other_kinds_still_run(
+        self, manager: TaskManager
+    ):
+        async def slow(*, task):
+            await asyncio.sleep(10)
+
+        held = [manager.submit("test:capped", slow, max_active=2) for _ in range(2)]
+
+        with pytest.raises(TaskLimitError) as refused:
+            manager.submit("test:capped", slow, max_active=2)
+        assert (refused.value.kind, refused.value.limit) == ("test:capped", 2)
+        assert len(manager.list(kind="test:capped")) == 2
+        manager.submit("test:other", slow, max_active=2)
+
+        manager.cancel(held[0].id)
+        await manager.await_terminal(held[0].id, 2.0)
+        manager.submit("test:capped", slow, max_active=2)
+        await manager.aclose()
+
+
+class TestClose:
+    @pytest.mark.asyncio
+    async def test_close_records_each_running_task_as_stopped_by_the_engine(
+        self, manager: TaskManager
+    ):
+        async def slow(*, task):
+            await asyncio.sleep(10)
+
+        async def quick(*, task):
+            return "ok"
+
+        running = manager.submit("test:slow", slow)
+        done = manager.submit("test:quick", quick)
+        await manager.await_terminal(done.id, 2.0)
+        await asyncio.sleep(0)
+
+        await manager.aclose()
+
+        stopped = manager.get(running.id)
+        assert stopped is not None
+        assert stopped.status == TaskStatus.FAILED
+        assert stopped.error == TASK_STOPPED_MESSAGE
+        finished = manager.get(done.id)
+        assert finished is not None
+        assert finished.status == TaskStatus.COMPLETED
 
 
 class TestWaitForProgress:
