@@ -159,6 +159,25 @@ class TestMutate:
         assert store.get("hits") is not None
         assert store.get("other") is None
 
+    def test_a_swap_never_lands_on_a_document_recreated_under_it(self, clients):
+        """A delete and a fresh insert between the read and the swap leave ``_rev`` at 1 again."""
+        store, other = (c.typed("counters", Counter, key="name") for c in clients)
+        assert store.insert(Counter(name="hits", value=10))
+        seen: list[int] = []
+
+        def recreate_then_bump(counter: Counter) -> Counter:
+            seen.append(counter.value)
+            if len(seen) == 1:
+                assert other.delete("hits")
+                assert other.insert(Counter(name="hits", value=0))
+            return _bump(counter)
+
+        result = store.mutate("hits", recreate_then_bump)
+
+        assert seen == [10, 0]
+        assert result == Counter(name="hits", value=1)
+        assert other.get("hits") == Counter(name="hits", value=1)
+
     def test_a_document_written_without_a_revision_is_mutated(self, clients):
         """A raw write, as a hand edit leaves it, carries no ``_rev`` and still takes a CAS write."""
         clients[0].collection("counters").insert_one({"name": "hits", "value": 7})
