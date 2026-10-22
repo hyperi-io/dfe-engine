@@ -8,8 +8,10 @@
 
 """Ingest credential tokens, minted through the engine's secrets seam.
 
-Each credential's token is its own secret at ``ingest/credentials/<id>``. The
-receiver reads one secret per listener, ``ingest/bearer-tokens/<listener>``, holding
+Each credential's token is its own secret at ``ingest/credentials/<id>@<token_id>``,
+with a new ``token_id`` for every mint, so a write never replaces or drops a token
+another write stored. The receiver reads one secret per listener,
+``ingest/bearer-tokens/<listener>``, holding
 an ``<id>:<token>`` line for every credential that listener accepts, so the id in
 front of the token names the binding the receiver holds the record to. The
 per-listener secrets are derived: :func:`sync_bearer_tokens` rewrites them from the
@@ -70,15 +72,17 @@ rotated credential's token stops within this, plus a mounted Secret's kubelet sy
 
 # 32 random bytes, URL-safe base64: no ':' and no line break, the receiver's two separators.
 _TOKEN_BYTES = 32
+# Hex, so a token id adds only characters every secrets backend takes in a name.
+_TOKEN_ID_BYTES = 8
 
 
 class BearerSourceUnreadableError(ValueError):
     """The engine's secrets backend holds the bearer tokens where dfe-receiver cannot read them."""
 
 
-def credential_secret_path(name: str) -> str:
-    """Where the token of the credential *name* is stored."""
-    return f"{CREDENTIAL_SECRET_PREFIX}/{name}"
+def credential_secret_path(credential: IngestCredential) -> str:
+    """Where *credential*'s current token is stored: one secret per mint."""
+    return f"{CREDENTIAL_SECRET_PREFIX}/{credential.name}@{credential.token_id}"
 
 
 def bearer_secret_path(listener: str) -> str:
@@ -172,14 +176,22 @@ def mint_token() -> str:
     return random_tokens.token_urlsafe(_TOKEN_BYTES)
 
 
-def store_token(secrets: DfeSecrets, name: str, token: str) -> None:
-    """Store *token* as the credential *name*'s, replacing any it had."""
-    secrets.put(credential_secret_path(name), token)
+def new_token_id() -> str:
+    """The ``token_id`` for a new mint, naming the secret its token is stored in."""
+    return random_tokens.token_hex(_TOKEN_ID_BYTES)
 
 
-def drop_token(secrets: DfeSecrets, name: str) -> None:
-    """Remove the credential *name*'s token, where one is stored."""
-    secrets.delete(credential_secret_path(name))
+def store_token(secrets: DfeSecrets, credential: IngestCredential, token: str) -> None:
+    """Store *token* as *credential*'s, under its ``token_id``."""
+    secrets.put(credential_secret_path(credential), token)
+
+
+def drop_token(secrets: DfeSecrets, credential: IngestCredential) -> None:
+    """Remove the token stored under *credential*'s ``token_id``, where one is.
+
+    A later mint of the same id stores under another ``token_id``, so it is never dropped here.
+    """
+    secrets.delete(credential_secret_path(credential))
 
 
 def bearer_entries(credentials: Iterable[IngestCredential], secrets: DfeSecrets) -> dict[str, str]:
@@ -198,7 +210,7 @@ def bearer_entries(credentials: Iterable[IngestCredential], secrets: DfeSecrets)
     """
     lines: dict[str, list[str]] = {listener: [] for listener in BEARER_LISTENERS}
     for credential in sorted(credentials, key=lambda c: c.name):
-        token = secrets.get_or_none(credential_secret_path(credential.name))
+        token = secrets.get_or_none(credential_secret_path(credential))
         if token is None:
             logger.warning("ingest credential has no stored token", ingest_id=credential.name)
             continue

@@ -57,6 +57,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.orgs.ingest_credentials import (
     BEARER_LISTENERS,
     CREDENTIAL_ID_PATTERN,
+    CredentialChangedError,
     CredentialIdTakenError,
     IngestCredential,
     IngestListener,
@@ -64,9 +65,9 @@ from dfe_engine.orgs.ingest_credentials import (
 from dfe_engine.orgs.ingest_tokens import (
     BearerSourceUnreadableError,
     bearer_secret_source,
-    credential_secret_path,
     drop_token,
     mint_token,
+    new_token_id,
     store_token,
     sync_bearer_tokens,
 )
@@ -301,18 +302,47 @@ def _sync_tokens(request: Request) -> None:
         raise _secrets_failure(exc) from exc
 
 
-def _store(request: Request, credential: IngestCredential) -> None:
+def _changed_since_read(
+    request: Request, credential: IngestCredential, *, new: bool
+) -> ProblemError:
+    """412 for a write another write got to first, with the credential's ETag as it is now."""
+    now = _owned(_registry(request), credential.org, credential.name)
+    etag = None if now is None else credential_etag(now)
+    if new:
+        return ProblemError(412, "The resource already exists", code="resource_exists", etag=etag)
+    if now is None:
+        return ProblemError(
+            412, "If-Match names a resource that does not exist", code="resource_missing"
+        )
+    return ProblemError(
+        412, "If-Match does not match the current ETag", code="etag_mismatch", etag=etag
+    )
+
+
+def _store(
+    request: Request,
+    credential: IngestCredential,
+    *,
+    new: bool = False,
+    current: IngestCredential | None = None,
+) -> None:
     """Store *credential*.
+
+    ``new`` stores it only where no credential has its id, and ``current`` only where
+    the stored one is still that credential.
 
     Raises:
         HTTPException: 409 ``credential_id_taken`` when another org took the id first.
+        ProblemError: 412 when another write created, changed or removed it since.
     """
     try:
-        _registry(request).ingest_credentials.put(credential)
+        _registry(request).ingest_credentials.put(credential, new=new, current=current)
     except CredentialIdTakenError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "credential_id_taken", "message": str(exc)}
         ) from exc
+    except CredentialChangedError as exc:
+        raise _changed_since_read(request, credential, new=new) from exc
 
 
 def _put(request: Request, credential: IngestCredential) -> None:
@@ -326,33 +356,33 @@ def _put(request: Request, credential: IngestCredential) -> None:
     _sync_tokens(request)
 
 
-def _put_back_token(secrets: DfeSecrets, name: str, token: str | None) -> None:
-    """Store *token* again as the credential's, or drop it when None, logging a backend that refuses.
-
-    The caller's error stands either way.
-    """
+def _drop_quietly(secrets: DfeSecrets, credential: IngestCredential) -> None:
+    """Drop the token stored under *credential*'s ``token_id``, logging a backend that refuses."""
     try:
-        if token is None:
-            drop_token(secrets, name)
-        else:
-            store_token(secrets, name, token)
+        drop_token(secrets, credential)
     except SecretsError as exc:
-        logger.warning("ingest credential token not put back", ingest_id=name, error=str(exc))
+        logger.warning(
+            "ingest credential token not dropped", ingest_id=credential.name, error=str(exc)
+        )
 
 
-def _put_back_record(request: Request, name: str, previous: IngestCredential | None) -> None:
-    """Restore the record a rotate replaced, or remove the one a create stored, logging a failure.
+def _put_back_record(
+    request: Request, credential: IngestCredential, previous: IngestCredential | None
+) -> None:
+    """Restore *previous*, or remove the record a create stored, while it is still *credential*.
 
-    Either write fires the org listeners, so the bearer secrets are rewritten from the
-    record and token as they stood before.
+    Either write fires the org listeners, so the bearer secrets are rewritten from what
+    stood before. A record another write changed since is left as that write made it,
+    and a failure is logged: the caller's error stands either way.
     """
+    credentials = _registry(request).ingest_credentials
     try:
         if previous is None:
-            _registry(request).ingest_credentials.delete(name)
+            credentials.delete(credential.name, current=credential)
         else:
-            _registry(request).ingest_credentials.put(previous)
-    except (KeyError, OSError, CredentialIdTakenError) as exc:
-        logger.warning("ingest credential not put back", ingest_id=name, error=str(exc))
+            credentials.put(previous, current=credential)
+    except (KeyError, OSError, CredentialIdTakenError, CredentialChangedError) as exc:
+        logger.warning("ingest credential not put back", ingest_id=credential.name, error=str(exc))
 
 
 def _mint(
@@ -362,40 +392,38 @@ def _mint(
     *,
     previous: IngestCredential | None = None,
 ) -> None:
-    """Store *token* as the credential's, then the credential, then the bearer secrets.
+    """Store the credential, then *token* as its token, then the bearer secrets.
 
-    The token goes first, so a credential is never stored with nothing a sender
-    could present. A write that cannot finish puts back everything it changed: its
-    caller got no token, so the API, the store and the receiver agree only on what
-    stood before. A create leaves nothing of the credential. A rotate, *previous*
-    being the credential as it stood, leaves the old token and record in place.
+    The record goes first and decides a race: a create stores it only where no
+    credential has its id, a rotate only where the stored one is still *previous*. The
+    write that loses has stored nothing, so it never touches the winner's token, and
+    each mint stores its token under a ``token_id`` of its own.
+
+    A write that cannot finish puts back what it changed: its caller got no token, so
+    the API, the store and the receiver agree only on what stood before. A create
+    leaves nothing of the credential. A rotate leaves the old record, whose token it
+    never touched. A rotate that finishes drops the old token.
 
     Raises:
         HTTPException: 409 ``credential_id_taken`` when another org took the id first,
             503 ``secrets_unavailable`` when the secrets backend or mirror refuses.
+        ProblemError: 412 when another write created, changed or removed it first.
     """
     secrets = _secrets(request)
+    _store(request, credential, new=previous is None, current=previous)
     try:
-        old_token = (
-            None
-            if previous is None
-            else secrets.get_or_none(credential_secret_path(credential.name))
-        )
-        store_token(secrets, credential.name, token)
+        store_token(secrets, credential, token)
     except SecretsError as exc:
+        _put_back_record(request, credential, previous)
         raise _secrets_failure(exc) from exc
-    try:
-        _store(request, credential)
-    except HTTPException:
-        _put_back_token(secrets, credential.name, old_token)
-        raise
     try:
         _sync_tokens(request)
     except HTTPException:
-        # Token first, so the bearer secrets the record write rewrites carry the old one.
-        _put_back_token(secrets, credential.name, old_token)
-        _put_back_record(request, credential.name, previous)
+        _put_back_record(request, credential, previous)
+        _drop_quietly(secrets, credential)
         raise
+    if previous is not None:
+        _drop_quietly(secrets, previous)
 
 
 def _delete(request: Request, credential: IngestCredential) -> None:
@@ -479,7 +507,11 @@ async def apply_ingest_credential(
 
     if current is not None:
         desired = desired.model_copy(
-            update={"created_at": current.created_at, "rotated_at": current.rotated_at}
+            update={
+                "created_at": current.created_at,
+                "rotated_at": current.rotated_at,
+                "token_id": current.token_id,
+            }
         )
         if dry_run:
             return _written(desired, dry_run=True)
@@ -491,7 +523,9 @@ async def apply_ingest_credential(
     if dry_run:
         return _written(desired, dry_run=True)
     now = _now()
-    minted = desired.model_copy(update={"created_at": now, "rotated_at": now})
+    minted = desired.model_copy(
+        update={"created_at": now, "rotated_at": now, "token_id": new_token_id()}
+    )
     token = mint_token()
     await run_blocking(functools.partial(_mint, request, minted, token))
     audit_resource_change(user.user_id, _RESOURCE, credential, "created", {"org": org})
@@ -534,15 +568,15 @@ async def rotate_ingest_credential(
     """Mint a new token for an ingest credential. The old one stops working and the binding stays.
 
     The new token comes back in this response and never again. ``If-Match`` is
-    honoured when sent. A rotate the secrets backend refuses answers 503 and leaves
-    the old token working.
+    honoured when sent. A rotate the secrets backend refuses answers 503, and one
+    another write beat to the credential answers 412. Either leaves the old token working.
     """
     held = _require_owned(_registry(request), org, credential)
     preconditions.check(credential_etag(held), require=False)
     response.headers["ETag"] = credential_etag(held)
     if dry_run:
         return _written(held, dry_run=True)
-    rotated = held.model_copy(update={"rotated_at": _now()})
+    rotated = held.model_copy(update={"rotated_at": _now(), "token_id": new_token_id()})
     token = mint_token()
     await run_blocking(functools.partial(_mint, request, rotated, token, previous=held))
     audit_resource_change(user.user_id, _RESOURCE, credential, "rotated", {"org": org})

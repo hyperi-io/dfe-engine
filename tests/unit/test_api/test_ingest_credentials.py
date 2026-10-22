@@ -12,6 +12,8 @@ receiver's overlay as tenant ids, and its ``<id>:<token>`` line reaches the bear
 secret of every listener it is scoped to.
 """
 
+from collections.abc import Callable, Iterator
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -23,7 +25,7 @@ from dfe_engine.api.v1 import ingest_credentials as ingest_credentials_api
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
-from dfe_engine.orgs.ingest_tokens import bearer_secret_path, credential_secret_path
+from dfe_engine.orgs.ingest_tokens import CREDENTIAL_SECRET_PREFIX, bearer_secret_path
 from dfe_engine.settings import IngestSettings, SecretsSettings
 from tests.support.local_kube_api import local_kube_api, mirror_for
 
@@ -48,6 +50,12 @@ def _secret(app, path: str) -> str | None:
     return app.state.dfe_secrets.get_or_none(path)
 
 
+def _stored_tokens(app, name: str) -> list[str]:
+    """Every token the file backend holds for credential *name*, under any of its mints."""
+    root = Path(app.state.settings.secrets.path) / CREDENTIAL_SECRET_PREFIX
+    return sorted(path.read_text(encoding="utf-8") for path in root.glob(f"{name}@*"))
+
+
 def _bearer(app, listener: str) -> str:
     value = _secret(app, bearer_secret_path(listener))
     assert value is not None, f"no bearer secret for {listener}"
@@ -70,7 +78,7 @@ class TestApplyCreates:
             "listeners": ["http", "otlp"],
         }
         assert resp.headers["ETag"]
-        assert _secret(app, credential_secret_path("agents")) == body["token"]
+        assert _stored_tokens(app, "agents") == [body["token"]]
 
         read = client.get(f"{BASE}/agents", headers=admin_headers)
         assert read.status_code == 200
@@ -137,7 +145,7 @@ class TestApplyCreates:
         assert resp.status_code == 200, resp.text
         assert (resp.json()["dry_run"], resp.json()["token"]) == (True, None)
         assert client.get(f"{BASE}/agents", headers=admin_headers).status_code == 404
-        assert _secret(app, credential_secret_path("agents")) is None
+        assert _stored_tokens(app, "agents") == []
 
 
 class TestClampRefusal:
@@ -178,7 +186,7 @@ class TestClampRefusal:
     def test_a_refused_binding_mints_nothing(self, client, app, admin_headers, orgs):
         _create(client, admin_headers, orgs=["acme"], default_org="beta")
 
-        assert _secret(app, credential_secret_path("agents")) is None
+        assert _stored_tokens(app, "agents") == []
 
 
 class TestUnreadableBackend:
@@ -199,7 +207,7 @@ class TestUnreadableBackend:
         assert body["code"] == "invalid_binding"
         assert [e["field"] for e in body["errors"]] == ["listeners"]
         assert "DFE_SECRETS_PROVIDER=ansible_vault" in body["errors"][0]["message"]
-        assert _secret(app, credential_secret_path("agents")) is None
+        assert _stored_tokens(app, "agents") == []
 
 
 class TestApplyUpdates:
@@ -219,7 +227,7 @@ class TestApplyUpdates:
         assert resp.json()["token"] is None
         assert resp.json()["orgs"] == ["acme", "beta"]
         assert resp.json()["created_at"] == created.json()["created_at"]
-        assert _secret(app, credential_secret_path("agents")) == token
+        assert _stored_tokens(app, "agents") == [token]
         assert _secret(app, bearer_secret_path("otlp")) == f"agents:{token}\n"
         assert token not in _bearer(app, "http")
 
@@ -245,7 +253,7 @@ class TestDeleteAndRotate:
 
         assert resp.status_code == 204
         assert client.get(f"{BASE}/agents", headers=admin_headers).status_code == 404
-        assert _secret(app, credential_secret_path("agents")) is None
+        assert _stored_tokens(app, "agents") == []
         assert token not in _bearer(app, "http")
 
     def test_a_delete_needs_if_match(self, client, admin_headers, orgs):
@@ -277,6 +285,7 @@ class TestDeleteAndRotate:
         assert token != created["token"]
         assert resp.json()["orgs"] == created["orgs"]
         assert _secret(app, bearer_secret_path("http")) == f"agents:{token}\n"
+        assert _stored_tokens(app, "agents") == [token]
 
     def test_a_dry_run_rotate_mints_nothing(self, client, app, admin_headers, orgs):
         created = _create(client, admin_headers).json()
@@ -284,7 +293,20 @@ class TestDeleteAndRotate:
         resp = client.post(f"{BASE}/agents/rotate?dry_run=true", headers=admin_headers)
 
         assert resp.json()["token"] is None
-        assert _secret(app, credential_secret_path("agents")) == created["token"]
+        assert _stored_tokens(app, "agents") == [created["token"]]
+
+
+def _first_write_lands_before(monkeypatch, app, method: str, write: Callable[[], None]) -> None:
+    """Make *write* land the moment the route calls the registry's *method*, as another replica's would."""
+    credentials = app.state.org_registry.ingest_credentials
+    real = getattr(credentials, method)
+
+    def racing(*args, **kwargs):
+        monkeypatch.setattr(credentials, method, real)
+        write()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(credentials, method, racing)
 
 
 @pytest.fixture
@@ -319,7 +341,7 @@ class TestBindingAnotherOrg:
 
         assert resp.status_code == 403, resp.text
         assert client.get(f"{BASE}/agents", headers=admin_headers).status_code == 404
-        assert _secret(app, credential_secret_path("agents")) is None
+        assert _stored_tokens(app, "agents") == []
 
     def test_an_org_admin_may_not_widen_a_binding_to_another_org(
         self, client, admin_headers, acme_admin
@@ -358,7 +380,7 @@ class TestADisabledOrg:
 
         assert disabled.status_code == 200, disabled.text
         assert token not in _bearer(app, "http")
-        assert _secret(app, credential_secret_path("agents")) == token
+        assert _stored_tokens(app, "agents") == [token]
 
         enabled = client.put("/api/v1/orgs/acme", json={"enabled": True}, headers=admin_headers)
 
@@ -552,7 +574,7 @@ class TestTheDefaultOrg:
         assert resp.status_code == 204, resp.text
         assert app.state.org_registry.ingest_credentials.get("agents") is None
         assert token not in _bearer(app, "http")
-        assert _secret(app, credential_secret_path("agents")) is None
+        assert _stored_tokens(app, "agents") == []
 
 
 class TestTheMirrorSecret:
@@ -599,7 +621,7 @@ class TestTheMirrorSecret:
 
             assert refused.status_code == 503, refused.text
             assert client.get(f"{BASE}/agents", headers=admin_headers).status_code == 404
-            assert _secret(app, credential_secret_path("agents")) is None
+            assert _stored_tokens(app, "agents") == []
             assert "agents:" not in _bearer(app, "http")
 
             kube.create_empty()
@@ -623,7 +645,7 @@ class TestTheMirrorSecret:
             refused = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
 
             assert refused.status_code == 503, refused.text
-            assert _secret(app, credential_secret_path("agents")) == created["token"]
+            assert _stored_tokens(app, "agents") == [created["token"]]
             assert _bearer(app, "http") == f"agents:{created['token']}\n"
             held = client.get(f"{BASE}/agents", headers=admin_headers).json()
             assert held["rotated_at"] == created["rotated_at"]
@@ -658,3 +680,74 @@ class TestTheMirrorSecret:
                 assert started.get("/livez").status_code == 200
         finally:
             _registries.clear()
+
+
+@pytest.fixture
+def replica_b(client, api_settings) -> Iterator[TestClient]:
+    """A second engine on the same config and secrets directories, as another replica runs."""
+    with TestClient(create_app(settings=api_settings), raise_server_exceptions=False) as other:
+        yield other
+
+
+class TestTwoReplicasWritingOneCredential:
+    """The write that loses touches nothing the winner wrote, its token above all."""
+
+    def test_a_create_that_loses_leaves_the_winner_s_token(
+        self, client, app, admin_headers, orgs, replica_b, monkeypatch
+    ):
+        won = {}
+
+        def b_creates_it() -> None:
+            won["resp"] = _create(replica_b, admin_headers, listeners=["http"])
+
+        _first_write_lands_before(monkeypatch, app, "put", b_creates_it)
+
+        lost = _create(client, admin_headers, listeners=["http"])
+
+        assert won["resp"].status_code == 201, won["resp"].text
+        assert lost.status_code == 412, lost.text
+        assert _bearer(app, "http") == f"agents:{won['resp'].json()['token']}\n"
+        assert _stored_tokens(app, "agents") == [won["resp"].json()["token"]]
+
+    def test_a_rotate_that_loses_leaves_the_winner_s_token(
+        self, client, app, admin_headers, orgs, replica_b, monkeypatch
+    ):
+        _create(client, admin_headers, listeners=["http"])
+        won = {}
+
+        def b_rotates_it() -> None:
+            won["resp"] = replica_b.post(f"{BASE}/agents/rotate", headers=admin_headers)
+
+        _first_write_lands_before(monkeypatch, app, "put", b_rotates_it)
+
+        lost = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
+
+        assert won["resp"].status_code == 200, won["resp"].text
+        assert lost.status_code == 412, lost.text
+        assert _bearer(app, "http") == f"agents:{won['resp'].json()['token']}\n"
+        assert _stored_tokens(app, "agents") == [won["resp"].json()["token"]]
+
+    def test_a_delete_spares_the_token_of_a_create_that_followed_it(
+        self, client, app, admin_headers, orgs, replica_b, monkeypatch
+    ):
+        created = _create(client, admin_headers, listeners=["http"])
+        credentials = app.state.org_registry.ingest_credentials
+        real = credentials._removed
+        won = {}
+
+        # Between the record going and its token being dropped, B creates the same id.
+        def removed(*args) -> None:
+            monkeypatch.setattr(credentials, "_removed", real)
+            won["resp"] = _create(replica_b, admin_headers, listeners=["http"])
+            real(*args)
+
+        monkeypatch.setattr(credentials, "_removed", removed)
+
+        resp = client.delete(
+            f"{BASE}/agents", headers={**admin_headers, "If-Match": created.headers["ETag"]}
+        )
+
+        assert resp.status_code == 204, resp.text
+        assert won["resp"].status_code == 201, won["resp"].text
+        assert _bearer(app, "http") == f"agents:{won['resp'].json()['token']}\n"
+        assert _stored_tokens(app, "agents") == [won["resp"].json()["token"]]

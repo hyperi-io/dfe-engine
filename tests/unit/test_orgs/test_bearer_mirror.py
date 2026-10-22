@@ -73,7 +73,7 @@ def _credential(registry: OrgRegistry, secrets, listeners: list[str]) -> IngestC
         }
     )
     registry.ingest_credentials.put(credential)
-    store_token(secrets, credential.name, "token-a")
+    store_token(secrets, credential, "token-a")
     return credential
 
 
@@ -125,7 +125,7 @@ class TestMirror:
         sync_bearer_tokens(registry, secrets, mirror)
 
         registry.ingest_credentials.delete(credential.name)
-        drop_token(secrets, credential.name)
+        drop_token(secrets, credential)
         sync_bearer_tokens(registry, secrets, mirror)
 
         # Each key stays, holding no token: the receiver keeps its last tokens when a file goes.

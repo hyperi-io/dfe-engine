@@ -232,7 +232,7 @@ class TestFileMount:
         registry.create("acme")
         registry.ingest_credentials.put(AGENTS)
         secrets = build_secrets(backend)
-        store_token(secrets, AGENTS.name, "token-a")
+        store_token(secrets, AGENTS, "token-a")
         sync_bearer_tokens(registry, secrets)
 
         auth = _auth(_on(settings, backend), Tenancy.read(registry))
