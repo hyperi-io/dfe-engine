@@ -8,6 +8,8 @@
 """CRUD for role definitions: one roles.yaml, or one document per custom role."""
 
 import builtins
+import functools
+import time
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,7 +31,7 @@ if TYPE_CHECKING:
 
 # How stale another replica's role write may be here: the floor between two checks.
 ROLE_REFRESH_SECONDS = 2.0
-# A binding claim no group holds is a group write that never finished once it is this old.
+# A binding claim no group holds, or a delete's mark, is a write that never finished once this old.
 BINDING_GRACE_SECONDS = 60.0
 
 type Holders = Callable[[str], Iterable[str]]
@@ -55,9 +57,13 @@ class Role(BaseModel):
 
 
 class _StoredRole(Role):
-    """A custom role as the document store holds it, marked while its delete runs."""
+    """A custom role as the document store holds it, marked while its delete runs.
 
-    deleting: bool = False
+    Attributes:
+        deleting_since: When a delete marked it, in seconds since the epoch, 0 when unmarked.
+    """
+
+    deleting_since: float = 0.0
 
 
 class RoleStore:
@@ -201,6 +207,10 @@ class DocuStoreRoleStore:
     binding before the group is written and then checks the role is still there. A
     delete marks the role first and then looks for groups and claims. Whichever comes
     second sees the other, so a role is never deleted while a group is being given it.
+
+    A mark older than the binding grace belongs to a delete that died before clearing
+    it. A bind takes such a mark away, and a delete removes the role only while its own
+    mark is still there, so one that was only slow fails rather than racing the bind.
     """
 
     def __init__(
@@ -299,26 +309,43 @@ class DocuStoreRoleStore:
         key = f"{role}/{group}"
         self._bindings.claim(key, group, subject=role)
         # After the claim: a delete that began before it is seen here, one after sees the claim.
-        stored = self._c.get(role)
-        if stored is None or stored.deleting:
+        if not self._bindable(role):
             self._bindings.release(key, group)
             raise RoleUnavailableError(f"Role '{role}' does not exist or is being deleted")
+
+    def _bindable(self, role: str) -> bool:
+        """Whether *role* exists with no live delete's mark, taking away a mark past the grace."""
+        stored = self._c.get(role)
+        if stored is None:
+            return False
+        if not stored.deleting_since:
+            return True
+        if time.time() - stored.deleting_since < self._binding_grace:
+            return False
+        try:
+            kept = self._c.mutate(role, functools.partial(_unmarked, stored.deleting_since))
+        except KeyError:
+            return False
+        return not kept.deleting_since
 
     def delete(self, name: str, *, holders: Holders) -> None:
         """Remove a custom role that no group holds or is being given, refusing a core one.
 
         A binding claim no group holds and older than the grace is a group write that
-        never finished, and is released rather than counted.
+        never finished, and is released rather than counted. A mark another delete left
+        is replaced by this one's.
 
         Raises:
             KeyError: No role holds the name.
             ValueError: The role is a core one.
-            RoleInUseError: A group holds it or is being given it.
+            RoleInUseError: A group holds it or is being given it, or a bind took this
+                delete's mark away.
         """
         if name in builtin_core_role_names():
             raise ValueError(CORE_RESOURCE_MUTATION_MESSAGE)
+        mark = time.time()
         try:
-            self._c.mutate(name, lambda stored: stored.model_copy(update={"deleting": True}))
+            self._c.mutate(name, lambda stored: stored.model_copy(update={"deleting_since": mark}))
         except KeyError:
             raise KeyError(f"Role '{name}' not found") from None
         try:
@@ -332,17 +359,19 @@ class DocuStoreRoleStore:
             ]
             if holding or pending:
                 raise RoleInUseError(_in_use_message(name))
-            if not self._c.delete(name, only_if={"deleting": True}):
+            if not self._c.delete(name, only_if={"deleting_since": mark}):
+                if self._c.exists(name):
+                    raise RoleInUseError(_in_use_message(name))
                 raise KeyError(f"Role '{name}' not found")
         except BaseException:
-            self._unmark(name)
+            self._unmark(name, mark)
             raise
         self._live.refresh()
 
-    def _unmark(self, name: str) -> None:
-        """Clear a delete's mark from *name*, so groups can be given it again."""
+    def _unmark(self, name: str, mark: float) -> None:
+        """Clear this delete's *mark* from *name*, so groups can be given it again."""
         try:
-            self._c.mutate(name, lambda stored: stored.model_copy(update={"deleting": False}))
+            self._c.mutate(name, functools.partial(_unmarked, mark))
         except KeyError:
             return
 
@@ -360,9 +389,16 @@ class DocuStoreRoleStore:
         return definitions
 
 
+def _unmarked(mark: float, stored: _StoredRole) -> _StoredRole:
+    """*stored* with *mark* cleared, or unchanged when a later delete marked it since."""
+    if stored.deleting_since != mark:
+        return stored
+    return stored.model_copy(update={"deleting_since": 0.0})
+
+
 def _public(role: _StoredRole) -> Role:
     """*role* without the store's delete mark."""
-    return Role(**role.model_dump(exclude={"deleting"}))
+    return Role(**role.model_dump(exclude={"deleting_since"}))
 
 
 def _in_use_message(name: str) -> str:
