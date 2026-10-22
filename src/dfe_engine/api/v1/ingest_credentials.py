@@ -392,12 +392,14 @@ def _mint(
     *,
     previous: IngestCredential | None = None,
 ) -> None:
-    """Store the credential, then *token* as its token, then the bearer secrets.
+    """Store *token* under the credential's own ``token_id``, then the credential, then the bearer secrets.
 
-    The record goes first and decides a race: a create stores it only where no
-    credential has its id, a rotate only where the stored one is still *previous*. The
-    write that loses has stored nothing, so it never touches the winner's token, and
-    each mint stores its token under a ``token_id`` of its own.
+    The token goes first, so a stored credential never names a token that is not
+    there. Its secret is this mint's alone, so storing it touches no other write's
+    token. The record then decides a race: a create stores it only where no credential
+    has its id, a rotate only where the stored one is still *previous*. The write that
+    loses drops its own token and nothing else. A replica that dies between the two
+    leaves a token no record names, which nothing ever presents.
 
     A write that cannot finish puts back what it changed: its caller got no token, so
     the API, the store and the receiver agree only on what stood before. A create
@@ -410,12 +412,15 @@ def _mint(
         ProblemError: 412 when another write created, changed or removed it first.
     """
     secrets = _secrets(request)
-    _store(request, credential, new=previous is None, current=previous)
     try:
         store_token(secrets, credential, token)
     except SecretsError as exc:
-        _put_back_record(request, credential, previous)
         raise _secrets_failure(exc) from exc
+    try:
+        _store(request, credential, new=previous is None, current=previous)
+    except BaseException:
+        _drop_quietly(secrets, credential)
+        raise
     try:
         _sync_tokens(request)
     except HTTPException:

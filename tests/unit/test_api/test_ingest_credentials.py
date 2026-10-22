@@ -12,6 +12,7 @@ receiver's overlay as tenant ids, and its ``<id>:<token>`` line reaches the bear
 secret of every listener it is scoped to.
 """
 
+import functools
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -25,7 +26,8 @@ from dfe_engine.api.v1 import ingest_credentials as ingest_credentials_api
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
-from dfe_engine.orgs.ingest_tokens import CREDENTIAL_SECRET_PREFIX, bearer_secret_path
+from dfe_engine.orgs.ingest_credentials import IngestCredential
+from dfe_engine.orgs.ingest_tokens import CREDENTIAL_SECRET_PREFIX, bearer_secret_path, store_token
 from dfe_engine.settings import IngestSettings, SecretsSettings
 from tests.support.local_kube_api import local_kube_api, mirror_for
 
@@ -751,3 +753,72 @@ class TestTwoReplicasWritingOneCredential:
         assert won["resp"].status_code == 201, won["resp"].text
         assert _bearer(app, "http") == f"agents:{won['resp'].json()['token']}\n"
         assert _stored_tokens(app, "agents") == [won["resp"].json()["token"]]
+
+
+def _second_write_dies(monkeypatch, app) -> None:
+    """Fail whichever of a mint's two writes, its token or its record, comes second, as a crash would."""
+    secrets, credentials = app.state.dfe_secrets, app.state.org_registry.ingest_credentials
+    store_secret, store_record = secrets.put, credentials.put
+    writes = []
+
+    def write(real, *args, **kwargs):
+        writes.append(real)
+        if len(writes) == 2:
+            raise RuntimeError("the replica died mid-mint")
+        return real(*args, **kwargs)
+
+    def put_secret(path, value):
+        if not path.startswith(CREDENTIAL_SECRET_PREFIX):
+            return store_secret(path, value)
+        return write(store_secret, path, value)
+
+    monkeypatch.setattr(secrets, "put", put_secret)
+    monkeypatch.setattr(credentials, "put", functools.partial(write, store_record))
+
+
+class TestAMintCutShortBetweenItsTwoWrites:
+    """A mint that dies between its token and its record leaves no record and no token in use."""
+
+    def test_a_create_leaves_no_record_and_no_token(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        _second_write_dies(monkeypatch, app)
+
+        resp = _create(client, admin_headers, listeners=["http"])
+
+        assert resp.status_code == 500
+        assert client.get(f"{BASE}/agents", headers=admin_headers).status_code == 404
+        assert _stored_tokens(app, "agents") == []
+        assert "agents:" not in _bearer(app, "http")
+
+    def test_a_rotate_leaves_the_old_token_working(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        created = _create(client, admin_headers, listeners=["http"]).json()
+        _second_write_dies(monkeypatch, app)
+
+        resp = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
+
+        assert resp.status_code == 500
+        assert _bearer(app, "http") == f"agents:{created['token']}\n"
+        assert _stored_tokens(app, "agents") == [created["token"]]
+        held = client.get(f"{BASE}/agents", headers=admin_headers).json()
+        assert held["rotated_at"] == created["rotated_at"]
+
+    def test_a_token_a_dead_replica_left_behind_is_never_presented(
+        self, client, app, admin_headers, orgs
+    ):
+        # Stored before the replica died, under a token id no record names.
+        orphan = IngestCredential(
+            name="agents",
+            org="acme",
+            orgs=["acme"],
+            default_org="acme",
+            listeners=["http"],
+            token_id="dead",
+        )
+        store_token(app.state.dfe_secrets, orphan, "orphan-token")
+
+        created = _create(client, admin_headers, listeners=["http"]).json()
+
+        assert _bearer(app, "http") == f"agents:{created['token']}\n"
