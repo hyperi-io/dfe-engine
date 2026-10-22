@@ -29,6 +29,7 @@ race it never won as :class:`DocumentConflictError`.
 
 import builtins
 import functools
+import uuid
 from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -433,12 +434,15 @@ class Claim(BaseModel):
         owner: Who holds it.
         claimed_at: When the owner last claimed it, ISO 8601 UTC.
         subject: What the key is about, for listing every claim on one thing.
+        instance: Made fresh when the key is claimed and kept through renewals, so a
+            claim released and made again never matches one read before.
     """
 
     key: str
     owner: str
     claimed_at: str = ""
     subject: str = ""
+    instance: str = ""
 
 
 class Claims:
@@ -463,7 +467,10 @@ class Claims:
             DocumentConflictError: The key was claimed and released under every attempt.
         """
         for _ in range(DEFAULT_ATTEMPTS):
-            if self._c.insert(Claim(key=key, owner=owner, claimed_at=_now(), subject=subject)):
+            made = Claim(
+                key=key, owner=owner, claimed_at=_now(), subject=subject, instance=uuid.uuid4().hex
+            )
+            if self._c.insert(made):
                 return True
             try:
                 held = self._c.mutate(key, functools.partial(_renewed, owner))
@@ -493,7 +500,8 @@ class Claims:
         """Release *claim* when its owner's record does not hold it and it is older than the grace.
 
         The grace leaves alone a claim whose owner is still writing the record that will
-        hold it. The release matches the claim as read, so one renewed since is kept.
+        hold it. The release matches the claim as read, so one renewed, or released and
+        made again, since is kept.
 
         Args:
             claim: A claim as read.
@@ -505,9 +513,8 @@ class Claims:
         """
         if held or _age_seconds(claim.claimed_at) < grace_seconds:
             return False
-        return self._c.delete(
-            claim.key, only_if={"owner": claim.owner, "claimed_at": claim.claimed_at}
-        )
+        as_read = {"owner": claim.owner, "claimed_at": claim.claimed_at, "instance": claim.instance}
+        return self._c.delete(claim.key, only_if=as_read)
 
 
 def _renewed(owner: str, claim: Claim) -> Claim:
