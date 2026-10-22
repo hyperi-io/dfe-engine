@@ -26,9 +26,9 @@ Usage:
         ...
 """
 
-from __future__ import annotations
-
 import importlib.resources
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -157,7 +157,12 @@ class RoleConfig:
     """
 
     def __init__(self, roles: dict[str, RoleDefinition]) -> None:
-        self.roles = roles
+        self._roles = roles
+
+    @property
+    def roles(self) -> dict[str, RoleDefinition]:
+        """The role definitions, keyed by role name."""
+        return self._roles
 
     def has_permission(self, role_name: str, action: str) -> bool:
         """Check whether a single role grants the given action.
@@ -264,3 +269,53 @@ class RoleConfig:
                 normalized.setdefault("resource_type", "custom")
             roles[name] = RoleDefinition.model_validate(normalized)
         return cls(roles=roles)
+
+
+class LiveRoleConfig(RoleConfig):
+    """Role definitions that follow a store several replicas write, read again when it changes.
+
+    Every read of :attr:`roles` compares the store's write counter with the one the
+    definitions were read at, at most once every ``refresh_seconds``, and reads them
+    again when it has moved. A role written through another replica therefore takes
+    effect here within that floor, and one written through this replica at once
+    (:meth:`refresh`).
+    """
+
+    def __init__(
+        self,
+        load: Callable[[], dict[str, RoleDefinition]],
+        revision: Callable[[], int],
+        *,
+        refresh_seconds: float,
+    ) -> None:
+        """Read the definitions once.
+
+        Args:
+            load: Reads every role definition from the store.
+            revision: The store's write counter for the roles.
+            refresh_seconds: The least time between two checks of the counter.
+        """
+        super().__init__({})
+        self._load = load
+        self._revision = revision
+        self._refresh_seconds = refresh_seconds
+        self._read_at = 0
+        self._checked = 0.0
+        self.refresh()
+
+    @property
+    def roles(self) -> dict[str, RoleDefinition]:
+        """The role definitions, read again first when the store has moved since."""
+        now = time.monotonic()
+        if now - self._checked >= self._refresh_seconds:
+            self._checked = now
+            if self._revision() != self._read_at:
+                self.refresh()
+        return self._roles
+
+    def refresh(self) -> None:
+        """Read the definitions now, whatever the floor."""
+        # The counter first: a write landing during the read leaves it behind, so the next check reads again.
+        self._read_at = self._revision()
+        self._roles = self._load()
+        self._checked = time.monotonic()

@@ -26,7 +26,9 @@ moment it lapses without any sweeper having to run; the file stays on disk
 until an admin revokes it, which keeps the lapse visible in list().
 
 Lookup strategy: filename is the key name; short_token is stored inside
-the YAML for cross-file lookup during verify()/revoke().
+the YAML for cross-file lookup during verify()/revoke(). The document store
+(:class:`DocuStoreAPIKeyStore`) holds one document per key, unique on both the
+name and the short token, so verify is one indexed read on any replica.
 """
 
 import builtins
@@ -35,16 +37,23 @@ import hmac
 import secrets
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
 from dfe_engine.auth.store_names import store_key
 from dfe_engine.names import VALID_NAME
+from dfe_engine.store.documents import DocumentConflictError
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+if TYPE_CHECKING:
+    from dfe_engine.store.documents import DocuStore
 
 _KEY_PREFIX = "dfe_ak"
 _SHORT_BYTES = 4  # 4 bytes -> 8 hex chars
 _LONG_BYTES = 16  # 16 bytes -> 32 hex chars
+# Fresh tokens drawn when a new key's 8-hex short token is already another key's.
+_TOKEN_ATTEMPTS = 3
 
 
 def parse_expiry(value: str) -> datetime:
@@ -143,33 +152,13 @@ class APIKeyStore:
             ValueError: If a key with this name already exists, or if
                 expires_at is unparseable or not in the future.
         """
-        if not VALID_NAME.match(name):
-            raise ValueError(f"Invalid API key name: {name!r}")
-        expiry: str | None = None
-        if expires_at is not None:
-            parsed_expiry = parse_expiry(expires_at)
-            if parsed_expiry <= datetime.now(UTC):
-                raise ValueError(f"Invalid expires_at: {expires_at!r} is in the past")
-            expiry = parsed_expiry.isoformat()
+        expiry = _checked_new_key(name, expires_at)
         key_file = self._keys_dir / f"{name}.yaml"
         if key_file.exists():
             raise ValueError(f"API key '{name}' already exists")
 
-        short_token = secrets.token_hex(_SHORT_BYTES)
-        long_token = secrets.token_hex(_LONG_BYTES)
-        key_hash = "sha384:" + hashlib.sha384(long_token.encode()).hexdigest()
-        full_key = f"{_KEY_PREFIX}_{short_token}_{long_token}"
-
-        key_meta = APIKey(
-            name=name,
-            short_token=short_token,
-            key_hash=key_hash,
-            enabled=True,
-            groups=groups or [],
-            org=org,
-            description=description,
-            created_at=datetime.now(UTC).isoformat(),
-            expires_at=expiry,
+        key_meta, full_key = _mint(
+            name, groups=groups, org=org, description=description, expiry=expiry
         )
 
         # Write to disk -- name is the filename stem, not in the YAML body
@@ -226,33 +215,12 @@ class APIKeyStore:
             reason is one of ``malformed_key``, ``unknown_key``,
             ``invalid_key``, ``disabled_key``, ``expired_key``.
         """
-        parsed = self._parse_key(submitted_key)
+        parsed = _parse_key(submitted_key)
         if parsed is None:
             return None, "malformed_key"
-
         short_token, long_token = parsed
-
         # Locate key file by scanning for matching short_token
-        key_meta = self._find_by_short_token(short_token)
-        if key_meta is None:
-            return None, "unknown_key"
-
-        # Timing-safe comparison. New keys are SHA-384 (CNSA); pre-existing
-        # sha256: keys still verify under their stored algorithm.
-        algo, _, stored_hash = key_meta.key_hash.partition(":")
-        if algo not in ("sha256", "sha384"):
-            return None, "invalid_key"
-        submitted_hash = hashlib.new(algo, long_token.encode()).hexdigest()
-        if not hmac.compare_digest(submitted_hash, stored_hash):
-            return None, "invalid_key"
-
-        if not key_meta.enabled:
-            return None, "disabled_key"
-
-        if key_meta.is_expired():
-            return None, "expired_key"
-
-        return key_meta, "ok"
+        return _verified(self._find_by_short_token(short_token), long_token)
 
     def revoke(self, short_token: str) -> None:
         """Delete a key by its short_token.
@@ -283,21 +251,6 @@ class APIKeyStore:
         data["name"] = path.stem
         return APIKey(**data)
 
-    def _parse_key(self, key: str) -> tuple[str, str] | None:
-        """Parse ``dfe_ak_{short}_{long}`` into (short_token, long_token).
-
-        Returns None if the format is invalid.
-        """
-        if not key:
-            return None
-        parts = key.split("_", maxsplit=3)
-        if len(parts) != 4:
-            return None
-        prefix, kind, short_token, long_token = parts
-        if prefix != "dfe" or kind != "ak":
-            return None
-        return short_token, long_token
-
     def _find_by_short_token(self, short_token: str) -> APIKey | None:
         """Scan all key files to find one matching the given short_token."""
         for key_file in self._keys_dir.glob("*.yaml"):
@@ -305,3 +258,156 @@ class APIKeyStore:
             if key_meta.short_token == short_token:
                 return key_meta
         return None
+
+
+class DocuStoreAPIKeyStore:
+    """API keys in the document store -- the same interface as :class:`APIKeyStore`.
+
+    One document per key, unique on ``name`` and on ``short_token``, so a create is
+    decided by the store's unique index on any replica and verify is one indexed read.
+    """
+
+    def __init__(self, store: DocuStore, *, collection: str = "api_keys") -> None:
+        self._c = store.typed(collection, APIKey, key="name", unique=("short_token",))
+
+    def create(
+        self,
+        name: str,
+        *,
+        groups: builtins.list[str] | None = None,
+        org: str = "",
+        description: str = "",
+        expires_at: str | None = None,
+    ) -> tuple[APIKey, str]:
+        """Create a new API key. The arguments and the answer are :meth:`APIKeyStore.create`'s.
+
+        Raises:
+            ValueError: A key with this name already exists, including one another
+                replica made at the same moment, or expires_at is unparseable or past.
+            DocumentConflictError: Every short token drawn was already another key's.
+        """
+        expiry = _checked_new_key(name, expires_at)
+        for _ in range(_TOKEN_ATTEMPTS):
+            key_meta, full_key = _mint(
+                name, groups=groups, org=org, description=description, expiry=expiry
+            )
+            if self._c.insert(key_meta):
+                return key_meta, full_key
+            if self._c.exists(name):
+                raise ValueError(f"API key '{name}' already exists")
+        raise DocumentConflictError(f"no free short token for API key {name} in {_TOKEN_ATTEMPTS}")
+
+    def get(self, name: str) -> APIKey | None:
+        """Read key metadata by name, or None if the key does not exist."""
+        try:
+            return self._c.get(store_key(name))
+        except KeyError:
+            return None
+
+    def list(self) -> builtins.list[APIKey]:
+        """Return all stored keys sorted by name."""
+        return self._c.list()
+
+    def verify(self, submitted_key: str) -> APIKey | None:
+        """Verify a submitted API key, as :meth:`APIKeyStore.verify` does."""
+        key_meta, _reason = self.verify_detailed(submitted_key)
+        return key_meta
+
+    def verify_detailed(self, submitted_key: str) -> tuple[APIKey | None, str]:
+        """Verify a key and report why it failed, as :meth:`APIKeyStore.verify_detailed` does."""
+        parsed = _parse_key(submitted_key)
+        if parsed is None:
+            return None, "malformed_key"
+        short_token, long_token = parsed
+        return _verified(self._c.get_by("short_token", short_token), long_token)
+
+    def revoke(self, short_token: str) -> None:
+        """Delete a key by its short_token.
+
+        Raises:
+            KeyError: If no key with this short_token exists, including one another
+                replica revoked a moment ago.
+        """
+        key_meta = self._c.get_by("short_token", short_token)
+        if key_meta is None or not self._c.delete(
+            key_meta.name, only_if={"short_token": short_token}
+        ):
+            raise KeyError(f"No API key with short_token '{short_token}'")
+
+
+def _checked_new_key(name: str, expires_at: str | None) -> str | None:
+    """The expiry a new key named *name* stores, normalised to UTC, or None for none.
+
+    Raises:
+        ValueError: The name is not one a key can have, or the expiry is unparseable
+            or not in the future.
+    """
+    if not VALID_NAME.match(name):
+        raise ValueError(f"Invalid API key name: {name!r}")
+    if expires_at is None:
+        return None
+    parsed_expiry = parse_expiry(expires_at)
+    if parsed_expiry <= datetime.now(UTC):
+        raise ValueError(f"Invalid expires_at: {expires_at!r} is in the past")
+    return parsed_expiry.isoformat()
+
+
+def _mint(
+    name: str,
+    *,
+    groups: list[str] | None,
+    org: str,
+    description: str,
+    expiry: str | None,
+) -> tuple[APIKey, str]:
+    """A new key's stored metadata and the full key, which only the caller ever sees."""
+    short_token = secrets.token_hex(_SHORT_BYTES)
+    long_token = secrets.token_hex(_LONG_BYTES)
+    key_meta = APIKey(
+        name=name,
+        short_token=short_token,
+        key_hash="sha384:" + hashlib.sha384(long_token.encode()).hexdigest(),
+        enabled=True,
+        groups=groups or [],
+        org=org,
+        description=description,
+        created_at=datetime.now(UTC).isoformat(),
+        expires_at=expiry,
+    )
+    return key_meta, f"{_KEY_PREFIX}_{short_token}_{long_token}"
+
+
+def _parse_key(key: str) -> tuple[str, str] | None:
+    """Parse ``dfe_ak_{short}_{long}`` into (short_token, long_token), or None if malformed."""
+    if not key:
+        return None
+    parts = key.split("_", maxsplit=3)
+    if len(parts) != 4:
+        return None
+    prefix, kind, short_token, long_token = parts
+    if prefix != "dfe" or kind != "ak":
+        return None
+    return short_token, long_token
+
+
+def _verified(key_meta: APIKey | None, long_token: str) -> tuple[APIKey | None, str]:
+    """*key_meta* and ``ok`` when *long_token* is its secret and it is usable, else why not.
+
+    The status checks run only after the hash comparison proves the caller holds the
+    real key, so a reason never confirms a key the caller has not already got.
+    """
+    if key_meta is None:
+        return None, "unknown_key"
+    # Timing-safe comparison. New keys are SHA-384 (CNSA), and pre-existing
+    # sha256: keys still verify under their stored algorithm.
+    algo, _, stored_hash = key_meta.key_hash.partition(":")
+    if algo not in ("sha256", "sha384"):
+        return None, "invalid_key"
+    submitted_hash = hashlib.new(algo, long_token.encode()).hexdigest()
+    if not hmac.compare_digest(submitted_hash, stored_hash):
+        return None, "invalid_key"
+    if not key_meta.enabled:
+        return None, "disabled_key"
+    if key_meta.is_expired():
+        return None, "expired_key"
+    return key_meta, "ok"

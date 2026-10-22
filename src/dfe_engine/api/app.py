@@ -387,9 +387,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     group_metrics = GroupMetrics(app.state.metrics_manager)
     injected_account_store = None
     injected_group_store = None
+    injected_api_key_store = None
+    injected_role_store = None
     if doc_store is not None:
         from dfe_engine.auth.accounts import DocuStoreAccountStore
+        from dfe_engine.auth.api_keys import DocuStoreAPIKeyStore
         from dfe_engine.auth.groups import DocuStoreGroupStore
+        from dfe_engine.auth.role_store import DocuStoreRoleStore
 
         # The admin name the bootstrap seeds, so the protected-name floor moves
         # with a renamed admin on this backend too.
@@ -398,9 +402,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
             collection=settings.auth.accounts_store.collection,
             admin_name=settings.auth.local.admin_name,
         )
+        injected_role_store = DocuStoreRoleStore(doc_store)
         injected_group_store = DocuStoreGroupStore(
-            doc_store, admin_name=settings.auth.local.admin_name, metrics=group_metrics
+            doc_store,
+            admin_name=settings.auth.local.admin_name,
+            metrics=group_metrics,
+            roles=injected_role_store,
         )
+        injected_api_key_store = DocuStoreAPIKeyStore(doc_store)
 
     # Refuse to start on the shipped admin password outside a dev posture, unless
     # the operator has retired the admin -- then an absent password is the point.
@@ -427,6 +436,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         seed_accounts=settings.auth.local.seed_accounts,
         breakglass_password=settings.auth.local.breakglass_password,
         recovery_email=settings.auth.local.recovery_email,
+        api_key_store=injected_api_key_store,
+        role_store=injected_role_store,
     )
     app.state.account_store = account_store
     app.state.group_store = group_store

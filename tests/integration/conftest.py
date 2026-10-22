@@ -1303,6 +1303,28 @@ def mongo_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         teardown()
 
 
+@pytest.fixture
+def docustore_pair(mongo_uri: str) -> Iterator[tuple[Any, Any]]:
+    """Two DocuStore clients on one throwaway database, as two engine replicas hold them.
+
+    Each holds its own connection pool, so only the store orders their writes. The
+    database is dropped on teardown.
+    """
+    import uuid
+
+    from dfe_engine.store.documents import DocuStore
+
+    database = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
+    first, second = DocuStore(mongo_uri, database), DocuStore(mongo_uri, database)
+    first.ping()
+    try:
+        yield first, second
+    finally:
+        first.drop_database(database)
+        first.close()
+        second.close()
+
+
 def _kafka_env(port: int) -> list[str]:
     """The ``-e`` arguments for a one-node KRaft broker that advertises the host port it is published on."""
     env = {

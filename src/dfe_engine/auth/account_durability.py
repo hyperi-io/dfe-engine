@@ -33,6 +33,7 @@ otherwise put the old one back. The hydrate also keeps the later of the two copi
 session ends.
 """
 
+import functools
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
@@ -72,6 +73,15 @@ _SESSION_STATE = (
     "disabled_at",
     "blocked",
     "blocked_at",
+)
+# What the boot takes from the deploy repo onto an account the live store already holds:
+# the credential and whether it may log in. Logins, contact details and the rest stay live.
+_DURABLE_FIELDS = (
+    "password_hash",
+    "seeded_password_hash",
+    "password_change_required",
+    "enabled",
+    "disabled_at",
 )
 # One read-and-write, then one more when another write lands between the two.
 _SESSION_END_ATTEMPTS = 2
@@ -459,9 +469,13 @@ def hydrate_from_deploy_repo(
     persisted admin is never overwritten by the shipped default. Best-effort: a
     missing/empty deploy repo just restores nothing.
 
-    An account the live store still holds keeps the later of the two session ends
-    (:func:`~dfe_engine.auth.accounts.later_session_end`), so a token it refused is
-    not let back in, and that later end is committed back to the deploy repo.
+    An account the live store does not hold is added whole. One it holds takes only
+    the deploy repo's credential and enable fields, and keeps the later of the two
+    session ends (:func:`~dfe_engine.auth.accounts.later_session_end`), so a token it
+    refused is not let back in. Several replicas share the live store, so that change
+    is written only over the record it was made from, and a logout or login another
+    replica records meanwhile survives. A later session end is committed back to the
+    deploy repo.
     """
     if gc is None:
         return 0
@@ -473,15 +487,40 @@ def hydrate_from_deploy_repo(
         except ResourceNotFoundError:
             continue
         durable = Account.model_validate({**doc, "username": name})
-        live = account_store.get(name)
-        account = durable if live is None else later_session_end(durable, live)
+        restored += 1
         # The deploy repo is the durable authority, so it may hold a retired admin
         # the protected-name floor would otherwise refuse to write back disabled.
-        account_store.put(account, allow_protected=True)
-        if account != durable:
+        if account_store.add(durable):
+            continue
+        try:
+            account = account_store.change(
+                name, functools.partial(_hydrated, durable), allow_protected=True
+            )
+        except KeyError:
+            # Deleted since the add found it, by an admin on another replica.
+            continue
+        if any(getattr(account, f) != getattr(durable, f) for f in _SESSION_STATE):
             publish_session_end(gc, account, actor="dfe-engine")
-        restored += 1
     return restored
+
+
+def _hydrated(durable: Account, live: Account) -> Account:
+    """*live* with *durable*'s credential and enable fields, and the later session end of the two.
+
+    Args:
+        durable: The account as the deploy repo holds it.
+        live: The same account as the live store holds it.
+
+    Returns:
+        *live* itself when nothing differs.
+    """
+    later = later_session_end(durable, live)
+    changes = {
+        field: getattr(later, field)
+        for field in (*_DURABLE_FIELDS, *_SESSION_STATE)
+        if getattr(later, field) != getattr(live, field)
+    }
+    return live.model_copy(update=changes) if changes else live
 
 
 def publish_session_end(gc: GitCrud | None, account: Account, *, actor: str) -> None:

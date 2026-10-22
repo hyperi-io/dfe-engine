@@ -30,6 +30,7 @@ import os
 import secrets
 import tempfile
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -295,6 +296,62 @@ class AccountStore:
         self._write(self._path(account.username), account)
         return account
 
+    def add(self, account: Account) -> bool:
+        """Store a complete record verbatim when no account holds its name.
+
+        Returns:
+            True when stored, False when an account already holds the name.
+
+        Raises:
+            InvalidNameError: The username is not a safe filename stem.
+        """
+        if not VALID_NAME.match(account.username):
+            raise InvalidNameError(f"Invalid account name: {account.username!r}")
+        try:
+            self._write_new(self._path(account.username), account)
+        except FileExistsError:
+            return False
+        return True
+
+    def change(
+        self,
+        username: str,
+        change: Callable[[Account], Account],
+        *,
+        allow_protected: bool = False,
+    ) -> Account:
+        """Store ``change`` of *username*'s record, and return what is stored.
+
+        Args:
+            username: The account to change.
+            change: Returns the new record from the stored one, keeping its username.
+            allow_protected: Store a record the protected-name floor would refuse.
+
+        Raises:
+            KeyError: No account is stored under *username*.
+            ValueError: ``change`` altered the username.
+            ProtectedAccountError: The record would leave a recovery credential
+                unable to log in.
+        """
+        path = self._stored(username)
+        if path is None:
+            raise KeyError(username)
+        account = self._read(path)
+        updated = change(account)
+        if updated == account:
+            return account
+        if updated.username != account.username:
+            raise ValueError(f"change may not rename the account {username!r}")
+        if not allow_protected:
+            self.protected.check_account_state(
+                updated.username,
+                enabled=updated.enabled,
+                blocked=updated.blocked,
+                groups=updated.groups,
+            )
+        self._write(path, updated)
+        return updated
+
     def get(self, username: str) -> Account | None:
         """Return the account for *username*, or None if not found.
 
@@ -375,9 +432,8 @@ class AccountStore:
             raise KeyError(username)
 
         account = self._read(path)
-        account = account.model_copy(
-            update=_password_update(account, new_password, change_required)
-        )
+        digest = hash_password(new_password)
+        account = account.model_copy(update=_password_update(account, digest, change_required))
         self._write(path, account)
 
     def end_sessions(self, username: str) -> Account:
@@ -564,6 +620,11 @@ class DocuStoreAccountStore:
     floor, and the timing-safe :meth:`verify_password` - is identical to the YAML
     store, so the two are drop-in interchangeable behind the same construction seam.
 
+    Several engine replicas share the store, so every change to a stored account
+    reads it, applies the change and writes only if no other write landed between,
+    and the protected-name floor judges the record being replaced. A change that
+    keeps losing that race raises :class:`~dfe_engine.store.documents.DocumentConflictError`.
+
     Attributes:
         protected: The recovery credentials this store refuses to lock out.
     """
@@ -629,6 +690,59 @@ class DocuStoreAccountStore:
         self._c.put(account.username, account)
         return account
 
+    def add(self, account: Account) -> bool:
+        """Store a complete record verbatim when no account holds its name.
+
+        The insert, not a prior lookup, decides, so of two replicas adding one name
+        exactly one does.
+
+        Returns:
+            True when stored, False when an account already holds the name.
+
+        Raises:
+            InvalidNameError: The username is not a name an account can have.
+        """
+        if not VALID_NAME.match(account.username):
+            raise InvalidNameError(f"Invalid account name: {account.username!r}")
+        return self._c.insert(account)
+
+    def change(
+        self,
+        username: str,
+        change: Callable[[Account], Account],
+        *,
+        allow_protected: bool = False,
+    ) -> Account:
+        """Store ``change`` of *username*'s record, only over the revision it was made from.
+
+        ``change`` may run more than once, each time on the record as now stored.
+
+        Args:
+            username: The account to change.
+            change: Returns the new record from the stored one, keeping its username.
+            allow_protected: Store a record the protected-name floor would refuse.
+
+        Raises:
+            KeyError: No account is stored under *username*.
+            ValueError: ``change`` altered the username.
+            ProtectedAccountError: The record would leave a recovery credential
+                unable to log in.
+            DocumentConflictError: Other writes kept landing first.
+        """
+
+        def checked(account: Account) -> Account:
+            updated = change(account)
+            if not allow_protected and updated != account:
+                self.protected.check_account_state(
+                    updated.username,
+                    enabled=updated.enabled,
+                    blocked=updated.blocked,
+                    groups=updated.groups,
+                )
+            return updated
+
+        return self._c.mutate(store_key(username), checked)
+
     def get(self, username: str) -> Account | None:
         """Return the account for *username*, or None if not found."""
         try:
@@ -653,13 +767,14 @@ class DocuStoreAccountStore:
         ``allow_protected`` disables or de-roles a recovery credential -- admin
         retirement only. Raises ProtectedAccountError otherwise.
         """
-        account = self._existing(username)
-        if not allow_protected:
-            self.protected.check_account_update(username, fields, account.groups)
-        updates = _access_updates(account, fields)
-        account = account.model_copy(update={**updates, "updated_at": _now()})
-        self._c.put(username, account)
-        return account
+
+        def apply(account: Account) -> Account:
+            if not allow_protected:
+                self.protected.check_account_update(username, fields, account.groups)
+            updates = _access_updates(account, fields)
+            return account.model_copy(update={**updates, "updated_at": _now()})
+
+        return self._c.mutate(store_key(username), apply)
 
     def reset_password(
         self, username: str, new_password: str, *, change_required: bool = False
@@ -668,25 +783,33 @@ class DocuStoreAccountStore:
 
         ``change_required`` marks the password as issued, and False clears a pending change.
         """
-        account = self._existing(username)
-        account = account.model_copy(
-            update=_password_update(account, new_password, change_required)
+        key = store_key(username)
+        if not self._c.exists(key):
+            raise KeyError(username)
+        # Hashed once, so a retried write does not pay bcrypt again.
+        digest = hash_password(new_password)
+        self._c.mutate(
+            key,
+            lambda account: account.model_copy(
+                update=_password_update(account, digest, change_required)
+            ),
         )
-        self._c.put(username, account)
 
     def end_sessions(self, username: str) -> Account:
         """End every session of an account. Raises KeyError if it does not exist."""
-        account = self._existing(username)
-        account = account.model_copy(update=_sessions_ended(account))
-        self._c.put(username, account)
-        return account
+        return self._c.mutate(
+            store_key(username),
+            lambda account: account.model_copy(update=_sessions_ended(account)),
+        )
 
     def set_attributes(self, username: str, attributes: dict) -> Account:
         """Full-replace the non-sensitive ``attributes`` blob. Raises KeyError if missing."""
-        account = self._existing(username)
-        account = account.model_copy(update={"attributes": attributes, "updated_at": _now()})
-        self._c.put(username, account)
-        return account
+        return self._c.mutate(
+            store_key(username),
+            lambda account: account.model_copy(
+                update={"attributes": attributes, "updated_at": _now()}
+            ),
+        )
 
     def delete(self, username: str, *, allow_protected: bool = False) -> None:
         """Remove an account. Raises KeyError if it does not exist.
@@ -896,15 +1019,12 @@ def _new_account(
     )
 
 
-def _password_update(
-    account: Account, new_password: str, change_required: bool
-) -> dict[str, object]:
-    """The fields a password reset of *account* writes, the seeded digest too when issued.
+def _password_update(account: Account, digest: str, change_required: bool) -> dict[str, object]:
+    """The fields a password reset of *account* to *digest* writes, the seeded digest too when issued.
 
     The reset ends every session as well, so a restore that puts back the hash it
     replaced never revives a token minted under that hash.
     """
-    digest = hash_password(new_password)
     update: dict[str, object] = {
         **_sessions_ended(account),
         "password_hash": digest,
