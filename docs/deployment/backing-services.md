@@ -126,7 +126,11 @@ The engine's JWT signing key, ClickHouse passwords and the OIDC client secrets a
 
 `DFE_SECRETS_PROVIDER=aws` keeps them in AWS Secrets Manager as `<DFE_SECRETS_NAME_PREFIX>/<path>` in `DFE_SECRETS_REGION`. Each is encrypted with `DFE_SECRETS_KMS_KEY_ID` (the AWS managed key when unset, with a startup warning), tagged with the `DFE_SECRETS_TAGS` JSON object, and deleted with no recovery window unless `DFE_SECRETS_RECOVERY_WINDOW_DAYS` sets 7-30. AWS finishes a forced delete in the background, so re-creating the same name retries for up to 30 seconds. Inside a window the name stays taken: re-creating that OIDC provider answers 409 with the remedy, and a reconcile re-creating that group fails naming the setting.
 
-`openbao` is used where the deployment configures it. `gcp` and `azure` are refused: their secret names allow no `/`, and every engine path has one.
+`DFE_SECRETS_PROVIDER=openbao` (or `vault`) keeps them in OpenBao at `DFE_SECRETS_ADDR`, falling back to `VAULT_ADDR`, under the KV v2 mount `DFE_SECRETS_MOUNT` (default `dfe`). The engine logs in with AppRole when `DFE_SECRETS_ROLE` holds the role id, taking the secret id from `VAULT_SECRET_ID`, and with `VAULT_TOKEN` otherwise. `VAULT_ROLE_ID` alone does not select AppRole.
+
+The engine's OpenBao policy needs create, read, update, delete and list on `<mount>/data/*` and `<mount>/metadata/*`. An OpenBao behind a private CA is trusted through `SSL_CERT_FILE`.
+
+More than one engine (`DFE_ENGINE_REPLICAS` above 1) needs `openbao` or `aws`. Both store a secret only when the name is free (KV v2 `cas=0`, `CreateSecret`), so replicas minting the same secret keep one value. `gcp` and `azure` are refused: their secret names allow no `/`, and every engine path has one.
 
 ## The dfe-docker special case - keep it small
 

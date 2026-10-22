@@ -68,7 +68,7 @@ import time
 import warnings
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NoReturn
@@ -99,6 +99,14 @@ _DOCUMENTDB_DIGEST = "sha256:03aef53ed72cd3007236f8ce1b4ef7a0c958dbbce1519074b85
 _DOCUMENTDB_IMAGE = (
     f"ghcr.io/documentdb/documentdb/documentdb-local:{_DOCUMENTDB_TAG}@{_DOCUMENTDB_DIGEST}"
 )
+# The shared secrets backend replicas use, in dev mode. The digest is ghcr's multi-arch
+# index for the tag.
+# renovate: datasource=docker depName=ghcr.io/openbao/openbao
+_OPENBAO_TAG = "2.7.1"
+_OPENBAO_DIGEST = "sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf"
+_OPENBAO_IMAGE = f"ghcr.io/openbao/openbao:{_OPENBAO_TAG}@{_OPENBAO_DIGEST}"
+_OPENBAO_PORT = 8200
+
 _DOCUMENTDB_USER = "dfe"
 _DOCUMENTDB_PORT = 10260
 _DOCUMENTDB_ENTRYPOINT = "/home/documentdb/gateway/scripts/emulator_entrypoint.sh"
@@ -1301,6 +1309,98 @@ def mongo_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
         yield uri
     finally:
         teardown()
+
+
+@dataclass(frozen=True)
+class OpenBao:
+    """A dev-mode OpenBao server, reached at *address* with its root *token*."""
+
+    address: str
+    token: str = field(repr=False)
+
+    def call(self, method: str, path: str, body: dict | None = None) -> dict:
+        """One API call as the root token, returning the parsed reply, empty for a 204."""
+        import json
+        import urllib.request
+
+        data = json.dumps(body).encode() if body is not None else None
+        request = urllib.request.Request(  # noqa: S310  # the harness's own server
+            f"{self.address}/v1/{path}",
+            data=data,
+            method=method,
+            headers={"X-Vault-Token": self.token, "Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(request, timeout=10) as reply:  # noqa: S310
+            raw = reply.read()
+        return json.loads(raw) if raw else {}
+
+    def kv_mount(self) -> str:
+        """A fresh KV v2 mount, so each test reads only what it wrote."""
+        mount = f"dfe-{secrets.token_hex(4)}"
+        self.call("POST", f"sys/mounts/{mount}", {"type": "kv", "options": {"version": "2"}})
+        return mount
+
+
+def _openbao_when_ready(address: str, timeout: float = 60.0, delay: float = 0.5) -> None:
+    """Poll until the dev server reports itself unsealed and active."""
+    import urllib.request
+
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            with urllib.request.urlopen(f"{address}/v1/sys/health", timeout=5) as reply:  # noqa: S310
+                if reply.status == 200:
+                    return
+        except OSError:
+            pass
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"OpenBao at {address} did not report healthy in {timeout}s")
+        time.sleep(delay)
+
+
+@pytest.fixture(scope="session")
+def openbao() -> Iterator[OpenBao]:
+    """A dev-mode OpenBao on docker, one per xdist worker, with a throwaway root token."""
+    spec = os.environ.get("DFE_TEST_DOCKER_HOST") or "local"
+    docker = _docker_prefix(spec)
+    host = _reach_address(spec)
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    name = _container_name(f"{worker}-{os.getpid()}", "openbao")
+    token = secrets.token_hex(16)
+    run_cmd = [
+        *docker,
+        "run",
+        "-d",
+        "--name",
+        name,
+        *_container_labels("openbao"),
+        "-p",
+        f"0:{_OPENBAO_PORT}",
+        "-e",
+        f"BAO_DEV_ROOT_TOKEN_ID={token}",
+        "-e",
+        f"BAO_DEV_LISTEN_ADDRESS=0.0.0.0:{_OPENBAO_PORT}",
+        _OPENBAO_IMAGE,
+        "server",
+        "-dev",
+    ]
+    try:
+        _run(run_cmd, timeout=240)  # first image pull can be slow
+    except (subprocess.SubprocessError, FileNotFoundError) as exc:
+        _unavailable(f"docker host '{spec}' cannot start OpenBao: {exc}")
+
+    try:
+        out = _run([*docker, "port", name, str(_OPENBAO_PORT)], timeout=30).stdout.strip()
+        address = f"http://{host}:{int(out.splitlines()[-1].rsplit(':', 1)[-1])}"
+        _openbao_when_ready(address)
+    except Exception as exc:
+        tail = _log_tail(docker, name).replace(token, "***")
+        _remove_container(docker, name)
+        _unavailable(f"OpenBao on '{spec}' did not come up: {exc}; container log: {tail}")
+    try:
+        yield OpenBao(address=address, token=token)
+    finally:
+        _remove_container(docker, name)
 
 
 def _kafka_env(port: int) -> list[str]:
