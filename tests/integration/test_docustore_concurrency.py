@@ -177,7 +177,8 @@ class TestExpectedRevision:
         store.insert(Counter(name="hits", value=1))
         store.mutate("hits", _bump)
 
-        assert store.get_with_revision("hits") == (Counter(name="hits", value=2), 2)
+        model, rev = store.get_with_revision("hits")
+        assert (model, rev.number) == (Counter(name="hits", value=2), 2)
         assert store.get_with_revision("ghost") is None
 
     def test_a_write_at_the_revision_read_lands(self, docustore_pair):
@@ -196,7 +197,42 @@ class TestExpectedRevision:
         with pytest.raises(StaleRevisionError, match="revision 2, not 1"):
             first.mutate("hits", _bump, expected_rev=rev)
 
-        assert first.get_with_revision("hits") == (Counter(name="hits", value=1), 2)
+        model, now = first.get_with_revision("hits")
+        assert (model, now.number) == (Counter(name="hits", value=1), 2)
+
+    def test_a_write_never_lands_on_the_document_made_again_since_the_read(self, docustore_pair):
+        """A document deleted and made again is back at revision 1, as the one read was."""
+        first, second = (c.typed("counters", Counter, key="name") for c in docustore_pair)
+        first.insert(Counter(name="hits"))
+        _, rev = first.get_with_revision("hits")
+        assert second.delete("hits")
+        assert second.insert(Counter(name="hits", value=5))
+
+        with pytest.raises(StaleRevisionError, match="made again"):
+            first.mutate("hits", _bump, expected_rev=rev)
+
+        assert second.get("hits") == Counter(name="hits", value=5)
+
+    def test_a_delete_never_removes_the_document_made_again_since_the_read(self, docustore_pair):
+        first, second = (c.typed("counters", Counter, key="name") for c in docustore_pair)
+        first.insert(Counter(name="hits"))
+        _, rev = first.get_with_revision("hits")
+        assert second.delete("hits")
+        assert second.insert(Counter(name="hits", value=5))
+
+        assert not first.delete("hits", expected_rev=rev)
+        assert second.get("hits") == Counter(name="hits", value=5)
+
+    def test_a_delete_at_the_revision_read_removes_a_document_written_without_one(
+        self, docustore_pair
+    ):
+        docustore_pair[0].collection("counters").insert_one({"name": "hits", "value": 7})
+        store = docustore_pair[0].typed("counters", Counter, key="name")
+        _, rev = store.get_with_revision("hits")
+
+        assert rev.number == 0
+        assert store.delete("hits", expected_rev=rev)
+        assert store.get("hits") is None
 
     def test_of_two_replicas_writing_from_one_read_exactly_one_lands(self, docustore_pair):
         stores = [c.typed("counters", Counter, key="name") for c in docustore_pair]

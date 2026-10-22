@@ -269,3 +269,55 @@ def test_a_credential_binding_an_org_another_engine_is_deleting_loses_cleanly(en
     assert all(set(c.orgs) <= orgs for c in credentials), credentials
     beta_ids = _hunt_tenant_ids(engines, "beta_hunt").get("beta")
     assert beta_ids == (["beta-1"] if "beta" in orgs else None)
+
+
+def _made_again_on_b_after_a_reads(engines, monkeypatch) -> list[Response]:
+    """Engine b deletes the credential and makes it again the moment engine a's write reads it.
+
+    The one made again is back at revision 1, as the one a read was. Returns b's
+    responses, filled in as it goes.
+    """
+    collection = engines.apps[0].state.org_registry.ingest_credentials._c
+    real = collection.get_with_revision
+    made: list[Response] = []
+
+    def read_then_made_again(name):
+        monkeypatch.setattr(collection, "get_with_revision", real)
+        found = real(name)
+        etag = engines.b.get(f"{CREDENTIALS}/{name}", headers=engines.headers).headers["ETag"]
+        made.append(
+            engines.b.delete(f"{CREDENTIALS}/{name}", headers={**engines.headers, "If-Match": etag})
+        )
+        made.append(
+            engines.b.put(
+                f"{CREDENTIALS}/{name}",
+                json={"listeners": ["http"]},
+                headers={**engines.headers, **CREATE},
+            )
+        )
+        return found
+
+    monkeypatch.setattr(collection, "get_with_revision", read_then_made_again)
+    return made
+
+
+@pytest.mark.parametrize("method", ["PUT", "DELETE"])
+def test_an_old_etag_never_writes_a_credential_made_again_since(engines, monkeypatch, method):
+    _org(engines, engines.a, "acme")
+    first = engines.a.put(
+        f"{CREDENTIALS}/agents", json={"listeners": ["http"]}, headers={**engines.headers, **CREATE}
+    )
+    assert first.status_code == 201, first.text
+    made = _made_again_on_b_after_a_reads(engines, monkeypatch)
+
+    resp = engines.a.request(
+        method,
+        f"{CREDENTIALS}/agents",
+        json={"listeners": ["otlp"]} if method == "PUT" else None,
+        headers={**engines.headers, "If-Match": first.headers["ETag"]},
+    )
+
+    assert [r.status_code for r in made] == [204, 201], [r.text for r in made]
+    assert resp.status_code == 412, resp.text
+    now = engines.b.get(f"{CREDENTIALS}/agents", headers=engines.headers).json()
+    assert (now["listeners"], now["created_at"]) == (["http"], made[1].json()["created_at"])
