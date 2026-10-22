@@ -6360,52 +6360,51 @@
         }
       }
     },
-    "/api/v1/sources/from-catalogue/{entry}": {
+    "/api/v1/sources/from-catalogue": {
       "post": {
         "tags": [
           "Sources"
         ],
-        "summary": "Create Source From Catalogue",
-        "description": "Create a source from a catalogue entry, on one of the intakes it arrives by.\n\nThe entry's file is the write body, and the intake chosen (the default when none is named) sets the match rule: the dataset a Beats event stamps, or the source's own label for a receiver intake. A variant the deployed transform's contract does not list is refused with 409, and one whose contract is not mounted is allowed. Everything after that is the ordinary create, so the source is indistinguishable from a hand-written one.",
-        "operationId": "sources.from-catalogue.post",
-        "parameters": [
-          {
-            "name": "entry",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Entry"
-            }
-          }
-        ],
+        "summary": "Create Sources From Catalogue",
+        "description": "Create a source for each catalogue entry, on the intake it arrives by.\n\nEach entry's file is the write body for its default intake, and another intake\nswaps in the match rule that intake derives. A variant the deployed transform's\ncontract does not list is refused for that entry, and one whose contract is not\nmounted is allowed. Everything after that is the ordinary create, so each source\nis indistinguishable from a hand-written one.\n\nAt most 50 entries. A longer selection is refused before anything is stored.\nEntries are stored in the order given. One entry's refusal is recorded in\n``failed`` and the rest continue. The apps are reconciled once, after the\nentries that could be stored.",
+        "operationId": "sources.from-catalogue",
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CatalogueSourceRequest"
+                "$ref": "#/components/schemas/CatalogueSourcesRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
+          "200": {
+            "description": "Some entries were stored and some were refused. failed names each refusal; created is what was stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogueSourcesResponse"
+                }
+              }
+            }
+          },
           "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SourceResponse"
+                  "$ref": "#/components/schemas/CatalogueSourcesResponse"
                 }
               }
             }
           },
           "202": {
-            "description": "The source was stored and the apps were not brought into step with it: apps_sync_error says why, and POST /sources/reconcile-apps retries it",
+            "description": "The entries in created were stored, and the apps were not brought into step with them: apps_sync_error says why, and POST /sources/reconcile-apps retries it",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SourceResponse"
+                  "$ref": "#/components/schemas/CatalogueSourcesResponse"
                 }
               }
             }
@@ -6431,46 +6430,21 @@
             }
           },
           "409": {
-            "description": "A source of that name already exists, the name is the core landing the engine owns and reconciles itself, its match duplicates another, or the deployed transform does not ship the variant (code missing_variant)",
+            "description": "Nothing was stored. Every entry was refused because it conflicts with a source that already exists, with the core landing, with another source's match, or with another source's alias under the same profile, or because the deployed transform does not ship its variant (code missing_variant)",
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/SourceNameConflictErrorResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/CoreResourceConflictErrorResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MatchConflictErrorResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AliasConflictErrorResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/MissingVariantErrorResponse"
-                    }
-                  ],
-                  "title": "Response 409 Sources.From-Catalogue.Post"
+                  "$ref": "#/components/schemas/CatalogueSourcesResponse"
                 }
               }
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error), or the receiver would refuse the source's rule (code invalid_rule): context.rule_errors names each field at fault and, for when, the span the check stopped at",
+            "description": "Nothing was stored. The selection is longer than 50, an entry is not in the catalogue, does not arrive by the intake given, names a variant it does not compile to, or cannot be saved",
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/InvalidRuleErrorResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ErrorResponse"
-                    }
-                  ],
-                  "title": "Response 422 Sources.From-Catalogue.Post"
+                  "$ref": "#/components/schemas/CatalogueSourcesResponse"
                 }
               }
             }
@@ -6483,12 +6457,11 @@
         ],
         "x-scalo": {
           "group": "sources",
-          "resource": "from-catalogue",
+          "resource": "sources",
           "hierarchy": [
-            "sources",
-            "from-catalogue"
+            "sources"
           ],
-          "verb": "post",
+          "verb": "from-catalogue",
           "read_only": false,
           "cli": {
             "hidden": false,
@@ -31628,6 +31601,53 @@
         "title": "CatalogRuleSummary",
         "description": "A catalogue row (no detection payload) for the paginated list."
       },
+      "CatalogueCreatedSource": {
+        "properties": {
+          "entry": {
+            "type": "string",
+            "title": "Entry",
+            "description": "Catalogue entry this source was compiled from"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Working version id after the create"
+          },
+          "deployed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed Version",
+            "description": "Version deployed to runtime (null until first deploy)"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Versions",
+            "description": "All version ids on the source"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entry",
+          "source",
+          "current",
+          "versions"
+        ],
+        "title": "CatalogueCreatedSource",
+        "description": "One source stored from a catalogue entry."
+      },
       "CatalogueEntry": {
         "properties": {
           "service": {
@@ -31899,8 +31919,44 @@
         "title": "CatalogueEntryObject",
         "description": "One source DFE ships ready to create, as the console lists it."
       },
-      "CatalogueSourceRequest": {
+      "CatalogueSourceFailure": {
         "properties": {
+          "entry": {
+            "type": "string",
+            "title": "Entry"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source name, once the entry compiled that far",
+            "default": ""
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entry",
+          "code",
+          "message"
+        ],
+        "title": "CatalogueSourceFailure",
+        "description": "One catalogue entry that was not stored, and why."
+      },
+      "CatalogueSourceItem": {
+        "properties": {
+          "entry": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Entry",
+            "description": "Catalogue entry name"
+          },
           "intake": {
             "anyOf": [
               {
@@ -31967,8 +32023,85 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "CatalogueSourceRequest",
-        "description": "Create a source from a catalogue entry."
+        "required": [
+          "entry"
+        ],
+        "title": "CatalogueSourceItem",
+        "description": "One catalogue entry to compile into a source."
+      },
+      "CatalogueSourcesRequest": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogueSourceItem"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Entries",
+            "description": "Entries to create, in the order given. At most 50."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "CatalogueSourcesRequest",
+        "description": "The catalogue entries to turn into sources, in one request."
+      },
+      "CatalogueSourcesResponse": {
+        "properties": {
+          "created": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogueCreatedSource"
+            },
+            "type": "array",
+            "title": "Created"
+          },
+          "failed": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogueSourceFailure"
+            },
+            "type": "array",
+            "title": "Failed"
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes made so the apps follow this change (service/instance: action)"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps could not be brought into step; reconcile-apps retries it"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app the change leaves to apply where this deployment renders the app config itself, including taking away the container of an instance a source no longer has. Empty where a GitOps controller applies it."
+          }
+        },
+        "type": "object",
+        "required": [
+          "created",
+          "failed"
+        ],
+        "title": "CatalogueSourcesResponse",
+        "description": "What creating the requested catalogue entries did.\n\n``created`` is what was stored. ``failed`` is what was left unstored. A later\nentry failing does not remove an earlier one. The apps are reconciled once,\nfor everything that was stored."
       },
       "CelCheckBatchRequest": {
         "properties": {
@@ -37987,59 +38120,6 @@
         ],
         "title": "MetricsResponse",
         "description": "An instance's current gauges and rates over a window."
-      },
-      "MissingVariantContext": {
-        "properties": {
-          "transform": {
-            "type": "string",
-            "title": "Transform",
-            "description": "The transform app the source's engine selects"
-          },
-          "variant": {
-            "type": "string",
-            "title": "Variant",
-            "description": "The variant the source would run"
-          }
-        },
-        "type": "object",
-        "required": [
-          "transform",
-          "variant"
-        ],
-        "title": "MissingVariantContext",
-        "description": "Structured context for a catalogue create naming a variant the deployed transform lacks."
-      },
-      "MissingVariantErrorResponse": {
-        "properties": {
-          "code": {
-            "type": "string",
-            "const": "missing_variant",
-            "title": "Code",
-            "default": "missing_variant"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message",
-            "description": "Human-readable explanation, naming the variant and transform"
-          },
-          "errors": {
-            "items": {
-              "$ref": "#/components/schemas/FieldError"
-            },
-            "type": "array",
-            "title": "Errors"
-          },
-          "context": {
-            "$ref": "#/components/schemas/MissingVariantContext"
-          }
-        },
-        "type": "object",
-        "required": [
-          "message",
-          "context"
-        ],
-        "title": "MissingVariantErrorResponse",
-        "description": "409 when a catalogue create names a variant the deployed transform's contract does not list."
       },
       "NonEmptyDict_str_SchemaVersionCreate_": {
         "additionalProperties": {

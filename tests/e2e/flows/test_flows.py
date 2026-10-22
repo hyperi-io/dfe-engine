@@ -465,14 +465,16 @@ class TestFlows:
         entry = str(((shipped) or (usable))[0]["name"])
         created = engine.call(
             "POST",
-            f"/sources/from-catalogue/{entry}",
-            {"intake": intake, "transport": transport},
+            "/sources/from-catalogue",
+            {"entries": [{"entry": entry, "intake": intake, "transport": transport}]},
         )
         assert created.status_code in (200, 201), (
             f"the catalogue entry {entry!r} would not compile into a source: "
             f"{created.status_code} {created.text}"
         )
-        name = str(created.json()["source"])
+        created_rows = created.json().get("created") or []
+        assert created_rows, created.text
+        name = str(created_rows[0]["source"])
         flow_sources.append(name)
         deployed = engine.json("POST", f"/sources/{name}/deploy")
         assert deployed["applied"], f"{name}: deploy did not apply: {deployed}"

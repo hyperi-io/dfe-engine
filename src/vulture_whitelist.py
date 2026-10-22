@@ -609,6 +609,7 @@ hunts_hunt_output.HuntResultSchema.detection_columns
 hunts_hunt_output.HuntResultSchema.result_table_columns
 hunts_hunt_output.RESULTS_TABLE_COLUMNS
 hunts_rule_model.Rule.to_rule_info
+hyperdx_client.HyperDXClient.create_source
 hyperdx_client.HyperDXClient.get_team_api_key
 hyperdx_client.HyperDXClient.update_source
 keda_shim_shim.QueryShim.query_names

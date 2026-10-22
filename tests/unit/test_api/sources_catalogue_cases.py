@@ -202,7 +202,7 @@ CREATE_FROM_CATALOGUE_REJECT_CASES: list[CreateFromCatalogueRejectCase] = [
             "message": "1 validation error(s)",
             "errors": [
                 {
-                    "field": "transform",
+                    "field": "entries.0.transform",
                     "message": "Extra inputs are not permitted",
                     "code": "extra_forbidden",
                 }

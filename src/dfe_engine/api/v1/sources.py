@@ -3,7 +3,7 @@
 GET    /api/v1/sources                  -> Paginated source list
 POST   /api/v1/sources                  -> Create source
 GET    /api/v1/sources/catalogue        -> The sources DFE ships ready to create
-POST   /api/v1/sources/from-catalogue/{entry} -> Create a source from a catalogue entry
+POST   /api/v1/sources/from-catalogue   -> Create sources from catalogue entries
 GET    /api/v1/sources/{name}           -> Get source details
 GET    /api/v1/sources/{name}/flow      -> The stages its records travel, resolved
 GET    /api/v1/sources/{name}/export    -> One version as a portable bundle
@@ -66,7 +66,6 @@ from dfe_engine.api.errors import (
     CoreResourceConflictErrorResponse,
     ErrorResponse,
     InvalidRuleErrorResponse,
-    MissingVariantErrorResponse,
     RuleError,
     RuleErrorSpan,
     SourceCreateConflictResponse,
@@ -805,11 +804,12 @@ class CatalogueEntryObject(BaseModel):
     availability_reason: str = Field(description="Why availability says what it does")
 
 
-class CatalogueSourceRequest(BaseModel):
-    """Create a source from a catalogue entry."""
+class CatalogueSourceItem(BaseModel):
+    """One catalogue entry to compile into a source."""
 
     model_config = ConfigDict(extra="forbid")
 
+    entry: str = Field(min_length=1, description="Catalogue entry name")
     intake: source_catalogue_module.CatalogueIntake | None = Field(
         default=None,
         description="How this source's data arrives, the entry's default intake when omitted",
@@ -830,6 +830,55 @@ class CatalogueSourceRequest(BaseModel):
         default=False,
         description="Keep the raw record as it arrived; needs the bus transport",
     )
+
+
+class CatalogueSourcesRequest(BaseModel):
+    """The catalogue entries to turn into sources, in one request."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    entries: list[CatalogueSourceItem] = Field(
+        min_length=1,
+        max_length=50,
+        description="Entries to create, in the order given. At most 50.",
+    )
+
+
+class CatalogueCreatedSource(BaseModel):
+    """One source stored from a catalogue entry."""
+
+    entry: str = Field(description="Catalogue entry this source was compiled from")
+    source: str
+    current: str = Field(description="Working version id after the create")
+    deployed_version: str | None = Field(
+        default=None,
+        description="Version deployed to runtime (null until first deploy)",
+    )
+    versions: list[str] = Field(description="All version ids on the source")
+
+
+class CatalogueSourceFailure(BaseModel):
+    """One catalogue entry that was not stored, and why."""
+
+    entry: str
+    source: str = Field(default="", description="Source name, once the entry compiled that far")
+    code: str
+    message: str
+
+
+class CatalogueSourcesResponse(BaseModel):
+    """What creating the requested catalogue entries did.
+
+    ``created`` is what was stored. ``failed`` is what was left unstored. A later
+    entry failing does not remove an earlier one. The apps are reconciled once,
+    for everything that was stored.
+    """
+
+    created: list[CatalogueCreatedSource]
+    failed: list[CatalogueSourceFailure]
+    apps_synced: list[str] = _apps_synced_field()
+    apps_sync_error: str | None = _apps_sync_error_field()
+    restart_required: list[str] = _apply_hints_field()
 
 
 class SchemaColumn(BaseModel):
@@ -1226,68 +1275,203 @@ def list_table_engines(
     return PaginatedResponse.from_list(rows, pagination.page, pagination.per_page)
 
 
+_CATALOGUE_CONFLICTS = frozenset(
+    {"alias_conflict", "conflict", "match_conflict", "missing_variant"}
+)
+
+
+def _catalogue_failure(
+    entry: str, exc: Exception, *, source: str = "", code: str = ""
+) -> CatalogueSourceFailure:
+    """One entry's refusal, using the same codes the single-source create answers with."""
+    if not code:
+        if isinstance(exc, source_catalogue_module.SourceCatalogueError):
+            code = "catalogue_error"
+        elif isinstance(exc, SourceValidationError):
+            code = _failure_code(exc)
+        else:
+            code = "validation_error"
+    if isinstance(exc, (SourceCoreResourceError, SourceMatchConflictError)):
+        source = source or exc.source
+    return CatalogueSourceFailure(entry=entry, source=source, code=code, message=str(exc))
+
+
+def _catalogue_http_failure(
+    entry: str, exc: HTTPException, *, source: str
+) -> CatalogueSourceFailure:
+    """A refusal raised as HTTP, recorded on the entry instead of aborting the batch."""
+    detail = exc.detail if isinstance(exc.detail, dict) else {}
+    code = detail.get("code", "validation_error")
+    message = detail.get("message", exc.detail)
+    return CatalogueSourceFailure(
+        entry=entry,
+        source=source,
+        code=code if isinstance(code, str) else "validation_error",
+        message=message if isinstance(message, str) else str(exc.detail),
+    )
+
+
+def _compile_catalogue_item(
+    catalogue: source_catalogue_module.SourceCatalogue,
+    item: CatalogueSourceItem,
+    *,
+    request: Request,
+) -> SourceWriteRequest | CatalogueSourceFailure:
+    """The write body for one entry, or the refusal that stops that entry only."""
+    try:
+        write = source_catalogue_module.write_request_for(
+            archive=item.archive,
+            entry=catalogue.entry(name=item.entry),
+            intake=item.intake,
+            name=item.name,
+            transport=item.transport,
+            variant=item.variant,
+        )
+        _refuse_unknown_fetched_org(request, write)
+    except source_catalogue_module.SourceCatalogueError as exc:
+        return _catalogue_failure(item.entry, exc)
+    except ValueError as exc:
+        return _catalogue_failure(item.entry, exc)
+    except HTTPException as exc:
+        return _catalogue_http_failure(item.entry, exc, source=write.source)
+    available = source_catalogue_module.variant_availability(transform=write.transform)
+    if available.state == "missing_variant" and write.transform is not None:
+        return CatalogueSourceFailure(
+            entry=item.entry,
+            source=write.source,
+            code="missing_variant",
+            message=available.reason,
+        )
+    return write
+
+
+def _catalogue_status(
+    created: list[CatalogueCreatedSource],
+    failed: list[CatalogueSourceFailure],
+    *,
+    apps_error: str | None,
+) -> int:
+    """201 when every entry was stored, 202 when the apps did not follow, 200 when some were refused.
+
+    Nothing stored is 409 when every refusal is a conflict or a missing variant, and 422 otherwise.
+    """
+    if created:
+        if apps_error:
+            return 202
+        if failed:
+            return 200
+        return 201
+    if failed and all(item.code in _CATALOGUE_CONFLICTS for item in failed):
+        return 409
+    return 422
+
+
 @router.post(
-    "/from-catalogue/{entry}",
-    response_model=SourceResponse,
+    "/from-catalogue",
+    response_model=CatalogueSourcesResponse,
     status_code=201,
     responses={
-        202: _CREATED_APPS_NOT_SYNCED,
-        409: {
-            "model": SourceCreateConflictResponse | MissingVariantErrorResponse,
+        200: {
+            "model": CatalogueSourcesResponse,
             "description": (
-                "A source of that name already exists, the name is the core landing "
-                "the engine owns and reconciles itself, its match duplicates another, "
-                "or the deployed transform does not ship the variant (code missing_variant)"
+                "Some entries were stored and some were refused. failed names each "
+                "refusal; created is what was stored"
             ),
         },
-        **_INVALID_RULE,
+        202: {
+            "model": CatalogueSourcesResponse,
+            "description": (
+                "The entries in created were stored, and the apps were not brought "
+                "into step with them: apps_sync_error says why, and POST "
+                "/sources/reconcile-apps retries it"
+            ),
+        },
+        409: {
+            "model": CatalogueSourcesResponse,
+            "description": (
+                "Nothing was stored. Every entry was refused because it conflicts with "
+                "a source that already exists, with the core landing, with another "
+                "source's match, or with another source's alias under the same profile, "
+                "or because the deployed transform does not ship its variant (code "
+                "missing_variant)"
+            ),
+        },
+        422: {
+            "model": CatalogueSourcesResponse,
+            "description": (
+                "Nothing was stored. The selection is longer than 50, an entry is not "
+                "in the catalogue, does not arrive by the intake given, names a variant "
+                "it does not compile to, or cannot be saved"
+            ),
+        },
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
-def create_source_from_catalogue(
-    entry: str,
-    body: CatalogueSourceRequest,
+def create_sources_from_catalogue(
+    body: CatalogueSourcesRequest,
     user: CurrentUser,
     registry: SourceReg,
     request: Request,
     response: Response,
-):
-    """Create a source from a catalogue entry, on one of the intakes it arrives by.
+) -> CatalogueSourcesResponse:
+    """Create a source for each catalogue entry, on the intake it arrives by.
 
-    The entry's file is the write body, and the intake chosen (the default when none is named) sets the match rule: the dataset a Beats event stamps, or the source's own label for a receiver intake. A variant the deployed transform's contract does not list is refused with 409, and one whose contract is not mounted is allowed. Everything after that is the ordinary create, so the source is indistinguishable from a hand-written one.
+    Each entry's file is the write body for its default intake, and another intake
+    swaps in the match rule that intake derives. A variant the deployed transform's
+    contract does not list is refused for that entry, and one whose contract is not
+    mounted is allowed. Everything after that is the ordinary create, so each source
+    is indistinguishable from a hand-written one.
+
+    At most 50 entries. A longer selection is refused before anything is stored.
+    Entries are stored in the order given. One entry's refusal is recorded in
+    ``failed`` and the rest continue. The apps are reconciled once, after the
+    entries that could be stored.
     """
     catalogue = _source_catalogue()
-    try:
-        write = source_catalogue_module.write_request_for(
-            archive=body.archive,
-            entry=catalogue.entry(name=entry),
-            intake=body.intake,
-            name=body.name,
-            transport=body.transport,
-            variant=body.variant,
+    created: list[CatalogueCreatedSource] = []
+    failed: list[CatalogueSourceFailure] = []
+    for item in body.entries:
+        compiled = _compile_catalogue_item(catalogue, item, request=request)
+        if isinstance(compiled, CatalogueSourceFailure):
+            failed.append(compiled)
+            continue
+        write = compiled
+        if registry.source_exists(write.source):
+            failed.append(
+                CatalogueSourceFailure(
+                    entry=item.entry,
+                    source=write.source,
+                    code="conflict",
+                    message=f"Source {write.source!r} already exists",
+                )
+            )
+            continue
+        try:
+            source = registry.create_source_from_write(write, created_by=git_author(user))
+        except SourceValidationError as exc:
+            failed.append(_catalogue_failure(item.entry, exc, source=write.source))
+            continue
+        audit_resource_change(user.user_id, "source", source.source, "created")
+        created.append(
+            CatalogueCreatedSource(
+                entry=item.entry,
+                source=source.source,
+                current=source.current,
+                deployed_version=source.deployed_version,
+                versions=sorted(source.versions.keys()),
+            )
         )
-    except source_catalogue_module.SourceCatalogueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "catalogue_error", "message": str(exc)},
-        ) from exc
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
-        ) from exc
-    available = source_catalogue_module.variant_availability(transform=write.transform)
-    if available.state == "missing_variant" and write.transform is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "missing_variant",
-                "message": available.reason,
-                "transform": app_catalogue.transform_service(engine=write.transform.engine),
-                "variant": write.transform.variant,
-            },
-        )
-    return create_source(write, user, registry, request, response)
+    apps = AppsSync(changes=[])
+    if created:
+        apps = reconcile_derived_apps(request, user, registry)
+    response.status_code = _catalogue_status(created, failed, apps_error=apps.error)
+    return CatalogueSourcesResponse(
+        created=created,
+        failed=failed,
+        apps_synced=apps.changes,
+        apps_sync_error=apps.error,
+        restart_required=apps.restart_required,
+    )
 
 
 @router.get(

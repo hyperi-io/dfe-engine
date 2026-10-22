@@ -380,7 +380,7 @@
     "/api/v1/sources/engines": {
       "dfe-ui": 2
     },
-    "/api/v1/sources/from-catalogue/{entry}": {
+    "/api/v1/sources/from-catalogue": {
       "dfe-ui": 2
     },
     "/api/v1/sources/seed": {
