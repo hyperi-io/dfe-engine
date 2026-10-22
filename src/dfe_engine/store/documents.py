@@ -30,7 +30,7 @@ race it never won as :class:`DocumentConflictError`.
 import builtins
 import functools
 import uuid
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -70,6 +70,9 @@ The engine passes ``auth.accounts_store.socket_timeout_seconds``, which defaults
 same thirty seconds, so this is the last resort for direct construction.
 """
 
+CONVERGE_PASSES = 3
+"""How many times :func:`converge` runs a derived write before leaving it to the next one."""
+
 # DuplicateKey, and DocumentDB's WriteConflict "Could not acquire lock for operation due to deadlock".
 _CONFLICT_CODES = frozenset({11000, 112})
 # InternalError, DocumentDB's answer to a createIndexes it could not finish, and WriteConflict.
@@ -81,6 +84,34 @@ _BACKOFF_CAP = 0.2
 
 class DocumentConflictError(RuntimeError):
     """A write lost to concurrent writers on every attempt it was allowed."""
+
+
+class StaleRevisionError(RuntimeError):
+    """The document is no longer at the revision a write was made against."""
+
+
+def converge[R](write: Callable[[], Sequence[R]], *, passes: int = CONVERGE_PASSES) -> list[R]:
+    """Run *write* again until a pass changes nothing, at most *passes* times.
+
+    For a write derived from shared state, such as a secret compiled from every stored
+    record. Each pass recomputes from what is stored now. A replica whose pass read state
+    another replica has since changed corrects its own write on the next, so the last to
+    finish leaves what the newest state derives, with no lock.
+
+    Args:
+        write: Writes what the current state derives, and returns what it changed.
+        passes: Most passes to run.
+
+    Returns:
+        Everything any pass changed, in pass order.
+    """
+    changed: list[R] = []
+    for _ in range(passes):
+        made = write()
+        if not made:
+            break
+        changed.extend(made)
+    return changed
 
 
 def _backoff(attempt: int) -> None:
@@ -250,6 +281,19 @@ class DocumentCollection[T: BaseModel]:
         """Return the document with ``key == key_value``, or None."""
         return self._load(self._c.find_one({self._key: key_value}))
 
+    def get_with_revision(self, key_value: str) -> tuple[T, int] | None:
+        """Return the document with ``key == key_value`` and its revision, or None.
+
+        A document written outside this layer, which carries no ``_rev``, reads as
+        revision 0. The revision is what :meth:`mutate` takes as ``expected_rev``.
+        """
+        stored = self._c.find_one({self._key: key_value})
+        if stored is None:
+            return None
+        rev = int(stored.get(REV, 0))
+        model = self._load(stored)
+        return (model, rev) if model is not None else None
+
     def get_by(self, field: str, value: str) -> T | None:
         """Return the document whose ``field`` is ``value``, one of the ``unique`` fields, or None."""
         return self._load(self._c.find_one({field: value}))
@@ -305,7 +349,12 @@ class DocumentCollection[T: BaseModel]:
         return inserted
 
     def mutate(
-        self, key_value: str, change: Callable[[T], T], *, attempts: int = DEFAULT_ATTEMPTS
+        self,
+        key_value: str,
+        change: Callable[[T], T],
+        *,
+        attempts: int = DEFAULT_ATTEMPTS,
+        expected_rev: int | None = None,
     ) -> T:
         """Replace ``key_value`` with ``change`` of what is stored, unless another write landed first.
 
@@ -316,16 +365,22 @@ class DocumentCollection[T: BaseModel]:
         only the model it is given. A domain check that raises inside ``change``
         writes nothing. A ``change`` that alters nothing writes nothing.
 
+        ``expected_rev`` holds the write to the revision a caller read earlier, as an
+        ``If-Match`` does: a document at any other revision is not reapplied to.
+
         Args:
             key_value: The document's key.
             change: Returns the new model from the stored one. Must keep the key.
             attempts: Reads and conditional writes before giving up.
+            expected_rev: The revision the document must still be at, from
+                :meth:`get_with_revision`. None takes whatever is stored.
 
         Returns:
             The model as stored.
 
         Raises:
             KeyError: No document holds ``key_value``.
+            StaleRevisionError: The document is not at ``expected_rev``.
             ValueError: ``change`` altered the key, or ``attempts`` is below 1.
             DocumentConflictError: Another write landed between the read and the
                 write on every attempt.
@@ -341,6 +396,10 @@ class DocumentCollection[T: BaseModel]:
             # A document deleted and made again restarts at revision 1, so _id tells it apart.
             identity = stored["_id"]
             rev = stored.get(REV)
+            if expected_rev is not None and (rev or 0) != expected_rev:
+                raise StaleRevisionError(
+                    f"{self._c.name}/{key_value} is at revision {rev or 0}, not {expected_rev}"
+                )
             current = self._load(stored)
             if current is None:
                 raise KeyError(key_value)
@@ -479,10 +538,29 @@ class Claims:
             return held.owner == owner
         raise DocumentConflictError(f"{key} was claimed and released {DEFAULT_ATTEMPTS} times")
 
+    def create(self, key: str, owner: str, *, subject: str = "") -> Claim | None:
+        """Claim *key* for *owner* only where nobody holds it, and return the claim made.
+
+        None when anyone holds it, *owner* included. The claim returned is what
+        :meth:`withdraw` takes to undo exactly this one.
+        """
+        made = Claim(
+            key=key, owner=owner, claimed_at=_now(), subject=subject, instance=uuid.uuid4().hex
+        )
+        return made if self._c.insert(made) else None
+
+    def get(self, key: str) -> Claim | None:
+        """The claim on *key*, or None when nobody holds it."""
+        return self._c.get(key)
+
     def holder(self, key: str) -> str | None:
         """The owner holding *key*, or None when nobody does."""
         held = self._c.get(key)
         return held.owner if held is not None else None
+
+    def list(self) -> builtins.list[Claim]:
+        """Every claim, sorted by key."""
+        return self._c.list()
 
     def about(self, subject: str) -> builtins.list[Claim]:
         """Every claim made with *subject*."""
@@ -514,6 +592,14 @@ class Claims:
         """
         if held or _age_seconds(claim.claimed_at) < grace_seconds:
             return False
+        return self.withdraw(claim)
+
+    def withdraw(self, claim: Claim) -> bool:
+        """Release *claim* as it reads: one claimed again since, by anyone, is kept.
+
+        Every claim restamps a key and every new one carries a fresh instance, so a
+        writer that claimed it after *claim* was read keeps it. True when it was released.
+        """
         as_read = {"owner": claim.owner, "claimed_at": claim.claimed_at, "instance": claim.instance}
         return self._c.delete(claim.key, only_if=as_read)
 

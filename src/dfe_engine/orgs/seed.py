@@ -27,13 +27,13 @@ from dfe_engine.orgs.registry import OrgExistsError
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
 
 if TYPE_CHECKING:
-    from dfe_engine.orgs.registry import OrgRegistry
+    from dfe_engine.orgs.registry import AnyOrgRegistry
     from dfe_engine.settings import SeedOrg
 
 SEED_ACTOR = "engine"
 
 
-def ensure_default_org(registry: OrgRegistry) -> bool:
+def ensure_default_org(registry: AnyOrgRegistry) -> bool:
     """Create the reserved default org, or restore its tenant id and enable it.
 
     Every app stamps ``DEFAULT_ORG_ID`` on a record that names no org, so the org
@@ -72,13 +72,17 @@ def ensure_default_org(registry: OrgRegistry) -> bool:
 
 
 def seed_orgs(
-    *, registry: OrgRegistry, seeds: list[SeedOrg], hunts: Any | None = None
+    *,
+    registry: AnyOrgRegistry,
+    seeds: list[SeedOrg],
+    hunts: Any | None = None,
 ) -> list[str]:
     """Create each seed the registry lacks, unless a hunt reads one of its ids for another org.
 
     A hunt counts on main or on a review branch not yet merged, as on the org routes. A
     seed the forge cannot check within ``gitops.read`` is skipped with a warning, so a
-    down forge never holds up startup, and the next boot seeds it.
+    down forge never holds up startup, and the next boot seeds it. A seed another
+    replica created first is left as that replica wrote it.
 
     Args:
         registry: The org registry.
@@ -113,7 +117,10 @@ def seed_orgs(
                 hunts=sorted({h.hunt for h in held}),
             )
             continue
-        registry.create(display_name=seed.display_name, name=seed.name, org_ids=seed.org_ids)
+        try:
+            registry.create(display_name=seed.display_name, name=seed.name, org_ids=seed.org_ids)
+        except OrgExistsError:
+            continue
         audit_org_change(admin_id=SEED_ACTOR, change="created", org_name=seed.name)
         logger.info(f"Seeded organisation {seed.name!r}")
         created.append(seed.name)

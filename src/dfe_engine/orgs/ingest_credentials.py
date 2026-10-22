@@ -14,12 +14,14 @@ record's ``_org_id`` to it, so a record lands only in an org its credential is
 bound to. The id is the receiver's key for the binding and the ``<id>:`` before
 each token in its bearer secret, which is why ids are unique across every org.
 
-Records are YAML files, ``{dir}/{id}.yaml``, with the id as the filename stem. The
+Records are YAML files, ``{dir}/{id}.yaml``, with the id as the filename stem, or
+one document each in the document store where engine replicas share them. The
 token itself is never stored here: it lives in the secrets backend
 (:mod:`dfe_engine.orgs.ingest_tokens`).
 """
 
 import builtins
+import functools
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -27,6 +29,13 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from dfe_engine.store.documents import (
+    DEFAULT_ATTEMPTS,
+    REV,
+    DocumentConflictError,
+    DocuStore,
+    StaleRevisionError,
+)
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 # dfe-receiver's is_credential_id: a ':' would split a token entry.
@@ -79,6 +88,22 @@ class CredentialIdTakenError(ValueError):
     """Another org already holds a credential with this id."""
 
 
+class CredentialChangedError(ValueError):
+    """The stored credential is not the one a conditional write was made against."""
+
+
+_ID_TAKEN = (
+    "Ingest credential id '{name}' is taken; ids are unique across every org because the "
+    "receiver keys its bindings on them"
+)
+
+
+def _checked_condition(*, new: bool, current: IngestCredential | None) -> None:
+    """Raises: ValueError: A write was conditioned on both being new and on a stored credential."""
+    if new and current is not None:
+        raise ValueError("a credential write is conditioned on new or on current, never both")
+
+
 class IngestCredentialRegistry:
     """YAML-backed store for ingest credentials, one ``{id}.yaml`` per credential.
 
@@ -119,30 +144,50 @@ class IngestCredentialRegistry:
         """The credentials another org owns that bind *org*, sorted by id."""
         return [c for c in self.list() if c.org != org and org in c.orgs]
 
-    def put(self, credential: IngestCredential) -> None:
+    def put(
+        self,
+        credential: IngestCredential,
+        *,
+        new: bool = False,
+        current: IngestCredential | None = None,
+    ) -> None:
         """Create or replace *credential*.
+
+        Args:
+            credential: The credential to store.
+            new: Store it only where no credential has its id.
+            current: Store it only where the stored credential is still this one.
 
         Raises:
             CredentialIdTakenError: Another org owns a credential with this id.
+            CredentialChangedError: ``new`` and one is stored, or the stored one is
+                not ``current``.
         """
+        _checked_condition(new=new, current=current)
         held = self.get(credential.name)
         if held is not None and held.org != credential.org:
-            raise CredentialIdTakenError(
-                f"Ingest credential id '{credential.name}' is taken; ids are unique across "
-                "every org because the receiver keys its bindings on them"
-            )
+            raise CredentialIdTakenError(_ID_TAKEN.format(name=credential.name))
+        if (new and held is not None) or (current is not None and held != current):
+            raise CredentialChangedError(f"Ingest credential '{credential.name}' changed")
         yaml_dump(credential.model_dump(mode="json", exclude={"name"}), self._path(credential))
         self._changed(credential.org)
 
-    def delete(self, name: str) -> None:
+    def delete(self, name: str, *, current: IngestCredential | None = None) -> None:
         """Remove the credential named *name*.
+
+        Args:
+            name: The credential id.
+            current: Remove it only where the stored credential is still this one.
 
         Raises:
             KeyError: No credential has that id.
+            CredentialChangedError: The stored credential is not ``current``.
         """
         held = self.get(name)
         if held is None:
             raise KeyError(name)
+        if current is not None and held != current:
+            raise CredentialChangedError(f"Ingest credential '{name}' changed")
         self._path(held).unlink()
         self._changed(held.org)
         self._removed(held.name)
@@ -154,3 +199,133 @@ class IngestCredentialRegistry:
         data: dict = yaml_load(path)
         data["name"] = path.stem
         return IngestCredential.model_validate(data)
+
+
+class DocuStoreIngestCredentialRegistry:
+    """Ingest credentials in the document store, one document per credential, keyed on its id.
+
+    The interface of :class:`IngestCredentialRegistry`, built by
+    :class:`~dfe_engine.orgs.registry.DocuStoreOrgRegistry`. The unique index on the id
+    decides a create, and a conditional write lands only at the revision the stored
+    credential was read at, so replicas racing one id never both land.
+    """
+
+    def __init__(
+        self,
+        store: DocuStore,
+        changed: Callable[[str], None],
+        removed: Callable[[str], None],
+        *,
+        collection: str = "ingest_credentials",
+    ) -> None:
+        self._c = store.typed(collection, IngestCredential, key="name")
+        self._changed = changed
+        self._removed = removed
+
+    def get(self, name: str) -> IngestCredential | None:
+        """The credential named *name*, or None when there is none."""
+        if re.fullmatch(CREDENTIAL_ID_PATTERN, name) is None:
+            return None
+        return self._c.get(name)
+
+    def list(self) -> builtins.list[IngestCredential]:
+        """Every credential, sorted by id."""
+        return self._c.list()
+
+    def owned_by(self, org: str) -> builtins.list[IngestCredential]:
+        """The credentials *org* owns, sorted by id."""
+        return self._c.list_by("org", org)
+
+    def binding(self, org: str) -> builtins.list[IngestCredential]:
+        """The credentials another org owns that bind *org*, sorted by id."""
+        return [c for c in self.list() if c.org != org and org in c.orgs]
+
+    def put(
+        self,
+        credential: IngestCredential,
+        *,
+        new: bool = False,
+        current: IngestCredential | None = None,
+    ) -> None:
+        """Create or replace *credential*, as :meth:`IngestCredentialRegistry.put` does.
+
+        Raises:
+            CredentialIdTakenError: Another org owns a credential with this id.
+            CredentialChangedError: ``new`` and one is stored, or the stored one is
+                not ``current``.
+            DocumentConflictError: Concurrent writers beat every attempt.
+        """
+        _checked_condition(new=new, current=current)
+        if current is not None:
+            self._replace(credential, current)
+        elif new:
+            self._create(credential)
+        else:
+            self._upsert(credential)
+        self._changed(credential.org)
+
+    def delete(self, name: str, *, current: IngestCredential | None = None) -> None:
+        """Remove the credential named *name*, as :meth:`IngestCredentialRegistry.delete` does.
+
+        Raises:
+            KeyError: No credential has that id.
+            CredentialChangedError: The stored credential is not ``current``.
+            DocumentConflictError: Concurrent writers beat every attempt.
+        """
+        valid = re.fullmatch(CREDENTIAL_ID_PATTERN, name) is not None
+        found = self._c.get_with_revision(name) if valid else None
+        if found is None:
+            raise KeyError(name)
+        held, rev = found
+        if current is not None and held != current:
+            raise CredentialChangedError(f"Ingest credential '{name}' changed")
+        only_if = None if current is None else {REV: rev}
+        if not self._c.delete(name, only_if=only_if):
+            if current is not None and self._c.exists(name):
+                raise CredentialChangedError(f"Ingest credential '{name}' changed")
+            raise KeyError(name)
+        self._changed(held.org)
+        self._removed(held.name)
+
+    def _create(self, credential: IngestCredential) -> None:
+        if self._c.insert(credential):
+            return
+        held = self._c.get(credential.name)
+        if held is not None and held.org != credential.org:
+            raise CredentialIdTakenError(_ID_TAKEN.format(name=credential.name))
+        raise CredentialChangedError(f"Ingest credential '{credential.name}' already exists")
+
+    def _replace(self, credential: IngestCredential, current: IngestCredential) -> None:
+        found = self._c.get_with_revision(credential.name)
+        if found is not None and found[0].org != credential.org:
+            raise CredentialIdTakenError(_ID_TAKEN.format(name=credential.name))
+        if found is None or found[0] != current:
+            raise CredentialChangedError(f"Ingest credential '{credential.name}' changed")
+        try:
+            self._c.mutate(credential.name, lambda _: credential, expected_rev=found[1])
+        except (KeyError, StaleRevisionError) as exc:
+            raise CredentialChangedError(f"Ingest credential '{credential.name}' changed") from exc
+
+    def _upsert(self, credential: IngestCredential) -> None:
+        for _ in range(DEFAULT_ATTEMPTS):
+            if self._c.insert(credential):
+                return
+            try:
+                self._c.mutate(credential.name, functools.partial(_same_owner, credential))
+            except KeyError:
+                continue  # removed since the insert found it: insert again
+            return
+        raise DocumentConflictError(
+            f"ingest credential '{credential.name}' was created and removed under every attempt"
+        )
+
+
+def _same_owner(credential: IngestCredential, stored: IngestCredential) -> IngestCredential:
+    """*credential* in place of *stored*, which must have the same owning org.
+
+    Raises:
+        CredentialIdTakenError: Another org owns *stored*.
+    """
+    if stored.org != credential.org:
+        raise CredentialIdTakenError(_ID_TAKEN.format(name=credential.name))
+    return credential

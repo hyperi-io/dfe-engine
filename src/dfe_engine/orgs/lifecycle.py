@@ -38,10 +38,10 @@ from dfe_engine.auth.audit import (
     audit_org_hyperdx_provisioned,
 )
 from dfe_engine.orgs.models import Org
-from dfe_engine.orgs.registry import OrgRegistry
 
 if TYPE_CHECKING:
     from dfe_engine.hyperdx.client import HyperDXClient
+    from dfe_engine.orgs.registry import AnyOrgRegistry
 
 
 class OrgLifecycleManager:
@@ -55,7 +55,7 @@ class OrgLifecycleManager:
 
     def __init__(
         self,
-        registry: OrgRegistry,
+        registry: AnyOrgRegistry,
         hyperdx_client: HyperDXClient | None = None,
     ) -> None:
         self._registry = registry

@@ -323,6 +323,72 @@ class TestUpdateOrg:
         assert resp.status_code == 403
 
 
+def _first_write_lands_before(monkeypatch, app, method: str, write) -> None:
+    """Make *write* land the moment the route calls the registry's *method*, as another replica's would."""
+    registry = app.state.org_registry
+    real = getattr(registry, method)
+
+    def racing(*args, **kwargs):
+        monkeypatch.setattr(registry, method, real)
+        write()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(registry, method, racing)
+
+
+class TestAWriteThatLandsAfterTheChecks:
+    """A collision another write makes after a route's checks is still a 409, never a 500."""
+
+    def test_a_create_whose_tenant_id_was_just_taken_is_409(
+        self, client, app, admin_headers, monkeypatch
+    ):
+        registry = app.state.org_registry
+        _first_write_lands_before(
+            monkeypatch, app, "create", lambda: registry.create("alpha", org_ids=["shared"])
+        )
+
+        resp = client.post(
+            "/api/v1/orgs", json={"name": "beta", "org_ids": ["shared"]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "conflict"
+        assert registry.get("beta") is None
+
+    def test_a_create_whose_name_was_just_taken_is_409(
+        self, client, app, admin_headers, monkeypatch
+    ):
+        registry = app.state.org_registry
+        _first_write_lands_before(monkeypatch, app, "create", lambda: registry.create("beta"))
+
+        resp = client.post("/api/v1/orgs", json={"name": "beta"}, headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
+
+    def test_an_update_whose_tenant_id_was_just_taken_is_409(
+        self, client, app, admin_headers, monkeypatch
+    ):
+        registry = app.state.org_registry
+        registry.create("beta")
+        _first_write_lands_before(
+            monkeypatch, app, "update", lambda: registry.create("alpha", org_ids=["shared"])
+        )
+
+        resp = client.put("/api/v1/orgs/beta", json={"org_ids": ["shared"]}, headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
+        assert registry.get("beta").org_ids == []
+
+    def test_an_update_of_an_org_just_deleted_is_404(self, client, app, admin_headers, monkeypatch):
+        registry = app.state.org_registry
+        registry.create("beta")
+        _first_write_lands_before(monkeypatch, app, "update", lambda: registry.delete("beta"))
+
+        resp = client.put("/api/v1/orgs/beta", json={"display_name": "B"}, headers=admin_headers)
+
+        assert resp.status_code == 404, resp.text
+
+
 # An empty id matches every untenanted row, and a comma splits the ClickHouse pin.
 _FENCE_BREAKING_IDS = ["", " acme", "a,b", "acme\n"]
 

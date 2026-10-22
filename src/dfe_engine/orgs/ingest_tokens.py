@@ -31,7 +31,7 @@ from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, IngestCredentia
 from dfe_engine.secrets import DfeSecrets
 
 if TYPE_CHECKING:
-    from dfe_engine.orgs.registry import OrgRegistry
+    from dfe_engine.orgs.registry import AnyOrgRegistry
     from dfe_engine.settings import SecretsSettings
 
 CREDENTIAL_SECRET_PREFIX = "ingest/credentials"
@@ -119,13 +119,13 @@ def bearer_entries(credentials: Iterable[IngestCredential], secrets: DfeSecrets)
     }
 
 
-def accepted_credentials(registry: OrgRegistry) -> list[IngestCredential]:
+def accepted_credentials(registry: AnyOrgRegistry) -> list[IngestCredential]:
     """The credentials the receiver accepts: those whose owning org is registered and enabled."""
     enabled = {org.name for org in registry.list() if org.enabled}
     return [c for c in registry.ingest_credentials.list() if c.org in enabled]
 
 
-def sync_bearer_tokens(registry: OrgRegistry, secrets: DfeSecrets) -> list[str]:
+def sync_bearer_tokens(registry: AnyOrgRegistry, secrets: DfeSecrets) -> list[str]:
     """Rewrite each listener's bearer secret that no longer matches the accepted credentials.
 
     Args:

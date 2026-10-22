@@ -68,8 +68,10 @@ from dfe_engine.orgs.available_ids import available_org_ids as discover_availabl
 from dfe_engine.orgs.lifecycle import OrgLifecycleManager
 from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org, ReservedOrgError, TenantId
 from dfe_engine.orgs.registry import (
+    AnyOrgRegistry,
     OrgBoundError,
-    OrgRegistry,
+    OrgCollisionError,
+    OrgExistsError,
     refuse_bound_delete,
     refuse_reserved_delete,
     refuse_reserved_update,
@@ -151,24 +153,28 @@ async def create_org(
     org's tenant ids stored first. A production+team posture routes that hunt
     change to review, and the ``X-DFE-Review-Required`` header says so.
     """
-    registry: OrgRegistry = request.app.state.org_registry
+    registry: AnyOrgRegistry = request.app.state.org_registry
     outcome = await run_blocking(
         functools.partial(_create_hunts_first, registry, hunts, body, user.user_id)
     )
 
     lifecycle: OrgLifecycleManager = request.app.state.org_lifecycle
-    org = await lifecycle.create_org(
-        body.name,
-        org_ids=body.org_ids,
-        display_name=body.display_name,
-        admin_id=user.user_id,
-    )
+    try:
+        org = await lifecycle.create_org(
+            body.name,
+            org_ids=body.org_ids,
+            display_name=body.display_name,
+            admin_id=user.user_id,
+        )
+    except (OrgExistsError, OrgCollisionError) as exc:
+        # Another replica's create got the name or a tenant id after the check above.
+        raise _conflict(exc) from exc
     apply_review_headers(response, outcome)
     return _org_response(org)
 
 
 def _create_hunts_first(
-    registry: OrgRegistry, hunts: Any, body: CreateOrgRequest, actor: str
+    registry: AnyOrgRegistry, hunts: Any, body: CreateOrgRequest, actor: str
 ) -> WriteOutcome | None:
     """Refuse a taken name or a collision, then store the new org's tenant ids in its hunts.
 
@@ -212,7 +218,7 @@ async def list_orgs(
     System-scope org:read holders see every org; org-scope holders see
     only the orgs their grants cover.
     """
-    registry: OrgRegistry = request.app.state.org_registry
+    registry: AnyOrgRegistry = request.app.state.org_registry
     if is_action_allowed(request, user, scopes_dict["org_read"]):
         visible = list(registry.list())
     else:
@@ -278,7 +284,7 @@ async def get_org(
 ):
     """Get a single organisation by name (org:read at that org's scope)."""
     check_action(request, user, scopes_dict["org_read"], scope=Scope(type="org", id=name))
-    registry: OrgRegistry = request.app.state.org_registry
+    registry: AnyOrgRegistry = request.app.state.org_registry
     org = registry.get(name)
     if org is None:
         raise HTTPException(
@@ -308,7 +314,7 @@ async def update_org(
     routes that hunt change to review, and the ``X-DFE-Review-Required`` header says
     so. An org's name is its identity, so it cannot be changed here.
     """
-    registry: OrgRegistry = request.app.state.org_registry
+    registry: AnyOrgRegistry = request.app.state.org_registry
     org, outcome = await run_blocking(
         functools.partial(_update_org, registry, hunts, name, body, user.user_id)
     )
@@ -319,7 +325,7 @@ async def update_org(
 
 
 def _update_org(
-    registry: OrgRegistry, hunts: Any, name: str, body: UpdateOrgRequest, actor: str
+    registry: AnyOrgRegistry, hunts: Any, name: str, body: UpdateOrgRequest, actor: str
 ) -> tuple[Org, WriteOutcome | None]:
     """Store the org's tenant ids in its hunts, then write the org.
 
@@ -366,7 +372,22 @@ def _update_org(
     if body.org_ids is not None:
         refuse_held_tenant_ids(hunts, name, tenant_ids)
     outcome = store_hunt_tenant_ids(hunts, name, tenant_ids, actor)
-    org = registry.update(name, **update_fields) if update_fields else existing
+    if not update_fields:
+        return existing, outcome
+    # Another replica's write since the checks above is judged again by the registry.
+    try:
+        org = registry.update(name, **update_fields)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Org '{name}' not found"},
+        ) from exc
+    except ReservedOrgError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "reserved_org", "message": str(exc)}
+        ) from exc
+    except OrgCollisionError as exc:
+        raise _conflict(exc) from exc
     return org, outcome
 
 
@@ -392,7 +413,7 @@ async def delete_org(
     The reserved ``default`` org cannot be deleted, nor can an org another org's
     ingest credential binds or a fetched source names: each answers 409.
     """
-    registry: OrgRegistry = request.app.state.org_registry
+    registry: AnyOrgRegistry = request.app.state.org_registry
     outcome = await run_blocking(
         functools.partial(_delete_hunts_first, registry, hunts, name, user.user_id)
     )
@@ -404,7 +425,7 @@ async def delete_org(
 
 
 def _delete_hunts_first(
-    registry: OrgRegistry, hunts: Any, name: str, actor: str
+    registry: AnyOrgRegistry, hunts: Any, name: str, actor: str
 ) -> WriteOutcome | None:
     """Refuse a delete the org's dependants forbid, then take its tenant ids out of its hunts.
 
@@ -547,6 +568,11 @@ def store_hunt_tenant_ids(
     for hunt in names:
         audit_resource_change(actor, "hunt", hunt, "updated", detail)
     return outcome
+
+
+def _conflict(exc: Exception) -> HTTPException:
+    """409 ``conflict`` carrying the registry's reason."""
+    return HTTPException(status_code=409, detail={"code": "conflict", "message": str(exc)})
 
 
 def _org_response(org: Org) -> OrgResponse:
