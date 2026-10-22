@@ -82,6 +82,9 @@ dependencies = [
     "clickhouse-connect>=1.10.0",
     # Configuration and parsing
     "ruamel-yaml>=0.19.1",
+    # 6.0.3 (2025-09) is the latest release. Imported by schema/registry.py for its
+    # libyaml loader, and already required by scalo.
+    "pyyaml>=6.0.3",
     "pydantic>=2.14.1",
     # AWS
     "boto3>=1.43.113",

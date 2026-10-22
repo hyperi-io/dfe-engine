@@ -22,12 +22,11 @@ Usage:
     registry.save_schema(Schema(...))
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, override
 
+import yaml
 from dulwich import porcelain as git
 from dulwich.repo import InvalidUserIdentity, check_user_identity
 from pydantic import ValidationError
@@ -38,6 +37,33 @@ from dfe_engine.git_identity import commit_file
 from dfe_engine.schema.models import MetaSchema
 from dfe_engine.schema.schema_loader import REGISTRIES_SUBDIR
 from dfe_engine.yaml_utils import yaml_dump
+
+# libyaml reads the shipped schema tree about nine times faster than PyYAML's pure-Python
+# loader, to the same documents, and the registry reads all of it at boot.
+_YAML_LOADER = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
+
+
+class _SchemaStore(DirectoryConfigStore):
+    """The schemas directory, parsed with libyaml wherever PyYAML was built with it."""
+
+    # Called by DirectoryConfigStore for every file it reads, so vulture sees no caller.
+    @override  # noqa: V105
+    def _load_yaml(self, path: Path) -> dict | None:
+        """Return the mapping in *path*, an empty one for an empty file, or None to skip it."""
+        try:
+            data = yaml.load(path.read_text(encoding="utf-8"), Loader=_YAML_LOADER)  # noqa: S506
+        except yaml.YAMLError as exc:
+            logger.warning(f"Failed to parse YAML {path}: {exc}")
+            return None
+        except OSError as exc:
+            logger.warning(f"Failed to read {path}: {exc}")
+            return None
+        if data is None:
+            return {}
+        if not isinstance(data, dict):
+            logger.warning(f"YAML file is not a mapping: {path}")
+            return None
+        return data
 
 
 class SchemaError(Exception):
@@ -114,7 +140,7 @@ class SchemaRegistry:
         self._directory = Path(schemas_directory).expanduser().resolve(strict=False)
         self._directory.mkdir(parents=True, exist_ok=True)
 
-        self._store = DirectoryConfigStore(
+        self._store = _SchemaStore(
             directory=self._directory,
             refresh_interval=refresh_interval,
             writable=writable,

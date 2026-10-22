@@ -1,9 +1,12 @@
 """Tests for SchemaRegistry (meta-schema YAML directory)."""
 
+import shutil
 from pathlib import Path
 
+import dfe_schemas
 import pydantic
 import pytest
+import yaml
 from dulwich import porcelain as dulwich_porcelain
 from dulwich.objects import Commit
 from dulwich.repo import Repo
@@ -50,6 +53,49 @@ def _minimal_meta(path: str) -> MetaSchema:
             )
         },
     )
+
+
+class TestParsing:
+    """The registry reads every file at boot, so its parse has to be both fast and faithful."""
+
+    def test_the_engine_s_pyyaml_carries_libyaml(self):
+        # Without it the shipped tree is read with the pure-Python loader, which holds boot about a minute.
+        assert yaml.__with_libyaml__
+
+    def test_the_largest_shipped_schemas_read_as_the_pure_python_loader_reads_them(
+        self, schemas_dir
+    ):
+        shipped = Path(dfe_schemas.schemas_root())
+        by_size = sorted((shipped / "additional").rglob("*.yaml"), key=lambda p: p.stat().st_size)
+        largest = by_size[-5:]
+        for source in largest:
+            target = schemas_dir / source.relative_to(shipped)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+        registry = SchemaRegistry(schemas_directory=schemas_dir, refresh_interval=0)
+        try:
+            for source in largest:
+                path = source.relative_to(shipped).with_suffix("").as_posix()
+                expected = MetaSchema.model_validate(yaml.safe_load(source.read_text("utf-8")))
+                expected.path = path
+                assert registry.get_schema(path) == expected, path
+        finally:
+            registry.close()
+
+    def test_an_empty_file_reads_empty_and_a_list_or_a_broken_file_is_skipped(self, schemas_dir):
+        (schemas_dir / "empty.yaml").write_text("", encoding="utf-8")
+        (schemas_dir / "listed.yaml").write_text("- a\n- b\n", encoding="utf-8")
+        (schemas_dir / "broken.yaml").write_text("a: [unclosed\n", encoding="utf-8")
+        registry = SchemaRegistry(schemas_directory=schemas_dir, refresh_interval=0)
+        try:
+            # Read as an empty mapping, which names no current version.
+            with pytest.raises(SchemaValidationError, match="no valid current version"):
+                registry.get_schema_current_version("empty")
+            for skipped in ("listed", "broken"):
+                with pytest.raises(SchemaNotFoundError):
+                    registry.get_schema_current_version(skipped)
+        finally:
+            registry.close()
 
 
 class TestSchemaRegistryCRUD:
