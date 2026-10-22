@@ -21,7 +21,7 @@ from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
-from dfe_engine.hunts.alert import ALERT_CLASS, AlertDestinationRegistry
+from dfe_engine.hunts.alert import ALERT_CLASS, AlertDestination, AlertDestinationRegistry
 from dfe_engine.hunts.deploy_repo import DeployRepoStore
 from dfe_engine.schema.registry import META_CLASS, SchemaRegistry
 from dfe_engine.secrets import build_secrets
@@ -366,3 +366,114 @@ class TestTheAppriseUrlStaysACredential:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "credential_in_action"
+
+    @pytest.mark.parametrize("path", ["url_path", "url_path.nested"])
+    def test_an_action_may_not_repoint_the_url_path(
+        self, app, client, admin_headers, deploy_repo, path
+    ):
+        """The path names which stored secret is sent as the URL, so any secret could be."""
+        app.state.settings.env = "dev"
+        app.state.gitcrud = deploy_repo
+        app.state.policy_store = PolicyStore(deploy_repo)
+        action = {
+            "name": "repoint-oncall",
+            "changes": [
+                {
+                    "cls": "alert_destinations",
+                    "name": "oncall",
+                    "path": path,
+                    "value": "oidc/sso/client_secret",
+                }
+            ],
+        }
+
+        created = client.post(
+            "/api/v1/governance/admin/actions", json=action, headers=admin_headers
+        )
+        validated = client.post(
+            "/api/v1/governance/admin/actions/validate", json=action, headers=admin_headers
+        )
+
+        assert created.status_code == 400, created.text
+        assert created.json()["code"] == "credential_in_action"
+        assert validated.json()["valid"] is False
+        assert any(f"alert_destinations/oncall:{path}" in e for e in validated.json()["errors"])
+
+
+_VICTIM_PATH = "oidc/sso/client_secret"
+_VICTIM_VALUE = "victim-client-secret-5521"
+
+
+@pytest.fixture
+def bound(tmp_path):
+    """A dev-posture registry over a local deploy repo and a file secrets backend.
+
+    The backend already holds a secret no destination owns, and ``oncall`` and ``other``
+    each hold a URL.
+    """
+    crud = GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry())
+    crud.put("gov_settings", "seed", {"seed": True}, "seed")
+    secrets = build_secrets(SecretsSettings(provider="file", path=str(tmp_path / "secrets")))
+    secrets.put(_VICTIM_PATH, _VICTIM_VALUE)
+    store = DeployRepoStore(crud, ALERT_CLASS, environment="dev", mode="solo")
+    registry = AlertDestinationRegistry(deploy_repo=store, secrets=secrets)
+    registry.add(AlertDestination(name="oncall", url="slack://T/B/oncall-5522"))
+    registry.add(AlertDestination(name="other", url="slack://T/B/other-5523"))
+    yield crud, secrets, registry
+    registry.close()
+
+
+def _repoint(crud: GitCrud, name: str, path: str) -> None:
+    """Rewrite *name*'s document to name *path*, as a hand commit to the deploy repo could."""
+    doc = crud.get(ALERT_CLASS, name)
+    crud.put(ALERT_CLASS, name, {**doc, "url_path": path}, "hand-edit")
+
+
+def _foreign_path(crud: GitCrud, kind: str) -> str:
+    """A path ``oncall``'s document could name that is not under ``alerts/oncall/``."""
+    other = crud.get(ALERT_CLASS, "other")["url_path"]
+    return {
+        "another secret": _VICTIM_PATH,
+        "another destination": other,
+        "climbing out": f"alerts/oncall/../../{_VICTIM_PATH}",
+        "climbing across": f"alerts/oncall/../other/{other.rsplit('/', 1)[1]}",
+    }[kind]
+
+
+class TestAUrlPathOutsideTheDestinationsOwn:
+    """A document can name any path, so only one under ``alerts/<name>/`` is read or deleted."""
+
+    @pytest.mark.parametrize(
+        "kind", ["another secret", "another destination", "climbing out", "climbing across"]
+    )
+    def test_resolve_refuses_it_and_logs_the_name_and_path_only(self, bound, audit_events, kind):
+        crud, _, registry = bound
+        path = _foreign_path(crud, kind)
+        _repoint(crud, "oncall", path)
+        audit_events.clear()
+
+        assert registry.resolve("oncall") is None
+
+        refused = [e for e in audit_events if e.get("store_path") == path]
+        assert refused
+        assert refused[0]["destination"] == "oncall"
+        assert _VICTIM_VALUE not in repr(audit_events)
+        assert "other-5523" not in repr(audit_events)
+
+    def test_a_removed_destination_deletes_no_secret_outside_its_own(self, bound):
+        crud, secrets, registry = bound
+        _repoint(crud, "oncall", _VICTIM_PATH)
+
+        assert registry.remove("oncall") is True
+
+        assert secrets.get_or_none(_VICTIM_PATH) == _VICTIM_VALUE
+
+    def test_a_new_url_retires_no_secret_outside_the_destinations_own(self, bound):
+        crud, _, registry = bound
+        other = crud.get(ALERT_CLASS, "other")["url_path"]
+        _repoint(crud, "oncall", other)
+
+        registry.add(AlertDestination(name="oncall", url="slack://T/B/replaced-5524"))
+
+        assert registry.resolve("oncall") == "slack://T/B/replaced-5524"
+        assert registry.resolve("other") == "slack://T/B/other-5523"

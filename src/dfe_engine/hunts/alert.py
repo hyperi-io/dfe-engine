@@ -30,6 +30,7 @@ Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
 """
 
 import builtins
+import re
 import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
@@ -76,6 +77,35 @@ def url_secret_path(name: str) -> str:
     URL main sends to before the branch merges.
     """
     return f"alerts/{name}/url-{uuid.uuid4().hex}"
+
+
+_URL_LEAF = re.compile(r"url-[0-9a-f]{32}")
+"""The last segment :func:`url_secret_path` gives a URL."""
+
+
+def _owns_url_path(name: str, path: object) -> bool:
+    """Whether *path* has the shape :func:`url_secret_path` gives destination *name*.
+
+    A document can name any path, and a file backend follows ``..``, so a path only
+    counts when it is exactly ``alerts/<name>/url-<hex>``.
+    """
+    if not isinstance(path, str):
+        return False
+    try:
+        validate_name(name)
+    except CommitPolicyError:
+        return False
+    leaf = path.removeprefix(f"alerts/{name}/")
+    return leaf != path and _URL_LEAF.fullmatch(leaf) is not None
+
+
+def _refuse_url_path(name: str, path: object) -> None:
+    """Log a document's URL path that is not the destination's own, by name and path."""
+    logger.warning(
+        "Alert destination URL path refused: it is not under the destination's own alerts/<name>/",
+        destination=name,
+        store_path=path,
+    )
 
 
 class AlertDestinationNameError(ValueError):
@@ -311,8 +341,12 @@ class AlertDestinationRegistry:
     def _retire_url(self, name: str, path: str, *, kept: bool) -> None:
         """Delete a URL no document on main names, or log where it stays while main still does.
 
-        A delete the backend fails is logged by its path and left for an operator.
+        A path outside the destination's own is refused, never deleted. A delete the
+        backend fails is logged by its path and left for an operator.
         """
+        if not _owns_url_path(name, path):
+            _refuse_url_path(name, path)
+            return
         if kept:
             logger.info(
                 "Alert destination URL kept until its review branch merges",
@@ -363,7 +397,8 @@ class AlertDestinationRegistry:
         """Resolve a destination name to its Apprise URL. Returns None if not found or disabled.
 
         A deploy-repo destination's URL is read from the secrets backend at the path its
-        document names. One missing there resolves to None and is logged.
+        document names. One missing there resolves to None and is logged, and so does a
+        path outside the destination's own ``alerts/<name>/``, which is never read.
 
         Raises:
             SecretsError: The secrets backend did not answer or refused the read.
@@ -378,6 +413,9 @@ class AlertDestinationRegistry:
         if data is None or not self._destination(name, data).enabled:
             return None
         path = data.get(URL_PATH_FIELD, "")
+        if path and not _owns_url_path(name, path):
+            _refuse_url_path(name, path)
+            return None
         url = self._urls.get_or_none(path) if path else None
         if url is None:
             logger.warning(
