@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.61](https://github.com/hyperi-io/dfe-engine/compare/v1.22.60...v1.22.61) (2026-10-22)
+
+### Bug Fixes
+
+* **orgs:** compile receiver auth per listener ([#943](https://github.com/hyperi-io/dfe-engine/issues/943)) ([842f375](https://github.com/hyperi-io/dfe-engine/commit/842f375842b3eec2480bedcf6fb4faf88b4241f9))
+* place the synthetic marker in list tags ([#954](https://github.com/hyperi-io/dfe-engine/issues/954)) ([e7fbf97](https://github.com/hyperi-io/dfe-engine/commit/e7fbf9780bd5a6f0b2bf070ab345778c8d959359))
+
 ## [1.22.60](https://github.com/hyperi-io/dfe-engine/compare/v1.22.59...v1.22.60) (2026-10-22)
 
 ### Bug Fixes
