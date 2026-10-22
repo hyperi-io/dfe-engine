@@ -589,7 +589,7 @@ Moved to [rbac-engine-reads.md](rbac-engine-reads.md#53-the-engines-own-reads).
 
 ### 6.1 Org Registry
 
-YAML-backed CRUD via `OrgRegistry`. One file per org in `config/orgs/`.
+`OrgRegistry` keeps one YAML file per org in `config/orgs/` for one engine. On the document store, `DocuStoreOrgRegistry` claims each name and tenant id so replicas never share one.
 
 ### 6.2 Org Creation Flow
 

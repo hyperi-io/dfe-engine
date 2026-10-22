@@ -17,7 +17,7 @@ runs enough rounds to meet both.
 import pytest
 from pydantic import BaseModel
 
-from dfe_engine.store.documents import DocumentConflictError
+from dfe_engine.store.documents import Claim, Claims, DocumentConflictError, StaleRevisionError
 from tests.support.races import race
 
 pytestmark = pytest.mark.integration
@@ -167,6 +167,85 @@ class TestIndexes:
                 ]
             )
             assert [r for r in results if isinstance(r, BaseException)] == [], (round_, results)
+
+
+class TestExpectedRevision:
+    """A write held to the revision read earlier, as an If-Match holds it, lands only there."""
+
+    def test_the_revision_read_back_is_the_one_a_write_takes(self, docustore_pair):
+        store = docustore_pair[0].typed("counters", Counter, key="name")
+        store.insert(Counter(name="hits", value=1))
+        store.mutate("hits", _bump)
+
+        model, rev = store.get_with_revision("hits")
+        assert (model, rev.number) == (Counter(name="hits", value=2), 2)
+        assert store.get_with_revision("ghost") is None
+
+    def test_a_write_at_the_revision_read_lands(self, docustore_pair):
+        store = docustore_pair[0].typed("counters", Counter, key="name")
+        store.insert(Counter(name="hits"))
+        _, rev = store.get_with_revision("hits")
+
+        assert store.mutate("hits", _bump, expected_rev=rev).value == 1
+
+    def test_a_write_another_replica_beat_is_refused_and_writes_nothing(self, docustore_pair):
+        first, second = (c.typed("counters", Counter, key="name") for c in docustore_pair)
+        first.insert(Counter(name="hits"))
+        _, rev = first.get_with_revision("hits")
+        second.mutate("hits", _bump)
+
+        with pytest.raises(StaleRevisionError, match="revision 2, not 1"):
+            first.mutate("hits", _bump, expected_rev=rev)
+
+        model, now = first.get_with_revision("hits")
+        assert (model, now.number) == (Counter(name="hits", value=1), 2)
+
+    def test_a_write_never_lands_on_the_document_made_again_since_the_read(self, docustore_pair):
+        """A document deleted and made again is back at revision 1, as the one read was."""
+        first, second = (c.typed("counters", Counter, key="name") for c in docustore_pair)
+        first.insert(Counter(name="hits"))
+        _, rev = first.get_with_revision("hits")
+        assert second.delete("hits")
+        assert second.insert(Counter(name="hits", value=5))
+
+        with pytest.raises(StaleRevisionError, match="made again"):
+            first.mutate("hits", _bump, expected_rev=rev)
+
+        assert second.get("hits") == Counter(name="hits", value=5)
+
+    def test_a_delete_never_removes_the_document_made_again_since_the_read(self, docustore_pair):
+        first, second = (c.typed("counters", Counter, key="name") for c in docustore_pair)
+        first.insert(Counter(name="hits"))
+        _, rev = first.get_with_revision("hits")
+        assert second.delete("hits")
+        assert second.insert(Counter(name="hits", value=5))
+
+        assert not first.delete("hits", expected_rev=rev)
+        assert second.get("hits") == Counter(name="hits", value=5)
+
+    def test_a_delete_at_the_revision_read_removes_a_document_written_without_one(
+        self, docustore_pair
+    ):
+        docustore_pair[0].collection("counters").insert_one({"name": "hits", "value": 7})
+        store = docustore_pair[0].typed("counters", Counter, key="name")
+        _, rev = store.get_with_revision("hits")
+
+        assert rev.number == 0
+        assert store.delete("hits", expected_rev=rev)
+        assert store.get("hits") is None
+
+    def test_of_two_replicas_writing_from_one_read_exactly_one_lands(self, docustore_pair):
+        stores = [c.typed("counters", Counter, key="name") for c in docustore_pair]
+        stores[0].insert(Counter(name="hits"))
+
+        for round_ in range(RACE_ROUNDS):
+            _, rev = stores[0].get_with_revision("hits")
+            results = race(
+                [lambda s=s, rev=rev: s.mutate("hits", _bump, expected_rev=rev) for s in stores]
+            )
+            stale = [r for r in results if isinstance(r, StaleRevisionError)]
+            assert len(stale) == 1, (round_, results)
+        assert stores[0].get("hits").value == RACE_ROUNDS
 
 
 class TestRevision:
@@ -338,6 +417,65 @@ class TestOrphanedClaims:
 
         assert not claims.release_if_orphaned(read, held=False, grace_seconds=0)
         assert claims.holder("tenant-1") == "acme"
+
+
+class TestMadeClaims:
+    """A claim a write made can be taken back exactly, and never one renewed since."""
+
+    def test_create_returns_the_claim_only_where_nobody_holds_the_key(self, docustore_pair):
+        claims = docustore_pair[0].claims("tenant_keys")
+
+        made = claims.create("tenant-1", "acme")
+
+        assert made is not None
+        assert claims.get("tenant-1") == made
+        assert claims.create("tenant-1", "acme") is None
+        assert claims.create("tenant-1", "globex") is None
+
+    def test_withdrawing_it_releases_the_key(self, docustore_pair):
+        claims = docustore_pair[0].claims("tenant_keys")
+        made = claims.create("tenant-1", "acme")
+
+        assert claims.withdraw(made)
+        assert claims.get("tenant-1") is None
+
+    def test_one_renewed_since_is_kept(self, docustore_pair):
+        first, second = (c.claims("tenant_keys") for c in docustore_pair)
+        made = first.create("tenant-1", "acme")
+        assert second.claim("tenant-1", "acme")
+
+        assert not first.withdraw(made)
+        assert first.holder("tenant-1") == "acme"
+
+    @staticmethod
+    def _made_again_at_its_stamp(docustore_pair) -> tuple[Claims, Claim, Claim]:
+        """A claim made, withdrawn, and made again by another replica whose clock stamps it alike."""
+        first, second = (c.claims("tenant_keys") for c in docustore_pair)
+        made = first.create("tenant-1", "acme")
+        assert first.withdraw(made)
+        again = second.create("tenant-1", "acme")
+        raw = docustore_pair[0].collection("tenant_keys")
+        raw.update_one({"key": "tenant-1"}, {"$set": {"claimed_at": made.claimed_at}})
+        return first, made, again.model_copy(update={"claimed_at": made.claimed_at})
+
+    def test_withdrawing_one_made_again_at_the_same_stamp_keeps_it(self, docustore_pair):
+        claims, made, again = self._made_again_at_its_stamp(docustore_pair)
+
+        assert not claims.withdraw(made)
+        assert claims.get("tenant-1") == again
+
+    def test_renewing_one_made_again_at_the_same_stamp_leaves_it(self, docustore_pair):
+        claims, made, again = self._made_again_at_its_stamp(docustore_pair)
+
+        assert claims.renew(made) is None
+        assert claims.get("tenant-1") == again
+
+    def test_every_claim_is_listed(self, docustore_pair):
+        claims = docustore_pair[0].claims("tenant_keys")
+        claims.claim("b", "globex")
+        claims.claim("a", "acme")
+
+        assert [(c.key, c.owner) for c in claims.list()] == [("a", "acme"), ("b", "globex")]
 
 
 class TestStoreRevisions:

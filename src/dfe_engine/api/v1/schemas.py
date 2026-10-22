@@ -17,6 +17,7 @@ from typing import Any, Literal, cast
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
+from scalo.concurrency import run_blocking
 
 from dfe_engine.api.body_limits import own_limit, refuse_declared_oversize, too_large
 from dfe_engine.api.deps import (
@@ -1767,6 +1768,8 @@ async def discover_json_paths(
     match_kw = _match_query_kwargs(match_rule)
 
     path_filter = [p.strip() for p in paths.split(",") if p.strip()] if paths else None
+    # The org registry may be a remote store, so the orgs the caller is held to are read off the loop.
+    org_ids = await run_blocking(held_tenant_ids, request, user, scopes_dict["schema_read"])
 
     try:
         discovered = discover_paths(
@@ -1777,7 +1780,7 @@ async def discover_json_paths(
             paths=path_filter,
             samples=samples,
             stats=stats,
-            org_ids=held_tenant_ids(request, user, scopes_dict["schema_read"]),
+            org_ids=org_ids,
             **match_kw,
         )
     except JsonPromotionScopeError as exc:
@@ -1871,6 +1874,7 @@ async def sample_source_rows(
         db=db,
     )
     match_kw = _match_query_kwargs(match_rule)
+    org_ids = await run_blocking(held_tenant_ids, request, user, scopes_dict["schema_read"])
 
     try:
         columns, rows = sample_rows(
@@ -1878,7 +1882,7 @@ async def sample_source_rows(
             db=db,
             source=target_table,
             limit=limit,
-            org_ids=held_tenant_ids(request, user, scopes_dict["schema_read"]),
+            org_ids=org_ids,
             **match_kw,
         )
     except JsonPromotionScopeError as exc:
@@ -2010,6 +2014,7 @@ async def promote_field(
     # Discover ClickHouse types only when a request relies on auto-derivation.
     path_types: dict[str, list[str]] = {}
     if any(r.data_type is None for r in requests):
+        org_ids = await run_blocking(held_tenant_ids, request, user, scopes_dict["schema_write"])
         try:
             discovered = discover_paths(
                 ch,
@@ -2017,7 +2022,7 @@ async def promote_field(
                 source=target_table,
                 existing_columns=columns,
                 paths=[r.json_path for r in requests],
-                org_ids=held_tenant_ids(request, user, scopes_dict["schema_write"]),
+                org_ids=org_ids,
                 **match_kw,
             )
         except JsonPromotionScopeError as exc:

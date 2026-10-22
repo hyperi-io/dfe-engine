@@ -29,6 +29,7 @@ from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture,
 
 if TYPE_CHECKING:
     from dfe_engine.kafka.topics import TopicEnsureResult
+    from dfe_engine.store.documents import DocuStore
 
 
 def docs_served(settings: DFESettings) -> bool:
@@ -85,8 +86,11 @@ async def _ensure_startup_topics(
     return ensured
 
 
-def _bootstrap_orgs(app: FastAPI, settings: DFESettings) -> None:
+def _bootstrap_orgs(app: FastAPI, settings: DFESettings, doc_store: DocuStore | None) -> None:
     """Build the org registry, then make sure the reserved default org exists and seed the rest.
+
+    The orgs live in the document store when the auth stores do, so every replica
+    shares them, and in YAML under the config directory otherwise.
 
     Raises:
         ValueError: Another org holds the default org's tenant id, so every record
@@ -96,12 +100,19 @@ def _bootstrap_orgs(app: FastAPI, settings: DFESettings) -> None:
     from pathlib import Path
 
     from dfe_engine.api.deps import get_hunt_config_registry_optional
-    from dfe_engine.orgs.registry import OrgRegistry
+    from dfe_engine.orgs.registry import DocuStoreOrgRegistry, OrgRegistry
     from dfe_engine.orgs.seed import ensure_default_org, seed_orgs
 
-    config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
-    orgs_dir = Path(config_dir) / "orgs" if config_dir else Path("config") / "orgs"
-    app.state.org_registry = OrgRegistry(orgs_dir)
+    if doc_store is not None:
+        registry = DocuStoreOrgRegistry(doc_store)
+        released = registry.release_orphaned_claims()
+        if released:
+            logger.info("Released org name and tenant id claims no org holds", keys=released)
+        app.state.org_registry = registry
+    else:
+        config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
+        orgs_dir = Path(config_dir) / "orgs" if config_dir else Path("config") / "orgs"
+        app.state.org_registry = OrgRegistry(orgs_dir)
     ensure_default_org(app.state.org_registry)
 
     try:
@@ -123,12 +134,13 @@ def _keep_bearer_tokens_in_step(app: FastAPI) -> None:
     rewrites the bearer secrets.
     """
     from dfe_engine.orgs.ingest_tokens import drop_token, sync_bearer_tokens
+    from dfe_engine.store.documents import converge
 
     registry = app.state.org_registry
     secrets = app.state.dfe_secrets
 
     def sync() -> None:
-        sync_bearer_tokens(registry, secrets)
+        converge(functools.partial(sync_bearer_tokens, registry, secrets))
 
     try:
         sync()
@@ -315,9 +327,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         except Exception as exc:  # the deploy repo is seeded again on the next start
             logger.warning("default app instances not seeded at startup", error=str(exc))
 
+    # One central backend for local users, groups and orgs: 'auto' (document store when a
+    # reachable URI is configured, else yaml), 'document' (forced), or 'yaml'. The
+    # document store is engine-wide and lifespan-owned so consumers share it.
+    from dfe_engine.auth.store_backend import resolve_store_backend
+
+    # A document store comes back exactly when the resolved backend is 'document'.
+    _, doc_store = resolve_store_backend(
+        settings.auth.store_backend,
+        settings.auth.accounts_store.uri,
+        settings.auth.accounts_store.database,
+        server_selection_timeout=settings.auth.accounts_store.server_selection_timeout_seconds,
+        socket_timeout=settings.auth.accounts_store.socket_timeout_seconds,
+    )
+    app.state.document_store = doc_store
+
     # Ahead of the reconcile below, which compiles the orgs into the apps' tenancy,
     # and of the CH RBAC reconcile, so a seeded org is fenced on this boot.
-    _bootstrap_orgs(app, settings)
+    _bootstrap_orgs(app, settings, doc_store)
 
     # The deploy repo's derived app state follows the sources, and a fresh deploy
     # seeds its apps with none: compile it in now, or the receiver has no
@@ -368,20 +395,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     auth_dir = Path(auth_dir_str)
 
-    # One central backend for local users AND groups: 'auto' (document store when a
-    # reachable URI is configured, else yaml), 'document' (forced), or 'yaml'. The
-    # document store is engine-wide and lifespan-owned so consumers share it.
-    from dfe_engine.auth.store_backend import resolve_store_backend
-
-    # A document store comes back exactly when the resolved backend is 'document'.
-    _, doc_store = resolve_store_backend(
-        settings.auth.store_backend,
-        settings.auth.accounts_store.uri,
-        settings.auth.accounts_store.database,
-        server_selection_timeout=settings.auth.accounts_store.server_selection_timeout_seconds,
-        socket_timeout=settings.auth.accounts_store.socket_timeout_seconds,
-    )
-    app.state.document_store = doc_store
     from dfe_engine.auth.groups import GroupMetrics
 
     group_metrics = GroupMetrics(app.state.metrics_manager)

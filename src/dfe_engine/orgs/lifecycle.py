@@ -28,9 +28,9 @@ Usage::
     org = await manager.create_org("acme", org_ids=["acme"], admin_id="admin")
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
+
+from scalo.concurrency import run_blocking
 
 from dfe_engine.auth.audit import (
     audit_org_change,
@@ -38,10 +38,10 @@ from dfe_engine.auth.audit import (
     audit_org_hyperdx_provisioned,
 )
 from dfe_engine.orgs.models import Org
-from dfe_engine.orgs.registry import OrgRegistry
 
 if TYPE_CHECKING:
     from dfe_engine.hyperdx.client import HyperDXClient
+    from dfe_engine.orgs.registry import AnyOrgRegistry
 
 
 class OrgLifecycleManager:
@@ -50,12 +50,13 @@ class OrgLifecycleManager:
     HyperDX operations are non-fatal: failures are logged and do not prevent the
     org operation from completing. Per-org ClickHouse isolation (row policies on
     ``_org_id``) is applied by ``governance.ch.ChRbacReconciler`` from the
-    registry, not here - orgs share tables.
+    registry, not here - orgs share tables. Registry calls, and the change listeners
+    they run, go to worker threads, because the registry may be a remote store.
     """
 
     def __init__(
         self,
-        registry: OrgRegistry,
+        registry: AnyOrgRegistry,
         hyperdx_client: HyperDXClient | None = None,
     ) -> None:
         self._registry = registry
@@ -91,7 +92,9 @@ class OrgLifecycleManager:
         Raises:
             ValueError: If an org with this name already exists.
         """
-        org = self._registry.create(name, org_ids=org_ids, display_name=display_name)
+        org = await run_blocking(
+            self._registry.create, name, org_ids=org_ids, display_name=display_name
+        )
         org = await self._provision_hyperdx(org)
         audit_org_change(admin_id=admin_id, org_name=name, change="created")
         return org
@@ -110,11 +113,10 @@ class OrgLifecycleManager:
         Raises:
             KeyError: If no org with *name* exists.
         """
-        org = self._registry.get(name)
-        if org is None:
+        if await run_blocking(self._registry.get, name) is None:
             raise KeyError(name)
 
-        self._registry.delete(name)
+        await run_blocking(self._registry.delete, name)
         audit_org_change(admin_id=admin_id, org_name=name, change="deleted")
 
     # ------------------------------------------------------------------
@@ -153,7 +155,7 @@ class OrgLifecycleManager:
         team_id = str(team.get("_id", "")) if team else ""
         if team_id:
             audit_org_hyperdx_provisioned(org_name=org.name, team_id=team_id)
-            return self._registry.update(org.name, hyperdx_team_id=team_id)
+            return await run_blocking(self._registry.update, org.name, hyperdx_team_id=team_id)
 
         audit_org_hyperdx_failed(org_name=org.name)
         return org

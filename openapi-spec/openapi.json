@@ -5433,7 +5433,7 @@
           "Ingest credentials"
         ],
         "summary": "Apply Ingest Credential",
-        "description": "Create an ingest credential and mint its token, or change what it binds.\n\n``If-None-Match: *`` creates it and answers 201 with the token, once.\n``If-Match: <etag>`` updates its orgs, default org and listeners and keeps its\ntoken. A credential id is unique across every org, so creating one another org\nholds answers 409 ``credential_id_taken``. A binding the receiver could not\nhold answers 422 ``invalid_binding`` with a field error for each problem.",
+        "description": "Create an ingest credential and mint its token, or change what it binds.\n\n``If-None-Match: *`` creates it and answers 201 with the token, once.\n``If-Match: <etag>`` updates its orgs, default org and listeners and keeps its\ntoken. A credential id is unique across every org, so creating one another org\nholds answers 409 ``credential_id_taken``. A binding the receiver could not\nhold answers 422 ``invalid_binding`` with a field error for each problem. A write\nanother one beat to the store after the precondition passed answers 412, as a\nstale precondition does.",
         "operationId": "orgs.ingest-credentials.apply",
         "parameters": [
           {
@@ -5716,7 +5716,7 @@
           "Ingest credentials"
         ],
         "summary": "Rotate Ingest Credential",
-        "description": "Mint a new token for an ingest credential. The old one stops working and the binding stays.\n\nThe new token comes back in this response and never again. ``If-Match`` is\nhonoured when sent.",
+        "description": "Mint a new token for an ingest credential. The old one stops working and the binding stays.\n\nThe new token comes back in this response and never again. ``If-Match`` is\nhonoured when sent. When another write changes or removes the credential first,\nit answers 412, as a stale precondition does.",
         "operationId": "orgs.ingest-credentials.rotate",
         "parameters": [
           {

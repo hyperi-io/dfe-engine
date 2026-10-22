@@ -12,12 +12,15 @@ receiver's overlay as tenant ids, and its ``<id>:<token>`` line reaches the bear
 secret of every listener it is scoped to.
 """
 
+from collections.abc import Callable
+
 import pytest
 
 from dfe_engine.api.deps import create_access_token
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
+from dfe_engine.orgs.ingest_credentials import IngestCredential
 from dfe_engine.orgs.ingest_tokens import bearer_secret_path, credential_secret_path
 
 BASE = "/api/v1/orgs/acme/ingest-credentials"
@@ -257,6 +260,99 @@ class TestDeleteAndRotate:
 
         assert resp.json()["token"] is None
         assert _secret(app, credential_secret_path("agents")) == created["token"]
+
+
+def _first_write_lands_before(monkeypatch, app, method: str, write: Callable[[], None]) -> None:
+    """Make *write* land the moment the route calls the registry's *method*, as another replica's would."""
+    credentials = app.state.org_registry.ingest_credentials
+    real = getattr(credentials, method)
+
+    def racing(*args, **kwargs):
+        monkeypatch.setattr(credentials, method, real)
+        write()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(credentials, method, racing)
+
+
+class TestAWriteThatLandsAfterThePreconditionCheck:
+    """Another write between a route's precondition check and its own write refuses the route's."""
+
+    @staticmethod
+    def _otlp_only(app) -> None:
+        credentials = app.state.org_registry.ingest_credentials
+        stored = credentials.get("agents")
+        credentials.put(stored.model_copy(update={"listeners": ["otlp"]}))
+
+    def test_an_update_answers_412_with_the_etag_now_stored(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        created = _create(client, admin_headers, listeners=["http"])
+        _first_write_lands_before(monkeypatch, app, "put", lambda: self._otlp_only(app))
+
+        resp = client.put(
+            f"{BASE}/agents",
+            json={"listeners": ["grpc"]},
+            headers={**admin_headers, "If-Match": created.headers["ETag"]},
+        )
+
+        assert resp.status_code == 412, resp.text
+        assert resp.json()["code"] == "etag_mismatch"
+        now = client.get(f"{BASE}/agents", headers=admin_headers)
+        assert now.json()["listeners"] == ["otlp"]
+        assert resp.json()["context"]["etag"] == now.headers["ETag"]
+
+    def test_a_delete_answers_412_and_removes_nothing(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        created = _create(client, admin_headers, listeners=["http"])
+        _first_write_lands_before(monkeypatch, app, "delete", lambda: self._otlp_only(app))
+
+        resp = client.delete(
+            f"{BASE}/agents", headers={**admin_headers, "If-Match": created.headers["ETag"]}
+        )
+
+        assert resp.status_code == 412, resp.text
+        assert client.get(f"{BASE}/agents", headers=admin_headers).json()["listeners"] == ["otlp"]
+
+    def test_a_create_answers_412_and_leaves_the_other(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        credentials = app.state.org_registry.ingest_credentials
+        other = IngestCredential(
+            name="agents", org="acme", orgs=["acme"], default_org="acme", listeners=["otlp"]
+        )
+        _first_write_lands_before(monkeypatch, app, "put", lambda: credentials.put(other))
+
+        resp = _create(client, admin_headers, listeners=["http"])
+
+        assert resp.status_code == 412, resp.text
+        assert resp.json()["code"] == "resource_exists"
+        assert credentials.get("agents") == other
+
+    def test_a_rotate_of_one_deleted_since_answers_412_and_leaves_it_gone(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        _create(client, admin_headers, listeners=["http"])
+        credentials = app.state.org_registry.ingest_credentials
+        _first_write_lands_before(monkeypatch, app, "put", lambda: credentials.delete("agents"))
+
+        resp = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
+
+        assert resp.status_code == 412, resp.text
+        assert resp.json()["code"] == "resource_missing"
+        assert credentials.get("agents") is None
+
+    def test_a_rotate_answers_412_and_keeps_a_binding_changed_since(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        _create(client, admin_headers, listeners=["http"])
+        _first_write_lands_before(monkeypatch, app, "put", lambda: self._otlp_only(app))
+
+        resp = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
+
+        assert resp.status_code == 412, resp.text
+        assert client.get(f"{BASE}/agents", headers=admin_headers).json()["listeners"] == ["otlp"]
 
 
 @pytest.fixture
