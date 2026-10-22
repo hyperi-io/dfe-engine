@@ -101,7 +101,7 @@ class OrgBinder(Protocol):
     """Claims the orgs a credential binds, so none is deleted while a write binding it is made."""
 
     def bind_orgs(self, credential: IngestCredential) -> builtins.list[Claim]:
-        """Claim each org *credential* binds beyond its owner, and return the claims made.
+        """Claim each org *credential* binds, its owner among them, and return the claims made.
 
         Raises:
             OrgUnavailableError: One of them does not exist or is being deleted.

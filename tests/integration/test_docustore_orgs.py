@@ -549,6 +549,73 @@ class TestBindings:
         assert _claimed(docustore_pair[0], BINDINGS_COLLECTION) == []
 
 
+def _owners_all_exist(registry: DocuStoreOrgRegistry) -> None:
+    """Every stored credential's owning org is a stored org."""
+    orgs = {org.name for org in registry.list()}
+    credentials = registry.ingest_credentials.list()
+    assert all(c.org in orgs for c in credentials), credentials
+
+
+class TestAnOrgsOwnCredentials:
+    """A credential written for an org while another replica deletes it never outlives the org."""
+
+    @pytest.fixture
+    def registries(self, docustore_pair):
+        registries = _registries(docustore_pair)
+        registries[0].create("beta")
+        return registries
+
+    def test_one_created_after_the_delete_listed_them_is_refused(self, registries, monkeypatch):
+        credentials = registries[0].ingest_credentials
+        real = credentials.owned_by
+        refused = []
+
+        # The delete has listed beta's credentials when the other replica creates one for beta.
+        def owned_by(org):
+            listed = real(org)
+            monkeypatch.setattr(credentials, "owned_by", real)
+            with pytest.raises(OrgUnavailableError) as caught:
+                registries[1].ingest_credentials.put(_credential("late", org="beta"), new=True)
+            refused.append(caught.value)
+            return listed
+
+        monkeypatch.setattr(credentials, "owned_by", owned_by)
+
+        registries[0].delete("beta")
+
+        assert refused
+        assert registries[1].get("beta") is None
+        _owners_all_exist(registries[1])
+
+    def test_one_in_flight_when_the_delete_starts_holds_it_off(self, registries, monkeypatch):
+        credentials = registries[1].ingest_credentials
+        real = credentials._c.insert
+        refused = []
+
+        # Between the create's claims and its record write, the other replica deletes beta.
+        def insert(model):
+            monkeypatch.setattr(credentials._c, "insert", real)
+            with pytest.raises(OrgBoundError, match="'agents'") as caught:
+                registries[0].delete("beta")
+            refused.append(caught.value)
+            return real(model)
+
+        monkeypatch.setattr(credentials._c, "insert", insert)
+
+        credentials.put(_credential("agents", org="beta"), new=True)
+
+        assert refused
+        assert registries[0].get("beta") is not None
+        _owners_all_exist(registries[0])
+
+    def test_a_delete_still_takes_the_ones_it_finds(self, registries):
+        registries[1].ingest_credentials.put(_credential("agents", org="beta"), new=True)
+
+        registries[0].delete("beta")
+
+        assert registries[1].ingest_credentials.list() == []
+
+
 def _claimed(store: DocuStore, collection: str) -> list[str]:
     """The keys of every claim in *collection*."""
     return sorted(doc["key"] for doc in store.collection(collection).find())

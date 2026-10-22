@@ -62,7 +62,7 @@ TENANT_KEYS_COLLECTION = "tenant_keys"
 """Where :class:`DocuStoreOrgRegistry` claims each org's name and tenant ids."""
 
 BINDINGS_COLLECTION = "org_bindings"
-"""Where each document-store credential claims the orgs it binds beyond its owner."""
+"""Where each document-store credential claims the orgs it binds, its owner among them."""
 
 DELETES_COLLECTION = "org_deletes"
 """Where a delete marks the org it is removing, so no credential write binds it meanwhile."""
@@ -365,11 +365,11 @@ class DocuStoreOrgRegistry(_OrgEvents):
     covers a replica that died between a claim and its record, and a key an update
     or delete gave up within the grace.
 
-    A credential write claims each other org it binds in :data:`BINDINGS_COLLECTION`
-    and then checks the org is not being deleted. A delete marks the org in
-    :data:`DELETES_COLLECTION` and then looks for credentials and claims binding it.
-    Whichever comes second sees the other, so an org is never deleted while a
-    credential write binds it.
+    A credential write claims each org it binds, its owner among them, in
+    :data:`BINDINGS_COLLECTION` and then checks the org is not being deleted. A delete
+    marks the org in :data:`DELETES_COLLECTION` and then looks for credentials and
+    claims binding it. Whichever comes second sees the other, so an org is never
+    deleted while a credential write binds it or creates one it owns.
     """
 
     def __init__(
@@ -540,7 +540,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
                 self._held_deletes.discard(name)
 
     def bind_orgs(self, credential: IngestCredential) -> builtins.list[Claim]:
-        """Claim each org *credential* binds beyond its owner, and return the claims made.
+        """Claim each org *credential* binds, its owner among them, and return the claims made.
 
         Raises:
             OrgUnavailableError: One of them does not exist or is being deleted. The
@@ -548,7 +548,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
         """
         made: builtins.list[Claim] = []
         try:
-            for org in sorted(set(credential.orgs) - {credential.org}):
+            for org in sorted({credential.org, *credential.orgs}):
                 key = f"{org}/{credential.name}"
                 claim = self._bindings.create(key, credential.name, subject=org)
                 if claim is None:
@@ -622,8 +622,9 @@ class DocuStoreOrgRegistry(_OrgEvents):
     def _refuse_bindings(self, name: str) -> None:
         """Refuse to delete *name* while a credential binds it or a write binding it is in flight.
 
-        A binding claim no credential holds and older than the grace is a write that never
-        finished, and is released rather than counted.
+        A credential *name* owns goes with the delete. A binding claim no credential holds
+        and older than the grace is a write that never finished, and is released rather
+        than counted.
 
         Raises:
             OrgBoundError: Naming each credential.
@@ -632,9 +633,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
         pending = sorted(
             claim.owner
             for claim in self._bindings.about(name)
-            if not self._bindings.release_if_orphaned(
-                claim, held=self._binds(claim), grace_seconds=self._grace
-            )
+            if self._binding_pending(claim, name)
         )
         if pending:
             raise OrgBoundError(
@@ -653,6 +652,14 @@ class DocuStoreOrgRegistry(_OrgEvents):
         """Whether the credential holding binding *claim* binds the org it is about."""
         credential = self.ingest_credentials.get(claim.owner)
         return credential is not None and claim.subject in credential.orgs
+
+    def _binding_pending(self, claim: Claim, org: str) -> bool:
+        """Whether binding *claim* on *org* holds off its delete. A credential *org* owns never does."""
+        credential = self.ingest_credentials.get(claim.owner)
+        if credential is not None and credential.org == org:
+            return False
+        held = credential is not None and claim.subject in credential.orgs
+        return not self._bindings.release_if_orphaned(claim, held=held, grace_seconds=self._grace)
 
     def _lock_create(self, name: str) -> Claim:
         """Lock org *name* against every other create held by :meth:`reserved`.
