@@ -118,17 +118,18 @@ def _keep_bearer_tokens_in_step(app: FastAPI) -> None:
     """Rewrite the receiver's bearer secrets now, and after every org or credential write.
 
     Every writer goes through the org registry, so a credential removed by any of
-    them stops working and its token secret is dropped. A secrets backend that is
-    down never breaks startup or a write: the next change, or the next boot,
-    rewrites the bearer secrets.
+    them stops working and its token secret is dropped. A secrets backend or mirror
+    Secret that is down never breaks startup or a write: the next change, or the next
+    boot, rewrites the bearer secrets.
     """
     from dfe_engine.orgs.ingest_tokens import drop_token, sync_bearer_tokens
 
     registry = app.state.org_registry
     secrets = app.state.dfe_secrets
+    mirror = app.state.bearer_mirror
 
     def sync() -> None:
-        sync_bearer_tokens(registry, secrets)
+        sync_bearer_tokens(registry, secrets, mirror)
 
     try:
         sync()
@@ -458,6 +459,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # The one seam for secrets the engine mints - OIDC provider credentials and
     # sigma provider tokens resolve through it, never through a backend SDK.
     app.state.dfe_secrets = build_secrets(settings.secrets)
+    from dfe_engine.orgs.ingest_tokens import build_bearer_mirror
+
+    app.state.bearer_mirror = build_bearer_mirror(settings.ingest.bearer_secret)
     _keep_bearer_tokens_in_step(app)
 
     from dfe_engine.governance import PolicyStore

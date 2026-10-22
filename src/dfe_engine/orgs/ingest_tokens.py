@@ -20,6 +20,11 @@ The receiver authenticates a listener only while an accepted credential lists it
 :func:`compile_listener_auth` compiles ``mode: bearer`` on that listener's secret then,
 and ``mode: none`` otherwise, under which a record lands in the default org.
 
+On Kubernetes the ``file`` backend writes under the engine's own volume, which no
+receiver pod can mount. With ``DFE_INGEST_BEARER_SECRET`` set, :func:`sync_bearer_tokens`
+also writes each listener's content into that Kubernetes Secret, keyed by listener, and
+the receiver mounts it at :data:`RECEIVER_BEARER_MOUNT`.
+
 No token is ever logged, and none is read back out of the API after the request
 that mints it.
 """
@@ -29,6 +34,7 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
+from scalo.secrets import SecretAlreadyExistsError, SecretNotFoundError, SecretsManager
 
 from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, IngestCredential, IngestListener
 from dfe_engine.orgs.tenancy import Tenancy
@@ -42,11 +48,15 @@ CREDENTIAL_SECRET_PREFIX = "ingest/credentials"
 BEARER_SECRET_PREFIX = "ingest/bearer-tokens"
 
 RECEIVER_BEARER_MOUNT = "/var/run/secrets/dfe/ingest-bearer-tokens"
-"""Where dfe-receiver mounts the file backend's ``ingest/bearer-tokens`` directory, read-only.
+"""Where dfe-receiver mounts the ``file`` backend's bearer tokens, read-only, one file per listener.
 
 The ``file`` backend writes under the engine's own volume, so the receiver reads the
-directory where the deployment mounts it rather than where the engine wrote it.
+directory where the deployment mounts it rather than where the engine wrote it: the
+backend's ``ingest/bearer-tokens`` directory on docker, the mirror Secret on Kubernetes.
 """
+
+MIRROR_PROVIDER = "kubernetes"
+"""The scalo secrets provider that writes the mirror Secret's keys."""
 
 # 32 random bytes, URL-safe base64: no ':' and no line break, the receiver's two separators.
 _TOKEN_BYTES = 32
@@ -96,7 +106,8 @@ def bearer_secret_source(listener: str, backend: SecretsSettings) -> str:
     raise BearerSourceUnreadableError(
         f"dfe-receiver cannot read the ingest bearer tokens on "
         f"DFE_SECRETS_PROVIDER={backend.provider}: {reason}. Use openbao or aws, or file with "
-        f"the receiver mounting DFE_SECRETS_PATH/{BEARER_SECRET_PREFIX} at {RECEIVER_BEARER_MOUNT}"
+        f"the receiver mounting DFE_SECRETS_PATH/{BEARER_SECRET_PREFIX}, or on Kubernetes the "
+        f"DFE_INGEST_BEARER_SECRET Secret, at {RECEIVER_BEARER_MOUNT}"
     )
 
 
@@ -183,22 +194,85 @@ def accepted_credentials(tenancy: Tenancy) -> list[IngestCredential]:
     return [c for c in tenancy.credentials if c.org in enabled]
 
 
-def sync_bearer_tokens(registry: OrgRegistry, secrets: DfeSecrets) -> list[str]:
+def build_bearer_mirror(secret_name: str) -> SecretsManager | None:
+    """The scalo secrets manager writing the mirror Secret *secret_name*, None when it is unset.
+
+    It authenticates as the engine's own service account, in the engine's own namespace.
+    Every read goes to the API server, so a Secret reset under it is seen on the next sync.
+    """
+    if not secret_name:
+        return None
+    return SecretsManager.from_config(
+        {MIRROR_PROVIDER: {"secret_name": secret_name}, "cache": {"enabled": False}}
+    )
+
+
+def mirror_bearer_tokens(entries: dict[str, str], mirror: SecretsManager) -> list[str]:
+    """Write each listener's content into the mirror Secret where the Secret holds something else.
+
+    Compared with the Secret itself rather than the engine's backend, so a Secret reset
+    or a write that failed earlier is caught up. A key is only ever written, never removed:
+    the receiver keeps its last tokens when a file it reads disappears.
+
+    Args:
+        entries: Content by listener, as :func:`bearer_entries` builds it.
+        mirror: The manager :func:`build_bearer_mirror` returned.
+
+    Returns:
+        The listeners whose key was written.
+
+    Raises:
+        SecretsError: The Secret does not exist, the engine may not read or update it,
+            or the API server could not be reached.
+    """
+    written = []
+    for listener, content in entries.items():
+        value = content.encode("utf-8")
+        try:
+            held = mirror.get_sync(listener, provider=MIRROR_PROVIDER).data
+        except SecretNotFoundError:
+            held = None
+        if held == value:
+            continue
+        if held is None:
+            try:
+                mirror.create_sync(listener, value, provider=MIRROR_PROVIDER)
+            except SecretAlreadyExistsError:
+                mirror.update_sync(listener, value, provider=MIRROR_PROVIDER)
+        else:
+            mirror.update_sync(listener, value, provider=MIRROR_PROVIDER)
+        written.append(listener)
+    if written:
+        logger.info("receiver bearer tokens written to the mirror Secret", listeners=written)
+    return written
+
+
+def sync_bearer_tokens(
+    registry: OrgRegistry, secrets: DfeSecrets, mirror: SecretsManager | None = None
+) -> list[str]:
     """Rewrite each listener's bearer secret that no longer matches the accepted credentials.
 
     Args:
         registry: The org registry holding the credentials.
         secrets: The secrets seam.
+        mirror: The mirror Secret's manager, None when no mirror is configured.
 
     Returns:
-        The listeners whose secret was rewritten.
+        The listeners whose secret, or mirror Secret key, was rewritten.
+
+    Raises:
+        SecretsError: The backend or the mirror Secret refused. The backend is written
+            first, so a refused mirror leaves it current and the next sync retries the mirror.
     """
-    rewritten = []
+    rewritten: set[str] = set()
     accepted = accepted_credentials(Tenancy.read(registry))
-    for listener, content in bearer_entries(accepted, secrets).items():
+    entries = bearer_entries(accepted, secrets)
+    for listener, content in entries.items():
         path = bearer_secret_path(listener)
         if secrets.get_or_none(path) == content:
             continue
         secrets.put(path, content)
-        rewritten.append(listener)
-    return rewritten
+        rewritten.add(listener)
+    if mirror is not None:
+        rewritten.update(mirror_bearer_tokens(entries, mirror))
+    return [listener for listener in BEARER_LISTENERS if listener in rewritten]

@@ -15,14 +15,17 @@ secret of every listener it is scoped to.
 from types import SimpleNamespace
 
 import pytest
+from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
+from dfe_engine.api.app import create_app
+from dfe_engine.api.deps import _registries, create_access_token
 from dfe_engine.api.v1 import ingest_credentials as ingest_credentials_api
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
 from dfe_engine.orgs.ingest_tokens import bearer_secret_path, credential_secret_path
-from dfe_engine.settings import SecretsSettings
+from dfe_engine.settings import IngestSettings, SecretsSettings
+from tests.support.local_kube_api import local_kube_api, mirror_for
 
 BASE = "/api/v1/orgs/acme/ingest-credentials"
 CREATE = {"If-None-Match": "*"}
@@ -550,3 +553,47 @@ class TestTheDefaultOrg:
         assert app.state.org_registry.ingest_credentials.get("agents") is None
         assert token not in _bearer(app, "http")
         assert _secret(app, credential_secret_path("agents")) is None
+
+
+class TestTheMirrorSecret:
+    """With DFE_INGEST_BEARER_SECRET set, a write also reaches the Secret the receiver mounts."""
+
+    SA_TOKEN = "service-account-token-placeholder"
+
+    def test_a_minted_token_reaches_the_secret(self, client, app, admin_headers, orgs, tmp_path):
+        token_file = tmp_path / "sa-token"
+        token_file.write_text(self.SA_TOKEN, encoding="utf-8")
+        with local_kube_api(self.SA_TOKEN) as kube:
+            kube.create_empty()
+            app.state.bearer_mirror = mirror_for(kube, token_file)
+
+            token = _create(client, admin_headers, listeners=["http"]).json()["token"]
+
+            assert kube.data()["http"] == f"agents:{token}\n"
+            assert kube.data()["otlp"] == "\n"
+
+    def test_a_secret_that_refuses_is_503_like_the_backend(
+        self, client, app, admin_headers, orgs, tmp_path
+    ):
+        token_file = tmp_path / "sa-token"
+        token_file.write_text(self.SA_TOKEN, encoding="utf-8")
+        with local_kube_api(self.SA_TOKEN) as kube:
+            app.state.bearer_mirror = mirror_for(kube, token_file)
+
+            resp = _create(client, admin_headers, listeners=["http"])
+
+            assert resp.status_code == 503, resp.text
+            assert resp.json()["code"] == "secrets_unavailable"
+            assert client.get("/api/v1/orgs", headers=admin_headers).status_code == 200
+
+    def test_a_mirror_with_no_api_server_never_stops_startup(self, api_settings, monkeypatch):
+        monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
+        monkeypatch.delenv("KUBERNETES_SERVICE_PORT", raising=False)
+        api_settings.ingest = IngestSettings(bearer_secret="dfe-ingest-bearer-tokens")
+        app = create_app(settings=api_settings)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as started:
+                assert app.state.bearer_mirror is not None
+                assert started.get("/livez").status_code == 200
+        finally:
+            _registries.clear()
