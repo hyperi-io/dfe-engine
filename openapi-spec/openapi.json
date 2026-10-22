@@ -5716,7 +5716,7 @@
           "Ingest credentials"
         ],
         "summary": "Rotate Ingest Credential",
-        "description": "Mint a new token for an ingest credential. The old one stops working and the binding stays.\n\nThe new token comes back in this response and never again. ``If-Match`` is\nhonoured when sent.",
+        "description": "Mint a new token for an ingest credential. The old one stops working and the binding stays.\n\nThe new token comes back in this response and never again. ``If-Match`` is\nhonoured when sent. A rotate the secrets backend refuses answers 503 and leaves\nthe old token working.",
         "operationId": "orgs.ingest-credentials.rotate",
         "parameters": [
           {

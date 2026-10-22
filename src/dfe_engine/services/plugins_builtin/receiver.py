@@ -102,13 +102,12 @@ _template_overrides: dict[str, dict[str, Any]] = {
 def _bearer_auth(backend: SecretsSettings) -> dict[str, dict[str, Any]]:
     """Each bearer listener's auth block, on the secret the engine writes for it on *backend*."""
     from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, LISTENER_SECTIONS
-    from dfe_engine.orgs.ingest_tokens import bearer_secret_source
+    from dfe_engine.orgs.ingest_tokens import bearer_auth
 
-    wired: dict[str, dict[str, Any]] = {}
-    for listener in BEARER_LISTENERS:
-        bearer = {"secret_source": bearer_secret_source(listener, backend)}
-        wired[LISTENER_SECTIONS[listener]] = {"auth": {"mode": "bearer", "bearer": bearer}}
-    return wired
+    return {
+        LISTENER_SECTIONS[listener]: {"auth": bearer_auth(listener, backend)}
+        for listener in BEARER_LISTENERS
+    }
 
 
 def _make_plugin() -> ServicePlugin:

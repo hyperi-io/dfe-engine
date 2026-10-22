@@ -168,6 +168,7 @@ def mirror_for(api: LocalKubeApi, token_file: Path, name: str = SECRET) -> Secre
                 "secret_name": name,
                 "namespace": NAMESPACE,
                 "api_server": api.base_url,
+                "allow_insecure_http": True,
                 "token_path": str(token_file),
                 "ca_cert": None,
                 "conflict_retries": 1,

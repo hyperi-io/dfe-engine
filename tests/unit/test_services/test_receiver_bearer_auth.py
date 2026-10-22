@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 
 from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, LISTENER_SECTIONS
-from dfe_engine.orgs.ingest_tokens import bearer_secret_path
+from dfe_engine.orgs.ingest_tokens import BEARER_REFRESH_SECONDS, bearer_secret_path
 from dfe_engine.services.models.receiver import ReceiverConfig
 from dfe_engine.services.templates import generate_template
 from dfe_engine.settings import SecretsSettings
@@ -59,6 +59,8 @@ def test_the_listener_reads_the_secret_the_engine_writes(name: str, listener: st
     assert auth["bearer"]["secret_source"] == (
         f"vault:{SecretsSettings().mount}/{bearer_secret_path(listener)}:value"
     )
+    # The interval the API promises a revoked token stops within, as the compiled routing sets it.
+    assert auth["bearer"]["refresh_interval_secs"] == BEARER_REFRESH_SECONDS
 
 
 @pytest.mark.parametrize("name", sorted(CONFIGS))

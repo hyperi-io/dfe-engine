@@ -608,6 +608,26 @@ class TestTheMirrorSecret:
             assert retried.status_code == 201, retried.text
             assert kube.data()["http"] == f"agents:{retried.json()['token']}\n"
 
+    def test_a_rotate_the_bearer_secrets_refuse_keeps_the_old_token_everywhere(
+        self, client, app, admin_headers, orgs, tmp_path
+    ):
+        # The caller got no new token, so the store, the record and the receiver keep the old one.
+        token_file = tmp_path / "sa-token"
+        token_file.write_text(self.SA_TOKEN, encoding="utf-8")
+        with local_kube_api(self.SA_TOKEN) as kube:
+            kube.create_empty()
+            app.state.bearer_mirror = mirror_for(kube, token_file)
+            created = _create(client, admin_headers, listeners=["http"]).json()
+            kube.granted.clear()
+
+            refused = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
+
+            assert refused.status_code == 503, refused.text
+            assert _secret(app, credential_secret_path("agents")) == created["token"]
+            assert _bearer(app, "http") == f"agents:{created['token']}\n"
+            held = client.get(f"{BASE}/agents", headers=admin_headers).json()
+            assert held["rotated_at"] == created["rotated_at"]
+
     def test_a_secret_recreated_empty_is_refilled_by_the_next_reconcile(
         self, client, app, admin_headers, orgs, tmp_path
     ):

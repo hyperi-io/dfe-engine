@@ -26,7 +26,7 @@ server:
     mode: bearer
     bearer:
       secret_source: "vault:dfe/ingest/bearer-tokens/http:value"
-      refresh_interval_secs: 300
+      refresh_interval_secs: 60
 
 grpc:  # bind_address is the receiver's own default
   enabled: false
@@ -34,7 +34,7 @@ grpc:  # bind_address is the receiver's own default
     mode: bearer
     bearer:
       secret_source: "vault:dfe/ingest/bearer-tokens/grpc:value"
-      refresh_interval_secs: 300
+      refresh_interval_secs: 60
 
 otlp:
   enabled: false
@@ -42,7 +42,7 @@ otlp:
     mode: bearer
     bearer:
       secret_source: "vault:dfe/ingest/bearer-tokens/otlp:value"
-      refresh_interval_secs: 300
+      refresh_interval_secs: 60
 
 splunk_hec:
   enabled: false
@@ -50,7 +50,7 @@ splunk_hec:
     mode: bearer
     bearer:
       secret_source: "vault:dfe/ingest/bearer-tokens/splunk_hec:value"
-      refresh_interval_secs: 300
+      refresh_interval_secs: 60
 
 prometheus_rw:
   enabled: false
@@ -58,7 +58,7 @@ prometheus_rw:
     mode: bearer
     bearer:
       secret_source: "vault:dfe/ingest/bearer-tokens/prometheus_rw:value"
-      refresh_interval_secs: 300
+      refresh_interval_secs: 60
 
 validation:
   require_json: true

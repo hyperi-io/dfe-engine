@@ -121,6 +121,21 @@ def bearer_secret_source(listener: str, backend: SecretsSettings) -> str:
     )
 
 
+def bearer_auth(listener: str, backend: SecretsSettings) -> dict[str, Any]:
+    """*listener*'s dfe-receiver ``auth`` block in ``mode: bearer``, re-read every :data:`BEARER_REFRESH_SECONDS`.
+
+    Raises:
+        BearerSourceUnreadableError: *backend* holds the secret where dfe-receiver cannot read it.
+    """
+    return {
+        "mode": "bearer",
+        "bearer": {
+            "secret_source": bearer_secret_source(listener, backend),
+            "refresh_interval_secs": BEARER_REFRESH_SECONDS,
+        },
+    }
+
+
 def compile_listener_auth(
     tenancy: Tenancy, backend: SecretsSettings
 ) -> dict[IngestListener, dict[str, Any]]:
@@ -146,17 +161,10 @@ def compile_listener_auth(
     listed: set[str] = set()
     for credential in accepted_credentials(tenancy):
         listed.update(credential.listeners)
-    blocks: dict[IngestListener, dict[str, Any]] = {}
-    for listener in BEARER_LISTENERS:
-        if listener not in listed:
-            blocks[listener] = {"mode": "none"}
-            continue
-        bearer = {
-            "secret_source": bearer_secret_source(listener, backend),
-            "refresh_interval_secs": BEARER_REFRESH_SECONDS,
-        }
-        blocks[listener] = {"mode": "bearer", "bearer": bearer}
-    return blocks
+    return {
+        listener: bearer_auth(listener, backend) if listener in listed else {"mode": "none"}
+        for listener in BEARER_LISTENERS
+    }
 
 
 def mint_token() -> str:
