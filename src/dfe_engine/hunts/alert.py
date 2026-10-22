@@ -30,11 +30,13 @@ Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
 """
 
 import builtins
+import re
+import uuid
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Self
 
 import apprise
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from scalo.expression import (
     evaluate_condition,
 )
@@ -43,9 +45,67 @@ from scalo.expression import (
 )
 from scalo.logger import logger
 
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_name
+from dfe_engine.http_errors import describe_http_error
 from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump
 
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud.routing import ReviewRouting
+    from dfe_engine.hunts.deploy_repo import DeployRepoStore
+    from dfe_engine.secrets import DfeSecrets
+
 # -- Destination Registry ------------------------------------------
+
+ALERT_CLASS = "alert_destinations"
+"""The gitcrud resource class alert destinations live in when gitops is on."""
+
+URL_PATH_FIELD = "url_path"
+"""The deploy-repo document field naming where the secrets backend holds the URL."""
+
+
+def scheme_of(url: str) -> str:
+    """The scheme of an Apprise URL, ``slack`` of ``slack://...``, empty where it names none."""
+    if "://" in url:
+        return url.split("://")[0]
+    return ""
+
+
+def url_secret_path(name: str) -> str:
+    """A new secrets-backend path for destination *name*'s URL.
+
+    Each URL gets its own path, so a URL change on a review branch never alters the
+    URL main sends to before the branch merges.
+    """
+    return f"alerts/{name}/url-{uuid.uuid4().hex}"
+
+
+_URL_LEAF = re.compile(r"url-[0-9a-f]{32}")
+"""The last segment :func:`url_secret_path` gives a URL."""
+
+
+def _owns_url_path(name: str, path: object) -> bool:
+    """Whether *path* has the shape :func:`url_secret_path` gives destination *name*.
+
+    A document can name any path, and a file backend follows ``..``, so a path only
+    counts when it is exactly ``alerts/<name>/url-<hex>``.
+    """
+    if not isinstance(path, str):
+        return False
+    try:
+        validate_name(name)
+    except CommitPolicyError:
+        return False
+    leaf = path.removeprefix(f"alerts/{name}/")
+    return leaf != path and _URL_LEAF.fullmatch(leaf) is not None
+
+
+def _refuse_url_path(name: str, path: object) -> None:
+    """Log a document's URL path that is not the destination's own, by name and path."""
+    logger.warning(
+        "Alert destination URL path refused: it is not under the destination's own alerts/<name>/",
+        destination=name,
+        store_path=path,
+    )
 
 
 class AlertDestinationNameError(ValueError):
@@ -85,7 +145,14 @@ class AlertDestination(BaseModel):
     """A named alert destination (Apprise URL with metadata)."""
 
     name: str = Field(..., description="Unique destination name (e.g. 'slack-dfe-alerts')")
-    url: str = Field(..., description="Apprise notification URL")
+    url: str | None = Field(
+        default=None,
+        description=(
+            "Apprise notification URL. None on a destination read from the deploy repo, "
+            "whose URL only resolve() reads, and on a write that keeps the stored URL"
+        ),
+    )
+    url_scheme: str = Field(default="", description="The URL's scheme, set from the URL")
     description: str = Field(default="", description="Human-readable description")
     enabled: bool = Field(default=True, description="Enable/disable this destination")
     hunt_name: str | None = Field(
@@ -93,17 +160,26 @@ class AlertDestination(BaseModel):
         description="Hunt file stem when this destination is owned by a hunt (set via API)",
     )
 
+    @model_validator(mode="after")
+    def _scheme_of_the_url(self) -> Self:
+        if self.url is not None:
+            self.url_scheme = scheme_of(self.url)
+        return self
+
 
 class AlertDestinationRegistry:
-    """Registry of named alert destinations backed by DirectoryConfigStore.
+    """Registry of named alert destinations.
 
-    When a ``directory`` is provided, destinations are persisted as YAML files
-    (one per destination) and the store handles caching, background refresh,
-    and optional git-aware writes.  Without a directory the registry operates
-    as an in-memory dict (useful for tests and bootstrap).
+    With ``deploy_repo`` the destinations are the deploy repo's
+    ``alert_destinations`` class, one document per destination, so every engine
+    replica reads the same set and every write is one routed commit. The URL is a
+    credential, so it lives in ``secrets`` and the document keeps its path in
+    :data:`URL_PATH_FIELD` and its scheme. With a ``directory`` they are YAML files
+    under a DirectoryConfigStore. With neither the registry is an in-memory dict
+    (tests and bootstrap).
 
     Usage:
-        # File-backed (production)
+        # File-backed
         registry = AlertDestinationRegistry(directory="/config/alert-destinations")
 
         # In-memory (tests / bootstrap from settings dict)
@@ -113,11 +189,32 @@ class AlertDestinationRegistry:
         url = registry.resolve("slack-dfe")
     """
 
-    def __init__(self, directory: str | None = None) -> None:
+    def __init__(
+        self,
+        directory: str | None = None,
+        *,
+        deploy_repo: DeployRepoStore | None = None,
+        secrets: DfeSecrets | None = None,
+    ) -> None:
+        """Bind the registry to one backend.
+
+        Args:
+            directory: YAML directory for the DirectoryConfigStore backend. Ignored
+                when ``deploy_repo`` is given.
+            deploy_repo: The deploy repo's ``alert_destinations`` class.
+            secrets: Holds each URL when ``deploy_repo`` is given.
+
+        Raises:
+            ValueError: ``deploy_repo`` is given without ``secrets``.
+        """
+        if deploy_repo is not None and secrets is None:
+            raise ValueError("alert destinations in the deploy repo need a secrets backend")
         self._store = None
         self._memory: dict[str, AlertDestination] = {}
+        self._deploy = deploy_repo
+        self._secrets = secrets
 
-        if directory:
+        if deploy_repo is None and directory:
             dir_path = Path(directory)
             dir_path.mkdir(parents=True, exist_ok=True)
             try:
@@ -135,14 +232,38 @@ class AlertDestinationRegistry:
                     "falling back to in-memory"
                 )
 
-    def add(self, destination: AlertDestination) -> None:
+    def add(
+        self,
+        destination: AlertDestination,
+        *,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> None:
         """Register a destination (overwrites if name exists).
 
-        Persists to YAML when backed by DirectoryConfigStore.
+        Persists to the deploy repo or to YAML when a backend is bound.
+
+        Args:
+            destination: The destination. A URL of None keeps the stored one.
+            created_by: Username/identity, recorded on a deploy-repo commit.
+            routing: Collects where a deploy-repo write landed.
 
         Raises:
-            AlertDestinationNameError: The name's file would sit outside the directory.
+            AlertDestinationNameError: The name cannot name a stored destination.
+            KeyError: The URL is None and no destination of that name is stored.
+            SecretsError: The secrets backend refused a deploy-repo destination's URL,
+                and nothing was committed.
         """
+        if self._deploy is not None:
+            self._put_in_deploy_repo(
+                self._deploy, destination, actor=created_by or "engine", routing=routing
+            )
+            return
+        if destination.url is None:
+            kept = self.get(destination.name).url
+            destination = AlertDestination.model_validate({**destination.model_dump(), "url": kept})
+        # The file name is the key and the URL gives the scheme, so only the rest is stored.
+        data = destination.model_dump(exclude={"name", "url_scheme"}, exclude_none=True)
         if self._store is not None:
             yaml_path = contained_yaml_file(self._store._directory, destination.name)
             if yaml_path is None:
@@ -150,37 +271,187 @@ class AlertDestinationRegistry:
                     f"alert destination name {destination.name!r} resolves outside the "
                     "destinations directory"
                 )
-            # Store url/description/enabled/hunt_name -- name comes from the filename.
-            # exclude_none drops hunt_name when unset so unowned destinations stay clean.
-            data = destination.model_dump(exclude={"name"}, exclude_none=True)
             yaml_dump(data, yaml_path)
             self._store._refresh_all()
         else:
             self._memory[destination.name] = destination
 
-    def get(self, name: str) -> AlertDestination:
-        """Get a destination by name. Raises KeyError if not found."""
-        if self._store is not None:
-            data = _stored(self._store, name)
-            if data is None:
-                raise KeyError(name)
-            # Inject name from table key (filename) -- not stored inside YAML
-            data["name"] = name
-            return AlertDestination.model_validate(data)
-        return self._memory[name]
+    @property
+    def _urls(self) -> DfeSecrets:
+        """The secrets backend holding deploy-repo URLs, bound with the deploy repo."""
+        if self._secrets is None:
+            raise ValueError("alert destinations in the deploy repo need a secrets backend")
+        return self._secrets
 
-    def resolve(self, name: str) -> str | None:
-        """Resolve a destination name to its Apprise URL. Returns None if not found or disabled."""
+    def _put_in_deploy_repo(
+        self,
+        deploy: DeployRepoStore,
+        destination: AlertDestination,
+        *,
+        actor: str,
+        routing: ReviewRouting | None,
+    ) -> None:
+        """Store a new URL in the secrets backend, then commit the document naming its path.
+
+        A URL the commit replaces is deleted once the commit is on main. On a review
+        branch both stay, because main sends to the old one until the branch merges.
+        A failed commit leaves its new URL unread rather than risk deleting one a
+        pushed branch names.
+        """
+        name = destination.name
         try:
-            dest = self.get(name)
-        except KeyError:
-            return None
-        if dest.enabled:
-            return dest.url
+            validate_name(name)
+        except CommitPolicyError as exc:
+            raise AlertDestinationNameError(
+                f"alert destination name {name!r} cannot name a deploy-repo document: use "
+                "letters, digits, '.', '_' and '-' only"
+            ) from exc
+        stored = deploy.get(name) or {}
+        old_path = stored.get(URL_PATH_FIELD, "")
+        if destination.url is None:
+            if not old_path:
+                raise KeyError(name)
+            path, scheme = old_path, stored.get("url_scheme", "")
+        else:
+            path, scheme = url_secret_path(name), destination.url_scheme
+            self._urls.put(path, destination.url)
+        doc = {
+            URL_PATH_FIELD: path,
+            "url_scheme": scheme,
+            # An unowned destination stores no hunt_name.
+            **destination.model_dump(
+                include={"description", "enabled", "hunt_name"}, exclude_none=True
+            ),
+        }
+        try:
+            outcome = deploy.put(name, doc, actor=actor)
+        except Exception:
+            if path != old_path:
+                logger.warning(
+                    "Alert destination URL left in the secrets backend: its commit failed",
+                    destination=name,
+                    store_path=path,
+                )
+            raise
+        if routing is not None:
+            routing.record(outcome)
+        if old_path and old_path != path:
+            self._retire_url(name, old_path, kept=outcome.review_required)
+
+    def _retire_url(self, name: str, path: str, *, kept: bool) -> None:
+        """Delete a URL no document on main names, or log where it stays while main still does.
+
+        A path outside the destination's own is refused, never deleted. A delete the
+        backend fails is logged by its path and left for an operator.
+        """
+        if not _owns_url_path(name, path):
+            _refuse_url_path(name, path)
+            return
+        if kept:
+            logger.info(
+                "Alert destination URL kept until its review branch merges",
+                destination=name,
+                store_path=path,
+            )
+            return
+        urls = self._urls
+        try:
+            urls.delete(path)
+        except Exception as exc:
+            logger.warning(
+                "Alert destination URL left in the secrets backend: no destination reads it",
+                destination=name,
+                store_path=path,
+                **describe_http_error(exc),
+            )
+
+    def _stored_doc(self, name: str) -> dict[str, Any] | None:
+        """The stored document for *name*, None when absent or not nameable by the backend."""
+        if self._deploy is not None:
+            return self._deploy.get(name)
+        if self._store is not None:
+            return _stored(self._store, name)
         return None
 
-    def remove(self, name: str) -> bool:
-        """Remove a destination by name. Returns True if it existed."""
+    def _destination(self, name: str, data: dict[str, Any]) -> AlertDestination:
+        """A stored document as a destination, with no URL when it comes from the deploy repo."""
+        # The name is the document's key, never a field inside it.
+        fields = {**data, "name": name}
+        if self._deploy is not None:
+            fields["url"] = None
+        return AlertDestination.model_validate(fields)
+
+    def get(self, name: str) -> AlertDestination:
+        """Get a destination by name. Raises KeyError if not found.
+
+        A deploy-repo destination comes back with no URL: :meth:`resolve` reads it.
+        """
+        if self._deploy is None and self._store is None:
+            return self._memory[name]
+        data = self._stored_doc(name)
+        if data is None:
+            raise KeyError(name)
+        return self._destination(name, data)
+
+    def resolve(self, name: str) -> str | None:
+        """Resolve a destination name to its Apprise URL. Returns None if not found or disabled.
+
+        A deploy-repo destination's URL is read from the secrets backend at the path its
+        document names. One missing there resolves to None and is logged, and so does a
+        path outside the destination's own ``alerts/<name>/``, which is never read.
+
+        Raises:
+            SecretsError: The secrets backend did not answer or refused the read.
+        """
+        if self._deploy is None:
+            try:
+                dest = self.get(name)
+            except KeyError:
+                return None
+            return dest.url if dest.enabled else None
+        data = self._deploy.get(name)
+        if data is None or not self._destination(name, data).enabled:
+            return None
+        path = data.get(URL_PATH_FIELD, "")
+        if path and not _owns_url_path(name, path):
+            _refuse_url_path(name, path)
+            return None
+        url = self._urls.get_or_none(path) if path else None
+        if url is None:
+            logger.warning(
+                "Alert destination URL missing from the secrets backend",
+                destination=name,
+                store_path=path,
+            )
+        return url
+
+    def remove(
+        self,
+        name: str,
+        *,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> bool:
+        """Remove a destination by name. Returns True if it existed.
+
+        A deploy-repo destination's URL is deleted from the secrets backend once the
+        document's removal is on main, so no document on main names a missing URL.
+
+        Args:
+            name: The destination name.
+            created_by: Username/identity, recorded on a deploy-repo commit.
+            routing: Collects where a deploy-repo write landed.
+        """
+        if self._deploy is not None:
+            path = (self._deploy.get(name) or {}).get(URL_PATH_FIELD, "")
+            outcome = self._deploy.delete(name, actor=created_by or "engine")
+            if outcome is None:
+                return False
+            if routing is not None:
+                routing.record(outcome)
+            if path:
+                self._retire_url(name, path, kept=outcome.review_required)
+            return True
         if self._store is not None:
             yaml_path = contained_yaml_file(self._store._directory, name)
             if yaml_path is not None and yaml_path.exists():
@@ -198,15 +469,22 @@ class AlertDestinationRegistry:
         Return annotation is ``builtins.list`` because this method named ``list``
         shadows the builtin for the type checker's annotation resolution.
         """
+        if self._deploy is None and self._store is None:
+            return list(self._memory.values())
+        results = []
+        for table_name in self._names():
+            data = self._stored_doc(table_name)
+            if data:
+                results.append(self._destination(table_name, data))
+        return results
+
+    def _names(self) -> builtins.list[str]:
+        """Every stored destination name."""
+        if self._deploy is not None:
+            return self._deploy.names()
         if self._store is not None:
-            results = []
-            for table_name in self._store.list_tables():
-                data = self._store.get(table_name)
-                if data:
-                    data["name"] = table_name
-                    results.append(AlertDestination.model_validate(data))
-            return results
-        return list(self._memory.values())
+            return list(self._store.list_tables())
+        return list(self._memory)
 
     def resolve_many(self, names: builtins.list[str]) -> builtins.list[str]:
         """Resolve a list of destination names to Apprise URLs.
@@ -233,14 +511,12 @@ class AlertDestinationRegistry:
             self._store.stop()
 
     def __len__(self) -> int:
-        if self._store is not None:
-            return len(list(self._store.list_tables()))
-        return len(self._memory)
+        return len(self._names())
 
     def __contains__(self, name: str) -> bool:
-        if self._store is not None:
-            return _stored(self._store, name) is not None
-        return name in self._memory
+        if self._deploy is None and self._store is None:
+            return name in self._memory
+        return self._stored_doc(name) is not None
 
 
 # -- Trigger Models -----------------------------------------------

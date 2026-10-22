@@ -1,25 +1,22 @@
-"""Service configuration registry backed by DirectoryConfigStore.
+"""Service configuration registry over the deploy repo or a YAML directory.
 
 Storage model:
-- YAML directory is the Single Source of Truth (SSoT)
-- DirectoryConfigStore from scalo provides:
-  - In-memory caching with background polling refresh
-  - Thread-safe reads via RLock
-  - Optional git-aware writes (auto-commit, branch management, push)
-  - Change callbacks for reactive configuration
-- Rust services (loader, receiver, archiver) read these YAML files directly
-- Config history is tracked via git log (when directory is a git repo)
-
-This replaces the previous PostgreSQL + YAML dual-write architecture.
-PostgreSQL is no longer required for service configuration storage.
+- With gitops on, the deploy repo's ``service_configs`` class is the Single
+  Source of Truth (SSoT): every engine replica reads it through its own clone and
+  every write is one commit routed by the deployment's posture.
+- Without gitops, a YAML directory is the SSoT, behind scalo's
+  DirectoryConfigStore (cached reads, background refresh, optional git-aware
+  writes, change callbacks). The Rust services on Compose read these files.
+- Config history is the git log of the config's file, in either backend.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
+from dulwich.repo import Repo
 from pydantic import BaseModel, SecretBytes, SecretStr
 from pydantic_core import to_jsonable_python
 from scalo.config import DirectoryConfigStore
@@ -28,7 +25,14 @@ from scalo.logger import logger
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file, git_repo_relative_path
 from dfe_engine.services.plugins import get_plugin, valid_services
 from dfe_engine.services.validators import ValidationResult, validate_config
-from dfe_engine.yaml_utils import yaml_dump
+from dfe_engine.yaml_utils import yaml_dump, yaml_load_string
+
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud.routing import ReviewRouting
+    from dfe_engine.hunts.deploy_repo import DeployRepoStore
+
+SERVICE_CONFIG_CLASS = "service_configs"
+"""The gitcrud resource class service configs live in when gitops is on."""
 
 
 def _unwrapped(value: Any) -> Any:
@@ -53,6 +57,51 @@ def stored_form(config: BaseModel | dict[str, Any]) -> dict[str, Any]:
     return to_jsonable_python(_unwrapped(config.model_dump()))
 
 
+def _file_history(repo: Repo, rel_path: str, limit: int) -> list[dict[str, Any]]:
+    """The newest commits that changed one repo-relative file, newest first."""
+    from dulwich.objects import Commit, Tree
+    from dulwich.walk import Walker
+
+    path = rel_path.encode("utf-8")
+    try:
+        head = repo.head()
+    except KeyError:
+        return []
+    history: list[dict[str, Any]] = []
+    try:
+        for entry in Walker(repo.object_store, [head]):
+            if len(history) >= limit:
+                break
+            commit = entry.commit
+            tree = cast(Tree, repo[commit.tree])
+            try:
+                current_entry = tree.lookup_path(repo.__getitem__, path)
+            except KeyError:
+                continue
+            if commit.parents:
+                parent = cast(Commit, repo[commit.parents[0]])
+                parent_tree = cast(Tree, repo[parent.tree])
+                try:
+                    if parent_tree.lookup_path(repo.__getitem__, path)[1] == current_entry[1]:
+                        continue
+                except KeyError:
+                    pass  # added in this commit
+            author_str = commit.author.decode("utf-8", errors="replace")
+            author_name = author_str.split("<")[0].strip() if "<" in author_str else author_str
+            history.append(
+                {
+                    "commit": commit.id.decode("ascii"),
+                    "message": commit.message.decode("utf-8", errors="replace").strip(),
+                    "author": author_name,
+                    "date": datetime.fromtimestamp(commit.author_time, tz=UTC).isoformat(),
+                }
+            )
+    except Exception as e:
+        logger.warning(f"Failed to read git history for {rel_path}: {e}")
+        return []
+    return history
+
+
 class ServiceConfigError(Exception):
     """Base exception for service config errors."""
 
@@ -64,9 +113,9 @@ class ConfigNotFoundError(ServiceConfigError):
 class ServiceConfigRegistry:
     """Registry for managing DFE Rust service configurations.
 
-    Backed by DirectoryConfigStore (YAML directory as SSoT).
+    Backed by the deploy repo's ``service_configs`` class or a YAML directory.
 
-    Directory layout:
+    Layout, under either root:
         <config_directory>/
             receiver-default.yaml
             receiver-production.yaml
@@ -85,21 +134,35 @@ class ServiceConfigRegistry:
 
     def __init__(
         self,
-        config_directory: str | Path,
+        config_directory: str | Path | None = None,
         writable: bool | None = None,
         git_branch: str | None = None,
         git_push: bool = False,
         refresh_interval: int = 30,
+        *,
+        deploy_repo: DeployRepoStore | None = None,
     ) -> None:
         """Initialize the registry.
 
         Args:
-            config_directory: Path to the YAML config directory.
+            config_directory: Path to the YAML config directory. Ignored when
+                ``deploy_repo`` is given.
             writable: Whether writes are allowed. None = auto-detect.
             git_branch: Git branch for writes. None = current branch.
             git_push: Auto-push after git commits.
             refresh_interval: Seconds between background cache refresh polls.
+            deploy_repo: The deploy repo's ``service_configs`` class.
+
+        Raises:
+            ServiceConfigError: Neither backend was given.
         """
+        self._deploy = deploy_repo
+        self._store: DirectoryConfigStore | None = None
+        if deploy_repo is not None:
+            self._config_directory = deploy_repo.directory
+            return
+        if config_directory is None:
+            raise ServiceConfigError("config_directory is required without a deploy repo")
         self._config_directory = Path(config_directory).resolve()
         self._config_directory.mkdir(parents=True, exist_ok=True)
 
@@ -111,6 +174,24 @@ class ServiceConfigRegistry:
             git_push=git_push,
         )
         self._store.start()
+
+    def _require_store(self) -> DirectoryConfigStore:
+        """The directory backend's store, which a deploy-repo registry does not have."""
+        if self._store is None:
+            raise ServiceConfigError("no DirectoryConfigStore backend (deploy repo is active)")
+        return self._store
+
+    def _tables(self) -> list[str]:
+        """Every stored ``{service}-{instance}`` key."""
+        if self._deploy is not None:
+            return self._deploy.names()
+        return list(self._require_store().list_tables())
+
+    def _get_raw(self, table: str) -> dict[str, Any] | None:
+        """The stored doc for one key, or None when absent."""
+        if self._deploy is not None:
+            return self._deploy.get(table)
+        return self._require_store().get(table)
 
     @classmethod
     def get_instance(
@@ -199,7 +280,7 @@ class ServiceConfigRegistry:
         """
         table = self._table_name(service, instance)
 
-        config_data = self._store.get(table)
+        config_data = self._get_raw(table)
         if config_data is None:
             raise ConfigNotFoundError(f"Config not found for {service}/{instance}")
 
@@ -217,10 +298,13 @@ class ServiceConfigRegistry:
         instance: str = "default",
         created_by: str | None = None,
         description: str | None = None,
+        *,
+        routing: ReviewRouting | None = None,
     ) -> None:
-        """Save a service configuration to the YAML directory.
+        """Save a service configuration.
 
-        If the directory is a git repo, changes are auto-committed.
+        The deploy repo takes it as one routed commit. A directory takes a plain
+        file write, auto-committed when the directory is a git repo.
 
         Args:
             service: Service name
@@ -228,6 +312,7 @@ class ServiceConfigRegistry:
             instance: Deployment instance name
             created_by: Username/identity of who made the change
             description: Description of the change
+            routing: Collects where a deploy-repo write landed.
         """
         # Normalize to dict. For registered services, validate via typed model.
         # For unknown services (schema-less mode), store the raw dict as-is.
@@ -243,34 +328,63 @@ class ServiceConfigRegistry:
 
         table = self._table_name(service, instance)
 
+        if self._deploy is not None:
+            outcome = self._deploy.put(table, config_data, actor=created_by or "engine")
+            if routing is not None:
+                routing.record(outcome)
+            logger.info(f"Saved config for {service}/{instance} -> deploy repo")
+            return
+
+        store = self._require_store()
         # Write YAML file directly (full document replacement)
         yaml_path = self._config_directory / f"{table}.yaml"
         yaml_dump(config_data, yaml_path)
 
         # Git commit if the store is git-aware
-        if self._store.is_git:
+        if store.is_git:
             commit_msg = description or f"config: update {service}/{instance}"
             if created_by:
                 commit_msg = f"{commit_msg} (by {created_by})"
-            commit_file(self._store, yaml_path, commit_msg, author=created_by)
-            if self._store._git_push:
-                self._store._git_push_remote()
+            commit_file(store, yaml_path, commit_msg, author=created_by)
+            if store._git_push:
+                store._git_push_remote()
 
         # Force cache refresh for this table
-        self._store._refresh_all()
+        store._refresh_all()
 
         logger.info(f"Saved config for {service}/{instance} -> {yaml_path}")
 
-    def delete_config(self, service: str, instance: str = "default") -> None:
+    def delete_config(
+        self,
+        service: str,
+        instance: str = "default",
+        *,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> None:
         """Delete a service configuration.
 
-        Removes the YAML file and commits the deletion if git-aware.
+        The deploy repo takes the delete as one routed commit. A directory removes
+        the YAML file and commits the deletion if git-aware.
 
         Args:
             service: Service name (any, including unregistered services)
             instance: Deployment instance name
+            created_by: Username/identity, recorded on a deploy-repo commit.
+            routing: Collects where a deploy-repo write landed.
         """
         table = self._table_name(service, instance)
+        if self._deploy is not None:
+            outcome = self._deploy.delete(table, actor=created_by or "engine")
+            if outcome is None:
+                logger.warning(f"Config does not exist: {service}/{instance}")
+                return
+            if routing is not None:
+                routing.record(outcome)
+            logger.info(f"Deleted config for {service}/{instance}")
+            return
+
+        store = self._require_store()
         yaml_path = self._config_directory / f"{table}.yaml"
 
         if not yaml_path.exists():
@@ -280,25 +394,25 @@ class ServiceConfigRegistry:
         resolved_path = yaml_path.resolve(strict=False)
         resolved_path.unlink(missing_ok=True)
 
-        if self._store.is_git and self._store._repo is not None:
+        if store.is_git and store._repo is not None:
             try:
                 from dulwich import porcelain as git
 
-                rel_path = git_repo_relative_path(self._store._repo.path, resolved_path)
-                git.rm(self._store._repo, paths=[rel_path])
+                rel_path = git_repo_relative_path(store._repo.path, resolved_path)
+                git.rm(store._repo, paths=[rel_path])
                 git.commit(
-                    self._store._repo,
+                    store._repo,
                     author=COMMITTER_IDENTITY.encode("utf-8"),
                     committer=COMMITTER_IDENTITY.encode("utf-8"),
                     message=f"config: delete {service}/{instance}".encode(),
                 )
-                if self._store._git_push:
-                    self._store._git_push_remote()
+                if store._git_push:
+                    store._git_push_remote()
             except Exception as e:
                 logger.error(f"Git delete failed: {e}")
 
-        with self._store._lock:
-            self._store._cache.pop(table, None)
+        with store._lock:
+            store._cache.pop(table, None)
 
         logger.info(f"Deleted config for {service}/{instance}")
 
@@ -312,7 +426,7 @@ class ServiceConfigRegistry:
             List of config metadata dicts (service, instance, updated_at)
         """
         results = []
-        for table in self._store.list_tables():
+        for table in self._tables():
             parsed = self._parse_table_name(table)
             if parsed is None:
                 continue
@@ -371,8 +485,8 @@ class ServiceConfigRegistry:
     ) -> list[dict[str, Any]]:
         """Get configuration change history from git log.
 
-        Only available when the config directory is a git repo.
-        Uses dulwich to walk the commit history.
+        Available from the deploy repo, or from a config directory inside a git
+        repo. Uses dulwich to walk the commit history.
 
         Args:
             service: Service name
@@ -383,66 +497,21 @@ class ServiceConfigRegistry:
             List of history entries (commit, message, author, date)
         """
         self._validate_service(service)
+        table = self._table_name(service, instance)
 
-        if not self._store.is_git or self._store._repo is None:
+        if self._deploy is not None:
+            rel_path = self._deploy.relative_path(table)
+            # The clone takes the remote's head first, so a write on another replica shows.
+            with self._deploy.reading(), Repo(str(self._deploy.repo_path)) as repo:
+                return _file_history(repo, rel_path, limit)
+
+        store = self._require_store()
+        if not store.is_git or store._repo is None:
             logger.warning("Config history requires a git-backed config directory")
             return []
-
-        table = self._table_name(service, instance)
-        yaml_file = f"{table}.yaml"
-        repo = self._store._repo
-
-        try:
-            from dulwich.objects import Commit, Tree
-            from dulwich.walk import Walker
-
-            rel_path = yaml_file.encode("utf-8")
-
-            history = []
-            walker = Walker(repo.object_store, [repo.head()])
-
-            for entry in walker:
-                if len(history) >= limit:
-                    break
-
-                commit = entry.commit
-                # Check if this commit touches our file
-                tree = cast(Tree, repo[commit.tree])
-                try:
-                    tree.lookup_path(repo.__getitem__, rel_path)
-                except KeyError:
-                    continue
-
-                # Check if file changed vs parent
-                if commit.parents:
-                    parent = cast(Commit, repo[commit.parents[0]])
-                    parent_tree = cast(Tree, repo[parent.tree])
-                    try:
-                        parent_entry = parent_tree.lookup_path(repo.__getitem__, rel_path)
-                        current_entry = tree.lookup_path(repo.__getitem__, rel_path)
-                        if parent_entry[1] == current_entry[1]:
-                            continue  # File unchanged in this commit
-                    except KeyError:
-                        pass  # File was added in this commit
-
-                author_str = commit.author.decode("utf-8", errors="replace")
-                # Parse "Name <email>" format: keep just the name
-                author_name = author_str.split("<")[0].strip() if "<" in author_str else author_str
-
-                history.append(
-                    {
-                        "commit": commit.id.decode("ascii"),
-                        "message": commit.message.decode("utf-8", errors="replace").strip(),
-                        "author": author_name,
-                        "date": datetime.fromtimestamp(commit.author_time, tz=UTC).isoformat(),
-                    }
-                )
-
-            return history
-
-        except Exception as e:
-            logger.warning(f"Failed to read git history for {yaml_file}: {e}")
-            return []
+        yaml_path = (self._config_directory / f"{table}.yaml").resolve(strict=False)
+        rel_path = git_repo_relative_path(store._repo.path, yaml_path)
+        return _file_history(store._repo, rel_path, limit)
 
     # -------------------------------------------------------------------------
     # YAML Export
@@ -472,28 +541,31 @@ class ServiceConfigRegistry:
 
     @property
     def is_git(self) -> bool:
-        """Whether the config directory is INSIDE a git repository.
+        """Whether writes land as git commits.
 
-        scalo walks up, so a directory under a gitops checkout answers True
-        without being a repository root itself.
+        The deploy repo always commits. A directory answers True when it sits
+        INSIDE a git repository: scalo walks up, so a directory under a gitops
+        checkout answers True without being a repository root itself.
         """
-        return self._store.is_git
+        if self._deploy is not None:
+            return True
+        return self._require_store().is_git
 
     @property
     def current_branch(self) -> str | None:
-        """Current git branch name."""
-        return self._store.current_branch
+        """Current git branch name (directory backend only)."""
+        return self._require_store().current_branch
 
     def list_branches(self) -> list[str]:
-        """List all git branches."""
-        return self._store.list_branches()
+        """List all git branches (directory backend only)."""
+        return self._require_store().list_branches()
 
     def switch_branch(self, branch: str, create: bool = False) -> None:
-        """Switch to a git branch. Refreshes config cache after switch."""
-        self._store.switch_branch(branch, create=create)
+        """Switch to a git branch (directory backend only). Refreshes the cache after."""
+        self._require_store().switch_branch(branch, create=create)
 
     def on_change(self, service: str, instance: str, callback) -> None:
-        """Register a callback for when a service config changes.
+        """Register a callback for when a service config changes (directory backend only).
 
         Args:
             service: Service name
@@ -501,20 +573,29 @@ class ServiceConfigRegistry:
             callback: Function called with (table_name, data) on change
         """
         table = self._table_name(service, instance)
-        self._store.on_change(table, callback)
+        self._require_store().on_change(table, callback)
 
     # -------------------------------------------------------------------------
     # Seed Defaults
     # -------------------------------------------------------------------------
 
-    def seed_defaults(self, overwrite: bool = False) -> int:
-        """Seed the config directory with built-in default configurations.
+    def seed_defaults(
+        self,
+        overwrite: bool = False,
+        *,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> int:
+        """Seed the configs with the built-in default configurations.
 
-        Copies default YAML files from package resources into the config
-        directory. Non-destructive by default: skips files that already exist.
+        Copies default YAML files from package resources. Non-destructive by
+        default: skips configs that already exist. The deploy repo takes every
+        seeded config in one commit.
 
         Args:
             overwrite: If True, overwrite existing configs with defaults.
+            created_by: Username/identity, recorded on a deploy-repo commit.
+            routing: Collects where a deploy-repo write landed.
 
         Returns:
             Number of configs seeded.
@@ -529,6 +610,11 @@ class ServiceConfigRegistry:
         except Exception as e:
             logger.warning(f"Failed to locate default configs: {e}")
             return 0
+
+        if self._deploy is not None:
+            return self._seed_deploy_repo(
+                defaults_dir, overwrite=overwrite, created_by=created_by, routing=routing
+            )
 
         count = 0
         for item in defaults_dir.iterdir():
@@ -548,9 +634,43 @@ class ServiceConfigRegistry:
 
         # Refresh cache to pick up new files
         if count > 0:
-            self._store._refresh_all()
+            self._require_store()._refresh_all()
 
         return count
+
+    def _seed_deploy_repo(
+        self,
+        defaults_dir: Any,
+        *,
+        overwrite: bool,
+        created_by: str | None,
+        routing: ReviewRouting | None,
+    ) -> int:
+        """Commit each built-in default the deploy repo lacks, or every one on overwrite."""
+        deploy = self._deploy
+        if deploy is None:
+            raise ServiceConfigError("no deploy repo backend")
+        held = set(deploy.names())
+        docs: dict[str, dict[str, Any]] = {}
+        for item in sorted(defaults_dir.iterdir(), key=lambda entry: entry.name):
+            if not item.name.endswith(".yaml"):
+                continue
+            table = item.name.removesuffix(".yaml")
+            if table in held and not overwrite:
+                logger.debug(f"Skipping existing config: {table}")
+                continue
+            doc = yaml_load_string(item.read_text(encoding="utf-8"))
+            if isinstance(doc, dict):
+                docs[table] = doc
+        if not docs:
+            return 0
+        outcome = deploy.put_many(
+            docs, actor=created_by or "engine", scope="services", summary="seed defaults"
+        )
+        if routing is not None:
+            routing.record(outcome)
+        logger.info(f"Seeded {len(docs)} default service configs into the deploy repo")
+        return len(docs)
 
     # -------------------------------------------------------------------------
     # Helpers
@@ -565,4 +685,5 @@ class ServiceConfigRegistry:
 
     def close(self) -> None:
         """Stop background refresh and cleanup."""
-        self._store.stop()
+        if self._store is not None:
+            self._store.stop()

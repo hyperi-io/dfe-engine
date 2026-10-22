@@ -61,9 +61,10 @@ def default_registry() -> ResourceClassRegistry:
     `library` (versioned artefacts an instance links its consumed files to),
     `sources` (the all-in-one source-definition doc under config/sources - the
     first datamodel class to land in the deploy repo), `derived_schemas` (the
-    column selections those sources name), and `hunts` + `rules` (what the hunt
-    runner executes). Meta schemas and fieldmaps stay in the dfe-schemas tree;
-    hunt alert-destinations arrive with the multi-repo work (option A).
+    column selections those sources name), `hunts` + `rules` (what the hunt
+    runner executes), and the config every engine replica reads through its own
+    clone: API-written meta schemas, field maps, alert destinations and service
+    configs. The image's own schema tree stays in the pod.
     """
     return ResourceClassRegistry(
         [
@@ -98,6 +99,14 @@ def default_registry() -> ResourceClassRegistry:
             # engine's existing hunt:/rule: grants rather than minting new ones.
             ResourceClass("hunts", "config/hunts", rbac_prefix="hunt"),
             ResourceClass("rules", "config/rules", rbac_prefix="rule"),
+            # The deployment's layer over the image's schema tree, keyed by the same
+            # paths. Its derived/ subtree belongs to derived_schemas.
+            ResourceClass("meta_schemas", "config/schemas", rbac_prefix="schema", nested=True),
+            ResourceClass("fieldmaps", "config/fieldmaps", rbac_prefix="fieldmap", nested=True),
+            # A destination's Apprise URL is its credential, so the secrets backend holds it
+            # and the document keeps only its path.
+            ResourceClass("alert_destinations", "config/alert-destinations", rbac_prefix="alert"),
+            ResourceClass("service_configs", "config/services", rbac_prefix="service"),
             # library class - the versioned artefact library an app instance links
             # its consumed files to. Versioned because a linked artefact is only
             # useful if an earlier version can be pointed at again, and a BUNDLE

@@ -91,12 +91,12 @@ def _class_directory() -> str:
 
 
 def derived_reference_root(settings: Any) -> Path | None:
-    """Root a ``derived/<group>/<name>`` reference resolves under, for this deployment.
+    """Root of this deployment's own schema documents, where a reference resolves first.
 
     Gitops on puts the documents in the deploy repo, so the root is the class
-    directory's parent; otherwise they sit under the runtime schemas tree. None
-    when the deployment configures neither, which leaves the reference to be
-    resolved as it was given.
+    directory's parent, which also holds the meta schemas the API wrote. Otherwise
+    they sit under the runtime schemas tree. None when the deployment configures
+    neither, which leaves the reference to be resolved as it was given.
     """
     gitops = getattr(settings, "gitops", None)
     if gitops is not None and gitops.enabled and gitops.local_path:

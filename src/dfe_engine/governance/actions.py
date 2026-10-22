@@ -37,6 +37,7 @@ from dfe_engine.gitcrud.commit_policy import added_violations
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 from dfe_engine.gitops.repo import PublishResult
 from dfe_engine.hunt_runner.checkpoint import TIMESTAMP_FIELD
+from dfe_engine.hunts.alert import ALERT_CLASS, URL_PATH_FIELD
 from dfe_engine.hunts.rule_guard import refuse_rule_condition
 from dfe_engine.hunts.validator import HuntValidator
 
@@ -51,6 +52,12 @@ HUNT_CLASS = "hunts"
 
 RULE_CLASS = "rules"
 """The gitops class the hunt runner reads detection rules from."""
+
+_ALERT_URL_FIELDS = ("url", URL_PATH_FIELD)
+"""Alert destination fields an action may not write, though the name rule reads them as settings.
+
+``url`` is the Apprise URL, and ``url_path`` names which stored secret is sent as one.
+"""
 
 CREDENTIAL_REFUSAL = (
     "an action definition is stored in the deploy repo's history, so it may not carry "
@@ -245,6 +252,8 @@ class ActionStore:
 
     def _credential_change(self, change: VarChange) -> bool:
         """Whether ``change`` would store a credential, by its path or by any value it can take."""
+        if change.cls == ALERT_CLASS and change.path.split(".")[0] in _ALERT_URL_FIELDS:
+            return True
         target = self._target(change)
         if contract.credential_var(target, change.path):
             return True

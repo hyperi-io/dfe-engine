@@ -99,6 +99,31 @@ class TestAlertDestinationsBootstrap:
         finally:
             shutdown_registries()
 
+    def test_with_gitops_on_the_urls_go_through_the_apps_one_secrets_store(self, tmp_path):
+        from dfe_engine.api.app import create_app
+        from dfe_engine.settings import (
+            APISettings,
+            ClickHouseSettings,
+            DFESettings,
+            GitopsSettings,
+            SecretsSettings,
+        )
+
+        settings = DFESettings(
+            env="test",
+            config_dir=str(tmp_path),
+            clickhouse=ClickHouseSettings(bootstrap_tables=False),
+            gitops=GitopsSettings(enabled=True, local_path=str(tmp_path / "deploy"), push=False),
+            secrets=SecretsSettings(provider="file", path=str(tmp_path / "secrets")),
+            api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"),
+        )
+        app = create_app(settings=settings)
+        try:
+            with TestClient(app, raise_server_exceptions=False):
+                assert _registries["alert_destinations"]._secrets is app.state.dfe_secrets
+        finally:
+            _registries.clear()
+
     def test_api_created_destination_is_hunt_engine_readable(
         self, alert_admin_headers, alert_client, sample_destination, tmp_path
     ):

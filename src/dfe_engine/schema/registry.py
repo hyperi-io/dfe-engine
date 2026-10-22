@@ -1,8 +1,12 @@
 """Meta schema Registry - CRUD management for meta schema definitions.
 
-Backed by DirectoryConfigStore (YAML directory as SSoT).
+The schemas tree the image ships sits under a DirectoryConfigStore. With gitops on,
+the deploy repo's ``meta_schemas`` class is a layer over it, keyed by the same
+paths: every API write lands there as one routed commit, and a read takes the
+deploy repo's copy before the shipped one, so every engine replica serves one
+answer. Without gitops, writes go to the directory itself.
 
-Directory layout::
+Layout, under either root::
 
     <schemas_directory>/
         azure/
@@ -24,9 +28,13 @@ Usage:
 
 from __future__ import annotations
 
+import tempfile
+from collections.abc import Generator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dulwich import porcelain as git
 from dulwich.repo import InvalidUserIdentity, check_user_identity
@@ -35,9 +43,21 @@ from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
 from dfe_engine.git_identity import commit_file
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError
+from dfe_engine.schema.derived import DERIVED_PREFIX
 from dfe_engine.schema.models import MetaSchema
 from dfe_engine.schema.schema_loader import REGISTRIES_SUBDIR
-from dfe_engine.yaml_utils import yaml_dump
+from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud.routing import ReviewRouting
+    from dfe_engine.hunts.deploy_repo import DeployRepoStore
+
+META_CLASS = "meta_schemas"
+"""The gitcrud resource class API-written meta schemas live in when gitops is on."""
+
+_NOT_META = frozenset({REGISTRIES_SUBDIR, DERIVED_PREFIX})
+"""Top-level directories of the schemas tree that hold no meta schema: allow-lists, derived."""
 
 
 class SchemaError(Exception):
@@ -50,6 +70,26 @@ class SchemaNotFoundError(SchemaError):
 
 class SchemaValidationError(SchemaError):
     """Schema definition failed validation."""
+
+
+class SchemaShippedError(SchemaError):
+    """The schema exists only in the image's tree, which no API write can remove."""
+
+
+@dataclass(slots=True)
+class SchemaEdit:
+    """One schema file staged for a write, and the schema it saved as.
+
+    Attributes:
+        path: The YAML file to edit in place.
+        saved: The schema as written, once the edit block has finished.
+        document: The deploy-repo document as written, for a follow-on edit in the
+            same request to start from where a review-routed write left main behind.
+    """
+
+    path: Path
+    saved: MetaSchema | None = None
+    document: dict[str, Any] | None = None
 
 
 def _schema_location(schema_path: str) -> tuple[str, str]:
@@ -97,8 +137,8 @@ def coerce_common_header_legacy_versions(table: str, config_data: dict[str, Any]
 class SchemaRegistry:
     """Registry for managing schema definitions.
 
-    Backed by DirectoryConfigStore (YAML directory as SSoT).
-    Provides CRUD operations, standard-scoped queries, and git-aware writes.
+    Provides CRUD operations, standard-scoped queries, and git-aware writes over
+    the image's schemas tree, with the deploy repo layered over it when given.
     """
 
     _instance: SchemaRegistry | None = None
@@ -110,9 +150,23 @@ class SchemaRegistry:
         git_branch: str | None = None,
         git_push: bool = False,
         refresh_interval: int = 30,
+        *,
+        deploy_repo: DeployRepoStore | None = None,
     ) -> None:
+        """Bind the registry to the schemas tree, and to the deploy repo when gitops is on.
+
+        Args:
+            schemas_directory: The schemas tree the image ships and the engine seeds.
+            writable: Whether writes are allowed. None = auto-detect.
+            git_branch: Git branch for writes. None = current branch.
+            git_push: Auto-push after git commits.
+            refresh_interval: Seconds between background cache refresh polls.
+            deploy_repo: The deploy repo's ``meta_schemas`` class. When given, every
+                write lands there and a read takes its copy first.
+        """
         self._directory = Path(schemas_directory).expanduser().resolve(strict=False)
         self._directory.mkdir(parents=True, exist_ok=True)
+        self._deploy = deploy_repo
 
         self._store = DirectoryConfigStore(
             directory=self._directory,
@@ -122,6 +176,74 @@ class SchemaRegistry:
             git_push=git_push,
         )
         self._store.start()
+
+    # -----------------------------------------------------------------
+    # Backend primitives
+    # -----------------------------------------------------------------
+
+    @staticmethod
+    def _deploy_key(path: str) -> str:
+        """The deploy-repo key for a schema path, refusing one the meta class cannot hold.
+
+        Raises:
+            SchemaValidationError: The path is empty, escapes the tree, or sits under
+                ``registries/`` or ``derived/``.
+        """
+        parts = [p for p in path.replace("\\", "/").split("/") if p]
+        if not parts:
+            raise SchemaValidationError("Invalid empty schema path")
+        for segment in parts:
+            if segment in (".", "..") or "\x00" in segment:
+                raise SchemaValidationError(f"Invalid schema path segment: {segment!r}")
+        if parts[0] in _NOT_META:
+            raise SchemaValidationError(f"Schema path must not be under {parts[0]}/")
+        return "/".join(parts)
+
+    def _deploy_doc(self, table: str) -> dict[str, Any] | None:
+        """The deploy repo's copy of a schema, None off gitops or where it holds none."""
+        if self._deploy is None:
+            return None
+        try:
+            key = self._deploy_key(table)
+        except SchemaValidationError:
+            return None
+        return self._deploy.get(key)
+
+    def _raw(self, table: str) -> dict[str, Any] | None:
+        """A schema's stored document: the deploy repo's copy, else the tree's."""
+        held = self._deploy_doc(table)
+        if held is not None:
+            return held
+        return self._store.get(table)
+
+    def _tables(self) -> list[str]:
+        """Every schema key, the deploy repo's first, each once."""
+        tables: list[str] = []
+        if self._deploy is not None:
+            tables = [
+                name for name in self._deploy.names() if name.split("/", 1)[0] not in _NOT_META
+            ]
+        held = set(tables)
+        tables.extend(table for table in self._store.list_tables() if table not in held)
+        return tables
+
+    def _stored_file(self, table: str) -> Path:
+        """The file a schema was read from, for its modified time."""
+        if self._deploy_doc(table) is not None and self._deploy is not None:
+            return self._deploy.directory / f"{table}.yaml"
+        return self._yaml_path(table)
+
+    def stored_config(self, path: str) -> dict[str, Any] | None:
+        """A schema's document as stored, None when absent or the path is invalid.
+
+        Args:
+            path: The schema's registry path.
+        """
+        try:
+            canonical = canonical_schema_path(path)
+        except SchemaValidationError:
+            return None
+        return self._raw(self._table_name(canonical))
 
     @staticmethod
     def _draft_commit_message(
@@ -239,9 +361,9 @@ class SchemaRegistry:
     # -----------------------------------------------------------------
 
     def get_schema_current_version(self, path: str) -> str:
-        """Return ``current`` from cached YAML without full MetaSchema validation."""
+        """Return ``current`` from the stored YAML without full MetaSchema validation."""
         table = self._table_name(path)
-        config_data = self._store.get(table)
+        config_data = self._raw(table)
         if config_data is None:
             raise SchemaNotFoundError(f"Schema not found: '{path}'")
         current = config_data.get("current")
@@ -250,21 +372,58 @@ class SchemaRegistry:
         return current
 
     def schema_version_exists(self, path: str, version: str) -> bool:
-        """Whether ``version`` is already present in on-disk YAML (raw store view)."""
+        """Whether ``version`` is already present in the stored YAML (raw view)."""
         table = self._table_name(path)
-        config_data = self._store.get(table)
+        config_data = self._raw(table)
         if not isinstance(config_data, dict):
             return False
         versions = config_data.get("versions")
         return isinstance(versions, dict) and version in versions
+
+    def _publish(
+        self,
+        key: str,
+        config_data: dict[str, Any],
+        *,
+        created_by: str | None,
+        routing: ReviewRouting | None,
+    ) -> None:
+        """Commit one schema document to the deploy repo, routed by posture.
+
+        Raises:
+            SchemaValidationError: The path cannot name a deploy-repo document.
+        """
+        if self._deploy is None:
+            raise SchemaError("no deploy repo backend")
+        try:
+            outcome = self._deploy.put(key, config_data, actor=created_by or "engine")
+        except CommitPolicyError as exc:
+            raise SchemaValidationError(f"Invalid schema path {key!r}: {exc}") from exc
+        if routing is not None:
+            routing.record(outcome)
 
     def save_schema(
         self,
         meta_schema: MetaSchema | dict[str, Any],
         created_by: str | None = None,
         description: str | None = None,
+        *,
+        routing: ReviewRouting | None = None,
     ) -> MetaSchema:
-        """Save a meta schema definition."""
+        """Save a meta schema definition.
+
+        Args:
+            meta_schema: The schema, its ``path`` naming where it is stored.
+            created_by: The git author, ``username <email>`` for a directory in git.
+            description: The commit subject for a directory in git.
+            routing: Collects where a deploy-repo write landed.
+
+        Returns:
+            The schema as saved.
+
+        Raises:
+            SchemaValidationError: The schema or its path is invalid.
+        """
         if isinstance(meta_schema, dict):
             table = str(meta_schema.get("path") or "")
             try:
@@ -275,9 +434,15 @@ class SchemaRegistry:
         if not (meta_schema.path):
             raise SchemaValidationError("'MetaSchema.path' is required when saving")
 
+        config_data = meta_schema.to_yaml_dict()
+        if self._deploy is not None:
+            key = self._deploy_key(canonical_schema_path(meta_schema.path))
+            self._publish(key, config_data, created_by=created_by, routing=routing)
+            logger.info(f"Saved schema {key!r} -> deploy repo")
+            return meta_schema
+
         self._validate_created_by(created_by=created_by)
 
-        config_data = meta_schema.to_yaml_dict()
         table = self._table_name(path=meta_schema.path)
 
         yaml_path = self._yaml_path(table=meta_schema.path)
@@ -301,9 +466,9 @@ class SchemaRegistry:
         return meta_schema
 
     def get_schema(self, path: str) -> MetaSchema:
-        """Get a meta schema."""
+        """Get a meta schema, the deploy repo's copy before the tree's."""
         table = self._table_name(path)
-        config_data = self._store.get(table)
+        config_data = self._raw(table)
         if config_data is None:
             desc = f"{path}"
             raise SchemaNotFoundError(f"Schema not found: {desc!r}")
@@ -319,7 +484,17 @@ class SchemaRegistry:
         description: str | None = None,
         created_by: str | None = None,
     ) -> MetaSchema:
-        """Refresh cache (and git-commit) after a direct on-disk schema YAML write."""
+        """Refresh cache (and git-commit) after a direct on-disk schema YAML write.
+
+        Directory backend only: a deploy-repo registry takes its edits through
+        :meth:`editing`.
+
+        Raises:
+            SchemaError: The deploy repo is the backend.
+            SchemaNotFoundError: No file is stored at *path*.
+        """
+        if self._deploy is not None:
+            raise SchemaError("a deploy-repo schema registry takes edits through editing()")
         table = self._table_name(path)
         yaml_path = self._yaml_path(path)
         if not yaml_path.exists():
@@ -335,10 +510,125 @@ class SchemaRegistry:
         logger.info(f"Schema file updated {table!r} -> {yaml_path}")
         return self.get_schema(path)
 
+    @contextmanager
+    def editing(
+        self,
+        path: str,
+        *,
+        description: str | None = None,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+        base: dict[str, Any] | None = None,
+    ) -> Generator[SchemaEdit]:
+        """Stage one schema file for an in-place edit, and store it when the block ends.
+
+        A directory registry hands over the file itself and commits it afterwards,
+        as :meth:`notify_schema_file_updated` does. A deploy-repo registry hands over
+        a private copy of the stored document, the deploy repo's or else the tree's,
+        and commits what the block leaves there as one routed write. A block that
+        raises stores nothing.
+
+        Args:
+            path: The schema's registry path.
+            description: The commit subject for a directory in git.
+            created_by: The git author.
+            routing: Collects where a deploy-repo write landed.
+            base: The document a deploy-repo edit starts from in place of the stored
+                one, such as an earlier edit's ``document`` that review left off main.
+
+        Yields:
+            The staged file, whose ``saved`` is set once the block finishes.
+
+        Raises:
+            SchemaNotFoundError: The block left no file to store.
+            SchemaValidationError: The path is invalid, or what the block left is
+                not a meta schema.
+        """
+        canonical = canonical_schema_path(path)
+        if self._deploy is None:
+            edit = SchemaEdit(path=self._yaml_path(canonical))
+            yield edit
+            edit.saved = self.notify_schema_file_updated(
+                canonical, description=description, created_by=created_by
+            )
+            return
+
+        key = self._deploy_key(canonical)
+        with tempfile.TemporaryDirectory(prefix="dfe-schema-edit-") as staging:
+            staged = Path(staging) / "schema.yaml"
+            current = base if base is not None else self._raw(key)
+            if current is not None:
+                yaml_dump(current, staged)
+            edit = SchemaEdit(path=staged)
+            yield edit
+            if not staged.is_file():
+                raise SchemaNotFoundError(f"Schema not found: {canonical!r}")
+            doc = yaml_load(staged)
+            if not isinstance(doc, dict):
+                raise SchemaValidationError(f"Schema {canonical!r} is not a mapping")
+            try:
+                saved = self._parse_meta_schema(key, doc)
+            except ValidationError as exc:
+                raise SchemaValidationError(f"Invalid schema definition: {exc}") from exc
+            self._publish(key, doc, created_by=created_by, routing=routing)
+        saved.path = canonical
+        edit.saved = saved
+        edit.document = doc
+
+    @contextmanager
+    def schema_file(self, path: str) -> Generator[Path]:
+        """A readable YAML file holding a schema's stored document.
+
+        The tree's own file for a directory registry, and a private copy of the
+        deploy repo's or the tree's document otherwise.
+
+        Raises:
+            SchemaNotFoundError: Nothing is stored at *path*.
+        """
+        canonical = canonical_schema_path(path)
+        if self._deploy is None:
+            yield self._yaml_path(canonical)
+            return
+        current = self._raw(canonical)
+        if current is None:
+            raise SchemaNotFoundError(f"Schema not found: {canonical!r}")
+        with tempfile.TemporaryDirectory(prefix="dfe-schema-read-") as staging:
+            staged = Path(staging) / "schema.yaml"
+            yaml_dump(current, staged)
+            yield staged
+
     def delete_schema(
-        self, path: str, *, description: str | None = None, created_by: str | None = None
+        self,
+        path: str,
+        *,
+        description: str | None = None,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
     ) -> None:
-        """Delete a meta schema."""
+        """Delete a meta schema.
+
+        On the deploy repo this removes the deployment's copy, so a schema the image
+        also ships reads as shipped again.
+
+        Raises:
+            SchemaShippedError: Only the image's tree holds the schema.
+        """
+        if self._deploy is not None:
+            key = self._deploy_key(canonical_schema_path(path))
+            outcome = self._deploy.delete(key, actor=created_by or "engine")
+            if outcome is None:
+                if self._store.get(self._table_name(path)) is not None:
+                    raise SchemaShippedError(
+                        f"Schema {path!r} ships with the image and is not stored in the "
+                        "deploy repo, so there is nothing to delete"
+                    )
+                logger.warning(f"Schema does not exist: {path!r}")
+                return
+            if routing is not None:
+                routing.record(outcome)
+            logger.info(f"Deleted schema {key!r} from the deploy repo")
+            return
+
         table = self._table_name(path)
         yaml_path = self._yaml_path(path)
 
@@ -366,7 +656,7 @@ class SchemaRegistry:
         match on-disk layout; ``MetaSchema.path`` is not persisted in YAML files.
         """
         parent, name = _schema_location(schema_path)
-        for table in self._store.list_tables():
+        for table in self._tables():
             existing_parent, existing_name = _schema_location(table)
             if existing_parent == parent and existing_name == name:
                 return table
@@ -382,11 +672,11 @@ class SchemaRegistry:
             List of schema metadata dicts.
         """
         results = []
-        for table in self._store.list_tables():
+        for table in self._tables():
             if path and table != path:
                 continue
 
-            config_data = self._store.get(table)
+            config_data = self._raw(table)
             if config_data is None:
                 continue
 
@@ -404,7 +694,7 @@ class SchemaRegistry:
 
             # Resolve YAML path for modified-time (use store table key, not list_schemas filter)
             schema_rel = getattr(schema, "path", None) or table
-            yaml_path = self._yaml_path(schema_rel)
+            yaml_path = self._stored_file(schema_rel)
             try:
                 stat = yaml_path.stat()
                 updated_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
@@ -433,17 +723,20 @@ class SchemaRegistry:
     # -----------------------------------------------------------------
 
     def on_change(self, path: str, callback: Any) -> None:
-        """Register a callback for when a schema changes."""
+        """Register a callback for when a schema in the image's tree changes."""
         table = self._table_name(path)
         self._store.on_change(table, callback)
 
     @property
     def is_git(self) -> bool:
-        """Whether the schemas directory is INSIDE a git repository.
+        """Whether writes land as git commits.
 
-        scalo walks up, so a directory under a gitops checkout answers True
-        without being a repository root itself.
+        The deploy repo always commits. A directory answers True when it sits
+        INSIDE a git repository: scalo walks up, so a directory under a gitops
+        checkout answers True without being a repository root itself.
         """
+        if self._deploy is not None:
+            return True
         return self._store.is_git
 
     @property
