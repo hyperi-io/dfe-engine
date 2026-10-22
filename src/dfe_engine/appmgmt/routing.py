@@ -16,8 +16,9 @@ default topic whatever the sources said.
 
 Tenancy is compiled the same way, from a :class:`~dfe_engine.orgs.tenancy.Tenancy`
 read once per pass: the default org's tenant id into the receiver, loader and
-fetcher, each fetched source's org into its fetcher, and each ingest credential's
-orgs into the receiver's ``ingest_bindings``.
+fetcher, each fetched source's org into its fetcher, each ingest credential's orgs
+into the receiver's ``ingest_bindings``, and each bearer listener's ``auth`` from
+the credentials that list it.
 
 This module is that path. The compiled block is DERIVED state, so it behaves
 like a resolved link rather than an edited value: ``status`` compares what the
@@ -75,6 +76,9 @@ SINK_BLOCK = "sink"
 
 # The loader's per-table _json/_raw capture, compiled from the derived schemas.
 CAPTURE_BLOCK = "capture"
+
+# A receiver listener's auth block is its config section's name with this after it.
+AUTH_BLOCK_SUFFIX = "_auth"
 
 
 class UnknownRoutingCompilerError(KeyError):
@@ -218,22 +222,28 @@ def _receiver(
     instance: str | None,
     tenancy: Tenancy | None,
 ) -> dict[str, Any]:
+    from dfe_engine.orgs.ingest_credentials import LISTENER_SECTIONS
+    from dfe_engine.orgs.ingest_tokens import compile_listener_auth
     from dfe_engine.services.source_routing import (
         compile_receiver_destinations,
         compile_receiver_routing,
         compile_receiver_rules,
     )
 
+    tenancy = _required(tenancy, app)
     # Only the keys the engine derives: the block is written whole, so a model
     # default in it would overwrite the deployment's own setting for that key.
     routing = compile_receiver_routing(registry, source_org_id=settings.ingest.source_org_id)
     destinations = compile_receiver_destinations(registry, settings)
-    return {
+    blocks: dict[str, Any] = {
         "routing": routing.model_dump(mode="json", exclude_unset=True),
         "rules": compile_receiver_rules(registry).model_dump(mode="json", exclude_defaults=True),
-        "ingest_bindings": compile_ingest_bindings(_required(tenancy, app)),
+        "ingest_bindings": compile_ingest_bindings(tenancy),
         "destinations": destinations.model_dump(mode="json", exclude_unset=True),
     }
+    for listener, auth in compile_listener_auth(tenancy, settings.secrets).items():
+        blocks[f"{LISTENER_SECTIONS[listener]}{AUTH_BLOCK_SUFFIX}"] = auth
+    return blocks
 
 
 def _loader(

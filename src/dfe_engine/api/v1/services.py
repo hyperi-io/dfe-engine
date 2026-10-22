@@ -14,12 +14,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, SecretStr
 
-from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, require_action
+from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, Settings, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
+from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError
 from dfe_engine.services.registry import ConfigNotFoundError, stored_form
 
 router = APIRouter(prefix="/services", tags=["Services"])
@@ -282,8 +283,14 @@ async def get_service_config_history(
     response_model=SeedResponse,
     dependencies=[Depends(require_action(scopes_dict["service_write"]))],
 )
-async def seed_service_configs(user: CurrentUser, registry: ServiceConfigReg):
+async def seed_service_configs(user: CurrentUser, registry: ServiceConfigReg, settings: Settings):
     """Seed built-in default service configs. Non-destructive."""
-    count = registry.seed_defaults(overwrite=False)
+    try:
+        count = registry.seed_defaults(overwrite=False, settings=settings)
+    except BearerSourceUnreadableError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "receiver_auth_unreadable", "message": str(exc)},
+        ) from exc
     audit_resource_change(user.user_id, "service_config", "all", "seeded")
     return SeedResponse(seeded=count)
