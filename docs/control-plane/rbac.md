@@ -225,6 +225,8 @@ and loads roles from the copy. Custom roles are added to it through
 
 The copy is never rewritten once it exists, and the API refuses edits to a built-in role. A built-in grant changed in a later engine release therefore reaches an existing deployment only when `rbac/roles.yaml` is edited by hand.
 
+With the document store, there is no copy. Built-in roles come straight from the shipped file, so an engine upgrade brings its own grants, and every replica answers them alike. Custom roles are documents in the `roles` collection, one per role. A stored role that takes a built-in role's name is ignored.
+
 8 built-in roles, flat hierarchy (no inheritance):
 
 ```mermaid
