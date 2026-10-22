@@ -2059,7 +2059,8 @@ class SecretsSettings(BaseModel):
 
     The engine reads runtime config secrets from env; this is the WRITE seam for
     secrets it generates (the JWT signing key, ClickHouse passwords, OIDC client
-    secrets). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
+    secrets and, with gitops on, alert destination URLs). ``provider`` selects the
+    scalo.secrets backend and NEVER a hardcoded
     product: 'file' by default (a directory on the engine's volume), 'ansible_vault',
     'openbao'/'vault' where a deployment runs one, and 'aws' for AWS Secrets Manager.
     'gcp' and 'azure' are refused: their secret names allow no '/', and every path
