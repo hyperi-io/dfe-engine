@@ -6140,7 +6140,7 @@
           "Sources"
         ],
         "summary": "List Catalogue",
-        "description": "List the sources the installed dfe-schemas catalogue ships ready to create.\n\nEach entry says whether the deployed transform ships its default variant, read off that app's mounted contract, so a console can hold back an entry the create would refuse.",
+        "description": "List the sources the installed dfe-schemas catalogue ships ready to create.\n\nAn entry already stored as a source is left out, matched on the catalogue entry\nname even when the source was given a different one. A source written by hand\ndoes not hide an entry. Each entry says whether the deployed transform ships\nits default variant, read off that app's mounted contract, so a console can\nhold back an entry the create would refuse.",
         "operationId": "sources.catalogue",
         "parameters": [
           {

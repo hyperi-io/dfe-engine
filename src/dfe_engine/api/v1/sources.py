@@ -2,7 +2,7 @@
 
 GET    /api/v1/sources                  -> Paginated source list
 POST   /api/v1/sources                  -> Create source
-GET    /api/v1/sources/catalogue        -> The sources DFE ships ready to create
+GET    /api/v1/sources/catalogue        -> The sources DFE ships ready to create, omitting ones already stored
 POST   /api/v1/sources/from-catalogue   -> Create sources from catalogue entries
 GET    /api/v1/sources/{name}           -> Get source details
 GET    /api/v1/sources/{name}/flow      -> The stages its records travel, resolved
@@ -1208,6 +1208,7 @@ def create_source(
 )
 def list_catalogue(
     user: CurrentUser,
+    registry: SourceReg,
     pagination: PaginationParams = Depends(),
     intake: str | None = Query(
         None, description="Only entries that arrive this way (beats, receiver, fetcher)"
@@ -1216,7 +1217,11 @@ def list_catalogue(
 ) -> PaginatedResponse[CatalogueEntryObject]:
     """List the sources the installed dfe-schemas catalogue ships ready to create.
 
-    Each entry says whether the deployed transform ships its default variant, read off that app's mounted contract, so a console can hold back an entry the create would refuse.
+    An entry already stored as a source is left out, matched on the catalogue entry
+    name even when the source was given a different one. A source written by hand
+    does not hide an entry. Each entry says whether the deployed transform ships
+    its default variant, read off that app's mounted contract, so a console can
+    hold back an entry the create would refuse.
     """
     catalogue = _source_catalogue()
     if intake is not None and intake not in source_catalogue_module.INTAKES:
@@ -1231,8 +1236,15 @@ def list_catalogue(
             },
         )
 
+    taken = {
+        source.from_catalogue_item
+        for source in registry.get_all_sources()
+        if source.from_catalogue_item is not None
+    }
     entries = [
-        entry for entry in catalogue.entries.values() if intake is None or intake in entry.intakes
+        entry
+        for entry in catalogue.entries.values()
+        if entry.name not in taken and (intake is None or intake in entry.intakes)
     ]
     if search:
         needle = search.lower()

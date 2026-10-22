@@ -140,6 +140,39 @@ class TestListCatalogue:
     def test_a_viewer_may_list(self, client: TestClient, viewer_headers: dict[str, str]):
         assert client.get(CATALOGUE, headers=viewer_headers).status_code == 200
 
+    def test_an_entry_already_stored_is_left_out(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        before = client.get(CATALOGUE, headers=admin_headers, params={"per_page": 1}).json()[
+            "total"
+        ]
+        created = _create(client, admin_headers, "okta", {"intake": "beats"})
+        assert created.status_code == 201, created.text
+        listed = client.get(CATALOGUE, headers=admin_headers, params={"search": "okta"})
+        again = client.get(CATALOGUE, headers=admin_headers, params={"per_page": 1}).json()["total"]
+        assert "okta" not in {row["name"] for row in listed.json()["items"]}
+        assert again == before - 1
+
+    def test_a_renamed_catalogue_source_still_hides_its_entry(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        created = _create(client, admin_headers, "cisco-asa", {"name": "edge-firewall"})
+        assert created.status_code == 201, created.text
+        listed = client.get(CATALOGUE, headers=admin_headers, params={"search": "cisco-asa"})
+        assert "cisco-asa" not in {row["name"] for row in listed.json()["items"]}
+
+    def test_a_hand_written_source_leaves_its_catalogue_entry_listed(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        written = client.post(
+            "/api/v1/sources",
+            headers=admin_headers,
+            json={"source": "okta", "match": {"field": "tags.collector.type", "value": "okta"}},
+        )
+        assert written.status_code == 201, written.text
+        listed = client.get(CATALOGUE, headers=admin_headers, params={"search": "okta"})
+        assert "okta" in {row["name"] for row in listed.json()["items"]}
+
 
 class TestCreateSourceFromCatalogue:
     @pytest.mark.parametrize(
