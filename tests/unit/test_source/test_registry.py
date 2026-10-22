@@ -216,14 +216,14 @@ class TestList:
             registry.save_source(_make_source("act", match_value="shared", state="active"))
 
     def test_unsupported_match_operator_rejected_on_save(self, registry: SourceRegistry):
-        """Receiver-routed sources must use equals/exists (documented receiver gap)."""
+        """Receiver-routed sources must use an operator that compiles to a receiver rule op."""
         bad = Source.model_validate(
             {
                 "source": "bad-op",
                 "match": {"field": "f", "operator": "includes", "value": "v"},
             }
         )
-        with pytest.raises(SourceValidationError, match="documented receiver gap"):
+        with pytest.raises(SourceValidationError, match="compiles to no dfe-receiver rule"):
             registry.save_source(bad)
 
     def test_disabled_source_with_legacy_operator_saves(self, registry: SourceRegistry):

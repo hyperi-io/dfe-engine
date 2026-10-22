@@ -54,6 +54,8 @@ from dfe_engine.api.deps import (
     SourceReg,
     get_field_map_registry_optional,
     get_interactive_clickhouse_client,
+    refuse_unknown_orgs,
+    request_tenancy,
     require_action,
     ttl_settings,
 )
@@ -368,8 +370,18 @@ def _one_per_app(hints: list[str]) -> list[str]:
     return list(dict.fromkeys(hints))
 
 
-def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
-    """Apply what the sources imply about the deployed apps. Never raises.
+def _refuse_unknown_fetched_org(request: Request, body: SourceWriteRequest) -> None:
+    """Refuse a fetched source naming an org the registry does not hold.
+
+    Raises:
+        HTTPException: 422 ``unknown_org``.
+    """
+    if body.fetcher is not None and body.fetcher.org is not None:
+        refuse_unknown_orgs(request, [body.fetcher.org])
+
+
+def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSync:
+    """Apply what the sources and the orgs imply about the deployed apps. Never raises.
 
     Returns the writes made, why the reconcile could not complete when it did
     not, and the restart each app needs where this deployment renders its config
@@ -392,7 +404,7 @@ def _reconcile_apps(request: Request, user: Any, registry: Any) -> AppsSync:
     done: list[str] = []
     hints: list[str] = []
     try:
-        changes = derived.plan(gc, registry, settings)
+        changes = derived.plan(gc, registry, settings, tenancy=request_tenancy(request))
         transforms = transform_instances(gc)
         for change in changes:
             if change.action == "forget":
@@ -1054,13 +1066,14 @@ def create_source(
                 "message": f"Source {name!r} already exists",
             },
         )
+    _refuse_unknown_fetched_org(request, body)
 
     try:
         source = registry.create_source_from_write(body, created_by=git_author(user))
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "created")
-    apps = _reconcile_apps(request, user, registry)
+    apps = reconcile_derived_apps(request, user, registry)
     if apps.error is not None:
         response.status_code = 202
     return _source_response(source, message="created", apps=apps)
@@ -2116,7 +2129,7 @@ def _record_source_deploy(
 
     # The receiver's rule for this source, the loader's table map and (for a
     # fetcher-based source) the fetcher instance are what make the deploy live.
-    return _reconcile_apps(request, user, registry)
+    return reconcile_derived_apps(request, user, registry)
 
 
 def _dry_run_table_moves(
@@ -2531,6 +2544,7 @@ def update_source(
                 "message": f"Source {name!r} not found",
             },
         )
+    _refuse_unknown_fetched_org(request, body)
 
     try:
         source = registry.update_source_from_write(name, body, created_by=git_author(user))
@@ -2546,7 +2560,7 @@ def update_source(
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "updated")
     return _source_response(
-        source, message="updated", apps=_reconcile_apps(request, user, registry)
+        source, message="updated", apps=reconcile_derived_apps(request, user, registry)
     )
 
 
@@ -2604,7 +2618,9 @@ def patch_source_enabled(
         _raise_save_validation_http(e)
 
     audit_resource_change(user.user_id, "source", saved.source, target)
-    return _source_response(saved, message=target, apps=_reconcile_apps(request, user, registry))
+    return _source_response(
+        saved, message=target, apps=reconcile_derived_apps(request, user, registry)
+    )
 
 
 @router.delete(
@@ -2645,7 +2661,7 @@ async def delete_source(
         "deleted",
         details={"topics_removed": topics_removed, "topics_failed": topics_failed},
     )
-    apps = await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
+    apps = await run_blocking(functools.partial(reconcile_derived_apps, request, user, registry))
     await _remove_hyperdx_source(request, name)
     # The table stays in ClickHouse; leaving the registry is what takes it out of all_sources.
     await _rebuild_all_sources(registry=registry, settings=settings, sources=[name])
@@ -2726,7 +2742,9 @@ async def bulk_action(
     apps = AppsSync(changes=[])
     if succeeded:
         audit_resource_change(user.user_id, "source", ",".join(succeeded), body.action)
-        apps = await run_blocking(functools.partial(_reconcile_apps, request, user, registry))
+        apps = await run_blocking(
+            functools.partial(reconcile_derived_apps, request, user, registry)
+        )
         for source in deleted:
             # One pass per source: the delete is already done, and a broker that
             # cannot be reached must not cost the next source its cleanup.
@@ -2891,7 +2909,7 @@ def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Request):
             status_code=503,
             detail={"code": "not_configured", "message": "gitops is not enabled"},
         )
-    apps = _reconcile_apps(request, user, registry)
+    apps = reconcile_derived_apps(request, user, registry)
     if apps.error:
         raise HTTPException(
             status_code=502,
@@ -2965,7 +2983,7 @@ def import_source(
         return SourceImportResponse(**result.model_dump())
 
     audit_resource_change(user.user_id, "source", result.source, "created")
-    apps = _reconcile_apps(request, user, registry)
+    apps = reconcile_derived_apps(request, user, registry)
     return SourceImportResponse(
         **result.model_dump(),
         apps_synced=apps.changes,

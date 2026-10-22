@@ -35,6 +35,7 @@ from dfe_engine.clickhouse.function_guard import (
 )
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.masking import CREDENTIAL_MAP, credential_name, words
+from dfe_engine.orgs.models import ORG_NAME_PATTERN
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
 from dfe_engine.source.type_registry import (
     LOWCARDINALITY_ATTRIBUTE,
@@ -333,7 +334,8 @@ class SchemaColumn(BaseModel):
 # replaces it. SourceHeader, the table-defaults resolver and ClickHouseSettings
 # all read these so the three cannot drift.
 DEFAULT_HEADER_TYPE = "timeseries"
-DEFAULT_HEADER_VERSION = "1.0.0"
+# 1.0.3 fills _org_id from the _org_id the first hop stamps, where earlier ones read a sender's org_id.
+DEFAULT_HEADER_VERSION = "1.0.3"
 
 
 class SourceHeader(BaseModel):
@@ -344,9 +346,6 @@ class SourceHeader(BaseModel):
         default=DEFAULT_HEADER_TYPE,
         description="Profile name (timeseries, minimal, passthrough)",
     )
-    # Held behind the profile's current 1.0.1, which makes _json and _tags
-    # not_null: moving unpinned sources onto it retypes live ClickHouse columns.
-    # Settled together with dfe-schemas#33 -- dfe-engine#440.
     version: str = Field(
         default=DEFAULT_HEADER_VERSION,
         description="Common header version (semver)",
@@ -685,6 +684,14 @@ class SourceFetcher(BaseModel):
             "Send matching fetched records to another source's landing instead of "
             "this one's. The named source must exist, which is checked when the "
             "fetcher instance is compiled, not here"
+        ),
+    )
+    org: str | None = Field(
+        default=None,
+        pattern=ORG_NAME_PATTERN,
+        description=(
+            "The registered org every fetched record belongs to: the fetcher stamps its "
+            "first tenant id as _org_id. Unset is the default org"
         ),
     )
 

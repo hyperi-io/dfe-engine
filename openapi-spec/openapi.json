@@ -5115,7 +5115,7 @@
           "Organisations"
         ],
         "summary": "Delete Org",
-        "description": "Delete an organisation (admin only).\n\nEvery hunt naming the org loses its stored tenant ids first and keeps the name,\nso it fails as ``unknown_customers`` and holds its watermark until it is edited,\nrather than reading the rows the org left behind. A production+team posture\nroutes that hunt change to review, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Delete an organisation (admin only), and the ingest credentials it owns.\n\nEvery hunt naming the org loses its stored tenant ids first and keeps the name,\nso it fails as ``unknown_customers`` and holds its watermark until it is edited,\nrather than reading the rows the org left behind. A production+team posture\nroutes that hunt change to review, and the ``X-DFE-Review-Required`` header says so.\n\nThe reserved ``default`` org cannot be deleted, nor can an org another org's\ningest credential binds or a fetched source names: each answers 409.",
         "operationId": "orgs.delete",
         "parameters": [
           {
@@ -5182,6 +5182,672 @@
             "positional": []
           },
           "action": "org:delete"
+        }
+      }
+    },
+    "/api/v1/orgs/{org}/ingest-credentials": {
+      "get": {
+        "tags": [
+          "Ingest credentials"
+        ],
+        "summary": "List Ingest Credentials",
+        "description": "List the ingest credentials an org owns, by id. Takes no filter or order_by.",
+        "operationId": "orgs.ingest-credentials.list",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Org"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items per page: 0 means 50, above 1000 is cut to it",
+              "default": 0,
+              "title": "Page Size"
+            },
+            "description": "Items per page: 0 means 50, above 1000 is cut to it"
+          },
+          {
+            "name": "page_token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_page_token of the previous page",
+              "title": "Page Token"
+            },
+            "description": "The next_page_token of the previous page"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression",
+              "title": "Filter"
+            },
+            "description": "Filter expression"
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Ordering, such as `name desc`",
+              "title": "Order By"
+            },
+            "description": "Ordering, such as `name desc`"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_IngestCredentialResponse_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "orgs",
+          "resource": "ingest-credentials",
+          "hierarchy": [
+            "orgs",
+            "ingest-credentials"
+          ],
+          "verb": "list",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "org:read"
+        }
+      }
+    },
+    "/api/v1/orgs/{org}/ingest-credentials/{credential}": {
+      "get": {
+        "tags": [
+          "Ingest credentials"
+        ],
+        "summary": "Get Ingest Credential",
+        "description": "Get one ingest credential, never its token. Its ``ETag`` is an apply's ``If-Match``.",
+        "operationId": "orgs.ingest-credentials.get",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Org"
+            }
+          },
+          {
+            "name": "credential",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Credential"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestCredentialResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "orgs",
+          "resource": "ingest-credentials",
+          "hierarchy": [
+            "orgs",
+            "ingest-credentials"
+          ],
+          "verb": "get",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "org:read"
+        }
+      },
+      "put": {
+        "tags": [
+          "Ingest credentials"
+        ],
+        "summary": "Apply Ingest Credential",
+        "description": "Create an ingest credential and mint its token, or change what it binds.\n\n``If-None-Match: *`` creates it and answers 201 with the token, once.\n``If-Match: <etag>`` updates its orgs, default org and listeners and keeps its\ntoken. A credential id is unique across every org, so creating one another org\nholds answers 409 ``credential_id_taken``. A binding the receiver could not\nhold answers 422 ``invalid_binding`` with a field error for each problem.",
+        "operationId": "orgs.ingest-credentials.apply",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Org"
+            }
+          },
+          {
+            "name": "credential",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Credential"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Validate and report the change without committing it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Validate and report the change without committing it"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The current ETag: the write fails with 412 if it has changed",
+              "title": "If-Match"
+            },
+            "description": "The current ETag: the write fails with 412 if it has changed"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`*` to create: the write fails with 412 if the resource exists",
+              "title": "If-None-Match"
+            },
+            "description": "`*` to create: the write fails with 412 if the resource exists"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestCredentialSpec"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestCredentialWriteResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "orgs",
+          "resource": "ingest-credentials",
+          "hierarchy": [
+            "orgs",
+            "ingest-credentials"
+          ],
+          "verb": "apply",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "org:write"
+        }
+      },
+      "delete": {
+        "tags": [
+          "Ingest credentials"
+        ],
+        "summary": "Delete Ingest Credential",
+        "description": "Delete an ingest credential. Its token stops working once the receiver rereads its secret.",
+        "operationId": "orgs.ingest-credentials.delete",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Org"
+            }
+          },
+          {
+            "name": "credential",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Credential"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Validate and report the change without committing it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Validate and report the change without committing it"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The current ETag: the write fails with 412 if it has changed",
+              "title": "If-Match"
+            },
+            "description": "The current ETag: the write fails with 412 if it has changed"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`*` to create: the write fails with 412 if the resource exists",
+              "title": "If-None-Match"
+            },
+            "description": "`*` to create: the write fails with 412 if the resource exists"
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "orgs",
+          "resource": "ingest-credentials",
+          "hierarchy": [
+            "orgs",
+            "ingest-credentials"
+          ],
+          "verb": "delete",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "org:write"
+        }
+      }
+    },
+    "/api/v1/orgs/{org}/ingest-credentials/{credential}/rotate": {
+      "post": {
+        "tags": [
+          "Ingest credentials"
+        ],
+        "summary": "Rotate Ingest Credential",
+        "description": "Mint a new token for an ingest credential. The old one stops working and the binding stays.\n\nThe new token comes back in this response and never again. ``If-Match`` is\nhonoured when sent.",
+        "operationId": "orgs.ingest-credentials.rotate",
+        "parameters": [
+          {
+            "name": "org",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Org"
+            }
+          },
+          {
+            "name": "credential",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Credential"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Validate and report the change without committing it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Validate and report the change without committing it"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The current ETag: the write fails with 412 if it has changed",
+              "title": "If-Match"
+            },
+            "description": "The current ETag: the write fails with 412 if it has changed"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`*` to create: the write fails with 412 if the resource exists",
+              "title": "If-None-Match"
+            },
+            "description": "`*` to create: the write fails with 412 if the resource exists"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestCredentialWriteResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "orgs",
+          "resource": "ingest-credentials",
+          "hierarchy": [
+            "orgs",
+            "ingest-credentials"
+          ],
+          "verb": "rotate",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "org:write"
         }
       }
     },
@@ -34281,6 +34947,223 @@
         "title": "HyperDXTeamSources",
         "description": "One HyperDX team and the DFE sources it holds."
       },
+      "IngestCredentialResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The credential id, unique across every org"
+          },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "description": "The org that owns it"
+          },
+          "orgs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Orgs",
+            "description": "The orgs its records may land in"
+          },
+          "default_org": {
+            "type": "string",
+            "title": "Default Org",
+            "description": "The org a record takes when no rule picks one"
+          },
+          "listeners": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "http",
+                "grpc",
+                "otlp",
+                "splunk_hec",
+                "prometheus_rw"
+              ]
+            },
+            "type": "array",
+            "title": "Listeners",
+            "description": "The listeners that accept its token"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At",
+            "description": "When its first token was minted (ISO 8601)"
+          },
+          "rotated_at": {
+            "type": "string",
+            "title": "Rotated At",
+            "description": "When its current token was minted (ISO 8601)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "org",
+          "orgs",
+          "default_org",
+          "listeners",
+          "created_at",
+          "rotated_at"
+        ],
+        "title": "IngestCredentialResponse",
+        "description": "An ingest credential, never its token."
+      },
+      "IngestCredentialSpec": {
+        "properties": {
+          "orgs": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Orgs",
+            "description": "The orgs its records may land in, the owning org among them. Unset is the owning org alone"
+          },
+          "default_org": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Org",
+            "description": "The org a record takes when no rule picks one of orgs. Unset is the owning org"
+          },
+          "listeners": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "http",
+                "grpc",
+                "otlp",
+                "splunk_hec",
+                "prometheus_rw"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Listeners",
+            "description": "The receiver listeners that accept its token. Unset is every one"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "IngestCredentialSpec",
+        "description": "What an operator sets on an ingest credential."
+      },
+      "IngestCredentialWriteResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The credential id, unique across every org"
+          },
+          "org": {
+            "type": "string",
+            "title": "Org",
+            "description": "The org that owns it"
+          },
+          "orgs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Orgs",
+            "description": "The orgs its records may land in"
+          },
+          "default_org": {
+            "type": "string",
+            "title": "Default Org",
+            "description": "The org a record takes when no rule picks one"
+          },
+          "listeners": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "http",
+                "grpc",
+                "otlp",
+                "splunk_hec",
+                "prometheus_rw"
+              ]
+            },
+            "type": "array",
+            "title": "Listeners",
+            "description": "The listeners that accept its token"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At",
+            "description": "When its first token was minted (ISO 8601)"
+          },
+          "rotated_at": {
+            "type": "string",
+            "title": "Rotated At",
+            "description": "When its current token was minted (ISO 8601)"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token",
+            "description": "The bearer token a sender presents as `Authorization: Bearer <token>`. Returned once, by the request that mints it, and never again"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "description": "Nothing was written: this is what the write would do"
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "The app overlays the binding change rewrote"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the app overlays were not brought into step, if not"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "org",
+          "orgs",
+          "default_org",
+          "listeners",
+          "created_at",
+          "rotated_at",
+          "dry_run"
+        ],
+        "title": "IngestCredentialWriteResponse",
+        "description": "The credential a write leaves, and the token when this write minted one."
+      },
       "InitialSetupState": {
         "properties": {
           "complete": {
@@ -36355,6 +37238,44 @@
         ],
         "title": "PackInfo",
         "description": "A generatable schema pack (a meta schema under the schemas root)."
+      },
+      "Page_IngestCredentialResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IngestCredentialResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_page_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page Token"
+          },
+          "total_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "Page[IngestCredentialResponse]"
       },
       "PaginatedResponse_APIKeyResponse_": {
         "properties": {
@@ -41872,7 +42793,7 @@
             },
             "type": "array",
             "title": "Organisations",
-            "description": "The organisation registry. Empty once setup is complete."
+            "description": "The organisation registry, bar the reserved default org. Empty once setup is complete."
           },
           "break_glass": {
             "anyOf": [
@@ -42830,6 +43751,19 @@
             "type": "array",
             "title": "Routes",
             "description": "Send matching fetched records to another source's landing instead of this one's. The named source must exist, which is checked when the fetcher instance is compiled, not here"
+          },
+          "org": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org",
+            "description": "The registered org every fetched record belongs to: the fetcher stamps its first tenant id as _org_id. Unset is the default org"
           }
         },
         "type": "object",
@@ -42914,7 +43848,7 @@
             "type": "string",
             "title": "Version",
             "description": "Common header version (semver)",
-            "default": "1.0.0"
+            "default": "1.0.3"
           }
         },
         "type": "object",

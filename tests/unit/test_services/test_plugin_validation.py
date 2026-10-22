@@ -67,9 +67,9 @@ class TestValidateLoaderHappyPath:
         assert errors == []
         assert warnings == []
 
-    def test_no_warnings_for_org_routes_with_db_fields(self):
+    def test_no_warnings_for_org_routes(self):
+        # org_routes keys on the tenant _org_id resolves to, so it needs no other field.
         config = LoaderConfig()
-        config.routing.db_fields = ["org_id"]
         config.routing.org_routes = [{"org_id": "acme"}]
         errors, warnings = run_loader_validation(config)
         assert errors == []
@@ -390,28 +390,21 @@ class TestLoaderTransportModelDefaults:
 
 
 class TestValidateLoaderRouting:
-    def test_org_routes_without_db_fields_produces_warning(self):
-        # The loader reads the org from the first db_fields hit, so org_routes
-        # with no db_fields is a map it never opens.
-        config = LoaderConfig()
-        config.routing.db_fields = []
-        config.routing.org_routes = [{"org_id": "org-a"}, {"org_id": "org-b"}]
-        _, warnings = run_loader_validation(config)
-        assert any("org_routes" in w for w in warnings)
+    @pytest.mark.parametrize("retired", ["db_fields", "rules", "mapping_file", "compat_v2_source"])
+    def test_a_routing_key_the_loader_no_longer_reads_is_refused(self, retired):
+        # The loader drops an unknown key without a word, so the engine refuses it instead.
+        with pytest.raises(ValueError, match=retired):
+            LoaderConfig.model_validate({"routing": {retired: []}})
 
-    def test_db_fields_present_no_warning(self):
-        config = LoaderConfig()
-        config.routing.db_fields = ["org_id"]
-        config.routing.org_routes = [{"org_id": "org-a"}]
-        _, warnings = run_loader_validation(config)
-        assert not any("org_routes" in w for w in warnings)
+    def test_the_default_org_is_the_suite_s(self):
+        assert LoaderConfig().routing.default_org_id == "default"
 
-    def test_no_org_routes_no_warning(self):
-        config = LoaderConfig()
-        config.routing.db_fields = []
-        config.routing.org_routes = []
-        _, warnings = run_loader_validation(config)
-        assert not any("org_routes" in w for w in warnings)
+    def test_an_empty_default_org_is_refused(self):
+        with pytest.raises(ValueError):
+            LoaderConfig.model_validate({"routing": {"default_org_id": ""}})
+
+    def test_a_routing_edit_reloads_in_place_by_default(self):
+        assert LoaderConfig().hot_reload.enabled is True
 
 
 # ---------------------------------------------------------------------------

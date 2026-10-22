@@ -264,10 +264,10 @@ class TestWriteAll:
         written = writer.write_all(tmp_path / "ddl")
         # Pinned, not derived from generate_all(): deriving both sides would let a
         # regression that silently drops a profile pass. Every schema version is
-        # emitted. The profiles carry 7 versions (timeseries 3, minimal 2,
-        # passthrough 2), so 29 = main 7 + profiles 7 + detection_checkpoint 1 +
-        # detection 2x7.
-        assert len(written) == 29
+        # emitted. The profiles carry 10 versions (timeseries 4, minimal 3,
+        # passthrough 3), so 41 = main 10 + profiles 10 + detection_checkpoint 1 +
+        # detection 2x10.
+        assert len(written) == 41
         names = {p.relative_to(tmp_path / "ddl").as_posix() for p in written}
         # The detection table takes each profile's own versions, not the last profile's.
         assert "detection/1.0.1/timeseries/1.0.2/detection.sql" in names

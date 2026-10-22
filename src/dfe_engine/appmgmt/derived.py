@@ -7,13 +7,13 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """What the sources imply about deployed apps, applied on every source change.
 
-Two things in the deploy repo are DERIVED from the source definitions and must
-never be authored by hand:
+Two things in the deploy repo are DERIVED from the source definitions and the
+orgs and must never be authored by hand:
 
-- The routing block of every stack-scoped app (the receiver's source rules, the
-  loader's table map, the archiver's topic list). A source deploy that does not
-  push it leaves the receiver on built-in defaults, routing every event to the
-  default topic.
+- The routing block of every stack-scoped app (the receiver's rules and ingest
+  bindings, the loader's table map, the archiver's topic list). A source deploy
+  that does not push it leaves the receiver on built-in defaults, routing every
+  event to the default topic.
 - The instances of every instance-scoped app: a fetcher per fetcher-based
   source, a transform per source that names one. An active, deployed source the
   app has something to do for means an instance named for it exists with the
@@ -39,6 +39,7 @@ from typing import Any, Literal
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
 from dfe_engine.gitcrud.engine import ResourceNotFoundError
+from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.source.reader import SourceReader
 
 from . import catalogue, files, instances, routing
@@ -82,8 +83,10 @@ class DerivedChange:
         return f"{self.app.service}/{self.app.instance}: {self.summary}"
 
 
-def plan(gc: GitCrud, registry: SourceReader, settings: Any) -> list[DerivedChange]:
-    """Every overlay write that brings the deploy repo into step with the sources."""
+def plan(
+    gc: GitCrud, registry: SourceReader, settings: Any, *, tenancy: Tenancy
+) -> list[DerivedChange]:
+    """Every overlay write that brings the deploy repo into step with the sources and tenancy."""
     deployed = instances.list_instances(gc)
     docs = {app: instances.read_overlay(gc, app) for app in deployed}
     changes: list[DerivedChange] = []
@@ -92,7 +95,7 @@ def plan(gc: GitCrud, registry: SourceReader, settings: Any) -> list[DerivedChan
         desc = app.descriptor
         if not desc.has_compiled_routing or desc.routing_is_per_instance:
             continue
-        if routing.sync(desc, doc, registry, settings):
+        if routing.sync(desc, doc, registry, settings, tenancy=tenancy):
             changes.append(DerivedChange(app, "sync", doc))
 
     # An instance runs only for a source that is active AND deployed: before the
@@ -107,7 +110,9 @@ def plan(gc: GitCrud, registry: SourceReader, settings: Any) -> list[DerivedChan
         wanted: dict[str, dict[str, Any]] = {}
         for source in live:
             try:
-                compiled = routing.compile_for(desc, registry, settings, instance=source.source)
+                compiled = routing.compile_for(
+                    desc, registry, settings, instance=source.source, tenancy=tenancy
+                )
             except routing.RoutingNotApplicableError:
                 continue
             wanted[source.source] = compiled
@@ -115,7 +120,7 @@ def plan(gc: GitCrud, registry: SourceReader, settings: Any) -> list[DerivedChan
         for name, compiled in wanted.items():
             if name in existing:
                 doc = docs[existing[name]]
-                if routing.sync(desc, doc, registry, settings, instance=name):
+                if routing.sync(desc, doc, registry, settings, instance=name, tenancy=tenancy):
                     changes.append(DerivedChange(existing[name], "sync", doc))
                 continue
             app = instances.instance_of(desc.service, name)
@@ -143,7 +148,12 @@ def plan(gc: GitCrud, registry: SourceReader, settings: Any) -> list[DerivedChan
 
 
 def reconcile(
-    gc: GitCrud, registry: SourceReader, settings: Any, actor: str = ENGINE_ACTOR
+    gc: GitCrud,
+    registry: SourceReader,
+    settings: Any,
+    actor: str = ENGINE_ACTOR,
+    *,
+    tenancy: Tenancy,
 ) -> list[str]:
     """Apply the plan straight to the tracked branch and report each write.
 
@@ -151,7 +161,7 @@ def reconcile(
     same commit shape the API makes, signed by the engine rather than a user.
     """
     done: list[str] = []
-    for change in plan(gc, registry, settings):
+    for change in plan(gc, registry, settings, tenancy=tenancy):
         message = _message(change.app, change.summary, actor)
         name = change.app.overlay_name
         if change.action == "forget":

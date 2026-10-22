@@ -17,6 +17,7 @@ from __future__ import annotations
 from dfe_engine.api.e2e.seed.base import Seed
 from dfe_engine.api.e2e.seed.sources import SEED_ACTOR
 from dfe_engine.api.v1.orgs import refuse_held_tenant_ids, store_hunt_tenant_ids
+from dfe_engine.orgs.models import DEFAULT_ORG_NAME
 
 _DEFAULT_ORGANISATION_NAME = "organisation"
 
@@ -33,8 +34,15 @@ class Organisations(Seed):
         return self._ensure_organisation(name, display_name=display_name)
 
     def delete_all(self) -> None:
-        """Clear all organisations from the YAML org registry, and from the hunts naming each."""
+        """Clear every org but the reserved default one, and the hunts' ids for each.
+
+        The ingest credentials go first, so no org is left bound by another's.
+        """
+        for credential in self._org_registry.ingest_credentials.list():
+            self._org_registry.ingest_credentials.delete(credential.name)
         for org in self._org_registry.list():
+            if org.name == DEFAULT_ORG_NAME:
+                continue
             store_hunt_tenant_ids(self._hunt_registry, org.name, None, SEED_ACTOR)
             self._org_registry.delete(org.name)
 

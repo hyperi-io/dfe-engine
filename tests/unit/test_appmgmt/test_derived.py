@@ -13,6 +13,7 @@ import pytest
 
 from dfe_engine.appmgmt import derived, instances
 from dfe_engine.gitcrud.engine import get_path
+from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.source.models import Source, SourceWriteRequest, source_from_write
 
 from .conftest import FakeRegistry as _Registry
@@ -22,6 +23,17 @@ LOADER = "dfe-loader"
 FETCHER = "dfe-fetcher"
 VRL = "dfe-transform-vrl"
 ACTOR = "test"
+
+# A fresh deployment's: no org but the default and no ingest credential.
+NO_TENANCY = Tenancy()
+
+
+def _plan(crud, registry, settings) -> list[derived.DerivedChange]:
+    return derived.plan(crud, registry, settings, tenancy=NO_TENANCY)
+
+
+def _reconcile(crud, registry, settings, **kwargs: Any) -> list[str]:
+    return derived.reconcile(crud, registry, settings, tenancy=NO_TENANCY, **kwargs)
 
 
 def _receiver_source(name: str = "filebeat", state: str = "active", **fields) -> Source:
@@ -97,7 +109,7 @@ class TestReconcile:
             app = instances.instance_of(service, "default")
             _put(crud, app, instances.initial_overlay(app))
 
-        done = derived.reconcile(crud, _Registry([]), direct_settings)
+        done = _reconcile(crud, _Registry([]), direct_settings)
 
         assert set(done) == {
             f"{RECEIVER}/default: sync routing",
@@ -116,9 +128,9 @@ class TestReconcile:
         app = instances.instance_of(RECEIVER, "default")
         _put(crud, app, instances.initial_overlay(app))
         registry = _Registry([_receiver_source()])
-        derived.reconcile(crud, registry, settings)
+        _reconcile(crud, registry, settings)
 
-        assert derived.reconcile(crud, registry, settings) == []
+        assert _reconcile(crud, registry, settings) == []
 
 
 class TestStackRouting:
@@ -126,30 +138,28 @@ class TestStackRouting:
         app = instances.instance_of(RECEIVER, "main")
         _put(crud, app, instances.initial_overlay(app))
 
-        changes = derived.plan(crud, _Registry([_receiver_source()]), settings)
+        changes = _plan(crud, _Registry([_receiver_source()]), settings)
 
         assert [(c.app.service, c.action) for c in changes] == [(RECEIVER, "sync")]
-        rules = get_path(_written(changes[0]), "config.routing.source_rules")
-        assert [r["source"] for r in rules] == ["filebeat"]
+        rules = get_path(_written(changes[0]), "config.rules.rules")
+        assert [r["set"]["_source"]["value"] for r in rules] == ["filebeat"]
 
     def test_a_synced_overlay_is_left_alone(self, crud, settings):
         app = instances.instance_of(RECEIVER, "main")
         _put(crud, app, instances.initial_overlay(app))
         registry = _Registry([_receiver_source()])
-        _apply(crud, derived.plan(crud, registry, settings))
+        _apply(crud, _plan(crud, registry, settings))
 
-        assert derived.plan(crud, registry, settings) == []
+        assert _plan(crud, registry, settings) == []
 
     def test_a_new_source_changes_the_receiver_and_the_loader(self, crud, settings):
         for service in (RECEIVER, LOADER):
             app = instances.instance_of(service, "main")
             _put(crud, app, instances.initial_overlay(app))
         registry = _Registry([_receiver_source()])
-        _apply(crud, derived.plan(crud, registry, settings))
+        _apply(crud, _plan(crud, registry, settings))
 
-        changes = derived.plan(
-            crud, _Registry([_receiver_source(), _receiver_source("syslog")]), settings
-        )
+        changes = _plan(crud, _Registry([_receiver_source(), _receiver_source("syslog")]), settings)
 
         assert {c.app.service for c in changes} == {RECEIVER, LOADER}
         assert all(c.action == "sync" for c in changes)
@@ -158,23 +168,53 @@ class TestStackRouting:
         app = instances.instance_of(RECEIVER, "main")
         _put(crud, app, instances.initial_overlay(app))
 
-        changes = derived.plan(crud, _Registry([_fetcher_source()]), settings)
+        changes = _plan(crud, _Registry([_fetcher_source()]), settings)
 
         receiver = next(c for c in changes if c.app.service == RECEIVER)
-        rules = get_path(_written(receiver), "config.routing.source_rules")
+        rules = get_path(_written(receiver), "config.rules.rules")
         assert rules == [
             {
-                "field": "_source",
-                "mode": "key_value_set",
-                "match_value": "crates-audit",
-                "source": "crates-audit",
+                "id": "source.crates-audit",
+                "match": {"field": "_source", "op": "equals", "value": "crates-audit"},
+                "set": {"_source": {"value": "crates-audit"}},
             }
         ]
+
+    def test_a_credential_bound_since_the_last_sync_changes_the_receiver_alone(
+        self, crud, settings
+    ):
+        from dfe_engine.orgs.ingest_credentials import IngestCredential
+        from dfe_engine.orgs.models import Org
+
+        for service in (RECEIVER, LOADER):
+            app = instances.instance_of(service, "main")
+            _put(crud, app, instances.initial_overlay(app))
+        registry = _Registry([_receiver_source()])
+        _apply(crud, _plan(crud, registry, settings))
+        bound = Tenancy(
+            orgs=(Org(name="default", org_ids=["default"]), Org(name="acme")),
+            credentials=(
+                IngestCredential(
+                    name="acme-agents",
+                    org="acme",
+                    orgs=["acme"],
+                    default_org="acme",
+                    listeners=["http"],
+                ),
+            ),
+        )
+
+        changes = derived.plan(crud, registry, settings, tenancy=bound)
+
+        assert [(c.app.service, c.action) for c in changes] == [(RECEIVER, "sync")]
+        assert get_path(_written(changes[0]), "config.ingest_bindings") == {
+            "credentials": {"acme-agents": {"orgs": ["acme"], "default_org": "acme"}}
+        }
 
 
 class TestFetcherInstances:
     def test_a_deployed_fetcher_source_gets_an_instance(self, crud, settings):
-        changes = derived.plan(crud, _Registry([_fetcher_source()]), settings)
+        changes = _plan(crud, _Registry([_fetcher_source()]), settings)
 
         assert [(c.app.service, c.app.instance, c.action) for c in changes] == [
             (FETCHER, "crates-audit", "deploy")
@@ -193,7 +233,7 @@ class TestFetcherInstances:
         }
 
     def test_the_main_topic_reaches_the_stanza(self, crud, settings):
-        changes = derived.plan(crud, _Registry([_fetcher_source(topic="main")]), settings)
+        changes = _plan(crud, _Registry([_fetcher_source(topic="main")]), settings)
         assert get_path(_written(changes[0]), "config.sources.crates_io.topic") == "main"
 
     @pytest.mark.parametrize(
@@ -208,45 +248,45 @@ class TestFetcherInstances:
     def test_nothing_is_deployed_for_a_source_that_is_not_live_and_fetched(
         self, crud, settings, source
     ):
-        changes = derived.plan(crud, _Registry([source]), settings)
+        changes = _plan(crud, _Registry([source]), settings)
         assert [c for c in changes if c.app.service == FETCHER] == []
 
     def test_an_instance_whose_source_went_dormant_is_removed(self, crud, settings):
         registry = _Registry([_fetcher_source()])
-        _apply(crud, derived.plan(crud, registry, settings))
+        _apply(crud, _plan(crud, registry, settings))
 
-        changes = derived.plan(crud, _Registry([_fetcher_source(state="dormant")]), settings)
+        changes = _plan(crud, _Registry([_fetcher_source(state="dormant")]), settings)
 
         assert [(c.app.instance, c.action) for c in changes] == [("crates-audit", "remove")]
 
     def test_an_instance_whose_source_was_deleted_is_removed(self, crud, settings):
-        _apply(crud, derived.plan(crud, _Registry([_fetcher_source()]), settings))
+        _apply(crud, _plan(crud, _Registry([_fetcher_source()]), settings))
 
-        changes = derived.plan(crud, _Registry([]), settings)
+        changes = _plan(crud, _Registry([]), settings)
 
         assert [(c.app.instance, c.action) for c in changes] == [("crates-audit", "remove")]
 
     def test_a_changed_stanza_is_synced_not_redeployed(self, crud, settings):
-        _apply(crud, derived.plan(crud, _Registry([_fetcher_source()]), settings))
+        _apply(crud, _plan(crud, _Registry([_fetcher_source()]), settings))
         changed = _fetcher_source()
         fetcher = changed.versions["1.0.0"].fetcher
         assert fetcher is not None
         fetcher.config["interval_secs"] = 60
 
-        changes = derived.plan(crud, _Registry([changed]), settings)
+        changes = _plan(crud, _Registry([changed]), settings)
 
         assert [(c.app.instance, c.action) for c in changes] == [("crates-audit", "sync")]
         assert get_path(_written(changes[0]), "config.sources.crates_io.interval_secs") == 60
 
     def test_a_hand_edit_to_the_stanza_is_drift(self, crud, settings):
         registry = _Registry([_fetcher_source()])
-        _apply(crud, derived.plan(crud, registry, settings))
+        _apply(crud, _plan(crud, registry, settings))
         app = instances.instance_of(FETCHER, "crates-audit")
         doc = instances.read_overlay(crud, app)
         doc["config"]["sources"]["crates_io"]["topic"] = "elsewhere"
         _put(crud, app, doc)
 
-        changes = derived.plan(crud, registry, settings)
+        changes = _plan(crud, registry, settings)
 
         assert [c.action for c in changes] == ["sync"]
         assert get_path(_written(changes[0]), "config.sources.crates_io.topic") == "crates-audit"
@@ -260,7 +300,7 @@ class TestFetcherInstances:
             ]
         )
 
-        changes = derived.plan(crud, registry, settings)
+        changes = _plan(crud, registry, settings)
 
         assert [(c.app.instance, c.action) for c in changes] == [
             ("crowdstrike-eu", "deploy"),
@@ -281,21 +321,21 @@ class TestFetcherInstances:
 
     def test_in_step_means_no_changes(self, crud, settings):
         registry = _Registry([_fetcher_source(), _receiver_source()])
-        _apply(crud, derived.plan(crud, registry, settings))
-        assert derived.plan(crud, registry, settings) == []
+        _apply(crud, _plan(crud, registry, settings))
+        assert _plan(crud, registry, settings) == []
 
     def test_a_stored_archive_the_save_now_refuses_leaves_its_fetcher_running(
         self, crud, direct_settings
     ):
         # Archiving a fetched source on direct is refused at save, never here: a
         # compile refusal would plan its running fetcher's removal.
-        running = derived.plan(crud, _Registry([_fetcher_source()]), direct_settings)
+        running = _plan(crud, _Registry([_fetcher_source()]), direct_settings)
         assert [(c.app.instance, c.action) for c in running] == [("crates-audit", "deploy")]
         _apply(crud, running)
         stored = _fetcher_source()
         stored.versions["1.0.0"].archive = True
 
-        assert derived.plan(crud, _Registry([stored]), direct_settings) == []
+        assert _plan(crud, _Registry([stored]), direct_settings) == []
 
     def test_a_main_landing_source_gets_its_instance_straight_off_the_create(self, crud, settings):
         write = SourceWriteRequest.model_validate(
@@ -310,7 +350,7 @@ class TestFetcherInstances:
         )
         source = source_from_write(write, source_name="crates-main")
 
-        changes = derived.plan(crud, _Registry([source]), settings)
+        changes = _plan(crud, _Registry([source]), settings)
 
         assert [(c.app.service, c.app.instance, c.action) for c in changes] == [
             (FETCHER, "crates-main", "deploy")
@@ -323,7 +363,7 @@ class TestTransformInstances:
     def test_a_source_that_names_a_transform_gets_its_instance(self, crud, settings):
         source = _receiver_source(transform={"engine": "vrl"})
 
-        changes = derived.plan(crud, _Registry([source]), settings)
+        changes = _plan(crud, _Registry([source]), settings)
 
         transform = next(c for c in changes if c.app.service == VRL)
         assert (transform.app.instance, transform.action) == ("filebeat", "deploy")
@@ -333,26 +373,24 @@ class TestTransformInstances:
     def test_only_the_app_that_runs_it_gets_an_instance(self, crud, settings):
         source = _receiver_source(transform={"engine": "vrl"})
 
-        changes = derived.plan(crud, _Registry([source]), settings)
+        changes = _plan(crud, _Registry([source]), settings)
 
         assert [c.app.service for c in changes if c.app.service.startswith("dfe-transform-")] == [
             VRL
         ]
 
     def test_a_source_with_no_transform_deploys_none(self, crud, settings):
-        changes = derived.plan(crud, _Registry([_receiver_source()]), settings)
+        changes = _plan(crud, _Registry([_receiver_source()]), settings)
 
         assert [c for c in changes if c.app.service == VRL] == []
 
     def test_an_instance_whose_source_dropped_its_transform_is_removed(self, crud, settings):
         _apply(
             crud,
-            derived.plan(
-                crud, _Registry([_receiver_source(transform={"engine": "vrl"})]), settings
-            ),
+            _plan(crud, _Registry([_receiver_source(transform={"engine": "vrl"})]), settings),
         )
 
-        changes = derived.plan(crud, _Registry([_receiver_source()]), settings)
+        changes = _plan(crud, _Registry([_receiver_source()]), settings)
 
         assert [(c.app.service, c.action) for c in changes] == [(VRL, "remove")]
 
@@ -364,7 +402,7 @@ class TestTheStartupReconcileParksAuthoredFiles:
 
     def _deploy_with_a_program(self, crud, settings):
         source = _receiver_source(transform={"engine": "vrl"})
-        derived.reconcile(crud, _Registry([source]), settings)
+        _reconcile(crud, _Registry([source]), settings)
         app = instances.instance_of(VRL, "filebeat")
         doc = instances.read_overlay(crud, app)
         doc["fileSets"] = {"transforms": {"files": [dict(self.PROGRAM)]}}
@@ -375,7 +413,7 @@ class TestTheStartupReconcileParksAuthoredFiles:
         app = self._deploy_with_a_program(crud, direct_settings)
         dormant = _receiver_source(state="dormant", transform={"engine": "vrl"})
 
-        done = derived.reconcile(crud, _Registry([dormant]), direct_settings)
+        done = _reconcile(crud, _Registry([dormant]), direct_settings)
 
         assert done == [f"{VRL}/filebeat: undeploy instance"]
         parked = crud.get(instances.HELMVARS_CLASS, app.parked_name)
@@ -384,9 +422,9 @@ class TestTheStartupReconcileParksAuthoredFiles:
     def test_the_next_deploy_restores_it_and_drops_the_copy(self, crud, direct_settings):
         app = self._deploy_with_a_program(crud, direct_settings)
         dormant = _receiver_source(state="dormant", transform={"engine": "vrl"})
-        derived.reconcile(crud, _Registry([dormant]), direct_settings)
+        _reconcile(crud, _Registry([dormant]), direct_settings)
 
-        derived.reconcile(
+        _reconcile(
             crud, _Registry([_receiver_source(transform={"engine": "vrl"})]), direct_settings
         )
 
@@ -397,9 +435,9 @@ class TestTheStartupReconcileParksAuthoredFiles:
     def test_a_parked_copy_whose_source_is_gone_is_forgotten(self, crud, direct_settings):
         app = self._deploy_with_a_program(crud, direct_settings)
         dormant = _receiver_source(state="dormant", transform={"engine": "vrl"})
-        derived.reconcile(crud, _Registry([dormant]), direct_settings)
+        _reconcile(crud, _Registry([dormant]), direct_settings)
 
-        done = derived.reconcile(crud, _Registry([]), direct_settings)
+        done = _reconcile(crud, _Registry([]), direct_settings)
 
         assert f"{VRL}/filebeat: drop parked files" in done
         assert app.parked_name not in crud.list(instances.HELMVARS_CLASS)

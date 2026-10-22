@@ -13,8 +13,6 @@ the filename stem and is NOT stored inside the YAML body (same pattern
 as AccountStore).
 """
 
-from __future__ import annotations
-
 from typing import Annotated
 
 from pydantic import BaseModel, Field, StringConstraints
@@ -26,6 +24,16 @@ ORG_NAME_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]*$"
 TENANT_ID_PATTERN = r"^[^\s,\x00-\x1f\x7f](?:[^,\x00-\x1f\x7f]*[^\s,\x00-\x1f\x7f])?$"
 
 TenantId = Annotated[str, StringConstraints(pattern=TENANT_ID_PATTERN)]
+
+DEFAULT_ORG_NAME = "default"
+"""The reserved org every record with no ``_org_id`` lands in. It cannot be deleted."""
+
+DEFAULT_ORG_ID = "default"
+"""The tenant id the default org's rows carry, compiled as ``default_org_id`` into every app."""
+
+
+class ReservedOrgError(ValueError):
+    """A write would delete the default org, disable it, or take its tenant id away."""
 
 
 class Org(BaseModel):

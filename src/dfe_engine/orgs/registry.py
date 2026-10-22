@@ -31,9 +31,24 @@ from pathlib import Path
 
 from scalo.logger import logger
 
-from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org
-from dfe_engine.orgs.tenant_scope import colliding_org
-from dfe_engine.yaml_utils import yaml_dump, yaml_load
+from dfe_engine.orgs.ingest_credentials import IngestCredentialRegistry
+from dfe_engine.orgs.models import (
+    DEFAULT_ORG_ID,
+    DEFAULT_ORG_NAME,
+    ORG_NAME_PATTERN,
+    Org,
+    ReservedOrgError,
+)
+from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids
+from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump, yaml_load
+
+
+class OrgBoundError(ValueError):
+    """Another org's ingest credential still binds the org a delete names."""
+
+
+class OrgExistsError(ValueError):
+    """An org with the name a create names is already stored."""
 
 
 class OrgRegistry:
@@ -42,12 +57,19 @@ class OrgRegistry:
     Each org is a ``{name}.yaml`` file in ``orgs_dir``.
     The name is derived from the filename stem and is never stored
     inside the YAML body.
+
+    The ingest credentials the orgs own are stored beside them, in
+    ``{orgs_dir}/ingest-credentials``, and their writes call the same listeners.
     """
 
     def __init__(self, orgs_dir: Path) -> None:
         self._dir = Path(orgs_dir)
         self._dir.mkdir(parents=True, exist_ok=True)
         self._listeners: list[Callable[[], None]] = []
+        self._removal_listeners: list[Callable[[str], None]] = []
+        self.ingest_credentials = IngestCredentialRegistry(
+            self._dir / "ingest-credentials", self._changed, self._credential_removed
+        )
 
     # ------------------------------------------------------------------
     # Public API
@@ -70,6 +92,23 @@ class OrgRegistry:
             except Exception as exc:
                 logger.warning("org change listener failed", org=name, error=str(exc))
 
+    def on_credential_removed(self, listener: Callable[[str], None]) -> None:
+        """Call ``listener`` with the id of every ingest credential deleted.
+
+        An org delete's cascade counts. A listener that raises is logged and never
+        fails the delete.
+        """
+        self._removal_listeners.append(listener)
+
+    def _credential_removed(self, name: str) -> None:
+        for listener in self._removal_listeners:
+            try:
+                listener(name)
+            except Exception as exc:
+                logger.warning(
+                    "ingest credential removal listener failed", ingest_id=name, error=str(exc)
+                )
+
     def create(
         self,
         name: str,
@@ -87,16 +126,16 @@ class OrgRegistry:
             The newly created Org.
 
         Raises:
-            ValueError: If the name is not a valid org name, an org with this name
-                already exists, the name or any tenant id collides with another
-                org's name or tenant ids, or a tenant id does not match
-                ``TENANT_ID_PATTERN``.
+            OrgExistsError: If an org with this name already exists.
+            ValueError: If the name is not a valid org name, the name or any tenant
+                id collides with another org's name or tenant ids, or a tenant id
+                does not match ``TENANT_ID_PATTERN``.
         """
         if re.fullmatch(ORG_NAME_PATTERN, name) is None:
             raise ValueError(f"Invalid org name: {name!r}")
         path = self._path(name)
         if path.exists():
-            raise ValueError(f"Org already exists: {name}")
+            raise OrgExistsError(f"Org already exists: {name}")
         other = colliding_org(name, org_ids or [], self.list())
         if other is not None:
             raise ValueError(f"Org '{name}' collides with tenant-fenced org '{other.name}'")
@@ -154,6 +193,8 @@ class OrgRegistry:
 
         Raises:
             KeyError: If no org with *name* exists.
+            ReservedOrgError: If the update would disable the default org or take
+                its tenant id away.
             ValueError: If the update's tenant ids collide with another org's
                 name or tenant ids, or one does not match ``TENANT_ID_PATTERN``.
         """
@@ -162,6 +203,7 @@ class OrgRegistry:
             raise KeyError(name)
 
         org = self._read(path)
+        refuse_reserved_update(org.model_copy(update=fields))
 
         new_org_ids = fields.get("org_ids")
         if isinstance(new_org_ids, list):
@@ -190,17 +232,23 @@ class OrgRegistry:
         return org
 
     def delete(self, name: str) -> None:
-        """Remove an org.
+        """Remove an org, and the ingest credentials it owns with it.
 
         Args:
             name: Org to delete.
 
         Raises:
             KeyError: If no org with *name* exists.
+            ReservedOrgError: If *name* is the default org.
+            OrgBoundError: If another org's ingest credential binds *name*.
         """
+        refuse_reserved_delete(name)
         path = self._path(name)
         if not path.exists():
             raise KeyError(name)
+        refuse_bound_delete(name, self.ingest_credentials)
+        for credential in self.ingest_credentials.owned_by(name):
+            self.ingest_credentials.delete(credential.name)
         path.unlink()
         self._changed(name)
 
@@ -212,11 +260,15 @@ class OrgRegistry:
         """The file org *name* lives in.
 
         Raises:
-            KeyError: No org can hold *name*, so it is looked up nowhere.
+            KeyError: No org can hold *name*, or its file resolves outside the
+                directory, so it is looked up nowhere.
         """
         if re.fullmatch(ORG_NAME_PATTERN, name) is None:
             raise KeyError(name)
-        return self._dir / f"{name}.yaml"
+        path = contained_yaml_file(self._dir, name)
+        if path is None:
+            raise KeyError(name)
+        return path
 
     def _read(self, path: Path) -> Org:
         """Load an Org from a YAML file.
@@ -237,6 +289,56 @@ class OrgRegistry:
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
+
+def refuse_reserved_delete(name: str) -> None:
+    """Refuse to delete the default org, which every unbound record lands in.
+
+    Raises:
+        ReservedOrgError: If *name* is the default org.
+    """
+    if name == DEFAULT_ORG_NAME:
+        raise ReservedOrgError(
+            f"Org '{DEFAULT_ORG_NAME}' is reserved: every record that names no org lands in "
+            "it, so it cannot be deleted"
+        )
+
+
+def refuse_bound_delete(name: str, credentials: IngestCredentialRegistry) -> None:
+    """Refuse to delete an org another org's ingest credential still binds.
+
+    Its records would otherwise be held to an org that no longer exists.
+
+    Raises:
+        OrgBoundError: Naming each credential that binds *name*.
+    """
+    binding = credentials.binding(name)
+    if binding:
+        held = ", ".join(f"'{c.name}' of org '{c.org}'" for c in binding)
+        raise OrgBoundError(
+            f"Org '{name}' is bound by ingest credential {held}: take it out of their orgs first"
+        )
+
+
+def refuse_reserved_update(after: Org) -> None:
+    """Refuse an update that would leave the default org disabled or without its tenant id.
+
+    Args:
+        after: The org as the update would write it.
+
+    Raises:
+        ReservedOrgError: If *after* is the default org and is disabled or has lost
+            ``DEFAULT_ORG_ID``.
+    """
+    if after.name != DEFAULT_ORG_NAME:
+        return
+    if not after.enabled:
+        raise ReservedOrgError(f"Org '{DEFAULT_ORG_NAME}' is reserved and cannot be disabled")
+    if DEFAULT_ORG_ID not in org_tenant_ids(after):
+        raise ReservedOrgError(
+            f"Org '{DEFAULT_ORG_NAME}' is reserved and keeps the tenant id '{DEFAULT_ORG_ID}', "
+            "which every app stamps on a record that names no org"
+        )
 
 
 def _now() -> str:

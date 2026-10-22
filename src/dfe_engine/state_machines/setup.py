@@ -69,7 +69,7 @@ from dfe_engine.auth.deployment_hints import (
 )
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.gitcrud import retention
-from dfe_engine.orgs.models import Org
+from dfe_engine.orgs.models import DEFAULT_ORG_NAME, Org
 
 if TYPE_CHECKING:
     from dfe_engine.auth.accounts import AccountStore
@@ -302,7 +302,8 @@ class SetupStatus(BaseModel):
     )
     organisations: list[Org] = Field(
         default_factory=list,
-        description="The organisation registry. Empty once setup is complete.",
+        description="The organisation registry, bar the reserved default org. "
+        "Empty once setup is complete.",
     )
     # The JSON name stays break_glass: dfe-ui reads it. It reports the local admin.
     break_glass: AccountGitState | None = Field(
@@ -383,10 +384,15 @@ def _has_enabled_oidc_provider(ctx: SetupContext) -> bool:
     return any(provider.enabled for _, provider in ctx.oidc_registry.list())
 
 
-def _has_organisation(ctx: SetupContext) -> bool:
+def _customer_orgs(ctx: SetupContext) -> list[Org]:
+    """The registry's orgs bar the reserved default org, which every deployment holds."""
     if ctx.org_registry is None:
-        return False
-    return len(ctx.org_registry.list()) > 0
+        return []
+    return [org for org in ctx.org_registry.list() if org.name != DEFAULT_ORG_NAME]
+
+
+def _has_organisation(ctx: SetupContext) -> bool:
+    return bool(_customer_orgs(ctx))
 
 
 def _has_real_user(ctx: SetupContext) -> bool:
@@ -599,9 +605,7 @@ class SetupStateMachine:
 
     @staticmethod
     def _organisations(ctx: SetupContext) -> list[Org]:
-        if ctx.org_registry is None:
-            return []
-        return list(ctx.org_registry.list())
+        return _customer_orgs(ctx)
 
 
 SETUP_MACHINE = SetupStateMachine()
