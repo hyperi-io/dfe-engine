@@ -13,10 +13,11 @@ backend, because a wrong one either leaves the listener open or refuses every se
 """
 
 import json
+from pathlib import Path
 
 import pytest
 
-from dfe_engine.appmgmt import catalogue, instances, routing
+from dfe_engine.appmgmt import appconfig, catalogue, instances, routing
 from dfe_engine.orgs.ingest_credentials import IngestCredential
 from dfe_engine.orgs.ingest_tokens import store_token, sync_bearer_tokens
 from dfe_engine.orgs.models import Org
@@ -24,8 +25,10 @@ from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.orgs.seed import ensure_default_org
 from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.secrets import build_secrets
-from dfe_engine.settings import SecretsSettings
+from dfe_engine.services.templates import generate_template
+from dfe_engine.settings import DFESettings, SecretsSettings
 from dfe_engine.source.models import Source
+from dfe_engine.yaml_utils import yaml_dump_string, yaml_load
 from tests.support.config_schema import definitions, type_mismatches, unread_keys
 from tests.support.producer_contract import DFE_RECEIVER, producer_file
 
@@ -272,3 +275,69 @@ class TestProducerContract:
         }
         assert unread_keys(config, receiver_schema, defs) == []
         assert type_mismatches(config, receiver_schema, defs) == []
+
+
+EVERY_LISTENER = IngestCredential(
+    name="acme-all",
+    org="acme",
+    orgs=["acme"],
+    default_org="acme",
+    listeners=["http", "grpc", "otlp", "splunk_hec", "prometheus_rw"],
+)
+TENANCIES = {
+    "some": TENANCY,
+    "every": Tenancy(orgs=ORGS, credentials=(EVERY_LISTENER,)),
+    "none": NO_CREDENTIAL,
+}
+
+
+class TestCompiledAuthOverTheTemplate:
+    """A deployment that takes the production template as its receiver base still runs the compiled auth.
+
+    The template is generated on one backend and the engine compiles on another, so a
+    listener reading the compiled secret could not have got it from the template.
+    """
+
+    @pytest.mark.parametrize("tenancy", sorted(TENANCIES))
+    @pytest.mark.parametrize("template_backend", ["aws", "openbao"])
+    @pytest.mark.parametrize("engine_backend", ["aws", "openbao"])
+    def test_every_listener_runs_the_compiled_block(
+        self, crud, tmp_path, monkeypatch, engine_backend, template_backend, tenancy
+    ):
+        monkeypatch.setattr(
+            "dfe_engine.settings._settings",
+            DFESettings(env="dev", secrets=BACKENDS[template_backend]),
+        )
+        template = generate_template("receiver", "production")
+        settings = DFESettings(
+            env="dev",
+            transport={"default": "bus"},
+            secrets=BACKENDS[engine_backend],
+            deployment={
+                "profile": "docker-single",
+                "target": "docker",
+                "app_config_dir": str(tmp_path / "app-config"),
+                "app_config_base_dir": str(tmp_path / "base"),
+                "app_config_mount": "/etc/dfe/apps",
+                "app_env_dir": str(tmp_path / "app-env"),
+            },
+        )
+        base = Path(settings.deployment.app_config_base_dir)
+        base.mkdir()
+        (base / f"{RECEIVER}.yaml").write_text(yaml_dump_string(template), encoding="utf-8")
+        app = catalogue.descriptor(RECEIVER)
+        instance = instances.instance_of(RECEIVER, "default")
+        doc = instances.initial_overlay(instance)
+        routing.sync(app, doc, _sources(), settings, tenancy=TENANCIES[tenancy])
+        crud.put(instances.HELMVARS_CLASS, instance.overlay_name, doc, "test", message="test")
+
+        appconfig.render(crud, settings)
+
+        rendered = yaml_load(Path(settings.deployment.app_config_dir) / RECEIVER / app.config_file)
+        compiled = _auth(settings, TENANCIES[tenancy])
+        for block, section in BLOCKS.items():
+            runs = rendered[section]["auth"]
+            assert runs["mode"] == compiled[block]["mode"], (section, runs)
+            if compiled[block]["mode"] == "bearer":
+                assert runs["bearer"]["secret_source"] == compiled[block]["bearer"]["secret_source"]
+                assert runs["bearer"]["refresh_interval_secs"] == REFRESH

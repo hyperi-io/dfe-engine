@@ -10,7 +10,7 @@ from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 
 if TYPE_CHECKING:
-    from dfe_engine.settings import SecretsSettings
+    from dfe_engine.settings import DFESettings, SecretsSettings
 
 descriptor = ServiceDescriptor(
     name="receiver",
@@ -110,16 +110,23 @@ def _bearer_auth(backend: SecretsSettings) -> dict[str, dict[str, Any]]:
     }
 
 
+def _settings_overrides(profile: str, settings: DFESettings) -> dict[str, Any]:
+    """The production profile's bearer listeners, on the engine's own secrets backend.
+
+    Raises:
+        BearerSourceUnreadableError: The engine's backend holds the tokens where
+            dfe-receiver cannot read them.
+    """
+    if profile != "production":
+        return {}
+    return _bearer_auth(settings.secrets)
+
+
 def _make_plugin() -> ServicePlugin:
     from dfe_engine.appmgmt import catalogue
     from dfe_engine.services.models.receiver import ReceiverConfig
-    from dfe_engine.settings import SecretsSettings
-    from dfe_engine.yaml_utils import deep_merge
 
     overrides = copy.deepcopy(_template_overrides)
-    # The production profile is a reference for an OpenBao deployment, as the shipped
-    # receiver-production.yaml is, so it reads no process settings.
-    deep_merge(overrides["production"], _bearer_auth(SecretsSettings(provider="openbao")))
     loader = catalogue.push_address(catalogue.descriptor("dfe-loader"))
     overrides["k8s"]["loader"] = {"address": loader}
     return ServicePlugin(
@@ -127,6 +134,7 @@ def _make_plugin() -> ServicePlugin:
         config_class=ReceiverConfig,
         validate_config=_validate_receiver,
         config_template_overrides=overrides,
+        settings_overrides=_settings_overrides,
     )
 
 
