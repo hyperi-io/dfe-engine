@@ -93,6 +93,9 @@ def test_shared_backends_boot_more_than_one_replica(secrets):
             "DFE_GITOPS_REPO_URL",
             id="deploy-repo-without-remote",
         ),
+        pytest.param(
+            {"gitops": {"push": False}}, "gitops.push", "DFE_GITOPS_PUSH", id="deploy-repo-unpushed"
+        ),
     ],
 )
 def test_each_local_backend_is_refused_by_name(changes, setting, variable):
@@ -111,13 +114,19 @@ def test_every_local_backend_is_named_at_once():
     settings = _settings(
         auth={"store_backend": "yaml"},
         secrets={"provider": "file"},
-        gitops={"enabled": False, "repo_url": ""},
+        gitops={"enabled": False, "repo_url": "", "push": False},
     )
 
     with pytest.raises(UnsharedStateError) as refused:
         require_shared_state(settings)
 
-    for setting in ("auth.store_backend", "secrets.provider", "gitops.enabled", "gitops.repo_url"):
+    for setting in (
+        "auth.store_backend",
+        "secrets.provider",
+        "gitops.enabled",
+        "gitops.repo_url",
+        "gitops.push",
+    ):
         assert setting in str(refused.value)
 
 

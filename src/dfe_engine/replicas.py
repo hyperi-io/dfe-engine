@@ -58,6 +58,10 @@ def unshared_state(settings: DFESettings) -> list[str]:
         found.append(
             "gitops.repo_url is empty, so the deploy repo has no remote (DFE_GITOPS_REPO_URL)"
         )
+    if not settings.gitops.push:
+        found.append(
+            "gitops.push is off, so no other replica sees this one's commits (DFE_GITOPS_PUSH)"
+        )
     return found
 
 
