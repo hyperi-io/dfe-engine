@@ -22,6 +22,7 @@ from dfe_engine.orgs.ingest_credentials import (
     CredentialChangedError,
     CredentialIdTakenError,
     IngestCredential,
+    OrgUnavailableError,
 )
 from dfe_engine.orgs.ingest_tokens import (
     bearer_entries,
@@ -32,9 +33,12 @@ from dfe_engine.orgs.ingest_tokens import (
 )
 from dfe_engine.orgs.models import Org, ReservedOrgError
 from dfe_engine.orgs.registry import (
+    BINDINGS_COLLECTION,
     CLAIM_GRACE_SECONDS,
+    DELETES_COLLECTION,
     TENANT_KEYS_COLLECTION,
     DocuStoreOrgRegistry,
+    OrgBoundError,
     OrgCollisionError,
     OrgExistsError,
 )
@@ -266,10 +270,20 @@ class TestBoot:
 
 
 def _credential(
-    name: str, *, org: str = "acme", listeners: tuple[str, ...] = ("http",)
+    name: str,
+    *,
+    org: str = "acme",
+    listeners: tuple[str, ...] = ("http",),
+    binds: tuple[str, ...] = (),
 ) -> IngestCredential:
     return IngestCredential.model_validate(
-        {"name": name, "org": org, "orgs": [org], "default_org": org, "listeners": list(listeners)}
+        {
+            "name": name,
+            "org": org,
+            "orgs": [org, *binds],
+            "default_org": org,
+            "listeners": list(listeners),
+        }
     )
 
 
@@ -343,6 +357,171 @@ class TestCredentials:
     def test_a_delete_of_a_missing_id_is_a_keyerror(self, credentials):
         with pytest.raises(KeyError):
             credentials[0].delete("ghost")
+
+
+def _orphan_in(store: DocuStore, collection: str, key: str, owner: str, subject: str = "") -> None:
+    """A claim a replica made and died before finishing the write it was for."""
+    store.typed(collection, Claim, key="key").insert(
+        Claim(key=key, owner=owner, claimed_at=LONG_AGO, subject=subject)
+    )
+
+
+class TestBindings:
+    """A credential write binding an org and a delete of that org never both land."""
+
+    @pytest.fixture
+    def registries(self, docustore_pair):
+        registries = _registries(docustore_pair)
+        registries[0].create("acme")
+        registries[0].create("beta")
+        return registries
+
+    def test_a_delete_while_a_binding_write_is_in_flight_is_refused(self, registries, monkeypatch):
+        credentials = registries[0].ingest_credentials
+        real = credentials._c.insert
+        refused = []
+
+        # Between the binding claim and the record write, the other replica deletes beta.
+        def insert(model):
+            monkeypatch.setattr(credentials._c, "insert", real)
+            with pytest.raises(OrgBoundError) as caught:
+                registries[1].delete("beta")
+            refused.append(caught.value)
+            return real(model)
+
+        monkeypatch.setattr(credentials._c, "insert", insert)
+
+        credentials.put(_credential("agents", binds=("beta",)), new=True)
+
+        assert refused
+        assert registries[1].get("beta") is not None
+
+    def test_a_binding_write_while_the_org_is_being_deleted_is_refused(
+        self, registries, docustore_pair, monkeypatch
+    ):
+        credentials = registries[0].ingest_credentials
+        real = credentials.owned_by
+
+        # Inside the delete, after its checks, the other replica binds beta.
+        def owned_by(org):
+            monkeypatch.setattr(credentials, "owned_by", real)
+            with pytest.raises(OrgUnavailableError):
+                registries[1].ingest_credentials.put(
+                    _credential("agents", binds=("beta",)), new=True
+                )
+            return real(org)
+
+        monkeypatch.setattr(credentials, "owned_by", owned_by)
+
+        registries[0].delete("beta")
+
+        assert registries[1].get("beta") is None
+        assert registries[1].ingest_credentials.get("agents") is None
+        assert _claimed(docustore_pair[0], BINDINGS_COLLECTION) == []
+
+    def test_a_bind_the_mark_refuses_never_stops_the_delete_holding_it(
+        self, registries, docustore_pair
+    ):
+        with registries[0].deleting("beta"):
+            # A bind that claimed after the mark went up and has not yet seen it and withdrawn.
+            docustore_pair[1].claims(BINDINGS_COLLECTION).create(
+                "beta/agents", "agents", subject="beta"
+            )
+            registries[0].delete("beta")
+
+        assert registries[1].get("beta") is None
+
+    def test_a_deleted_credential_frees_the_orgs_it_bound_at_once(self, registries):
+        credentials = registries[0].ingest_credentials
+        credentials.put(_credential("agents", binds=("beta",)), new=True)
+
+        credentials.delete("agents")
+        registries[1].delete("beta")
+
+        assert registries[1].get("beta") is None
+
+    def test_an_org_an_update_unbinds_is_held_for_the_grace(self, docustore_pair):
+        for grace, kept in ((CLAIM_GRACE_SECONDS, True), (0, False)):
+            registries = _registries(docustore_pair, claim_grace_seconds=grace)
+            for name in ("acme", "beta"):
+                if registries[0].get(name) is None:
+                    registries[0].create(name)
+            credentials = registries[0].ingest_credentials
+            credentials.put(_credential("agents", binds=("beta",)))
+            credentials.put(_credential("agents"))
+
+            if kept:
+                with pytest.raises(OrgBoundError, match="'agents'"):
+                    registries[1].delete("beta")
+            else:
+                registries[1].delete("beta")
+                assert registries[1].get("beta") is None
+
+    def test_an_old_binding_no_credential_holds_gives_way(self, registries, docustore_pair):
+        _orphan_in(docustore_pair[0], BINDINGS_COLLECTION, "beta/ghost", "ghost", "beta")
+
+        registries[1].delete("beta")
+
+        assert registries[1].get("beta") is None
+
+    def test_an_old_delete_mark_does_not_stop_a_binding(self, registries, docustore_pair):
+        _orphan_in(docustore_pair[0], DELETES_COLLECTION, "beta", "beta")
+
+        registries[0].ingest_credentials.put(_credential("agents", binds=("beta",)), new=True)
+
+        assert registries[1].ingest_credentials.get("agents") is not None
+
+    def test_a_binding_an_org_that_is_gone_is_refused(self, registries, docustore_pair):
+        with pytest.raises(OrgUnavailableError, match="'gamma'"):
+            registries[0].ingest_credentials.put(_credential("agents", binds=("gamma",)), new=True)
+
+        assert _claimed(docustore_pair[0], BINDINGS_COLLECTION) == []
+
+
+def _claimed(store: DocuStore, collection: str) -> list[str]:
+    """The keys of every claim in *collection*."""
+    return sorted(doc["key"] for doc in store.collection(collection).find())
+
+
+class TestReservedCreates:
+    """A create held across its hunt write is refused before it has written anything."""
+
+    def test_a_second_create_held_for_one_name_is_refused(self, docustore_pair):
+        registries = _registries(docustore_pair)
+
+        with registries[0].reserved("acme", []):
+            with pytest.raises(OrgExistsError, match="being created"):
+                with registries[1].reserved("acme", ["acme-2"]):
+                    pytest.fail("a second create of one name was held")
+
+    def test_a_collision_is_refused_before_the_block_runs(self, docustore_pair):
+        registries = _registries(docustore_pair)
+        registries[0].create("alpha", ["shared"])
+
+        with pytest.raises(OrgCollisionError):
+            with registries[1].reserved("beta", ["shared"]):
+                pytest.fail("a colliding create was held")
+
+    def test_a_failure_inside_takes_back_what_it_held(self, docustore_pair):
+        registries = _registries(docustore_pair)
+
+        with pytest.raises(RuntimeError):
+            with registries[0].reserved("beta", ["shared"]):
+                raise RuntimeError("the hunt write failed")
+
+        assert registries[1].create("gamma", ["shared"]).org_ids == ["shared"]
+        with registries[1].reserved("beta", []):
+            pass
+
+    def test_a_create_inside_keeps_what_it_held(self, docustore_pair):
+        registries = _registries(docustore_pair)
+
+        with registries[0].reserved("beta", ["shared"]):
+            registries[0].create("beta", ["shared"])
+
+        _claims_match_records(registries[0], docustore_pair[0])
+        with pytest.raises(OrgCollisionError):
+            registries[1].create("gamma", ["shared"])
 
 
 class _Paused(DfeSecrets):

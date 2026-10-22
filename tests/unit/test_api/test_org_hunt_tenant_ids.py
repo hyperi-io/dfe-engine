@@ -156,6 +156,34 @@ class TestTheHuntsFollowTheOrg:
         assert _stored(api_settings, "windows_hunt")["customer_tenant_ids"] == {"acme": ["acme-1"]}
 
 
+class TestACreateRefusedAfterItsHuntWrite:
+    def test_the_hunts_are_put_back_for_the_org_that_won_the_name(
+        self, client, app, admin_headers, api_settings, orgs, monkeypatch
+    ):
+        _create_hunt(client, admin_headers, "windows_hunt", ["acme"])
+        assert client.delete(f"{ORGS}/acme", headers=admin_headers).status_code == 204
+        registry, hunts = app.state.org_registry, _registries["hunt_configs"]
+        real = hunts.store_org_tenant_ids
+
+        # A writer that holds nothing, as the startup seed does, lands after the hunt write.
+        def racing(*args, **kwargs):
+            monkeypatch.setattr(hunts, "store_org_tenant_ids", real)
+            stored = real(*args, **kwargs)
+            registry.create("acme", org_ids=["acme-seeded"])
+            return stored
+
+        monkeypatch.setattr(hunts, "store_org_tenant_ids", racing)
+
+        resp = client.post(
+            ORGS, json={"name": "acme", "org_ids": ["acme-7"]}, headers=admin_headers
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert _stored(api_settings, "windows_hunt")["customer_tenant_ids"] == {
+            "acme": ["acme-seeded"]
+        }
+
+
 class _SaveFailingHuntRegistry(HuntConfigRegistry):
     """A hunt registry whose multi-hunt write fails as a full disk fails it."""
 

@@ -23,15 +23,16 @@ token itself is never stored here: it lives in the secrets backend
 import builtins
 import functools
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Literal, get_args
+from typing import Literal, Protocol, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.store.documents import (
     DEFAULT_ATTEMPTS,
     REV,
+    Claim,
     DocumentConflictError,
     DocuStore,
     StaleRevisionError,
@@ -90,6 +91,34 @@ class CredentialIdTakenError(ValueError):
 
 class CredentialChangedError(ValueError):
     """The stored credential is not the one a conditional write was made against."""
+
+
+class OrgUnavailableError(ValueError):
+    """An org a credential write binds does not exist or is being deleted."""
+
+
+class OrgBinder(Protocol):
+    """Claims the orgs a credential binds, so none is deleted while a write binding it is made."""
+
+    def bind_orgs(self, credential: IngestCredential) -> builtins.list[Claim]:
+        """Claim each org *credential* binds beyond its owner, and return the claims made.
+
+        Raises:
+            OrgUnavailableError: One of them does not exist or is being deleted.
+        """
+        ...
+
+    def withdraw_bindings(self, made: Iterable[Claim]) -> None:
+        """Take back the claims a write that did not land made."""
+        ...
+
+    def settle_bindings(self, name: str, bound: Iterable[str], *, removed: bool = False) -> None:
+        """Release credential *name*'s claims on orgs outside *bound*.
+
+        A claim is released once it is older than the grace, unless the credential was
+        *removed*: a delete takes its claims back as they read.
+        """
+        ...
 
 
 _ID_TAKEN = (
@@ -207,7 +236,9 @@ class DocuStoreIngestCredentialRegistry:
     The interface of :class:`IngestCredentialRegistry`, built by
     :class:`~dfe_engine.orgs.registry.DocuStoreOrgRegistry`. The unique index on the id
     decides a create, and a conditional write lands only at the revision the stored
-    credential was read at, so replicas racing one id never both land.
+    credential was read at, so replicas racing one id never both land. *binder* claims
+    each org a write binds before the write, so a delete of that org running at the same
+    time refuses or is refused.
     """
 
     def __init__(
@@ -216,11 +247,13 @@ class DocuStoreIngestCredentialRegistry:
         changed: Callable[[str], None],
         removed: Callable[[str], None],
         *,
+        binder: OrgBinder,
         collection: str = "ingest_credentials",
     ) -> None:
         self._c = store.typed(collection, IngestCredential, key="name")
         self._changed = changed
         self._removed = removed
+        self._binder = binder
 
     def get(self, name: str) -> IngestCredential | None:
         """The credential named *name*, or None when there is none."""
@@ -253,15 +286,22 @@ class DocuStoreIngestCredentialRegistry:
             CredentialIdTakenError: Another org owns a credential with this id.
             CredentialChangedError: ``new`` and one is stored, or the stored one is
                 not ``current``.
+            OrgUnavailableError: An org it binds does not exist or is being deleted.
             DocumentConflictError: Concurrent writers beat every attempt.
         """
         _checked_condition(new=new, current=current)
-        if current is not None:
-            self._replace(credential, current)
-        elif new:
-            self._create(credential)
-        else:
-            self._upsert(credential)
+        made = self._binder.bind_orgs(credential)
+        try:
+            if current is not None:
+                self._replace(credential, current)
+            elif new:
+                self._create(credential)
+            else:
+                self._upsert(credential)
+        except BaseException:
+            self._binder.withdraw_bindings(made)
+            raise
+        self._binder.settle_bindings(credential.name, credential.orgs)
         self._changed(credential.org)
 
     def delete(self, name: str, *, current: IngestCredential | None = None) -> None:
@@ -284,6 +324,7 @@ class DocuStoreIngestCredentialRegistry:
             if current is not None and self._c.exists(name):
                 raise CredentialChangedError(f"Ingest credential '{name}' changed")
             raise KeyError(name)
+        self._binder.settle_bindings(name, (), removed=True)
         self._changed(held.org)
         self._removed(held.name)
 
