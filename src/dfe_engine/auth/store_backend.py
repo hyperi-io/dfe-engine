@@ -34,12 +34,16 @@ class StoreBackendError(ValueError):
     """The forced document store has no connection configured."""
 
 
-def resolve_store_backend(requested: str, uri: str, database: str) -> tuple[str, DocuStore | None]:
+def resolve_store_backend(
+    requested: str, uri: str, database: str, *, server_selection_timeout: float
+) -> tuple[str, DocuStore | None]:
     """Return the effective backend ('document' | 'yaml') and a DocuStore if document.
 
     The DocuStore (when returned) is shared by the account and group stores, so
     the caller owns its lifecycle (close on shutdown). ``MongoClient`` connects
-    lazily; :meth:`DocuStore.ping` is the actual reachability check.
+    lazily; :meth:`DocuStore.ping` is the actual reachability check, and it and
+    every later call give up on an unreachable store after
+    ``server_selection_timeout`` seconds.
 
     Raises:
         StoreBackendError: ``document`` was forced with no URI to reach it at.
@@ -57,7 +61,7 @@ def resolve_store_backend(requested: str, uri: str, database: str) -> tuple[str,
                 "auth.store_backend is 'document' but auth.accounts_store.uri is empty: "
                 "set DFE_AUTH_ACCOUNTS_STORE_URI"
             )
-        store = DocuStore(uri, database)
+        store = DocuStore(uri, database, server_selection_timeout=server_selection_timeout)
         store.ping()  # explicit opt-in: fail loudly if the operator's document store is down
         logger.info("Users/groups store backend: document (forced)")
         return "document", store
@@ -66,7 +70,7 @@ def resolve_store_backend(requested: str, uri: str, database: str) -> tuple[str,
     if not uri:
         logger.info("Users/groups store backend: yaml (auto -- no document store URI configured)")
         return "yaml", None
-    store = DocuStore(uri, database)
+    store = DocuStore(uri, database, server_selection_timeout=server_selection_timeout)
     try:
         store.ping()
     except Exception as exc:  # unreachable document store must never break startup

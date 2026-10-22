@@ -53,6 +53,13 @@ REVISIONS_COLLECTION = "store_revisions"
 DEFAULT_ATTEMPTS = 5
 """How many times a write is tried before a race it keeps losing is a conflict."""
 
+SERVER_SELECTION_TIMEOUT_SECONDS = 5.0
+"""How long a call waits for a store it cannot reach, where nothing passes one in.
+
+The engine passes ``auth.accounts_store.server_selection_timeout_seconds``, which
+defaults to the same five seconds, so this is the last resort for direct construction.
+"""
+
 # DuplicateKey, and DocumentDB's WriteConflict "Could not acquire lock for operation due to deadlock".
 _CONFLICT_CODES = frozenset({11000, 112})
 # The first wait between attempts, doubled after each, up to the cap. Seconds.
@@ -113,10 +120,23 @@ class DocuStore:
     real operation (or an explicit :meth:`ping`) is what surfaces an unreachable
     server. Hold ONE instance per process (built in the app lifespan) and hand out
     collections from it; call :meth:`close` on shutdown.
+
+    A call that finds no store it can reach raises ``ServerSelectionTimeoutError``
+    after ``server_selection_timeout`` seconds, rather than pymongo's thirty.
     """
 
-    def __init__(self, uri: str, database: str = "dfe_engine") -> None:
-        self._client: MongoClient = MongoClient(uri, appname="dfe-engine")
+    def __init__(
+        self,
+        uri: str,
+        database: str = "dfe_engine",
+        *,
+        server_selection_timeout: float = SERVER_SELECTION_TIMEOUT_SECONDS,
+    ) -> None:
+        self._client: MongoClient = MongoClient(
+            uri,
+            appname="dfe-engine",
+            serverSelectionTimeoutMS=round(server_selection_timeout * 1000),
+        )
         self._db = self._client[database]
         self._revisions = _Revisions(self._db[REVISIONS_COLLECTION])
 
