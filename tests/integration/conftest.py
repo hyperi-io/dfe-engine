@@ -1251,66 +1251,6 @@ def _log_tail(docker: list[str], name: str, lines: int = 15) -> str:
     return " | ".join((proc.stdout + proc.stderr).split("\n")).strip(" |")
 
 
-@pytest.fixture(scope="session")
-def mongo_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    """A mongo-wire document store URI: ``DFE_TEST_MONGO_URI``, else DocumentDB on docker.
-
-    Session-scoped, so each xdist worker starts one container and its tests share it;
-    every test isolates itself in a throwaway database. The name carries the pid
-    because concurrent runs on one host each have a ``gw0``. The URI verifies the
-    gateway's certificate against the CA minted here and logs in with SCRAM-SHA-256.
-    """
-    configured = os.environ.get("DFE_TEST_MONGO_URI", "").strip()
-    if configured:
-        yield configured
-        return
-
-    spec = os.environ.get("DFE_TEST_DOCKER_HOST") or "local"
-    docker = _docker_prefix(spec)
-    host = _reach_address(spec)
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    name = _container_name(f"{worker}-{os.getpid()}", "documentdb")
-    password = secrets.token_hex(16)
-    tls = gateway_tls(host)
-    ca_file = tmp_path_factory.mktemp("documentdb-tls") / "ca.crt"
-    ca_file.write_bytes(tls.ca)
-    run_cmd = [
-        *docker,
-        "run",
-        "-d",
-        "--name",
-        name,
-        *_container_labels("documentdb"),
-        "-p",
-        f"0:{_DOCUMENTDB_PORT}",
-        *documentdb_run_args(tls, password),
-    ]
-    try:
-        _run(run_cmd, timeout=240)  # first image pull can be slow
-    except (subprocess.SubprocessError, FileNotFoundError) as exc:
-        _unavailable(f"docker host '{spec}' cannot start DocumentDB: {exc}")
-
-    def teardown() -> None:
-        _remove_container(docker, name)
-
-    try:
-        out = _run([*docker, "port", name, str(_DOCUMENTDB_PORT)], timeout=30).stdout.strip()
-        port = int(out.splitlines()[-1].rsplit(":", 1)[-1])
-        uri = (
-            f"mongodb://{_DOCUMENTDB_USER}:{password}@{host}:{port}/"
-            f"?tls=true&tlsCAFile={ca_file}&authMechanism=SCRAM-SHA-256"
-        )
-        _mongo_when_ready(uri)
-    except Exception as exc:
-        tail = _log_tail(docker, name).replace(password, "***")
-        teardown()
-        _unavailable(f"DocumentDB on '{spec}' did not come up: {exc}; container log: {tail}")
-    try:
-        yield uri
-    finally:
-        teardown()
-
-
 @dataclass(frozen=True)
 class OpenBao:
     """A dev-mode OpenBao server, reached at *address* with its root *token*."""
@@ -1401,6 +1341,66 @@ def openbao() -> Iterator[OpenBao]:
         yield OpenBao(address=address, token=token)
     finally:
         _remove_container(docker, name)
+
+
+@pytest.fixture(scope="session")
+def mongo_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """A mongo-wire document store URI: ``DFE_TEST_MONGO_URI``, else DocumentDB on docker.
+
+    Session-scoped, so each xdist worker starts one container and its tests share it;
+    every test isolates itself in a throwaway database. The name carries the pid
+    because concurrent runs on one host each have a ``gw0``. The URI verifies the
+    gateway's certificate against the CA minted here and logs in with SCRAM-SHA-256.
+    """
+    configured = os.environ.get("DFE_TEST_MONGO_URI", "").strip()
+    if configured:
+        yield configured
+        return
+
+    spec = os.environ.get("DFE_TEST_DOCKER_HOST") or "local"
+    docker = _docker_prefix(spec)
+    host = _reach_address(spec)
+    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    name = _container_name(f"{worker}-{os.getpid()}", "documentdb")
+    password = secrets.token_hex(16)
+    tls = gateway_tls(host)
+    ca_file = tmp_path_factory.mktemp("documentdb-tls") / "ca.crt"
+    ca_file.write_bytes(tls.ca)
+    run_cmd = [
+        *docker,
+        "run",
+        "-d",
+        "--name",
+        name,
+        *_container_labels("documentdb"),
+        "-p",
+        f"0:{_DOCUMENTDB_PORT}",
+        *documentdb_run_args(tls, password),
+    ]
+    try:
+        _run(run_cmd, timeout=240)  # first image pull can be slow
+    except (subprocess.SubprocessError, FileNotFoundError) as exc:
+        _unavailable(f"docker host '{spec}' cannot start DocumentDB: {exc}")
+
+    def teardown() -> None:
+        _remove_container(docker, name)
+
+    try:
+        out = _run([*docker, "port", name, str(_DOCUMENTDB_PORT)], timeout=30).stdout.strip()
+        port = int(out.splitlines()[-1].rsplit(":", 1)[-1])
+        uri = (
+            f"mongodb://{_DOCUMENTDB_USER}:{password}@{host}:{port}/"
+            f"?tls=true&tlsCAFile={ca_file}&authMechanism=SCRAM-SHA-256"
+        )
+        _mongo_when_ready(uri)
+    except Exception as exc:
+        tail = _log_tail(docker, name).replace(password, "***")
+        teardown()
+        _unavailable(f"DocumentDB on '{spec}' did not come up: {exc}; container log: {tail}")
+    try:
+        yield uri
+    finally:
+        teardown()
 
 
 def _kafka_env(port: int) -> list[str]:
