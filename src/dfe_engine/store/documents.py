@@ -69,6 +69,8 @@ same thirty seconds, so this is the last resort for direct construction.
 
 # DuplicateKey, and DocumentDB's WriteConflict "Could not acquire lock for operation due to deadlock".
 _CONFLICT_CODES = frozenset({11000, 112})
+# InternalError, DocumentDB's answer to a createIndexes it could not finish, and WriteConflict.
+_INDEX_RETRY_CODES = frozenset({1, 112})
 # The first wait between attempts, doubled after each, up to the cap. Seconds.
 _BACKOFF_FIRST = 0.01
 _BACKOFF_CAP = 0.2
@@ -238,9 +240,8 @@ class DocumentCollection[T: BaseModel]:
         self._revisions = revisions
         self._on_invalid = on_invalid
         self._prepare = prepare
-        # Idempotent, and enforces one document per value of each field.
         for field in (key, *unique):
-            self._c.create_index([(field, ASCENDING)], unique=True)
+            self._index(field)
 
     def get(self, key_value: str) -> T | None:
         """Return the document with ``key == key_value``, or None."""
@@ -375,6 +376,24 @@ class DocumentCollection[T: BaseModel]:
     def exists(self, key_value: str) -> bool:
         """Whether a document with ``key == key_value`` exists."""
         return self._c.count_documents({self._key: key_value}, limit=1) > 0
+
+    def _index(self, field: str) -> None:
+        """Make the unique index on *field*, which every replica asks for as it boots.
+
+        Idempotent. A failure DocumentDB gives a busy createIndexes is retried, bounded.
+
+        Raises:
+            OperationFailure: The store refused the index, or failed it on every attempt.
+        """
+        for attempt in range(DEFAULT_ATTEMPTS):
+            if attempt:
+                _backoff(attempt)
+            try:
+                self._c.create_index([(field, ASCENDING)], unique=True)
+                return
+            except OperationFailure as exc:
+                if exc.code not in _INDEX_RETRY_CODES or attempt == DEFAULT_ATTEMPTS - 1:
+                    raise
 
     def _load(self, doc: dict | None) -> T | None:
         if doc is None:

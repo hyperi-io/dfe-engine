@@ -187,6 +187,23 @@ class TestMutate:
         assert clients[0].collection("counters").find_one({"name": "hits"})["_rev"] == 1
 
 
+class TestIndexes:
+    """Two replicas booting at once each make a fresh collection's unique indexes."""
+
+    def test_two_clients_indexing_one_new_collection_at_once_both_succeed(self, clients):
+        for round_ in range(RACE_ROUNDS):
+            name = f"boot_{round_}"
+            results = _race(
+                [
+                    lambda docu=docu, name=name: docu.typed(
+                        name, Item, key="name", unique=("token",)
+                    )
+                    for docu in clients
+                ]
+            )
+            assert [r for r in results if isinstance(r, BaseException)] == [], (round_, results)
+
+
 class TestRevision:
     """Every document carries ``_rev``, which reads never surface in the model."""
 
