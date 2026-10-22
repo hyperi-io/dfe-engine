@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.63](https://github.com/hyperi-io/dfe-engine/compare/v1.22.62...v1.22.63) (2026-10-22)
+
+### Bug Fixes
+
+* read the source catalogue from dfe-schemas, not the transform image ([#963](https://github.com/hyperi-io/dfe-engine/issues/963)) ([0167c6d](https://github.com/hyperi-io/dfe-engine/commit/0167c6d20d5b7d9c5462a7d9ddefdfa5b8836453))
+
 ## [1.22.62](https://github.com/hyperi-io/dfe-engine/compare/v1.22.61...v1.22.62) (2026-10-22)
 
 ### Bug Fixes
