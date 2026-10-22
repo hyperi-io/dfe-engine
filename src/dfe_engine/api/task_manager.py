@@ -48,8 +48,6 @@ TASK_STOPPED_MESSAGE = "The engine running the task stopped before it finished"
 TASK_RESULT_TOO_LARGE = "The task finished, but its result is too large to keep"
 CLOSE_TIMEOUT_SECONDS = 5.0
 """How long :meth:`TaskManager.aclose` waits for cancelled tasks to record how they ended."""
-# Half the 16 MiB document the store takes, so the record holding the largest result fits.
-MAX_RESULT_BYTES = 8 * 1024 * 1024
 
 
 def _json_safe(value: Any) -> Any:
@@ -205,6 +203,9 @@ class TaskManager:
     ``max_completed`` to prevent unbounded memory growth.
     """
 
+    _result_limit: int | None = None
+    """The most bytes a result may take as JSON, or None for no limit."""
+
     def __init__(self, max_completed: int = 1000) -> None:
         self._tasks: dict[str, _Task] = {}
         self._max_completed = max_completed
@@ -230,9 +231,6 @@ class TaskManager:
         it is one of ``reportable``; any other failure reads as
         :data:`TASK_FAILED_MESSAGE`, because a backend's own error text can carry
         statement fragments, user names and password hashes.
-
-        A result over :data:`MAX_RESULT_BYTES` as JSON is not kept, and the task fails
-        with :data:`TASK_RESULT_TOO_LARGE`, so one engine and a cluster agree.
 
         Args:
             kind: The task kind, for ``list(kind=...)``.
@@ -264,14 +262,14 @@ class TaskManager:
                 task.message = "Running"
                 await self._record(task)
                 result = await coro_fn(*args, task=task, **kwargs)
-                size = _result_size(result)
-                if size > MAX_RESULT_BYTES:
+                oversize = self._oversize(result)
+                if oversize is not None:
                     logger.warning(
                         "background task result too large to keep",
                         task_id=task.id,
                         kind=kind,
-                        size_bytes=size,
-                        limit_bytes=MAX_RESULT_BYTES,
+                        size_bytes=oversize,
+                        limit_bytes=self._result_limit,
                     )
                     task.status = TaskStatus.FAILED
                     task.error = TASK_RESULT_TOO_LARGE
@@ -324,6 +322,13 @@ class TaskManager:
         )
         if active >= max_active:
             raise TaskLimitError(task.kind, max_active)
+
+    def _oversize(self, result: Any) -> int | None:
+        """The bytes ``result`` takes as JSON when that is over the limit, else None."""
+        if self._result_limit is None:
+            return None
+        size = _result_size(result)
+        return size if size > self._result_limit else None
 
     def _submitted(self, task: _Task) -> None:
         """Called once ``task`` is running in the background. Nothing more to do in memory."""

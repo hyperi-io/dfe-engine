@@ -36,13 +36,13 @@ from pymongo.collection import Collection
 
 from dfe_engine.api.document_tasks import (
     HEARTBEAT_SECONDS,
+    MAX_RESULT_BYTES,
     OWNER_LOST_SECONDS,
     TASKS_COLLECTION,
     WATCH_SECONDS,
     DocumentTaskManager,
 )
 from dfe_engine.api.task_manager import (
-    MAX_RESULT_BYTES,
     TASK_RESULT_TOO_LARGE,
     TASK_STOPPED_MESSAGE,
     TaskInfo,
