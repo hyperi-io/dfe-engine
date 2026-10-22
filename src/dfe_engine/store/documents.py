@@ -603,12 +603,37 @@ class Claims:
         as_read = {"owner": claim.owner, "claimed_at": claim.claimed_at, "instance": claim.instance}
         return self._c.delete(claim.key, only_if=as_read)
 
+    def renew(self, claim: Claim) -> Claim | None:
+        """Stamp *claim* fresh only while it is still as read, and return it.
+
+        None when it was released or claimed again since, by anyone, so a holder learns
+        whether its claim lapsed and was taken while it was not looking.
+
+        Raises:
+            DocumentConflictError: Concurrent writers beat every attempt.
+        """
+        try:
+            return self._c.mutate(claim.key, functools.partial(_restamped, claim))
+        except KeyError, StaleRevisionError:
+            return None
+
 
 def _renewed(owner: str, claim: Claim) -> Claim:
     """*claim* stamped fresh when *owner* holds it, else unchanged."""
     if claim.owner != owner:
         return claim
     return claim.model_copy(update={"claimed_at": _now()})
+
+
+def _restamped(read: Claim, stored: Claim) -> Claim:
+    """*stored* stamped fresh.
+
+    Raises:
+        StaleRevisionError: *stored* is not *read*: it was claimed again since.
+    """
+    if (stored.owner, stored.claimed_at) != (read.owner, read.claimed_at):
+        raise StaleRevisionError(f"{read.key} was claimed again since it was read")
+    return stored.model_copy(update={"claimed_at": _now()})
 
 
 def _now() -> str:

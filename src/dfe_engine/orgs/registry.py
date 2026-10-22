@@ -385,8 +385,8 @@ class DocuStoreOrgRegistry(_OrgEvents):
         self._bindings = store.claims(BINDINGS_COLLECTION)
         self._deletes = store.claims(DELETES_COLLECTION)
         self._creates = store.claims(CREATES_COLLECTION)
-        # The orgs this registry's deleting() holds, whose bindings were checked under their mark.
-        self._held_deletes: set[str] = set()
+        # The orgs this registry's deleting() holds, by the mark their bindings were checked under.
+        self._held_deletes: dict[str, Claim] = {}
         self._grace = claim_grace_seconds
         self.ingest_credentials = DocuStoreIngestCredentialRegistry(
             store, self._changed, self._credential_removed, binder=self
@@ -505,9 +505,9 @@ class DocuStoreOrgRegistry(_OrgEvents):
         refuse_reserved_delete(name)
         if not self._orgs.exists(name):
             raise KeyError(name)
+        checked = self._holds_its_mark(name)
         with self._marked_for_delete(name):
-            # deleting() checked bindings with the mark up, and the mark refuses every bind since.
-            if name not in self._held_deletes:
+            if not checked:
                 self._refuse_bindings(name)
             for credential in self.ingest_credentials.owned_by(name):
                 self.ingest_credentials.delete(credential.name)
@@ -521,7 +521,8 @@ class DocuStoreOrgRegistry(_OrgEvents):
         """Hold *name* against new bindings while its hunts are written and then its delete.
 
         A delete refused because a credential binds the org, or a write binding it is in
-        flight, is refused here, before it has written anything.
+        flight, is refused here, before it has written anything. A hold that outlives the
+        grace can let a binding through, which :meth:`delete` then checks for itself.
 
         Raises:
             KeyError: No org has the name.
@@ -531,13 +532,14 @@ class DocuStoreOrgRegistry(_OrgEvents):
         refuse_reserved_delete(name)
         if not self._orgs.exists(name):
             raise KeyError(name)
-        with self._marked_for_delete(name):
+        with self._marked_for_delete(name) as mark:
             self._refuse_bindings(name)
-            self._held_deletes.add(name)
+            if mark is not None:
+                self._held_deletes[name] = mark
             try:
                 yield
             finally:
-                self._held_deletes.discard(name)
+                self._held_deletes.pop(name, None)
 
     def bind_orgs(self, credential: IngestCredential) -> builtins.list[Claim]:
         """Claim each org *credential* binds, its owner among them, and return the claims made.
@@ -605,8 +607,8 @@ class DocuStoreOrgRegistry(_OrgEvents):
         ]
 
     @contextlib.contextmanager
-    def _marked_for_delete(self, name: str) -> Iterator[None]:
-        """Mark *name* as being deleted for as long as the block runs.
+    def _marked_for_delete(self, name: str) -> Iterator[Claim | None]:
+        """Mark *name* as being deleted for as long as the block runs, and yield the mark.
 
         Every delete of one org shares the mark, so a delete held by :meth:`deleting`
         takes it again inside without refusing itself.
@@ -614,10 +616,24 @@ class DocuStoreOrgRegistry(_OrgEvents):
         self._deletes.claim(name, name)
         mark = self._deletes.get(name)
         try:
-            yield
+            yield mark
         finally:
             if mark is not None:
                 _withdraw(self._deletes, [mark])
+
+    def _holds_its_mark(self, name: str) -> bool:
+        """Whether :meth:`deleting` holds *name* and its mark is as it was, renewing it if so.
+
+        The bindings checked under that mark stand only while no bind has released it,
+        which a bind does once the mark outlives the grace.
+        """
+        mark = self._held_deletes.get(name)
+        if mark is None:
+            return False
+        try:
+            return self._deletes.renew(mark) is not None
+        except DocumentConflictError:
+            return False
 
     def _refuse_bindings(self, name: str) -> None:
         """Refuse to delete *name* while a credential binds it or a write binding it is in flight.
