@@ -15,8 +15,9 @@ optional ``synthetic:`` hints authored in the schema YAML.
 
 Every event is marked ``tags.synthetic: true`` by default (the common header
 maps ``first(tags/_tags/...)`` into ``_tags``), so synthetic data is always
-distinguishable downstream. Overridable for the rare demo that must not show
-the marker.
+distinguishable downstream. A pack whose own ``tags`` is a string or list (an
+ECS keyword array) gets ``synthetic`` appended to that list instead. Overridable
+for the rare demo that must not show the marker.
 
 Path grammar accepted (the closed set observed across dfe-schemas):
 ``Key``, ``dotted.path``, ``Resources[0].Type``, ``first(a/b)`` (first
@@ -37,6 +38,7 @@ from dfe_engine.schema.schema_loader import SchemaLoader
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.synthetic_data.entities import EntityPool
 from dfe_engine.synthetic_data.models import ColumnHints, Scenario, SyntheticDataError
+from dfe_engine.synthetic_data.tags import SYNTHETIC_TAG, merge_tags
 from dfe_engine.synthetic_data.values import (
     EventContext,
     Inference,
@@ -173,8 +175,10 @@ class SchemaEventFactory:
         scenarios: Schema-level coherent shapes (``load_synthetic_scenarios``
             output); one is drawn per event and overrides hints for the
             columns it names.
-        tags: Extra tags merged into the event's ``tags`` object.
-        mark_synthetic: Emit ``tags.synthetic: true`` (default on).
+        tags: Extra tags merged into the event's ``tags`` object. A pack whose
+            ``tags`` is a string or list cannot take them and refuses.
+        mark_synthetic: Emit ``tags.synthetic: true``, or the ``synthetic``
+            keyword where ``tags`` is a list (default on).
     """
 
     def __init__(
@@ -195,7 +199,7 @@ class SchemaEventFactory:
         self._scenario_weights = [s.weight for s in self.scenarios]
         self.tags = dict(tags or {})
         if mark_synthetic:
-            self.tags.setdefault("synthetic", True)
+            self.tags.setdefault(SYNTHETIC_TAG, True)
         self._plan: list[tuple[SchemaColumn, list[_PathSegment], Inference]] = []
         for col in columns:
             segments = parse_source_path(col.expr or "")
@@ -265,9 +269,7 @@ class SchemaEventFactory:
         for col, segments, inference in self._plan:
             set_path(event, segments, self._value(col, inference, ctx, scenario))
         if self.tags:
-            tags_node = event.setdefault("tags", {})
-            for key, value in self.tags.items():
-                tags_node.setdefault(key, value)
+            merge_tags(event, self.tags)
         return event
 
     def events(
