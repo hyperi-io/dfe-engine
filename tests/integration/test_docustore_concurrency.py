@@ -326,6 +326,19 @@ class TestOrphanedClaims:
         assert not claims.release_if_orphaned(stale, held=False, grace_seconds=0)
         assert claims.holder("tenant-1") == "acme"
 
+    def test_a_claim_released_and_made_again_at_the_same_stamp_is_kept(self, docustore_pair):
+        """Two replicas' clocks can stamp two claims alike, so the stamp alone names neither."""
+        claims = docustore_pair[0].claims("tenant_keys")
+        raw = docustore_pair[0].collection("tenant_keys")
+        claims.claim("tenant-1", "acme")
+        read = claims.about("")[0]
+        assert claims.release("tenant-1", "acme")
+        assert docustore_pair[1].claims("tenant_keys").claim("tenant-1", "acme")
+        raw.update_one({"key": "tenant-1"}, {"$set": {"claimed_at": read.claimed_at}})
+
+        assert not claims.release_if_orphaned(read, held=False, grace_seconds=0)
+        assert claims.holder("tenant-1") == "acme"
+
 
 class TestStoreRevisions:
     """One counter per collection moves once for every write and never for anything else."""
