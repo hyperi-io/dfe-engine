@@ -60,6 +60,13 @@ The engine passes ``auth.accounts_store.server_selection_timeout_seconds``, whic
 defaults to the same five seconds, so this is the last resort for direct construction.
 """
 
+SOCKET_TIMEOUT_SECONDS = 30.0
+"""How long a call waits on a store that stopped answering mid-call, where nothing passes one in.
+
+The engine passes ``auth.accounts_store.socket_timeout_seconds``, which defaults to the
+same thirty seconds, so this is the last resort for direct construction.
+"""
+
 # DuplicateKey, and DocumentDB's WriteConflict "Could not acquire lock for operation due to deadlock".
 _CONFLICT_CODES = frozenset({11000, 112})
 # The first wait between attempts, doubled after each, up to the cap. Seconds.
@@ -122,7 +129,9 @@ class DocuStore:
     collections from it; call :meth:`close` on shutdown.
 
     A call that finds no store it can reach raises ``ServerSelectionTimeoutError``
-    after ``server_selection_timeout`` seconds, rather than pymongo's thirty.
+    after ``server_selection_timeout`` seconds, rather than pymongo's thirty. One that
+    reached the store and gets no answer raises ``NetworkTimeout`` after
+    ``socket_timeout`` seconds, where pymongo would wait for ever.
     """
 
     def __init__(
@@ -131,11 +140,13 @@ class DocuStore:
         database: str = "dfe_engine",
         *,
         server_selection_timeout: float = SERVER_SELECTION_TIMEOUT_SECONDS,
+        socket_timeout: float = SOCKET_TIMEOUT_SECONDS,
     ) -> None:
         self._client: MongoClient = MongoClient(
             uri,
             appname="dfe-engine",
             serverSelectionTimeoutMS=round(server_selection_timeout * 1000),
+            socketTimeoutMS=round(socket_timeout * 1000),
         )
         self._db = self._client[database]
         self._revisions = _Revisions(self._db[REVISIONS_COLLECTION])

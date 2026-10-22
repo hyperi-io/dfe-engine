@@ -379,6 +379,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         settings.auth.accounts_store.uri,
         settings.auth.accounts_store.database,
         server_selection_timeout=settings.auth.accounts_store.server_selection_timeout_seconds,
+        socket_timeout=settings.auth.accounts_store.socket_timeout_seconds,
     )
     app.state.document_store = doc_store
     from dfe_engine.auth.groups import GroupMetrics
