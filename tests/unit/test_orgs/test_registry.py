@@ -13,7 +13,7 @@ import typing
 import pytest
 
 from dfe_engine.orgs.models import Org
-from dfe_engine.orgs.registry import OrgRegistry
+from dfe_engine.orgs.registry import OrgCollisionError, OrgRegistry
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -97,14 +97,14 @@ class TestCreate:
     def test_create_refuses_a_tenant_id_another_org_already_declares(self, registry):
         registry.create("acme", org_ids=["t-acme-1", "t-acme-2"])
 
-        with pytest.raises(ValueError, match="acme"):
+        with pytest.raises(OrgCollisionError, match="acme"):
             registry.create("beta", org_ids=["t-acme-1"])
         assert registry.get("beta") is None
 
     def test_create_refuses_a_tenant_id_equal_to_another_orgs_name(self, registry):
         registry.create("acme")
 
-        with pytest.raises(ValueError, match="acme"):
+        with pytest.raises(OrgCollisionError, match="acme"):
             registry.create("beta", org_ids=["acme"])
         assert registry.get("beta") is None
 
@@ -243,7 +243,7 @@ class TestUpdate:
         registry.create("acme", org_ids=["t-acme-1"])
         registry.create("beta", org_ids=["t-beta-1"])
 
-        with pytest.raises(ValueError, match="acme"):
+        with pytest.raises(OrgCollisionError, match="acme"):
             registry.update("beta", org_ids=["t-acme-1"])
         assert registry.get("beta").org_ids == ["t-beta-1"]
 

@@ -17,7 +17,7 @@ runs enough rounds to meet both.
 import pytest
 from pydantic import BaseModel
 
-from dfe_engine.store.documents import DocumentConflictError
+from dfe_engine.store.documents import DocumentConflictError, StaleRevisionError
 from tests.support.races import race
 
 pytestmark = pytest.mark.integration
@@ -167,6 +167,49 @@ class TestIndexes:
                 ]
             )
             assert [r for r in results if isinstance(r, BaseException)] == [], (round_, results)
+
+
+class TestExpectedRevision:
+    """A write held to the revision read earlier, as an If-Match holds it, lands only there."""
+
+    def test_the_revision_read_back_is_the_one_a_write_takes(self, docustore_pair):
+        store = docustore_pair[0].typed("counters", Counter, key="name")
+        store.insert(Counter(name="hits", value=1))
+        store.mutate("hits", _bump)
+
+        assert store.get_with_revision("hits") == (Counter(name="hits", value=2), 2)
+        assert store.get_with_revision("ghost") is None
+
+    def test_a_write_at_the_revision_read_lands(self, docustore_pair):
+        store = docustore_pair[0].typed("counters", Counter, key="name")
+        store.insert(Counter(name="hits"))
+        _, rev = store.get_with_revision("hits")
+
+        assert store.mutate("hits", _bump, expected_rev=rev).value == 1
+
+    def test_a_write_another_replica_beat_is_refused_and_writes_nothing(self, docustore_pair):
+        first, second = (c.typed("counters", Counter, key="name") for c in docustore_pair)
+        first.insert(Counter(name="hits"))
+        _, rev = first.get_with_revision("hits")
+        second.mutate("hits", _bump)
+
+        with pytest.raises(StaleRevisionError, match="revision 2, not 1"):
+            first.mutate("hits", _bump, expected_rev=rev)
+
+        assert first.get_with_revision("hits") == (Counter(name="hits", value=1), 2)
+
+    def test_of_two_replicas_writing_from_one_read_exactly_one_lands(self, docustore_pair):
+        stores = [c.typed("counters", Counter, key="name") for c in docustore_pair]
+        stores[0].insert(Counter(name="hits"))
+
+        for round_ in range(RACE_ROUNDS):
+            _, rev = stores[0].get_with_revision("hits")
+            results = race(
+                [lambda s=s, rev=rev: s.mutate("hits", _bump, expected_rev=rev) for s in stores]
+            )
+            stale = [r for r in results if isinstance(r, StaleRevisionError)]
+            assert len(stale) == 1, (round_, results)
+        assert stores[0].get("hits").value == RACE_ROUNDS
 
 
 class TestRevision:
@@ -338,6 +381,42 @@ class TestOrphanedClaims:
 
         assert not claims.release_if_orphaned(read, held=False, grace_seconds=0)
         assert claims.holder("tenant-1") == "acme"
+
+
+class TestMadeClaims:
+    """A claim a write made can be taken back exactly, and never one renewed since."""
+
+    def test_create_returns_the_claim_only_where_nobody_holds_the_key(self, docustore_pair):
+        claims = docustore_pair[0].claims("tenant_keys")
+
+        made = claims.create("tenant-1", "acme")
+
+        assert made is not None
+        assert claims.get("tenant-1") == made
+        assert claims.create("tenant-1", "acme") is None
+        assert claims.create("tenant-1", "globex") is None
+
+    def test_withdrawing_it_releases_the_key(self, docustore_pair):
+        claims = docustore_pair[0].claims("tenant_keys")
+        made = claims.create("tenant-1", "acme")
+
+        assert claims.withdraw(made)
+        assert claims.get("tenant-1") is None
+
+    def test_one_renewed_since_is_kept(self, docustore_pair):
+        first, second = (c.claims("tenant_keys") for c in docustore_pair)
+        made = first.create("tenant-1", "acme")
+        assert second.claim("tenant-1", "acme")
+
+        assert not first.withdraw(made)
+        assert first.holder("tenant-1") == "acme"
+
+    def test_every_claim_is_listed(self, docustore_pair):
+        claims = docustore_pair[0].claims("tenant_keys")
+        claims.claim("b", "globex")
+        claims.claim("a", "acme")
+
+        assert [(c.key, c.owner) for c in claims.list()] == [("a", "acme"), ("b", "globex")]
 
 
 class TestStoreRevisions:

@@ -56,6 +56,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.orgs.ingest_credentials import (
     BEARER_LISTENERS,
     CREDENTIAL_ID_PATTERN,
+    CredentialChangedError,
     CredentialIdTakenError,
     IngestCredential,
     IngestListener,
@@ -63,6 +64,7 @@ from dfe_engine.orgs.ingest_credentials import (
 from dfe_engine.orgs.ingest_tokens import drop_token, mint_token, store_token, sync_bearer_tokens
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.secrets import DfeSecrets
+from dfe_engine.store.documents import converge
 
 router = APIRouter(
     prefix="/orgs/{org}/ingest-credentials",
@@ -273,23 +275,52 @@ def _sync_tokens(request: Request) -> None:
         HTTPException: 503 ``secrets_unavailable`` when the secrets backend refuses.
     """
     try:
-        sync_bearer_tokens(_registry(request), _secrets(request))
+        converge(functools.partial(sync_bearer_tokens, _registry(request), _secrets(request)))
     except SecretsError as exc:
         raise _secrets_failure(exc) from exc
 
 
-def _put(request: Request, credential: IngestCredential) -> None:
+def _changed_since_read(
+    request: Request, credential: IngestCredential, *, new: bool
+) -> ProblemError:
+    """412 for a write another write got to first, with the credential's ETag as it is now."""
+    now = _owned(_registry(request), credential.org, credential.name)
+    etag = None if now is None else credential_etag(now)
+    if new:
+        return ProblemError(412, "The resource already exists", code="resource_exists", etag=etag)
+    if now is None:
+        return ProblemError(
+            412, "If-Match names a resource that does not exist", code="resource_missing"
+        )
+    return ProblemError(
+        412, "If-Match does not match the current ETag", code="etag_mismatch", etag=etag
+    )
+
+
+def _put(
+    request: Request,
+    credential: IngestCredential,
+    *,
+    new: bool = False,
+    current: IngestCredential | None = None,
+) -> None:
     """Store *credential*, then rewrite the bearer secrets its listeners change.
+
+    ``new`` stores it only where no credential has its id, and ``current`` only where
+    the stored one is still the credential the route checked the precondition against.
 
     Raises:
         HTTPException: 409 ``credential_id_taken`` when another org took the id first.
+        ProblemError: 412 when another write created, changed or removed it since.
     """
     try:
-        _registry(request).ingest_credentials.put(credential)
+        _registry(request).ingest_credentials.put(credential, new=new, current=current)
     except CredentialIdTakenError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "credential_id_taken", "message": str(exc)}
         ) from exc
+    except CredentialChangedError as exc:
+        raise _changed_since_read(request, credential, new=new) from exc
     _sync_tokens(request)
 
 
@@ -305,19 +336,25 @@ def _mint(request: Request, credential: IngestCredential, token: str, *, created
     except SecretsError as exc:
         raise _secrets_failure(exc) from exc
     try:
-        _put(request, credential)
-    except HTTPException:
+        _put(request, credential, new=created)
+    except HTTPException, ProblemError:
         if created:
             drop_token(secrets, credential.name)
         raise
 
 
 def _delete(request: Request, credential: IngestCredential) -> None:
-    """Remove the credential and rewrite the bearer secrets without it.
+    """Remove the credential, while it is still *credential*, and rewrite the bearer secrets.
 
     The org registry's removal listener drops its token, as it does for an org's cascade.
+
+    Raises:
+        ProblemError: 412 when another write changed or removed it since.
     """
-    _registry(request).ingest_credentials.delete(credential.name)
+    try:
+        _registry(request).ingest_credentials.delete(credential.name, current=credential)
+    except (KeyError, CredentialChangedError) as exc:
+        raise _changed_since_read(request, credential, new=False) from exc
     _sync_tokens(request)
 
 
@@ -365,7 +402,9 @@ async def apply_ingest_credential(
     ``If-Match: <etag>`` updates its orgs, default org and listeners and keeps its
     token. A credential id is unique across every org, so creating one another org
     holds answers 409 ``credential_id_taken``. A binding the receiver could not
-    hold answers 422 ``invalid_binding`` with a field error for each problem.
+    hold answers 422 ``invalid_binding`` with a field error for each problem. A write
+    another one beat to the store after the precondition passed answers 412, as a
+    stale precondition does.
     """
     if re.fullmatch(CREDENTIAL_ID_PATTERN, credential) is None:
         raise ProblemError(
@@ -397,7 +436,7 @@ async def apply_ingest_credential(
         )
         if dry_run:
             return _written(desired, dry_run=True)
-        await run_blocking(functools.partial(_put, request, desired))
+        await run_blocking(functools.partial(_put, request, desired, current=current))
         audit_resource_change(user.user_id, _RESOURCE, credential, "updated", {"org": org})
         synced = await run_blocking(functools.partial(reconcile_tenancy, request, user))
         return _written(desired, dry_run=False, synced=synced)

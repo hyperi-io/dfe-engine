@@ -23,7 +23,7 @@ from scalo.logger import logger
 
 from dfe_engine.orgs.ingest_credentials import IngestCredential
 from dfe_engine.orgs.models import DEFAULT_ORG_ID, Org
-from dfe_engine.orgs.registry import OrgRegistry
+from dfe_engine.orgs.registry import AnyOrgRegistry
 from dfe_engine.orgs.tenant_scope import org_tenant_ids
 
 
@@ -44,7 +44,7 @@ class Tenancy:
     credentials: tuple[IngestCredential, ...] = ()
 
     @classmethod
-    def read(cls, registry: OrgRegistry) -> Tenancy:
+    def read(cls, registry: AnyOrgRegistry) -> Tenancy:
         """The registry's orgs and ingest credentials, as they are now."""
         return cls(tuple(registry.list()), tuple(registry.ingest_credentials.list()))
 

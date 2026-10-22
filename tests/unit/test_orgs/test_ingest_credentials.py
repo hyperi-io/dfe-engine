@@ -11,6 +11,7 @@ import pytest
 
 from dfe_engine.orgs.ingest_credentials import (
     BEARER_LISTENERS,
+    CredentialChangedError,
     CredentialIdTakenError,
     IngestCredential,
 )
@@ -108,6 +109,48 @@ class TestStore:
         registry.ingest_credentials.delete("acme-agents")
 
         assert heard == ["changed", "changed"]
+
+
+class TestConditionalWrites:
+    """A write held to what the caller read lands only while that is what is stored."""
+
+    def test_a_new_one_lands_once(self, registry):
+        registry.ingest_credentials.put(_credential(), new=True)
+
+        with pytest.raises(CredentialChangedError):
+            registry.ingest_credentials.put(_credential(listeners=["otlp"]), new=True)
+        assert registry.ingest_credentials.get("acme-agents").listeners == ["http"]
+
+    def test_a_new_one_another_org_holds_is_taken(self, registry):
+        registry.ingest_credentials.put(_credential())
+
+        with pytest.raises(CredentialIdTakenError):
+            registry.ingest_credentials.put(_credential(org="beta"), new=True)
+
+    def test_a_replace_lands_only_over_what_was_read(self, registry):
+        registry.ingest_credentials.put(_credential())
+        read = registry.ingest_credentials.get("acme-agents")
+        registry.ingest_credentials.put(_credential(listeners=["otlp"]), current=read)
+
+        with pytest.raises(CredentialChangedError):
+            registry.ingest_credentials.put(_credential(listeners=["grpc"]), current=read)
+        assert registry.ingest_credentials.get("acme-agents").listeners == ["otlp"]
+
+    def test_a_delete_lands_only_over_what_was_read(self, registry):
+        registry.ingest_credentials.put(_credential())
+        read = registry.ingest_credentials.get("acme-agents")
+        registry.ingest_credentials.put(_credential(listeners=["otlp"]))
+
+        with pytest.raises(CredentialChangedError):
+            registry.ingest_credentials.delete("acme-agents", current=read)
+        registry.ingest_credentials.delete(
+            "acme-agents", current=registry.ingest_credentials.get("acme-agents")
+        )
+        assert registry.ingest_credentials.get("acme-agents") is None
+
+    def test_new_and_current_together_are_refused(self, registry):
+        with pytest.raises(ValueError, match="never both"):
+            registry.ingest_credentials.put(_credential(), new=True, current=_credential())
 
 
 class TestOrgDelete:
