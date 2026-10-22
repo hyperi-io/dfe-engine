@@ -39,6 +39,7 @@ from scalo.api import (
     ListParams,
     Page,
     PreconditionHeaders,
+    Preconditions,
     ProblemError,
     etag_of,
     paginate,
@@ -266,7 +267,41 @@ def _secrets_failure(exc: Exception) -> HTTPException:
     )
 
 
-# -- Writes, run off the event loop ------------------------------------------
+# -- Store calls, run off the event loop -------------------------------------
+
+
+def _checked_apply(
+    request: Request,
+    user: Any,
+    org: str,
+    name: str,
+    spec: IngestCredentialSpec,
+    preconditions: Preconditions,
+) -> tuple[IngestCredential | None, IngestCredential]:
+    """The credential *org* holds as *name*, if any, and the one *spec* asks for, once checked.
+
+    Raises:
+        HTTPException: 404 ``not_found`` for an org that does not exist, or 409
+            ``credential_id_taken`` for an id another org holds.
+        ProblemError: 412 or 428 for a precondition that fails, or 422
+            ``invalid_binding`` for a binding the receiver could not hold.
+    """
+    registry = _registry(request)
+    _require_org(registry, org)
+    current = _owned(registry, org, name)
+    preconditions.check(None if current is None else credential_etag(current))
+    if current is None and registry.ingest_credentials.get(name) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "credential_id_taken",
+                "message": f"Ingest credential id '{name}' is taken: ids are unique "
+                "across every org because the receiver keys its bindings on them",
+            },
+        )
+    desired = _desired(registry, org, name, spec)
+    _check_bound_orgs(request, user, desired)
+    return current, desired
 
 
 def _sync_tokens(request: Request) -> None:
@@ -428,21 +463,9 @@ async def apply_ingest_credential(
             "letter or digit",
             code="invalid_credential_id",
         )
-    registry = _registry(request)
-    _require_org(registry, org)
-    current = _owned(registry, org, credential)
-    preconditions.check(None if current is None else credential_etag(current))
-    if current is None and registry.ingest_credentials.get(credential) is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "credential_id_taken",
-                "message": f"Ingest credential id '{credential}' is taken: ids are unique "
-                "across every org because the receiver keys its bindings on them",
-            },
-        )
-    desired = _desired(registry, org, credential, body)
-    _check_bound_orgs(request, user, desired)
+    current, desired = await run_blocking(
+        _checked_apply, request, user, org, credential, body, preconditions
+    )
     response.headers["ETag"] = credential_etag(desired)
 
     if current is not None:
@@ -478,7 +501,7 @@ async def delete_ingest_credential(
     dry_run: DryRun,
 ) -> None:
     """Delete an ingest credential. Its token stops working once the receiver rereads its secret."""
-    held = _require_owned(_registry(request), org, credential)
+    held = await run_blocking(_require_owned, _registry(request), org, credential)
     preconditions.check(credential_etag(held))
     if dry_run:
         return
@@ -505,7 +528,7 @@ async def rotate_ingest_credential(
     honoured when sent. When another write changes or removes the credential first,
     it answers 412, as a stale precondition does.
     """
-    held = _require_owned(_registry(request), org, credential)
+    held = await run_blocking(_require_owned, _registry(request), org, credential)
     preconditions.check(credential_etag(held), require=False)
     response.headers["ETag"] = credential_etag(held)
     if dry_run:
