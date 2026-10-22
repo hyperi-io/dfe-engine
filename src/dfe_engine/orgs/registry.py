@@ -411,13 +411,17 @@ class DocuStoreOrgRegistry(_OrgEvents):
             raise ValueError(f"Invalid org name: {name!r}")
         if self._orgs.exists(name):
             raise OrgExistsError(f"Org already exists: {name}")
+        # A stored org whose claims were lost still collides here. The claims decide races.
+        other = colliding_org(name, org_ids or [], self.list())
+        if other is not None:
+            raise OrgCollisionError(_collision(name, other.name))
         org = _new_org(name, org_ids, display_name)
         made = self._claim(name, _markers(org))
         try:
             if not self._orgs.insert(org):
                 raise OrgExistsError(f"Org already exists: {name}")
         except BaseException:
-            _withdraw(self._keys, made)
+            self._withdraw_unheld(made)
             raise
         self._changed(name)
         return org
@@ -429,7 +433,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
         The name is locked against every other create held this way, and the name and
         tenant ids are claimed as :meth:`create` claims them, so a create that would lose
         is refused here, before it has written anything. A failure inside takes back the
-        claims this made.
+        claims this made that no stored org holds.
 
         Raises:
             OrgExistsError: An org has the name, or another create holds it.
@@ -445,7 +449,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
             try:
                 yield
             except BaseException:
-                _withdraw(self._keys, made)
+                self._withdraw_unheld(made)
                 raise
         finally:
             _withdraw(self._creates, [lock])
@@ -483,7 +487,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
         try:
             org = self._orgs.mutate(name, change)
         except BaseException:
-            _withdraw(self._keys, made)
+            self._withdraw_unheld(made)
             raise
         self._release_unheld(name, _markers(replaced[0]) - _markers(org))
         self._changed(name)
@@ -674,7 +678,8 @@ class DocuStoreOrgRegistry(_OrgEvents):
         write never takes away a claim an earlier write made.
 
         Raises:
-            OrgCollisionError: Another org holds a marker. Every claim made is withdrawn.
+            OrgCollisionError: Another org holds a marker. Every claim made that no
+                stored org holds is withdrawn.
         """
         made: builtins.list[Claim] = []
         try:
@@ -683,7 +688,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
                 if claim is not None:
                     made.append(claim)
         except BaseException:
-            _withdraw(self._keys, made)
+            self._withdraw_unheld(made)
             raise
         return made
 
@@ -717,6 +722,19 @@ class DocuStoreOrgRegistry(_OrgEvents):
         """Whether the record of the org holding *claim* holds its key."""
         org = self._orgs.get(claim.owner)
         return org is not None and claim.key in _markers(org)
+
+    def _withdraw_unheld(self, made: Iterable[Claim]) -> None:
+        """Withdraw each claim a failed write made that no stored org holds.
+
+        A write can land and still raise, so a claim its record holds stays. One whose
+        record cannot be read stays too, until the grace releases it.
+        """
+        for claim in made:
+            try:
+                if not self._holds(claim):
+                    self._keys.withdraw(claim)
+            except Exception as exc:
+                logger.warning("claim not withdrawn", key=claim.key, error=str(exc))
 
     def _release_unheld(self, owner: str, keys: Iterable[str]) -> None:
         """Release each of *owner*'s claims on *keys* its record no longer holds, past the grace."""
