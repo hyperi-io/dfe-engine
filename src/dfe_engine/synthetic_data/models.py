@@ -18,6 +18,14 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+SYNTHETIC_FIELD_DESCRIPTION = (
+    "Mark events synthetic: tags.synthetic=true for an object tags, or a "
+    "'synthetic' keyword in the list for an ECS keyword-array tags"
+)
+EXTRA_TAGS_DESCRIPTION = (
+    "Extra tags merged into events (refused for a pack whose tags is a keyword list)"
+)
+
 
 class ColumnHints(BaseModel):
     """Per-column generation hints authored in the schema YAML (``synthetic:``).
@@ -115,8 +123,8 @@ class GenerateRequest(BaseModel):
     rate_eps: float | None = Field(
         default=None, gt=0, description="Timestamp spacing rate (events/second)"
     )
-    tags: dict[str, Any] | None = Field(default=None, description="Extra tags merged into events")
-    mark_synthetic: bool = Field(default=True, description="Emit tags.synthetic=true")
+    tags: dict[str, Any] | None = Field(default=None, description=EXTRA_TAGS_DESCRIPTION)
+    mark_synthetic: bool = Field(default=True, description=SYNTHETIC_FIELD_DESCRIPTION)
 
 
 class LookalikeRequest(BaseModel):
@@ -138,8 +146,8 @@ class LookalikeRequest(BaseModel):
     rate_eps: float | None = Field(
         default=None, gt=0, description="Timestamp spacing rate (events/second)"
     )
-    tags: dict[str, Any] | None = Field(default=None, description="Extra tags merged into events")
-    mark_synthetic: bool = Field(default=True, description="Emit tags.synthetic=true")
+    tags: dict[str, Any] | None = Field(default=None, description=EXTRA_TAGS_DESCRIPTION)
+    mark_synthetic: bool = Field(default=True, description=SYNTHETIC_FIELD_DESCRIPTION)
 
 
 class GenerateResult(BaseModel):
@@ -175,8 +183,8 @@ class StreamRequest(BaseModel):
     )
     ndjson: bool = Field(default=False, description="POST batches as NDJSON instead of JSON")
     batch_max: int = Field(default=10, ge=1, description="Events per POST")
-    tags: dict[str, Any] | None = Field(default=None, description="Extra tags merged into events")
-    mark_synthetic: bool = Field(default=True, description="Emit tags.synthetic=true")
+    tags: dict[str, Any] | None = Field(default=None, description=EXTRA_TAGS_DESCRIPTION)
+    mark_synthetic: bool = Field(default=True, description=SYNTHETIC_FIELD_DESCRIPTION)
     wait: float | None = Field(
         default=None, ge=0, description="Seconds to block for inline completion before returning"
     )

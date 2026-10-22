@@ -141,6 +141,30 @@ class TestModesAndEdges:
             for ip in SAMPLE_PUBLIC_IPS:
                 assert ip not in event["message"]
 
+    def test_string_tags_become_a_list_carrying_the_marker(self):
+        rows = [{"message": f"line {i}", "tags": "forwarded"} for i in range(20)]
+        events = SampleEventFactory(rows=rows, seed=5).events(10, end=FIXED_END)
+        for event in events:
+            assert event["tags"] == ["forwarded", "synthetic"]
+
+    def test_list_tags_in_the_sample_still_yield_a_list_with_the_marker(self):
+        rows = [{"message": f"line {i}", "tags": ["a", "b"]} for i in range(20)]
+        events = SampleEventFactory(rows=rows, seed=5).events(10, end=FIXED_END)
+        for event in events:
+            assert event["tags"] == ["synthetic"]
+
+    def test_object_tags_in_the_sample_take_the_marker_key(self):
+        rows = [{"message": f"line {i}", "tags": {"env": "prod"}} for i in range(20)]
+        events = SampleEventFactory(rows=rows, seed=5).events(10, end=FIXED_END)
+        for event in events:
+            assert event["tags"] == {"env": "prod", "synthetic": True}
+
+    def test_extra_tags_are_refused_beside_string_tags(self):
+        rows = [{"message": f"line {i}", "tags": "forwarded"} for i in range(20)]
+        factory = SampleEventFactory(rows=rows, seed=5, tags={"scenario": "demo-1"})
+        with pytest.raises(SyntheticDataError, match="scenario"):
+            factory.event(when=FIXED_END)
+
     def test_epoch_ms_timestamps_detected(self):
         rows = [{"ts": 1755500000000 + i * 1000, "level": "info"} for i in range(30)]
         factory = SampleEventFactory(rows=rows, seed=3)

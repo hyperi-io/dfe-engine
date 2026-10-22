@@ -50,6 +50,7 @@ from scalo.logger import logger
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.synthetic_data.entities import EntityPool
 from dfe_engine.synthetic_data.models import SyntheticDataError
+from dfe_engine.synthetic_data.tags import SYNTHETIC_TAG, merge_tags
 from dfe_engine.synthetic_data.values import (
     EventContext,
     Inference,
@@ -238,8 +239,10 @@ class SampleEventFactory:
             event is ``{"message": <scrubbed line>}``.
         seed: Determinism seed.
         pool: Entity pool (built from ``seed`` when omitted).
-        tags: Extra tags merged into the event's ``tags`` object.
-        mark_synthetic: Emit ``tags.synthetic: true`` (default on).
+        tags: Extra tags merged into the event's ``tags`` object. A sample whose
+            ``tags`` is a string or list cannot take them and refuses.
+        mark_synthetic: Emit ``tags.synthetic: true``, or the ``synthetic``
+            keyword where the sample's ``tags`` is a string or list (default on).
         max_sample: Sample rows/lines analysed beyond which input is truncated.
     """
 
@@ -257,7 +260,7 @@ class SampleEventFactory:
         self.pool = pool or EntityPool(seed)
         self.tags = dict(tags or {})
         if mark_synthetic:
-            self.tags.setdefault("synthetic", True)
+            self.tags.setdefault(SYNTHETIC_TAG, True)
 
         rows = (rows or [])[:max_sample]
         lines = (lines or [])[:max_sample]
@@ -281,6 +284,9 @@ class SampleEventFactory:
                 self._plans[("message",)] = _KeyPlan(
                     "text", values=vocab, weights=[counts[v] for v in vocab]
                 )
+        # A list-valued `tags` is dropped above, but the event still needs a list
+        # to carry the marker in: an ECS keyword array rejects an object.
+        self._tags_listed = ("tags",) in dropped
         if dropped:
             logger.info(
                 "lookalike: list-valued keys are not generated",
@@ -363,10 +369,9 @@ class SampleEventFactory:
         event: dict[str, Any] = {}
         for path, plan in self._plans.items():
             _set_nested(event, path, self._value(plan, ctx))
-        tags_node = event.setdefault("tags", {})
-        if isinstance(tags_node, dict):
-            for key, value in self.tags.items():
-                tags_node.setdefault(key, value)
+        if self._tags_listed:
+            event.setdefault("tags", [])
+        merge_tags(event, self.tags)
         return event
 
     def events(
