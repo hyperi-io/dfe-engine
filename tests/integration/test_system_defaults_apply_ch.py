@@ -24,7 +24,7 @@ from scalo.logger import logger
 
 from dfe_engine.gitcrud.table_defaults import commit_patch
 from dfe_engine.schema.schema_loader import SchemaLoader
-from tests.support.engine_stack import deploy_source
+from tests.support.engine_stack import default_header, deploy_source
 
 pytestmark = pytest.mark.integration
 
@@ -145,7 +145,11 @@ def test_deploying_the_applied_header_adds_its_columns_to_the_table(ch_client, s
         header={"type": "minimal", "version": "1.0.0"}, name="syslog-minimal", stack=stack
     )
     before = set(_columns(ch_client, db, "syslog-minimal"))
-    header = {col.name for col in SchemaLoader.load_profile("timeseries", profile_version="1.0.0")}
+    applied = default_header(stack)
+    header = {
+        col.name
+        for col in SchemaLoader.load_profile(applied["type"], profile_version=applied["version"])
+    }
     missing = header - before
     assert {"_timestamp_received", "_tags"} <= missing
 
@@ -234,8 +238,9 @@ def test_plan_and_dry_run_show_the_ttl_move_and_that_it_deletes_rows(ch_client, 
 
 
 def test_a_header_named_by_its_registry_path_is_not_drift(ch_client, stack):
+    inherited = default_header(stack)
     deploy_source(
-        header={"type": "common-header/timeseries", "version": "1.0.0"},
+        header={"type": f"common-header/{inherited['type']}", "version": inherited["version"]},
         name="syslog-path",
         stack=stack,
     )
