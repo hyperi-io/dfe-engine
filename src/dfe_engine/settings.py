@@ -1621,8 +1621,10 @@ class AuthSettings(BaseModel):
         description=(
             "Auth config written into the stores at every boot, usually a mounted "
             "ConfigMap. Each <name>.yaml in its oidc-providers/ replaces the stored OIDC "
-            "provider of that name, whatever was changed through the API. Empty seeds "
-            "nothing. DFE_AUTH_SEED_DIR."
+            "provider of that name, whatever was changed through the API. Each "
+            "<name>.yaml in its groups/ sets every field it carries on the group of that "
+            "name, and the fields it leaves out, members among them, keep their stored "
+            "values. Empty seeds nothing. DFE_AUTH_SEED_DIR."
         ),
     )
     trust_proxy_auth_headers: bool = Field(

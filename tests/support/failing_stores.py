@@ -31,6 +31,27 @@ class DeleteFailingSecrets(DfeSecrets):
         raise ConnectionError("the secrets backend did not answer")
 
 
+class PutFailingSecrets(DfeSecrets):
+    """A file-backed secret store whose writes fail as an unreachable backend fails them."""
+
+    def put(self, path: str, value: str) -> None:
+        """Fail the write, storing nothing."""
+        raise ConnectionError("the secrets backend did not answer")
+
+
+class LaterPutFailingSecrets(DfeSecrets):
+    """A file-backed secret store whose first write lands and every later one fails."""
+
+    _landed = False
+
+    def put(self, path: str, value: str) -> None:
+        """Store the first write, then fail each one after it."""
+        if self._landed:
+            raise ConnectionError("the secrets backend did not answer")
+        super().put(path, value)
+        self._landed = True
+
+
 class NameHeldSecrets(DfeSecrets):
     """A file-backed secret store whose writes meet a name a deleted secret still holds."""
 
@@ -103,6 +124,18 @@ def make_delete_failing_secrets(*, root: str) -> DeleteFailingSecrets:
     """Build a DeleteFailingSecrets over the file secret store at *root*."""
     manager = SecretsManager.from_config({"cache": {"enabled": False}})
     return DeleteFailingSecrets(manager=manager, provider="file", root=root)
+
+
+def make_put_failing_secrets(*, root: str) -> PutFailingSecrets:
+    """Build a PutFailingSecrets over the file secret store at *root*."""
+    manager = SecretsManager.from_config({"cache": {"enabled": False}})
+    return PutFailingSecrets(manager=manager, provider="file", root=root)
+
+
+def make_later_put_failing_secrets(*, root: str) -> LaterPutFailingSecrets:
+    """Build a LaterPutFailingSecrets over the file secret store at *root*."""
+    manager = SecretsManager.from_config({"cache": {"enabled": False}})
+    return LaterPutFailingSecrets(manager=manager, provider="file", root=root)
 
 
 def make_name_held_secrets(*, root: str) -> NameHeldSecrets:

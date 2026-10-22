@@ -2,10 +2,12 @@
 #  License:      BUSL-1.1
 """HTTP middleware that refuses writes to core resources."""
 
+import functools
 import json
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI
+from scalo.concurrency import run_blocking
 from starlette.requests import Request
 from starlette.responses import Response
 
@@ -46,13 +48,17 @@ async def core_resource_guard_middleware(
 
         request = Request(request.scope, receive)
 
-    if match_api_core_mutation(
-        method=method,
-        path=path,
-        role_store=getattr(request.app.state, "role_store", None),
-        schema_registry=_registries.get("meta_schema"),
-        fieldmap_registry=_registries.get("fieldmap"),
-        body=request_body,
+    # A role write reads the role store, so the check runs off the event loop.
+    if method in MUTATION_METHODS and await run_blocking(
+        functools.partial(
+            match_api_core_mutation,
+            method=method,
+            path=path,
+            role_store=getattr(request.app.state, "role_store", None),
+            schema_registry=_registries.get("meta_schema"),
+            fieldmap_registry=_registries.get("fieldmap"),
+            body=request_body,
+        )
     ):
         return _core_mutation_error_response()
 

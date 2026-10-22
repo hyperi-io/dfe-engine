@@ -18,6 +18,7 @@ from dfe_engine.auth.oidc.credential_env import (
     credential_check,
     env_var_resolves,
     is_env_var_name,
+    new_secret_version,
     provider_secret_path,
     resolve_credential,
 )
@@ -341,7 +342,15 @@ class TestResolveCredential:
 
 class TestPathAndNameHelpers:
     def test_provider_secret_path_shape(self):
-        assert provider_secret_path("acme", "client_secret") == "oidc/acme/client_secret"
+        path = provider_secret_path("acme", "client_secret", "0123456789abcdef")
+
+        assert path == "oidc/acme/0123456789abcdef/client_secret"
+
+    def test_every_secret_version_is_new(self):
+        versions = {new_secret_version() for _ in range(1000)}
+
+        assert len(versions) == 1000
+        assert all(len(version) == 16 for version in versions)
 
     @pytest.mark.parametrize("name", ["OKTA_CLIENT_ID", "_private", "A1_b2"])
     def test_env_var_names_accepted(self, name):

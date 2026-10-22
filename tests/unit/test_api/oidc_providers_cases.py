@@ -105,13 +105,17 @@ UPDATE_TENANT_ID_ENV_CASES: list[UpdateTenantIdEnvCase] = [
 
 
 class UpdateProviderSecretSourceCase(TypedDict):
-    """One update to a provider holding a secret, its answer and where the provider reads that secret from afterwards."""
+    """One update to a provider holding a secret, its answer and where the provider reads that secret from afterwards.
+
+    In ``expected_source``, ``path`` is ``kept`` for the store path the provider held
+    before the update, ``new`` for another one and empty for none, and ``stored`` is
+    whether the store still holds the path held before.
+    """
 
     id: str
     create_body: dict[str, Any]
     update_body: dict[str, Any]
     secret_field: str
-    stored_path: str
     expected_status: int
     expected_source: dict[str, object]
 
@@ -122,7 +126,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {"client_secret": _STORED_SECRET},
         "update_body": {"client_secret_env": SWITCHED_SECRET_ENV},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -136,7 +139,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {},
         "update_body": {"client_secret_env": SWITCHED_SECRET_ENV},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -150,7 +152,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {"client_secret": _STORED_SECRET, "client_secret_env": UNSET_SECRET_ENV},
         "update_body": {"client_secret_env": SWITCHED_SECRET_ENV},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -164,7 +165,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {**_OKTA, "groups": {**_OKTA_GROUPS, "api_token": _STORED_SECRET}},
         "update_body": {"groups": {**_OKTA_GROUPS, "api_token_env": SWITCHED_SECRET_ENV}},
         "secret_field": "groups.api_token",
-        "stored_path": "oidc/sso/groups_api_token",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -178,7 +178,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {**_ENTRA, "groups": {**_ENTRA_GROUPS, "client_secret": _STORED_SECRET}},
         "update_body": {"groups": {**_ENTRA_GROUPS, "client_secret_env": SWITCHED_SECRET_ENV}},
         "secret_field": "groups.client_secret",
-        "stored_path": "oidc/sso/groups_client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -197,7 +196,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
             "groups": {**_GOOGLE_GROUPS, "service_account_json_env": SWITCHED_SECRET_ENV}
         },
         "secret_field": "groups.service_account_json",
-        "stored_path": "oidc/sso/groups_service_account_json",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -211,7 +209,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {"client_secret": _STORED_SECRET, "client_secret_env": SWITCHED_SECRET_ENV},
         "update_body": {"client_secret_env": SWITCHED_SECRET_ENV, "display_name": "Renamed"},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -232,7 +229,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
         "update_body": {"groups": {**_OKTA_GROUPS, "api_token_env": SWITCHED_SECRET_ENV}},
         "secret_field": "groups.api_token",
-        "stored_path": "oidc/sso/groups_api_token",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -253,7 +249,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
         "update_body": {"groups": {**_ENTRA_GROUPS, "client_secret_env": SWITCHED_SECRET_ENV}},
         "secret_field": "groups.client_secret",
-        "stored_path": "oidc/sso/groups_client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -276,7 +271,6 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
             "groups": {**_GOOGLE_GROUPS, "service_account_json_env": SWITCHED_SECRET_ENV}
         },
         "secret_field": "groups.service_account_json",
-        "stored_path": "oidc/sso/groups_service_account_json",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
@@ -290,11 +284,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {"client_secret": _STORED_SECRET},
         "update_body": {"client_secret_env": UNSET_SECRET_ENV},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 422,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/client_secret",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -304,11 +297,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {"client_secret": _STORED_SECRET, "client_secret_env": UNSET_SECRET_ENV},
         "update_body": {"client_secret_env": UNSET_SECRET_ENV, "display_name": "Renamed"},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 422,
         "expected_source": {
             "env": UNSET_SECRET_ENV,
-            "path": "oidc/sso/client_secret",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -318,11 +310,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {**_OKTA, "groups": {**_OKTA_GROUPS, "api_token": _STORED_SECRET}},
         "update_body": {"groups": {**_OKTA_GROUPS, "api_token_env": UNSET_SECRET_ENV}},
         "secret_field": "groups.api_token",
-        "stored_path": "oidc/sso/groups_api_token",
         "expected_status": 422,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/groups_api_token",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -332,11 +323,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {**_ENTRA, "groups": {**_ENTRA_GROUPS, "client_secret": _STORED_SECRET}},
         "update_body": {"groups": {**_ENTRA_GROUPS, "client_secret_env": UNSET_SECRET_ENV}},
         "secret_field": "groups.client_secret",
-        "stored_path": "oidc/sso/groups_client_secret",
         "expected_status": 422,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/groups_client_secret",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -349,11 +339,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
         "update_body": {"groups": {**_GOOGLE_GROUPS, "service_account_json_env": UNSET_SECRET_ENV}},
         "secret_field": "groups.service_account_json",
-        "stored_path": "oidc/sso/groups_service_account_json",
         "expected_status": 422,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/groups_service_account_json",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -363,11 +352,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {"client_secret": _STORED_SECRET, "client_secret_env": SWITCHED_SECRET_ENV},
         "update_body": {"client_secret_env": ""},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/client_secret",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -377,11 +365,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {"client_secret": _STORED_SECRET, "client_secret_env": SWITCHED_SECRET_ENV},
         "update_body": {"display_name": "Renamed"},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
-            "path": "oidc/sso/client_secret",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -398,11 +385,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
         "update_body": {"groups": {**_OKTA_GROUPS, "sync_interval": 900}},
         "secret_field": "groups.api_token",
-        "stored_path": "oidc/sso/groups_api_token",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
-            "path": "oidc/sso/groups_api_token",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -419,11 +405,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
         "update_body": {"groups": {**_ENTRA_GROUPS, "sync_interval": 900}},
         "secret_field": "groups.client_secret",
-        "stored_path": "oidc/sso/groups_client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
-            "path": "oidc/sso/groups_client_secret",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -440,11 +425,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
         "update_body": {"groups": {**_GOOGLE_GROUPS, "sync_interval": 900}},
         "secret_field": "groups.service_account_json",
-        "stored_path": "oidc/sso/groups_service_account_json",
         "expected_status": 200,
         "expected_source": {
             "env": SWITCHED_SECRET_ENV,
-            "path": "oidc/sso/groups_service_account_json",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -461,11 +445,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
         "update_body": {"groups": {**_OKTA_GROUPS, "api_token_env": ""}},
         "secret_field": "groups.api_token",
-        "stored_path": "oidc/sso/groups_api_token",
         "expected_status": 200,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/groups_api_token",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -482,11 +465,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
         "update_body": {"groups": {**_ENTRA_GROUPS, "client_secret_env": ""}},
         "secret_field": "groups.client_secret",
-        "stored_path": "oidc/sso/groups_client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/groups_client_secret",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -503,11 +485,10 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         },
         "update_body": {"groups": {**_GOOGLE_GROUPS, "service_account_json_env": ""}},
         "secret_field": "groups.service_account_json",
-        "stored_path": "oidc/sso/groups_service_account_json",
         "expected_status": 200,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/groups_service_account_json",
+            "path": "kept",
             "resolved": _STORED_SECRET,
             "stored": True,
         },
@@ -517,13 +498,12 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {"client_secret": _STORED_SECRET},
         "update_body": {"client_secret": _ROTATED_SECRET, "client_secret_env": ""},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/client_secret",
+            "path": "new",
             "resolved": _ROTATED_SECRET,
-            "stored": True,
+            "stored": False,
         },
     },
     {
@@ -531,13 +511,12 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {"client_secret": _STORED_SECRET},
         "update_body": {"client_secret": _ROTATED_SECRET, "client_secret_env": UNSET_SECRET_ENV},
         "secret_field": "client_secret",
-        "stored_path": "oidc/sso/client_secret",
         "expected_status": 200,
         "expected_source": {
             "env": UNSET_SECRET_ENV,
-            "path": "oidc/sso/client_secret",
+            "path": "new",
             "resolved": _ROTATED_SECRET,
-            "stored": True,
+            "stored": False,
         },
     },
     {
@@ -545,13 +524,12 @@ UPDATE_PROVIDER_SECRET_SOURCE_CASES: list[UpdateProviderSecretSourceCase] = [
         "create_body": {**_OKTA, "groups": {**_OKTA_GROUPS, "api_token": _STORED_SECRET}},
         "update_body": {"groups": {**_OKTA_GROUPS, "api_token": _ROTATED_SECRET}},
         "secret_field": "groups.api_token",
-        "stored_path": "oidc/sso/groups_api_token",
         "expected_status": 200,
         "expected_source": {
             "env": "",
-            "path": "oidc/sso/groups_api_token",
+            "path": "new",
             "resolved": _ROTATED_SECRET,
-            "stored": True,
+            "stored": False,
         },
     },
 ]

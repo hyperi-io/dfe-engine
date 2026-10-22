@@ -122,7 +122,7 @@ def _response_fields(key_meta: APIKey) -> dict:
     status_code=201,
     dependencies=[Depends(require_action(scopes_dict["api_key_write"]))],
 )
-async def create_api_key(
+def create_api_key(
     body: CreateAPIKeyRequest,
     user: CurrentUser,
     request: Request,
@@ -176,7 +176,7 @@ async def create_api_key(
     response_model=PaginatedResponse[APIKeyResponse],
     dependencies=[Depends(require_action(scopes_dict["api_key_read"]))],
 )
-async def list_api_keys(
+def list_api_keys(
     user: CurrentUser,
     request: Request,
     pagination: PaginationParams = Depends(),
@@ -200,7 +200,7 @@ async def list_api_keys(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["api_key_delete"]))],
 )
-async def revoke_api_key(
+def revoke_api_key(
     short_token: str,
     user: CurrentUser,
     request: Request,

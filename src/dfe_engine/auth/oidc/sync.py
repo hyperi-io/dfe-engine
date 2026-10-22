@@ -424,6 +424,21 @@ def _upsert_groups(
         )
 
 
+async def _record_sync(
+    provider_registry: ProviderRegistry, provider_name: str, *, status: str, error: str
+) -> None:
+    """Stamp how the provider's sync ended, now, on a worker thread: the registry may be a store."""
+    await run_blocking(
+        functools.partial(
+            provider_registry.update,
+            provider_name,
+            last_sync_at=datetime.now(UTC).isoformat(),
+            last_sync_status=status,
+            sync_error=error,
+        )
+    )
+
+
 async def sync_provider(
     provider_name: str,
     provider_registry: ProviderRegistry,
@@ -478,7 +493,7 @@ async def sync_provider(
           never on the text of ``error`` or ``skipped``.
     """
     # Resolve provider config
-    provider = provider_registry.get(provider_name)
+    provider = await run_blocking(functools.partial(provider_registry.get, provider_name))
     if provider is None:
         return {
             "created": 0,
@@ -532,12 +547,7 @@ async def sync_provider(
     except NoDirectoryListingError:
         # The stamp keeps the scheduler from listing again until the next interval.
         logger.debug("OIDC group sync skipped -- no directory to list", provider=provider_name)
-        provider_registry.update(
-            provider_name,
-            last_sync_at=datetime.now(UTC).isoformat(),
-            last_sync_status=SYNC_USER_TOKEN,
-            sync_error="",
-        )
+        await _record_sync(provider_registry, provider_name, status=SYNC_USER_TOKEN, error="")
         return {
             "created": 0,
             "updated": 0,
@@ -550,11 +560,11 @@ async def sync_provider(
     except DirectoryNotConfiguredError:
         # The stamp keeps the scheduler from listing again until the next interval.
         logger.info("OIDC group sync skipped -- no directory credential", provider=provider_name)
-        provider_registry.update(
+        await _record_sync(
+            provider_registry,
             provider_name,
-            last_sync_at=datetime.now(UTC).isoformat(),
-            last_sync_status=SYNC_NOT_CONFIGURED,
-            sync_error=NOT_CONFIGURED_MESSAGE,
+            status=SYNC_NOT_CONFIGURED,
+            error=NOT_CONFIGURED_MESSAGE,
         )
         return {
             "created": 0,
@@ -574,12 +584,7 @@ async def sync_provider(
             provider=provider_name,
             **describe_http_error(exc),
         )
-        provider_registry.update(
-            provider_name,
-            last_sync_at=datetime.now(UTC).isoformat(),
-            last_sync_status="error",
-            sync_error=error_msg,
-        )
+        await _record_sync(provider_registry, provider_name, status="error", error=error_msg)
         return {
             "created": 0,
             "updated": 0,
@@ -612,11 +617,8 @@ async def sync_provider(
             provider=provider_name,
             **describe_http_error(exc),
         )
-        provider_registry.update(
-            provider_name,
-            last_sync_at=datetime.now(UTC).isoformat(),
-            last_sync_status="error",
-            sync_error=STORE_FAILURE_MESSAGE,
+        await _record_sync(
+            provider_registry, provider_name, status="error", error=STORE_FAILURE_MESSAGE
         )
         return {
             "created": tally.created,
@@ -636,13 +638,7 @@ async def sync_provider(
         why = "; ".join(text for reason, text in _SKIP_STATUS.items() if tally.skips[reason])
         status = f"{PARTIAL_SYNC_PREFIX}{skipped} of {len(remote_groups)} groups skipped, {why}"
 
-    # Update provider sync metadata
-    provider_registry.update(
-        provider_name,
-        last_sync_at=datetime.now(UTC).isoformat(),
-        last_sync_status=status,
-        sync_error="",
-    )
+    await _record_sync(provider_registry, provider_name, status=status, error="")
 
     logger.info(
         "OIDC group sync complete",

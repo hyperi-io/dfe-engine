@@ -22,6 +22,7 @@ whether a credential resolved and from where.
 import os
 import re
 from dataclasses import dataclass, field
+from secrets import token_hex
 from typing import TYPE_CHECKING
 
 from scalo.logger import logger
@@ -95,9 +96,20 @@ def is_env_var_name(value: str) -> bool:
     return bool(_ENV_VAR_NAME.match(value))
 
 
-def provider_secret_path(provider_name: str, field: str) -> str:
-    """The ``DfeSecrets`` path a provider's secret is written to."""
-    return f"oidc/{provider_name}/{field}"
+def new_secret_version() -> str:
+    """A fresh version for the secrets one provider write stores, unique to that write."""
+    return token_hex(8)
+
+
+def provider_secret_path(provider_name: str, field: str, version: str) -> str:
+    """The ``DfeSecrets`` path one version of a provider's secret is written to.
+
+    Each write that stores a secret takes a new version, and the provider record names
+    the path it wrote, so no two writes ever share a path. A write that loses a race,
+    or a provider created again under a deleted one's name, never touches the secret
+    another record names.
+    """
+    return f"oidc/{provider_name}/{version}/{field}"
 
 
 def _from_env(env_name: str) -> str:

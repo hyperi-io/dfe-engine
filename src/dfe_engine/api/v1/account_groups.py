@@ -451,7 +451,7 @@ def _refuse_last_admin_member_removals(
 
 
 @router.post("", response_model=GroupResponse, status_code=201)
-async def create_group(
+def create_group(
     body: CreateGroupRequest,
     user: CurrentUser,
     request: Request,
@@ -551,7 +551,7 @@ async def create_group(
 
 
 @router.get("", response_model=PaginatedResponse[GroupResponse])
-async def list_groups(
+def list_groups(
     user: CurrentUser,
     request: Request,
     pagination: PaginationParams = Depends(),
@@ -574,7 +574,7 @@ async def list_groups(
 
 
 @router.get("/{name}", response_model=GroupResponse)
-async def get_group(
+def get_group(
     name: str,
     user: CurrentUser,
     request: Request,
@@ -584,7 +584,7 @@ async def get_group(
 
 
 @router.put("/{name}", response_model=GroupResponse)
-async def update_group(
+def update_group(
     name: str,
     body: UpdateGroupRequest,
     user: CurrentUser,
@@ -676,7 +676,7 @@ async def update_group(
 
 
 @router.post("/{name}/members", response_model=GroupResponse, status_code=200)
-async def add_member(
+def add_member(
     name: str,
     body: AddMemberRequest,
     user: CurrentUser,
@@ -708,7 +708,7 @@ async def add_member(
 
 
 @router.delete("/{name}/members/{username}", response_model=GroupResponse, status_code=200)
-async def remove_member(
+def remove_member(
     name: str,
     username: str,
     user: CurrentUser,
@@ -743,7 +743,7 @@ async def remove_member(
 
 
 @router.delete("/{name}", status_code=204)
-async def delete_group(
+def delete_group(
     name: str,
     user: CurrentUser,
     request: Request,
@@ -786,7 +786,7 @@ async def delete_group(
     "/{name}/attributes",
     dependencies=[Depends(require_action(scopes_dict["group_attributes_read"]))],
 )
-async def get_group_attributes(
+def get_group_attributes(
     name: str,
     user: CurrentUser,
     request: Request,
@@ -808,7 +808,7 @@ async def get_group_attributes(
     "/{name}/attributes",
     dependencies=[Depends(require_action(scopes_dict["group_attributes_write"]))],
 )
-async def put_group_attributes(
+def put_group_attributes(
     name: str,
     body: AttributesRequest,
     user: CurrentUser,
@@ -833,7 +833,7 @@ async def put_group_attributes(
     "/{name}/sensitive-attributes",
     dependencies=[Depends(require_action(scopes_dict["group_attributes_read_sensitive"]))],
 )
-async def get_group_sensitive_attributes(
+def get_group_sensitive_attributes(
     name: str,
     user: CurrentUser,
     request: Request,
@@ -858,7 +858,7 @@ async def get_group_sensitive_attributes(
     "/{name}/sensitive-attributes",
     dependencies=[Depends(require_action(scopes_dict["group_attributes_write_sensitive"]))],
 )
-async def put_group_sensitive_attributes(
+def put_group_sensitive_attributes(
     name: str,
     body: AttributesRequest,
     user: CurrentUser,

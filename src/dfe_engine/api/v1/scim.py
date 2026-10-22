@@ -31,11 +31,14 @@ open (IdPs probe them before presenting a token). Responses use the SCIM
 media type and the SCIM error envelope.
 """
 
+import functools
 import re
+from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
+from scalo.concurrency import run_blocking
 from scim2_models import (
     AuthenticationScheme,
     Bulk,
@@ -62,6 +65,7 @@ from scim2_models import (
 from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action
 from dfe_engine.api.password_floor import FLOOR_MESSAGE, below_floor, count_floor_refusal
 from dfe_engine.api.v1.account_groups import check_group_changes, check_role_assignment, scope_of
+from dfe_engine.auth import AuthContext
 from dfe_engine.auth.accounts import AccountExistsError, discard_created
 from dfe_engine.auth.audit import audit_account_change, audit_group_change
 from dfe_engine.auth.groups import (
@@ -263,7 +267,7 @@ def _scim_last_admin_member_removals(
     "/Users",
     dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
-async def list_users(user: CurrentUser, request: Request) -> Response:
+def list_users(user: CurrentUser, request: Request) -> Response:
     """List users (SCIM ListResponse). Supports ``userName eq`` filter + paging."""
     store = request.app.state.account_store
     group_store = request.app.state.group_store
@@ -304,7 +308,7 @@ async def list_users(user: CurrentUser, request: Request) -> Response:
     "/Users/{user_id}",
     dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
-async def get_user(user_id: str, user: CurrentUser, request: Request) -> Response:
+def get_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Fetch a single user by id (username)."""
     store = request.app.state.account_store
     group_store = request.app.state.group_store
@@ -329,6 +333,11 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
     password the API sets, and one under it is refused rather than replaced.
     """
     body = await _parse_body(request)
+    return await run_blocking(functools.partial(_create_user, user, request, body))
+
+
+def _create_user(user: AuthContext, request: Request, body: Any) -> Response:
+    """:func:`create_user` once its body is read: store work, so off the event loop."""
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     try:
@@ -384,9 +393,14 @@ async def create_user(user: CurrentUser, request: Request) -> Response:
 )
 async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Replace a user's writable attributes (SCIM PUT)."""
+    body = await _parse_body(request)
+    return await run_blocking(functools.partial(_replace_user, user_id, user, request, body))
+
+
+def _replace_user(user_id: str, user: AuthContext, request: Request, body: Any) -> Response:
+    """:func:`replace_user` once its body is read: store work, so off the event loop."""
     from dfe_engine.auth import admin_retirement
 
-    body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
@@ -440,9 +454,14 @@ async def replace_user(user_id: str, user: CurrentUser, request: Request) -> Res
 )
 async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Apply a PatchOp - primarily the ``active`` toggle IdPs use to deprovision."""
+    body = await _parse_body(request)
+    return await run_blocking(functools.partial(_patch_user, user_id, user, request, body))
+
+
+def _patch_user(user_id: str, user: AuthContext, request: Request, body: Any) -> Response:
+    """:func:`patch_user` once its body is read: store work, so off the event loop."""
     from dfe_engine.auth import admin_retirement
 
-    body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.account_store
@@ -502,7 +521,7 @@ async def patch_user(user_id: str, user: CurrentUser, request: Request) -> Respo
     "/Users/{user_id}",
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
 )
-async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Response:
+def delete_user(user_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a user (SCIM 204)."""
     from dfe_engine.auth import admin_retirement
 
@@ -542,7 +561,7 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     "/Groups",
     dependencies=[Depends(require_action(scopes_dict["group_read"]))],
 )
-async def list_groups(user: CurrentUser, request: Request) -> Response:
+def list_groups(user: CurrentUser, request: Request) -> Response:
     """List groups (SCIM ListResponse). Supports ``displayName eq`` filter + paging."""
     store = request.app.state.group_store
     groups = store.list()
@@ -575,7 +594,7 @@ async def list_groups(user: CurrentUser, request: Request) -> Response:
     "/Groups/{group_id}",
     dependencies=[Depends(require_action(scopes_dict["group_read"]))],
 )
-async def get_group(group_id: str, user: CurrentUser, request: Request) -> Response:
+def get_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Fetch a single group by id (name)."""
     store = request.app.state.group_store
     group = store.get(group_id)
@@ -592,9 +611,14 @@ async def get_group(group_id: str, user: CurrentUser, request: Request) -> Respo
 )
 async def create_group(user: CurrentUser, request: Request) -> Response:
     """Provision a group with its member set (member Account.groups kept in sync)."""
+    body = await _parse_body(request)
+    return await run_blocking(functools.partial(_create_group, user, request, body))
+
+
+def _create_group(user: AuthContext, request: Request, body: Any) -> Response:
+    """:func:`create_group` once its body is read: store work, so off the event loop."""
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
-    body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     try:
@@ -643,9 +667,14 @@ async def create_group(user: CurrentUser, request: Request) -> Response:
 )
 async def replace_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Replace a group's member set (SCIM PUT)."""
+    body = await _parse_body(request)
+    return await run_blocking(functools.partial(_replace_group, group_id, user, request, body))
+
+
+def _replace_group(group_id: str, user: AuthContext, request: Request, body: Any) -> Response:
+    """:func:`replace_group` once its body is read: store work, so off the event loop."""
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
-    body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.group_store
@@ -716,9 +745,14 @@ async def replace_group(group_id: str, user: CurrentUser, request: Request) -> R
 )
 async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Apply a PatchOp on group membership (add/remove/replace members)."""
+    body = await _parse_body(request)
+    return await run_blocking(functools.partial(_patch_group, group_id, user, request, body))
+
+
+def _patch_group(group_id: str, user: AuthContext, request: Request, body: Any) -> Response:
+    """:func:`patch_group` once its body is read: store work, so off the event loop."""
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
-    body = await _parse_body(request)
     if body is None:
         return scim_error(400, "Malformed JSON body", "invalidSyntax")
     store = request.app.state.group_store
@@ -763,7 +797,7 @@ async def patch_group(group_id: str, user: CurrentUser, request: Request) -> Res
     "/Groups/{group_id}",
     dependencies=[Depends(require_action(scopes_dict["group_delete"]))],
 )
-async def delete_group(group_id: str, user: CurrentUser, request: Request) -> Response:
+def delete_group(group_id: str, user: CurrentUser, request: Request) -> Response:
     """Delete a group. Members are detached first so the store permits removal."""
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 

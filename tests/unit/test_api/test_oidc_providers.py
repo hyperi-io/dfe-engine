@@ -9,6 +9,7 @@
 """Tests for POST/GET/PUT/DELETE /api/v1/auth/oidc-providers endpoints."""
 
 import json
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -19,7 +20,12 @@ from fastapi.testclient import TestClient
 from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.http_errors import credential_failure_message
 from dfe_engine.settings import DFESettings
-from tests.support.failing_stores import make_delete_failing_secrets, make_name_held_secrets
+from tests.support.failing_stores import (
+    make_delete_failing_secrets,
+    make_later_put_failing_secrets,
+    make_name_held_secrets,
+    make_put_failing_secrets,
+)
 from tests.support.loopback import CountingListener
 from tests.unit.test_api.oidc_providers_cases import (
     CREATE_PROVIDER_UNSET_ENV_CASES,
@@ -41,25 +47,37 @@ from tests.unit.test_auth.factories import (
 # An Okta API token an HTTP header cannot carry: the line break survives stripping.
 _UNSENDABLE_TOKEN = "test-okta\napi-token"
 
+# Where a provider write stores a secret: one version per write.
+_VERSIONED_PATH = re.compile(r"oidc/[^/]+/[0-9a-f]{16}/[a-z_]+")
+
 
 def _provider_yaml(api_settings, name: str) -> Path:
     """The YAML file the registry persists a provider to."""
     return Path(api_settings.auth.auth_dir) / "oidc-providers" / f"{name}.yaml"
 
 
-def _secret_source(*, app: FastAPI, field: str, name: str, stored_path: str) -> dict[str, object]:
-    """The env var name and store path a provider keeps for one secret, the value it resolves to and whether the store still holds *stored_path*."""
+def _secret_field(*, app: FastAPI, field: str, name: str) -> tuple[str, str]:
+    """The env var name and store path provider *name* keeps for one secret."""
     provider = app.state.oidc_provider_registry.get(name)
     *parents, leaf = field.split(".")
     holder = provider.groups if parents else provider
-    env = getattr(holder, f"{leaf}_env")
-    path = getattr(holder, f"{leaf}_path")
+    return getattr(holder, f"{leaf}_env"), getattr(holder, f"{leaf}_path")
+
+
+def _secret_source(*, app: FastAPI, field: str, name: str, before: str) -> dict[str, object]:
+    """Where a provider reads one secret from, measured against *before*, the path it held earlier.
+
+    ``path`` reads ``kept`` for *before*, ``new`` for another path and empty for none,
+    and ``stored`` is whether the store still holds *before*.
+    """
+    env, path = _secret_field(app=app, field=field, name=name)
     resolved = resolve_credential(env_name=env, secret_path=path, secrets=app.state.dfe_secrets)
+    shown = "" if not path else "kept" if path == before else "new"
     return {
         "env": env,
-        "path": path,
+        "path": shown,
         "resolved": resolved.value,
-        "stored": app.state.dfe_secrets.exists(stored_path),
+        "stored": bool(before) and app.state.dfe_secrets.exists(before),
     }
 
 
@@ -200,14 +218,14 @@ class TestCreateProvider:
             name="sso",
         )
 
-        source = _secret_source(
-            app=app, field="client_secret", name="sso", stored_path="oidc/sso/client_secret"
-        )
+        _env, path = _secret_field(app=app, field="client_secret", name="sso")
+        source = _secret_source(app=app, field="client_secret", name="sso", before=path)
+        assert _VERSIONED_PATH.fullmatch(path), path
         assert (resp.status_code, source) == (
             201,
             {
                 "env": UNSET_SECRET_ENV,
-                "path": "oidc/sso/client_secret",
+                "path": "kept",
                 "resolved": "rp-client-secret",
                 "stored": True,
             },
@@ -348,14 +366,13 @@ class TestUpdateProvider:
         _create_provider(
             admin_headers=admin_headers, client=client, name="sso", **case["create_body"]
         )
+        _env, before = _secret_field(app=app, field=case["secret_field"], name="sso")
 
         resp = client.put(
             "/api/v1/auth/oidc-providers/sso", headers=admin_headers, json=case["update_body"]
         )
 
-        source = _secret_source(
-            app=app, field=case["secret_field"], name="sso", stored_path=case["stored_path"]
-        )
+        source = _secret_source(app=app, field=case["secret_field"], name="sso", before=before)
         assert (resp.status_code, source) == (case["expected_status"], case["expected_source"])
 
     def test_a_move_onto_an_unset_env_var_answers_on_that_field(
@@ -471,6 +488,7 @@ class TestUpdateProvider:
         _create_provider(
             admin_headers=admin_headers, client=client, client_secret="stored-secret", name="sso"
         )
+        _env, before = _secret_field(app=app, field="client_secret", name="sso")
         app.state.dfe_secrets = make_delete_failing_secrets(root=api_settings.secrets.path)
 
         resp = client.put(
@@ -485,13 +503,11 @@ class TestUpdateProvider:
             if event["event"]
             == "OIDC provider secret left in the secret store: the provider no longer reads it"
         ]
-        source = _secret_source(
-            app=app, field="client_secret", name="sso", stored_path="oidc/sso/client_secret"
-        )
+        source = _secret_source(app=app, field="client_secret", name="sso", before=before)
         assert (resp.status_code, source, left) == (
             200,
             {"env": SWITCHED_SECRET_ENV, "path": "", "resolved": SWITCHED_SECRET, "stored": True},
-            [("oidc/sso/client_secret", "ConnectionError")],
+            [(before, "ConnectionError")],
         )
 
     def test_a_refused_switch_to_env_deletes_nothing(
@@ -510,6 +526,8 @@ class TestUpdateProvider:
             name="sso",
             type="okta",
         )
+        created = app.state.oidc_provider_registry.get("sso")
+        held = (created.client_secret_path, created.groups.api_token_path)
 
         resp = client.put(
             "/api/v1/auth/oidc-providers/sso",
@@ -524,10 +542,10 @@ class TestUpdateProvider:
         kept = (
             stored.client_secret_path,
             stored.groups.api_token_path,
-            app.state.dfe_secrets.exists("oidc/sso/client_secret"),
-            app.state.dfe_secrets.exists("oidc/sso/groups_api_token"),
+            app.state.dfe_secrets.exists(held[0]),
+            app.state.dfe_secrets.exists(held[1]),
         )
-        expected_kept = ("oidc/sso/client_secret", "oidc/sso/groups_api_token", True, True)
+        expected_kept = (*held, True, True)
         assert (resp.status_code, _field_errors(response=resp), kept) == (
             422,
             ["groups.okta_domain"],
@@ -1126,8 +1144,11 @@ class TestCredentialsGoToTheSecretStore:
             client, admin_headers, name="stored", client_secret="rp-client-secret"
         )
         assert resp.status_code == 201
-        assert resp.json()["client_secret_path"] == "oidc/stored/client_secret"
-        assert app.state.dfe_secrets.get("oidc/stored/client_secret") == "rp-client-secret"
+        path = resp.json()["client_secret_path"]
+        assert _VERSIONED_PATH.fullmatch(path), path
+        assert path.startswith("oidc/stored/")
+        assert path.endswith("/client_secret")
+        assert app.state.dfe_secrets.get(path) == "rp-client-secret"
         assert "rp-client-secret" not in _provider_yaml(api_settings, "stored").read_text()
 
     def test_a_name_a_deleted_secret_still_holds_answers_409_with_the_remedy(
@@ -1166,54 +1187,114 @@ class TestCredentialsGoToTheSecretStore:
             groups={"mode": "api", "okta_domain": "acme.okta.com", "api_token": "okta-ssws-token"},
         )
         assert resp.status_code == 201
-        assert resp.json()["groups"]["api_token_path"] == "oidc/okta-groups/groups_api_token"
-        assert app.state.dfe_secrets.get("oidc/okta-groups/groups_api_token") == "okta-ssws-token"
+        path = resp.json()["groups"]["api_token_path"]
+        assert _VERSIONED_PATH.fullmatch(path), path
+        assert path.endswith("/groups_api_token")
+        assert app.state.dfe_secrets.get(path) == "okta-ssws-token"
         assert "okta-ssws-token" not in _provider_yaml(api_settings, "okta-groups").read_text()
 
-    def test_rotation_replaces_the_stored_secret(self, client, app, admin_headers):
-        _create_provider(client, admin_headers, name="rotated", client_secret="first")
+    def test_rotation_stores_a_new_version_and_deletes_the_old(self, client, app, admin_headers):
+        created = _create_provider(client, admin_headers, name="rotated", client_secret="first")
+        first = created.json()["client_secret_path"]
+
         resp = client.put(
             "/api/v1/auth/oidc-providers/rotated",
             json={"client_secret": "second"},
             headers=admin_headers,
         )
+
         assert resp.status_code == 200
-        assert app.state.dfe_secrets.get("oidc/rotated/client_secret") == "second"
+        second = resp.json()["client_secret_path"]
+        assert second != first
+        assert app.state.dfe_secrets.get(second) == "second"
+        assert not app.state.dfe_secrets.exists(first)
+
+    def test_a_rotation_the_store_refuses_leaves_the_old_secret_serving(
+        self, client, app, api_settings, admin_headers
+    ):
+        created = _create_provider(client, admin_headers, name="rotated", client_secret="first")
+        first = created.json()["client_secret_path"]
+        app.state.dfe_secrets = make_put_failing_secrets(root=api_settings.secrets.path)
+
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/rotated",
+            json={"client_secret": "second"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code >= 500, resp.text
+        stored = app.state.oidc_provider_registry.get("rotated")
+        assert stored.client_secret_path == first
+        assert app.state.dfe_secrets.get(first) == "first"
+
+    def test_a_create_the_store_refuses_leaves_no_provider(
+        self, client, app, api_settings, admin_headers
+    ):
+        app.state.dfe_secrets = make_put_failing_secrets(root=api_settings.secrets.path)
+
+        resp = _create_provider(client, admin_headers, name="unsecured", client_secret="s")
+
+        assert resp.status_code >= 500, resp.text
+        assert app.state.oidc_provider_registry.get("unsecured") is None
+
+    def test_a_create_whose_second_secret_fails_leaves_neither_secret(
+        self, client, app, api_settings, admin_headers
+    ):
+        root = Path(api_settings.secrets.path)
+        app.state.dfe_secrets = make_later_put_failing_secrets(root=str(root))
+
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="half",
+            type="okta",
+            client_secret="rp-secret",
+            groups={"mode": "api", "okta_domain": "acme.okta.com", "api_token": "okta-token"},
+        )
+
+        assert resp.status_code >= 500, resp.text
+        assert app.state.oidc_provider_registry.get("half") is None
+        assert [path for path in root.rglob("*") if path.is_file() and "half" in path.parts] == []
 
     def test_an_unrelated_update_keeps_the_stored_secret(self, client, app, admin_headers):
         """Flipping enabled must not strand the credential the provider logs in with."""
-        _create_provider(client, admin_headers, name="kept", client_secret="keep-me")
+        created = _create_provider(client, admin_headers, name="kept", client_secret="keep-me")
+        path = created.json()["client_secret_path"]
         client.put(
             "/api/v1/auth/oidc-providers/kept", json={"enabled": False}, headers=admin_headers
         )
         resp = client.get("/api/v1/auth/oidc-providers/kept", headers=admin_headers)
-        assert resp.json()["client_secret_path"] == "oidc/kept/client_secret"
-        assert app.state.dfe_secrets.get("oidc/kept/client_secret") == "keep-me"
+        assert resp.json()["client_secret_path"] == path
+        assert app.state.dfe_secrets.get(path) == "keep-me"
 
     def test_a_groups_edit_keeps_a_stored_directory_token(self, client, app, admin_headers):
-        _create_provider(
+        created = _create_provider(
             client,
             admin_headers,
             name="okta-edit",
             type="okta",
             groups={"mode": "api", "okta_domain": "acme.okta.com", "api_token": "okta-ssws-token"},
         )
+        path = created.json()["groups"]["api_token_path"]
         resp = client.put(
             "/api/v1/auth/oidc-providers/okta-edit",
             json={"groups": {"mode": "api", "okta_domain": "acme.okta.com", "sync_interval": 900}},
             headers=admin_headers,
         )
         assert resp.status_code == 200
-        assert resp.json()["groups"]["api_token_path"] == "oidc/okta-edit/groups_api_token"
-        assert app.state.dfe_secrets.get("oidc/okta-edit/groups_api_token") == "okta-ssws-token"
+        assert resp.json()["groups"]["api_token_path"] == path
+        assert app.state.dfe_secrets.get(path) == "okta-ssws-token"
 
     def test_detach_removes_the_stored_secrets(self, client, app, admin_headers):
         """Nothing is left in the store that can authenticate as a detached provider."""
-        _create_provider(client, admin_headers, name="gone", client_secret="rp-client-secret")
-        assert app.state.dfe_secrets.exists("oidc/gone/client_secret")
+        created = _create_provider(
+            client, admin_headers, name="gone", client_secret="rp-client-secret"
+        )
+        path = created.json()["client_secret_path"]
+        assert app.state.dfe_secrets.exists(path)
 
         client.delete("/api/v1/auth/oidc-providers/gone", headers=admin_headers)
-        assert not app.state.dfe_secrets.exists("oidc/gone/client_secret")
+        assert not app.state.dfe_secrets.exists(path)
 
 
 # No service account and no admin: a Google provider logs in on the user's own token.
@@ -1497,10 +1578,12 @@ class TestProviderFieldRules:
         assert _field_errors(resp) == fields
         assert [sorted(path.rglob("*")) for path in written] == before
 
-    def test_update_refuses_and_writes_nothing(self, client, app, admin_headers):
-        _create_provider(
+    def test_update_refuses_and_writes_nothing(self, client, app, api_settings, admin_headers):
+        created = _create_provider(
             client, admin_headers, name="okta-claim", type="okta", client_secret="first"
         )
+        first = created.json()["client_secret_path"]
+        before = sorted(Path(api_settings.secrets.path).rglob("*"))
         resp = client.put(
             "/api/v1/auth/oidc-providers/okta-claim",
             json={
@@ -1511,8 +1594,8 @@ class TestProviderFieldRules:
         )
         assert resp.status_code == 422, resp.text
         assert _field_errors(resp) == ["groups.okta_domain"]
-        assert app.state.dfe_secrets.get("oidc/okta-claim/client_secret") == "first"
-        assert not app.state.dfe_secrets.exists("oidc/okta-claim/groups_api_token")
+        assert app.state.dfe_secrets.get(first) == "first"
+        assert sorted(Path(api_settings.secrets.path).rglob("*")) == before
         got = client.get("/api/v1/auth/oidc-providers/okta-claim", headers=admin_headers)
         assert got.json()["groups"]["mode"] == "token_claim"
 

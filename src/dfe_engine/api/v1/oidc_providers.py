@@ -26,7 +26,7 @@ secret paths and the env var names, never a secret value.
 
 import functools
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -47,6 +47,7 @@ from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.oidc.credential_env import (
     env_var_resolves,
     is_env_var_name,
+    new_secret_version,
     provider_secret_path,
 )
 from dfe_engine.auth.oidc.field_rules import FieldProblem, field_problems
@@ -64,6 +65,7 @@ from dfe_engine.names import StoreName
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+    from dfe_engine.auth.oidc.registry import ProviderRegistry
 
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 
@@ -482,15 +484,126 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
 
 def _get_registry(request: Request):
     """Return the provider registry from app state."""
-    from dfe_engine.auth.oidc.registry import ProviderRegistry
-
     registry: ProviderRegistry = request.app.state.oidc_provider_registry
     return registry
 
 
-def _store_secret(*, field: str, name: str, request: Request, value: str) -> None:
-    """Write one provider secret through the seam, at the path the provider records."""
-    secrets_store(request).put(provider_secret_path(field=field, provider_name=name), value)
+def _write_provider_secrets(
+    request: Request,
+    *,
+    client_secret: str,
+    groups: GroupResolutionRequest | None,
+    provider: OIDCProvider,
+    written: list[str],
+) -> None:
+    """Write each secret value a request sent to the path *provider*, as stored, records for it.
+
+    A secret the request omits keeps the one already stored. Each path is appended to
+    *written* once its value has landed.
+    """
+    store = secrets_store(request)
+    sent = [(provider.client_secret_path, client_secret)]
+    if groups is not None:
+        sent.extend(
+            (getattr(provider.groups, path_field), getattr(groups, value_field))
+            for value_field, _store_field, path_field in _GROUP_SECRETS
+        )
+    for path, value in sent:
+        if value:
+            store.put(path, value)
+            written.append(path)
+
+
+def _secret_paths(provider: OIDCProvider) -> tuple[str, ...]:
+    """Every store path *provider* records, the RP client secret's first."""
+    group_paths = (
+        getattr(provider.groups, path_field) for _value, _store, path_field in _GROUP_SECRETS
+    )
+    return (provider.client_secret_path, *group_paths)
+
+
+def _forget_unwritten(registry: ProviderRegistry, name: str, created: OIDCProvider) -> None:
+    """Delete the provider a create stored once its secrets could not be written.
+
+    Only while it still names the secrets this create was writing, so a provider
+    another write has moved onto secrets of its own since is kept.
+    """
+    current = registry.get(name)
+    if current is not None and _secret_paths(current) == _secret_paths(created):
+        registry.delete(name)
+
+
+def _put_back_secret_paths(
+    registry: ProviderRegistry, name: str, *, previous: OIDCProvider, written: OIDCProvider
+) -> None:
+    """Point the provider back at *previous*'s secrets once an update's new ones could not be written.
+
+    Only while it still names the secrets this update was writing.
+    """
+    current = registry.get(name)
+    if current is None or _secret_paths(current) != _secret_paths(written):
+        return
+    registry.update(
+        name,
+        client_secret_path=previous.client_secret_path,
+        groups=current.groups.model_copy(
+            update={
+                path_field: getattr(previous.groups, path_field)
+                for _value, _store, path_field in _GROUP_SECRETS
+            }
+        ),
+    )
+
+
+async def _write_secrets_or_undo(
+    request: Request,
+    *,
+    client_secret: str,
+    groups: GroupResolutionRequest | None,
+    provider: OIDCProvider,
+    undo: Callable[[], None],
+    name: str,
+) -> None:
+    """Write the secrets a provider write recorded, undoing that write when they cannot be written.
+
+    Once the write is undone, the values that did land are deleted: their paths are this
+    write's own, and no provider names them. The provider is stamped once every value is
+    written, which moves its counter again, so a replica that rebuilt its relying party
+    before they landed rebuilds with them.
+
+    Raises:
+        Exception: Whatever the secret store raised, once the write is undone.
+    """
+    written: list[str] = []
+    try:
+        await run_blocking(
+            functools.partial(
+                _write_provider_secrets,
+                request,
+                client_secret=client_secret,
+                groups=groups,
+                provider=provider,
+                written=written,
+            )
+        )
+    except Exception:
+        try:
+            await run_blocking(undo)
+        except Exception as exc:
+            # The provider may still name the values that landed, so they stay.
+            logger.warning(
+                "OIDC provider write not undone after its secrets could not be written",
+                provider=name,
+                **describe_http_error(exc),
+            )
+        else:
+            await run_blocking(functools.partial(_delete_secrets, paths=written, request=request))
+        raise
+    try:
+        await run_blocking(functools.partial(_get_registry(request).update, name))
+    except KeyError:
+        # Deleted meanwhile, so no relying party serves it to rebuild.
+        return
 
 
 def _group_config(
@@ -510,10 +623,12 @@ def _group_config(
     return GroupResolutionConfig.model_validate(fields)
 
 
-def _group_secret_paths(*, groups: GroupResolutionRequest, name: str) -> dict[str, str]:
+def _group_secret_paths(
+    *, groups: GroupResolutionRequest, name: str, version: str
+) -> dict[str, str]:
     """The store path of each directory secret the groups block carries, keyed by the config field that keeps it."""
     return {
-        path_field: provider_secret_path(field=store_field, provider_name=name)
+        path_field: provider_secret_path(field=store_field, provider_name=name, version=version)
         for value_field, store_field, path_field in _GROUP_SECRETS
         if getattr(groups, value_field)
     }
@@ -539,15 +654,6 @@ def _sent_group_fields(*, groups: GroupResolutionRequest | None) -> frozenset[st
     if groups is None:
         return frozenset()
     return frozenset(field for field, value in groups.model_dump().items() if value)
-
-
-def _store_group_secrets(*, groups: GroupResolutionRequest, name: str, request: Request) -> None:
-    """Write whichever directory-API secrets the groups block carries; a secret it omits keeps the one already stored."""
-    for value_field, store_field, _path_field in _GROUP_SECRETS:
-        if getattr(groups, value_field):
-            _store_secret(
-                field=store_field, name=name, request=request, value=getattr(groups, value_field)
-            )
 
 
 def _delete_secrets(*, paths: Iterable[str], request: Request) -> None:
@@ -659,23 +765,24 @@ async def create_provider(
 ):
     """Create a new OIDC provider configuration (admin only).
 
-    Secret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).
+    The provider is stored first and its secret values after, each at a path unique to this create, so of two creates of one name only the one that stored the provider writes a secret. Nothing is written until the provider passes the field rules for its type and mode. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``). When a secret cannot be written the provider is deleted again and the request fails, so no provider is left naming a secret that is not there.
     """
     from dfe_engine.auth.oidc.models import OIDCProvider
 
     registry = _get_registry(request)
-    if registry.get(body.name) is not None:
+    if await run_blocking(functools.partial(registry.get, body.name)) is not None:
         raise HTTPException(
             status_code=409,
             detail={"code": "conflict", "message": f"OIDC provider '{body.name}' already exists"},
         )
 
+    version = new_secret_version()
     client_secret_path = (
-        provider_secret_path(field="client_secret", provider_name=body.name)
+        provider_secret_path(field="client_secret", provider_name=body.name, version=version)
         if body.client_secret
         else ""
     )
-    group_paths = _group_secret_paths(groups=body.groups, name=body.name)
+    group_paths = _group_secret_paths(groups=body.groups, name=body.name, version=version)
     fields: dict[str, Any] = {
         "type": body.type,
         "enabled": body.enabled,
@@ -705,23 +812,21 @@ async def create_provider(
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
     provider = OIDCProvider(**fields)
 
-    await run_blocking(
-        lambda: _store_group_secrets(groups=body.groups, name=body.name, request=request)
-    )
-    if body.client_secret:
-        secret = body.client_secret
-        await run_blocking(
-            lambda: _store_secret(
-                field="client_secret", name=body.name, request=request, value=secret
-            )
-        )
-
     try:
-        registry.create(body.name, provider)
+        await run_blocking(functools.partial(registry.create, body.name, provider))
     except ValueError:
         raise HTTPException(
             status_code=409,
             detail={"code": "conflict", "message": f"OIDC provider '{body.name}' already exists"},
+        )
+    if any(_secret_paths(provider)):
+        await _write_secrets_or_undo(
+            request,
+            client_secret=body.client_secret,
+            groups=body.groups,
+            provider=provider,
+            undo=functools.partial(_forget_unwritten, registry, body.name, provider),
+            name=body.name,
         )
 
     await _refresh_rp(request)
@@ -743,8 +848,8 @@ async def list_providers(
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List OIDC providers (admin only), paginated."""
-    registry = _get_registry(request)
-    rows = [_provider_to_response(name, p).model_dump() for name, p in registry.list()]
+    listed = await run_blocking(_get_registry(request).list)
+    rows = [_provider_to_response(name, p).model_dump() for name, p in listed]
     rows = apply_search(rows, search, ["name", "display_name"])
     rows = apply_sort(rows, sort_by, sort_order)
     summaries = [ProviderResponse.model_validate(row) for row in rows]
@@ -763,7 +868,7 @@ async def get_provider(
 ):
     """Get a single OIDC provider by name (admin only)."""
     registry = _get_registry(request)
-    provider = registry.get(name)
+    provider = await run_blocking(functools.partial(registry.get, name))
     if provider is None:
         raise HTTPException(
             status_code=404,
@@ -786,15 +891,18 @@ async def update_provider(
     """Update an OIDC provider configuration (admin only).
 
     A secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential; an empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.
+
+    A secret value sent is a new version: the provider is pointed at a path unique to this update first, the value written there after, and the old version deleted once both have landed. When the value cannot be written the provider is pointed back at the old version and the request fails.
     """
     registry = _get_registry(request)
-    current = registry.get(name)
+    current = await run_blocking(functools.partial(registry.get, name))
     if current is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
         )
 
+    version = new_secret_version()
     stale_paths = []
     env_problems = []
     update_fields: dict[str, object] = {}
@@ -812,8 +920,9 @@ async def update_provider(
         update_fields["scopes"] = " ".join(body.scopes)
     if body.client_secret:
         update_fields["client_secret_path"] = provider_secret_path(
-            field="client_secret", provider_name=name
+            field="client_secret", provider_name=name, version=version
         )
+        stale_paths.append(current.client_secret_path)
     elif body.client_secret_env is not None and _moves_to_env(
         env=body.client_secret_env,
         stored_env=current.client_secret_env,
@@ -848,7 +957,9 @@ async def update_provider(
         env_problems.extend(group_env_problems)
         stale_paths.extend(getattr(current.groups, path_field) for path_field in moved_to_env)
         kept.update(dict.fromkeys(moved_to_env, ""))
-        kept.update(_group_secret_paths(groups=body.groups, name=name))
+        new_paths = _group_secret_paths(groups=body.groups, name=name, version=version)
+        stale_paths.extend(getattr(current.groups, path_field) for path_field in new_paths)
+        kept.update(new_paths)
         update_fields["groups"] = _group_config(
             groups=body.groups, kept=kept, provider_type=current.type
         )
@@ -863,16 +974,28 @@ async def update_provider(
         rule_problems = [problem for problem in problems if problem.field != "issuer"]
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
 
-    if body.client_secret:
-        secret = body.client_secret
-        await run_blocking(
-            lambda: _store_secret(field="client_secret", name=name, request=request, value=secret)
+    try:
+        provider = await run_blocking(functools.partial(registry.update, name, **update_fields))
+    except KeyError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
+        ) from None
+    sends_secret = bool(body.client_secret) or (
+        body.groups is not None
+        and any(getattr(body.groups, value_field) for value_field, _s, _p in _GROUP_SECRETS)
+    )
+    if sends_secret:
+        await _write_secrets_or_undo(
+            request,
+            client_secret=body.client_secret or "",
+            groups=body.groups,
+            provider=provider,
+            undo=functools.partial(
+                _put_back_secret_paths, registry, name, previous=current, written=provider
+            ),
+            name=name,
         )
-    if body.groups is not None:
-        groups = body.groups
-        await run_blocking(lambda: _store_group_secrets(groups=groups, name=name, request=request))
-
-    provider = registry.update(name, **update_fields)
     # Picks up an enable/disable flip and a rotated client secret alike.
     await _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "updated")
@@ -899,6 +1022,32 @@ async def delete_provider(
     soft-deleted: disabled and renamed to ``{uuid}-deleted`` with contact fields
     cleared. The provider's stored credentials ARE removed: nothing is left that
     can authenticate as a detached provider.
+    """
+    provider, orphaned, disabled_accounts = await run_blocking(
+        functools.partial(_detach, request, name)
+    )
+    await run_blocking(lambda: _delete_stored_secrets(request, provider))
+    # A detached provider must stop serving logins immediately, not at restart.
+    await _refresh_rp(request)
+    audit_resource_change(user.user_id, "oidc_provider", name, "deleted")
+
+    return DetachResponse(
+        deleted=name,
+        orphaned_groups=orphaned,
+        disabled_accounts=disabled_accounts,
+    )
+
+
+def _detach(
+    request: Request, name: str
+) -> tuple[OIDCProvider, list[OrphanedGroupInfo], list[DisabledAccountInfo]]:
+    """Delete provider *name* and soft-delete its accounts, off the event loop.
+
+    Returns:
+        The provider as it was, the groups it leaves orphaned and the accounts disabled.
+
+    Raises:
+        HTTPException: 404 when no provider holds the name.
     """
     from dfe_engine.auth.accounts import soft_delete_account
     from dfe_engine.auth.groups import GroupStore
@@ -949,17 +1098,15 @@ async def delete_provider(
             )
         )
 
-    registry.delete(name)
-    await run_blocking(lambda: _delete_stored_secrets(request, provider))
-    # A detached provider must stop serving logins immediately, not at restart.
-    await _refresh_rp(request)
-    audit_resource_change(user.user_id, "oidc_provider", name, "deleted")
-
-    return DetachResponse(
-        deleted=name,
-        orphaned_groups=orphaned,
-        disabled_accounts=disabled_accounts,
-    )
+    try:
+        registry.delete(name)
+    except KeyError:
+        # Another replica detached it meanwhile.
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
+        ) from None
+    return provider, orphaned, disabled_accounts
 
 
 @router.post(
@@ -976,7 +1123,7 @@ async def sync_provider_groups(
     from dfe_engine.auth.oidc.sync import sync_provider
 
     registry = _get_registry(request)
-    if registry.get(name) is None:
+    if await run_blocking(functools.partial(registry.get, name)) is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
@@ -1021,7 +1168,7 @@ async def test_provider(
     from dfe_engine.auth.oidc.adapters import get_adapter
 
     registry = _get_registry(request)
-    provider = registry.get(name)
+    provider = await run_blocking(functools.partial(registry.get, name))
     if provider is None:
         raise HTTPException(
             status_code=404,
@@ -1051,7 +1198,7 @@ async def verify_login_config(
     resolves, and the issuer's discovery document is reachable and well-formed.
     """
     registry = _get_registry(request)
-    provider = registry.get(name)
+    provider = await run_blocking(functools.partial(registry.get, name))
     if provider is None:
         raise HTTPException(
             status_code=404,

@@ -23,7 +23,6 @@ Admin endpoints require account write/reset scopes. ``GET/PUT /me`` and
 a logged-in user. Password hashes are NEVER returned in any response.
 """
 
-import functools
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -49,7 +48,7 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.api.v1.account_groups import check_group_changes
-from dfe_engine.api.v1.auth import persist_session_end, throttled
+from dfe_engine.api.v1.auth import record_session_end, throttled
 from dfe_engine.auth import account_durability, breakglass
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import (
@@ -75,7 +74,7 @@ from dfe_engine.names import InvalidNameError, StoreName
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
 
-async def _persist_account(
+def _persist_account(
     request: Request,
     settings: Settings,
     *,
@@ -88,20 +87,18 @@ async def _persist_account(
 
     Only the local admin's account doc is git-persisted; regular users are durable
     in their own store (document store/yaml), so they never touch the deploy repo.
-    The mirror is a commit and a push, so it runs on a worker thread.
+    The mirror is a commit and a push, so the routes calling this are sync and run
+    on FastAPI's threadpool.
     """
     if not account_durability.is_local_admin(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
-    return await run_blocking(
-        functools.partial(
-            _mirror_account,
-            request,
-            settings,
-            username=username,
-            account=account,
-            summary=summary,
-            actor=actor,
-        )
+    return _mirror_account(
+        request,
+        settings,
+        username=username,
+        account=account,
+        summary=summary,
+        actor=actor,
     )
 
 
@@ -149,7 +146,7 @@ def _publish_breakglass_hash(
     return account_durability.state_from_outcome(gc, outcome)
 
 
-async def _persist_password(
+def _persist_password(
     request: Request,
     settings: Settings,
     *,
@@ -164,16 +161,13 @@ async def _persist_password(
     durable in its own store. Either commit is a git write, so it runs off the loop.
     """
     if username == breakglass.USERNAME:
-        return await run_blocking(
-            functools.partial(
-                _publish_breakglass_hash,
-                request,
-                settings,
-                digest=account.password_hash,
-                actor=actor,
-            )
+        return _publish_breakglass_hash(
+            request,
+            settings,
+            digest=account.password_hash,
+            actor=actor,
         )
-    return await _persist_account(
+    return _persist_account(
         request,
         settings,
         username=username,
@@ -463,7 +457,7 @@ def _write_new_password(store: Any, existing: Account, new_password: str) -> boo
     return True
 
 
-async def _reset_stored_password(
+def _reset_stored_password(
     request: Request,
     settings: Settings,
     *,
@@ -476,6 +470,7 @@ async def _reset_stored_password(
     The new password ends every session the account held (its session marker moves).
     That end goes to the deploy repo's main ahead of the password, which may wait on
     a review, so a restart before the review merges does not revive those sessions.
+    Blocking: bcrypt, the store and git, so the routes calling it are sync.
     """
     from dfe_engine.auth.accounts import AccountStore
 
@@ -487,7 +482,7 @@ async def _reset_stored_password(
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
     _refuse_external(existing)
-    if not await run_blocking(_write_new_password, store, existing, new_password):
+    if not _write_new_password(store, existing, new_password):
         raise HTTPException(
             status_code=400,
             detail={
@@ -499,8 +494,8 @@ async def _reset_stored_password(
             },
         )
     stored = store.get(username) or existing
-    await persist_session_end(request, stored, actor=actor)
-    git = await _persist_password(
+    record_session_end(request, stored, actor=actor)
+    git = _persist_password(
         request,
         settings,
         username=username,
@@ -519,7 +514,7 @@ async def _reset_stored_password(
     status_code=201,
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
 )
-async def create_account(
+def create_account(
     body: CreateAccountRequest,
     user: CurrentUser,
     request: Request,
@@ -549,19 +544,15 @@ async def create_account(
     )
     check_group_changes(after=held_after, before=(), groups=groups, request=request, user=user)
     # The create decides: another replica can take the name after the lookup above.
-    # It hashes the password, so it runs off the event loop.
     try:
-        account = await run_blocking(
-            functools.partial(
-                store.create,
-                body.username,
-                body.password,
-                groups=body.groups,
-                email=body.email,
-                phone=body.phone,
-                name=body.name,
-                org=body.org,
-            )
+        account = store.create(
+            body.username,
+            body.password,
+            groups=body.groups,
+            email=body.email,
+            phone=body.phone,
+            name=body.name,
+            org=body.org,
         )
     except AccountExistsError as exc:
         raise conflict from exc
@@ -575,7 +566,7 @@ async def create_account(
         body.username,
         added=body.groups,
     )
-    await _persist_account(
+    _persist_account(
         request,
         settings,
         username=account.username,
@@ -594,7 +585,7 @@ async def create_account(
     response_model=PaginatedResponse[AccountResponse],
     dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
-async def list_accounts(
+def list_accounts(
     user: CurrentUser,
     request: Request,
     pagination: PaginationParams = Depends(),
@@ -636,7 +627,7 @@ async def list_accounts(
 
 
 @router.get("/me", response_model=AccountResponse)
-async def get_current_user_account(
+def get_current_user_account(
     user: CurrentUser,
     request: Request,
 ):
@@ -657,7 +648,7 @@ async def get_current_user_account(
 
 # Declared, since the path alone names the same action as GET /me.
 @router.put("/me", response_model=AccountResponse, openapi_extra=scalo_extra(verb="update-me"))
-async def update_current_user_account(
+def update_current_user_account(
     body: UpdateOwnAccountRequest,
     user: CurrentUser,
     request: Request,
@@ -676,7 +667,7 @@ async def update_current_user_account(
     account = (
         store.update(existing.username, allow_protected=False, **fields) if fields else existing
     )
-    await _persist_account(
+    _persist_account(
         request,
         settings,
         username=account.username,
@@ -693,7 +684,7 @@ async def update_current_user_account(
     response_model=AccountResponse,
     dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
-async def get_account(
+def get_account(
     username: str,
     user: CurrentUser,
     request: Request,
@@ -727,7 +718,7 @@ async def get_account(
         },
     },
 )
-async def update_account(
+def update_account(
     username: str,
     body: UpdateAccountRequest,
     user: CurrentUser,
@@ -832,8 +823,8 @@ async def update_account(
     else:
         account = store.update(username, allow_protected=False, **update_fields)
     if account.session_generation != existing.session_generation:
-        await persist_session_end(request, account, actor=user.user_id)
-    await _persist_account(
+        record_session_end(request, account, actor=user.user_id)
+    _persist_account(
         request,
         settings,
         username=account.username,
@@ -869,7 +860,7 @@ async def update_account(
         },
     },
 )
-async def reset_current_user_password(
+def reset_current_user_password(
     body: ChangeOwnPasswordRequest,
     user: CurrentUser,
     request: Request,
@@ -898,7 +889,7 @@ async def reset_current_user_password(
     wait = throttle.retry_after(account.username, client_ip)
     if wait:
         raise throttled(request, wait)
-    if not await run_blocking(store.verify_password, account.username, body.current_password):
+    if not store.verify_password(account.username, body.current_password):
         throttle.failed(account.username, client_ip)
         audit_login_denied(user.user_id, "password_change", client_ip, "wrong_current_password")
         raise HTTPException(
@@ -909,7 +900,7 @@ async def reset_current_user_password(
             },
         )
     throttle.succeeded(account.username)
-    result = await _reset_stored_password(
+    result = _reset_stored_password(
         request,
         settings,
         username=account.username,
@@ -928,7 +919,7 @@ async def reset_current_user_password(
         Depends(require_action(scopes_dict["accounts_reset_password"])),
     ],
 )
-async def reset_password(
+def reset_password(
     username: str,
     body: ResetPasswordRequest,
     user: CurrentUser,
@@ -944,7 +935,7 @@ async def reset_password(
     straight away (dev/solo) or is a pending review PR / CLI merge
     (production+team), or is a no-op file share.
     """
-    result = await _reset_stored_password(
+    result = _reset_stored_password(
         request,
         settings,
         username=username,
@@ -1026,7 +1017,7 @@ async def rotate_password(
     response_model=AccountGitState,
     dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
-async def account_git_status(
+def account_git_status(
     username: str,
     user: CurrentUser,
     request: Request,
@@ -1045,28 +1036,15 @@ async def account_git_status(
     store: AccountStore = request.app.state.account_store
     _require_account(store, username)
     gc = getattr(request.app.state, "gitcrud", None)
-    # Each poll fetches the deploy repo's remote, so it runs on a worker thread.
+    # Each poll fetches the deploy repo's remote, so the route is sync and runs on the threadpool.
     if username == breakglass.USERNAME:
-        return await run_blocking(
-            functools.partial(
-                account_durability.breakglass_state,
-                gc,
-                store,
-                environment=settings.env,
-                mode=settings.gitops.mode,
-            )
+        return account_durability.breakglass_state(
+            gc, store, environment=settings.env, mode=settings.gitops.mode
         )
     if not account_durability.is_local_admin(username, settings.auth.local.admin_name):
         return account_durability.not_git_backed_state()
-    return await run_blocking(
-        functools.partial(
-            account_durability.remote_state,
-            gc,
-            store,
-            username,
-            environment=settings.env,
-            mode=settings.gitops.mode,
-        )
+    return account_durability.remote_state(
+        gc, store, username, environment=settings.env, mode=settings.gitops.mode
     )
 
 
@@ -1085,7 +1063,7 @@ async def account_git_status(
         },
     },
 )
-async def delete_account(
+def delete_account(
     username: str,
     user: CurrentUser,
     request: Request,
@@ -1148,7 +1126,7 @@ async def delete_account(
     "/{username}/attributes",
     dependencies=[Depends(require_action(scopes_dict["account_attributes_read"]))],
 )
-async def get_account_attributes(
+def get_account_attributes(
     username: str,
     user: CurrentUser,
     request: Request,
@@ -1165,7 +1143,7 @@ async def get_account_attributes(
     "/{username}/attributes",
     dependencies=[Depends(require_action(scopes_dict["account_attributes_write"]))],
 )
-async def put_account_attributes(
+def put_account_attributes(
     username: str,
     body: AttributesRequest,
     user: CurrentUser,
@@ -1185,7 +1163,7 @@ async def put_account_attributes(
     "/{username}/sensitive-attributes",
     dependencies=[Depends(require_action(scopes_dict["account_attributes_read_sensitive"]))],
 )
-async def get_account_sensitive_attributes(
+def get_account_sensitive_attributes(
     username: str,
     user: CurrentUser,
     request: Request,
@@ -1207,7 +1185,7 @@ async def get_account_sensitive_attributes(
     "/{username}/sensitive-attributes",
     dependencies=[Depends(require_action(scopes_dict["account_attributes_write_sensitive"]))],
 )
-async def put_account_sensitive_attributes(
+def put_account_sensitive_attributes(
     username: str,
     body: AttributesRequest,
     user: CurrentUser,
