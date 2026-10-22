@@ -64,6 +64,8 @@ OWNER_LOST_SECONDS = 30.0
 HEARTBEAT_SECONDS = 5.0
 # How often an owner reads for cancels and writes progress, so a cancel lands within two.
 WATCH_SECONDS = 1.0
+# Half the 16 MiB document the store takes, so the record holding the largest result fits.
+MAX_RESULT_BYTES = 8 * 1024 * 1024
 
 _ENDED = [status.value for status in TaskStatus if status.is_terminal]
 
@@ -219,7 +221,13 @@ class DocumentTaskManager(TaskManager):
     Reads, lists and cancels go to the store, so every replica sees every task. This
     replica's own tasks keep their coroutine and live progress in memory until the
     store holds how each ended.
+
+    A result over :data:`MAX_RESULT_BYTES` as JSON fails its task with
+    :data:`~dfe_engine.api.task_manager.TASK_RESULT_TOO_LARGE`, since the record
+    holding it would not fit in the store.
     """
+
+    _result_limit = MAX_RESULT_BYTES
 
     def __init__(
         self, store: DocuStore, *, owner: str | None = None, max_completed: int = 1000
