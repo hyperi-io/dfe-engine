@@ -27,6 +27,7 @@ from dfe_engine.exchange.models import (
 from dfe_engine.schema.models import MetaSchema
 
 if TYPE_CHECKING:
+    from dfe_engine.gitcrud.routing import ReviewRouting
     from dfe_engine.schema.registry import SchemaRegistry
 
 
@@ -103,6 +104,7 @@ def apply_meta_schema_export(
     *,
     created_by: str | None = None,
     dry_run: bool = False,
+    routing: ReviewRouting | None = None,
 ) -> MetaSchemaImportResult:
     """Apply one meta-schema document to this deployment.
 
@@ -115,6 +117,7 @@ def apply_meta_schema_export(
         document: The exchange document.
         created_by: Git author for the commit.
         dry_run: Run every check and report the outcome, writing nothing.
+        routing: Collects where a deploy-repo write landed.
 
     Returns:
         What was done, or would be done under ``dry_run``.
@@ -162,6 +165,7 @@ def apply_meta_schema_export(
             meta,
             created_by=created_by,
             description=f"schema: import {canonical}",
+            routing=routing,
         )
     except SchemaValidationError as exc:
         raise ExchangeError(str(exc)) from exc

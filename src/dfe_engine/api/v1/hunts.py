@@ -38,10 +38,15 @@ from dfe_engine.api.deps import (
     require_action,
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
-from dfe_engine.api.review import apply_review_headers, review_audit_detail
+from dfe_engine.api.review import (
+    apply_review_headers,
+    apply_routing_headers,
+    review_audit_detail,
+)
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.hunt_runner.run_status import RunStatus, live_runner_count, read_run_status
 from dfe_engine.hunt_runner.spec_loader import interval_seconds_for
 from dfe_engine.hunt_runner.spread import next_due
@@ -617,9 +622,14 @@ def delete_hunt(
             status_code=404,
             detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
+    cascade = ReviewRouting()
     if alert_registry is not None:
-        delete_destinations_owned_by_hunt(alert_registry, registry, name)
+        delete_destinations_owned_by_hunt(
+            alert_registry, registry, name, created_by=user.user_id, routing=cascade
+        )
     outcome = registry.delete(name, created_by=user.user_id)
+    # The hunt's own PR goes on last, so it is the one X-DFE-PR-Url names.
+    apply_routing_headers(response, cascade)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", name, "deleted", review_audit_detail(outcome))
 

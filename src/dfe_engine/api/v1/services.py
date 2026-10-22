@@ -7,22 +7,29 @@ DELETE /api/v1/services/{service}/{instance}   -> Delete config
 POST   /api/v1/services/{service}/{instance}/validate  -> Dry-run validate
 GET    /api/v1/services/{service}/{instance}/history   -> Git history
 POST   /api/v1/services/seed                   -> Seed built-in defaults
+
+With gitops on, a write is a deploy-repo commit routed by the deployment's
+posture, so a production+team write sits on a review branch and the
+``X-DFE-Review-Required`` header says so.
 """
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, SecretStr
 
 from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.review import apply_routing_headers, routing_audit_detail
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
+from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.services.registry import ConfigNotFoundError, stored_form
 
-router = APIRouter(prefix="/services", tags=["Services"])
+router = APIRouter(prefix="/services", tags=["Services"], dependencies=[WRITE_TURN])
 
 _SECRET_MASK = str(SecretStr("x"))
 """pydantic's own placeholder for a set secret, which a write still reads as the mask."""
@@ -99,7 +106,7 @@ class SeedResponse(BaseModel):
     response_model=PaginatedResponse[ServiceConfigSummary],
     dependencies=[Depends(require_action(scopes_dict["service_read"]))],
 )
-async def list_service_configs(
+def list_service_configs(
     user: CurrentUser,
     registry: ServiceConfigReg,
     pagination: PaginationParams = Depends(),
@@ -128,7 +135,7 @@ async def list_service_configs(
     response_model=ServiceConfigDetail,
     dependencies=[Depends(require_action(scopes_dict["service_read"]))],
 )
-async def get_service_config(
+def get_service_config(
     service: str,
     instance: str,
     user: CurrentUser,
@@ -152,12 +159,13 @@ async def get_service_config(
     "/{service}/{instance}",
     dependencies=[Depends(require_action(scopes_dict["service_write"]))],
 )
-async def save_service_config(
+def save_service_config(
     service: str,
     instance: str,
     body: dict[str, Any],
     user: CurrentUser,
     registry: ServiceConfigReg,
+    response: Response,
 ):
     """Create or update a service config.
 
@@ -189,13 +197,22 @@ async def save_service_config(
         ) from exc
     removed = {key for key, value in body.items() if value is None}
     config = {key: value for key, value in stored.items() if key not in removed} | restored
+    routing = ReviewRouting()
     registry.save_config(
         service=service,
         config=config,
         instance=instance,
         created_by=git_author(user),
+        routing=routing,
     )
-    audit_resource_change(user.user_id, "service_config", f"{service}/{instance}", "updated")
+    apply_routing_headers(response, routing)
+    audit_resource_change(
+        user.user_id,
+        "service_config",
+        f"{service}/{instance}",
+        "updated",
+        routing_audit_detail(routing),
+    )
     return {"service": service, "instance": instance, "message": "saved"}
 
 
@@ -204,11 +221,12 @@ async def save_service_config(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["service_delete"]))],
 )
-async def delete_service_config(
+def delete_service_config(
     service: str,
     instance: str,
     user: CurrentUser,
     registry: ServiceConfigReg,
+    response: Response,
 ):
     """Delete a service config."""
     # Verify existence before delete (delete_config is a no-op on missing)
@@ -222,8 +240,16 @@ async def delete_service_config(
                 "message": f"Service config '{service}/{instance}' not found",
             },
         )
-    registry.delete_config(service, instance)
-    audit_resource_change(user.user_id, "service_config", f"{service}/{instance}", "deleted")
+    routing = ReviewRouting()
+    registry.delete_config(service, instance, created_by=git_author(user), routing=routing)
+    apply_routing_headers(response, routing)
+    audit_resource_change(
+        user.user_id,
+        "service_config",
+        f"{service}/{instance}",
+        "deleted",
+        routing_audit_detail(routing),
+    )
 
 
 @router.post(
@@ -231,7 +257,7 @@ async def delete_service_config(
     response_model=ValidationResult,
     dependencies=[Depends(require_action(scopes_dict["service_validate"]))],
 )
-async def validate_service_config(
+def validate_service_config(
     service: str,
     instance: str,
     body: dict[str, Any],
@@ -250,7 +276,7 @@ async def validate_service_config(
     response_model=list[ConfigHistoryEntry],
     dependencies=[Depends(require_action(scopes_dict["service_read"]))],
 )
-async def get_service_config_history(
+def get_service_config_history(
     service: str,
     instance: str,
     user: CurrentUser,
@@ -282,8 +308,12 @@ async def get_service_config_history(
     response_model=SeedResponse,
     dependencies=[Depends(require_action(scopes_dict["service_write"]))],
 )
-async def seed_service_configs(user: CurrentUser, registry: ServiceConfigReg):
+def seed_service_configs(user: CurrentUser, registry: ServiceConfigReg, response: Response):
     """Seed built-in default service configs. Non-destructive."""
-    count = registry.seed_defaults(overwrite=False)
-    audit_resource_change(user.user_id, "service_config", "all", "seeded")
+    routing = ReviewRouting()
+    count = registry.seed_defaults(overwrite=False, created_by=git_author(user), routing=routing)
+    apply_routing_headers(response, routing)
+    audit_resource_change(
+        user.user_id, "service_config", "all", "seeded", routing_audit_detail(routing)
+    )
     return SeedResponse(seeded=count)

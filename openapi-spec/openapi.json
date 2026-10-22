@@ -10577,7 +10577,7 @@
           "Alerts"
         ],
         "summary": "Create Destination",
-        "description": "Create an alert destination.\n\nLinking it to a hunt writes the hunt YAML, so in production+team that link is\nrouted to a review branch and ``X-DFE-Review-Required`` says so.",
+        "description": "Create an alert destination.\n\nThe destination write, and linking it to a hunt, which writes the hunt YAML, are\neach routed to a review branch in production+team, and ``X-DFE-Review-Required``\nsays so.",
         "operationId": "alerts.create-destination",
         "requestBody": {
           "required": true,
@@ -10741,7 +10741,7 @@
           "Alerts"
         ],
         "summary": "Update Destination",
-        "description": "Update an alert destination.\n\nLinking it to a hunt writes the hunt YAML, so in production+team that link is\nrouted to a review branch and ``X-DFE-Review-Required`` says so.",
+        "description": "Update an alert destination.\n\nThe destination write, and linking it to a hunt, which writes the hunt YAML, are\neach routed to a review branch in production+team, and ``X-DFE-Review-Required``\nsays so.",
         "operationId": "alerts.destinations.apply",
         "parameters": [
           {
@@ -10833,7 +10833,7 @@
           "Alerts"
         ],
         "summary": "Delete Destination",
-        "description": "Delete an alert destination.",
+        "description": "Delete an alert destination.\n\nA production+team delete is routed to a review branch, so hunts keep alerting the\ndestination until that branch is merged, and ``X-DFE-Review-Required`` says so.",
         "operationId": "alerts.destinations.delete",
         "parameters": [
           {
@@ -16113,7 +16113,7 @@
           "schemas"
         ],
         "summary": "Delete Meta Schema",
-        "description": "Delete a meta-schema definition by registry path.",
+        "description": "Delete a meta-schema definition by registry path.\n\nWith gitops on this removes the deployment's copy, so a schema the image also\nships reads as shipped again. A schema only the image ships answers 409.",
         "operationId": "schemas.definitions.delete",
         "parameters": [
           {

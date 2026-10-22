@@ -957,3 +957,70 @@ class TestPromoteFieldOnLandingSource:
 
         assert resp.status_code == 200
         assert resp.json()["rows"] == [{"_json": {"user": {"id": 1}}}]
+
+
+class TestPromoteFieldOverTheDeployRepo:
+    """With gitops on, the core schema's fork and the promoted version are deploy-repo writes."""
+
+    @staticmethod
+    def _bind(settings: DFESettings, tmp_path: Path, *, environment: str, mode: str, forge=None):
+        from dfe_engine.gitcrud import GitCrud, default_registry
+        from dfe_engine.gitops.repo import GitopsRepo
+        from dfe_engine.hunts.deploy_repo import DeployRepoStore
+        from dfe_engine.schema.registry import META_CLASS, SchemaRegistry
+
+        crud = GitCrud(
+            GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry()
+        )
+        # An empty repo has no base to branch a review from, so main carries a first commit.
+        crud.put("gov_settings", "seed", {"seed": True}, "seed")
+        store = DeployRepoStore(
+            crud, META_CLASS, environment=environment, mode=mode, forge=forge, commit_type="schema"
+        )
+        _registries["meta_schema"].close()
+        _registries["meta_schema"] = SchemaRegistry(
+            settings.schemas.schemas_dir, refresh_interval=0, deploy_repo=store
+        )
+        return crud
+
+    def test_the_fork_and_its_new_version_land_in_the_deploy_repo(
+        self, settings: DFESettings, client: TestClient, admin_headers, tmp_path
+    ):
+        crud = self._bind(settings, tmp_path, environment="dev", mode="team")
+
+        resp = client.post(
+            f"/api/v1/schemas/{CORE_SOURCE}/promote-field",
+            json={"json_path": "user.email", "data_type": "string"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["schema_version"] == "1.1.0"
+        fork = crud.get("meta_schemas", CORE_FORK_PATH)
+        assert sorted(fork["versions"]) == ["1.0.0", "1.1.0"]
+        assert fork["resource_type"] == "custom"
+        assert not (Path(settings.schemas.schemas_dir) / f"{CORE_FORK_PATH}.yaml").exists()
+
+    def test_production_team_keeps_both_writes_off_main_and_says_so(
+        self, settings: DFESettings, client: TestClient, admin_headers, tmp_path
+    ):
+        """The version starts from the fork as written, which review left off main."""
+        from dfe_engine.gitcrud.forge import PullRequest
+
+        class _Forge:
+            def open_pull_request(self, *, head, base, title, body) -> PullRequest:
+                return PullRequest(number=9, url=f"http://forge/{head}", branch=head)
+
+        crud = self._bind(settings, tmp_path, environment="production", mode="team", forge=_Forge())
+        main_before = crud.head_revision()
+
+        resp = client.post(
+            f"/api/v1/schemas/{CORE_SOURCE}/promote-field",
+            json={"json_path": "user.email", "data_type": "string"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["schema_version"] == "1.1.0"
+        assert resp.headers["X-DFE-Review-Required"] == "true"
+        assert crud.head_revision() == main_before
