@@ -35,6 +35,7 @@ from dfe_engine.services.models.transform_vrl import TransformVrlConfig
 from dfe_engine.services.registry import stored_form
 from dfe_engine.services.templates import generate_template
 from dfe_engine.yaml_utils import yaml_load_string
+from tests.support.config_schema import definitions, unread_keys
 from tests.support.producer_contract import (
     DFE_LOADER,
     DFE_RECEIVER,
@@ -145,51 +146,6 @@ def _every_block(model: type[BaseModel]) -> dict[str, Any]:
     return doc
 
 
-def _variants(node: Any, defs: dict[str, Any]) -> list[dict[str, Any]]:
-    """The schemas a value at ``node`` may match, references and unions expanded."""
-    if not isinstance(node, dict):
-        return []
-    while "$ref" in node:
-        node = defs[node["$ref"].rsplit("/", 1)[-1]]
-    found: list[dict[str, Any]] = []
-    for key in ("anyOf", "oneOf", "allOf"):
-        for sub in node.get(key, []):
-            found.extend(_variants(sub, defs))
-    return found or [node]
-
-
-def _unread_keys(value: Any, node: Any, defs: dict[str, Any], path: str = "") -> list[str]:
-    """Every key path in ``value`` that the schema ``node`` gives no field for."""
-    variants = _variants(node, defs)
-    if isinstance(value, list):
-        items = [v["items"] for v in variants if isinstance(v.get("items"), dict)]
-        if not items:
-            return []
-        return [key for item in value for key in _unread_keys(item, items[0], defs, f"{path}[]")]
-    if not isinstance(value, dict):
-        return []
-    structs = [v for v in variants if "properties" in v or "additionalProperties" in v]
-    # No struct to compare against, or one that takes any key: nothing is unread.
-    if not structs or any(v.get("additionalProperties") is True for v in structs):
-        return []
-    fields: dict[str, Any] = {}
-    entries: dict[str, Any] | None = None
-    for struct in structs:
-        fields.update(struct.get("properties", {}))
-        if isinstance(struct.get("additionalProperties"), dict):
-            entries = struct["additionalProperties"]
-    unread: list[str] = []
-    for key, sub in value.items():
-        where = f"{path}.{key}" if path else key
-        if key in fields:
-            unread.extend(_unread_keys(sub, fields[key], defs, where))
-        elif entries is not None:
-            unread.extend(_unread_keys(sub, entries, defs, where))
-        else:
-            unread.append(where)
-    return unread
-
-
 @pytest.fixture(scope="module")
 def schemas() -> dict[str, dict[str, Any]]:
     """Each app's config schema at its pinned release, keyed by engine service name."""
@@ -219,8 +175,7 @@ _WRITERS = [(service, writer) for service in _APPS for writer, _ in _written(ser
 
 
 def _unread_in(doc: dict[str, Any], schema: dict[str, Any]) -> set[str]:
-    defs = schema.get("$defs", schema.get("definitions", {}))
-    return set(_unread_keys(doc, schema, defs))
+    return set(unread_keys(doc, schema, definitions(schema)))
 
 
 def _unread_by(service: str, writer: str, schema: dict[str, Any]) -> set[str]:

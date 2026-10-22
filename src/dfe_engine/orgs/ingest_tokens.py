@@ -16,18 +16,22 @@ per-listener secrets are derived: :func:`sync_bearer_tokens` rewrites them from 
 credentials after every change, so a deleted credential's token, or a disabled org's,
 stops working whichever writer made the change.
 
+The receiver authenticates a listener only while an accepted credential lists it.
+:func:`compile_listener_auth` compiles ``mode: bearer`` on that listener's secret then,
+and ``mode: none`` otherwise, under which a record lands in the default org.
+
 No token is ever logged, and none is read back out of the API after the request
 that mints it.
 """
 
 import secrets as random_tokens
 from collections.abc import Iterable
-from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
 
-from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, IngestCredential
+from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, IngestCredential, IngestListener
+from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.secrets import DfeSecrets
 
 if TYPE_CHECKING:
@@ -37,8 +41,19 @@ if TYPE_CHECKING:
 CREDENTIAL_SECRET_PREFIX = "ingest/credentials"
 BEARER_SECRET_PREFIX = "ingest/bearer-tokens"
 
+RECEIVER_BEARER_MOUNT = "/var/run/secrets/dfe/ingest-bearer-tokens"
+"""Where dfe-receiver mounts the file backend's ``ingest/bearer-tokens`` directory, read-only.
+
+The ``file`` backend writes under the engine's own volume, so the receiver reads the
+directory where the deployment mounts it rather than where the engine wrote it.
+"""
+
 # 32 random bytes, URL-safe base64: no ':' and no line break, the receiver's two separators.
 _TOKEN_BYTES = 32
+
+
+class BearerSourceUnreadableError(ValueError):
+    """The engine's secrets backend holds the bearer tokens where dfe-receiver cannot read them."""
 
 
 def credential_secret_path(name: str) -> str:
@@ -51,29 +66,72 @@ def bearer_secret_path(listener: str) -> str:
     return f"{BEARER_SECRET_PREFIX}/{listener}"
 
 
-def bearer_secret_source(listener: str, backend: SecretsSettings) -> str | None:
+def bearer_secret_source(listener: str, backend: SecretsSettings) -> str:
     """dfe-receiver's ``secret_source`` for *listener*'s bearer secret, where *backend* holds it.
 
     The spec names the secret as :class:`~dfe_engine.secrets.DfeSecrets` writes it: under
-    the KV mount on OpenBao, under the name prefix on AWS Secrets Manager, under the root
-    directory for ``file``. An ``aws:`` spec resolves only in a receiver built with
-    scalo's ``secrets-aws``, and a ``file:`` one only where the receiver mounts that
-    directory.
+    the KV mount on OpenBao, under the name prefix on AWS Secrets Manager. A ``file``
+    secret is named under :data:`RECEIVER_BEARER_MOUNT`. An ``aws:`` spec resolves only
+    in a receiver built with scalo's ``secrets-aws``.
 
-    Returns:
-        The spec, or None for ``ansible_vault``, whose encrypted file the receiver
-        cannot read.
+    Raises:
+        BearerSourceUnreadableError: *backend* is one of scalo-py's providers that
+            dfe-receiver reads no secret from, or no provider scalo-py has.
     """
     path = bearer_secret_path(listener)
     match backend.provider:
         case "openbao" | "vault":
-            return f"vault:{backend.mount}/{path}:value"
+            stored = f"{backend.mount}/{path}" if backend.mount else path
+            return f"vault:{stored}:value"
         case "aws":
             return f"aws:{backend.name_prefix}/{path}"
         case "file":
-            return f"file:{Path(backend.path) / path}"
+            return f"file:{RECEIVER_BEARER_MOUNT}/{listener}"
+        case "gcp" | "azure":
+            reason = "it has no provider for that backend"
+        case "ansible_vault":
+            reason = "it cannot decrypt an ansible-vault file"
         case _:
-            return None
+            reason = "that is not a scalo secrets provider"
+    raise BearerSourceUnreadableError(
+        f"dfe-receiver cannot read the ingest bearer tokens on "
+        f"DFE_SECRETS_PROVIDER={backend.provider}: {reason}. Use openbao or aws, or file with "
+        f"the receiver mounting DFE_SECRETS_PATH/{BEARER_SECRET_PREFIX} at {RECEIVER_BEARER_MOUNT}"
+    )
+
+
+def compile_listener_auth(
+    tenancy: Tenancy, backend: SecretsSettings
+) -> dict[IngestListener, dict[str, Any]]:
+    """Each bearer listener's dfe-receiver ``auth`` block.
+
+    ``mode: bearer`` on the listener's secret while an accepted credential lists the
+    listener, else ``mode: none``, under which the receiver lands a record in the
+    default org. :func:`sync_bearer_tokens` writes the secret from the same accepted
+    credentials, so the mode and the secret agree on which ones a listener takes.
+
+    Args:
+        tenancy: The orgs and credentials to compile.
+        backend: The engine's secrets backend, which holds each listener's secret.
+
+    Returns:
+        The block by listener, every listener present.
+
+    Raises:
+        BearerSourceUnreadableError: A listener needs its secret and *backend* holds it
+            where dfe-receiver cannot read it.
+    """
+    listed: set[str] = set()
+    for credential in accepted_credentials(tenancy):
+        listed.update(credential.listeners)
+    blocks: dict[IngestListener, dict[str, Any]] = {}
+    for listener in BEARER_LISTENERS:
+        if listener not in listed:
+            blocks[listener] = {"mode": "none"}
+            continue
+        source = bearer_secret_source(listener, backend)
+        blocks[listener] = {"mode": "bearer", "bearer": {"secret_source": source}}
+    return blocks
 
 
 def mint_token() -> str:
@@ -119,10 +177,10 @@ def bearer_entries(credentials: Iterable[IngestCredential], secrets: DfeSecrets)
     }
 
 
-def accepted_credentials(registry: OrgRegistry) -> list[IngestCredential]:
+def accepted_credentials(tenancy: Tenancy) -> list[IngestCredential]:
     """The credentials the receiver accepts: those whose owning org is registered and enabled."""
-    enabled = {org.name for org in registry.list() if org.enabled}
-    return [c for c in registry.ingest_credentials.list() if c.org in enabled]
+    enabled = {org.name for org in tenancy.orgs if org.enabled}
+    return [c for c in tenancy.credentials if c.org in enabled]
 
 
 def sync_bearer_tokens(registry: OrgRegistry, secrets: DfeSecrets) -> list[str]:
@@ -136,7 +194,8 @@ def sync_bearer_tokens(registry: OrgRegistry, secrets: DfeSecrets) -> list[str]:
         The listeners whose secret was rewritten.
     """
     rewritten = []
-    for listener, content in bearer_entries(accepted_credentials(registry), secrets).items():
+    accepted = accepted_credentials(Tenancy.read(registry))
+    for listener, content in bearer_entries(accepted, secrets).items():
         path = bearer_secret_path(listener)
         if secrets.get_or_none(path) == content:
             continue

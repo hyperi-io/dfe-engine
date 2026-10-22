@@ -90,6 +90,7 @@ from dfe_engine.exchange.schemas import ExchangeError
 from dfe_engine.exchange.sources import apply_source_bundle, build_source_bundle
 from dfe_engine.git_identity import git_author
 from dfe_engine.manifest import ManifestError
+from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError
 from dfe_engine.schema.applier import SchemaApplyError, live_tables
 from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.schema.lock import SchemaLockBusyError, SchemaLockError, ddl_lease
@@ -430,6 +431,10 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
         detail = exc.detail if isinstance(exc.detail, str) else exc.detail.get("message", "")
         logger.warning(f"apps not reconciled with the sources: {detail}")
         return AppsSync(changes=done, error=str(detail), restart_required=_one_per_app(hints))
+    except BearerSourceUnreadableError as exc:
+        # The engine's own text, naming the setting to change, so it reaches the caller.
+        logger.warning(f"apps not reconciled with the sources: {exc}")
+        return AppsSync(changes=done, error=str(exc), restart_required=_one_per_app(hints))
     except Exception as exc:
         # Anything but an HTTPException can be the deploy repo's own text.
         error = hide_backend_text(

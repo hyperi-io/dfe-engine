@@ -15,6 +15,7 @@ from dfe_engine.orgs.ingest_credentials import (
     IngestCredential,
 )
 from dfe_engine.orgs.ingest_tokens import (
+    BearerSourceUnreadableError,
     accepted_credentials,
     bearer_entries,
     bearer_secret_path,
@@ -263,8 +264,9 @@ class TestTokens:
                 "vault:kv-dfe/ingest/bearer-tokens/http:value",
             ),
             (
+                # The engine's own volume is mounted into the receiver, not shared by path.
                 SecretsSettings(provider="file", path="/app/config/.secrets"),
-                "file:/app/config/.secrets/ingest/bearer-tokens/http",
+                "file:/var/run/secrets/dfe/ingest-bearer-tokens/http",
             ),
         ],
         ids=["aws", "openbao", "vault", "file"],
@@ -274,7 +276,8 @@ class TestTokens:
 
     def test_an_ansible_vault_backend_has_no_source_the_receiver_reads(self):
         # The receiver cannot decrypt an ansible-vault file.
-        assert bearer_secret_source("http", SecretsSettings(provider="ansible_vault")) is None
+        with pytest.raises(BearerSourceUnreadableError, match="cannot decrypt"):
+            bearer_secret_source("http", SecretsSettings(provider="ansible_vault"))
 
     def test_a_listener_no_credential_names_holds_no_token(self, secrets):
         # Never empty, so a backend that refuses an empty value still takes it.
@@ -314,4 +317,4 @@ class TestTokens:
         registry.ingest_credentials.put(_credential("beta-hec", org="beta"))
         registry.update("acme", enabled=False)
 
-        assert [c.name for c in accepted_credentials(registry)] == ["beta-hec"]
+        assert [c.name for c in accepted_credentials(Tenancy.read(registry))] == ["beta-hec"]
