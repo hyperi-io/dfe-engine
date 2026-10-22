@@ -48,9 +48,10 @@ database, which a server without them refuses (dfe-schemas
 and keep its SQL users and roles in Keeper.
 
 The document store resolves separately (``mongo_uri``): ``DFE_TEST_MONGO_URI`` if
-set, else one FerretDB per xdist worker on the same docker host, named
-`dfe-engine-test-integration-<worker>-<pid>-ferretdb` and removed at session end.
-DFE_TEST_KEEP does not apply to it.
+set, else one DocumentDB per xdist worker on the same docker host, named
+`dfe-engine-test-integration-<worker>-<pid>-documentdb` and removed at session end.
+Its gateway requires TLS, verified against a CA minted for the session, and a
+SCRAM-SHA-256 login, as a deployed store does. DFE_TEST_KEEP does not apply to it.
 
 The Kafka broker resolves the same way (``kafka_bootstrap``): ``DFE_TEST_KAFKA_BOOTSTRAP``
 if set, else one KRaft broker per xdist worker on local docker, named
@@ -90,14 +91,18 @@ _CH_TAG = "26.3.42.3"
 _CH_DIGEST = "sha256:21d572843e59539c7d100286b6f5a6053c341fe4b33c2d7b74b1ff7cb24c5399"
 _DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}@{_CH_DIGEST}"
 
-# The document store production runs (dfe-infra versions.yaml); the eval image
-# bundles its PostgreSQL + DocumentDB backend into one container. versions.yaml
-# pins the production image, not this one, so the digest is ghcr's index for the tag.
-# renovate: datasource=docker depName=ghcr.io/ferretdb/ferretdb-eval
-_FERRETDB_TAG = "2.7.0"
-_FERRETDB_DIGEST = "sha256:1bf47a449dd65839aabfc1a535d1370c98326f8a90de20437eda0aeb30bd8dd5"
-_FERRETDB_IMAGE = f"ghcr.io/ferretdb/ferretdb-eval:{_FERRETDB_TAG}@{_FERRETDB_DIGEST}"
-_FERRETDB_USER = "dfe"
+# The engine's document store: PostgreSQL with the DocumentDB extension and its
+# Mongo-wire gateway in one image. The digest is ghcr's multi-arch index for the tag.
+# renovate: datasource=docker depName=ghcr.io/documentdb/documentdb/documentdb-local
+_DOCUMENTDB_TAG = "pg18-1.0.0"
+_DOCUMENTDB_DIGEST = "sha256:03aef53ed72cd3007236f8ce1b4ef7a0c958dbbce1519074b85d8a3e10be89a5"
+_DOCUMENTDB_IMAGE = (
+    f"ghcr.io/documentdb/documentdb/documentdb-local:{_DOCUMENTDB_TAG}@{_DOCUMENTDB_DIGEST}"
+)
+_DOCUMENTDB_USER = "dfe"
+_DOCUMENTDB_PORT = 10260
+_DOCUMENTDB_ENTRYPOINT = "/home/documentdb/gateway/scripts/emulator_entrypoint.sh"
+_DOCUMENTDB_TLS_DIR = "/tmp/dfe-tls"
 
 # The broker dfe-infra runs on the docker path, at the digest versions.yaml pins for the tag.
 # renovate: datasource=docker depName=apache/kafka
@@ -1082,8 +1087,8 @@ def _engine_api(
 def _mongo_when_ready(uri: str, timeout: float = 180.0, delay: float = 1.0) -> None:
     """Poll until an authenticated listDatabases succeeds; ping answers before the backend.
 
-    The eval image initialises its PostgreSQL on first start, and with one container
-    per xdist worker starting at once that has taken longer than a minute on CI.
+    The image initialises its PostgreSQL on first start, and with one container per
+    xdist worker starting at once that has taken longer than a minute on CI.
     """
     from pymongo import MongoClient
 
@@ -1094,12 +1099,139 @@ def _mongo_when_ready(uri: str, timeout: float = 180.0, delay: float = 1.0) -> N
         try:
             client.list_database_names()
             return
-        except Exception as exc:  # FerretDB or its PostgreSQL still starting
+        except Exception as exc:  # the gateway or its PostgreSQL still starting
             last = exc
             time.sleep(delay)
         finally:
             client.close()
     raise last if last is not None else RuntimeError("document store unreachable")
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayTls:
+    """A throwaway CA and the certificate it signs for the document-store gateway, as PEM.
+
+    Attributes:
+        ca: The CA certificate the client verifies the gateway against.
+        cert: The gateway's certificate.
+        key: The gateway's private key, unencrypted PKCS#8.
+    """
+
+    ca: bytes
+    cert: bytes
+    key: bytes
+
+
+def gateway_tls(host: str) -> GatewayTls:
+    """Mint a CA and a gateway certificate whose subjectAltName carries *host* and localhost.
+
+    The extensions are the ones Python's strict chain verification requires of a CA
+    and of the leaf it signs.
+    """
+    import ipaddress
+    from datetime import UTC, datetime, timedelta
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+
+    def usage(*, cert_sign: bool) -> x509.KeyUsage:
+        return x509.KeyUsage(
+            digital_signature=not cert_sign,
+            content_commitment=False,
+            key_encipherment=False,
+            data_encipherment=False,
+            key_agreement=False,
+            key_cert_sign=cert_sign,
+            crl_sign=cert_sign,
+            encipher_only=False,
+            decipher_only=False,
+        )
+
+    now = datetime.now(UTC)
+    ca_key = ec.generate_private_key(ec.SECP384R1())
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "dfe-engine-test-documentdb-ca")])
+    ca_ski = x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key())
+    ca = (
+        x509.CertificateBuilder()
+        .subject_name(ca_name)
+        .issuer_name(ca_name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(usage(cert_sign=True), critical=True)
+        .add_extension(ca_ski, critical=False)
+        .sign(ca_key, hashes.SHA384())
+    )
+
+    try:
+        names: list[x509.GeneralName] = [x509.IPAddress(ipaddress.ip_address(host))]
+    except ValueError:
+        names = [x509.DNSName(host)]
+    if host != "localhost":
+        names.append(x509.DNSName("localhost"))
+    key = ec.generate_private_key(ec.SECP384R1())
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "documentdb")]))
+        .issuer_name(ca_name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+        .add_extension(usage(cert_sign=False), critical=True)
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .add_extension(x509.SubjectAlternativeName(names), critical=False)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(ca_ski), critical=False
+        )
+        .sign(ca_key, hashes.SHA384())
+    )
+    return GatewayTls(
+        ca=ca.public_bytes(serialization.Encoding.PEM),
+        cert=cert.public_bytes(serialization.Encoding.PEM),
+        key=key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ),
+    )
+
+
+def documentdb_run_args(tls: GatewayTls, password: str) -> list[str]:
+    """The tail of a ``docker run`` that starts the gateway on *tls* behind a SCRAM login.
+
+    The certificate and key travel in environment variables rather than a mount, so a
+    remote docker host reached over ssh needs no file of its own.
+    """
+    script = (
+        f"umask 077 && mkdir -p {_DOCUMENTDB_TLS_DIR} "
+        f'&& printf %s "$DFE_TEST_TLS_CERT" | base64 -d > {_DOCUMENTDB_TLS_DIR}/tls.crt '
+        f'&& printf %s "$DFE_TEST_TLS_KEY" | base64 -d > {_DOCUMENTDB_TLS_DIR}/tls.key '
+        f"&& exec {_DOCUMENTDB_ENTRYPOINT}"
+    )
+    env = {
+        "USERNAME": _DOCUMENTDB_USER,
+        "PASSWORD": password,
+        "TLS_MODE": "requireTLS",
+        "CERT_PATH": f"{_DOCUMENTDB_TLS_DIR}/tls.crt",
+        "KEY_FILE": f"{_DOCUMENTDB_TLS_DIR}/tls.key",
+        # Off, the gateway listens on the container's loopback only.
+        "ALLOW_EXTERNAL_CONNECTIONS": "true",
+        # On upstream, it reports to a third party at start and hourly.
+        "DOCUMENTDB_USAGE_TELEMETRY": "false",
+        "DFE_TEST_TLS_CERT": base64.b64encode(tls.cert).decode("ascii"),
+        "DFE_TEST_TLS_KEY": base64.b64encode(tls.key).decode("ascii"),
+    }
+    args: list[str] = []
+    for name, value in env.items():
+        args.extend(["-e", f"{name}={value}"])
+    return [*args, "--entrypoint", "/bin/bash", _DOCUMENTDB_IMAGE, "-c", script]
 
 
 def _log_tail(docker: list[str], name: str, lines: int = 15) -> str:
@@ -1112,12 +1244,13 @@ def _log_tail(docker: list[str], name: str, lines: int = 15) -> str:
 
 
 @pytest.fixture(scope="session")
-def mongo_uri():
-    """A mongo-wire document store URI: ``DFE_TEST_MONGO_URI``, else FerretDB on docker.
+def mongo_uri(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
+    """A mongo-wire document store URI: ``DFE_TEST_MONGO_URI``, else DocumentDB on docker.
 
     Session-scoped, so each xdist worker starts one container and its tests share it;
     every test isolates itself in a throwaway database. The name carries the pid
-    because concurrent runs on one host each have a ``gw0``.
+    because concurrent runs on one host each have a ``gw0``. The URI verifies the
+    gateway's certificate against the CA minted here and logs in with SCRAM-SHA-256.
     """
     configured = os.environ.get("DFE_TEST_MONGO_URI", "").strip()
     if configured:
@@ -1126,41 +1259,44 @@ def mongo_uri():
 
     spec = os.environ.get("DFE_TEST_DOCKER_HOST") or "local"
     docker = _docker_prefix(spec)
+    host = _reach_address(spec)
     worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    name = _container_name(f"{worker}-{os.getpid()}", "ferretdb")
+    name = _container_name(f"{worker}-{os.getpid()}", "documentdb")
     password = secrets.token_hex(16)
+    tls = gateway_tls(host)
+    ca_file = tmp_path_factory.mktemp("documentdb-tls") / "ca.crt"
+    ca_file.write_bytes(tls.ca)
     run_cmd = [
         *docker,
         "run",
         "-d",
         "--name",
         name,
-        *_container_labels("ferretdb"),
+        *_container_labels("documentdb"),
         "-p",
-        "0:27017",
-        "-e",
-        f"POSTGRES_USER={_FERRETDB_USER}",
-        "-e",
-        f"POSTGRES_PASSWORD={password}",
-        _FERRETDB_IMAGE,
+        f"0:{_DOCUMENTDB_PORT}",
+        *documentdb_run_args(tls, password),
     ]
     try:
         _run(run_cmd, timeout=240)  # first image pull can be slow
     except (subprocess.SubprocessError, FileNotFoundError) as exc:
-        _unavailable(f"docker host '{spec}' cannot start FerretDB: {exc}")
+        _unavailable(f"docker host '{spec}' cannot start DocumentDB: {exc}")
 
     def teardown() -> None:
         _remove_container(docker, name)
 
     try:
-        out = _run([*docker, "port", name, "27017"], timeout=30).stdout.strip()
+        out = _run([*docker, "port", name, str(_DOCUMENTDB_PORT)], timeout=30).stdout.strip()
         port = int(out.splitlines()[-1].rsplit(":", 1)[-1])
-        uri = f"mongodb://{_FERRETDB_USER}:{password}@{_reach_address(spec)}:{port}/"
+        uri = (
+            f"mongodb://{_DOCUMENTDB_USER}:{password}@{host}:{port}/"
+            f"?tls=true&tlsCAFile={ca_file}&authMechanism=SCRAM-SHA-256"
+        )
         _mongo_when_ready(uri)
     except Exception as exc:
         tail = _log_tail(docker, name).replace(password, "***")
         teardown()
-        _unavailable(f"FerretDB on '{spec}' did not come up: {exc}; container log: {tail}")
+        _unavailable(f"DocumentDB on '{spec}' did not come up: {exc}; container log: {tail}")
     try:
         yield uri
     finally:

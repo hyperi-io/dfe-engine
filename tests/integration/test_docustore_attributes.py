@@ -1,7 +1,7 @@
 """Integration tests for flexible attributes against a real document store.
 
 Runs against the harness's document store (``mongo_uri``: ``DFE_TEST_MONGO_URI``, else
-FerretDB on docker). Uses a throwaway database per test so it never touches real data,
+DocumentDB on docker). Uses a throwaway database per test so it never touches real data,
 and drops it on teardown. Real dependency, no mocks - the inline ``set_attributes`` and
 the separate sensitive store must behave against a real store exactly as they do for the
 YAML backend.

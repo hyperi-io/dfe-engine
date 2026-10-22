@@ -1,7 +1,7 @@
 """Integration tests for the document-store-backed account store + document layer.
 
 Runs against the harness's document store (``mongo_uri``: ``DFE_TEST_MONGO_URI``, else
-FerretDB on docker). Uses a throwaway database per test so it never touches real data,
+DocumentDB on docker). Uses a throwaway database per test so it never touches real data,
 and drops it on teardown. Real dependency, no mocks - the timing-safe and
 unusable-password semantics must hold against a real store exactly as they do for the
 YAML backend.
