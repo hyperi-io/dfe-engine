@@ -140,7 +140,7 @@ async def start_stream(
     cap = service.settings.max_concurrent_streams
     try:
         # The manager counts every replica's streams against the cap.
-        info = manager.submit(
+        info = await manager.submit(
             _TASK_KIND,
             service.run_stream,
             body,
@@ -172,7 +172,7 @@ async def start_stream(
 @router.get("/synthetic-data/streams", response_model=list[TaskInfo], dependencies=[_READ])
 async def list_streams(request: Request, user: CurrentUser) -> list[TaskInfo]:
     """List stream tasks (most recent first)."""
-    return _task_manager(request).list(kind=_TASK_KIND)
+    return await _task_manager(request).list(kind=_TASK_KIND)
 
 
 @router.get(
@@ -180,7 +180,7 @@ async def list_streams(request: Request, user: CurrentUser) -> list[TaskInfo]:
 )
 async def get_stream(task_id: str, request: Request, user: CurrentUser) -> StreamSubmitResponse:
     """Poll a stream task's status and summary."""
-    info = _task_manager(request).get(task_id)
+    info = await _task_manager(request).get(task_id)
     if info is None or info.kind != _TASK_KIND:
         raise HTTPException(404, detail={"code": "not_found", "message": "stream task not found"})
     return _to_response(info)
@@ -192,9 +192,9 @@ async def get_stream(task_id: str, request: Request, user: CurrentUser) -> Strea
 async def cancel_stream(task_id: str, request: Request, user: CurrentUser) -> CancelResponse:
     """Cancel a running stream task."""
     manager = _task_manager(request)
-    info = manager.get(task_id)
+    info = await manager.get(task_id)
     if info is None or info.kind != _TASK_KIND:
         raise HTTPException(404, detail={"code": "not_found", "message": "stream task not found"})
-    cancelled = manager.cancel(task_id)
+    cancelled = await manager.cancel(task_id)
     audit_resource_change(user.user_id, "synthetic-data", task_id, "cancelled")
     return CancelResponse(task_id=task_id, cancelled=cancelled)

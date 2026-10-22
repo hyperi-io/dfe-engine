@@ -20,12 +20,15 @@ This manager answers only for the tasks its own process runs, which is right for
 engine. :class:`dfe_engine.api.document_tasks.DocumentTaskManager` keeps them in the
 document store, so every replica answers for every task.
 
+Every call is awaited, so a manager whose tasks live in a store reaches it off the
+event loop.
+
 Usage::
 
     manager = TaskManager()
-    task = manager.submit("hunt:execute", coro_fn, arg1, arg2)
-    status = manager.get(task.id)
-    manager.cancel(task.id)
+    task = await manager.submit("hunt:execute", coro_fn, arg1, arg2)
+    status = await manager.get(task.id)
+    await manager.cancel(task.id)
 """
 
 import asyncio
@@ -207,7 +210,7 @@ class TaskManager:
         self._max_completed = max_completed
         self._closing = False
 
-    def submit(
+    async def submit(
         self,
         kind: str,
         coro_fn,
@@ -251,7 +254,7 @@ class TaskManager:
         """
         task_id = str(uuid.uuid4())
         task = _Task(task_id, kind, _held(held_to))
-        self._admit(task, max_active)
+        await self._admit(task, max_active)
         self._tasks[task_id] = task
 
         async def _run() -> None:
@@ -305,8 +308,11 @@ class TaskManager:
         self._submitted(task)
         return task.to_info()
 
-    def _admit(self, task: _Task, max_active: int | None) -> None:
+    async def _admit(self, task: _Task, max_active: int | None) -> None:
         """Refuse ``task`` when ``max_active`` tasks of its kind are pending or running here.
+
+        Never suspends, so no other submit is counted between this check and the one
+        :meth:`submit` makes.
 
         Raises:
             TaskLimitError: The limit is reached.
@@ -335,7 +341,9 @@ class TaskManager:
             task.status = TaskStatus.CANCELLED
             task.message = "Cancelled"
 
-    def get(self, task_id: str, *, reader_orgs: Iterable[str] | None = None) -> TaskInfo | None:
+    async def get(
+        self, task_id: str, *, reader_orgs: Iterable[str] | None = None
+    ) -> TaskInfo | None:
         """Get current task state, or None if not found or not visible to the reader.
 
         Args:
@@ -351,7 +359,7 @@ class TaskManager:
             return None
         return task.to_info()
 
-    def list(
+    async def list(
         self, kind: str | None = None, *, reader_orgs: Iterable[str] | None = None
     ) -> builtins.list[TaskInfo]:
         """List the tasks visible to the reader, most recent first, optionally filtered by kind.
@@ -369,7 +377,7 @@ class TaskManager:
         ]
         return [t.to_info() for t in sorted(tasks, key=lambda t: t.created_at, reverse=True)]
 
-    def cancel(self, task_id: str) -> bool:
+    async def cancel(self, task_id: str) -> bool:
         """Cancel a running task. Returns True if cancellation was requested."""
         task = self._tasks.get(task_id)
         if task is None:
@@ -419,7 +427,7 @@ class TaskManager:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + wait
         while True:
-            info = self.get(task_id)
+            info = await self.get(task_id)
             if info is None or info.status.is_terminal:
                 return info
             remaining = deadline - loop.time()

@@ -1379,7 +1379,7 @@ class TestBulkDeploy:
     """POST /api/v1/sources/bulk with action=deploy"""
 
     def test_submits_one_task_per_source(
-        self, client: TestClient, admin_headers: dict, app, monkeypatch
+        self, client: TestClient, admin_headers: dict, monkeypatch
     ):
         from dfe_engine.api.v1 import sources as sources_api
         from dfe_engine.source.deployment import SchemaDeployResult
@@ -1426,9 +1426,9 @@ class TestBulkDeploy:
         assert len({row["task_id"] for row in body["deployments"]}) == 2
 
         for row in body["deployments"]:
-            task = app.state.task_manager.get(row["task_id"])
-            assert task is not None
-            assert task.kind == "source:deploy"
+            task = client.get(f"/api/v1/tasks/{row['task_id']}", headers=admin_headers)
+            assert task.status_code == 200, task.text
+            assert task.json()["kind"] == "source:deploy"
 
     def test_refuses_missing_source_and_version(
         self, client: TestClient, admin_headers: dict, sample_source: dict

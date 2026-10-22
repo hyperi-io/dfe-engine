@@ -35,7 +35,7 @@ class TestTaskSubmitAndGet:
         async def noop(*, task):
             return "done"
 
-        info = manager.submit("test:noop", noop)
+        info = await manager.submit("test:noop", noop)
         assert info.kind == "test:noop"
         assert info.id
 
@@ -44,11 +44,11 @@ class TestTaskSubmitAndGet:
         async def compute(*, task):
             return {"answer": 42}
 
-        info = manager.submit("test:compute", compute)
+        info = await manager.submit("test:compute", compute)
         # Wait briefly for task to complete
         await asyncio.sleep(0.1)
 
-        result = manager.get(info.id)
+        result = await manager.get(info.id)
         assert result is not None
         assert result.status == TaskStatus.COMPLETED
         assert result.result == {"answer": 42}
@@ -62,10 +62,10 @@ class TestTaskSubmitAndGet:
         async def weird_result(*, task):
             return {"path": Path("/tmp"), "at": datetime.now(UTC)}
 
-        info = manager.submit("test:weird", weird_result)
+        info = await manager.submit("test:weird", weird_result)
         await asyncio.sleep(0.1)
 
-        result = manager.get(info.id)
+        result = await manager.get(info.id)
         assert result is not None
         assert result.status == TaskStatus.COMPLETED
         json.dumps(result.model_dump(mode="json"))
@@ -75,10 +75,10 @@ class TestTaskSubmitAndGet:
         async def fail(*, task):
             raise ValueError("boom")
 
-        info = manager.submit("test:fail", fail, reportable=(ValueError,))
+        info = await manager.submit("test:fail", fail, reportable=(ValueError,))
         await asyncio.sleep(0.1)
 
-        result = manager.get(info.id)
+        result = await manager.get(info.id)
         assert result is not None
         assert result.status == TaskStatus.FAILED
         assert result.error == "boom"
@@ -91,10 +91,10 @@ class TestTaskSubmitAndGet:
         async def fail(*, task):
             raise RuntimeError("ALTER USER x IDENTIFIED WITH sha256_hash BY 'deadbeef'")
 
-        info = manager.submit("test:fail", fail, reportable=(ValueError,))
+        info = await manager.submit("test:fail", fail, reportable=(ValueError,))
         await asyncio.sleep(0.1)
 
-        result = manager.get(info.id)
+        result = await manager.get(info.id)
         assert result is not None
         assert result.status == TaskStatus.FAILED
         assert result.error == TASK_FAILED_MESSAGE
@@ -106,14 +106,14 @@ class TestTaskSubmitAndGet:
         async def slow(*, task):
             await asyncio.sleep(10)
 
-        info = manager.submit("test:slow", slow)
+        info = await manager.submit("test:slow", slow)
         await asyncio.sleep(0.05)
 
-        cancelled = manager.cancel(info.id)
+        cancelled = await manager.cancel(info.id)
         assert cancelled is True
         await asyncio.sleep(0.1)
 
-        result = manager.get(info.id)
+        result = await manager.get(info.id)
         assert result is not None
         assert result.status == TaskStatus.CANCELLED
 
@@ -124,8 +124,8 @@ class TestTaskSubmitAndGet:
         async def never_runs(*, task):
             raise AssertionError("cancelled before it started")
 
-        info = manager.submit("test:unstarted", never_runs)
-        assert manager.cancel(info.id) is True
+        info = await manager.submit("test:unstarted", never_runs)
+        assert await manager.cancel(info.id) is True
 
         settled = await manager.await_terminal(info.id, 2.0)
         assert settled is not None
@@ -134,11 +134,11 @@ class TestTaskSubmitAndGet:
 
     @pytest.mark.asyncio
     async def test_cancel_nonexistent_returns_false(self, manager: TaskManager):
-        assert manager.cancel("nonexistent") is False
+        assert await manager.cancel("nonexistent") is False
 
     @pytest.mark.asyncio
     async def test_get_nonexistent_returns_none(self, manager: TaskManager):
-        assert manager.get("nonexistent") is None
+        assert await manager.get("nonexistent") is None
 
 
 class TestTaskList:
@@ -147,11 +147,11 @@ class TestTaskList:
         async def noop(*, task):
             return "ok"
 
-        manager.submit("a:task", noop)
-        manager.submit("b:task", noop)
+        await manager.submit("a:task", noop)
+        await manager.submit("b:task", noop)
         await asyncio.sleep(0.1)
 
-        tasks = manager.list()
+        tasks = await manager.list()
         assert len(tasks) == 2
 
     @pytest.mark.asyncio
@@ -159,11 +159,11 @@ class TestTaskList:
         async def noop(*, task):
             return "ok"
 
-        manager.submit("hunt:execute", noop)
-        manager.submit("pipeline:build", noop)
+        await manager.submit("hunt:execute", noop)
+        await manager.submit("pipeline:build", noop)
         await asyncio.sleep(0.1)
 
-        hunts = manager.list(kind="hunt:execute")
+        hunts = await manager.list(kind="hunt:execute")
         assert len(hunts) == 1
         assert hunts[0].kind == "hunt:execute"
 
@@ -176,10 +176,10 @@ class TestTaskProgress:
             await asyncio.sleep(0.05)
             return "done"
 
-        info = manager.submit("test:progress", with_progress)
+        info = await manager.submit("test:progress", with_progress)
         await asyncio.sleep(0.2)
 
-        result = manager.get(info.id)
+        result = await manager.get(info.id)
         assert result is not None
         assert result.status == TaskStatus.COMPLETED
         assert result.progress == 100
@@ -193,12 +193,12 @@ class TestEviction:
 
         # Submit more than max_completed (5)
         for _ in range(8):
-            manager.submit("test:evict", noop)
+            await manager.submit("test:evict", noop)
 
         await asyncio.sleep(0.3)
 
         # Eviction runs on completion -- should have at most max_completed finished tasks
-        tasks = manager.list()
+        tasks = await manager.list()
         assert len(tasks) <= 5
 
 
@@ -208,7 +208,7 @@ async def _settled(manager: TaskManager, held_to: list[str] | None) -> str:
     async def noop(*, task):
         return "ok"
 
-    info = manager.submit("test:held", noop, held_to=held_to)
+    info = await manager.submit("test:held", noop, held_to=held_to)
     settled = await manager.await_terminal(info.id, 2.0)
     assert settled is not None
     assert settled.status == TaskStatus.COMPLETED
@@ -222,20 +222,20 @@ class TestHeldTasks:
         wider = await _settled(manager, ["org-a", "org-b"])
         every_org = await _settled(manager, None)
 
-        assert manager.get(own, reader_orgs=["org-a", "org-c"]) is not None
-        assert manager.get(wider, reader_orgs=["org-a"]) is None
-        assert manager.get(every_org, reader_orgs=["org-a", "org-b"]) is None
-        assert [t.id for t in manager.list(reader_orgs=["org-a", "org-b"])] == [wider, own]
-        assert {t.id for t in manager.list()} == {own, wider, every_org}
-        assert manager.get(every_org) is not None
+        assert await manager.get(own, reader_orgs=["org-a", "org-c"]) is not None
+        assert await manager.get(wider, reader_orgs=["org-a"]) is None
+        assert await manager.get(every_org, reader_orgs=["org-a", "org-b"]) is None
+        assert [t.id for t in await manager.list(reader_orgs=["org-a", "org-b"])] == [wider, own]
+        assert {t.id for t in await manager.list()} == {own, wider, every_org}
+        assert await manager.get(every_org) is not None
 
     @pytest.mark.asyncio
     async def test_a_reader_held_to_no_org_sees_no_task(self, manager: TaskManager):
         held = await _settled(manager, ["org-a"])
         await _settled(manager, None)
 
-        assert manager.get(held, reader_orgs=[]) is None
-        assert manager.list(reader_orgs=[]) == []
+        assert await manager.get(held, reader_orgs=[]) is None
+        assert await manager.list(reader_orgs=[]) == []
 
     @pytest.mark.asyncio
     async def test_eviction_takes_the_scope_with_the_task(self):
@@ -243,10 +243,10 @@ class TestHeldTasks:
         first = await _settled(manager, ["org-a"])
         kept = [await _settled(manager, ["org-a"]) for _ in range(2)]
 
-        assert manager.get(first) is None
-        assert manager.get(first, reader_orgs=["org-a"]) is None
-        assert manager.list(reader_orgs=["org-a"]) == manager.list()
-        assert {t.id for t in manager.list(reader_orgs=["org-a"])} == set(kept)
+        assert await manager.get(first) is None
+        assert await manager.get(first, reader_orgs=["org-a"]) is None
+        assert await manager.list(reader_orgs=["org-a"]) == await manager.list()
+        assert {t.id for t in await manager.list(reader_orgs=["org-a"])} == set(kept)
         assert [t.held_to for t in manager._tasks.values()] == [frozenset({"org-a"})] * 2
 
 
@@ -258,17 +258,17 @@ class TestMaxActive:
         async def slow(*, task):
             await asyncio.sleep(10)
 
-        held = [manager.submit("test:capped", slow, max_active=2) for _ in range(2)]
+        held = [await manager.submit("test:capped", slow, max_active=2) for _ in range(2)]
 
         with pytest.raises(TaskLimitError) as refused:
-            manager.submit("test:capped", slow, max_active=2)
+            await manager.submit("test:capped", slow, max_active=2)
         assert (refused.value.kind, refused.value.limit) == ("test:capped", 2)
-        assert len(manager.list(kind="test:capped")) == 2
-        manager.submit("test:other", slow, max_active=2)
+        assert len(await manager.list(kind="test:capped")) == 2
+        await manager.submit("test:other", slow, max_active=2)
 
-        manager.cancel(held[0].id)
+        await manager.cancel(held[0].id)
         await manager.await_terminal(held[0].id, 2.0)
-        manager.submit("test:capped", slow, max_active=2)
+        await manager.submit("test:capped", slow, max_active=2)
         await manager.aclose()
 
 
@@ -279,7 +279,7 @@ class TestResultSize:
             # JSON adds two quotes, so this is one byte over.
             return "x" * (MAX_RESULT_BYTES - 1)
 
-        info = manager.submit("test:huge", huge)
+        info = await manager.submit("test:huge", huge)
         settled = await manager.await_terminal(info.id, 10.0)
 
         assert settled is not None
@@ -292,7 +292,7 @@ class TestResultSize:
         async def largest(*, task):
             return "x" * (MAX_RESULT_BYTES - 2)
 
-        info = manager.submit("test:largest", largest)
+        info = await manager.submit("test:largest", largest)
         settled = await manager.await_terminal(info.id, 10.0)
 
         assert settled is not None
@@ -311,18 +311,18 @@ class TestClose:
         async def quick(*, task):
             return "ok"
 
-        running = manager.submit("test:slow", slow)
-        done = manager.submit("test:quick", quick)
+        running = await manager.submit("test:slow", slow)
+        done = await manager.submit("test:quick", quick)
         await manager.await_terminal(done.id, 2.0)
         await asyncio.sleep(0)
 
         await manager.aclose()
 
-        stopped = manager.get(running.id)
+        stopped = await manager.get(running.id)
         assert stopped is not None
         assert stopped.status == TaskStatus.FAILED
         assert stopped.error == TASK_STOPPED_MESSAGE
-        finished = manager.get(done.id)
+        finished = await manager.get(done.id)
         assert finished is not None
         assert finished.status == TaskStatus.COMPLETED
 
@@ -333,7 +333,7 @@ class TestWaitForProgress:
         async def quick(*, task):
             return "fast"
 
-        info = manager.submit("test:quick", quick)
+        info = await manager.submit("test:quick", quick)
         result = await manager.wait_for_progress(info.id, timeout=2.0)
         assert result is not None
         assert result.status in (TaskStatus.COMPLETED, TaskStatus.RUNNING)
@@ -348,9 +348,9 @@ class TestWaitForProgress:
         async def slow(*, task):
             await asyncio.sleep(10)
 
-        info = manager.submit("test:slow", slow)
+        info = await manager.submit("test:slow", slow)
         result = await manager.wait_for_progress(info.id, timeout=0.1)
         assert result is not None
         # Task is still running after short timeout
         assert result.status in (TaskStatus.RUNNING, TaskStatus.PENDING)
-        manager.cancel(info.id)
+        await manager.cancel(info.id)

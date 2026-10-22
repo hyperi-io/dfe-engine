@@ -114,7 +114,7 @@ async def build_pipeline(
     Returns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``.
     """
     manager = _get_task_manager(request)
-    task_info = manager.submit(
+    task_info = await manager.submit(
         "pipeline:build",
         _build_pipeline,
         body.config_path,

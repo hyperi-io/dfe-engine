@@ -1023,8 +1023,9 @@ def document_engine(
     """Start the ``stack`` engine API with its users, groups and tasks in the document store.
 
     Yields ``start``, a callable whose context is one running process, so a test can
-    read the store after the process stops, and ``store_uri`` and ``store_database``,
-    the throwaway database the process uses, dropped on teardown.
+    read the store after the process stops, ``store_uri`` and ``store_database``, the
+    throwaway database the process uses, dropped on teardown, and ``settings``, which a
+    test may change before it starts the process.
     """
     import uuid
 
@@ -1045,6 +1046,7 @@ def document_engine(
             ),
             store_uri=mongo_uri,
             store_database=store_database,
+            settings=settings,
         )
     finally:
         drop_database_and_policies(client=ch_client, database=database)

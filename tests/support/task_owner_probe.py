@@ -33,7 +33,7 @@ async def main() -> None:
         os.environ["DFE_TEST_TASK_STORE_URI"], os.environ["DFE_TEST_TASK_STORE_DATABASE"]
     )
     manager = DocumentTaskManager(store, owner=OWNER)
-    manager.submit(KIND, _forever)
+    await manager.submit(KIND, _forever)
     await asyncio.Event().wait()
 
 
