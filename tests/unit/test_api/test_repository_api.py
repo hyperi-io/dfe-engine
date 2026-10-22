@@ -13,7 +13,9 @@ merge-patch fast path with etags, and the scoped-object RBAC matrix
 (membership reads, owner writes, org-wildcard admins, 404-not-403 hiding).
 """
 
+import asyncio
 from collections.abc import Iterator
+from typing import Any
 
 import jwt as pyjwt
 import pytest
@@ -48,6 +50,41 @@ def fake_ch(app) -> Iterator[FakeRepositoryCH]:
     # A server the engine's schema phase has already converged, which is what
     # every repository read now asserts before it runs.
     ch = FakeRepositoryCH(applied={("dfe", "repository")})
+    app.dependency_overrides[get_clickhouse_client] = lambda: ch
+    yield ch
+    app.dependency_overrides.pop(get_clickhouse_client, None)
+
+
+class _LoopRecordingCH(FakeRepositoryCH):
+    """The fake server, noting each call that arrives on a thread running an event loop."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.on_the_loop: list[str] = []
+
+    def _note(self, statement: str) -> None:
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        self.on_the_loop.append(statement.split(maxsplit=1)[0])
+
+    def command(self, statement: str, *args: Any, **kwargs: Any):
+        self._note(statement)
+        return super().command(statement, *args, **kwargs)
+
+    def query(self, sql: str, *args: Any, parameters: Any = None, **kwargs: Any):
+        self._note(sql)
+        return super().query(sql, *args, parameters=parameters, **kwargs)
+
+    def execute(self, query: str, *args: Any, parameters: Any = None, **kwargs: Any):
+        self._note(query.strip())
+        return super().execute(query, *args, parameters=parameters, **kwargs)
+
+
+@pytest.fixture
+def recording_ch(app) -> Iterator[_LoopRecordingCH]:
+    ch = _LoopRecordingCH(applied={("dfe", "repository")})
     app.dependency_overrides[get_clickhouse_client] = lambda: ch
     yield ch
     app.dependency_overrides.pop(get_clickhouse_client, None)
@@ -426,6 +463,37 @@ class TestOrgAccessComesOnlyFromTheBoundAccount:
             "dfe_org_globex",
             "globex-pw",
         )
+
+
+# -- ClickHouse calls stay off the event loop -----------------
+
+
+class TestClickHouseCallsLeaveTheEventLoop:
+    """A slow ClickHouse holds the request that reads it, never every other request."""
+
+    @pytest.mark.parametrize(
+        ("method", "path", "body"),
+        [
+            pytest.param("GET", PREFS, None, id="get-preferences"),
+            pytest.param("PATCH", PREFS, {"theme": "dark"}, id="patch-preferences"),
+            pytest.param("PUT", f"{OBJECTS}/user/user1/notes/todo", b"v1", id="put-object"),
+            pytest.param("GET", f"{OBJECTS}/user/user1/notes", None, id="list-objects"),
+            pytest.param("GET", f"{OBJECTS}/user/user1/notes/todo", None, id="get-object"),
+            pytest.param("DELETE", f"{OBJECTS}/user/user1/notes/todo", None, id="delete-object"),
+        ],
+    )
+    def test_no_route_calls_clickhouse_on_the_loop(
+        self, client: TestClient, recording_ch, api_settings, method, path, body
+    ):
+        user1 = _headers(api_settings, "user1")
+        client.put(f"{OBJECTS}/user/user1/notes/todo", content=b"v0", headers=user1)
+        recording_ch.on_the_loop.clear()
+        sent = {"json": body} if isinstance(body, dict) else {"content": body}
+
+        resp = client.request(method, path, headers=user1, **sent)
+
+        assert resp.status_code < 300, resp.text
+        assert recording_ch.on_the_loop == []
 
 
 # ── Validation + size caps ───────────────────────────────────

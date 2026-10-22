@@ -442,7 +442,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if settings.auth.seed_dir:
         from dfe_engine.auth.groups import seed_groups
 
-        seed_groups(group_store, Path(settings.auth.seed_dir) / "groups", metrics=group_metrics)
+        seed_groups(
+            group_store,
+            Path(settings.auth.seed_dir) / "groups",
+            account_store=account_store,
+            metrics=group_metrics,
+        )
     app.state.account_store = account_store
     app.state.group_store = group_store
     app.state.api_key_store = api_key_store

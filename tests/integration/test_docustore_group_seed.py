@@ -95,3 +95,14 @@ class TestGroupSeed:
             "Analysts",
             ["alice"],
         )
+
+    def test_a_seeded_member_holds_the_group_on_its_own_account(self, deployment):
+        first = deployment.replica("a")
+        first.app.state.account_store.create("alice", "alice-password-1")
+        _seed(deployment, "okta-analysts", roles=["data_analyst"], members=["alice"])
+
+        second = deployment.replica("b")
+
+        account = second.app.state.account_store.get("alice")
+        assert account is not None
+        assert account.groups == ["okta-analysts"]

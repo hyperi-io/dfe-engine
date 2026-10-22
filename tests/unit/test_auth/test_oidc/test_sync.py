@@ -15,7 +15,7 @@ from prometheus_client.parser import text_string_to_metric_families
 from scalo.logger import logger
 from scalo.metrics import create_metrics
 
-from dfe_engine.api.deps import _resolve_roles_from_groups
+from dfe_engine.api.deps import _resolve_group_grants
 from dfe_engine.auth.bootstrap import bootstrap_auth
 from dfe_engine.auth.groups import GROUPS_SKIPPED, GroupMetrics, GroupStore
 from dfe_engine.auth.membership import linked_groups, linked_providers
@@ -338,7 +338,7 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         assert group_store.get("dfe-admins") == before
         assert before.source_provider == ""
         assert before.source_id == ""
-        assert _resolve_roles_from_groups([self.ATTACKER], group_store) == ([], [])
+        assert _resolve_group_grants([self.ATTACKER], group_store)[:2] == ([], [])
         assert _sync_skips(manager) == {"name_taken": 1.0}
         assert provider_registry.get("test-sso").last_sync_status == (
             "partial: 1 of 1 groups skipped, their name is held by a group not linked to them"
@@ -363,7 +363,7 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         assert result["groups_skipped"] == 1
         stored = group_store.get("soc-example.com")
         assert (stored.source_provider, stored.source_id, stored.description) == ("", "", "Ours")
-        assert _resolve_roles_from_groups([self.ATTACKER], group_store) == ([], [])
+        assert _resolve_group_grants([self.ATTACKER], group_store)[:2] == ([], [])
 
     async def test_a_group_linked_to_another_idp_group_keeps_its_link(
         self, registries, api_provider
@@ -383,8 +383,8 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
 
         assert (result["updated"], result["groups_skipped"]) == (0, 1)
         assert group_store.get("soc-team").source_id == "g-soc"
-        assert _resolve_roles_from_groups([self.ATTACKER], group_store) == ([], [])
-        assert _resolve_roles_from_groups(["g-soc"], group_store) == (["data_analyst"], [])
+        assert _resolve_group_grants([self.ATTACKER], group_store)[:2] == ([], [])
+        assert _resolve_group_grants(["g-soc"], group_store)[:2] == (["data_analyst"], [])
 
     async def test_a_group_an_admin_linked_syncs_and_keeps_its_roles(
         self, registries, api_provider

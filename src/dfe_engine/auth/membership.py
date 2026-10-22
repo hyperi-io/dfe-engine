@@ -10,7 +10,7 @@
 
 from collections.abc import Collection, Iterable, Mapping
 
-from dfe_engine.auth.accounts import Account, AccountStore
+from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
 from dfe_engine.auth.groups import Group, GroupStore
 
 
@@ -182,7 +182,7 @@ def forget_member(group_store: GroupStore, username: str) -> None:
 
 
 def sync_account_groups_for_membership_change(
-    account_store: AccountStore,
+    account_store: AccountStore | DocuStoreAccountStore,
     group_name: str,
     *,
     added: Iterable[str] = (),

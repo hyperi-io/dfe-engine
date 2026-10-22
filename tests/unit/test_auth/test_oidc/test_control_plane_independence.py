@@ -119,9 +119,9 @@ class TestOIDCAuthWithStaticFiles:
         )
 
         store = GroupStore(groups_dir)
-        from dfe_engine.api.deps import _resolve_roles_from_groups
+        from dfe_engine.api.deps import _resolve_group_grants
 
-        roles, org_ids = _resolve_roles_from_groups(["platform-admins"], store)
+        roles, org_ids, *_ = _resolve_group_grants(["platform-admins"], store)
 
         assert roles == ["admin"]
         assert org_ids == []
@@ -140,9 +140,9 @@ class TestOIDCAuthWithStaticFiles:
         )
 
         store = GroupStore(groups_dir)
-        from dfe_engine.api.deps import _resolve_roles_from_groups
+        from dfe_engine.api.deps import _resolve_group_grants
 
-        roles, org_ids = _resolve_roles_from_groups(["eng-analysts", "eng-infra"], store)
+        roles, org_ids, *_ = _resolve_group_grants(["eng-analysts", "eng-infra"], store)
 
         assert "data_analyst" in roles
         assert "infra_admin" in roles
@@ -156,10 +156,10 @@ class TestOIDCAuthWithStaticFiles:
         # No files written — all groups are unknown
 
         store = GroupStore(groups_dir)
-        from dfe_engine.api.deps import _resolve_roles_from_groups
+        from dfe_engine.api.deps import _resolve_group_grants
 
         # Should NOT raise — unknown groups are silently skipped
-        roles, org_ids = _resolve_roles_from_groups(["unknown-group-1", "unknown-group-2"], store)
+        roles, org_ids, *_ = _resolve_group_grants(["unknown-group-1", "unknown-group-2"], store)
 
         assert roles == []
         assert org_ids == []
@@ -175,9 +175,9 @@ class TestOIDCAuthWithStaticFiles:
         )
 
         store = GroupStore(groups_dir)
-        from dfe_engine.api.deps import _resolve_roles_from_groups
+        from dfe_engine.api.deps import _resolve_group_grants
 
-        roles, org_ids = _resolve_roles_from_groups([guid], store)
+        roles, org_ids, *_ = _resolve_group_grants([guid], store)
 
         assert roles == ["data_viewer"]
 
@@ -299,9 +299,9 @@ class TestGroupsPersistAfterProviderDetach:
 
         # Role resolution is completely unaffected
         store = GroupStore(groups_dir)
-        from dfe_engine.api.deps import _resolve_roles_from_groups
+        from dfe_engine.api.deps import _resolve_group_grants
 
-        roles, _ = _resolve_roles_from_groups(["finance-team", "security-ops"], store)
+        roles, *_ = _resolve_group_grants(["finance-team", "security-ops"], store)
         assert "data_viewer" in roles
         assert "admin" in roles
 
@@ -405,9 +405,9 @@ class TestSyncFailureDoesNotBreakAuth:
         # Auth must still work with the stale — but valid — files
 
         store = GroupStore(groups_dir)
-        from dfe_engine.api.deps import _resolve_roles_from_groups
+        from dfe_engine.api.deps import _resolve_group_grants
 
-        roles, _ = _resolve_roles_from_groups(["engineering", "sre-team"], store)
+        roles, *_ = _resolve_group_grants(["engineering", "sre-team"], store)
 
         assert "data_analyst" in roles
         assert "infra_admin" in roles

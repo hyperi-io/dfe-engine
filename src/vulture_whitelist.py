@@ -19,7 +19,6 @@ from dfe_engine.ai import interface as ai_interface
 from dfe_engine.alerting import dispatcher as alerting_dispatcher
 from dfe_engine.alerting import models as alerting_models
 from dfe_engine.api import conventions as api_conventions
-from dfe_engine.api import deps as api_deps
 from dfe_engine.api.v1 import alerts as api_v1_alerts
 from dfe_engine.api.v1 import api_keys as api_v1_api_keys
 from dfe_engine.api.v1 import app_contracts as api_v1_app_contracts
@@ -570,7 +569,6 @@ ai_interface.AIModuleRegistry.module_names
 ai_interface.AIModuleRegistry.unregister
 alerting_dispatcher.Dispatcher.dispatch
 api_conventions.protocol_paths
-api_deps._resolve_roles_from_groups
 appmgmt_contract.reload_contracts
 appmgmt_routing.instances_needing_sync
 auth_hyperdx_role.FORK_ACCEPTS
