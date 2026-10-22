@@ -9,7 +9,8 @@
 
 Each replica is built the way the lifespan builds it, through ``bootstrap_registries``
 with its own settings and its own clone of one bare remote. Nothing is shared but the
-remote, so a write on A is read on B only when the registry keeps it in the deploy repo.
+remote and the secrets backend, so a write on A is read on B only when the registry
+keeps it in one of those.
 """
 
 from collections.abc import Iterator
@@ -18,18 +19,23 @@ from typing import Any
 
 import pytest
 from dulwich import porcelain
+from dulwich.repo import Repo
+from scalo.secrets.exceptions import ProviderError
 
 from dfe_engine.api import deps
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitops.repo import GitopsRepo
+from dfe_engine.hunts.alert import ALERT_CLASS, AlertDestination
 from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import (
     DFESettings,
     FieldMapSettings,
     GitopsSettings,
     HuntsSettings,
     SchemasSettings,
+    SecretsSettings,
     ServicesSettings,
 )
 from dfe_engine.source.models import Source
@@ -50,8 +56,8 @@ def _seeded_remote(tmp_path: Path) -> tuple[str, str]:
     return str(remote), branch
 
 
-def _settings(root: Path, remote: str, branch: str) -> DFESettings:
-    """One replica's settings: its own config volume, its own clone of the shared remote."""
+def _settings(root: Path, remote: str, branch: str, secrets_root: Path) -> DFESettings:
+    """One replica's settings: its own config volume and clone, the shared remote and secrets."""
     config = root / "config"
     return DFESettings(
         env="test",
@@ -66,6 +72,7 @@ def _settings(root: Path, remote: str, branch: str) -> DFESettings:
         fieldmap=FieldMapSettings(fieldmaps_dir=str(config / "fieldmaps")),
         services=ServicesSettings(config_yaml_dir=str(config / "services")),
         hunts=HuntsSettings(alert_destinations_dir=str(config / "alert-destinations")),
+        secrets=SecretsSettings(provider="file", path=str(secrets_root)),
     )
 
 
@@ -97,17 +104,35 @@ def _boot(settings: DFESettings) -> _Replica:
     return _Replica(settings, crud, built)
 
 
+def _close(replica: _Replica) -> None:
+    for registry in replica.registries.values():
+        if hasattr(registry, "close"):
+            registry.close()
+
+
 @pytest.fixture
 def replicas(tmp_path: Path) -> Iterator[tuple[_Replica, _Replica]]:
     remote, branch = _seeded_remote(tmp_path)
     deps._registries.clear()
-    a = _boot(_settings(tmp_path / "a", remote, branch))
-    b = _boot(_settings(tmp_path / "b", remote, branch))
+    a = _boot(_settings(tmp_path / "a", remote, branch, tmp_path / "secrets"))
+    b = _boot(_settings(tmp_path / "b", remote, branch, tmp_path / "secrets"))
     yield a, b
     for replica in (a, b):
-        for registry in replica.registries.values():
-            if hasattr(registry, "close"):
-                registry.close()
+        _close(replica)
+
+
+def _every_object(repo_path: Path) -> list[bytes]:
+    """The raw content of every object a repo holds, packed or loose, on any ref or none."""
+    repo = Repo(str(repo_path))
+    try:
+        return [repo.object_store[sha].as_raw_string() for sha in repo.object_store]
+    finally:
+        repo.close()
+
+
+def _stored_url_path(replica: _Replica, name: str) -> str:
+    """The secrets-backend path a destination's deploy-repo document keeps."""
+    return replica.crud.get(ALERT_CLASS, name)["url_path"]
 
 
 def _meta_schema_doc(column: str) -> dict[str, Any]:
@@ -146,8 +171,6 @@ class TestFieldMapsAcrossReplicas:
 
 class TestAlertDestinationsAcrossReplicas:
     def test_a_destination_added_on_one_replica_resolves_on_the_other(self, replicas) -> None:
-        from dfe_engine.hunts.alert import AlertDestination
-
         a, b = replicas
         a["alert_destinations"].add(
             AlertDestination(name="oncall", url="slack://T/B/C/#alerts", description="pager")
@@ -156,16 +179,128 @@ class TestAlertDestinationsAcrossReplicas:
         assert "oncall" in b["alert_destinations"]
         assert b["alert_destinations"].resolve("oncall") == "slack://T/B/C/#alerts"
         assert [d.name for d in b["alert_destinations"].list()] == ["oncall"]
+        assert b["alert_destinations"].get("oncall").url_scheme == "slack"
 
     def test_a_destination_removed_on_one_replica_is_gone_on_the_other(self, replicas) -> None:
-        from dfe_engine.hunts.alert import AlertDestination
-
         a, b = replicas
         a["alert_destinations"].add(AlertDestination(name="oncall", url="slack://T/B/C"))
 
         assert b["alert_destinations"].remove("oncall") is True
 
         assert "oncall" not in a["alert_destinations"]
+
+    def test_no_url_reaches_any_object_in_the_deploy_repo(self, replicas, tmp_path) -> None:
+        """Every commit and blob, on the remote and in the writer's clone."""
+        a, _ = replicas
+        tokens = ("created-4911", "replaced-4912")
+        a["alert_destinations"].add(
+            AlertDestination(name="oncall", url=f"slack://T1/B1/{tokens[0]}", description="pager")
+        )
+        a["alert_destinations"].add(
+            AlertDestination(name="oncall", url=f"slack://T2/B2/{tokens[1]}")
+        )
+
+        stored = a.crud.get(ALERT_CLASS, "oncall")
+        assert "url" not in stored
+        assert stored["url_path"].startswith("alerts/oncall/")
+        assert stored["url_scheme"] == "slack"
+        objects = [*_every_object(tmp_path / "remote.git"), *_every_object(a.crud.repo_path)]
+        assert not [raw for raw in objects for token in tokens if token.encode() in raw]
+
+    def test_no_url_reaches_a_review_branch(self, replicas, tmp_path) -> None:
+        from dfe_engine.gitcrud.routing import ReviewRouting
+
+        a, _ = replicas
+        routing = ReviewRouting()
+
+        _registry_at(a, "alert_destinations", environment="production", mode="team").add(
+            AlertDestination(name="oncall", url="slack://T3/B3/proposed-4913"), routing=routing
+        )
+
+        remote = Repo(str(tmp_path / "remote.git"))
+        try:
+            assert f"refs/heads/{routing.branches[0]}".encode() in remote.refs.keys()
+        finally:
+            remote.close()
+        objects = [*_every_object(tmp_path / "remote.git"), *_every_object(a.crud.repo_path)]
+        assert not [raw for raw in objects if b"proposed-4913" in raw]
+
+    def test_a_new_url_on_one_replica_resolves_on_the_other_and_retires_the_old(
+        self, replicas
+    ) -> None:
+        a, b = replicas
+        a["alert_destinations"].add(AlertDestination(name="oncall", url="slack://T/B/old-4921"))
+        old_path = _stored_url_path(b, "oncall")
+
+        a["alert_destinations"].add(AlertDestination(name="oncall", url="slack://T/B/new-4922"))
+
+        assert b["alert_destinations"].resolve("oncall") == "slack://T/B/new-4922"
+        assert build_secrets(b.settings.secrets).get_or_none(old_path) is None
+
+    def test_a_write_that_keeps_the_url_moves_no_secret(self, replicas) -> None:
+        a, b = replicas
+        a["alert_destinations"].add(
+            AlertDestination(name="oncall", url="slack://T/B/kept-4923", description="first")
+        )
+        path = _stored_url_path(a, "oncall")
+
+        b["alert_destinations"].add(AlertDestination(name="oncall", description="second"))
+
+        assert _stored_url_path(a, "oncall") == path
+        assert a["alert_destinations"].get("oncall").description == "second"
+        assert a["alert_destinations"].resolve("oncall") == "slack://T/B/kept-4923"
+
+    def test_a_removed_destination_takes_its_url_out_of_the_secrets_backend(self, replicas) -> None:
+        a, b = replicas
+        a["alert_destinations"].add(AlertDestination(name="oncall", url="slack://T/B/gone-4924"))
+        path = _stored_url_path(a, "oncall")
+
+        assert b["alert_destinations"].remove("oncall") is True
+
+        assert build_secrets(a.settings.secrets).get_or_none(path) is None
+
+    def test_a_url_the_secrets_backend_refuses_commits_nothing(self, replicas, tmp_path) -> None:
+        """The URL is stored before the document, so a failed store leaves no document."""
+        a, b = replicas
+        blocked = tmp_path / "not-a-directory"
+        blocked.write_text("", encoding="utf-8")
+        c = _boot(
+            _settings(tmp_path / "c", a.settings.gitops.repo_url, a.settings.gitops.branch, blocked)
+        )
+        try:
+            with pytest.raises(ProviderError):
+                c["alert_destinations"].add(AlertDestination(name="oncall", url="slack://T/B/C"))
+        finally:
+            _close(c)
+
+        assert "oncall" not in b["alert_destinations"]
+
+    def test_a_url_changed_on_a_review_branch_is_not_sent_until_it_merges(self, replicas) -> None:
+        from dfe_engine.gitcrud.routing import ReviewRouting
+
+        a, b = replicas
+        a["alert_destinations"].add(AlertDestination(name="oncall", url="slack://T/B/live-4931"))
+        routing = ReviewRouting()
+
+        _registry_at(a, "alert_destinations", environment="production", mode="team").add(
+            AlertDestination(name="oncall", url="slack://T/B/proposed-4932"), routing=routing
+        )
+
+        assert routing.review_required is True
+        assert b["alert_destinations"].resolve("oncall") == "slack://T/B/live-4931"
+
+    def test_a_delete_on_a_review_branch_keeps_the_url_main_still_sends_to(self, replicas) -> None:
+        from dfe_engine.gitcrud.routing import ReviewRouting
+
+        a, b = replicas
+        a["alert_destinations"].add(AlertDestination(name="oncall", url="slack://T/B/live-4933"))
+        routing = ReviewRouting()
+
+        registry = _registry_at(a, "alert_destinations", environment="production", mode="team")
+        assert registry.remove("oncall", routing=routing) is True
+
+        assert routing.review_required is True
+        assert b["alert_destinations"].resolve("oncall") == "slack://T/B/live-4933"
 
 
 class TestMetaSchemasAcrossReplicas:
@@ -277,7 +412,7 @@ class TestServiceConfigsAcrossReplicas:
 def _registry_at(replica: _Replica, key: str, *, environment: str, mode: str) -> Any:
     """Replica A's registry for *key*, rebuilt over the deploy repo at another posture."""
     from dfe_engine.fieldmap.registry import FIELDMAP_CLASS, FieldMapRegistry
-    from dfe_engine.hunts.alert import ALERT_CLASS, AlertDestinationRegistry
+    from dfe_engine.hunts.alert import AlertDestinationRegistry
     from dfe_engine.hunts.deploy_repo import DeployRepoStore
     from dfe_engine.schema.registry import META_CLASS, SchemaRegistry
     from dfe_engine.services.registry import SERVICE_CONFIG_CLASS, ServiceConfigRegistry
@@ -288,7 +423,9 @@ def _registry_at(replica: _Replica, key: str, *, environment: str, mode: str) ->
     if key == "fieldmap":
         return FieldMapRegistry(deploy_repo=store(FIELDMAP_CLASS))
     if key == "alert_destinations":
-        return AlertDestinationRegistry(deploy_repo=store(ALERT_CLASS))
+        return AlertDestinationRegistry(
+            deploy_repo=store(ALERT_CLASS), secrets=build_secrets(replica.settings.secrets)
+        )
     if key == "service_config":
         return ServiceConfigRegistry(deploy_repo=store(SERVICE_CONFIG_CLASS))
     return SchemaRegistry(replica.settings.schemas.schemas_dir, deploy_repo=store(META_CLASS))
@@ -296,8 +433,6 @@ def _registry_at(replica: _Replica, key: str, *, environment: str, mode: str) ->
 
 def _write(registry: Any, key: str, routing: Any) -> None:
     """One write through *registry*, routed into *routing*."""
-    from dfe_engine.hunts.alert import AlertDestination
-
     if key == "fieldmap":
         registry.save_map({"standard": "ecs", "mappings": {"a": "b"}}, routing=routing)
     elif key == "alert_destinations":

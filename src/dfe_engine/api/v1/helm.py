@@ -40,7 +40,6 @@ from dfe_engine.gitcrud.commit_policy import (
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import ACTION_CLASS, ActionStore, PolicyStore, ProtectedVarError
-from dfe_engine.hunts.alert import ALERT_CLASS
 
 router = APIRouter(prefix="/helm", tags=["Governed Ops: Helm Vars"], dependencies=[WRITE_TURN])
 
@@ -131,9 +130,6 @@ def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
     doc = gc.get(cls, name)
     if cls == ACTION_CLASS:
         doc = ActionStore(gc).shown_doc(name, doc)
-    elif cls == ALERT_CLASS and doc.get("url"):
-        # An Apprise URL is a credential wherever its scheme puts the token, so no part of it shows.
-        doc = {**doc, "url": contract.REDACTED}
     try:
         shown = contract.redact_resource(doc)
     except contract.ContractError as exc:

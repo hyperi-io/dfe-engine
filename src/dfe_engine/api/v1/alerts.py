@@ -16,7 +16,8 @@ back keeps the stored URL, as every other credential write does.
 
 With gitops on, a destination is a deploy-repo document and a write is a commit
 routed by the deployment's posture, so a production+team write sits on a review
-branch and ``X-DFE-Review-Required`` says so.
+branch and ``X-DFE-Review-Required`` says so. The URL itself goes to the secrets
+backend and the document keeps its path and scheme, so no read here fetches it.
 
 GET    /api/v1/alerts/destinations            -> Paginated list
 POST   /api/v1/alerts/destinations            -> Create destination
@@ -123,7 +124,7 @@ def list_destinations(
     raw = [
         {
             "name": dest.name,
-            "url_scheme": _url_scheme(dest.url),
+            "url_scheme": dest.url_scheme,
             "description": dest.description,
             "enabled": dest.enabled,
             "hunt_name": dest.hunt_name,
@@ -202,12 +203,17 @@ def create_destination(
             },
         )
     # Nothing is stored yet, so the mask has nothing to restore from and is refused.
-    body.url = _typed_url(body.url, "")
+    url = _typed_url(body.url, None)
     if body.hunt_name is not None:
         _ensure_hunt_for_link(hunt_registry, body.hunt_name)
     routing = ReviewRouting()
     written = _write_destination(
-        registry, body, hunt_name=body.hunt_name, created_by=git_author(user), routing=routing
+        registry,
+        body,
+        url=url,
+        hunt_name=body.hunt_name,
+        created_by=git_author(user),
+        routing=routing,
     )
     if body.hunt_name is not None and hunt_registry is not None:
         routing.record(add_destination_to_hunt(hunt_registry, body.hunt_name, body.name))
@@ -265,14 +271,20 @@ def update_destination(
         )
     existing = registry.get(name)
     body.name = name
-    body.url = _typed_url(body.url, existing.url)
+    url = _typed_url(body.url, existing)
     hunt_to_link = body.hunt_name
     if hunt_to_link is not None:
         _ensure_hunt_for_link(hunt_registry, hunt_to_link)
     stored_hunt_name = hunt_to_link if hunt_to_link is not None else existing.hunt_name
     routing = ReviewRouting()
     written = _write_destination(
-        registry, body, hunt_name=stored_hunt_name, created_by=git_author(user), routing=routing
+        registry,
+        body,
+        url=url,
+        url_scheme=existing.url_scheme,
+        hunt_name=stored_hunt_name,
+        created_by=git_author(user),
+        routing=routing,
     )
     if hunt_to_link is not None and hunt_registry is not None:
         routing.record(add_destination_to_hunt(hunt_registry, hunt_to_link, name))
@@ -314,51 +326,73 @@ def delete_destination(
 # -- Helpers --------------------------------------------------
 
 
-def _destination_url_shown(url: str) -> str:
-    """A stored destination URL as every read shows it: the whole URL is the credential."""
-    return contract.REDACTED if url else ""
+def _destination_url_shown(dest: RegistryAlertDestination) -> str:
+    """A stored destination's URL as every read shows it: the whole URL is the credential.
+
+    A URL of None is one the secrets backend holds, so it is never read to be masked.
+    """
+    return "" if dest.url == "" else contract.REDACTED
 
 
 def _destination_from_registry(dest: RegistryAlertDestination) -> AlertDestination:
     """The API response model for a stored destination, its URL masked."""
     return AlertDestination(
         name=dest.name,
-        url=_destination_url_shown(dest.url),
+        url=_destination_url_shown(dest),
         description=dest.description,
         enabled=dest.enabled,
-        url_scheme=_url_scheme(dest.url),
+        url_scheme=dest.url_scheme,
         hunt_name=dest.hunt_name,
     )
 
 
-def _typed_url(written: str, stored: str) -> str:
-    """The URL to store: the stored one where the mask was written back, else what was written.
+_KEPT = object()
+"""What the mask restores to, standing for the stored URL this route never reads."""
+
+
+def _typed_url(written: str, existing: RegistryAlertDestination | None) -> str | None:
+    """The URL to store, or None where the mask was written back to keep the stored one.
 
     Raises:
         HTTPException: 400 when the mask stands where no URL is stored, so a
             destination is never saved pointing at the placeholder, or masks only
             part of a URL every read shows whole, whether the rest is right or not.
     """
-    shown = _destination_url_shown(stored)
+    stored = existing is not None and _destination_url_shown(existing) == contract.REDACTED
     try:
-        return contract.restore_masked(
-            written, stored or contract.MISSING, path="url", shown=shown or contract.MISSING
+        typed = contract.restore_masked(
+            written,
+            _KEPT if stored else contract.MISSING,
+            path="url",
+            shown=contract.REDACTED if stored else contract.MISSING,
         )
     except contract.MaskedValueError as exc:
         raise HTTPException(
             status_code=400, detail={"code": exc.code, "message": str(exc)}
         ) from exc
+    return None if typed is _KEPT else typed
 
 
 def _write_destination(
     registry,
     dest: AlertDestination,
     *,
+    url: str | None,
+    url_scheme: str = "",
     hunt_name: str | None = None,
     created_by: str | None = None,
     routing: ReviewRouting | None = None,
 ) -> RegistryAlertDestination:
     """Persist a destination via the registry (overwrites if the name exists).
+
+    Args:
+        registry: The alert destinations.
+        dest: The request body, for everything but the URL.
+        url: The URL to store, or None to keep the stored one.
+        url_scheme: The stored URL's scheme, reported when the URL is kept.
+        hunt_name: The owning hunt, or None.
+        created_by: Username/identity, recorded on a deploy-repo commit.
+        routing: Collects where a deploy-repo write landed.
 
     Returns:
         The destination as written, which a review-routed write has not put on main.
@@ -368,7 +402,8 @@ def _write_destination(
     """
     written = RegistryAlertDestination(
         name=dest.name,
-        url=dest.url,
+        url=url,
+        url_scheme=url_scheme,
         description=dest.description,
         enabled=dest.enabled,
         hunt_name=hunt_name,
@@ -398,10 +433,3 @@ def _ensure_hunt_for_link(hunt_registry: Any | None, hunt_name: str) -> None:
             status_code=404,
             detail={"code": "not_found", "message": f"Hunt '{hunt_name}' not found"},
         ) from None
-
-
-def _url_scheme(url: str) -> str:
-    """Extract scheme from Apprise URL (e.g. 'slack' from 'slack://...')."""
-    if "://" in url:
-        return url.split("://")[0]
-    return ""

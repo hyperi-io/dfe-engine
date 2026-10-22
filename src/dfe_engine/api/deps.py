@@ -104,10 +104,10 @@ def bootstrap_registries(
     enabled) makes the deploy repo the SSoT for sources (``config/sources/``),
     hunts (``config/hunts/``), rules (``config/rules/``), API-written meta schemas
     (``config/schemas/``), field maps (``config/fieldmaps/``), alert destinations
-    (``config/alert-destinations/``) and service configs (``config/services/``), so
-    every engine replica reads them through its own clone. Without it each registry
-    falls back to its plain YAML directory. ``forge`` opens the review PR when the
-    deployment posture refuses a direct commit.
+    (``config/alert-destinations/``, each URL in the secrets backend) and service
+    configs (``config/services/``), so every engine replica reads them through its own
+    clone. Without it each registry falls back to its plain YAML directory. ``forge``
+    opens the review PR when the deployment posture refuses a direct commit.
     """
     from dfe_engine.hunts.deploy_repo import deploy_store
 
@@ -179,10 +179,13 @@ def bootstrap_registries(
 
     if gitcrud is not None or settings.hunts.alert_destinations_dir:
         from dfe_engine.hunts.alert import ALERT_CLASS, AlertDestinationRegistry
+        from dfe_engine.secrets import build_secrets
 
         _registries["alert_destinations"] = AlertDestinationRegistry(
             directory=settings.hunts.alert_destinations_dir or None,
             deploy_repo=deploy_store(gitcrud, ALERT_CLASS, settings=settings, forge=forge),
+            # The deploy repo keeps each URL's path, so the URL needs the secrets backend.
+            secrets=build_secrets(settings.secrets) if gitcrud is not None else None,
         )
 
 
