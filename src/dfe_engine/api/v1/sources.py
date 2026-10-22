@@ -740,10 +740,7 @@ class CatalogueEntryObject(BaseModel):
     )
     source: str = Field(
         default="",
-        description=(
-            "Source name this entry derives; empty when the entry's own name is not a "
-            "legal source name and one must be supplied on create"
-        ),
+        description="Source name a source created from this entry takes unless one is supplied",
     )
     schema_layers: CatalogueSchemaAvailability = Field(
         description="Whether the entry's table schema resolves here, and which layer does not"
@@ -1108,15 +1105,11 @@ def list_catalogue(
 ) -> PaginatedResponse[CatalogueEntryObject]:
     """List the sources the deployed transforms already handle.
 
-    Empty when no catalogue is mounted, which is a deployment without one rather
-    than an error: the app that ships the catalogue prints it from its own image.
-    Each entry says whether its table's schema layers resolve on this deployment,
+    The catalogue is dfe-schemas package data, so every deployment has it. Each entry says whether its table's schema layers resolve on this deployment,
     and names the first one that does not, so a console can hold back an entry
     the create would refuse.
     """
     catalogue = _source_catalogue()
-    if catalogue is None:
-        return PaginatedResponse.from_list([], pagination.page, pagination.per_page)
     if intake is not None and intake not in source_catalogue_module.INTAKES:
         raise HTTPException(
             status_code=422,
@@ -1211,14 +1204,6 @@ def create_source_from_catalogue(
     hand-written one.
     """
     catalogue = _source_catalogue()
-    if catalogue is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "no source catalogue is mounted on this deployment",
-            },
-        )
     try:
         write = source_catalogue_module.write_request_for(
             catalogue,
@@ -3008,12 +2993,8 @@ def import_source(
 # -- Helpers --
 
 
-def _source_catalogue() -> source_catalogue_module.SourceCatalogue | None:
-    """The mounted catalogue, or a 502 naming what is wrong with it.
-
-    A missing catalogue is None and the routes answer empty; a catalogue that is
-    there but unreadable is a deployment fault worth saying out loud.
-    """
+def _source_catalogue() -> source_catalogue_module.SourceCatalogue:
+    """The shipped catalogue, or a 502 naming what is wrong with the installed copy."""
     try:
         return source_catalogue_module.source_catalogue()
     except ManifestError as exc:
@@ -3028,10 +3009,7 @@ def _to_catalogue_object(
     entry: source_catalogue_module.CatalogueEntry,
     settings: Any,
 ) -> CatalogueEntryObject:
-    try:
-        derived = entry.source_name()
-    except ValueError:
-        derived = ""
+    derived = entry.source_name()
     binding = catalogue.app.catalogue
     resolution = source_catalogue_module.resolve_schema_layers(
         entry, binding.schema_layers if binding else None, settings
