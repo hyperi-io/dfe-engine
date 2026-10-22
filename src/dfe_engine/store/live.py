@@ -17,6 +17,7 @@ import asyncio
 import threading
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from scalo.logger import logger
 
@@ -24,6 +25,22 @@ from dfe_engine.http_errors import describe_http_error
 
 REFRESH_SECONDS = 2.0
 """How stale another replica's write may be here: the least time between two checks."""
+
+MAX_AGE_SECONDS = 60.0
+"""How long a value is served before the next check builds it again whatever the counter says.
+
+A write lands before its counter moves, so a write whose counter bump failed is seen
+here once the value reaches this age.
+"""
+
+
+@dataclass(frozen=True, slots=True)
+class _Built[T]:
+    """A value, the counter it was built at, and when its build began."""
+
+    revision: int
+    at: float
+    value: T
 
 
 def _on_event_loop() -> bool:
@@ -39,9 +56,10 @@ class Live[T]:
     """A value built from a collection, built again once the collection's write counter moves.
 
     :meth:`get` compares the counter with the one the value was built at, at most once
-    every ``refresh_seconds``, and builds again when it has moved. A write through
-    another replica therefore shows here within that floor, and one through this
-    replica at once when the writer calls :meth:`refresh`. Building is safe from
+    every ``refresh_seconds``, and builds again when it has moved or the value is
+    ``max_age_seconds`` old. A write through another replica therefore shows here
+    within that floor, or within the age when its counter never moved, and one through
+    this replica at once when the writer calls :meth:`refresh`. Building is safe from
     several threads at once: the counter and the value are kept as one pair, so a build
     that finishes after a newer one leaves its older counter beside its value, and the
     next check builds again.
@@ -57,6 +75,8 @@ class Live[T]:
         revision: Callable[[], int],
         *,
         refresh_seconds: float = REFRESH_SECONDS,
+        max_age_seconds: float = MAX_AGE_SECONDS,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         """Build the value once.
 
@@ -64,44 +84,55 @@ class Live[T]:
             build: Builds the value from the collection.
             revision: The collection's write counter.
             refresh_seconds: The least time between two checks of the counter.
+            max_age_seconds: The age at which a check builds again whatever the counter says.
+            clock: Seconds on a clock that never goes back.
         """
         self._build = build
         self._revision = revision
         self._refresh_seconds = refresh_seconds
+        self._max_age_seconds = max_age_seconds
+        self._clock = clock
         self._lock = threading.Lock()
         self._checking = False
         self._failing = False
-        self._built: tuple[int, T] = self._fresh()
-        self._checked = time.monotonic()
+        self._built: _Built[T] = self._fresh()
+        self._checked = self._clock()
 
     @property
     def value(self) -> T:
         """The value as last built, without looking at the collection."""
-        return self._built[1]
+        return self._built.value
 
     def get(self) -> T:
-        """The value, built again first when the collection has moved since it was built."""
-        now = time.monotonic()
+        """The value, built again first when the collection has moved or the value has aged."""
+        now = self._clock()
         if now - self._checked < self._refresh_seconds:
-            return self._built[1]
+            return self._built.value
         self._checked = now
         if _on_event_loop():
             self._check_in_background()
-            return self._built[1]
-        if self._revision() != self._built[0]:
+            return self._built.value
+        if self._stale(now):
             return self.refresh()
-        return self._built[1]
+        return self._built.value
 
     def refresh(self) -> T:
         """Build the value now, whatever the floor."""
         self._built = self._fresh()
-        self._checked = time.monotonic()
-        return self._built[1]
+        self._checked = self._clock()
+        return self._built.value
 
-    def _fresh(self) -> tuple[int, T]:
+    def _stale(self, now: float) -> bool:
+        """Whether the value has aged out, or the counter has moved since it was built."""
+        if now - self._built.at >= self._max_age_seconds:
+            return True
+        return self._revision() != self._built.revision
+
+    def _fresh(self) -> _Built[T]:
         # The counter first: a write landing during the build leaves it behind, so the next check builds again.
+        at = self._clock()
         revision = self._revision()
-        return revision, self._build()
+        return _Built(revision=revision, at=at, value=self._build())
 
     def _check_in_background(self) -> None:
         """Start one background check, unless one is already running."""
@@ -112,9 +143,9 @@ class Live[T]:
         threading.Thread(target=self._check, name="live-check", daemon=True).start()
 
     def _check(self) -> None:
-        """Build again when the counter has moved, keeping the value as built when the store fails."""
+        """Build again when the value is stale, keeping it as built when the store fails."""
         try:
-            if self._revision() != self._built[0]:
+            if self._stale(self._clock()):
                 self.refresh()
         except Exception as exc:
             # Logged when it starts and when it stops, so a store that stays down logs once.
