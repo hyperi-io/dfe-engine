@@ -239,6 +239,8 @@ View execution returns **JSON** (`QueryResponse`) with fields:
 Background task polling for long-running operations (hunt execution,
 pipeline builds).
 
+With the document store configured, every engine replica answers these routes. A cancel sent to a replica other than the one running the task lands within 2 s, and a task whose replica stops reads as `failed` once its heartbeat is 30 s old.
+
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/tasks` | List tasks (filter by `kind`) |
