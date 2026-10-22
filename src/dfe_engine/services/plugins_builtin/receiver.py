@@ -86,8 +86,10 @@ _template_overrides: dict[str, dict[str, Any]] = {
                 "aws_session_token": None,
                 "aws_profile": None,
             },
-            "tls": {"enabled": True},
+            "tls": {"enabled": True, "ca_file": "/etc/tls/kafka-ca.crt"},
         },
+        "destinations": {"default": "kafka"},
+        "buffer": {"pressure_threshold": 0.85},
     },
     "k8s": {
         "server": {"bind_address": "0.0.0.0:8080"},

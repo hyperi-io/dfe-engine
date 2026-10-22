@@ -24,24 +24,16 @@ from dfe_engine.appmgmt import catalogue
 from dfe_engine.services.models.archiver import PATH_TEMPLATE_PLACEHOLDERS
 from dfe_engine.services.models.receiver import ReceiverConfig
 from dfe_engine.services.plugins import get_plugin
-from dfe_engine.services.registry import ServiceConfigRegistry
+from dfe_engine.services.registry import ServiceConfigRegistry, default_configs
+from dfe_engine.settings import DFESettings, SecretsSettings
 from dfe_engine.yaml_utils import yaml_load_string
 
 _TOKEN = re.compile(r"\{[^{}]*\}")
 
-
-def _shipped_configs() -> list[tuple[str, str]]:
-    from importlib import resources
-
-    root = resources.files("dfe_engine.services") / "default_configs"
-    return sorted(
-        (entry.name, entry.read_text(encoding="utf-8"))
-        for entry in root.iterdir()
-        if entry.name.endswith(".yaml")
-    )
-
-
-_SHIPPED = _shipped_configs()
+# Every config a seed writes, on a backend the receiver reads, so no developer .env decides.
+_SHIPPED = sorted(
+    default_configs(DFESettings(env="dev", secrets=SecretsSettings(provider="openbao"))).items()
+)
 _ARCHIVER = [(name, text) for name, text in _SHIPPED if name.startswith("archiver-")]
 _LOADER = [(name, text) for name, text in _SHIPPED if name.startswith("loader-")]
 _RECEIVER = [(name, text) for name, text in _SHIPPED if name.startswith("receiver-")]
@@ -108,7 +100,8 @@ def test_every_shipped_loader_config_consumes_as_the_loader_does(name: str, text
 @pytest.mark.parametrize(("name", "text"), _RECEIVER, ids=[n for n, _ in _RECEIVER])
 def test_every_shipped_receiver_config_sends_inside_the_hold(name: str, text: str):
     # A seeded 5 s deadline replaced the receiver's own 20 s one.
-    shipped = (yaml_load_string(text) or {})["loader"]["timeout_ms"]
+    # Through the model, so a config that leaves the deadline to the receiver is judged by it.
+    shipped = ReceiverConfig.model_validate(yaml_load_string(text) or {}).loader.timeout_ms
     app = _app_default("contract-acknowledgements", "dfe-receiver", "loader")["timeout_ms"]
     assert shipped == app, name
 
@@ -131,7 +124,7 @@ def test_the_receiver_model_accepts_no_header_by_default():
 def test_every_shipped_receiver_dials_the_loader_the_app_manifest_places(name: str, text: str):
     # The Service name with no namespace resolves wherever the suite is installed.
     shipped = yaml_load_string(text) or {}
-    assert "address" not in shipped["loader"], f"{name} pins the loader address"
+    assert "address" not in shipped.get("loader", {}), f"{name} pins the loader address"
     assert ReceiverConfig.model_validate(shipped).loader.address == catalogue.push_address(
         catalogue.descriptor("dfe-loader")
     )

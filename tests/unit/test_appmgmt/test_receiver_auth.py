@@ -25,10 +25,11 @@ from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.orgs.seed import ensure_default_org
 from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.secrets import build_secrets
+from dfe_engine.services.registry import default_configs
 from dfe_engine.services.templates import generate_template
 from dfe_engine.settings import DFESettings, SecretsSettings
 from dfe_engine.source.models import Source
-from dfe_engine.yaml_utils import yaml_dump_string, yaml_load
+from dfe_engine.yaml_utils import yaml_dump_string, yaml_load, yaml_load_string
 from tests.support.config_schema import definitions, type_mismatches, unread_keys
 from tests.support.producer_contract import DFE_RECEIVER, producer_file
 
@@ -341,3 +342,14 @@ class TestCompiledAuthOverTheTemplate:
             if compiled[block]["mode"] == "bearer":
                 assert runs["bearer"]["secret_source"] == compiled[block]["bearer"]["secret_source"]
                 assert runs["bearer"]["refresh_interval_secs"] == REFRESH
+
+
+class TestSeededProductionConfig:
+    @pytest.mark.parametrize("backend", ["aws", "openbao"])
+    def test_the_seeded_production_config_holds_no_value_the_receiver_refuses(
+        self, receiver_schema, backend
+    ):
+        engine = DFESettings(env="dev", secrets=BACKENDS[backend])
+        seeded = yaml_load_string(default_configs(engine)["receiver-production.yaml"])
+
+        assert type_mismatches(seeded, receiver_schema, definitions(receiver_schema)) == []
