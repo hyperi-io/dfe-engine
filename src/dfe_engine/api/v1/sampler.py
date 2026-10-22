@@ -153,7 +153,8 @@ async def _submit(
         raise HTTPException(
             400, detail={"code": "bad_sample_request", "message": str(exc)}
         ) from exc
-    org_ids = sample_org_scope(request, user)
+    # The caller's orgs come from the org registry, which may be a remote store.
+    org_ids = await run_blocking(sample_org_scope, request, user)
     await check_sample_scope(sampler, req, ch, source_registry, org_ids)
 
     info = manager.submit(
@@ -219,7 +220,7 @@ async def get_sample(task_id: str, request: Request, user: CurrentUser) -> Sampl
     A caller held to its orgs gets 404 for a task not held to them, as for one that
     does not exist.
     """
-    org_ids = sample_org_scope(request, user)
+    org_ids = await run_blocking(sample_org_scope, request, user)
     info = _task_manager(request).get(task_id, reader_orgs=org_ids)
     if info is None:
         raise HTTPException(404, detail={"code": "not_found", "message": "sample task not found"})
@@ -229,5 +230,5 @@ async def get_sample(task_id: str, request: Request, user: CurrentUser) -> Sampl
 @router.get("/samples", response_model=list[TaskInfo], dependencies=[_READ])
 async def list_samples(request: Request, user: CurrentUser) -> list[TaskInfo]:
     """List recent sample tasks (most recent first); a caller held to its orgs sees only theirs."""
-    org_ids = sample_org_scope(request, user)
+    org_ids = await run_blocking(sample_org_scope, request, user)
     return _task_manager(request).list(kind=_TASK_KIND, reader_orgs=org_ids)

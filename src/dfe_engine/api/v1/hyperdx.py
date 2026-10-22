@@ -167,7 +167,8 @@ async def hyperdx_connection(
     that resolves to zero or several separate orgs is refused (403) so isolation
     fails closed rather than guessing.
     """
-    identity = _resolve_identity(request, user)
+    # A held caller's org comes from the org registry, which may be a remote store.
+    identity = await run_blocking(_resolve_identity, request, user)
     if isinstance(identity, _Refusal):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
