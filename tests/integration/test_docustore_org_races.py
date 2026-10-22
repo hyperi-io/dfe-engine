@@ -32,10 +32,12 @@ from dfe_engine.settings import (
     AuthSettings,
     ClickHouseSettings,
     DFESettings,
+    HuntsSettings,
     LocalAuthSettings,
     SecretsSettings,
 )
 from dfe_engine.store.documents import DocuStore
+from dfe_engine.yaml_utils import yaml_load
 from tests.support.accounts import admin_on_its_own_password
 from tests.support.races import race, raised
 
@@ -47,12 +49,13 @@ ROUNDS = 10
 CREDENTIALS = "/api/v1/orgs/acme/ingest-credentials"
 
 
-def _settings(root: Path, secrets_dir: Path, mongo_uri: str, database: str) -> DFESettings:
-    """One engine's settings: its own config directory, the shared store and secrets."""
+def _settings(root: Path, shared: Path, mongo_uri: str, database: str) -> DFESettings:
+    """One engine's settings: its own config directory, the shared store, secrets and hunts."""
     (root / "auth").mkdir(parents=True)
     return DFESettings(
         config_dir=str(root),
         clickhouse=ClickHouseSettings(bootstrap_tables=False),
+        hunts=HuntsSettings(rules_dir=str(shared / "rules"), hunt_dir=str(shared / "hunts")),
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(root / "auth"),
@@ -60,7 +63,7 @@ def _settings(root: Path, secrets_dir: Path, mongo_uri: str, database: str) -> D
             accounts_store=AccountStoreSettings(uri=mongo_uri, database=database),
             local=LocalAuthSettings(admin_password=ADMIN_PASSWORD),
         ),
-        secrets=SecretsSettings(provider="file", path=str(secrets_dir)),
+        secrets=SecretsSettings(provider="file", path=str(shared / "secrets")),
         api=APISettings(jwt_secret="test-secret-key-for-unit-tests-hmac32"),
     )
 
@@ -69,10 +72,11 @@ def _settings(root: Path, secrets_dir: Path, mongo_uri: str, database: str) -> D
 def engines(mongo_uri: str, tmp_path: Path) -> Iterator[SimpleNamespace]:
     """Engines ``a`` and ``b`` on one throwaway database, with an admin's bearer header."""
     database = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
-    secrets_dir = tmp_path / "secrets"
-    secrets_dir.mkdir()
-    first = _settings(tmp_path / "a", secrets_dir, mongo_uri, database)
-    second = _settings(tmp_path / "b", secrets_dir, mongo_uri, database)
+    shared = tmp_path / "shared"
+    for sub in ("secrets", "rules", "hunts"):
+        (shared / sub).mkdir(parents=True)
+    first = _settings(tmp_path / "a", shared, mongo_uri, database)
+    second = _settings(tmp_path / "b", shared, mongo_uri, database)
     app_a, app_b = create_app(settings=first), create_app(settings=second)
     token = create_access_token(data={"sub": "admin"}, settings=first)
     try:
@@ -82,7 +86,11 @@ def engines(mongo_uri: str, tmp_path: Path) -> Iterator[SimpleNamespace]:
         ):
             admin_on_its_own_password(app_a)
             yield SimpleNamespace(
-                a=a, b=b, apps=(app_a, app_b), headers={"Authorization": f"Bearer {token}"}
+                a=a,
+                b=b,
+                apps=(app_a, app_b),
+                headers={"Authorization": f"Bearer {token}"},
+                hunt_dir=shared / "hunts",
             )
     finally:
         _registries.clear()
@@ -169,3 +177,95 @@ def test_a_credential_made_on_one_engine_while_another_goes_on_the_other(engines
         assert sorted(line.split(":", 1)[0] for line in http.split()) == [
             f"new-{n}" for n in range(round_ + 1)
         ]
+
+
+ORGS = "/api/v1/orgs"
+_HUNT = {
+    "cron": "*/5 * * * *",
+    "rules": ["certutil"],
+    "global_source_table_name": "dfe.main",
+    "global_target_table_name": "dfe.detection",
+}
+
+
+def _org(engines, client: TestClient, name: str, org_ids: list[str] | None = None) -> None:
+    body = {"name": name, "org_ids": org_ids or []}
+    made = client.post(ORGS, json=body, headers=engines.headers)
+    assert made.status_code == 201, made.text
+
+
+def _hunt_naming(engines, name: str, customers: list[str]) -> None:
+    body = {"name": name, **_HUNT, "customers": customers}
+    made = engines.a.post("/api/v1/hunts", json=body, headers=engines.headers)
+    assert made.status_code == 201, made.text
+
+
+def _hunt_tenant_ids(engines, name: str) -> dict[str, list[str]]:
+    return yaml_load(engines.hunt_dir / f"{name}.yaml").get("customer_tenant_ids") or {}
+
+
+def _the_hunt_write_waits_for(monkeypatch, write) -> None:
+    """Make *write* land the moment a route writes an org's tenant ids into its hunts."""
+    hunts = _registries["hunt_configs"]
+    real = hunts.store_org_tenant_ids
+
+    def racing(*args, **kwargs):
+        monkeypatch.setattr(hunts, "store_org_tenant_ids", real)
+        write()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(hunts, "store_org_tenant_ids", racing)
+
+
+def test_an_org_that_loses_its_tenant_id_to_another_engine_leaves_its_hunts_alone(
+    engines, monkeypatch
+):
+    _org(engines, engines.a, "beta")
+    _hunt_naming(engines, "beta_hunt", ["beta"])
+    assert engines.a.delete(f"{ORGS}/beta", headers=engines.headers).status_code == 204
+    other = {}
+
+    def b_takes_the_tenant_id() -> None:
+        body = {"name": "alpha", "org_ids": ["shared"]}
+        other["resp"] = engines.b.post(ORGS, json=body, headers=engines.headers)
+
+    _the_hunt_write_waits_for(monkeypatch, b_takes_the_tenant_id)
+
+    created = engines.a.post(
+        ORGS, json={"name": "beta", "org_ids": ["shared"]}, headers=engines.headers
+    )
+
+    assert sorted([created.status_code, other["resp"].status_code]) == [201, 409]
+    (holder,) = _holders(engines.a, engines.headers, "shared")
+    holding = [
+        org for org, ids in _hunt_tenant_ids(engines, "beta_hunt").items() if "shared" in ids
+    ]
+    assert holding in ([], [holder])
+
+
+def test_a_credential_binding_an_org_another_engine_is_deleting_loses_cleanly(engines, monkeypatch):
+    _org(engines, engines.a, "acme")
+    _org(engines, engines.a, "beta", ["beta-1"])
+    _hunt_naming(engines, "beta_hunt", ["beta"])
+    bound = {}
+
+    def a_binds_beta() -> None:
+        bound["resp"] = engines.a.put(
+            f"{CREDENTIALS}/agents",
+            json={"orgs": ["acme", "beta"]},
+            headers={**engines.headers, **CREATE},
+        )
+
+    _the_hunt_write_waits_for(monkeypatch, a_binds_beta)
+
+    deleted = engines.b.delete(f"{ORGS}/beta", headers=engines.headers)
+
+    assert sorted([deleted.status_code, bound["resp"].status_code]) == [204, 409], (
+        deleted.text,
+        bound["resp"].text,
+    )
+    orgs = {org.name for org in engines.apps[0].state.org_registry.list()}
+    credentials = engines.apps[0].state.org_registry.ingest_credentials.list()
+    assert all(set(c.orgs) <= orgs for c in credentials), credentials
+    beta_ids = _hunt_tenant_ids(engines, "beta_hunt").get("beta")
+    assert beta_ids == (["beta-1"] if "beta" in orgs else None)

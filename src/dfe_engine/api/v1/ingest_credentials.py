@@ -60,6 +60,7 @@ from dfe_engine.orgs.ingest_credentials import (
     CredentialIdTakenError,
     IngestCredential,
     IngestListener,
+    OrgUnavailableError,
 )
 from dfe_engine.orgs.ingest_tokens import drop_token, mint_token, store_token, sync_bearer_tokens
 from dfe_engine.orgs.registry import OrgRegistry
@@ -310,7 +311,8 @@ def _put(
     the stored one is still the credential the route checked the precondition against.
 
     Raises:
-        HTTPException: 409 ``credential_id_taken`` when another org took the id first.
+        HTTPException: 409 ``credential_id_taken`` when another org took the id first,
+            or 409 ``org_unavailable`` when an org it binds is being deleted or is gone.
         ProblemError: 412 when another write created, changed or removed it since.
     """
     try:
@@ -318,6 +320,10 @@ def _put(
     except CredentialIdTakenError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "credential_id_taken", "message": str(exc)}
+        ) from exc
+    except OrgUnavailableError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "org_unavailable", "message": str(exc)}
         ) from exc
     except CredentialChangedError as exc:
         raise _changed_since_read(request, credential, new=new) from exc

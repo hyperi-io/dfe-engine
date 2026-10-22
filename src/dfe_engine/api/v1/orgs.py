@@ -72,8 +72,6 @@ from dfe_engine.orgs.registry import (
     OrgBoundError,
     OrgCollisionError,
     OrgExistsError,
-    refuse_bound_delete,
-    refuse_reserved_delete,
     refuse_reserved_update,
 )
 from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids
@@ -154,51 +152,55 @@ async def create_org(
     change to review, and the ``X-DFE-Review-Required`` header says so.
     """
     registry: AnyOrgRegistry = request.app.state.org_registry
-    outcome = await run_blocking(
-        functools.partial(_create_hunts_first, registry, hunts, body, user.user_id)
-    )
-
     lifecycle: OrgLifecycleManager = request.app.state.org_lifecycle
     try:
-        org = await lifecycle.create_org(
-            body.name,
-            org_ids=body.org_ids,
-            display_name=body.display_name,
-            admin_id=user.user_id,
-        )
+        # Held until the record is in, so a create that would lose is refused before its hunts move.
+        with registry.reserved(body.name, body.org_ids):
+            outcome = await run_blocking(
+                functools.partial(_create_hunts_first, hunts, body, user.user_id)
+            )
+            try:
+                org = await lifecycle.create_org(
+                    body.name,
+                    org_ids=body.org_ids,
+                    display_name=body.display_name,
+                    admin_id=user.user_id,
+                )
+            except OrgExistsError, OrgCollisionError:
+                # A writer that holds nothing, such as the startup seed, got there first.
+                await run_blocking(
+                    functools.partial(_put_hunts_back, registry, hunts, body.name, user.user_id)
+                )
+                raise
     except (OrgExistsError, OrgCollisionError) as exc:
-        # Another replica's create got the name or a tenant id after the check above.
         raise _conflict(exc) from exc
     apply_review_headers(response, outcome)
     return _org_response(org)
 
 
-def _create_hunts_first(
-    registry: AnyOrgRegistry, hunts: Any, body: CreateOrgRequest, actor: str
-) -> WriteOutcome | None:
-    """Refuse a taken name or a collision, then store the new org's tenant ids in its hunts.
+def _create_hunts_first(hunts: Any, body: CreateOrgRequest, actor: str) -> WriteOutcome | None:
+    """Store the new org's tenant ids in the hunts naming it.
 
     Raises:
-        HTTPException: 409 ``conflict`` for a name taken or a tenant id another org holds,
-            or 409 ``tenant_id_held`` for one a hunt still reads for another org.
+        HTTPException: 409 ``tenant_id_held`` for a tenant id a hunt still reads for
+            another org.
     """
-    if registry.get(body.name) is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": f"Org '{body.name}' already exists"},
-        )
-    other = colliding_org(body.name, body.org_ids, registry.list())
-    if other is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": f"Org '{body.name}' collides with tenant-fenced org '{other.name}'",
-            },
-        )
     tenant_ids = org_tenant_ids(body)
     refuse_held_tenant_ids(hunts, body.name, tenant_ids)
     return store_hunt_tenant_ids(hunts, body.name, tenant_ids, actor)
+
+
+def _put_hunts_back(registry: AnyOrgRegistry, hunts: Any, name: str, actor: str) -> None:
+    """Store in the hunts naming *name* the tenant ids of whichever org holds it now. Never raises.
+
+    A create refused after its hunt write leaves them as the org that won the name, or
+    no org at all, would have them.
+    """
+    now = registry.get(name)
+    try:
+        store_hunt_tenant_ids(hunts, name, None if now is None else org_tenant_ids(now), actor)
+    except Exception as exc:  # the create's 409 stands whatever the hunt write does
+        logger.error("hunts not put back after a refused org create", org=name, error=str(exc))
 
 
 @router.get(
@@ -414,34 +416,20 @@ async def delete_org(
     ingest credential binds or a fetched source names: each answers 409.
     """
     registry: AnyOrgRegistry = request.app.state.org_registry
-    outcome = await run_blocking(
-        functools.partial(_delete_hunts_first, registry, hunts, name, user.user_id)
-    )
-
     lifecycle: OrgLifecycleManager = request.app.state.org_lifecycle
-    await lifecycle.delete_org(name, admin_id=user.user_id)
-    await run_blocking(functools.partial(reconcile_tenancy, request, user))
-    apply_review_headers(response, outcome)
-
-
-def _delete_hunts_first(
-    registry: AnyOrgRegistry, hunts: Any, name: str, actor: str
-) -> WriteOutcome | None:
-    """Refuse a delete the org's dependants forbid, then take its tenant ids out of its hunts.
-
-    Raises:
-        HTTPException: 404 ``not_found``, 409 ``reserved_org`` for the default org,
-            409 ``org_bound`` for one another org's ingest credential binds, or 409
-            ``org_in_use`` for one a fetched source names.
-    """
-    if registry.get(name) is None:
+    try:
+        # Held until the record is gone, so a delete that would be refused is refused before
+        # its hunts move, and no credential write binds the org meanwhile.
+        with registry.deleting(name):
+            outcome = await run_blocking(
+                functools.partial(_delete_hunts_first, hunts, name, user.user_id)
+            )
+            await lifecycle.delete_org(name, admin_id=user.user_id)
+    except KeyError as exc:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Org '{name}' not found"},
-        )
-    try:
-        refuse_reserved_delete(name)
-        refuse_bound_delete(name, registry.ingest_credentials)
+        ) from exc
     except ReservedOrgError as exc:
         raise HTTPException(
             status_code=409, detail={"code": "reserved_org", "message": str(exc)}
@@ -450,6 +438,16 @@ def _delete_hunts_first(
         raise HTTPException(
             status_code=409, detail={"code": "org_bound", "message": str(exc)}
         ) from exc
+    await run_blocking(functools.partial(reconcile_tenancy, request, user))
+    apply_review_headers(response, outcome)
+
+
+def _delete_hunts_first(hunts: Any, name: str, actor: str) -> WriteOutcome | None:
+    """Refuse a delete a fetched source forbids, then take the org's tenant ids out of its hunts.
+
+    Raises:
+        HTTPException: 409 ``org_in_use`` for an org a fetched source names.
+    """
     refuse_org_named_by_sources(name)
     return store_hunt_tenant_ids(hunts, name, None, actor)
 
