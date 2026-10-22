@@ -57,6 +57,7 @@ from dfe_engine.backing import observed, providers
 from dfe_engine.backing.providers import ManagedBy, Resolution, SetIn
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, get_path, set_path
 from dfe_engine.settings import BackingFactSettings
+from dfe_engine.yaml_utils import yaml_load
 
 from .helm import (
     SetVarRequest,
@@ -82,6 +83,10 @@ _CLASS = "infravars"
 # The deployment-wide overlay, read before the per-chart one so the per-chart file
 # wins - the same order the ApplicationSets stack them in.
 _COMMON = "common"
+
+# The resolver's data-chart sizing, read under both overlays as layer2-data stacks it.
+_SIZING_DIR = "sizing"
+_SIZING_SUFFIX = ".data-charts.values.yaml"
 
 MANAGED_REFUSAL = "managed_by_provider"
 """The 409 code for a write to a value DFE does not set because it does not run the service."""
@@ -388,10 +393,28 @@ class BackingWriteResult(WriteResult):
     )
 
 
+def _sizing(request: Request) -> list[tuple[str, dict]]:
+    """The resolver's data-chart sizing for this deployment's profile, where the deploy repo holds it.
+
+    layer2-data renders it under ``infra/common.yaml`` and ``infra/<chart>.yaml``, so a
+    count it sizes is the declared count until an overlay sets its own.
+    """
+    profile = request.app.state.settings.deployment.profile
+    if not profile:
+        return []
+    gc = gitcrud_of(request)
+    rel = f"{_SIZING_DIR}/{profile}{_SIZING_SUFFIX}"
+    with gc.reading():
+        f = gc.repo_path / rel
+        if not f.is_file():
+            return []
+        return [(rel, yaml_load(f) or {})]
+
+
 def _docs(request: Request, chart: str) -> list[tuple[str, dict]]:
     """The overlay documents that apply to one chart, lowest precedence first."""
     gc = gitcrud_of(request)
-    out: list[tuple[str, dict]] = []
+    out: list[tuple[str, dict]] = _sizing(request)
     for name in (_COMMON, chart):
         try:
             out.append((name, gc.get(_CLASS, name)))
@@ -545,7 +568,7 @@ def _stack_with(
 ) -> list[tuple[str, dict]]:
     """The overlay stack as it would read with ``edit`` applied to ``name``."""
     gc = gitcrud_of(request)
-    out: list[tuple[str, dict]] = []
+    out: list[tuple[str, dict]] = _sizing(request)
     for candidate in (_COMMON, spec.chart):
         try:
             doc = copy.deepcopy(gc.get(_CLASS, candidate))

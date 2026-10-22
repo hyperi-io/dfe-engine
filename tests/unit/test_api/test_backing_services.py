@@ -9,6 +9,7 @@ import copy
 from importlib import resources
 
 import pytest
+import yaml
 
 from dfe_engine.appmgmt import contract
 from dfe_engine.gitcrud import GitCrud, default_registry
@@ -533,6 +534,58 @@ class TestMemberCountsGoUpOnly:
         gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
         resp = self._set(client, admin_headers, "kafka", "kafka", {"replicas": 5, "x": 1})
         assert resp.status_code == 200, resp.text
+
+
+class TestTheResolverSizingIsDeclared:
+    """The resolver's sizing/<profile> file is the lowest layer, as layer2-data renders it."""
+
+    def _sized(self, app, tmp_path, doc, profile="scale"):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "common", {}, "tester")
+        app.state.settings.deployment.profile = profile
+        sizing = gc.repo_path / "sizing" / f"{profile}.data-charts.values.yaml"
+        sizing.parent.mkdir(parents=True, exist_ok=True)
+        sizing.write_text(yaml.safe_dump(doc), encoding="utf-8")
+        return gc
+
+    def _set(self, client, headers, path, value, name="kafka"):
+        return client.put(
+            f"/api/v1/backing-services/overlays/{name}/vars/{path}",
+            json={"value": value},
+            headers=headers,
+        )
+
+    def test_lowering_a_sized_broker_count_is_refused(self, client, app, admin_headers, tmp_path):
+        self._sized(app, tmp_path, {"kafka": {"replicas": 5}})
+
+        resp = self._set(client, admin_headers, "kafka.replicas", 3)
+
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "scale_down_refused"
+        assert "5 -> 3" in resp.json()["message"]
+
+    def test_lowering_a_sized_keeper_ensemble_is_refused(
+        self, client, app, admin_headers, tmp_path
+    ):
+        self._sized(app, tmp_path, {"clickhouse": {"keeper": {"replicas": 3}}})
+
+        resp = self._set(
+            client, admin_headers, "clickhouse.keeper.replicas", 1, name="clickhouse-cluster"
+        )
+
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "scale_down_refused"
+
+    def test_raising_a_sized_count_is_accepted(self, client, app, admin_headers, tmp_path):
+        self._sized(app, tmp_path, {"kafka": {"replicas": 3}})
+
+        assert self._set(client, admin_headers, "kafka.replicas", 5).status_code == 200
+
+    def test_another_profile_s_sizing_is_not_read(self, client, app, admin_headers, tmp_path):
+        self._sized(app, tmp_path, {"kafka": {"replicas": 5}}, profile="single")
+        app.state.settings.deployment.profile = "scale"
+
+        assert self._set(client, admin_headers, "kafka.replicas", 3).status_code == 200
 
 
 class TestARevertCannotShrinkAMemberCount:
