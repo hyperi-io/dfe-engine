@@ -115,6 +115,9 @@ Auth (local):
 E2E server (Playwright host-run helpers; refused in production):
 - DFE_E2E_SERVER -> e2e_server
 
+Replicas (how many engines the deploy runs, guarded by dfe_engine.replicas):
+- DFE_ENGINE_REPLICAS -> engine_replicas
+
 Stack identity (what the deploy says this pod came from):
 - DFE_STACK_VERSION -> stack_version
 - DFE_UI_VERSION -> ui_version (the dfe-ui pin the deploy rendered)
@@ -2239,6 +2242,16 @@ class DFESettings(BaseModel):
     gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
     secrets: SecretsSettings = Field(default_factory=SecretsSettings)
+    engine_replicas: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "How many engines the deploy runs, passed by the chart from its replica "
+            "count. Above 1 the engine refuses to boot unless every replica reaches the "
+            "same users, secrets and deploy repo (dfe_engine.replicas). "
+            "DFE_ENGINE_REPLICAS."
+        ),
+    )
     stack_version: str = Field(
         default="",
         description=(
@@ -2954,6 +2967,9 @@ def _get_env_overrides() -> dict:
         overrides["secrets"]["recovery_window_days"] = val
     if val := _get_env("DFE_SECRETS_TAGS"):
         overrides["secrets"]["tags"] = val
+
+    if val := _get_env("DFE_ENGINE_REPLICAS"):
+        overrides["engine_replicas"] = int(val)
 
     # The stack this pod was deployed from, when the deploy passed it in
     if val := _get_env("DFE_STACK_VERSION"):
