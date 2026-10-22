@@ -491,27 +491,49 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         startup_banner(resolve_state(gitcrud, environment=settings.env, mode=settings.gitops.mode))
     app.state.policy_store = PolicyStore(gitcrud) if gitcrud is not None else None
 
-    # Bootstrap OIDC provider registry
-    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry, ProviderMetrics
-
-    oidc_dir = auth_dir / "oidc-providers"
-    oidc_dir.mkdir(parents=True, exist_ok=True)
-    app.state.oidc_provider_registry = OIDCProviderRegistry(
-        oidc_dir, metrics=ProviderMetrics(app.state.metrics_manager)
+    # OIDC providers live beside the accounts: the document store, else YAML files.
+    from dfe_engine.auth.oidc.registry import (
+        DocuStoreOIDCProviderRegistry,
+        OIDCProviderRegistry,
+        ProviderMetrics,
+        ProviderRegistry,
+        seed_providers,
     )
+
+    provider_metrics = ProviderMetrics(app.state.metrics_manager)
+    oidc_registry: ProviderRegistry
+    providers_revision = None
+    if doc_store is not None:
+        stored_providers = DocuStoreOIDCProviderRegistry(doc_store, metrics=provider_metrics)
+        providers_revision = stored_providers.revision
+        oidc_registry = stored_providers
+    else:
+        oidc_dir = auth_dir / "oidc-providers"
+        oidc_dir.mkdir(parents=True, exist_ok=True)
+        oidc_registry = OIDCProviderRegistry(oidc_dir, metrics=provider_metrics)
+    if settings.auth.seed_dir:
+        seed_providers(
+            oidc_registry, Path(settings.auth.seed_dir) / "oidc-providers", metrics=provider_metrics
+        )
+    app.state.oidc_provider_registry = oidc_registry
 
     # Build the OIDC relying party from the enabled providers. The engine is the
     # RP + single token issuer: it terminates the IdP login and re-mints its own
     # ES384 token. Zero providers is fine (an empty registry -> every login 404s).
     # This is only the INITIAL build - the RP is rebuilt whenever the provider
-    # registry changes, so a new provider can serve logins without a restart.
-    from dfe_engine.auth.oidc.rp import build_relying_party
+    # registry changes, so a new provider can serve logins without a restart. On the
+    # document store another replica's write rebuilds it too.
+    from dfe_engine.api.v1.oidc_login import relying_party_for
 
-    app.state.oidc_rp = build_relying_party(
-        app.state.oidc_provider_registry,
-        secrets=app.state.dfe_secrets,
-        metrics=app.state.oidc_login_metrics,
-    )
+    if providers_revision is not None:
+        from dfe_engine.store.live import Live
+
+        app.state.oidc_rp_live = Live(
+            functools.partial(relying_party_for, app.state), providers_revision
+        )
+        app.state.oidc_rp = app.state.oidc_rp_live.value
+    else:
+        app.state.oidc_rp = relying_party_for(app.state)
 
     # Bootstrap HyperDX client (optional)
     if settings.hyperdx.enabled and settings.hyperdx.base_url:

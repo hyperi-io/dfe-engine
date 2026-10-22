@@ -24,13 +24,12 @@ from dfe_engine.auth.roles import (
     builtin_core_role_names,
 )
 from dfe_engine.core_resources.yaml_resource_type import CORE_RESOURCE_MUTATION_MESSAGE
+from dfe_engine.store.live import REFRESH_SECONDS
 from dfe_engine.yaml_utils import yaml_dump
 
 if TYPE_CHECKING:
     from dfe_engine.store.documents import DocuStore
 
-# How stale another replica's role write may be here: the floor between two checks.
-ROLE_REFRESH_SECONDS = 2.0
 # A binding claim no group holds, or a delete's mark, is a write that never finished once this old.
 # The age compares this replica's clock with the writer's, so replicas need clocks synced by NTP.
 BINDING_GRACE_SECONDS = 60.0
@@ -219,7 +218,7 @@ class DocuStoreRoleStore:
         store: DocuStore,
         *,
         collection: str = "roles",
-        refresh_seconds: float = ROLE_REFRESH_SECONDS,
+        refresh_seconds: float = REFRESH_SECONDS,
         binding_grace_seconds: float = BINDING_GRACE_SECONDS,
     ) -> None:
         self._c = store.typed(collection, _StoredRole, key="name")

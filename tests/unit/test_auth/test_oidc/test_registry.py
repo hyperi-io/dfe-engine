@@ -16,8 +16,14 @@ from pydantic import ValidationError
 from scalo.metrics import create_metrics
 
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
-from dfe_engine.auth.oidc.registry import PROVIDERS_SKIPPED, OIDCProviderRegistry, ProviderMetrics
-from dfe_engine.yaml_utils import yaml_load
+from dfe_engine.auth.oidc.registry import (
+    PROVIDERS_SKIPPED,
+    DocuStoreOIDCProviderRegistry,
+    OIDCProviderRegistry,
+    ProviderMetrics,
+    seed_providers,
+)
+from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
 def _make_google_provider() -> OIDCProvider:
@@ -335,12 +341,120 @@ class TestANameThatIsAPath:
         assert not (tmp_path / "elsewhere" / "planted.yaml").exists()
 
 
+class TestPut:
+    """A put writes the provider whole, whatever the name held before."""
+
+    def test_it_replaces_every_field_a_stored_provider_carried(self, tmp_path):
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("sso", _make_generic_provider())
+        registry.update("sso", last_sync_status="ok", display_name="Edited")
+
+        registry.put("sso", _make_google_provider())
+
+        assert registry.get("sso") == _make_google_provider()
+
+    def test_it_refuses_a_name_no_provider_can_hold(self, tmp_path):
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+
+        with pytest.raises(KeyError):
+            registry.put("../elsewhere/planted", _make_generic_provider())
+
+        assert not (tmp_path / "elsewhere").exists()
+
+
+class TestSeedProviders:
+    """Each seed file is written over the stored provider of its name, at every boot."""
+
+    @pytest.fixture
+    def seed(self, tmp_path):
+        directory = tmp_path / "seed"
+        directory.mkdir()
+        return directory
+
+    def _write(self, seed, name: str, provider: OIDCProvider) -> None:
+        yaml_dump(provider.model_dump(), seed / f"{name}.yaml")
+
+    def test_the_seed_wins_over_a_stored_provider_of_its_name(self, tmp_path, seed):
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("sso", _make_generic_provider(enabled=True))
+        registry.update("sso", enabled=False, last_sync_status="ok")
+        self._write(seed, "sso", _make_generic_provider(enabled=True))
+
+        assert seed_providers(registry, seed) == ["sso"]
+
+        assert registry.get("sso") == _make_generic_provider(enabled=True)
+
+    def test_a_stored_provider_no_file_names_is_left_alone(self, tmp_path, seed):
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        registry.create("local", _make_google_provider())
+        self._write(seed, "sso", _make_generic_provider())
+
+        seed_providers(registry, seed)
+
+        assert [name for name, _ in registry.list()] == ["local", "sso"]
+        assert registry.get("local") == _make_google_provider()
+
+    @pytest.mark.parametrize(("reason", "content"), UNLOADABLE_PROVIDER_FILES)
+    def test_a_file_that_does_not_load_is_skipped_and_counted(
+        self, tmp_path, seed, reason, content
+    ):
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        (seed / "broken.yaml").write_bytes(content)
+        self._write(seed, "sso", _make_generic_provider())
+
+        seeded = seed_providers(registry, seed, metrics=ProviderMetrics(manager))
+
+        assert seeded == ["sso"]
+        assert [name for name, _ in registry.list()] == ["sso"]
+        assert _skips(manager) == {reason: 1.0}
+
+    def test_a_file_not_named_for_a_provider_is_skipped(self, tmp_path, seed):
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        self._write(seed, "-leading-dash", _make_generic_provider())
+        self._write(seed, "sso", _make_generic_provider())
+
+        assert seed_providers(registry, seed) == ["sso"]
+
+    def test_only_yaml_files_are_seeded(self, tmp_path, seed):
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        (seed / "notes.txt").write_text("type: generic\n", encoding="utf-8")
+        yaml_dump(_make_generic_provider().model_dump(), seed / "other.yml")
+
+        assert seed_providers(registry, seed) == []
+
+    def test_the_log_names_a_skipped_file_never_its_values(self, tmp_path, seed, audit_events):
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+        (seed / "broken.yaml").write_text("type: sentinel-seed-4410\n", encoding="utf-8")
+
+        seed_providers(registry, seed)
+
+        (line,) = [e for e in audit_events if e["event"].startswith("OIDC provider seed file")]
+        assert (line["file"], line["reason"], line["error_type"]) == (
+            "broken.yaml",
+            "invalid",
+            "ValidationError",
+        )
+        assert "sentinel-seed-4410" not in json.dumps(audit_events, default=str)
+
+    def test_an_absent_directory_seeds_nothing(self, tmp_path):
+        registry = OIDCProviderRegistry(tmp_path / "oidc")
+
+        assert seed_providers(registry, tmp_path / "absent") == []
+        assert registry.list() == []
+
+
 @pytest.mark.parametrize(
-    "method",
-    [name for name, value in vars(OIDCProviderRegistry).items() if inspect.isfunction(value)],
+    ("registry_class", "method"),
+    [
+        (registry_class, name)
+        for registry_class in (OIDCProviderRegistry, DocuStoreOIDCProviderRegistry)
+        for name, value in vars(registry_class).items()
+        if inspect.isfunction(value)
+    ],
 )
-def test_every_method_annotation_evaluates(method):
+def test_every_method_annotation_evaluates(registry_class, method):
     """The class defines ``list``, so an annotation naming the builtin must not resolve to it."""
-    hints = typing.get_type_hints(getattr(OIDCProviderRegistry, method))
+    hints = typing.get_type_hints(getattr(registry_class, method))
 
     assert "return" in hints

@@ -96,12 +96,14 @@ Two principles:
 ### Provider config
 
 Providers are YAML files (one per provider, filename stem = name) managed by
-`OIDCProviderRegistry`. The model (`auth/oidc/models.py`, the SSoT) carries:
+`OIDCProviderRegistry`, or on the document store backend one document each in
+`oidc_providers`, managed by `DocuStoreOIDCProviderRegistry` and shared by every
+engine replica. The model (`auth/oidc/models.py`, the SSoT) carries:
 `type` (generic|google|entra_id|okta), `enabled`, `issuer`, `client_id`,
 `client_id_env`, `client_secret_path`, `client_secret_env`, `scopes`, and a
 `groups` block (mode + claim_name + per-provider directory fields).
 
-A provider file that does not load, whether its YAML is unreadable or its fields fail validation, is left out of the provider list, the relying party and the sync scheduler. The engine logs it once and counts it on `auth_oidc_providers_skipped_total{reason}` (`unreadable`, `invalid`), and every other provider carries on.
+A provider file or stored document that does not load, whether its YAML is unreadable or its fields fail validation, is left out of the provider list, the relying party and the sync scheduler. The engine logs it once and counts it on `auth_oidc_providers_skipped_total{reason}` (`unreadable`, `invalid`), and every other provider carries on.
 
 A secret is never stored in config: the client id is not secret and is held in
 the clear, every other credential is a PATH into the `DfeSecrets` seam or the

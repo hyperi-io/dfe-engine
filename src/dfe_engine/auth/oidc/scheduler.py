@@ -22,7 +22,7 @@ from dfe_engine.http_errors import describe_failure
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
     from dfe_engine.auth.oidc.models import OIDCProvider
-    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    from dfe_engine.auth.oidc.registry import ProviderRegistry
     from dfe_engine.secrets import DfeSecrets
 
 # The provider API refuses a shorter interval, and a provider file written out of band is held to it too.
@@ -63,7 +63,7 @@ class OidcSyncScheduler:
         group_store: GroupStore | DocuStoreGroupStore,
         metrics: SyncMetrics | None,
         on_groups_created: Callable[[], None] | None,
-        registry: OIDCProviderRegistry,
+        registry: ProviderRegistry,
         secrets: DfeSecrets | None,
         tick_seconds: float,
     ) -> None:

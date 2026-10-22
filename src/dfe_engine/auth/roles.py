@@ -27,13 +27,13 @@ Usage:
 """
 
 import importlib.resources
-import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
+from dfe_engine.store.live import Live
 from dfe_engine.yaml_utils import yaml_load, yaml_load_string
 
 RoleResourceType = Literal["core", "custom"]
@@ -296,26 +296,13 @@ class LiveRoleConfig(RoleConfig):
             refresh_seconds: The least time between two checks of the counter.
         """
         super().__init__({})
-        self._load = load
-        self._revision = revision
-        self._refresh_seconds = refresh_seconds
-        self._read_at = 0
-        self._checked = 0.0
-        self.refresh()
+        self._live = Live(load, revision, refresh_seconds=refresh_seconds)
 
     @property
     def roles(self) -> dict[str, RoleDefinition]:
         """The role definitions, read again first when the store has moved since."""
-        now = time.monotonic()
-        if now - self._checked >= self._refresh_seconds:
-            self._checked = now
-            if self._revision() != self._read_at:
-                self.refresh()
-        return self._roles
+        return self._live.get()
 
     def refresh(self) -> None:
         """Read the definitions now, whatever the floor."""
-        # The counter first: a write landing during the read leaves it behind, so the next check reads again.
-        self._read_at = self._revision()
-        self._roles = self._load()
-        self._checked = time.monotonic()
+        self._live.refresh()

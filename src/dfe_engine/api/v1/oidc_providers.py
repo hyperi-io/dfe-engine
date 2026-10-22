@@ -481,10 +481,10 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
 
 
 def _get_registry(request: Request):
-    """Return OIDCProviderRegistry from app state."""
-    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    """Return the provider registry from app state."""
+    from dfe_engine.auth.oidc.registry import ProviderRegistry
 
-    registry: OIDCProviderRegistry = request.app.state.oidc_provider_registry
+    registry: ProviderRegistry = request.app.state.oidc_provider_registry
     return registry
 
 
@@ -632,22 +632,15 @@ def _moves_to_env(*, env: str, stored_env: str, stored_path: str, value: str) ->
 async def _refresh_rp(request: Request) -> None:
     """Rebuild the relying party so this write takes effect on the login routes.
 
-    The registry is read fresh from YAML on every call, but the RP snapshots the
-    enabled providers and their resolved credentials when it is built. Without
-    this rebuild a provider created here 404s on ``/auth/oidc/{name}/login``
-    until the process restarts. Non-raising - see ``build_relying_party``. The
-    rebuild reads each credential from the secret store, so it runs on a worker thread.
+    The registry is read fresh on every call, but the RP snapshots the enabled
+    providers and their resolved credentials when it is built. Without this rebuild a
+    provider created here 404s on ``/auth/oidc/{name}/login`` until the process
+    restarts. Another replica rebuilds once its next login sees the write. Non-raising -
+    see ``build_relying_party``.
     """
-    from dfe_engine.auth.oidc.rp import build_relying_party
+    from dfe_engine.api.v1.oidc_login import rebuild_relying_party
 
-    request.app.state.oidc_rp = await run_blocking(
-        functools.partial(
-            build_relying_party,
-            _get_registry(request),
-            secrets=getattr(request.app.state, "dfe_secrets", None),
-            metrics=getattr(request.app.state, "oidc_login_metrics", None),
-        )
-    )
+    await rebuild_relying_party(request)
 
 
 # -- Endpoints ------------------------------------------------

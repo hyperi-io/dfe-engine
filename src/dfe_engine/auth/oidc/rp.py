@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from starlette.requests import Request
 
     from dfe_engine.auth.oidc.models import OIDCProvider
-    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    from dfe_engine.auth.oidc.registry import ProviderRegistry
     from dfe_engine.secrets import DfeSecrets
 
 # Claims a userinfo response may fill; groups stay ID-token-only because they decide roles.
@@ -293,7 +293,7 @@ class OidcRelyingParty:
 
     def __init__(
         self,
-        registry: OIDCProviderRegistry,
+        registry: ProviderRegistry,
         *,
         secrets: DfeSecrets | None = None,
         metrics: LoginMetrics | None = None,
@@ -503,7 +503,7 @@ class OidcRelyingParty:
 
 
 def build_relying_party(
-    registry: OIDCProviderRegistry,
+    registry: ProviderRegistry,
     *,
     secrets: DfeSecrets | None = None,
     metrics: LoginMetrics | None = None,
