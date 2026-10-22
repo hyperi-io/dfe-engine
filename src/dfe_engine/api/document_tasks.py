@@ -29,7 +29,6 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from bson.errors import InvalidDocument
 from pydantic import BaseModel, ValidationError
 from pymongo import DESCENDING
 from pymongo.errors import PyMongoError
@@ -58,8 +57,6 @@ OWNER_LOST_SECONDS = 30.0
 HEARTBEAT_SECONDS = 5.0
 # How often an owner reads for cancels and writes progress, so a cancel lands within two.
 WATCH_SECONDS = 1.0
-
-TASK_RESULT_TOO_LARGE = "The task finished, but its result is too large to keep"
 
 _ENDED = [status.value for status in TaskStatus if status.is_terminal]
 
@@ -198,15 +195,6 @@ def _failed_for_lost_owner(record: TaskRecord, now: float) -> TaskRecord:
             "completed_at": datetime.fromtimestamp(now, UTC).isoformat(),
         }
     )
-
-
-def _result_dropped(fields: dict[str, Any]) -> dict[str, Any]:
-    return fields | {
-        "status": TaskStatus.FAILED,
-        "result": None,
-        "error": TASK_RESULT_TOO_LARGE,
-        "message": f"Failed: {TASK_RESULT_TOO_LARGE}",
-    }
 
 
 def _cancel_requested(record: TaskRecord) -> TaskRecord:
@@ -543,10 +531,6 @@ class DocumentTaskManager(TaskManager):
             self._records.mutate(task_id, update)
         except KeyError, _UnwritableError:
             return _Outcome.LOST
-        except InvalidDocument:
-            if fields["result"] is None:
-                raise
-            return self._write_record(task_id, _result_dropped(fields))
         return _Outcome.WRITTEN
 
     def _prune(self) -> None:

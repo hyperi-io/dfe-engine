@@ -66,7 +66,7 @@ import shlex
 import subprocess
 import time
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -1012,6 +1012,47 @@ def kafka_engine_restarts(
         drop_database_and_policies(client=ch_client, database=database)
 
 
+@pytest.fixture
+def document_engine(
+    ch_client: Any,
+    ch_params: dict,
+    mongo_uri: str,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> Iterator[SimpleNamespace]:
+    """Start the ``stack`` engine API with its users, groups and tasks in the document store.
+
+    Yields ``start``, a callable whose context is one running process, so a test can
+    read the store after the process stops, and ``store_uri`` and ``store_database``,
+    the throwaway database the process uses, dropped on teardown.
+    """
+    import uuid
+
+    from dfe_engine.store.documents import DocuStore
+    from tests.support.engine_stack import api_settings
+
+    database = f"dfe_engine_api_{uuid.uuid4().hex[:8]}"
+    store_database = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
+    settings = api_settings(ch_params=ch_params, database=database, tmp_path=tmp_path)
+    settings.auth.store_backend = "document"
+    settings.auth.accounts_store.uri = mongo_uri
+    settings.auth.accounts_store.database = store_database
+    _prepare_engine(ch_client=ch_client, monkeypatch=monkeypatch, settings=settings)
+    try:
+        yield SimpleNamespace(
+            start=functools.partial(
+                _engine_process, database=database, settings=settings, tmp_path=tmp_path
+            ),
+            store_uri=mongo_uri,
+            store_database=store_database,
+        )
+    finally:
+        drop_database_and_policies(client=ch_client, database=database)
+        store = DocuStore(mongo_uri, store_database)
+        store.drop_database(store_database)
+        store.close()
+
+
 def _prepare_engine(*, ch_client: Any, monkeypatch: pytest.MonkeyPatch, settings: Any) -> None:
     """Give the harness's ClickHouse the core tables *settings* name, as the engine expects at start."""
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
@@ -1026,7 +1067,7 @@ def _prepare_engine(*, ch_client: Any, monkeypatch: pytest.MonkeyPatch, settings
 
 
 @contextmanager
-def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Iterator[SimpleNamespace]:
+def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Generator[SimpleNamespace]:
     """One engine API process over *settings*, its admin signed in.
 
     Without gitops on, the process gets a local deploy repo once it has started.

@@ -37,6 +37,8 @@ from dfe_engine.api.document_tasks import (
     DocumentTaskManager,
 )
 from dfe_engine.api.task_manager import (
+    MAX_RESULT_BYTES,
+    TASK_RESULT_TOO_LARGE,
     TASK_STOPPED_MESSAGE,
     TaskInfo,
     TaskLimitError,
@@ -352,6 +354,38 @@ async def _admitted(store: DocuStore, owner: str, kind: str, barrier: threading.
     barrier.wait(timeout=30)
     await manager.aclose()
     return admitted
+
+
+class TestResultSize:
+    """A result over the limit fails here as in memory, and one at the limit fits the store."""
+
+    async def test_a_result_over_the_limit_reads_failed_on_b(self, replicas):
+        a, b = replicas
+
+        async def huge(*, task: Any) -> str:
+            # JSON adds two quotes, so this is one byte over.
+            return "x" * (MAX_RESULT_BYTES - 1)
+
+        info = a.submit("test:huge", huge)
+        ended = await _until(
+            lambda: b.get(info.id), lambda i: i.status.is_terminal, timeout=30.0, what="end"
+        )
+        assert ended.status is TaskStatus.FAILED
+        assert ended.error == TASK_RESULT_TOO_LARGE
+        assert ended.result is None
+
+    async def test_a_result_at_the_limit_round_trips_through_the_store(self, replicas):
+        a, b = replicas
+
+        async def largest(*, task: Any) -> str:
+            return "x" * (MAX_RESULT_BYTES - 2)
+
+        info = a.submit("test:largest", largest)
+        ended = await _until(
+            lambda: b.get(info.id), lambda i: i.status.is_terminal, timeout=30.0, what="end"
+        )
+        assert ended.status is TaskStatus.COMPLETED, ended.error
+        assert ended.result == "x" * (MAX_RESULT_BYTES - 2)
 
 
 class TestPrune:

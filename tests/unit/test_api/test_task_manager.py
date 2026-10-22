@@ -14,7 +14,9 @@ import json
 import pytest
 
 from dfe_engine.api.task_manager import (
+    MAX_RESULT_BYTES,
     TASK_FAILED_MESSAGE,
+    TASK_RESULT_TOO_LARGE,
     TASK_STOPPED_MESSAGE,
     TaskLimitError,
     TaskManager,
@@ -268,6 +270,34 @@ class TestMaxActive:
         await manager.await_terminal(held[0].id, 2.0)
         manager.submit("test:capped", slow, max_active=2)
         await manager.aclose()
+
+
+class TestResultSize:
+    @pytest.mark.asyncio
+    async def test_a_result_over_the_limit_fails_as_too_large_to_keep(self, manager: TaskManager):
+        async def huge(*, task):
+            # JSON adds two quotes, so this is one byte over.
+            return "x" * (MAX_RESULT_BYTES - 1)
+
+        info = manager.submit("test:huge", huge)
+        settled = await manager.await_terminal(info.id, 10.0)
+
+        assert settled is not None
+        assert settled.status == TaskStatus.FAILED
+        assert settled.error == TASK_RESULT_TOO_LARGE
+        assert settled.result is None
+
+    @pytest.mark.asyncio
+    async def test_a_result_at_the_limit_is_kept(self, manager: TaskManager):
+        async def largest(*, task):
+            return "x" * (MAX_RESULT_BYTES - 2)
+
+        info = manager.submit("test:largest", largest)
+        settled = await manager.await_terminal(info.id, 10.0)
+
+        assert settled is not None
+        assert settled.status == TaskStatus.COMPLETED
+        assert settled.result == "x" * (MAX_RESULT_BYTES - 2)
 
 
 class TestClose:
