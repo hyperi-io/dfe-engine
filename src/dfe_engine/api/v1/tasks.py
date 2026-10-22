@@ -34,14 +34,14 @@ def _get_task_manager(request: Request) -> TaskManager:
     return request.app.state.task_manager
 
 
-def _visible_task(request: Request, user: AuthContext, task_id: str, action: str) -> TaskInfo:
+async def _visible_task(request: Request, user: AuthContext, task_id: str, action: str) -> TaskInfo:
     """The task, if the caller may see it under ``action``.
 
     Raises:
         HTTPException: 404 when the task does not exist or is not held to the caller's orgs.
     """
     reader_orgs = held_tenant_ids(request, user, action)
-    info = _get_task_manager(request).get(task_id, reader_orgs=reader_orgs)
+    info = await _get_task_manager(request).get(task_id, reader_orgs=reader_orgs)
     if info is None:
         raise HTTPException(
             status_code=404,
@@ -62,7 +62,7 @@ async def list_tasks(
 ) -> list[TaskInfo]:
     """List the tasks the caller may see, optionally filtered by kind."""
     reader_orgs = held_tenant_ids(request, user, scopes_dict["task_read"])
-    return _get_task_manager(request).list(kind=kind, reader_orgs=reader_orgs)
+    return await _get_task_manager(request).list(kind=kind, reader_orgs=reader_orgs)
 
 
 @router.get(
@@ -76,7 +76,7 @@ async def get_task(
     user: CurrentUser,
 ) -> TaskInfo:
     """Get current status of a task."""
-    return _visible_task(request, user, task_id, scopes_dict["task_read"])
+    return await _visible_task(request, user, task_id, scopes_dict["task_read"])
 
 
 @router.post(
@@ -90,12 +90,12 @@ async def cancel_task(
     user: CurrentUser,
 ) -> TaskInfo:
     """Cancel a running task."""
-    info = _visible_task(request, user, task_id, scopes_dict["task_write"])
+    info = await _visible_task(request, user, task_id, scopes_dict["task_write"])
     manager = _get_task_manager(request)
-    manager.cancel(task_id)
+    await manager.cancel(task_id)
     # Re-fetch after cancel request (status may not have changed yet); fall back
     # to the pre-cancel info if the task vanished between cancel and re-fetch.
-    return manager.get(task_id) or info
+    return await manager.get(task_id) or info
 
 
 @router.get(
@@ -116,7 +116,7 @@ async def stream_task(
     - ``complete``: ``{status, result, error}`` (terminal -- stream ends)
     """
     # A task's hold is fixed at submit, so the check here covers every event after it.
-    _visible_task(request, user, task_id, scopes_dict["task_read"])
+    await _visible_task(request, user, task_id, scopes_dict["task_read"])
     manager = _get_task_manager(request)
 
     async def _event_generator():

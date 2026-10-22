@@ -2733,7 +2733,7 @@ async def bulk_action(
 
     if body.action == "deploy":
         response.status_code = 202
-        return _submit_bulk_deploys(body, user, registry, settings, request)
+        return await _submit_bulk_deploys(body, user, registry, settings, request)
 
     succeeded, failed, deleted = await run_blocking(
         functools.partial(_apply_bulk, body, action_to_state, user, registry, settings)
@@ -2764,7 +2764,7 @@ async def bulk_action(
     )
 
 
-def _submit_bulk_deploys(
+async def _submit_bulk_deploys(
     body: BulkActionRequest,
     user: Any,
     registry: Any,
@@ -2808,7 +2808,7 @@ def _submit_bulk_deploys(
                 )
                 continue
 
-        info = manager.submit(
+        info = await manager.submit(
             _SOURCE_DEPLOY_TASK_KIND,
             _run_source_deploy_task,
             item.source,

@@ -105,7 +105,7 @@ class TestTaskRoutes:
                 assert started.status_code == 200, started.text
                 own = started.json()["task_id"]
                 await until_status(own, TaskStatus.RUNNING)
-                seen_on_b = b.get(own)
+                seen_on_b = await b.get(own)
                 assert seen_on_b is not None
                 assert seen_on_b.status is TaskStatus.RUNNING
 
@@ -124,7 +124,7 @@ class TestTaskRoutes:
                         cancelled_at.append(loop.time())
                         raise
 
-                remote = b.submit("test:remote", until_cancelled)
+                remote = await b.submit("test:remote", until_cancelled)
                 await until_status(remote.id, TaskStatus.RUNNING)
                 listed = await call("get", "/api/v1/tasks", params={"kind": "test:remote"})
                 assert [t["id"] for t in listed.json()] == [remote.id]

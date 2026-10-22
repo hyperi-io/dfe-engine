@@ -17,6 +17,11 @@ to read it records that, so an owner that comes back cannot write over it.
 A kind submitted with ``max_active`` takes one of that many claims in
 :data:`SLOTS_COLLECTION`, so the limit counts every replica's tasks. A claim held by a
 task that has ended, or lost its owner, is taken back by the next submit that needs it.
+
+Every store call runs on a worker thread, so a stalled store holds up only the call
+waiting on it, never the event loop and the probes. The owner's writes have a worker
+thread of their own, so reads stalled on every shared one still leave its heartbeat
+beating.
 """
 
 import asyncio
@@ -29,6 +34,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
+import anyio
 from pydantic import BaseModel, ValidationError
 from pymongo import DESCENDING
 from pymongo.errors import PyMongoError
@@ -236,27 +242,26 @@ class DocumentTaskManager(TaskManager):
         self._held_by_id: dict[str, _Held] = {}
         # One owner write at a time, so a heartbeat never races the write that ends a task.
         self._writing = asyncio.Lock()
+        # Owner writes have their own worker thread, so stalled reads cannot stop a beat.
+        self._writer = anyio.CapacityLimiter(1)
         self._watcher: asyncio.Task | None = None
         self._store_down = False
 
     # -- reads, from any replica ----------------------------------------------
 
-    def get(self, task_id: str, *, reader_orgs: Iterable[str] | None = None) -> TaskInfo | None:
+    async def get(
+        self, task_id: str, *, reader_orgs: Iterable[str] | None = None
+    ) -> TaskInfo | None:
         """See base class. Reads the store, so it answers for every replica's tasks."""
-        record = self._records.get(task_id)
-        if record is None or not _visible(_held(record.held_to), _held(reader_orgs)):
-            return None
-        return _info(self._settle(record))
+        return await run_blocking(self._stored, task_id, _held(reader_orgs))
 
-    def list(
+    async def list(
         self, kind: str | None = None, *, reader_orgs: Iterable[str] | None = None
     ) -> builtins.list[TaskInfo]:
         """See base class. Reads the store, so it answers for every replica's tasks."""
-        held = _held(reader_orgs)
-        records = self._find({"kind": kind} if kind else {})
-        return [_info(self._settle(r)) for r in records if _visible(_held(r.held_to), held)]
+        return await run_blocking(self._listed, kind, _held(reader_orgs))
 
-    def cancel(self, task_id: str) -> bool:
+    async def cancel(self, task_id: str) -> bool:
         """Cancel a running task, on whichever replica runs it.
 
         The owner's own call cancels at once. Any other replica marks the record, and
@@ -268,20 +273,13 @@ class DocumentTaskManager(TaskManager):
         task = self._tasks.get(task_id)
         if task is not None:
             return self._cancel_local(task)
-        record = self._records.get(task_id)
-        if record is None or self._settle(record).status.is_terminal:
-            return False
-        try:
-            self._records.mutate(task_id, _cancel_requested)
-        except KeyError, _UnwritableError:
-            return False
-        return True
+        return await run_blocking(self._ask_owner_to_cancel, task_id)
 
     async def wait_for_progress(self, task_id: str, timeout: float = 30.0) -> TaskInfo | None:
         """See base class. Reads the store each :data:`WATCH_SECONDS` until the task changes."""
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout
-        first = await run_blocking(self.get, task_id)
+        first = await self.get(task_id)
         latest = first
         while latest is not None and not latest.status.is_terminal and latest == first:
             remaining = deadline - loop.time()
@@ -292,8 +290,33 @@ class DocumentTaskManager(TaskManager):
                 await task.wait_changed(min(remaining, WATCH_SECONDS))
             else:
                 await asyncio.sleep(min(remaining, WATCH_SECONDS))
-            latest = await run_blocking(self.get, task_id)
+            latest = await self.get(task_id)
         return latest
+
+    # -- worker-thread halves of the reads ---------------------------------------
+
+    def _stored(self, task_id: str, reader_orgs: frozenset[str] | None) -> TaskInfo | None:
+        record = self._records.get(task_id)
+        if record is None or not _visible(_held(record.held_to), reader_orgs):
+            return None
+        return _info(self._settle(record))
+
+    def _listed(
+        self, kind: str | None, reader_orgs: frozenset[str] | None
+    ) -> builtins.list[TaskInfo]:
+        records = self._find({"kind": kind} if kind else {})
+        return [_info(self._settle(r)) for r in records if _visible(_held(r.held_to), reader_orgs)]
+
+    def _ask_owner_to_cancel(self, task_id: str) -> bool:
+        """Mark another replica's task for its owner to cancel. False once it has ended."""
+        record = self._records.get(task_id)
+        if record is None or self._settle(record).status.is_terminal:
+            return False
+        try:
+            self._records.mutate(task_id, _cancel_requested)
+        except KeyError, _UnwritableError:
+            return False
+        return True
 
     def _find(self, query: Mapping[str, Any]) -> builtins.list[TaskRecord]:
         """Every readable record matching ``query``, newest first."""
@@ -326,11 +349,23 @@ class DocumentTaskManager(TaskManager):
 
     # -- the owner's side -------------------------------------------------------
 
-    def _admit(self, task: _Task, max_active: int | None) -> None:
+    async def _admit(self, task: _Task, max_active: int | None) -> None:
+        """See :meth:`_admitted`, which runs on a worker thread.
+
+        Raises:
+            TaskLimitError: Every slot of the kind is held by a task still running.
+            DocumentConflictError: The store kept losing the write to concurrent ones.
+        """
+        self._held_by_id[task.id] = await run_blocking(self._admitted, task, max_active)
+
+    def _admitted(self, task: _Task, max_active: int | None) -> _Held:
         """Write ``task``'s record, then take a slot of its kind when ``max_active`` limits it.
 
         The record goes first, so a slot is never held by a task with no record to
         judge it by.
+
+        Returns:
+            What the owner knows about writing the task from here on.
 
         Raises:
             TaskLimitError: Every slot of the kind is held by a task still running.
@@ -358,7 +393,7 @@ class DocumentTaskManager(TaskManager):
             if held.slot is None:
                 self._records.delete(task.id)
                 raise TaskLimitError(task.kind, max_active)
-        self._held_by_id[task.id] = held
+        return held
 
     def _take_slot(self, kind: str, limit: int, task_id: str) -> str | None:
         """Claim one of ``limit`` slots of ``kind`` for ``task_id``, or None when all are held."""
@@ -390,7 +425,7 @@ class DocumentTaskManager(TaskManager):
         async with self._writing:
             write = self._write_for(task)
             if write is not None:
-                flushed, error = await run_blocking(self._flush, write)
+                flushed, error = await run_blocking(self._flush, write, limiter=self._writer)
                 self._apply(task, write, flushed, error, time.time())
             self._forget_if_done(task)
 
@@ -431,7 +466,7 @@ class DocumentTaskManager(TaskManager):
                 return
             try:
                 outcomes, cancels = await run_blocking(
-                    self._watch_store, [w for _, w in writes], polled
+                    self._watch_store, [w for _, w in writes], polled, limiter=self._writer
                 )
             except (PyMongoError, DocumentConflictError) as exc:
                 self._note_store(str(exc))

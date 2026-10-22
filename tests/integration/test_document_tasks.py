@@ -11,7 +11,8 @@ Runs against the harness's document store (``mongo_uri``: ``DFE_TEST_MONGO_URI``
 DocumentDB on docker), each test in a throwaway database dropped on teardown. Each
 replica has its own client and its own owner id, so only the store carries a task from
 one to the other. The killed-owner test runs its owner as a child process and SIGKILLs
-it, so nothing records how its task ended.
+it, so nothing records how its task ended. The stalled-store test reaches the store
+through a relay it holds (:mod:`tests.support.pausable_relay`).
 """
 
 import asyncio
@@ -23,17 +24,21 @@ import sys
 import threading
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
+import anyio
 import pytest
+from pymongo.collection import Collection
 
 from dfe_engine.api.document_tasks import (
     HEARTBEAT_SECONDS,
     OWNER_LOST_SECONDS,
     TASKS_COLLECTION,
+    WATCH_SECONDS,
     DocumentTaskManager,
 )
 from dfe_engine.api.task_manager import (
@@ -46,6 +51,8 @@ from dfe_engine.api.task_manager import (
     TaskStatus,
 )
 from dfe_engine.store.documents import DocuStore
+from tests.support.pausable_relay import PausableRelay
+from tests.support.stalled_call import Stall
 
 pytestmark = pytest.mark.integration
 
@@ -58,6 +65,8 @@ PROBE_KIND = "test:owner-killed"
 LIMIT = 3
 RACE_ROUNDS = 10
 SUBMITS_PER_REPLICA = 4
+# Well under the stall, so a write made during it fails rather than waiting it out.
+RELAYED_SOCKET_TIMEOUT = 2.0
 
 
 @pytest.fixture
@@ -93,7 +102,7 @@ async def replicas(
 
 
 async def _until(
-    read: Callable[[], TaskInfo | None],
+    read: Callable[[], Awaitable[TaskInfo | None]],
     done: Callable[[TaskInfo], bool],
     *,
     timeout: float = 10.0,
@@ -103,7 +112,7 @@ async def _until(
     deadline = time.monotonic() + timeout
     latest = None
     while time.monotonic() < deadline:
-        latest = read()
+        latest = await read()
         if latest is not None and done(latest):
             return latest
         await asyncio.sleep(0.1)
@@ -118,8 +127,8 @@ def _running(info: TaskInfo) -> bool:
     return info.status is TaskStatus.RUNNING
 
 
-def _status(manager: TaskManager, task_id: str) -> TaskStatus | None:
-    info = manager.get(task_id)
+async def _status(manager: TaskManager, task_id: str) -> TaskStatus | None:
+    info = await manager.get(task_id)
     return None if info is None else info.status
 
 
@@ -138,13 +147,13 @@ class TestAcrossReplicas:
                 cancelled_at.append(loop.time())
                 raise
 
-        info = a.submit("test:cancel", until_cancelled)
+        info = await a.submit("test:cancel", until_cancelled)
         seen = await _until(lambda: b.get(info.id), _running, what="A's task running on B")
         assert seen.kind == "test:cancel"
-        assert [t.id for t in b.list(kind="test:cancel")] == [info.id]
+        assert [t.id for t in await b.list(kind="test:cancel")] == [info.id]
 
         asked_at = loop.time()
-        assert b.cancel(info.id) is True
+        assert await b.cancel(info.id) is True
         await _until(lambda: a.get(info.id), lambda i: bool(cancelled_at), what="the cancel on A")
 
         _log.info("cancel through B reached A after %.3f s", cancelled_at[0] - asked_at)
@@ -162,7 +171,7 @@ class TestAcrossReplicas:
             # Keys the store itself may refuse, so the result travels as JSON text.
             return {"_json.data_stream.dataset": "cisco_ios.log", "$weird": [1, None]}
 
-        info = a.submit("test:report", report)
+        info = await a.submit("test:report", report)
         halfway = await _until(
             lambda: b.get(info.id), lambda i: i.progress == 40, what="progress on B"
         )
@@ -176,12 +185,12 @@ class TestAcrossReplicas:
 
     async def test_b_holds_a_reader_to_the_orgs_a_held_the_task_to(self, replicas):
         a, b = replicas
-        info = a.submit("test:held", _wait_forever, held_to=["org-a"])
+        info = await a.submit("test:held", _wait_forever, held_to=["org-a"])
         await _until(lambda: b.get(info.id), _running, what="A's task on B")
 
-        assert b.get(info.id, reader_orgs=["org-a", "org-b"]) is not None
-        assert b.get(info.id, reader_orgs=["org-b"]) is None
-        assert b.list(reader_orgs=["org-b"]) == []
+        assert await b.get(info.id, reader_orgs=["org-a", "org-b"]) is not None
+        assert await b.get(info.id, reader_orgs=["org-b"]) is None
+        assert await b.list(reader_orgs=["org-b"]) == []
 
     async def test_an_owner_whose_task_was_failed_elsewhere_stops_it(self, replicas, stores):
         a, b = replicas
@@ -194,16 +203,16 @@ class TestAcrossReplicas:
                 stopped.set()
                 raise
 
-        info = a.submit("test:stalled", until_stopped)
+        info = await a.submit("test:stalled", until_stopped)
         await _until(lambda: b.get(info.id), _running, what="A's task on B")
 
         raw = stores[1].collection(TASKS_COLLECTION)
         stale = time.time() - OWNER_LOST_SECONDS - 1
 
-        def backdated_read() -> TaskInfo | None:
+        async def backdated_read() -> TaskInfo | None:
             # A stalled owner, as B sees one: its last beat older than the window.
             raw.update_one({"id": info.id}, {"$set": {"heartbeat_at": stale}})
-            return b.get(info.id)
+            return await b.get(info.id)
 
         failed = await _until(
             backdated_read, lambda i: i.status is TaskStatus.FAILED, what="B failing it"
@@ -212,13 +221,96 @@ class TestAcrossReplicas:
 
         await asyncio.wait_for(stopped.wait(), timeout=HEARTBEAT_SECONDS + 3)
         await asyncio.sleep(HEARTBEAT_SECONDS)
-        assert _status(b, info.id) is TaskStatus.FAILED
+        assert await _status(b, info.id) is TaskStatus.FAILED
+
+
+async def _until_true(check: Callable[[], bool], *, timeout: float = 10.0, what: str) -> None:
+    deadline = time.monotonic() + timeout
+    while not check():
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"{what} not seen within {timeout}s")
+        await asyncio.sleep(0.05)
+
+
+async def _beat_after(raw: Collection, task_id: str, after: float, *, timeout: float) -> bool:
+    """Whether the stored heartbeat of *task_id* moves past *after* within *timeout* seconds.
+
+    Reads on this thread, since the test may hold every shared worker thread.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        stored = raw.find_one({"id": task_id})
+        if stored is not None and stored["heartbeat_at"] > after:
+            return True
+        await asyncio.sleep(0.2)
+    return False
+
+
+class TestHeartbeat:
+    """The owner keeps beating while its reads stall, and beats again once its store answers."""
+
+    async def test_reads_stalled_on_every_shared_worker_thread_leave_the_heartbeat_beating(
+        self, replicas, stores, monkeypatch
+    ):
+        a, b = replicas
+        info = await a.submit("test:beating", _wait_forever)
+        await _until(lambda: b.get(info.id), _running, what="A's task on B")
+        raw = stores[1].collection(TASKS_COLLECTION)
+        shared = anyio.to_thread.current_default_thread_limiter()
+        stall = Stall()
+        monkeypatch.setattr(a._records, "get", stall.call(a._records.get))
+
+        reads = [asyncio.create_task(a.get(info.id)) for _ in range(int(shared.total_tokens) + 1)]
+        try:
+            await _until_true(
+                lambda: shared.available_tokens == 0, what="every shared worker thread stalled"
+            )
+            beating = await _beat_after(
+                raw, info.id, time.time(), timeout=HEARTBEAT_SECONDS + WATCH_SECONDS + 2
+            )
+        finally:
+            stall.release.set()
+            read = await asyncio.gather(*reads)
+
+        assert beating, "no heartbeat while stalled reads held every shared worker thread"
+        assert {i.status if i is not None else None for i in read} == {TaskStatus.RUNNING}
+
+    async def test_a_store_that_stalls_then_answers_gets_the_heartbeat_again(
+        self, mongo_uri, database, stores
+    ):
+        parts = urlsplit(mongo_uri)
+        assert parts.hostname is not None, "a single-host store URI"
+        assert parts.port is not None, "a store URI that names its port"
+        relay = PausableRelay((parts.hostname, parts.port))
+        relayed = DocuStore(
+            relay.relayed_uri(mongo_uri), database, socket_timeout=RELAYED_SOCKET_TIMEOUT
+        )
+        a = DocumentTaskManager(relayed, owner="replica-a")
+        b = DocumentTaskManager(stores[1], owner="replica-b")
+        raw = stores[1].collection(TASKS_COLLECTION)
+        try:
+            info = await a.submit("test:recovers", _wait_forever)
+            await _until(lambda: b.get(info.id), _running, what="A's task on B")
+
+            relay.hold()
+            await asyncio.sleep(HEARTBEAT_SECONDS + 2)
+            relay.release()
+            answered_at = time.time()
+
+            beating = await _beat_after(raw, info.id, answered_at, timeout=HEARTBEAT_SECONDS + 5)
+            assert beating, "no heartbeat once the store answered again"
+            assert await _status(b, info.id) is TaskStatus.RUNNING
+        finally:
+            relay.release()
+            await a.aclose()
+            relayed.close()
+            relay.close()
 
 
 class TestOwnerLost:
     """A killed owner's task reads as failed on B once its heartbeat runs out."""
 
-    def test_b_reports_the_task_of_a_killed_owner_failed_within_35_seconds(
+    async def test_b_reports_the_task_of_a_killed_owner_failed_within_35_seconds(
         self, mongo_uri, database, stores, tmp_path
     ):
         b = DocumentTaskManager(stores[1], owner="replica-b")
@@ -238,12 +330,12 @@ class TestOwnerLost:
                 stderr=sink,
             )
         try:
-            task = self._first_running(b, owner, log, mongo_uri)
+            task = await self._first_running(b, owner, log, mongo_uri)
 
             first_beat = raw.find_one({"id": task.id})["heartbeat_at"]
-            time.sleep(HEARTBEAT_SECONDS + 2)
+            await asyncio.sleep(HEARTBEAT_SECONDS + 2)
             assert raw.find_one({"id": task.id})["heartbeat_at"] > first_beat, "no heartbeat"
-            assert _status(b, task.id) is TaskStatus.RUNNING
+            assert await _status(b, task.id) is TaskStatus.RUNNING
         finally:
             owner.send_signal(signal.SIGKILL)
             owner.wait(timeout=30)
@@ -251,10 +343,10 @@ class TestOwnerLost:
 
         info = None
         while time.monotonic() - killed_at < 40:
-            info = b.get(task.id)
+            info = await b.get(task.id)
             if info is not None and info.status.is_terminal:
                 break
-            time.sleep(0.5)
+            await asyncio.sleep(0.5)
         elapsed = time.monotonic() - killed_at
         _log.info("B read the killed owner's task as failed %.3f s after the kill", elapsed)
 
@@ -267,7 +359,7 @@ class TestOwnerLost:
         assert raw.find_one({"id": task.id})["status"] == TaskStatus.FAILED.value
 
     @staticmethod
-    def _first_running(
+    async def _first_running(
         b: TaskManager, owner: subprocess.Popen, log: Path, mongo_uri: str
     ) -> TaskInfo:
         """The probe's task once B reads it running, failing if the probe dies or stalls."""
@@ -275,10 +367,10 @@ class TestOwnerLost:
         while time.monotonic() < deadline:
             if owner.poll() is not None:
                 break
-            running = [t for t in b.list(kind=PROBE_KIND) if _running(t)]
+            running = [t for t in await b.list(kind=PROBE_KIND) if _running(t)]
             if running:
                 return running[0]
-            time.sleep(0.2)
+            await asyncio.sleep(0.2)
         tail = log.read_text(encoding="utf-8", errors="replace")[-2000:].replace(mongo_uri, "***")
         raise AssertionError(f"the owner's task never ran (exit {owner.poll()}): {tail}")
 
@@ -288,18 +380,20 @@ class TestLimitAcrossReplicas:
 
     async def test_b_is_refused_while_a_holds_every_slot_and_admitted_once_one_ends(self, replicas):
         a, b = replicas
-        held = [a.submit("test:capped", _wait_forever, max_active=LIMIT) for _ in range(LIMIT)]
+        held = [
+            await a.submit("test:capped", _wait_forever, max_active=LIMIT) for _ in range(LIMIT)
+        ]
 
         with pytest.raises(TaskLimitError) as refused:
-            b.submit("test:capped", _wait_forever, max_active=LIMIT)
+            await b.submit("test:capped", _wait_forever, max_active=LIMIT)
         assert refused.value.limit == LIMIT
-        assert len(b.list(kind="test:capped")) == LIMIT
+        assert len(await b.list(kind="test:capped")) == LIMIT
 
-        assert b.cancel(held[0].id) is True
+        assert await b.cancel(held[0].id) is True
         await _until(lambda: b.get(held[0].id), lambda i: i.status.is_terminal, what="end")
 
-        admitted = b.submit("test:capped", _wait_forever, max_active=LIMIT)
-        assert b.get(admitted.id) is not None
+        admitted = await b.submit("test:capped", _wait_forever, max_active=LIMIT)
+        assert await b.get(admitted.id) is not None
 
     def test_concurrent_submits_through_two_replicas_admit_exactly_the_limit(self, stores):
         for round_ in range(RACE_ROUNDS):
@@ -315,7 +409,9 @@ class TestLimitAcrossReplicas:
 
     async def test_a_slot_held_by_a_killed_owner_is_taken_back(self, replicas, stores):
         a, b = replicas
-        held = [a.submit("test:reclaim", _wait_forever, max_active=LIMIT) for _ in range(LIMIT)]
+        held = [
+            await a.submit("test:reclaim", _wait_forever, max_active=LIMIT) for _ in range(LIMIT)
+        ]
         for info in held:
             await _until(lambda i=info: b.get(i.id), _running, what="A's task on B")
 
@@ -331,9 +427,9 @@ class TestLimitAcrossReplicas:
             },
         )
 
-        admitted = b.submit("test:reclaim", _wait_forever, max_active=LIMIT)
-        assert _status(b, admitted.id) in (TaskStatus.PENDING, TaskStatus.RUNNING)
-        assert _status(b, held[0].id) is TaskStatus.FAILED
+        admitted = await b.submit("test:reclaim", _wait_forever, max_active=LIMIT)
+        assert await _status(b, admitted.id) in (TaskStatus.PENDING, TaskStatus.RUNNING)
+        assert await _status(b, held[0].id) is TaskStatus.FAILED
 
 
 async def _admitted(store: DocuStore, owner: str, kind: str, barrier: threading.Barrier) -> int:
@@ -347,7 +443,7 @@ async def _admitted(store: DocuStore, owner: str, kind: str, barrier: threading.
     admitted = 0
     for _ in range(SUBMITS_PER_REPLICA):
         try:
-            manager.submit(kind, _wait_forever, max_active=LIMIT)
+            await manager.submit(kind, _wait_forever, max_active=LIMIT)
         except TaskLimitError:
             continue
         admitted += 1
@@ -366,7 +462,7 @@ class TestResultSize:
             # JSON adds two quotes, so this is one byte over.
             return "x" * (MAX_RESULT_BYTES - 1)
 
-        info = a.submit("test:huge", huge)
+        info = await a.submit("test:huge", huge)
         ended = await _until(
             lambda: b.get(info.id), lambda i: i.status.is_terminal, timeout=30.0, what="end"
         )
@@ -380,7 +476,7 @@ class TestResultSize:
         async def largest(*, task: Any) -> str:
             return "x" * (MAX_RESULT_BYTES - 2)
 
-        info = a.submit("test:largest", largest)
+        info = await a.submit("test:largest", largest)
         ended = await _until(
             lambda: b.get(info.id), lambda i: i.status.is_terminal, timeout=30.0, what="end"
         )
@@ -401,21 +497,23 @@ class TestPrune:
 
         submitted: list[TaskInfo] = []
         for manager in (a, b, a, b, a):
-            info = manager.submit("test:prune", quick)
+            info = await manager.submit("test:prune", quick)
             await _until(lambda i=info: b.get(i.id), lambda i: i.status.is_terminal, what="end")
             submitted.append(info)
-        await _until_count(lambda: len(b.list(kind="test:prune")), keep)
+        await _until_count(lambda: b.list(kind="test:prune"), keep)
 
-        kept = {t.id for t in b.list(kind="test:prune")}
+        kept = {t.id for t in await b.list(kind="test:prune")}
         assert kept == {t.id for t in submitted[-keep:]}
         await a.aclose()
         await b.aclose()
 
 
-async def _until_count(count: Callable[[], int], expected: int, timeout: float = 10.0) -> None:
+async def _until_count(
+    read: Callable[[], Awaitable[list[TaskInfo]]], expected: int, timeout: float = 10.0
+) -> None:
     deadline = time.monotonic() + timeout
-    seen = count()
+    seen = len(await read())
     while seen != expected and time.monotonic() < deadline:
         await asyncio.sleep(0.1)
-        seen = count()
+        seen = len(await read())
     assert seen == expected, seen
