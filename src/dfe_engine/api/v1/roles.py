@@ -175,7 +175,7 @@ def _role_holders(request: Request, role_name: str) -> list[str]:
     response_model=CasbinScopesResponse,
     dependencies=[Depends(require_action(scopes_dict["role_scopes"]))],
 )
-async def list_casbin_scopes(
+def list_casbin_scopes(
     user: CurrentUser,
     pagination: PaginationParams = Depends(),
     search: str | None = Query(
@@ -211,7 +211,7 @@ async def list_casbin_scopes(
     status_code=201,
     dependencies=[Depends(require_action(scopes_dict["role_write"]))],
 )
-async def create_role(
+def create_role(
     body: CreateRoleRequest,
     user: CurrentUser,
     request: Request,
@@ -241,7 +241,7 @@ async def create_role(
     response_model=PaginatedResponse[RoleResponse],
     dependencies=[Depends(require_action(scopes_dict["role_read"]))],
 )
-async def list_roles(
+def list_roles(
     user: CurrentUser,
     request: Request,
     pagination: PaginationParams = Depends(),
@@ -271,7 +271,7 @@ async def list_roles(
     response_model=RoleResponse,
     dependencies=[Depends(require_action(scopes_dict["role_read"]))],
 )
-async def get_role(
+def get_role(
     name: str,
     user: CurrentUser,
     request: Request,
@@ -292,7 +292,7 @@ async def get_role(
     response_model=RoleResponse,
     dependencies=[Depends(require_action(scopes_dict["role_write"]))],
 )
-async def update_role(
+def update_role(
     name: str,
     body: UpdateRoleRequest,
     user: CurrentUser,
@@ -334,7 +334,7 @@ async def update_role(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["role_delete"]))],
 )
-async def delete_role(
+def delete_role(
     name: str,
     user: CurrentUser,
     request: Request,

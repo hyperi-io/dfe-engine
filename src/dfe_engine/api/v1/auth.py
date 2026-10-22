@@ -9,6 +9,7 @@ GET  /api/v1/auth/setup-status      -> Initial setup required? (public, pre-logi
 POST /api/v1/auth/setup/retire-admin -> Retire the bootstrap admin (admin, or itself)
 """
 
+import functools
 import time
 from datetime import timedelta
 from typing import Annotated
@@ -46,7 +47,7 @@ from dfe_engine.auth.audit import (
 from dfe_engine.auth.bootstrap import admin_account_name, admin_on_default_password
 from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.login_throttle import LoginThrottle
-from dfe_engine.auth.models import AuthenticationError, ScopedGrant
+from dfe_engine.auth.models import AuthContext, AuthenticationError, ScopedGrant
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.sessions import (
     remaining_seconds,
@@ -211,8 +212,13 @@ async def persist_session_end(request: Request, account: Account, *, actor: str)
 
     A commit and a push, so it runs on a worker thread.
     """
+    await run_blocking(functools.partial(record_session_end, request, account, actor=actor))
+
+
+def record_session_end(request: Request, account: Account, *, actor: str) -> None:
+    """:func:`persist_session_end` for a caller already off the event loop."""
     gc = getattr(request.app.state, "gitcrud", None)
-    await run_blocking(account_durability.publish_session_end, gc, account, actor=actor)
+    account_durability.publish_session_end(gc, account, actor=actor)
 
 
 def throttled(request: Request, wait: int) -> HTTPException:
@@ -336,7 +342,11 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     # The password is exchanged for a token here, so this is the login the
     # audit trail counts - not the per-request token check in get_current_user.
     audit_login_success(auth_ctx.user_id, "jwt", client_ip, auth_ctx.roles)
+    return await run_blocking(functools.partial(_login_token, request, settings, auth_ctx))
 
+
+def _login_token(request: Request, settings: DFESettings, auth_ctx: AuthContext) -> TokenResponse:
+    """The token a login issues *auth_ctx*, read from the auth stores, so it runs off the event loop."""
     change_required = _password_change_required(request, auth_ctx.user_id)
     # The provider resolves role names only; the claim needs the scope each is bound at.
     live = resolve_live_grants_for_user(request, auth_ctx.user_id)
@@ -375,7 +385,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         },
     },
 )
-async def refresh_token(user: CurrentUser, request: Request, settings: Settings, now: RequestTime):
+def refresh_token(user: CurrentUser, request: Request, settings: Settings, now: RequestTime):
     """Refresh the current JWT token. Requires a valid existing token.
 
     The new token keeps the session's sign-in time, so a session renews only until
@@ -434,10 +444,9 @@ async def logout(user: CurrentUser, request: Request, settings: Settings) -> Res
     this one included, and the engine's login cookie is cleared. A peer that
     verifies engine tokens by signature alone still accepts one until it expires.
     """
-    account = bound_account(request, user.user_id)
-    if account is not None:
-        ended = request.app.state.account_store.end_sessions(account.username)
-        audit_account_change(user.user_id, account.username, "sessions_ended")
+    ended = await run_blocking(functools.partial(_end_sessions, request, user.user_id))
+    if ended is not None:
+        audit_account_change(user.user_id, ended.username, "sessions_ended")
         await persist_session_end(request, ended, actor=user.user_id)
     response = Response(status_code=204)
     response.delete_cookie(
@@ -446,8 +455,16 @@ async def logout(user: CurrentUser, request: Request, settings: Settings) -> Res
     return response
 
 
+def _end_sessions(request: Request, user_id: str) -> Account | None:
+    """End every session of the account behind *user_id*, returning it as stored, or None when none is."""
+    account = bound_account(request, user_id)
+    if account is None:
+        return None
+    return request.app.state.account_store.end_sessions(account.username)
+
+
 @router.get("/me", response_model=UserResponse)
-async def get_me(user: CurrentUser, request: Request):
+def get_me(user: CurrentUser, request: Request):
     """Get the current authenticated user's info.
 
     A session on an issued password reports the flag and no roles, permissions,
@@ -478,7 +495,7 @@ async def get_me(user: CurrentUser, request: Request):
 
 
 @router.get("/permissions", response_model=PermissionsResponse)
-async def get_permissions(user: CurrentUser, request: Request):
+def get_permissions(user: CurrentUser, request: Request):
     """Get resolved permissions for the current user's roles."""
     role_config = get_role_config(request)
     all_perms = role_config.resolve_permissions(user.roles)

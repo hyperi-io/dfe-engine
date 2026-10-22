@@ -7,19 +7,16 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """OIDC providers across two engine replicas sharing one document store.
 
-Each replica is a whole engine app with its own config directory. They share the
-harness's document store (``mongo_uri``) and one secrets directory, as replicas share
-a document store and a secrets backend. The IdP is a discovery document served on
-loopback, so a login starts without leaving the host.
+The replicas share the harness's document store (``mongo_uri``) and one secrets
+directory (:mod:`tests.support.engine_replicas`). The IdP is a discovery document
+served on loopback, so a login starts without leaving the host.
 """
 
 import functools
 import json
 import threading
 import time
-import uuid
 from collections.abc import Callable, Iterator
-from contextlib import ExitStack
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
@@ -27,36 +24,19 @@ from typing import Any
 
 import httpx
 import pytest
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
 
-from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
-from dfe_engine.settings import (
-    AccountStoreSettings,
-    APISettings,
-    AuthSettings,
-    ClickHouseSettings,
-    DFESettings,
-    HuntsSettings,
-    LocalAuthSettings,
-    SchemasSettings,
-    SecretsSettings,
-    ServicesSettings,
-    SigmaSettings,
-    SourceSettings,
-)
-from dfe_engine.store.documents import DocuStore
 from tests.support.accounts import admin_on_its_own_password
-from tests.support.core_sources import write_landing_definition
+from tests.support.engine_replicas import Deployment, engine_replicas
 from tests.support.races import race, raised
 
 pytestmark = pytest.mark.integration
 
 _PROVIDERS = "/api/v1/auth/oidc-providers"
-_ADMIN_PASSWORD = "issued-admin-password-1"
 # A backstop for each wait: a replica that follows the store sees a write within its two-second floor.
 _SEEN_WITHIN_SECONDS = 15.0
+# Rounds of two replicas creating one name at once. Each round a loser that wrote its
+# secret over the winner's has an even chance of being caught.
+_CREATE_ROUNDS = 20
 
 
 class _Discovery(BaseHTTPRequestHandler):
@@ -100,89 +80,11 @@ def issuer(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
         thread.join(timeout=10)
 
 
-class _Deployment:
-    """Engine replicas over one document-store database and one secrets directory.
-
-    Attributes:
-        seed: The providers directory every replica's ``auth.seed_dir`` holds.
-    """
-
-    def __init__(self, *, root: Path, uri: str, stack: ExitStack) -> None:
-        self._root = root
-        self._uri = uri
-        self._stack = stack
-        self.database = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
-        self._secrets = root / "secrets"
-        self._secrets.mkdir()
-        self.seed = root / "seed" / "oidc-providers"
-        self.seed.mkdir(parents=True)
-
-    def app(self, name: str) -> FastAPI:
-        """An engine app for replica *name*, not yet started."""
-        return create_app(settings=self._settings(name))
-
-    def start(self, app: FastAPI) -> TestClient:
-        """Run *app*'s startup, which seeds the providers, and return its client."""
-        client = TestClient(app, raise_server_exceptions=False)
-        client.__enter__()
-        self._stack.push(client.__exit__)
-        return client
-
-    def replica(self, name: str) -> SimpleNamespace:
-        """A started replica, its admin signed in."""
-        app = self.app(name)
-        client = self.start(app)
-        admin_on_its_own_password(app)
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=app.state.settings,
-        )
-        return SimpleNamespace(app=app, client=client, headers={"Authorization": f"Bearer {token}"})
-
-    def _settings(self, name: str) -> DFESettings:
-        root = self._root / name
-        dirs = {
-            key: root / key for key in ("sources", "services", "rules", "hunts", "auth", "schemas")
-        }
-        for path in dirs.values():
-            path.mkdir(parents=True)
-        write_landing_definition(schemas_dir=dirs["schemas"])
-        return DFESettings(
-            config_dir=str(root),
-            clickhouse=ClickHouseSettings(bootstrap_tables=False),
-            source=SourceSettings(sources_dir=str(dirs["sources"])),
-            services=ServicesSettings(config_yaml_dir=str(dirs["services"])),
-            schemas=SchemasSettings(schemas_dir=str(dirs["schemas"])),
-            hunts=HuntsSettings(rules_dir=str(dirs["rules"]), hunt_dir=str(dirs["hunts"])),
-            sigma=SigmaSettings(enabled=False),
-            auth=AuthSettings(
-                enabled=True,
-                auth_dir=str(dirs["auth"]),
-                store_backend="document",
-                accounts_store=AccountStoreSettings(uri=self._uri, database=self.database),
-                seed_dir=str(self.seed.parent),
-                local=LocalAuthSettings(admin_password=_ADMIN_PASSWORD),
-            ),
-            secrets=SecretsSettings(provider="file", path=str(self._secrets)),
-            api=APISettings(
-                jwt_secret="test-secret-key-for-integration-hmac32", jwt_expire_minutes=30
-            ),
-        )
-
-
 @pytest.fixture
-def deployment(mongo_uri: str, tmp_path: Path) -> Iterator[_Deployment]:
+def deployment(mongo_uri: str, tmp_path: Path) -> Iterator[Deployment]:
     """Replicas started through it stop, and its database is dropped, at teardown."""
-    with ExitStack() as stack:
-        deployed = _Deployment(root=tmp_path, uri=mongo_uri, stack=stack)
-        try:
-            yield deployed
-        finally:
-            stack.close()
-            store = DocuStore(mongo_uri, deployed.database)
-            store.drop_database(deployed.database)
-            store.close()
-            _registries.clear()
+    with engine_replicas(root=tmp_path, uri=mongo_uri) as deployed:
+        yield deployed
 
 
 def _provider(name: str, issuer: str, **fields: Any) -> dict[str, Any]:
@@ -209,9 +111,9 @@ def _client_secret(replica: SimpleNamespace, provider: str) -> str | None:
     return replica.app.state.oidc_rp._oauth.create_client(provider).client_secret
 
 
-def _seed(deployment: _Deployment, name: str, issuer: str, **fields: Any) -> None:
+def _seed(deployment: Deployment, name: str, issuer: str, **fields: Any) -> None:
     body = {"type": "generic", "issuer": issuer, "client_id": "dfe", **fields}
-    (deployment.seed / f"{name}.yaml").write_text(json.dumps(body), encoding="utf-8")
+    (deployment.providers_seed / f"{name}.yaml").write_text(json.dumps(body), encoding="utf-8")
 
 
 def _listed(replica: SimpleNamespace) -> list[str]:
@@ -286,6 +188,42 @@ class TestProviderWritesAcrossReplicas:
             lambda: _client_secret(second, "acme") == "second",
             failure="the second replica kept the secret the first rotated out",
         )
+
+
+class TestTwoReplicasCreatingOneName:
+    """Of two creates of one name at once, one wins, and its provider holds its own secret."""
+
+    def test_the_winner_keeps_its_secret(self, deployment, issuer):
+        replicas = [deployment.replica("a"), deployment.replica("b")]
+        winners: dict[str, str] = {}
+        for round_ in range(_CREATE_ROUNDS):
+            name = f"acme-{round_}"
+            calls = [
+                functools.partial(
+                    replica.client.post,
+                    _PROVIDERS,
+                    json=_provider(name, issuer, client_secret=f"from-{index}"),
+                    headers=replica.headers,
+                )
+                for index, replica in enumerate(replicas)
+            ]
+
+            results = race(calls)
+
+            responses = [result for result in results if not isinstance(result, BaseException)]
+            assert raised(results) == []
+            statuses = [response.status_code for response in responses]
+            assert sorted(statuses) == [201, 409], [response.text for response in responses]
+            winners[name] = f"from-{statuses.index(201)}"
+
+        for replica in replicas:
+            for name, secret in winners.items():
+                _until(
+                    lambda replica=replica, name=name, secret=secret: (
+                        _client_secret(replica, name) == secret
+                    ),
+                    failure=f"{name} never resolved the secret its winning create sent",
+                )
 
 
 class TestProviderSeed:

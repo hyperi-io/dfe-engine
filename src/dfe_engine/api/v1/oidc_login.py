@@ -61,7 +61,7 @@ from dfe_engine.http_errors import describe_http_error
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 if TYPE_CHECKING:
-    from dfe_engine.auth.oidc.rp import OidcRelyingParty
+    from dfe_engine.auth.oidc.rp import NormalizedIdentity, OidcRelyingParty
 
 router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
@@ -351,7 +351,22 @@ async def _complete_login(
             status_code=401,
             detail={"code": "unauthorized", "message": "IdP id_token carried no subject"},
         )
+    return await run_blocking(
+        functools.partial(_admitted, provider, request, settings, identity, return_to)
+    )
 
+
+def _admitted(
+    provider: str,
+    request: Request,
+    settings: DFESettings,
+    identity: NormalizedIdentity,
+    return_to: str | None,
+) -> JSONResponse | RedirectResponse:
+    """Record *identity*'s login and mint its token, raising HTTPException on a refusal.
+
+    It reads and writes the auth stores, so it runs off the event loop.
+    """
     jit = getattr(request.app.state, "jit_provisioner", None)
     if jit:
         try:

@@ -9,11 +9,13 @@
 """Background group sync for api-mode OIDC providers, each on its own ``sync_interval``."""
 
 import asyncio
+import functools
 import random
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.auth.oidc.sync import SyncMetrics, SyncOutcome, sync_provider
@@ -141,9 +143,10 @@ class OidcSyncScheduler:
     async def run_once(self, *, now: datetime) -> dict[str, SyncOutcome]:
         """Sync every provider due at *now*, one at a time, and return how each run ended."""
         outcomes = {}
-        for name, _listed in self._registry.list():
+        # The registry may be the document store, so every read runs on a worker thread.
+        for name, _listed in await run_blocking(self._registry.list):
             # Re-read just before running, so a provider another replica has just synced is not run twice.
-            provider = self._registry.get(name)
+            provider = await run_blocking(functools.partial(self._registry.get, name))
             if (
                 (provider is None)
                 or not (sync_is_due(now=now, provider=provider))

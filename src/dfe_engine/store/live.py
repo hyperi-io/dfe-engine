@@ -13,11 +13,26 @@ the OIDC relying party, compares the collection's write counter in ``store_revis
 with the one it built at, and builds again when another replica has written since.
 """
 
+import asyncio
+import threading
 import time
 from collections.abc import Callable
 
+from scalo.logger import logger
+
+from dfe_engine.http_errors import describe_http_error
+
 REFRESH_SECONDS = 2.0
 """How stale another replica's write may be here: the least time between two checks."""
+
+
+def _on_event_loop() -> bool:
+    """Whether the calling thread is running an asyncio event loop."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
 
 
 class Live[T]:
@@ -30,6 +45,10 @@ class Live[T]:
     several threads at once: the counter and the value are kept as one pair, so a build
     that finishes after a newer one leaves its older counter beside its value, and the
     next check builds again.
+
+    A :meth:`get` on an event loop's thread never touches the store: it starts the
+    check on a background thread and returns the value as built, so the next read
+    after the check finishes sees the change.
     """
 
     def __init__(
@@ -49,6 +68,9 @@ class Live[T]:
         self._build = build
         self._revision = revision
         self._refresh_seconds = refresh_seconds
+        self._lock = threading.Lock()
+        self._checking = False
+        self._failing = False
         self._built: tuple[int, T] = self._fresh()
         self._checked = time.monotonic()
 
@@ -60,10 +82,14 @@ class Live[T]:
     def get(self) -> T:
         """The value, built again first when the collection has moved since it was built."""
         now = time.monotonic()
-        if now - self._checked >= self._refresh_seconds:
-            self._checked = now
-            if self._revision() != self._built[0]:
-                return self.refresh()
+        if now - self._checked < self._refresh_seconds:
+            return self._built[1]
+        self._checked = now
+        if _on_event_loop():
+            self._check_in_background()
+            return self._built[1]
+        if self._revision() != self._built[0]:
+            return self.refresh()
         return self._built[1]
 
     def refresh(self) -> T:
@@ -76,3 +102,32 @@ class Live[T]:
         # The counter first: a write landing during the build leaves it behind, so the next check builds again.
         revision = self._revision()
         return revision, self._build()
+
+    def _check_in_background(self) -> None:
+        """Start one background check, unless one is already running."""
+        with self._lock:
+            if self._checking:
+                return
+            self._checking = True
+        threading.Thread(target=self._check, name="live-check", daemon=True).start()
+
+    def _check(self) -> None:
+        """Build again when the counter has moved, keeping the value as built when the store fails."""
+        try:
+            if self._revision() != self._built[0]:
+                self.refresh()
+        except Exception as exc:
+            # Logged when it starts and when it stops, so a store that stays down logs once.
+            if not self._failing:
+                logger.warning(
+                    "A replicated value could not be checked against its store; serving it as built",
+                    **describe_http_error(exc),
+                )
+            self._failing = True
+        else:
+            if self._failing:
+                logger.info("A replicated value is being checked against its store again")
+            self._failing = False
+        finally:
+            with self._lock:
+                self._checking = False

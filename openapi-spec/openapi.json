@@ -3897,7 +3897,7 @@
           "OIDC Providers"
         ],
         "summary": "Create Provider",
-        "description": "Create a new OIDC provider configuration (admin only).\n\nSecret values in the body are written to the secret store before the YAML, and only once the name is free and the provider passes the field rules for its type and mode, so a refused provider leaves nothing behind. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``).",
+        "description": "Create a new OIDC provider configuration (admin only).\n\nThe provider is stored first and its secret values after, each at a path unique to this create, so of two creates of one name only the one that stored the provider writes a secret. Nothing is written until the provider passes the field rules for its type and mode. A secret named by an env var the engine does not set, with no value sent for it, is refused the same way (``env_var_not_set``). When a secret cannot be written the provider is deleted again and the request fails, so no provider is left naming a secret that is not there.",
         "operationId": "auth.oidc-providers.create",
         "requestBody": {
           "required": true,
@@ -4204,7 +4204,7 @@
           "OIDC Providers"
         ],
         "summary": "Update Provider",
-        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential; an empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.",
+        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential; an empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.\n\nA secret value sent is a new version: the provider is pointed at a path unique to this update first, the value written there after, and the old version deleted once both have landed. When the value cannot be written the provider is pointed back at the old version and the request fails.",
         "operationId": "auth.oidc-providers.apply",
         "parameters": [
           {
