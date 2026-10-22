@@ -20,6 +20,7 @@ must be "-" (stored as ""). Reads that are not visible return 404;
 forbidden writes return 403.
 """
 
+import functools
 import json
 from datetime import datetime
 from typing import Any, Literal
@@ -28,6 +29,7 @@ from fastapi import APIRouter, Body, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from scalo.api import scalo_extra
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.api import body_limits
@@ -250,7 +252,7 @@ async def get_preferences(
 ):
     """Effective merged preferences for the caller (system -> org -> group -> user)."""
     store = _store(ch_client, settings)
-    return _effective_preferences(store, user)
+    return await run_blocking(functools.partial(_effective_preferences, store, user))
 
 
 @router.patch("/preferences", response_model=PreferencesResponse, openapi_extra=CLI_HIDDEN)
@@ -266,7 +268,21 @@ async def patch_preferences(
     The theme toggle is one call: ``PATCH {"theme": "dark"}``. ``null``
     removes a user-layer key (falling back to the inherited value).
     """
-    store = _store(ch_client, settings)
+    return await run_blocking(
+        functools.partial(
+            _patch_user_preferences, _store(ch_client, settings), user, settings, patch, if_match
+        )
+    )
+
+
+def _patch_user_preferences(
+    store: RepositoryStore,
+    user: AuthContext,
+    settings: Any,
+    patch: dict[str, Any],
+    if_match: str | None,
+) -> PreferencesResponse | JSONResponse:
+    """The ClickHouse read, write and merge :func:`patch_preferences` makes, off the event loop."""
     current = store.get("user", user.user_id, _PREFS_NAMESPACE, _PREFS_KEY)
     current_doc = (_decode_json(current) or {}) if current else {}
     new_doc = json_merge_patch(current_doc, patch)
@@ -307,7 +323,7 @@ async def patch_preferences(
     response_model=list[ObjectEntry],
     openapi_extra={**CLI_HIDDEN, **scalo_extra(verb="list")},
 )
-async def list_objects(
+def list_objects(
     scope: RepositoryScope,
     scope_id: str,
     namespace: str,
@@ -324,7 +340,7 @@ async def list_objects(
 
 
 @router.get("/objects/{scope}/{scope_id}/{namespace}/{key}", openapi_extra=CLI_HIDDEN)
-async def get_object(
+def get_object(
     scope: RepositoryScope,
     scope_id: str,
     namespace: str,
@@ -370,7 +386,10 @@ async def put_object(
 ):
     """Store raw bytes (body) under a scope-aligned key."""
     _validate_names(namespace, key)
-    stored_id = _require_write(request, user, scope, scope_id)
+    # A group scope is looked up in the group store, so the check runs off the event loop.
+    stored_id = await run_blocking(
+        functools.partial(_require_write, request, user, scope, scope_id)
+    )
 
     body = await request.body()
     if len(body) > settings.repository.max_object_bytes:
@@ -385,15 +404,18 @@ async def put_object(
 
     store = _store(ch_client, settings)
     try:
-        meta = store.put(
-            scope,
-            stored_id,
-            namespace,
-            key,
-            body,
-            content_type,
-            user.user_id,
-            if_match=if_match,
+        meta = await run_blocking(
+            functools.partial(
+                store.put,
+                scope,
+                stored_id,
+                namespace,
+                key,
+                body,
+                content_type,
+                user.user_id,
+                if_match=if_match,
+            )
         )
     except ConflictError as exc:
         return _precondition_failed(exc.current_etag)
@@ -409,7 +431,7 @@ async def put_object(
     status_code=204,
     openapi_extra=CLI_HIDDEN,
 )
-async def delete_object(
+def delete_object(
     scope: RepositoryScope,
     scope_id: str,
     namespace: str,

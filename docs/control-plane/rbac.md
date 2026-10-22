@@ -494,15 +494,19 @@ enabled: true
 display_name: "Google Workspace"
 issuer: "https://accounts.google.com"
 client_id: "1234.apps.googleusercontent.com"   # not secret
-client_secret_path: "oidc/google-workspace/client_secret"
+client_secret_path: "oidc/google-workspace/6f1c2a9e0b7d4c35/client_secret"
 groups:
   mode: "api"            # manual | token_claim | api (google: api only)
   sync_interval: 3600
   enrich_on_login: true  # required for google: its tokens carry no groups
   # Google, optional: a service account holding a groups admin role, for sync
-  service_account_json_path: "oidc/google-workspace/groups_service_account_json"
+  service_account_json_path: "oidc/google-workspace/6f1c2a9e0b7d4c35/groups_service_account_json"
   domain: "example.com"
 ```
+
+On the document store backend (`auth.store_backend: document`) each provider is one document in the `oidc_providers` collection, keyed on its name. A write through one engine replica reaches every other replica's logins within two seconds. `DFE_AUTH_SEED_DIR` names a directory whose `oidc-providers/{name}.yaml` files are written over the stored providers at every boot, on either backend. The file wins over any change made through the API, and a stored provider no file names is left alone. Its `groups/{name}.yaml` files are seeded the same way, except that a field a group file leaves out keeps its stored value, so members added through the API, SCIM or a login survive a restart. A group file that names members updates the group list of each account it adds or drops, as an API membership change does. A group file that would take the admin role off the admin group, or drop a recovery account from it, is refused and logged.
+
+Each secret a provider write stores goes to its own path, `oidc/{name}/{version}/{field}`. The provider is stored first and the secret after, so of two creates of one name only the winner writes one, and a write whose secret cannot be stored is undone, along with any value it did store. A rotation deletes the old version once the new one has landed.
 
 A Google login reads the user's groups from Cloud Identity with that login's own token (scope `cloud-identity.groups.readonly`, Cloud Identity API enabled in the OAuth client's project). A group file links on `source_id`, the id after `groups/` in the group's resource name.
 
@@ -702,6 +706,7 @@ the context.
 class AuthSettings(BaseModel):
     enabled: bool = True  # Off needs a dev DFE_ENV, else the engine refuses to start
     auth_dir: str = ""  # Path to config/auth/, OIDC providers in its oidc-providers/
+    seed_dir: str = ""  # oidc-providers/ and groups/ files written into the stores at boot
     trust_proxy_auth_headers: bool = False  # Read the X-Oidc-* headers (Path 1)
     oidc_group_sync_enabled: bool = True  # Background sync of api-mode providers
     oidc_group_sync_tick_seconds: int = 60  # How often the sync checks which providers are due
@@ -710,12 +715,13 @@ class AuthSettings(BaseModel):
     api_key_default_ttl_days: int = 90  # 0 = keys created without expires_at never expire
 ```
 
-Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`,
+Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`, `DFE_AUTH_SEED_DIR`,
 `DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`, `DFE_AUTH_PROXY_PROVIDER`,
 `DFE_AUTH_SOURCE_PROVIDER_BINDINGS` (a JSON object),
 `DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS`, `DFE_AUTH_OIDC_GROUP_SYNC_ENABLED`,
-`DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS`. OIDC provider files always live in the
-auth directory's `oidc-providers/`.
+`DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS`. On the YAML backend OIDC provider files
+live in the auth directory's `oidc-providers/`, and on the document store backend in
+the `oidc_providers` collection (section 4.2).
 
 ---
 

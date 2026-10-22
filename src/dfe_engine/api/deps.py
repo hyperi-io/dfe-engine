@@ -10,6 +10,7 @@ per-request via ``Depends()``.  Authentication checks four paths in order:
 4. Auth disabled -- dev/test default, root context
 """
 
+import functools
 from collections.abc import Iterable, Iterator, Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
@@ -18,6 +19,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, iter_route_contexts
 from scalo.api import permission
+from scalo.concurrency import run_blocking
 from scalo.logger import logger
 from starlette.routing import BaseRoute
 
@@ -460,15 +462,6 @@ def _grants_of(groups: Iterable[Group]) -> GroupResolution:
     return GroupResolution(sorted(roles), sorted(org_ids), grants, sorted(matched))
 
 
-def _resolve_roles_from_groups(
-    groups: list[str],
-    group_store: GroupStore,
-) -> tuple[list[str], list[str]]:
-    """Resolve (roles, org_ids) from group names -- see _resolve_group_grants."""
-    resolution = _resolve_group_grants(groups, group_store)
-    return resolution.roles, resolution.org_ids
-
-
 def groups_granting(identifiers: list[str], group_store: GroupStore) -> list[str]:
     """The names of the stored groups a session's roles come from.
 
@@ -620,8 +613,14 @@ async def get_current_user(request: Request) -> AuthContext:
     4. Auth disabled -- dev/test root context
 
     When ``auth.enabled=False`` (dev/test default), returns a root AuthContext
-    that bypasses authorization if no credentials are provided.
+    that bypasses authorization if no credentials are provided. Every path reads
+    the auth stores, so the work runs on a worker thread.
     """
+    return await run_blocking(functools.partial(_authenticate, request))
+
+
+def _authenticate(request: Request) -> AuthContext:
+    """The work :func:`get_current_user` does, off the event loop."""
     # No auth.login.success here: this runs on every request and creates no
     # session, so the login audit belongs to the credential exchange
     # (POST /auth/login, GET /auth/oidc/{provider}/callback).
@@ -1068,8 +1067,9 @@ def require_action(action: str, *, scope: Scope | None = None):
         ): ...
     """
 
+    # A sync dependency runs on FastAPI's threadpool: the role definitions it reads follow the store.
     @permission(action)
-    async def _check(
+    def _check(
         request: Request,
         user: AuthContext = Depends(get_current_user),
         settings: DFESettings = Depends(get_app_settings),
@@ -1096,8 +1096,9 @@ def require_org_action(action: str):
     ``x-scalo.action``, as :func:`require_action` does.
     """
 
+    # Sync, so FastAPI runs it on the threadpool, as require_action's check.
     @permission(action)
-    async def _check(
+    def _check(
         request: Request,
         org: str,
         user: AuthContext = Depends(get_current_user),

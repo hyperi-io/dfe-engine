@@ -425,6 +425,13 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.auth.auth_dir == str(tmp_path / "auth")
 
+    def test_auth_seed_dir_is_unset_by_default(self):
+        assert load_settings().auth.seed_dir == ""
+
+    def test_auth_seed_dir_override(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DFE_AUTH_SEED_DIR", str(tmp_path / "seed"))
+        assert load_settings().auth.seed_dir == str(tmp_path / "seed")
+
     def test_hunt_log_path_override(self, monkeypatch):
         monkeypatch.setenv("DFE_HUNT_LOG_PATH", "/var/log/hunts")
         settings = load_settings()

@@ -11,17 +11,21 @@ import builtins
 import re
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import Any, Literal, Protocol, Self
+from typing import TYPE_CHECKING, Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from scalo.logger import logger
 
-from dfe_engine.auth.protected_accounts import resolve_floor
+from dfe_engine.auth.protected_accounts import ProtectedAccountError, resolve_floor
 from dfe_engine.auth.store_names import store_key
+from dfe_engine.http_errors import describe_http_error
 from dfe_engine.names import VALID_NAME
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
 from dfe_engine.store.documents import DEFAULT_ATTEMPTS, DocumentConflictError, DocuStore
 from dfe_engine.yaml_utils import YAMLError, yaml_dump, yaml_load
+
+if TYPE_CHECKING:
+    from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
 
 GROUP_SCOPE_SYSTEM = "system"
 _ORG_SCOPE_PREFIX = "org:"
@@ -816,3 +820,131 @@ class DocuStoreGroupStore:
             if username in group.members:
                 roles.update(group.roles)
         return sorted(roles)
+
+
+# The fields a seed file may set: every Group field, the name being the file's stem.
+_SEED_FIELDS = (*_UPDATABLE_GROUP_FIELDS, "attributes")
+# The fields create() takes. A seed sets the rest with update() and set_attributes().
+_CREATE_FIELDS = frozenset(
+    {"roles", "description", "members", "scope", "source_provider", "source_id"}
+)
+
+
+def seed_groups(
+    group_store: GroupStore | DocuStoreGroupStore,
+    seed_dir: Path,
+    *,
+    account_store: AccountStore | DocuStoreAccountStore,
+    metrics: GroupMetrics | None = None,
+) -> builtins.list[str]:
+    """Write each group file in *seed_dir* over the stored group of its name.
+
+    The file wins on every field it carries, at every boot. A field it leaves out keeps
+    the stored value, so the members a group gained through the API, SCIM or a login
+    survive the next boot. A file that names members updates the group list of each
+    account it adds or drops, as an API membership change does. A stored group no file
+    names is left alone. File ``<name>.yaml`` holds group
+    ``<name>``, and one that does not load is logged, counted and skipped, as is one the
+    store refuses: a provider id with no provider, or a change that would take the admin
+    role off the admin group or drop a recovery credential from it. Two replicas booting
+    at once write the same groups, and each ends stored once.
+
+    Args:
+        group_store: Where the groups are written.
+        seed_dir: The directory of group files, usually a mounted ConfigMap.
+        account_store: The accounts whose group lists follow a seeded membership.
+        metrics: Where a file left out is counted.
+
+    Returns:
+        The names written, in name order.
+    """
+    if not seed_dir.is_dir():
+        logger.info("No group seed directory", seed_dir=str(seed_dir))
+        return []
+    metrics = metrics if metrics is not None else GroupMetrics()
+    seeded: builtins.list[str] = []
+    for path in sorted(seed_dir.glob("*.yaml")):
+        fields = _seed_group_fields(path, metrics)
+        if fields is None:
+            continue
+        try:
+            _write_seed_group(group_store, account_store, path.stem, fields)
+        except (ValueError, ProtectedAccountError, DocumentConflictError) as exc:
+            metrics.skipped("invalid")
+            logger.warning(
+                "group seed file skipped: the store refused it",
+                file=path.name,
+                **describe_http_error(exc),
+            )
+            continue
+        seeded.append(path.stem)
+    logger.info("Groups seeded", count=len(seeded), groups=seeded)
+    return seeded
+
+
+def _seed_group_fields(path: Path, metrics: GroupMetrics) -> dict[str, Any] | None:
+    """The group fields seed file *path* sets, validated, or None when it cannot be seeded."""
+    if not VALID_NAME.match(path.stem):
+        return _skip_seed_file(path, "invalid", None, metrics)
+    try:
+        data = yaml_load(path)
+    except (OSError, UnicodeDecodeError, YAMLError, RecursionError) as exc:
+        return _skip_seed_file(path, "unreadable", exc, metrics)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return _skip_seed_file(path, "not_a_mapping", None, metrics)
+    sent = {key: data[key] for key in _SEED_FIELDS if key in data}
+    try:
+        group = Group.model_validate({**sent, "name": path.stem})
+    except ValidationError as exc:
+        return _skip_seed_file(path, "invalid", exc, metrics)
+    return {key: getattr(group, key) for key in sent}
+
+
+def _skip_seed_file(
+    path: Path, reason: SkipReason, exc: Exception | None, metrics: GroupMetrics
+) -> None:
+    metrics.skipped(reason)
+    # The validation text quotes the file's values, so the log takes the failure's class only.
+    failure = describe_http_error(exc) if exc is not None else {}
+    logger.warning("group seed file skipped", file=path.name, reason=reason, **failure)
+
+
+def _write_seed_group(
+    group_store: GroupStore | DocuStoreGroupStore,
+    account_store: AccountStore | DocuStoreAccountStore,
+    name: str,
+    fields: dict[str, Any],
+) -> None:
+    """Create group *name* from *fields*, or write them over the one already stored.
+
+    The store decides a create, so of two replicas seeding one group at once the loser
+    writes its fields over the winner's instead. Once the group is written, the accounts
+    a seeded member list added or dropped are brought into step with it.
+    """
+    # Imported here because membership imports this module.
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
+
+    created: dict[str, Any] = {
+        "roles": [],
+        **{key: fields[key] for key in _CREATE_FIELDS & fields.keys()},
+    }
+    try:
+        group_store.create(name, **created)
+        before: builtins.list[str] = []
+        rest = {key: value for key, value in fields.items() if key not in _CREATE_FIELDS}
+    except GroupExistsError:
+        stored = group_store.get(name)
+        before = stored.members if stored is not None else []
+        rest = dict(fields)
+    attributes = rest.pop("attributes", None)
+    if rest:
+        group_store.update(name, **rest)
+    if attributes is not None:
+        group_store.set_attributes(name, attributes)
+    if "members" in fields:
+        after = set(fields["members"])
+        sync_account_groups_for_membership_change(
+            account_store, name, added=after - set(before), removed=set(before) - after
+        )
