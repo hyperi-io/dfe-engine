@@ -14,11 +14,13 @@ secret of every listener it is scoped to.
 
 import functools
 from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from scalo.logger import logger
 from scalo.secrets import SecretsError
 
 from dfe_engine.api.app import create_app
@@ -32,6 +34,7 @@ from dfe_engine.orgs.ingest_tokens import (
     BEARER_SECRET_PREFIX,
     CREDENTIAL_SECRET_PREFIX,
     bearer_secret_path,
+    credential_secret_path,
     store_token,
 )
 from dfe_engine.settings import IngestSettings, SecretsSettings
@@ -958,16 +961,57 @@ def _registry_fails_after(monkeypatch, app, method: str, calls: int) -> None:
     monkeypatch.setattr(credentials, method, write)
 
 
-class TestAPutBackThatFails:
-    """A mint the bearer secrets refuse, whose record then cannot be put back, still drops its token."""
+def _record(app, name: str = "agents") -> IngestCredential | None:
+    """The credential record the registry holds for *name*."""
+    return app.state.org_registry.ingest_credentials.get(name)
+
+
+def _stored_paths(app, name: str) -> list[str]:
+    """The secret path of every token the file backend holds for credential *name*."""
+    root = Path(app.state.settings.secrets.path) / CREDENTIAL_SECRET_PREFIX
+    return sorted(f"{CREDENTIAL_SECRET_PREFIX}/{path.name}" for path in root.glob(f"{name}@*"))
+
+
+def _record_unreadable_after_put_back_fails(monkeypatch, app) -> None:
+    """Fail a create's put-back, then every read of the record, as a store that went away would."""
+    credentials = app.state.org_registry.ingest_credentials
+    read_record = credentials.get
+    failed = []
+
+    def delete(*args, **kwargs):
+        failed.append("delete")
+        raise RuntimeError("the credential store went away")
+
+    def get(name):
+        if failed:
+            raise OSError("the credential store went away")
+        return read_record(name)
+
+    monkeypatch.setattr(credentials, "delete", delete)
+    monkeypatch.setattr(credentials, "get", get)
+
+
+@contextmanager
+def _logged() -> Iterator[list[str]]:
+    """Each line the engine logs inside the block, with its fields."""
+    lines: list[str] = []
+    sink = logger.add(lines.append, level="DEBUG", format="{message} {extra}\n")
+    try:
+        yield lines
+    finally:
+        logger.remove(sink)
+
+
+class TestAPutBackThatLands:
+    """A mint the bearer secrets refuse, whose record is put back, drops the token it minted."""
 
     def test_a_create_drops_its_token(self, client, app, admin_headers, orgs, monkeypatch):
         _bearer_secrets_refuse(monkeypatch, app)
-        _registry_fails_after(monkeypatch, app, "delete", 0)
 
         resp = _create(client, admin_headers, listeners=["http"])
 
-        assert resp.status_code == 500, resp.text
+        assert resp.status_code == 503, resp.text
+        assert _record(app) is None
         assert _stored_tokens(app, "agents") == []
 
     def test_a_rotate_drops_its_token_and_keeps_the_old_one(
@@ -975,9 +1019,58 @@ class TestAPutBackThatFails:
     ):
         created = _create(client, admin_headers, listeners=["http"]).json()
         _bearer_secrets_refuse(monkeypatch, app)
+
+        resp = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
+
+        assert resp.status_code == 503, resp.text
+        assert _stored_tokens(app, "agents") == [created["token"]]
+
+
+class TestAPutBackThatFails:
+    """A mint the bearer secrets refuse, whose record cannot be put back, keeps the token the record names."""
+
+    def test_a_create_keeps_the_token_its_record_names(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        _bearer_secrets_refuse(monkeypatch, app)
+        _registry_fails_after(monkeypatch, app, "delete", 0)
+
+        resp = _create(client, admin_headers, listeners=["http"])
+
+        assert resp.status_code == 500, resp.text
+        named = _record(app)
+        assert named is not None
+        assert _secret(app, credential_secret_path(named)) is not None
+        assert len(_stored_tokens(app, "agents")) == 1
+
+    def test_a_rotate_keeps_the_token_its_record_names_and_the_old_one(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        created = _create(client, admin_headers, listeners=["http"]).json()
+        old = _record(app)
+        assert old is not None
+        _bearer_secrets_refuse(monkeypatch, app)
         _registry_fails_after(monkeypatch, app, "put", 1)
 
         resp = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
 
         assert resp.status_code == 500, resp.text
-        assert _stored_tokens(app, "agents") == [created["token"]]
+        named = _record(app)
+        assert named is not None
+        assert named.token_id != old.token_id
+        assert _secret(app, credential_secret_path(named)) is not None
+        assert _secret(app, credential_secret_path(old)) == created["token"]
+        assert len(_stored_tokens(app, "agents")) == 2
+
+    def test_a_record_that_cannot_be_read_keeps_the_token_and_logs_its_path(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        _bearer_secrets_refuse(monkeypatch, app)
+        _record_unreadable_after_put_back_fails(monkeypatch, app)
+
+        with _logged() as lines:
+            resp = _create(client, admin_headers, listeners=["http"])
+
+        assert resp.status_code == 500, resp.text
+        [path] = _stored_paths(app, "agents")
+        assert [line for line in lines if "token kept" in line and path in line]

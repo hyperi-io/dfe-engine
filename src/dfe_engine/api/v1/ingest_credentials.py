@@ -68,6 +68,7 @@ from dfe_engine.orgs.ingest_credentials import (
 from dfe_engine.orgs.ingest_tokens import (
     BearerSourceUnreadableError,
     bearer_secret_source,
+    credential_secret_path,
     drop_token,
     mint_token,
     new_token_id,
@@ -384,6 +385,27 @@ def _drop_quietly(secrets: DfeSecrets, credential: IngestCredential) -> None:
         )
 
 
+def _drop_unless_named(request: Request, credential: IngestCredential) -> None:
+    """Drop the token stored under *credential*'s ``token_id`` unless the stored record names it.
+
+    A put-back that never landed leaves the record on this token, and dropping it would
+    leave a record pointing at nothing. A record that cannot be read keeps the token too,
+    because an orphan token is inert.
+    """
+    try:
+        stored = _registry(request).ingest_credentials.get(credential.name)
+    except Exception as exc:  # The caller's own failure must reach it, whatever the read raises.
+        logger.warning(
+            "ingest credential token kept, its record could not be read",
+            ingest_id=credential.name,
+            path=credential_secret_path(credential),
+            error=str(exc),
+        )
+        return
+    if stored is None or stored.token_id != credential.token_id:
+        _drop_quietly(_secrets(request), credential)
+
+
 def _put_back_record(
     request: Request, credential: IngestCredential, previous: IngestCredential | None
 ) -> None:
@@ -423,8 +445,9 @@ def _mint(
     A write that cannot finish puts back what it changed: its caller got no token, so
     the API, the store and the receiver agree only on what stood before. A create
     leaves nothing of the credential. A rotate leaves the old record, whose token it
-    never touched. The token this write minted is dropped however the put-back ends,
-    and a put-back that fails raises in place of the caller's error. A rotate that
+    never touched. The token this write minted is dropped once the put-back has ended,
+    unless the stored record still names it, as it does after a put-back that never
+    landed. A put-back that fails raises in place of the caller's error. A rotate that
     finishes drops the old token.
 
     Raises:
@@ -449,7 +472,7 @@ def _mint(
         try:
             _put_back_record(request, credential, previous)
         finally:
-            _drop_quietly(secrets, credential)
+            _drop_unless_named(request, credential)
         raise
     if previous is not None:
         _drop_quietly(secrets, previous)
