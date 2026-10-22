@@ -31,8 +31,6 @@ With gitops disabled there is nowhere durable to hold the hash, so no break-glas
 account is seeded at all -- the deployment has only ``admin``.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -198,8 +196,12 @@ def seed(
                 email=email,
                 created_at=account.created_at if account else now,
                 updated_at=now,
+                session_generation=account.session_generation if account else 0,
             )
         )
+        if account is not None:
+            # Main's hash back on the live account must not revive a token minted under it.
+            account_store.end_sessions(USERNAME)
         logger.info("Reconciled the break-glass account from the deploy repo hash")
     elif account.email != email:
         account_store.update(USERNAME, email=email)

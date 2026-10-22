@@ -37,6 +37,7 @@ from dfe_engine.settings import (
     SeedOrg,
     SourceSettings,
 )
+from tests.support.accounts import admin_on_its_own_password
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 
 pytestmark = pytest.mark.integration
@@ -104,7 +105,7 @@ def stack(ch_params, ch_client, tmp_path):
     app = create_app(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            app.state.account_store.reset_password("admin", ADMIN_PASSWORD)
+            admin_on_its_own_password(app)
             app.state.group_store.create("multi-viewers", roles=["org_viewer"], members=["viewer"])
             app.state.group_store.update("multi-viewers", org_ids=VIEWER_ORGS)
             app.state.account_store.create(

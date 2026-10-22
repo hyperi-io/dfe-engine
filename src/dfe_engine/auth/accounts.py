@@ -147,8 +147,15 @@ class Account(BaseModel):
     Kept after the owner's change, so the boot reconcile can tell an injected
     password it already issued from one the deployment has since rotated."""
     session_epoch: str = ""
-    """Replaced whenever every session of the account ends: its owner logs out, or it
-    is disabled, blocked, re-enabled or unblocked. Empty until that first happens."""
+    """Replaced whenever every session of the account ends: its owner logs out, its
+    password changes, or it is disabled, blocked, re-enabled or unblocked. Empty until
+    that first happens."""
+    session_generation: int = 0
+    """How many times every session of the account has ended.
+
+    The epoch is random, so this is what orders two copies of one account: the copy
+    with the higher count holds the later epoch, and a restore keeps it
+    (:func:`later_session_end`)."""
     previous_username: str = ""
     """Account id before soft-delete anonymization.
 
@@ -368,7 +375,9 @@ class AccountStore:
             raise KeyError(username)
 
         account = self._read(path)
-        account = account.model_copy(update=_password_update(new_password, change_required))
+        account = account.model_copy(
+            update=_password_update(account, new_password, change_required)
+        )
         self._write(path, account)
 
     def end_sessions(self, username: str) -> Account:
@@ -388,7 +397,7 @@ class AccountStore:
             raise KeyError(username)
 
         account = self._read(path)
-        account = account.model_copy(update=_sessions_ended())
+        account = account.model_copy(update=_sessions_ended(account))
         self._write(path, account)
         return account
 
@@ -660,12 +669,15 @@ class DocuStoreAccountStore:
         ``change_required`` marks the password as issued, and False clears a pending change.
         """
         account = self._existing(username)
-        account = account.model_copy(update=_password_update(new_password, change_required))
+        account = account.model_copy(
+            update=_password_update(account, new_password, change_required)
+        )
         self._c.put(username, account)
 
     def end_sessions(self, username: str) -> Account:
         """End every session of an account. Raises KeyError if it does not exist."""
-        account = self._existing(username).model_copy(update=_sessions_ended())
+        account = self._existing(username)
+        account = account.model_copy(update=_sessions_ended(account))
         self._c.put(username, account)
         return account
 
@@ -769,7 +781,7 @@ def soft_delete_account(store: AccountStore | DocuStoreAccountStore, username: s
             "name": "",
             "subject": "",
             "attributes": {},
-            "session_epoch": _new_session_epoch(),
+            **_session_end(existing),
             "updated_at": _now(),
         }
     )
@@ -779,14 +791,52 @@ def soft_delete_account(store: AccountStore | DocuStoreAccountStore, username: s
     return rewritten
 
 
+def later_session_end(durable: Account, live: Account) -> Account:
+    """*durable*, carrying whichever of the two copies' session ends is later.
+
+    A *live* copy that has ended its sessions more times than *durable* keeps its
+    epoch, and keeps a disable or block it carries. Two copies at the same count with
+    different epochs cannot be ordered, so every session ends again.
+
+    Args:
+        durable: The account as the deploy repo holds it.
+        live: The same account as the live store holds it.
+
+    Returns:
+        *durable* with the session state that refuses every token either copy refuses.
+    """
+    if live.session_generation > durable.session_generation:
+        update: dict[str, object] = {
+            "session_epoch": live.session_epoch,
+            "session_generation": live.session_generation,
+        }
+        if durable.enabled and not live.enabled:
+            update |= {"enabled": False, "disabled_at": live.disabled_at}
+        if live.blocked and not durable.blocked:
+            update |= {"blocked": True, "blocked_at": live.blocked_at}
+        return durable.model_copy(update=update)
+    unordered = live.session_generation == durable.session_generation
+    if unordered and live.session_epoch != durable.session_epoch:
+        return durable.model_copy(update=_session_end(durable))
+    return durable
+
+
 def _new_session_epoch() -> str:
     """A fresh session epoch; no token minted before it carries a marker made from it."""
     return secrets.token_urlsafe(16)
 
 
-def _sessions_ended() -> dict[str, object]:
-    """The fields that end every session of an account."""
-    return {"session_epoch": _new_session_epoch(), "updated_at": _now()}
+def _session_end(account: Account) -> dict[str, object]:
+    """The fields that end every session of *account*, counted so its copies can be ordered."""
+    return {
+        "session_epoch": _new_session_epoch(),
+        "session_generation": account.session_generation + 1,
+    }
+
+
+def _sessions_ended(account: Account) -> dict[str, object]:
+    """The fields that end every session of *account*, stamped."""
+    return {**_session_end(account), "updated_at": _now()}
 
 
 def _access_updates(account: Account, fields: dict[str, object]) -> dict[str, object]:
@@ -798,7 +848,7 @@ def _access_updates(account: Account, fields: dict[str, object]) -> dict[str, ob
     updates = _apply_access_stamps({k: fields[k] for k in _UPDATABLE_FIELDS if k in fields})
     access = ("enabled", "blocked")
     if any(key in updates and updates[key] != getattr(account, key) for key in access):
-        updates["session_epoch"] = _new_session_epoch()
+        updates.update(_session_end(account))
     return updates
 
 
@@ -846,13 +896,19 @@ def _new_account(
     )
 
 
-def _password_update(new_password: str, change_required: bool) -> dict[str, object]:
-    """The fields a password reset writes. An issued password is also the seeded digest."""
+def _password_update(
+    account: Account, new_password: str, change_required: bool
+) -> dict[str, object]:
+    """The fields a password reset of *account* writes, the seeded digest too when issued.
+
+    The reset ends every session as well, so a restore that puts back the hash it
+    replaced never revives a token minted under that hash.
+    """
     digest = hash_password(new_password)
     update: dict[str, object] = {
+        **_sessions_ended(account),
         "password_hash": digest,
         "password_change_required": change_required,
-        "updated_at": _now(),
     }
     if change_required:
         update["seeded_password_hash"] = digest

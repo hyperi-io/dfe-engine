@@ -18,6 +18,7 @@ from scalo.metrics import create_metrics
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.yaml_health import WRITE_FAILURES
+from tests.support.accounts import admin_on_its_own_password
 
 STATUS = "/api/v1/system/status"
 GROUPS = "/api/v1/auth/groups"
@@ -69,8 +70,7 @@ def test_a_refused_write_is_counted_on_the_engines_metrics(api_settings, admin_h
     app = create_app(settings=api_settings, metrics_manager=manager)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            # The seed issues admin a password it must change; setting it clears that.
-            app.state.account_store.reset_password("admin", api_settings.auth.local.admin_password)
+            admin_on_its_own_password(app)
             client.post(GROUPS, json={"name": "nel", "roles": []}, headers=admin_headers)
             refused = client.put(
                 f"{GROUPS}/nel", json={"description": "a\x85b"}, headers=admin_headers

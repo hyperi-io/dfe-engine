@@ -49,7 +49,7 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.api.v1.account_groups import check_group_changes
-from dfe_engine.api.v1.auth import throttled
+from dfe_engine.api.v1.auth import persist_session_end, throttled
 from dfe_engine.auth import account_durability, breakglass
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import (
@@ -474,6 +474,8 @@ async def _reset_stored_password(
     """Apply a password reset in the live store and commit it where it is kept.
 
     The new password ends every session the account held (its session marker moves).
+    That end goes to the deploy repo's main ahead of the password, which may wait on
+    a review, so a restart before the review merges does not revive those sessions.
     """
     from dfe_engine.auth.accounts import AccountStore
 
@@ -496,11 +498,13 @@ async def _reset_stored_password(
                 ),
             },
         )
+    stored = store.get(username) or existing
+    await persist_session_end(request, stored, actor=actor)
     git = await _persist_password(
         request,
         settings,
         username=username,
-        account=store.get(username) or existing,
+        account=stored,
         actor=actor,
     )
     return ResetPasswordResponse(git=git)
@@ -827,6 +831,8 @@ async def update_account(
         )
     else:
         account = store.update(username, allow_protected=False, **update_fields)
+    if account.session_generation != existing.session_generation:
+        await persist_session_end(request, account, actor=user.user_id)
     await _persist_account(
         request,
         settings,
