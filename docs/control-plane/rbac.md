@@ -504,6 +504,8 @@ groups:
   domain: "example.com"
 ```
 
+On the document store backend (`auth.store_backend: document`) each provider is one document in the `oidc_providers` collection, keyed on its name. A write through one engine replica reaches every other replica's logins within two seconds. `DFE_AUTH_SEED_DIR` names a directory whose `oidc-providers/{name}.yaml` files are written over the stored providers at every boot, on either backend. The file wins over any change made through the API, and a stored provider no file names is left alone.
+
 A Google login reads the user's groups from Cloud Identity with that login's own token (scope `cloud-identity.groups.readonly`, Cloud Identity API enabled in the OAuth client's project). A group file links on `source_id`, the id after `groups/` in the group's resource name.
 
 The customer's IdP admin sets up their side from [idp-setup/google.md](idp-setup/google.md), [idp-setup/entra.md](idp-setup/entra.md) or [idp-setup/okta.md](idp-setup/okta.md), and sends back the client credentials, the issuer and the group identifiers each provider links on.
@@ -702,6 +704,7 @@ the context.
 class AuthSettings(BaseModel):
     enabled: bool = True  # Off needs a dev DFE_ENV, else the engine refuses to start
     auth_dir: str = ""  # Path to config/auth/, OIDC providers in its oidc-providers/
+    seed_dir: str = ""  # Provider files in its oidc-providers/, written over the store at boot
     trust_proxy_auth_headers: bool = False  # Read the X-Oidc-* headers (Path 1)
     oidc_group_sync_enabled: bool = True  # Background sync of api-mode providers
     oidc_group_sync_tick_seconds: int = 60  # How often the sync checks which providers are due
@@ -710,12 +713,13 @@ class AuthSettings(BaseModel):
     api_key_default_ttl_days: int = 90  # 0 = keys created without expires_at never expire
 ```
 
-Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`,
+Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`, `DFE_AUTH_SEED_DIR`,
 `DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`, `DFE_AUTH_PROXY_PROVIDER`,
 `DFE_AUTH_SOURCE_PROVIDER_BINDINGS` (a JSON object),
 `DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS`, `DFE_AUTH_OIDC_GROUP_SYNC_ENABLED`,
-`DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS`. OIDC provider files always live in the
-auth directory's `oidc-providers/`.
+`DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS`. On the YAML backend OIDC provider files
+live in the auth directory's `oidc-providers/`, and on the document store backend in
+the `oidc_providers` collection (section 4.2).
 
 ---
 

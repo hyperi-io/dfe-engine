@@ -74,7 +74,7 @@ from dfe_engine.orgs.models import DEFAULT_ORG_NAME, Org
 if TYPE_CHECKING:
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
-    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    from dfe_engine.auth.oidc.registry import ProviderRegistry
     from dfe_engine.orgs.registry import OrgRegistry
 
 # The bootstrap-seeded LOCAL ADMIN (see auth/bootstrap.py::_seed_admin) does not
@@ -113,7 +113,7 @@ class SetupContext:
     account_store: AccountStore | None = None
     group_store: GroupStore | None = None
     org_registry: OrgRegistry | None = None
-    oidc_registry: OIDCProviderRegistry | None = None
+    oidc_registry: ProviderRegistry | None = None
     break_glass_git: AccountGitState | None = None
     # The configured local admin; its password is what ``default_credentials`` grades.
     bootstrap_admin_name: str = field(default_factory=admin_account_name)

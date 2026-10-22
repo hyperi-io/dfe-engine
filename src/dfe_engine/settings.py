@@ -1596,6 +1596,7 @@ class AuthSettings(BaseModel):
     Environment variables:
     - DFE_AUTH_ENABLED -> auth.enabled
     - DFE_AUTH_DIR -> auth.auth_dir
+    - DFE_AUTH_SEED_DIR -> auth.seed_dir
     - DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS -> auth.api_key_default_ttl_days
     - DFE_AUTH_OIDC_GROUP_SYNC_ENABLED -> auth.oidc_group_sync_enabled
     - DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS -> auth.oidc_group_sync_tick_seconds
@@ -1614,6 +1615,15 @@ class AuthSettings(BaseModel):
     auth_dir: str = Field(
         default="",
         description="Auth config directory (accounts, groups, api-keys)",
+    )
+    seed_dir: str = Field(
+        default="",
+        description=(
+            "Auth config written into the stores at every boot, usually a mounted "
+            "ConfigMap. Each <name>.yaml in its oidc-providers/ replaces the stored OIDC "
+            "provider of that name, whatever was changed through the API. Empty seeds "
+            "nothing. DFE_AUTH_SEED_DIR."
+        ),
     )
     trust_proxy_auth_headers: bool = Field(
         default=False,
@@ -2805,6 +2815,8 @@ def _get_env_overrides() -> dict:
         overrides["auth"]["enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_AUTH_DIR"):
         overrides["auth"]["auth_dir"] = val
+    if val := _get_env("DFE_AUTH_SEED_DIR"):
+        overrides["auth"]["seed_dir"] = val
     if val := _get_env("DFE_AUTH_TRUST_PROXY_AUTH_HEADERS"):
         overrides["auth"]["trust_proxy_auth_headers"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_AUTH_PROXY_PROVIDER"):

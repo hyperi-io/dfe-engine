@@ -62,7 +62,7 @@ if TYPE_CHECKING:
     from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
     from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
     from dfe_engine.auth.oidc.models import GroupInfo
-    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    from dfe_engine.auth.oidc.registry import ProviderRegistry
     from dfe_engine.secrets import DfeSecrets
 
 SYNC_GROUPS_SKIPPED = "auth_oidc_sync_groups_skipped_total"
@@ -426,7 +426,7 @@ def _upsert_groups(
 
 async def sync_provider(
     provider_name: str,
-    provider_registry: OIDCProviderRegistry,
+    provider_registry: ProviderRegistry,
     group_store: GroupStore | DocuStoreGroupStore,
     adapter: OIDCGroupAdapter | None = None,
     secrets: DfeSecrets | None = None,

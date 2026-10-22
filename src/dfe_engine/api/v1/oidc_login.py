@@ -32,7 +32,7 @@ or disabled providers return 404.
 import functools
 import time
 from datetime import timedelta
-from typing import TYPE_CHECKING, Literal, NoReturn
+from typing import TYPE_CHECKING, Any, Literal, NoReturn
 from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -141,22 +141,55 @@ class OidcCallbackResponse(BaseModel):
     groups: list[str] = Field(default_factory=list, description="Resolved group identifiers")
 
 
+def relying_party_for(state: Any) -> OidcRelyingParty | None:
+    """Build a relying party over the providers *state*'s registry holds now, with its secrets and metrics."""
+    from dfe_engine.auth.oidc.rp import build_relying_party
+
+    return build_relying_party(
+        state.oidc_provider_registry,
+        secrets=getattr(state, "dfe_secrets", None),
+        metrics=getattr(state, "oidc_login_metrics", None),
+    )
+
+
+async def current_relying_party(request: Request) -> OidcRelyingParty | None:
+    """The relying party, built again first when another replica has changed the providers.
+
+    Only the document-store backend sets ``oidc_rp_live``. Its check reads the
+    providers' write counter, at most once per refresh floor, and a rebuild reads each
+    enabled provider's credentials, so both run on a worker thread.
+    """
+    live = getattr(request.app.state, "oidc_rp_live", None)
+    if live is not None:
+        request.app.state.oidc_rp = await run_blocking(live.get)
+    return getattr(request.app.state, "oidc_rp", None)
+
+
+async def rebuild_relying_party(request: Request) -> OidcRelyingParty | None:
+    """Build the relying party again now, over the providers as stored, and keep it.
+
+    The build reads each enabled provider's credentials from the secret store, so it
+    runs on a worker thread.
+    """
+    state = request.app.state
+    live = getattr(state, "oidc_rp_live", None)
+    build = live.refresh if live is not None else functools.partial(relying_party_for, state)
+    state.oidc_rp = await run_blocking(build)
+    return state.oidc_rp
+
+
 async def _reload_rp_if_provider_known(request: Request, provider: str):
     """Rebuild the RP when the registry knows an enabled provider the RP does not.
 
-    The provider-CRUD endpoints rebuild the RP on every write, but that only
-    heals the worker that served the write. The registry is a directory of YAML
-    files that also changes out-of-band - another uvicorn worker's write, a
-    gitops sync, an operator editing a file - so the login path checks the
-    registry once before giving up. That turns "restart the engine" into a
-    self-heal.
+    The provider-CRUD endpoints rebuild the RP on every write, but that only heals
+    the replica that served the write. The registry also changes out of band -
+    another replica's write, an operator editing a provider file - so the login path
+    checks the registry once before giving up. That turns "restart the engine" into
+    a self-heal.
 
-    Costs a single stat + one small YAML parse for the NAMED provider (no
-    directory walk), so an unauthenticated caller spamming bogus names buys
-    itself a failed stat and nothing more.
-
-    The rebuild reads each enabled provider's credentials from the secret store, so it
-    runs on a worker thread.
+    Costs one read of the NAMED provider, a file or one indexed document, so an
+    unauthenticated caller spamming bogus names buys itself a failed lookup and
+    nothing more. The read and the rebuild run on a worker thread.
 
     Returns the rebuilt RP, or None if the registry does not vindicate the miss.
     """
@@ -164,7 +197,7 @@ async def _reload_rp_if_provider_known(request: Request, provider: str):
     if registry is None:
         return None
     try:
-        known = registry.get(provider)
+        known = await run_blocking(functools.partial(registry.get, provider))
     except Exception as exc:  # malformed YAML on disk - not this request's problem
         # The validation text quotes the file's values, so only the failure's class is logged.
         logger.warning(
@@ -174,23 +207,13 @@ async def _reload_rp_if_provider_known(request: Request, provider: str):
     if known is None or not known.enabled:
         return None
 
-    from dfe_engine.auth.oidc.rp import build_relying_party
-
     logger.info("OIDC RP stale - rebuilding for a provider added since startup", provider=provider)
-    request.app.state.oidc_rp = await run_blocking(
-        functools.partial(
-            build_relying_party,
-            registry,
-            secrets=getattr(request.app.state, "dfe_secrets", None),
-            metrics=getattr(request.app.state, "oidc_login_metrics", None),
-        )
-    )
-    return request.app.state.oidc_rp
+    return await rebuild_relying_party(request)
 
 
 async def _rp_or_404(request: Request, provider: str):
     """Resolve the relying party and assert the provider is registered."""
-    rp = getattr(request.app.state, "oidc_rp", None)
+    rp = await current_relying_party(request)
     if rp is None or not rp.has_provider(provider):
         rp = await _reload_rp_if_provider_known(request, provider)
     if rp is None or not rp.has_provider(provider):
