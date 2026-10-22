@@ -37,6 +37,7 @@ from dfe_engine.gitcrud.commit_policy import added_violations
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 from dfe_engine.gitops.repo import PublishResult
 from dfe_engine.hunt_runner.checkpoint import TIMESTAMP_FIELD
+from dfe_engine.hunts.alert import ALERT_CLASS
 from dfe_engine.hunts.rule_guard import refuse_rule_condition
 from dfe_engine.hunts.validator import HuntValidator
 
@@ -245,6 +246,9 @@ class ActionStore:
 
     def _credential_change(self, change: VarChange) -> bool:
         """Whether ``change`` would store a credential, by its path or by any value it can take."""
+        if change.cls == ALERT_CLASS and change.path == "url":
+            # The name rule reads `url` as a setting, but an Apprise URL is the credential.
+            return True
         target = self._target(change)
         if contract.credential_var(target, change.path):
             return True

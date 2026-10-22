@@ -20,6 +20,10 @@ rewriting -- because ``hunt_runner/spec_loader.py`` and
 
 With gitops off (the docker tier) no backend is built and the registries keep
 their DirectoryConfigStore over the shared config volume the docker runner reads.
+
+The field map, alert destination, meta schema and service config registries use
+the same backend, under their own commit type, so every engine replica reads one
+copy through its own clone.
 """
 
 from __future__ import annotations
@@ -41,6 +45,7 @@ from dfe_engine.yaml_utils import yaml_load_string
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from contextlib import AbstractContextManager
     from pathlib import Path
 
     from dfe_engine.gitcrud.engine import GitCrud
@@ -84,17 +89,33 @@ class DeployRepoStore:
         environment: str,
         mode: str,
         forge: ForgeProvider | None = None,
+        commit_type: str = _COMMIT_TYPE,
     ) -> None:
         self._crud = crud
         self._cls_name = cls_name
         self._environment = environment
         self._mode = mode
         self._forge = forge
+        self._commit_type = commit_type
 
     @property
     def directory(self) -> Path:
         """Working-tree path of the class's directory in the deploy repo."""
         return self._crud.repo_path / self._crud.resource_class(self._cls_name).directory
+
+    @property
+    def repo_path(self) -> Path:
+        """Working-tree path of this replica's clone of the deploy repo."""
+        return self._crud.repo_path
+
+    def relative_path(self, name: str) -> str:
+        """The repo-relative file one resource is stored in."""
+        cls = self._crud.resource_class(self._cls_name)
+        return f"{cls.directory}/{name}{cls.suffix}"
+
+    def reading(self) -> AbstractContextManager[None]:
+        """Take the remote's head and hold the tree, for a read of the clone's history."""
+        return self._crud.reading()
 
     def names(self) -> list[str]:
         """Stored resource names (file stems), which are the runner's identities."""
@@ -189,7 +210,7 @@ class DeployRepoStore:
     def _message(self, name: str, summary: str, actor: str) -> str:
         return build_message(
             CommitContext(
-                ctype=_COMMIT_TYPE,
+                ctype=self._commit_type,
                 scope=name,
                 summary=summary,
                 actor=actor,
@@ -219,7 +240,7 @@ class DeployRepoStore:
                 rbac_class=self._rbac_class,
                 resource=resource,
                 actor=actor,
-                title=f"{_COMMIT_TYPE}({name}): {summary}",
+                title=f"{self._commit_type}({name}): {summary}",
                 body=(
                     f"Governed change to {resource} by {actor}. Opened for review "
                     "because production+team may not commit straight to main."
@@ -233,7 +254,7 @@ class DeployRepoStore:
             res = write(branch)
             logger.warning(
                 "REVIEW REQUIRED: change committed to a branch; no forge to open a "
-                "PR, so the hunt runner sees it only once the branch is merged",
+                "PR, so nothing reading main sees it until the branch is merged",
                 actor=actor,
                 resource=resource,
                 branch=branch,
@@ -252,8 +273,17 @@ def deploy_store(
     *,
     settings: DFESettings,
     forge: ForgeProvider | None = None,
+    commit_type: str = _COMMIT_TYPE,
 ) -> DeployRepoStore | None:
-    """The deploy-repo backend for one hunt-domain class; None when gitops is off."""
+    """The deploy-repo backend for one class, or None when gitops is off.
+
+    Args:
+        crud: The deploy repo, or None when gitops is off.
+        cls_name: The gitcrud resource class.
+        settings: The deployment posture each write is routed by.
+        forge: Opens the review PR a production+team write needs.
+        commit_type: The commit standard's type for the class's commits.
+    """
     if crud is None:
         return None
     return DeployRepoStore(
@@ -262,4 +292,5 @@ def deploy_store(
         environment=settings.env,
         mode=settings.gitops.mode,
         forge=forge,
+        commit_type=commit_type,
     )

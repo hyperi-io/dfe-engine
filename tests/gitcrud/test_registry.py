@@ -19,19 +19,38 @@ from dfe_engine.gitcrud import (
 
 
 def test_default_registry_classes_are_the_rbac_prefixes():
-    # deploy-repo scope: helmvars + governance + library + sources (the first
-    # datamodel class to land; the rest arrive with multi-repo) + schema (the
-    # derived column selections those sources name) + the hunt and rule classes
-    # the hunt runner git-syncs
+    # deploy-repo scope: helmvars + governance + library + sources + schema (the
+    # derived column selections those sources name, and the meta schemas the API
+    # writes) + the hunt and rule classes the hunt runner git-syncs + the config
+    # every engine replica reads (field maps, alert destinations, service configs)
     assert default_registry().classes() == [
+        "alert",
+        "fieldmap",
         "governance",
         "helmvars",
         "hunt",
         "library",
         "rule",
         "schema",
+        "service",
         "sources",
     ]
+
+
+@pytest.mark.parametrize(
+    ("name", "directory", "prefix", "nested"),
+    [
+        ("meta_schemas", "config/schemas", "schema", True),
+        ("fieldmaps", "config/fieldmaps", "fieldmap", True),
+        ("alert_destinations", "config/alert-destinations", "alert", False),
+        ("service_configs", "config/services", "service", False),
+    ],
+)
+def test_replica_config_classes_bind_the_existing_grants(name, directory, prefix, nested):
+    """Each reuses the grant its API route already checks, so no role changes."""
+    cls = default_registry().get(name)
+    assert (cls.directory, cls.rbac_prefix, cls.nested) == (directory, prefix, nested)
+    assert cls.versioned is False
 
 
 def test_hunt_classes_are_registered_at_the_paths_the_runner_syncs():

@@ -6,20 +6,27 @@ GET    /api/v1/field-maps/{standard}       -> Default map for standard
 GET    /api/v1/field-maps/{standard}/{source} -> Source-specific map
 DELETE /api/v1/field-maps/{standard}/{source} -> Delete source-specific map
 POST   /api/v1/field-maps/seed             -> Seed built-in defaults
+
+With gitops on, a write is a deploy-repo commit routed by the deployment's
+posture, so a production+team write sits on a review branch and the
+``X-DFE-Review-Required`` header says so.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel
 from scalo.api import scalo_extra
 
 from dfe_engine.api.deps import CurrentUser, FieldMapReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.review import apply_routing_headers, routing_audit_detail
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.fieldmap.models import FieldMap
 from dfe_engine.git_identity import git_author
+from dfe_engine.gitcrud.routing import ReviewRouting
 
-router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
+router = APIRouter(prefix="/field-maps", tags=["Field Maps"], dependencies=[WRITE_TURN])
 
 
 # -- Response models ------------------------------------------
@@ -50,7 +57,7 @@ class SeedResponse(BaseModel):
     response_model=PaginatedResponse[FieldMapSummary],
     dependencies=[Depends(require_action(scopes_dict["fieldmap_read"]))],
 )
-async def list_field_maps(
+def list_field_maps(
     user: CurrentUser,
     registry: FieldMapReg,
     pagination: PaginationParams = Depends(),
@@ -83,16 +90,18 @@ async def list_field_maps(
     response_model=FieldMap,
     dependencies=[Depends(require_action(scopes_dict["fieldmap_write"]))],
 )
-async def create_field_map(
+def create_field_map(
     body: FieldMap,
     user: CurrentUser,
     registry: FieldMapReg,
+    response: Response,
 ):
     """Create or update a field map."""
     from dfe_engine.fieldmap.registry import FieldMapValidationError
 
+    routing = ReviewRouting()
     try:
-        fm = registry.save_map(body, created_by=git_author(user))
+        fm = registry.save_map(body, created_by=git_author(user), routing=routing)
     except FieldMapValidationError as e:
         raise HTTPException(
             status_code=422,
@@ -101,7 +110,10 @@ async def create_field_map(
                 "message": str(e),
             },
         )
-    audit_resource_change(user.user_id, "field_map", f"{fm.standard}", "created")
+    apply_routing_headers(response, routing)
+    audit_resource_change(
+        user.user_id, "field_map", f"{fm.standard}", "created", routing_audit_detail(routing)
+    )
     return fm
 
 
@@ -110,7 +122,7 @@ async def create_field_map(
     response_model=FieldMap,
     dependencies=[Depends(require_action(scopes_dict["fieldmap_read"]))],
 )
-async def get_default_field_map(standard: str, user: CurrentUser, registry: FieldMapReg):
+def get_default_field_map(standard: str, user: CurrentUser, registry: FieldMapReg):
     """Get the default field map for a standard (no source-specific overrides)."""
     from dfe_engine.fieldmap.registry import FieldMapNotFoundError
 
@@ -134,9 +146,7 @@ async def get_default_field_map(standard: str, user: CurrentUser, registry: Fiel
     dependencies=[Depends(require_action(scopes_dict["fieldmap_read"]))],
     openapi_extra=scalo_extra(verb="get-for-source"),
 )
-async def get_source_field_map(
-    standard: str, source: str, user: CurrentUser, registry: FieldMapReg
-):
+def get_source_field_map(standard: str, source: str, user: CurrentUser, registry: FieldMapReg):
     """Get the source-specific field map override."""
     from dfe_engine.fieldmap.registry import FieldMapNotFoundError
 
@@ -158,8 +168,8 @@ async def get_source_field_map(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["fieldmap_delete"]))],
 )
-async def delete_source_field_map(
-    standard: str, source: str, user: CurrentUser, registry: FieldMapReg
+def delete_source_field_map(
+    standard: str, source: str, user: CurrentUser, registry: FieldMapReg, response: Response
 ):
     """Delete a source-specific field map override."""
     if not registry.map_exists(standard, source=source):
@@ -170,8 +180,16 @@ async def delete_source_field_map(
                 "message": f"Field map for '{standard}/{source}' not found",
             },
         )
-    registry.delete_map(standard, source=source)
-    audit_resource_change(user.user_id, "field_map", f"{standard}/{source}", "deleted")
+    routing = ReviewRouting()
+    registry.delete_map(standard, source=source, created_by=git_author(user), routing=routing)
+    apply_routing_headers(response, routing)
+    audit_resource_change(
+        user.user_id,
+        "field_map",
+        f"{standard}/{source}",
+        "deleted",
+        routing_audit_detail(routing),
+    )
 
 
 @router.post(
@@ -179,8 +197,10 @@ async def delete_source_field_map(
     response_model=SeedResponse,
     dependencies=[Depends(require_action(scopes_dict["fieldmap_write"]))],
 )
-async def seed_field_maps(user: CurrentUser, registry: FieldMapReg):
+def seed_field_maps(user: CurrentUser, registry: FieldMapReg, response: Response):
     """Seed built-in default field maps. Non-destructive."""
-    count = registry.seed_defaults(overwrite=False)
-    audit_resource_change(user.user_id, "field_map", "all", "seeded")
+    routing = ReviewRouting()
+    count = registry.seed_defaults(overwrite=False, created_by=git_author(user), routing=routing)
+    apply_routing_headers(response, routing)
+    audit_resource_change(user.user_id, "field_map", "all", "seeded", routing_audit_detail(routing))
     return SeedResponse(seeded=count)

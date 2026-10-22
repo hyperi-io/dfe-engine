@@ -136,12 +136,14 @@ class SchemaBuilderV2:
                               derived_schema, additional_fields). Schema file paths
                               in the Source model are resolved relative to this.
                               If None, paths must be absolute.
-            derived_base_dir: Root a ``derived/...`` reference resolves under. A
-                              deployment with gitops stores derived schemas in the
-                              deploy repo rather than the schemas tree, so the two
-                              roots differ; pass
-                              ``DerivedSchemaRegistry.reference_root``. None keeps
-                              them in the schemas tree.
+            derived_base_dir: Root of the deployment's own schema documents, which
+                              every reference resolves under before
+                              ``schemas_base_dir``. A deployment with gitops stores
+                              its derived schemas and the meta schemas the API
+                              wrote in the deploy repo rather than the schemas
+                              tree, so the two roots differ. Pass
+                              ``derived_reference_root(settings)``. None keeps
+                              everything in the schemas tree.
             use_legacy_indexes: Use tokenbf/ngrambf instead of GA text indexes.
             field_map_registry: Optional FieldMapRegistry for generating standard
                                 views (sigma, ecs, cim, ocsf). When provided and the
@@ -448,7 +450,18 @@ class SchemaBuilderV2:
         return columns
 
     def _resolve_path(self, path_str: str) -> Path:
-        """Resolve a schema file path (relative to schemas_base_dir or absolute)."""
+        """Resolve a schema file path: the deployment's own tree, then schemas_base_dir.
+
+        With gitops on, a meta schema the API wrote is in the deploy repo's tree,
+        which ``derived_base_dir`` names, and not in this pod's copy of the shipped
+        one.
+        """
+        if self._derived_base_dir:
+            from dfe_engine.schema.derived_registry import resolve_derived_reference
+
+            return resolve_derived_reference(
+                path_str, self._derived_base_dir, self._schemas_base_dir
+            )
         if self._schemas_base_dir:
             return resolve_schema_yaml_path(self._schemas_base_dir, path_str)
         return Path(path_str)

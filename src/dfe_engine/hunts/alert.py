@@ -31,7 +31,7 @@ Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
 
 import builtins
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import apprise
 from pydantic import BaseModel, Field, field_validator
@@ -43,9 +43,17 @@ from scalo.expression import (
 )
 from scalo.logger import logger
 
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError
 from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump
 
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud.routing import ReviewRouting
+    from dfe_engine.hunts.deploy_repo import DeployRepoStore
+
 # -- Destination Registry ------------------------------------------
+
+ALERT_CLASS = "alert_destinations"
+"""The gitcrud resource class alert destinations live in when gitops is on."""
 
 
 class AlertDestinationNameError(ValueError):
@@ -95,15 +103,16 @@ class AlertDestination(BaseModel):
 
 
 class AlertDestinationRegistry:
-    """Registry of named alert destinations backed by DirectoryConfigStore.
+    """Registry of named alert destinations.
 
-    When a ``directory`` is provided, destinations are persisted as YAML files
-    (one per destination) and the store handles caching, background refresh,
-    and optional git-aware writes.  Without a directory the registry operates
-    as an in-memory dict (useful for tests and bootstrap).
+    With ``deploy_repo`` the destinations are the deploy repo's
+    ``alert_destinations`` class, one document per destination, so every engine
+    replica reads the same set and every write is one routed commit. With a
+    ``directory`` they are YAML files under a DirectoryConfigStore. With neither
+    the registry is an in-memory dict (tests and bootstrap).
 
     Usage:
-        # File-backed (production)
+        # File-backed
         registry = AlertDestinationRegistry(directory="/config/alert-destinations")
 
         # In-memory (tests / bootstrap from settings dict)
@@ -113,11 +122,21 @@ class AlertDestinationRegistry:
         url = registry.resolve("slack-dfe")
     """
 
-    def __init__(self, directory: str | None = None) -> None:
+    def __init__(
+        self, directory: str | None = None, *, deploy_repo: DeployRepoStore | None = None
+    ) -> None:
+        """Bind the registry to one backend.
+
+        Args:
+            directory: YAML directory for the DirectoryConfigStore backend. Ignored
+                when ``deploy_repo`` is given.
+            deploy_repo: The deploy repo's ``alert_destinations`` class.
+        """
         self._store = None
         self._memory: dict[str, AlertDestination] = {}
+        self._deploy = deploy_repo
 
-        if directory:
+        if deploy_repo is None and directory:
             dir_path = Path(directory)
             dir_path.mkdir(parents=True, exist_ok=True)
             try:
@@ -135,14 +154,38 @@ class AlertDestinationRegistry:
                     "falling back to in-memory"
                 )
 
-    def add(self, destination: AlertDestination) -> None:
+    def add(
+        self,
+        destination: AlertDestination,
+        *,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> None:
         """Register a destination (overwrites if name exists).
 
-        Persists to YAML when backed by DirectoryConfigStore.
+        Persists to the deploy repo or to YAML when a backend is bound.
+
+        Args:
+            destination: The destination, URL included.
+            created_by: Username/identity, recorded on a deploy-repo commit.
+            routing: Collects where a deploy-repo write landed.
 
         Raises:
-            AlertDestinationNameError: The name's file would sit outside the directory.
+            AlertDestinationNameError: The name cannot name a stored destination.
         """
+        # name comes from the document's key, and an unowned destination stores no hunt_name.
+        data = destination.model_dump(exclude={"name"}, exclude_none=True)
+        if self._deploy is not None:
+            try:
+                outcome = self._deploy.put(destination.name, data, actor=created_by or "engine")
+            except CommitPolicyError as exc:
+                raise AlertDestinationNameError(
+                    f"alert destination name {destination.name!r} cannot name a deploy-repo "
+                    "document: use letters, digits, '.', '_' and '-' only"
+                ) from exc
+            if routing is not None:
+                routing.record(outcome)
+            return
         if self._store is not None:
             yaml_path = contained_yaml_file(self._store._directory, destination.name)
             if yaml_path is None:
@@ -150,24 +193,28 @@ class AlertDestinationRegistry:
                     f"alert destination name {destination.name!r} resolves outside the "
                     "destinations directory"
                 )
-            # Store url/description/enabled/hunt_name -- name comes from the filename.
-            # exclude_none drops hunt_name when unset so unowned destinations stay clean.
-            data = destination.model_dump(exclude={"name"}, exclude_none=True)
             yaml_dump(data, yaml_path)
             self._store._refresh_all()
         else:
             self._memory[destination.name] = destination
 
+    def _stored_doc(self, name: str) -> dict[str, Any] | None:
+        """The stored document for *name*, None when absent or not nameable by the backend."""
+        if self._deploy is not None:
+            return self._deploy.get(name)
+        if self._store is not None:
+            return _stored(self._store, name)
+        return None
+
     def get(self, name: str) -> AlertDestination:
         """Get a destination by name. Raises KeyError if not found."""
-        if self._store is not None:
-            data = _stored(self._store, name)
-            if data is None:
-                raise KeyError(name)
-            # Inject name from table key (filename) -- not stored inside YAML
-            data["name"] = name
-            return AlertDestination.model_validate(data)
-        return self._memory[name]
+        if self._deploy is None and self._store is None:
+            return self._memory[name]
+        data = self._stored_doc(name)
+        if data is None:
+            raise KeyError(name)
+        # The name is the document's key, never a field inside it.
+        return AlertDestination.model_validate({**data, "name": name})
 
     def resolve(self, name: str) -> str | None:
         """Resolve a destination name to its Apprise URL. Returns None if not found or disabled."""
@@ -179,8 +226,27 @@ class AlertDestinationRegistry:
             return dest.url
         return None
 
-    def remove(self, name: str) -> bool:
-        """Remove a destination by name. Returns True if it existed."""
+    def remove(
+        self,
+        name: str,
+        *,
+        created_by: str | None = None,
+        routing: ReviewRouting | None = None,
+    ) -> bool:
+        """Remove a destination by name. Returns True if it existed.
+
+        Args:
+            name: The destination name.
+            created_by: Username/identity, recorded on a deploy-repo commit.
+            routing: Collects where a deploy-repo write landed.
+        """
+        if self._deploy is not None:
+            outcome = self._deploy.delete(name, actor=created_by or "engine")
+            if outcome is None:
+                return False
+            if routing is not None:
+                routing.record(outcome)
+            return True
         if self._store is not None:
             yaml_path = contained_yaml_file(self._store._directory, name)
             if yaml_path is not None and yaml_path.exists():
@@ -198,15 +264,22 @@ class AlertDestinationRegistry:
         Return annotation is ``builtins.list`` because this method named ``list``
         shadows the builtin for the type checker's annotation resolution.
         """
+        if self._deploy is None and self._store is None:
+            return list(self._memory.values())
+        results = []
+        for table_name in self._names():
+            data = self._stored_doc(table_name)
+            if data:
+                results.append(AlertDestination.model_validate({**data, "name": table_name}))
+        return results
+
+    def _names(self) -> builtins.list[str]:
+        """Every stored destination name."""
+        if self._deploy is not None:
+            return self._deploy.names()
         if self._store is not None:
-            results = []
-            for table_name in self._store.list_tables():
-                data = self._store.get(table_name)
-                if data:
-                    data["name"] = table_name
-                    results.append(AlertDestination.model_validate(data))
-            return results
-        return list(self._memory.values())
+            return list(self._store.list_tables())
+        return list(self._memory)
 
     def resolve_many(self, names: builtins.list[str]) -> builtins.list[str]:
         """Resolve a list of destination names to Apprise URLs.
@@ -233,14 +306,12 @@ class AlertDestinationRegistry:
             self._store.stop()
 
     def __len__(self) -> int:
-        if self._store is not None:
-            return len(list(self._store.list_tables()))
-        return len(self._memory)
+        return len(self._names())
 
     def __contains__(self, name: str) -> bool:
-        if self._store is not None:
-            return _stored(self._store, name) is not None
-        return name in self._memory
+        if self._deploy is None and self._store is None:
+            return name in self._memory
+        return self._stored_doc(name) is not None
 
 
 # -- Trigger Models -----------------------------------------------

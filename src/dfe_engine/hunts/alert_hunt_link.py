@@ -9,8 +9,8 @@ from dfe_engine.hunts.hunt_config_registry import (
 )
 
 if TYPE_CHECKING:
-    from dfe_engine.gitcrud.routing import WriteOutcome
-    from dfe_engine.hunts.alert import AlertDestination, AlertDestinationRegistry
+    from dfe_engine.gitcrud.routing import ReviewRouting, WriteOutcome
+    from dfe_engine.hunts.alert import AlertDestinationRegistry
 
 
 def add_destination_to_hunt(
@@ -43,29 +43,34 @@ def delete_destinations_owned_by_hunt(
     registry: AlertDestinationRegistry,
     hunt_registry: HuntConfigRegistry,
     hunt_name: str,
+    *,
+    created_by: str | None = None,
+    routing: ReviewRouting | None = None,
 ) -> list[str]:
-    """Delete destinations owned by ``hunt_name`` when they are not used by other hunts."""
+    """Delete destinations owned by ``hunt_name`` when they are not used by other hunts.
+
+    Args:
+        registry: The alert destinations.
+        hunt_registry: The hunts, to find which ones still name a destination.
+        hunt_name: The hunt being deleted.
+        created_by: Username/identity, recorded on a deploy-repo commit.
+        routing: Collects where each deploy-repo write landed.
+
+    Returns:
+        The names of the destinations deleted.
+    """
     deleted: list[str] = []
     for dest in registry.list():
         if dest.hunt_name != hunt_name:
             continue
         hunts_using = hunt_registry.hunt_names_referencing_destination(dest.name)
-        if len(hunts_using) > 1:
-            _clear_hunt_name_if_owned(registry, dest, hunt_name)
+        if len(hunts_using) > 1 or (len(hunts_using) == 1 and hunts_using[0] != hunt_name):
+            registry.add(
+                dest.model_copy(update={"hunt_name": None}),
+                created_by=created_by,
+                routing=routing,
+            )
             continue
-        if len(hunts_using) == 1 and hunts_using[0] != hunt_name:
-            _clear_hunt_name_if_owned(registry, dest, hunt_name)
-            continue
-        registry.remove(dest.name)
+        registry.remove(dest.name, created_by=created_by, routing=routing)
         deleted.append(dest.name)
     return deleted
-
-
-def _clear_hunt_name_if_owned(
-    registry: AlertDestinationRegistry,
-    dest: AlertDestination,
-    hunt_name: str,
-) -> None:
-    if dest.hunt_name != hunt_name:
-        return
-    registry.add(dest.model_copy(update={"hunt_name": None}))

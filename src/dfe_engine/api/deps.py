@@ -102,14 +102,24 @@ def bootstrap_registries(
 
     ``gitcrud`` (the Governed Ops engine over the deploy repo, when gitops is
     enabled) makes the deploy repo the SSoT for sources (``config/sources/``),
-    hunts (``config/hunts/``) and rules (``config/rules/``); without it each
-    registry falls back to its plain YAML directory. ``forge`` opens the review
-    PR when the deployment posture refuses a direct commit.
+    hunts (``config/hunts/``), rules (``config/rules/``), API-written meta schemas
+    (``config/schemas/``), field maps (``config/fieldmaps/``), alert destinations
+    (``config/alert-destinations/``) and service configs (``config/services/``), so
+    every engine replica reads them through its own clone. Without it each registry
+    falls back to its plain YAML directory. ``forge`` opens the review PR when the
+    deployment posture refuses a direct commit.
     """
-    if settings.schemas.schemas_dir:
-        from dfe_engine.schema.registry import SchemaRegistry
+    from dfe_engine.hunts.deploy_repo import deploy_store
 
-        _registries["meta_schema"] = SchemaRegistry(schemas_directory=settings.schemas.schemas_dir)
+    if settings.schemas.schemas_dir:
+        from dfe_engine.schema.registry import META_CLASS, SchemaRegistry
+
+        _registries["meta_schema"] = SchemaRegistry(
+            schemas_directory=settings.schemas.schemas_dir,
+            deploy_repo=deploy_store(
+                gitcrud, META_CLASS, settings=settings, forge=forge, commit_type="schema"
+            ),
+        )
 
     # A derived schema is a deployment's own artefact, so it follows the sources
     # into the deploy repo when gitops is on and sits under the schemas tree
@@ -127,25 +137,29 @@ def bootstrap_registries(
             crud=gitcrud,
         )
 
-    if settings.services.config_yaml_dir:
-        from dfe_engine.services.registry import ServiceConfigRegistry
+    if gitcrud is not None or settings.services.config_yaml_dir:
+        from dfe_engine.services.registry import SERVICE_CONFIG_CLASS, ServiceConfigRegistry
 
         _registries["service_config"] = ServiceConfigRegistry(
-            config_directory=settings.services.config_yaml_dir
+            config_directory=settings.services.config_yaml_dir or None,
+            deploy_repo=deploy_store(
+                gitcrud, SERVICE_CONFIG_CLASS, settings=settings, forge=forge, commit_type="cfg"
+            ),
         )
 
-    if settings.fieldmap.fieldmaps_dir:
-        from dfe_engine.fieldmap.registry import FieldMapRegistry
+    if gitcrud is not None or settings.fieldmap.fieldmaps_dir:
+        from dfe_engine.fieldmap.registry import FIELDMAP_CLASS, FieldMapRegistry
 
         _registries["fieldmap"] = FieldMapRegistry(
-            field_maps_directory=settings.fieldmap.fieldmaps_dir
+            field_maps_directory=settings.fieldmap.fieldmaps_dir or None,
+            deploy_repo=deploy_store(
+                gitcrud, FIELDMAP_CLASS, settings=settings, forge=forge, commit_type="schema"
+            ),
         )
 
     # The hunt runner reads hunts and rules off a git-sync of the deploy repo, so
     # with gitops on they are governed there rather than in a directory only the
     # engine pod can see (dfe-infra#212).
-    from dfe_engine.hunts.deploy_repo import deploy_store
-
     if gitcrud is not None or settings.hunts.rules_dir:
         from dfe_engine.hunts.rule_registry import RuleRegistry
 
@@ -163,11 +177,12 @@ def bootstrap_registries(
             deploy_repo=deploy_store(gitcrud, "hunts", settings=settings, forge=forge),
         )
 
-    if settings.hunts.alert_destinations_dir:
-        from dfe_engine.hunts.alert import AlertDestinationRegistry
+    if gitcrud is not None or settings.hunts.alert_destinations_dir:
+        from dfe_engine.hunts.alert import ALERT_CLASS, AlertDestinationRegistry
 
         _registries["alert_destinations"] = AlertDestinationRegistry(
-            directory=settings.hunts.alert_destinations_dir,
+            directory=settings.hunts.alert_destinations_dir or None,
+            deploy_repo=deploy_store(gitcrud, ALERT_CLASS, settings=settings, forge=forge),
         )
 
 
@@ -238,7 +253,7 @@ def get_service_config_registry():
             detail={
                 "code": "not_configured",
                 "message": "ServiceConfigRegistry not initialized"
-                " -- set DFE_SERVICES_CONFIG_YAML_DIR",
+                " -- set DFE_SERVICES_CONFIG_YAML_DIR or enable gitops",
             },
         )
     return reg
@@ -252,7 +267,8 @@ def get_field_map_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "FieldMapRegistry not initialized -- set DFE_FIELDMAPS_DIR",
+                "message": "FieldMapRegistry not initialized"
+                " -- set DFE_FIELDMAPS_DIR or enable gitops",
             },
         )
     return reg
@@ -272,7 +288,7 @@ def get_alert_destinations_registry():
             detail={
                 "code": "not_configured",
                 "message": "Alert destinations not initialized"
-                " -- set DFE_HUNTS_ALERT_DESTINATIONS_DIR",
+                " -- set DFE_HUNTS_ALERT_DESTINATIONS_DIR or enable gitops",
             },
         )
     return reg

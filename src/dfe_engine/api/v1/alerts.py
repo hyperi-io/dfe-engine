@@ -14,6 +14,10 @@ viewer role, so a stored URL is masked on every read and the scheme is reported
 separately for what a reader actually needs. A PUT that hands the placeholder
 back keeps the stored URL, as every other credential write does.
 
+With gitops on, a destination is a deploy-repo document and a write is a commit
+routed by the deployment's posture, so a production+team write sits on a review
+branch and ``X-DFE-Review-Required`` says so.
+
 GET    /api/v1/alerts/destinations            -> Paginated list
 POST   /api/v1/alerts/destinations            -> Create destination
 GET    /api/v1/alerts/destinations/{name}     -> Get destination
@@ -29,11 +33,18 @@ from scalo.api import scalo_extra
 
 from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
-from dfe_engine.api.review import apply_review_headers
+from dfe_engine.api.review import apply_routing_headers, routing_audit_detail
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.hunts.alert import DESTINATION_NAME_RULE, is_destination_name
+from dfe_engine.git_identity import git_author
+from dfe_engine.gitcrud.routing import ReviewRouting
+from dfe_engine.hunts.alert import (
+    DESTINATION_NAME_RULE,
+    AlertDestinationNameError,
+    is_destination_name,
+)
 from dfe_engine.hunts.alert import AlertDestination as RegistryAlertDestination
 from dfe_engine.hunts.alert_hunt_link import (
     add_destination_to_hunt,
@@ -41,7 +52,7 @@ from dfe_engine.hunts.alert_hunt_link import (
 )
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
 
-router = APIRouter(prefix="/alerts", tags=["Alerts"])
+router = APIRouter(prefix="/alerts", tags=["Alerts"], dependencies=[WRITE_TURN])
 
 
 def _get_hunt_config_registry_optional() -> Any | None:
@@ -94,7 +105,7 @@ class AlertDestinationSummary(BaseModel):
     response_model=PaginatedResponse[AlertDestinationSummary],
     dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
-async def list_destinations(
+def list_destinations(
     user: CurrentUser,
     registry: AlertDestRegistry,
     hunt_registry: OptionalHuntConfigReg,
@@ -161,7 +172,7 @@ async def list_destinations(
     dependencies=[Depends(require_action(scopes_dict["alert_write"]))],
     openapi_extra=scalo_extra(verb="create-destination"),
 )
-async def create_destination(
+def create_destination(
     body: AlertDestination,
     user: CurrentUser,
     registry: AlertDestRegistry,
@@ -170,8 +181,9 @@ async def create_destination(
 ):
     """Create an alert destination.
 
-    Linking it to a hunt writes the hunt YAML, so in production+team that link is
-    routed to a review branch and ``X-DFE-Review-Required`` says so.
+    The destination write, and linking it to a hunt, which writes the hunt YAML, are
+    each routed to a review branch in production+team, and ``X-DFE-Review-Required``
+    says so.
     """
     if not is_destination_name(body.name):
         raise HTTPException(
@@ -193,13 +205,17 @@ async def create_destination(
     body.url = _typed_url(body.url, "")
     if body.hunt_name is not None:
         _ensure_hunt_for_link(hunt_registry, body.hunt_name)
-    _write_destination(registry, body, hunt_name=body.hunt_name)
+    routing = ReviewRouting()
+    written = _write_destination(
+        registry, body, hunt_name=body.hunt_name, created_by=git_author(user), routing=routing
+    )
     if body.hunt_name is not None and hunt_registry is not None:
-        apply_review_headers(
-            response, add_destination_to_hunt(hunt_registry, body.hunt_name, body.name)
-        )
-    audit_resource_change(user.user_id, "alert_destination", body.name, "created")
-    return _destination_from_registry(registry.get(body.name))
+        routing.record(add_destination_to_hunt(hunt_registry, body.hunt_name, body.name))
+    apply_routing_headers(response, routing)
+    audit_resource_change(
+        user.user_id, "alert_destination", body.name, "created", routing_audit_detail(routing)
+    )
+    return _destination_from_registry(written)
 
 
 @router.get(
@@ -207,7 +223,7 @@ async def create_destination(
     response_model=AlertDestination,
     dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
-async def get_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
+def get_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Get an alert destination by name."""
     if name not in registry:
         raise HTTPException(
@@ -225,7 +241,7 @@ async def get_destination(name: str, user: CurrentUser, registry: AlertDestRegis
     response_model=AlertDestination,
     dependencies=[Depends(require_action(scopes_dict["alert_write"]))],
 )
-async def update_destination(
+def update_destination(
     name: str,
     body: AlertDestination,
     user: CurrentUser,
@@ -235,8 +251,9 @@ async def update_destination(
 ):
     """Update an alert destination.
 
-    Linking it to a hunt writes the hunt YAML, so in production+team that link is
-    routed to a review branch and ``X-DFE-Review-Required`` says so.
+    The destination write, and linking it to a hunt, which writes the hunt YAML, are
+    each routed to a review branch in production+team, and ``X-DFE-Review-Required``
+    says so.
     """
     if name not in registry:
         raise HTTPException(
@@ -253,11 +270,17 @@ async def update_destination(
     if hunt_to_link is not None:
         _ensure_hunt_for_link(hunt_registry, hunt_to_link)
     stored_hunt_name = hunt_to_link if hunt_to_link is not None else existing.hunt_name
-    _write_destination(registry, body, hunt_name=stored_hunt_name)
+    routing = ReviewRouting()
+    written = _write_destination(
+        registry, body, hunt_name=stored_hunt_name, created_by=git_author(user), routing=routing
+    )
     if hunt_to_link is not None and hunt_registry is not None:
-        apply_review_headers(response, add_destination_to_hunt(hunt_registry, hunt_to_link, name))
-    audit_resource_change(user.user_id, "alert_destination", name, "updated")
-    return _destination_from_registry(registry.get(name))
+        routing.record(add_destination_to_hunt(hunt_registry, hunt_to_link, name))
+    apply_routing_headers(response, routing)
+    audit_resource_change(
+        user.user_id, "alert_destination", name, "updated", routing_audit_detail(routing)
+    )
+    return _destination_from_registry(written)
 
 
 @router.delete(
@@ -265,9 +288,16 @@ async def update_destination(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["alert_delete"]))],
 )
-async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
-    """Delete an alert destination."""
-    if not registry.remove(name):
+def delete_destination(
+    name: str, user: CurrentUser, registry: AlertDestRegistry, response: Response
+):
+    """Delete an alert destination.
+
+    A production+team delete is routed to a review branch, so hunts keep alerting the
+    destination until that branch is merged, and ``X-DFE-Review-Required`` says so.
+    """
+    routing = ReviewRouting()
+    if not registry.remove(name, created_by=git_author(user), routing=routing):
         raise HTTPException(
             status_code=404,
             detail={
@@ -275,7 +305,10 @@ async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRe
                 "message": f"Alert destination '{name}' not found",
             },
         )
-    audit_resource_change(user.user_id, "alert_destination", name, "deleted")
+    apply_routing_headers(response, routing)
+    audit_resource_change(
+        user.user_id, "alert_destination", name, "deleted", routing_audit_detail(routing)
+    )
 
 
 # -- Helpers --------------------------------------------------
@@ -322,17 +355,31 @@ def _write_destination(
     dest: AlertDestination,
     *,
     hunt_name: str | None = None,
-) -> None:
-    """Persist a destination via the registry (overwrites if the name exists)."""
-    registry.add(
-        RegistryAlertDestination(
-            name=dest.name,
-            url=dest.url,
-            description=dest.description,
-            enabled=dest.enabled,
-            hunt_name=hunt_name,
-        )
+    created_by: str | None = None,
+    routing: ReviewRouting | None = None,
+) -> RegistryAlertDestination:
+    """Persist a destination via the registry (overwrites if the name exists).
+
+    Returns:
+        The destination as written, which a review-routed write has not put on main.
+
+    Raises:
+        HTTPException: 422 when the registry cannot store a destination of that name.
+    """
+    written = RegistryAlertDestination(
+        name=dest.name,
+        url=dest.url,
+        description=dest.description,
+        enabled=dest.enabled,
+        hunt_name=hunt_name,
     )
+    try:
+        registry.add(written, created_by=created_by, routing=routing)
+    except AlertDestinationNameError as exc:
+        raise HTTPException(
+            status_code=422, detail={"code": "validation_error", "message": str(exc)}
+        ) from exc
+    return written
 
 
 def _ensure_hunt_for_link(hunt_registry: Any | None, hunt_name: str) -> None:

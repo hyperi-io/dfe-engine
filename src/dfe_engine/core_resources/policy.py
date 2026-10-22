@@ -39,8 +39,7 @@ def schema_registry_path_is_core(
     except SchemaValidationError:
         return False
 
-    table = registry._table_name(canonical)
-    config = registry._store.get(table)
+    config = registry.stored_config(canonical)
     if not isinstance(config, dict):
         return False
     return config_is_core(config)
@@ -63,10 +62,7 @@ def fieldmap_target_is_core(
     if registry is None or not standard:
         return False
     src = source if source not in (None, "", DEFAULT_MAP_NAME) else None
-    if not registry.map_exists(standard, source=src):
-        return False
-    table = registry._table_name(standard, src)
-    config = registry._store.get(table)
+    config = registry.stored_config(standard, src)
     if not isinstance(config, dict):
         return False
     return config_is_core(config)
