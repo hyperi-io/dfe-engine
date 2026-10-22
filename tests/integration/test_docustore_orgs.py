@@ -13,6 +13,7 @@ database. Each replica holds its own client, so only the store orders their writ
 
 import functools
 import threading
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import override
 
@@ -45,6 +46,7 @@ from dfe_engine.orgs.registry import (
 from dfe_engine.orgs.seed import ensure_default_org, seed_orgs
 from dfe_engine.secrets import DfeSecrets, build_secrets
 from dfe_engine.settings import SecretsSettings, SeedOrg
+from dfe_engine.store import documents
 from dfe_engine.store.documents import Claim, DocumentConflictError, DocuStore, converge
 from tests.support.races import race, raised
 
@@ -619,6 +621,56 @@ class TestAnOrgsOwnCredentials:
 def _claimed(store: DocuStore, collection: str) -> list[str]:
     """The keys of every claim in *collection*."""
     return sorted(doc["key"] for doc in store.collection(collection).find())
+
+
+@pytest.fixture
+def claims_clock(monkeypatch) -> dict[str, float]:
+    """The claims clock, moved on by ``["ahead"]`` seconds, as a write outlasting the grace sees it."""
+    clock = {"ahead": 0.0}
+
+    class _Ahead(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime.now(tz) + timedelta(seconds=clock["ahead"])
+
+    monkeypatch.setattr(documents, "datetime", _Ahead)
+    return clock
+
+
+class TestAHeldDeleteThatOutlivesTheGrace:
+    """A delete held across a hunt write longer than the grace judges what that let through."""
+
+    @pytest.fixture
+    def registries(self, docustore_pair):
+        registries = _registries(docustore_pair)
+        registries[0].create("acme")
+        registries[0].create("beta")
+        return registries
+
+    def test_a_binding_made_once_its_mark_lapsed_refuses_the_delete(self, registries, claims_clock):
+        with pytest.raises(OrgBoundError, match="'agents'"):
+            with registries[0].deleting("beta"):
+                claims_clock["ahead"] = CLAIM_GRACE_SECONDS * 2
+                registries[1].ingest_credentials.put(
+                    _credential("agents", binds=("beta",)), new=True
+                )
+                registries[0].delete("beta")
+
+        assert registries[1].get("beta") is not None
+        assert registries[1].ingest_credentials.get("agents") is not None
+
+    def test_a_lapsed_mark_nothing_took_still_carries_the_delete(
+        self, registries, docustore_pair, claims_clock
+    ):
+        with registries[0].deleting("beta"):
+            claims_clock["ahead"] = CLAIM_GRACE_SECONDS * 2
+            # A bind that claimed after the mark went up and has not yet seen it and withdrawn.
+            docustore_pair[1].claims(BINDINGS_COLLECTION).create(
+                "beta/agents", "agents", subject="beta"
+            )
+            registries[0].delete("beta")
+
+        assert registries[1].get("beta") is None
 
 
 class TestReservedCreates:
