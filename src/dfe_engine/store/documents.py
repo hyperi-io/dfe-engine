@@ -600,8 +600,7 @@ class Claims:
         Every claim restamps a key and every new one carries a fresh instance, so a
         writer that claimed it after *claim* was read keeps it. True when it was released.
         """
-        as_read = {"owner": claim.owner, "claimed_at": claim.claimed_at, "instance": claim.instance}
-        return self._c.delete(claim.key, only_if=as_read)
+        return self._c.delete(claim.key, only_if=_as_read(claim))
 
     def renew(self, claim: Claim) -> Claim | None:
         """Stamp *claim* fresh only while it is still as read, and return it.
@@ -625,13 +624,18 @@ def _renewed(owner: str, claim: Claim) -> Claim:
     return claim.model_copy(update={"claimed_at": _now()})
 
 
+def _as_read(claim: Claim) -> dict[str, str]:
+    """The fields that tell *claim* from one renewed or made again on its key since."""
+    return {"owner": claim.owner, "claimed_at": claim.claimed_at, "instance": claim.instance}
+
+
 def _restamped(read: Claim, stored: Claim) -> Claim:
     """*stored* stamped fresh.
 
     Raises:
         StaleRevisionError: *stored* is not *read*: it was claimed again since.
     """
-    if (stored.owner, stored.claimed_at) != (read.owner, read.claimed_at):
+    if _as_read(stored) != _as_read(read):
         raise StaleRevisionError(f"{read.key} was claimed again since it was read")
     return stored.model_copy(update={"claimed_at": _now()})
 

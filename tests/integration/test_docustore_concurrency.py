@@ -17,7 +17,7 @@ runs enough rounds to meet both.
 import pytest
 from pydantic import BaseModel
 
-from dfe_engine.store.documents import DocumentConflictError, StaleRevisionError
+from dfe_engine.store.documents import Claim, Claims, DocumentConflictError, StaleRevisionError
 from tests.support.races import race
 
 pytestmark = pytest.mark.integration
@@ -410,6 +410,29 @@ class TestMadeClaims:
 
         assert not first.withdraw(made)
         assert first.holder("tenant-1") == "acme"
+
+    @staticmethod
+    def _made_again_at_its_stamp(docustore_pair) -> tuple[Claims, Claim, Claim]:
+        """A claim made, withdrawn, and made again by another replica whose clock stamps it alike."""
+        first, second = (c.claims("tenant_keys") for c in docustore_pair)
+        made = first.create("tenant-1", "acme")
+        assert first.withdraw(made)
+        again = second.create("tenant-1", "acme")
+        raw = docustore_pair[0].collection("tenant_keys")
+        raw.update_one({"key": "tenant-1"}, {"$set": {"claimed_at": made.claimed_at}})
+        return first, made, again.model_copy(update={"claimed_at": made.claimed_at})
+
+    def test_withdrawing_one_made_again_at_the_same_stamp_keeps_it(self, docustore_pair):
+        claims, made, again = self._made_again_at_its_stamp(docustore_pair)
+
+        assert not claims.withdraw(made)
+        assert claims.get("tenant-1") == again
+
+    def test_renewing_one_made_again_at_the_same_stamp_leaves_it(self, docustore_pair):
+        claims, made, again = self._made_again_at_its_stamp(docustore_pair)
+
+        assert claims.renew(made) is None
+        assert claims.get("tenant-1") == again
 
     def test_every_claim_is_listed(self, docustore_pair):
         claims = docustore_pair[0].claims("tenant_keys")
