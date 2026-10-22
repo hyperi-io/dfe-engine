@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from dfe_engine.services.descriptor import ServiceDescriptor
+    from dfe_engine.settings import DFESettings
 
 
 @dataclass
@@ -33,9 +34,13 @@ class ServicePlugin:
             Signature: ``(config: BaseModel, errors: list[str], warnings: list[str]) -> None``
         config_template_overrides: Per-profile config overrides for template generation.
             Shape: ``{"production": {"kafka": {"sasl": {...}}}, "k8s": {...}}``
+        settings_overrides: Overrides that follow the engine's settings, built each time
+            a template is generated and merged over ``config_template_overrides``.
+            Signature: ``(profile: str, settings: DFESettings) -> dict``
     """
 
     descriptor: ServiceDescriptor
     config_class: type[BaseModel]
     validate_config: Callable[..., None] | None = None
     config_template_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
+    settings_overrides: Callable[[str, DFESettings], dict[str, Any]] | None = None

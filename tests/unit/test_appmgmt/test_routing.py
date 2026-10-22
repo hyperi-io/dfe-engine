@@ -141,7 +141,7 @@ def overlay():
 
 
 class TestManifest:
-    def test_the_receiver_owns_its_rules_bindings_and_destinations(self):
+    def test_the_receiver_owns_its_rules_bindings_destinations_and_listener_auth(self):
         app = catalogue.descriptor(RECEIVER)
         assert app.has_compiled_routing is True
         assert app.routing_compiler == "receiver"
@@ -150,6 +150,11 @@ class TestManifest:
             "rules": "config.rules",
             "ingest_bindings": "config.ingest_bindings",
             "destinations": "config.destinations",
+            "server_auth": "config.server.auth",
+            "grpc_auth": "config.grpc.auth",
+            "otlp_auth": "config.otlp.auth",
+            "splunk_hec_auth": "config.splunk_hec.auth",
+            "prometheus_rw_auth": "config.prometheus_rw.auth",
         }
 
     def test_the_loader_declares_its_own(self):
@@ -332,6 +337,29 @@ class TestReceiverGolden:
                 }
             },
             "destinations": {"default": "kafka", "sources": {}},
+            "server_auth": {
+                "mode": "bearer",
+                "bearer": {
+                    "secret_source": "file:/var/run/secrets/dfe/ingest-bearer-tokens/http",
+                    "refresh_interval_secs": 60,
+                },
+            },
+            "grpc_auth": {"mode": "none"},
+            "otlp_auth": {
+                "mode": "bearer",
+                "bearer": {
+                    "secret_source": "file:/var/run/secrets/dfe/ingest-bearer-tokens/otlp",
+                    "refresh_interval_secs": 60,
+                },
+            },
+            "splunk_hec_auth": {
+                "mode": "bearer",
+                "bearer": {
+                    "secret_source": "file:/var/run/secrets/dfe/ingest-bearer-tokens/splunk_hec",
+                    "refresh_interval_secs": 60,
+                },
+            },
+            "prometheus_rw_auth": {"mode": "none"},
         }
 
     def test_a_fresh_deployment_binds_no_credential(self, source_registry, settings):
@@ -361,9 +389,13 @@ class TestReceiverGolden:
     ):
         from dfe_engine.services.models.receiver import ReceiverConfig
 
-        compiled = _receiver(fetched_registry, settings, TENANCY)
-        accepted = ReceiverConfig.model_validate(compiled)
+        doc = instances.initial_overlay(instances.instance_of(RECEIVER, "default"))
+        routing.apply(
+            catalogue.descriptor(RECEIVER), doc, _receiver(fetched_registry, settings, TENANCY)
+        )
+        accepted = ReceiverConfig.model_validate(doc["config"])
         assert accepted.ingest_bindings.credentials["acme-agents"].default_org == "acme-prod"
+        assert accepted.server.auth.mode == "bearer"
 
 
 class TestReceiverOnTheBus:

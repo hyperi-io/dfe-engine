@@ -99,6 +99,7 @@ Schemas:
 
 Ingest tenancy (compiled into dfe-receiver):
 - DFE_INGEST_SOURCE_ORG_ID -> ingest.source_org_id (disallow | allow)
+- DFE_INGEST_BEARER_SECRET -> ingest.bearer_secret (Kubernetes Secret the bearer tokens mirror into)
 
 Auth (local):
 - DFE_AUTH_LOCAL_ENABLED -> auth.local.enabled
@@ -2175,6 +2176,7 @@ class IngestSettings(BaseModel):
 
     Environment variables:
     - DFE_INGEST_SOURCE_ORG_ID -> ingest.source_org_id (disallow | allow)
+    - DFE_INGEST_BEARER_SECRET -> ingest.bearer_secret (Kubernetes Secret name)
     """
 
     source_org_id: Literal["disallow", "allow"] = Field(
@@ -2185,6 +2187,27 @@ class IngestSettings(BaseModel):
             "sender's ingest credential binds. Compiled as routing.source_org_id."
         ),
     )
+    bearer_secret: str = Field(
+        default="",
+        description=(
+            "Kubernetes Secret, in the engine's own namespace, that the engine also writes each "
+            "listener's bearer tokens into, one key per listener, for dfe-receiver to mount. "
+            "Empty writes none. The engine needs get and update on that one Secret."
+        ),
+    )
+
+    @field_validator("bearer_secret")
+    @classmethod
+    def _bearer_secret_is_a_secret_name(cls, value: str) -> str:
+        if value:
+            # scalo's own check, so the engine refuses at startup what the API server would.
+            from scalo.secrets import KubernetesConfig
+
+            try:
+                KubernetesConfig(secret_name=value)
+            except ValueError as exc:
+                raise ValueError(f"DFE_INGEST_BEARER_SECRET: {exc}") from exc
+        return value
 
 
 class OrgsSettings(BaseModel):
@@ -2829,6 +2852,8 @@ def _get_env_overrides() -> dict:
         overrides["orgs"]["seed_orgs"] = seed
     if val := _get_env("DFE_INGEST_SOURCE_ORG_ID"):
         overrides["ingest"]["source_org_id"] = val.lower()
+    if val := _get_env("DFE_INGEST_BEARER_SECRET"):
+        overrides["ingest"]["bearer_secret"] = val.strip()
 
     # Failed sign-in backoff (nested under auth.login_throttle)
     if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_ENABLED"):

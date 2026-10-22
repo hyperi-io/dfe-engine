@@ -16,7 +16,7 @@ is [source-flow.md](source-flow.md); the fields are
 
 ## The receiver
 
-The engine emits four receiver blocks, each the exact serde the receiver deserialises (`src/config/mod.rs`, and scalo-rs `rules::RuleSetConfig` for `rules`):
+The engine emits four receiver blocks, plus an `auth` block per bearer listener, each the exact serde the receiver deserialises (`src/config/mod.rs`, and scalo-rs `rules::RuleSetConfig` for `rules`):
 
 1. Iterate ACTIVE sources -- dormant and disabled are excluded
 2. Each `match` becomes one `rules` row, `source.<name>`, first match wins
@@ -40,6 +40,12 @@ rules:
 ingest_bindings:                  # Compiled from the ingest credentials, as tenant ids
   credentials:
     acme-agents: {orgs: [acme-prod, acme-dev], default_org: acme-prod}
+server:                           # Likewise grpc, otlp, splunk_hec and prometheus_rw
+  auth:
+    mode: bearer                  # none while no accepted credential lists the listener
+    bearer:
+      secret_source: "aws:<DFE_SECRETS_NAME_PREFIX>/ingest/bearer-tokens/http"
+      refresh_interval_secs: 60
 ```
 
 | Source `match.operator` | Receiver row `op` |
@@ -51,6 +57,8 @@ ingest_bindings:                  # Compiled from the ingest credentials, as ten
 Four operators (`not_equals`, `includes`, `starts_with`, `ends_with`) compile to no row. Saving a non-disabled source that uses one is refused, and a stored doc that still carries one is skipped at compile with a loud warning rather than failing the whole receiver config.
 
 `ingest_bindings` holds each ingest credential's orgs as the tenant ids they own, and its default as its default org's first tenant id. Every record's `_org_id` is held to the binding of the credential that sent it, and a credential with no entry may land records in the default org alone. A credential naming an org that is no longer registered is left out for that reason.
+
+Each bearer listener runs `mode: bearer` while a credential whose owning org is registered and enabled lists it, reading the `<id>:<token>` lines the engine writes to `ingest/bearer-tokens/<listener>`. With none it runs `mode: none`, and every record it takes lands in the default org. `secret_source` follows `DFE_SECRETS_PROVIDER`: `vault:<mount>/...:value` for openbao, `aws:<DFE_SECRETS_NAME_PREFIX>/...` for aws, and `file:/var/run/secrets/dfe/ingest-bearer-tokens/<listener>` for file, where the deployment mounts that one directory read-only into the receiver. On Kubernetes that directory is the Secret `DFE_INGEST_BEARER_SECRET` names, which the engine writes one key per listener into. A credential on any other backend fails the compile, naming the setting to change. The receiver re-reads each listener's secret every 60 seconds (`refresh_interval_secs`), so a deleted, disabled or rotated credential's token stops within about a minute, plus the kubelet's sync of a mounted Secret.
 
 On the direct transport there is no topic between stages, so `destinations.sources` keys each source's landing label to a named endpoint -- the source's transform instance when it has one, else the loader -- and every name it uses is listed beside it as `<name>: {grpc: {endpoint: <uri>}}`. The key is the `_source` the row set, so the one rule evaluation that labels a record also picks where it goes.
 

@@ -23,9 +23,10 @@ from dfe_engine.appmgmt import catalogue
 from dfe_engine.services.models.archiver import ArchiverConfig
 from dfe_engine.services.models.loader import LoaderConfig
 from dfe_engine.services.models.receiver import ReceiverConfig
-from dfe_engine.services.registry import ServiceConfigRegistry
+from dfe_engine.services.registry import ServiceConfigRegistry, default_configs
 from dfe_engine.services.templates import generate_template
-from dfe_engine.yaml_utils import yaml_load
+from dfe_engine.settings import DFESettings, SecretsSettings
+from dfe_engine.yaml_utils import yaml_load, yaml_load_string
 
 FIXTURES = Path(__file__).parents[2] / "fixtures"
 
@@ -237,7 +238,8 @@ class TestReceiverNextHopDeadline:
         assert ReceiverConfig().loader.address == app == manifest
 
 
-DEFAULT_CONFIGS = Path(__file__).parents[3] / "src" / "dfe_engine" / "services" / "default_configs"
+# A backend the receiver reads, so a developer .env cannot decide what the seed writes.
+_ENGINE = DFESettings(env="dev", secrets=SecretsSettings(provider="openbao"))
 
 
 class TestReceiverPorts:
@@ -259,11 +261,11 @@ class TestReceiverPorts:
     def test_a_seeded_config_takes_the_loader_address_from_the_manifest(
         self, moved_loader, profile: str
     ):
-        seeded = ReceiverConfig.model_validate(yaml_load(DEFAULT_CONFIGS / profile))
+        seeded = ReceiverConfig.model_validate(yaml_load_string(default_configs(_ENGINE)[profile]))
         assert seeded.loader.address == "dfe-loader:7000"
 
     @pytest.mark.parametrize("profile", ["receiver-default.yaml", "receiver-production.yaml"])
     def test_a_seeded_config_takes_the_grpc_listener_from_the_receiver(self, profile: str):
         app = _schema_default("contract-main", "dfe-receiver", "grpc")["bind_address"]
-        seeded = ReceiverConfig.model_validate(yaml_load(DEFAULT_CONFIGS / profile))
+        seeded = ReceiverConfig.model_validate(yaml_load_string(default_configs(_ENGINE)[profile]))
         assert seeded.grpc.bind_address == ReceiverConfig().grpc.bind_address == app

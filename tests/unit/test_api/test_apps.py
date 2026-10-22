@@ -17,7 +17,9 @@ from dfe_engine.auth.roles import RoleDefinition
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
+from dfe_engine.orgs.ingest_credentials import IngestCredential
 from dfe_engine.sampling.models import SampleResult
+from dfe_engine.settings import SecretsSettings
 
 VRL = "dfe-transform-vrl"
 BASE = f"/api/v1/apps/{VRL}/edge"
@@ -956,7 +958,34 @@ class TestRouting:
             "rules": "config.rules",
             "ingest_bindings": "config.ingest_bindings",
             "destinations": "config.destinations",
+            "server_auth": "config.server.auth",
+            "grpc_auth": "config.grpc.auth",
+            "otlp_auth": "config.otlp.auth",
+            "splunk_hec_auth": "config.splunk_hec.auth",
+            "prometheus_rw_auth": "config.prometheus_rw.auth",
         }
+
+    def test_a_credential_the_receiver_cannot_read_is_a_conflict_naming_the_setting(
+        self, client, app, admin_headers, tmp_path
+    ):
+        self._deployed(client, app, admin_headers, tmp_path)
+        app.state.org_registry.create("acme")
+        app.state.org_registry.ingest_credentials.put(
+            IngestCredential(
+                name="acme-agents",
+                org="acme",
+                orgs=["acme"],
+                default_org="acme",
+                listeners=["http"],
+            )
+        )
+        app.state.settings.secrets = SecretsSettings(provider="ansible_vault")
+
+        resp = client.get(f"{self.RECEIVER}/routing", headers=admin_headers)
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "receiver_auth_unreadable"
+        assert "DFE_SECRETS_PROVIDER=ansible_vault" in resp.json()["message"]
 
     def test_sync_writes_the_block_and_commits(self, client, app, admin_headers, tmp_path):
         gc = self._deployed(client, app, admin_headers, tmp_path)

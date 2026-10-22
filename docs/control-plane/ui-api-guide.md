@@ -269,8 +269,8 @@ es.addEventListener('complete', (e) => {
 | CRUD | `/field-maps` | Field map management |
 | CRUD | `/alerts/destinations` | Alert destination management |
 | CRUD | `/orgs` | Organisation management. `default` is reserved: a delete, a disable or dropping its tenant id answers `409 reserved_org` |
-| list, get, apply, delete | `/orgs/{org}/ingest-credentials[/{credential}]` | An org's ingest credentials. `PUT` with `If-None-Match: *` mints the bearer token and returns it once, `If-Match` changes `orgs`, `default_org` and `listeners`. A binding the receiver could not hold answers `422 invalid_binding` |
-| POST | `/orgs/{org}/ingest-credentials/{credential}/rotate` | Mint a new token in place of the old one, returned once |
+| list, get, apply, delete | `/orgs/{org}/ingest-credentials[/{credential}]` | An org's ingest credentials. `PUT` with `If-None-Match: *` mints the bearer token and returns it once, `If-Match` changes `orgs`, `default_org` and `listeners`. A binding the receiver could not hold answers `422 invalid_binding`. An update or delete that loses a race changes nothing and answers `412` when its own `If-Match` no longer matches, else `409 conflict` because another write won |
+| POST | `/orgs/{org}/ingest-credentials/{credential}/rotate` | Mint a new token in place of the old one, returned once. A rotate that loses a race answers the same: `412` on an `If-Match` it sent, else `409 conflict` |
 | POST | `/rules` | Create hunt rule |
 | POST | `/rules/validate` | Validate rule |
 | POST | `/transforms/compile` | Compile VRL/CEL transform |

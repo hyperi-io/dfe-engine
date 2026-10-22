@@ -10,7 +10,7 @@ from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 
 if TYPE_CHECKING:
-    from dfe_engine.settings import SecretsSettings
+    from dfe_engine.settings import DFESettings, SecretsSettings
 
 descriptor = ServiceDescriptor(
     name="receiver",
@@ -86,8 +86,10 @@ _template_overrides: dict[str, dict[str, Any]] = {
                 "aws_session_token": None,
                 "aws_profile": None,
             },
-            "tls": {"enabled": True},
+            "tls": {"enabled": True, "ca_file": "/etc/tls/kafka-ca.crt"},
         },
+        "destinations": {"default": "kafka"},
+        "buffer": {"pressure_threshold": 0.85},
     },
     "k8s": {
         "server": {"bind_address": "0.0.0.0:8080"},
@@ -100,32 +102,33 @@ _template_overrides: dict[str, dict[str, Any]] = {
 
 
 def _bearer_auth(backend: SecretsSettings) -> dict[str, dict[str, Any]]:
-    """Each bearer listener's auth block, on the secret the engine writes for it on *backend*.
-
-    A backend the receiver cannot read wires nothing, so the deployment names its own.
-    """
+    """Each bearer listener's auth block, on the secret the engine writes for it on *backend*."""
     from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, LISTENER_SECTIONS
-    from dfe_engine.orgs.ingest_tokens import bearer_secret_source
+    from dfe_engine.orgs.ingest_tokens import bearer_auth
 
-    wired: dict[str, dict[str, Any]] = {}
-    for listener in BEARER_LISTENERS:
-        source = bearer_secret_source(listener, backend)
-        if source is not None:
-            bearer = {"secret_source": source}
-            wired[LISTENER_SECTIONS[listener]] = {"auth": {"mode": "bearer", "bearer": bearer}}
-    return wired
+    return {
+        LISTENER_SECTIONS[listener]: {"auth": bearer_auth(listener, backend)}
+        for listener in BEARER_LISTENERS
+    }
+
+
+def _settings_overrides(profile: str, settings: DFESettings) -> dict[str, Any]:
+    """The production profile's bearer listeners, on the engine's own secrets backend.
+
+    Raises:
+        BearerSourceUnreadableError: The engine's backend holds the tokens where
+            dfe-receiver cannot read them.
+    """
+    if profile != "production":
+        return {}
+    return _bearer_auth(settings.secrets)
 
 
 def _make_plugin() -> ServicePlugin:
     from dfe_engine.appmgmt import catalogue
     from dfe_engine.services.models.receiver import ReceiverConfig
-    from dfe_engine.settings import SecretsSettings
-    from dfe_engine.yaml_utils import deep_merge
 
     overrides = copy.deepcopy(_template_overrides)
-    # The production profile is a reference for an OpenBao deployment, as the shipped
-    # receiver-production.yaml is, so it reads no process settings.
-    deep_merge(overrides["production"], _bearer_auth(SecretsSettings(provider="openbao")))
     loader = catalogue.push_address(catalogue.descriptor("dfe-loader"))
     overrides["k8s"]["loader"] = {"address": loader}
     return ServicePlugin(
@@ -133,6 +136,7 @@ def _make_plugin() -> ServicePlugin:
         config_class=ReceiverConfig,
         validate_config=_validate_receiver,
         config_template_overrides=overrides,
+        settings_overrides=_settings_overrides,
     )
 
 

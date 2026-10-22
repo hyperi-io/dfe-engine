@@ -13,7 +13,6 @@ discards every dead letter.
 """
 
 from collections.abc import Iterable
-from importlib import resources
 
 import pytest
 
@@ -24,8 +23,9 @@ from dfe_engine.schema.phase import (
     require_dead_letter_topics,
 )
 from dfe_engine.schema.plan import build_plan
-from dfe_engine.services.models.loader import LoaderRoutingConfig
-from dfe_engine.services.models.receiver import ReceiverRoutingConfig
+from dfe_engine.services.models.loader import LoaderConfig, LoaderRoutingConfig
+from dfe_engine.services.models.receiver import ReceiverConfig, ReceiverRoutingConfig
+from dfe_engine.services.registry import default_configs
 from dfe_engine.settings import DFESettings
 from dfe_engine.source.models import _topic_policy
 from dfe_engine.yaml_utils import yaml_load_string
@@ -106,8 +106,10 @@ class TestNames:
         ],
     )
     def test_every_shipped_config_names_a_created_topic(self, declared, name):
-        text = (resources.files("dfe_engine.services") / "default_configs" / name).read_text()
-        assert yaml_load_string(text)["routing"]["dlq"]["topic"] in declared
+        text = default_configs(DFESettings(env="dev", secrets={"provider": "openbao"}))[name]
+        model = ReceiverConfig if name.startswith("receiver-") else LoaderConfig
+        # Through the model, so a seed that leaves the topic to the app's default is judged by it.
+        assert model.model_validate(yaml_load_string(text)).routing.dlq.topic in declared
 
 
 class TestTheGate:

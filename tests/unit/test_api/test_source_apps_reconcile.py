@@ -17,6 +17,8 @@ from __future__ import annotations
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
+from dfe_engine.orgs.ingest_credentials import IngestCredential
+from dfe_engine.settings import SecretsSettings
 
 RECEIVER_OVERLAY = "dfe-receiver-main-values"
 FETCHER = "dfe-fetcher"
@@ -73,6 +75,30 @@ class TestReceiverRoutingFollowsTheSources:
         assert resp.json()["apps_synced"] == ["dfe-receiver/main: sync routing"]
         assert resp.json()["apps_sync_error"] is None
         assert _rules(gc) == ["kvproof"]
+
+    def test_a_credential_the_receiver_cannot_read_names_the_setting_to_change(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        app.state.org_registry.create("acme")
+        app.state.org_registry.ingest_credentials.put(
+            IngestCredential(
+                name="acme-agents",
+                org="acme",
+                orgs=["acme"],
+                default_org="acme",
+                listeners=["http"],
+            )
+        )
+        app.state.settings.secrets = SecretsSettings(provider="ansible_vault")
+
+        resp = client.post("/api/v1/sources", json=_receiver_body("kvproof"), headers=admin_headers)
+
+        # 202: the source is stored, and the reply says why the apps did not follow it.
+        assert resp.status_code == 202, resp.text
+        assert "DFE_SECRETS_PROVIDER=ansible_vault" in resp.json()["apps_sync_error"]
+        # Refused rather than compiled open: the overlay keeps what it had.
+        assert "config" not in gc.get("helmvars", RECEIVER_OVERLAY)
 
     def test_disabling_a_source_withdraws_its_rule(self, client, app, admin_headers, tmp_path):
         gc = _wire(app, tmp_path)

@@ -14,9 +14,8 @@ This replaces the previous PostgreSQL + YAML dual-write architecture.
 PostgreSQL is no longer required for service configuration storage.
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
+from importlib import resources
 from pathlib import Path
 from typing import Any, cast
 
@@ -27,8 +26,17 @@ from scalo.logger import logger
 
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file, git_repo_relative_path
 from dfe_engine.services.plugins import get_plugin, valid_services
+from dfe_engine.services.templates import profile_overrides
 from dfe_engine.services.validators import ValidationResult, validate_config
-from dfe_engine.yaml_utils import yaml_dump
+from dfe_engine.settings import DFESettings
+from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string
+
+RENDERED_DEFAULTS = {"receiver-production.yaml": ("receiver", "production")}
+"""Defaults built from a template profile when they are seeded, by file name.
+
+Each follows the engine's settings, so the receiver's bearer listeners name the
+secrets backend this engine writes the tokens to.
+"""
 
 
 def _unwrapped(value: Any) -> Any:
@@ -51,6 +59,31 @@ def stored_form(config: BaseModel | dict[str, Any]) -> dict[str, Any]:
     if isinstance(config, dict):
         return config
     return to_jsonable_python(_unwrapped(config.model_dump()))
+
+
+def default_configs(settings: DFESettings | None = None) -> dict[str, str]:
+    """Every config :meth:`ServiceConfigRegistry.seed_defaults` writes, by file name, as YAML.
+
+    The files shipped under ``default_configs`` byte for byte, and each of
+    :data:`RENDERED_DEFAULTS` as its template profile's keys, which leave every other
+    key to the service's own default.
+
+    Args:
+        settings: The engine settings a rendered default is built from, the process's
+            own when None.
+
+    Raises:
+        ValueError: A rendered default names something its service cannot read.
+    """
+    shipped = resources.files("dfe_engine.services") / "default_configs"
+    configs = {
+        entry.name: entry.read_text(encoding="utf-8")
+        for entry in shipped.iterdir()
+        if entry.name.endswith(".yaml")
+    }
+    for name, (service, profile) in RENDERED_DEFAULTS.items():
+        configs[name] = yaml_dump_string(profile_overrides(service, profile, settings))
+    return dict(sorted(configs.items()))
 
 
 class ServiceConfigError(Exception):
@@ -507,44 +540,34 @@ class ServiceConfigRegistry:
     # Seed Defaults
     # -------------------------------------------------------------------------
 
-    def seed_defaults(self, overwrite: bool = False) -> int:
+    def seed_defaults(self, overwrite: bool = False, *, settings: DFESettings | None = None) -> int:
         """Seed the config directory with built-in default configurations.
 
-        Copies default YAML files from package resources into the config
-        directory. Non-destructive by default: skips files that already exist.
+        Writes each of :func:`default_configs`. Non-destructive by default: skips
+        files that already exist.
 
         Args:
             overwrite: If True, overwrite existing configs with defaults.
+            settings: The engine settings a rendered default is built from, the
+                process's own when None.
 
         Returns:
             Number of configs seeded.
+
+        Raises:
+            ValueError: A rendered default names something its service cannot read,
+                such as receiver bearer tokens on a secrets backend dfe-receiver has
+                no provider for.
         """
-        import importlib.resources as resources
-
-        try:
-            defaults_dir = resources.files("dfe_engine.services") / "default_configs"
-            if not defaults_dir.is_dir():
-                logger.warning("No default_configs package resource found")
-                return 0
-        except Exception as e:
-            logger.warning(f"Failed to locate default configs: {e}")
-            return 0
-
         count = 0
-        for item in defaults_dir.iterdir():
-            if not item.name.endswith(".yaml"):
-                continue
-
-            target = self._config_directory / item.name
+        for name, content in default_configs(settings).items():
+            target = self._config_directory / name
             if target.exists() and not overwrite:
-                logger.debug(f"Skipping existing config: {item.name}")
+                logger.debug(f"Skipping existing config: {name}")
                 continue
-
-            # Read from package resource and write to config directory
-            content = item.read_text(encoding="utf-8")
             target.write_text(content, encoding="utf-8")
             count += 1
-            logger.info(f"Seeded default config: {item.name}")
+            logger.info(f"Seeded default config: {name}")
 
         # Refresh cache to pick up new files
         if count > 0:
