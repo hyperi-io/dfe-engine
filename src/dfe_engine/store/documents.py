@@ -28,7 +28,10 @@ race it never won as :class:`DocumentConflictError`.
 """
 
 import builtins
+import functools
+import uuid
 from collections.abc import Callable, Iterable, Mapping
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -247,6 +250,15 @@ class DocumentCollection[T: BaseModel]:
         """Return the document with ``key == key_value``, or None."""
         return self._load(self._c.find_one({self._key: key_value}))
 
+    def get_by(self, field: str, value: str) -> T | None:
+        """Return the document whose ``field`` is ``value``, one of the ``unique`` fields, or None."""
+        return self._load(self._c.find_one({field: value}))
+
+    def list_by(self, field: str, value: str) -> builtins.list[T]:
+        """Return every document whose ``field`` is ``value``, sorted by the key field."""
+        found = self._c.find({field: value}).sort(self._key, ASCENDING)
+        return [m for m in (self._load(d) for d in found) if m]
+
     def list(self) -> builtins.list[T]:
         """Return all documents, sorted by the key field."""
         return [m for m in (self._load(d) for d in self._c.find().sort(self._key, ASCENDING)) if m]
@@ -415,10 +427,22 @@ class DocumentCollection[T: BaseModel]:
 
 
 class Claim(BaseModel):
-    """One claimed key and who holds it."""
+    """One claimed key, who holds it, and when they last claimed it.
+
+    Attributes:
+        key: The claimed key.
+        owner: Who holds it.
+        claimed_at: When the owner last claimed it, ISO 8601 UTC.
+        subject: What the key is about, for listing every claim on one thing.
+        instance: Made fresh when the key is claimed and kept through renewals, so a
+            claim released and made again never matches one read before.
+    """
 
     key: str
     owner: str
+    claimed_at: str = ""
+    subject: str = ""
+    instance: str = ""
 
 
 class Claims:
@@ -426,24 +450,33 @@ class Claims:
 
     A claim is a document keyed and unique-indexed on the key, so the store's unique
     index, not a prior lookup, decides who holds it. An owner claiming a key it
-    already holds succeeds, so a retried claim does not lose to itself.
+    already holds succeeds and stamps it fresh, so a retried claim does not lose to
+    itself and a claim still in use never reads as old.
+
+    A claim is made before the record that needs it is written, so an owner that dies
+    between the two leaves a claim nothing holds. :meth:`release_if_orphaned` frees one.
     """
 
     def __init__(self, collection: DocumentCollection[Claim]) -> None:
         self._c = collection
 
-    def claim(self, key: str, owner: str) -> bool:
+    def claim(self, key: str, owner: str, *, subject: str = "") -> bool:
         """Claim *key* for *owner*. True when *owner* holds it now, False when another does.
 
         Raises:
             DocumentConflictError: The key was claimed and released under every attempt.
         """
         for _ in range(DEFAULT_ATTEMPTS):
-            if self._c.insert(Claim(key=key, owner=owner)):
+            made = Claim(
+                key=key, owner=owner, claimed_at=_now(), subject=subject, instance=uuid.uuid4().hex
+            )
+            if self._c.insert(made):
                 return True
-            holder = self.holder(key)
-            if holder is not None:
-                return holder == owner
+            try:
+                held = self._c.mutate(key, functools.partial(_renewed, owner))
+            except KeyError:
+                continue
+            return held.owner == owner
         raise DocumentConflictError(f"{key} was claimed and released {DEFAULT_ATTEMPTS} times")
 
     def holder(self, key: str) -> str | None:
@@ -451,6 +484,54 @@ class Claims:
         held = self._c.get(key)
         return held.owner if held is not None else None
 
+    def about(self, subject: str) -> builtins.list[Claim]:
+        """Every claim made with *subject*."""
+        return self._c.list_by("subject", subject)
+
+    def owned_by(self, owner: str) -> builtins.list[Claim]:
+        """Every claim *owner* holds."""
+        return self._c.list_by("owner", owner)
+
     def release(self, key: str, owner: str) -> bool:
         """Release *key* when *owner* holds it. True when it was released."""
         return self._c.delete(key, only_if={"owner": owner})
+
+    def release_if_orphaned(self, claim: Claim, *, held: bool, grace_seconds: float) -> bool:
+        """Release *claim* when its owner's record does not hold it and it is older than the grace.
+
+        The grace leaves alone a claim whose owner is still writing the record that will
+        hold it. The release matches the claim as read, so one renewed, or released and
+        made again, since is kept. The age compares this replica's clock with the
+        claimer's, so replicas need clocks synced by NTP.
+
+        Args:
+            claim: A claim as read.
+            held: Whether the owner's record holds the key now.
+            grace_seconds: How old a claim nothing holds must be before it is released.
+
+        Returns:
+            True when it was released.
+        """
+        if held or _age_seconds(claim.claimed_at) < grace_seconds:
+            return False
+        as_read = {"owner": claim.owner, "claimed_at": claim.claimed_at, "instance": claim.instance}
+        return self._c.delete(claim.key, only_if=as_read)
+
+
+def _renewed(owner: str, claim: Claim) -> Claim:
+    """*claim* stamped fresh when *owner* holds it, else unchanged."""
+    if claim.owner != owner:
+        return claim
+    return claim.model_copy(update={"claimed_at": _now()})
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _age_seconds(stamp: str) -> float:
+    """Seconds since *stamp*, an ISO 8601 time. An empty or unreadable one counts as old."""
+    try:
+        return (datetime.now(UTC) - datetime.fromisoformat(stamp)).total_seconds()
+    except ValueError:
+        return float("inf")

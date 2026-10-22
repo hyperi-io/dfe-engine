@@ -33,7 +33,7 @@ Usage::
     from dfe_engine.auth.bootstrap import bootstrap_auth
 
     stores = bootstrap_auth(Path("/etc/dfe/auth"))
-    account_store, group_store, api_key_store, role_config = stores
+    account_store, group_store, api_key_store, role_store, role_config = stores
 """
 
 import importlib.resources
@@ -45,19 +45,21 @@ from scalo.logger import logger
 
 from dfe_engine.auth.accounts import (
     Account,
+    AccountExistsError,
     AccountStore,
     DocuStoreAccountStore,
     matches_digest,
     refuse_unhashable_password,
 )
-from dfe_engine.auth.api_keys import APIKeyStore
+from dfe_engine.auth.api_keys import APIKeyStore, DocuStoreAPIKeyStore
 from dfe_engine.auth.groups import (
     DocuStoreGroupStore,
+    GroupExistsError,
     GroupMetrics,
     GroupStore,
     warn_identifier_collisions,
 )
-from dfe_engine.auth.role_store import RoleStore
+from dfe_engine.auth.role_store import DocuStoreRoleStore, RoleStore
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.git_identity import DEFAULT_FALLBACK_DOMAIN
 from dfe_engine.settings import is_dev_posture
@@ -240,17 +242,21 @@ def bootstrap_auth(
     seed_accounts: list[SeedAccount] | None = None,
     breakglass_password: str = "",
     recovery_email: str = "",
+    api_key_store: APIKeyStore | DocuStoreAPIKeyStore | None = None,
+    role_store: RoleStore | DocuStoreRoleStore | None = None,
 ) -> tuple[
     AccountStore | DocuStoreAccountStore,
     GroupStore | DocuStoreGroupStore,
-    APIKeyStore,
-    RoleStore,
+    APIKeyStore | DocuStoreAPIKeyStore,
+    RoleStore | DocuStoreRoleStore,
     RoleConfig,
 ]:
     """Bootstrap auth stores with sensible defaults.
 
     Creates subdirectories, seeds roles and groups, reconciles the local accounts
-    from config, and returns the initialised stores.
+    from config, and returns the initialised stores. Several replicas may run this
+    at once on one shared store: a group or account another replica seeded a moment
+    earlier is taken as seeded.
 
     Args:
         auth_dir: Root directory for auth config files.
@@ -274,6 +280,8 @@ def bootstrap_auth(
             deploy repo as a hash when none is committed, ignored thereafter.
         recovery_email: Contact email for the admin and break-glass accounts
             (``DFE_RECOVERY_EMAIL``). Empty falls back to ``{username}@dfe.local``.
+        api_key_store: The API key store. None builds the YAML store under ``auth_dir``.
+        role_store: The role store. None seeds and reads ``roles.yaml`` beside ``auth_dir``.
 
     Returns:
         Tuple of (AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig).
@@ -289,14 +297,13 @@ def bootstrap_auth(
     for d in (accounts_dir, groups_dir, api_keys_dir, rbac_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    # Seed roles.yaml from built-in resource if missing
-    roles_path = rbac_dir / "roles.yaml"
-    if not roles_path.exists():
-        _seed_roles(roles_path)
-        logger.info(f"Seeded built-in roles.yaml to {roles_path}")
-
-    # Load role config
-    role_store = RoleStore(roles_path)
+    if role_store is None:
+        # Seed roles.yaml from built-in resource if missing
+        roles_path = rbac_dir / "roles.yaml"
+        if not roles_path.exists():
+            _seed_roles(roles_path)
+            logger.info(f"Seeded built-in roles.yaml to {roles_path}")
+        role_store = RoleStore(roles_path)
     role_config = role_store.load_config()
 
     # Instantiate stores. A caller may inject a backend (e.g. a document store); the
@@ -305,7 +312,8 @@ def bootstrap_auth(
         account_store = AccountStore(accounts_dir, admin_name=default_admin_name)
     if group_store is None:
         group_store = GroupStore(groups_dir, admin_name=default_admin_name, metrics=group_metrics)
-    api_key_store = APIKeyStore(api_keys_dir)
+    if api_key_store is None:
+        api_key_store = APIKeyStore(api_keys_dir)
 
     # Seed default groups if the store has none (backend-agnostic)
     if not group_store.list():
@@ -391,9 +399,12 @@ def _seed_roles(dest: Path) -> None:
 
 
 def _seed_groups(group_store: GroupStore | DocuStoreGroupStore) -> None:
-    """Create default groups."""
+    """Create default groups, taking one another replica created a moment ago as created."""
     for name, (roles, description) in _DEFAULT_GROUPS.items():
-        group_store.create(name, roles=roles, description=description)
+        try:
+            group_store.create(name, roles=roles, description=description)
+        except GroupExistsError:
+            continue
 
 
 def _config_password_wins(
@@ -465,16 +476,21 @@ def _reconcile_seed_accounts(
         change_required = spec.username in issued
         account = account_store.get(spec.username)
         if account is None:
-            account_store.create(
-                spec.username,
-                spec.password,
-                groups=wanted_groups,
-                email=spec.email,
-                change_required=change_required,
-            )
-            seeded.append(spec.username)
-            logger.info(f"Seeded named account '{spec.username}'")
-        else:
+            try:
+                account_store.create(
+                    spec.username,
+                    spec.password,
+                    groups=wanted_groups,
+                    email=spec.email,
+                    change_required=change_required,
+                )
+            except AccountExistsError:
+                # Another replica seeded it a moment ago from the same config: reconcile it.
+                account = account_store.get(spec.username)
+            else:
+                seeded.append(spec.username)
+                logger.info(f"Seeded named account '{spec.username}'")
+        if account is not None:
             if spec.password and _config_password_wins(
                 account_store, account, spec.password, issued=change_required
             ):

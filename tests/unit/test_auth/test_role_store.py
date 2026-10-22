@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from dfe_engine.auth.role_store import RoleStore
+from dfe_engine.auth.role_store import RoleInUseError, RoleStore
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -49,8 +49,17 @@ class TestRoleStore:
         updated = store.update("custom", description="Updated")
         assert updated.description == "Updated"
 
-        store.delete("custom")
+        store.delete("custom", holders=lambda _role: ())
         assert store.get("custom") is None
+
+    def test_delete_refuses_a_role_a_group_holds(self, roles_path):
+        store = RoleStore(roles_path)
+        store.create("custom", description="", permissions=["query:execute"])
+
+        with pytest.raises(RoleInUseError, match="assigned to one or more groups"):
+            store.delete("custom", holders=lambda _role: ["analysts"])
+
+        assert store.get("custom") is not None
 
     def test_create_duplicate_raises(self, roles_path):
         store = RoleStore(roles_path)

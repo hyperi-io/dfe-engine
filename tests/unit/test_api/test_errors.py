@@ -172,6 +172,66 @@ class TestServiceUnavailable:
         assert "warming up" in data["message"].lower()
 
 
+class TestAWriteThatKeepsLosingTheRace:
+    """A store write another replica kept beating is a 409 the caller can retry, never a 500."""
+
+    @staticmethod
+    def _client() -> TestClient:
+        from fastapi import FastAPI
+
+        from dfe_engine.api.errors import install_exception_handlers
+        from dfe_engine.api.v1.scim import SCIM_ROOT
+        from dfe_engine.store.documents import DocumentConflictError
+
+        app = FastAPI()
+        install_exception_handlers(app)
+
+        @app.post("/api/v1/auth/groups/team/members")
+        def _native():
+            raise DocumentConflictError("groups/team changed under 5 attempts to mutate it")
+
+        @app.patch(f"{SCIM_ROOT}/Groups/team")
+        def _scim():
+            raise DocumentConflictError("groups/team changed under 5 attempts to mutate it")
+
+        return TestClient(app, raise_server_exceptions=False)
+
+    def test_a_native_route_answers_409_conflict(self):
+        resp = self._client().post("/api/v1/auth/groups/team/members")
+
+        assert resp.status_code == 409
+        assert resp.json()["code"] == ErrorCode.CONFLICT
+        assert "groups/team" not in resp.text
+
+    def test_a_scim_route_answers_a_scim_409(self):
+        resp = self._client().patch("/api/v1/scim/v2/Groups/team")
+
+        assert resp.status_code == 409
+        assert resp.headers["content-type"].startswith("application/scim+json")
+        assert "groups/team" not in resp.text
+
+
+def test_a_role_that_is_gone_or_being_deleted_answers_409():
+    """A group write naming such a role is a conflict the caller can see, never a 500."""
+    from fastapi import FastAPI
+
+    from dfe_engine.api.errors import install_exception_handlers
+    from dfe_engine.auth.role_store import RoleUnavailableError
+
+    app = FastAPI()
+    install_exception_handlers(app)
+
+    @app.put("/api/v1/auth/groups/team")
+    def _update():
+        raise RoleUnavailableError("Role 'auditor' does not exist or is being deleted")
+
+    resp = TestClient(app, raise_server_exceptions=False).put("/api/v1/auth/groups/team")
+
+    assert resp.status_code == 409
+    assert resp.json()["code"] == ErrorCode.CONFLICT
+    assert "auditor" in resp.json()["message"]
+
+
 class TestAnUnexpectedFailure:
     """The catch-all 500 answers in the envelope the caller's client parses."""
 

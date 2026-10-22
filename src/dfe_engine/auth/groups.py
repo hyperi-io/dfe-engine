@@ -9,9 +9,9 @@
 
 import builtins
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Self
+from typing import Any, Literal, Protocol, Self
 
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from scalo.logger import logger
@@ -20,10 +20,8 @@ from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import store_key
 from dfe_engine.names import VALID_NAME
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
+from dfe_engine.store.documents import DEFAULT_ATTEMPTS, DocumentConflictError, DocuStore
 from dfe_engine.yaml_utils import YAMLError, yaml_dump, yaml_load
-
-if TYPE_CHECKING:
-    from dfe_engine.store.documents import DocuStore
 
 GROUP_SCOPE_SYSTEM = "system"
 _ORG_SCOPE_PREFIX = "org:"
@@ -132,6 +130,19 @@ class _Skips:
     def loaded(self, name: str) -> None:
         """Forget *name* as skipped, so a later failure is reported again."""
         self._names.discard(name)
+
+
+class RoleBinder(Protocol):
+    """Records that a group is being given a role, before the group is written."""
+
+    def bind(self, role: str, group: str) -> None:
+        """Refuse when *role* cannot be given to *group* now."""
+        ...
+
+
+def _as_list(value: object) -> list[str]:
+    """*value* as a list of role names, empty when it is not a list."""
+    return [str(item) for item in value] if isinstance(value, list) else []
 
 
 def validate_group_scope(scope: str) -> str:
@@ -584,6 +595,10 @@ class DocuStoreGroupStore:
     delete-with-members guard - is identical to the YAML store, so the two are
     drop-in interchangeable behind the same construction seam.
 
+    A group is given each role through ``roles`` (:class:`RoleBinder`) before it is
+    written, so a custom role being deleted on another replica is refused rather than
+    left named by a group.
+
     Attributes:
         protected: The recovery credentials this store refuses to drop from the
             admin-role group.
@@ -596,9 +611,11 @@ class DocuStoreGroupStore:
         collection: str = "groups",
         admin_name: str = "",
         metrics: GroupMetrics | None = None,
+        roles: RoleBinder | None = None,
     ) -> None:
         self._collection = collection
         self._skips = _Skips(metrics)
+        self._roles = roles
         self._c = store.typed(
             collection,
             Group,
@@ -632,13 +649,12 @@ class DocuStoreGroupStore:
         """Create a new group. The arguments are :meth:`GroupStore.create`'s.
 
         Raises:
-            GroupExistsError: A document already holds this name, loadable or not.
+            GroupExistsError: A document already holds this name, loadable or not,
+                including one another replica created at the same moment.
             ValueError: The name is not one a group can have, or the scope is bad.
         """
         if not VALID_NAME.match(name):
             raise ValueError(f"Invalid group name: {name!r}")
-        if self._c.exists(name):
-            raise GroupExistsError(f"Group '{name}' already exists")
         member_list: list[str] = []
         if members:
             seen: set[str] = set()
@@ -655,7 +671,9 @@ class DocuStoreGroupStore:
             source_provider=source_provider,
             source_id=source_id,
         )
-        self._c.put(name, group)
+        self._bind(name, roles)
+        if not self._c.insert(group):
+            raise GroupExistsError(f"Group '{name}' already exists")
         return group
 
     def get(self, name: str) -> Group | None:
@@ -699,50 +717,54 @@ class DocuStoreGroupStore:
         changes its roles or scope; reserved for the reconcile paths. Raises
         ProtectedAccountError otherwise.
         """
-        group = self.get(name)
-        if group is None:
-            raise KeyError(f"Group '{name}' not found")
         # model_copy(update=...) skips validators - check explicitly.
         if "scope" in fields:
             validate_group_scope(str(fields["scope"]))
-        _check_updated_link(group, fields)
-        if not allow_protected:
-            self.protected.check_group_update(name, fields)
-            if "members" in fields:
-                self.protected.check_members_replaced(name, group.members, fields["members"])
-        updates = {k: fields[k] for k in _UPDATABLE_GROUP_FIELDS if k in fields}
-        updated = group.model_copy(update=updates)
-        self._c.put(name, updated)
-        return updated
+        if "roles" in fields:
+            self._bind(name, _as_list(fields["roles"]))
+
+        def apply(group: Group) -> Group:
+            _check_updated_link(group, fields)
+            if not allow_protected:
+                self.protected.check_group_update(name, fields)
+                if "members" in fields:
+                    self.protected.check_members_replaced(name, group.members, fields["members"])
+            updates = {k: fields[k] for k in _UPDATABLE_GROUP_FIELDS if k in fields}
+            return group.model_copy(update=updates)
+
+        return self._mutate(name, apply)
 
     def set_attributes(self, name: str, attributes: dict) -> Group:
         """Full-replace the non-sensitive ``attributes`` blob. Raises KeyError if missing."""
-        group = self.get(name)
-        if group is None:
-            raise KeyError(f"Group '{name}' not found")
-        updated = group.model_copy(update={"attributes": attributes})
-        self._c.put(name, updated)
-        return updated
+        return self._mutate(name, lambda group: group.model_copy(update={"attributes": attributes}))
 
     def delete(self, name: str) -> None:
-        """Delete the named group. Raises KeyError if missing, ValueError if it has members."""
-        group = self.get(name)
-        if group is None:
-            raise KeyError(f"Group '{name}' not found")
-        if group.members:
-            raise ValueError(
-                f"Cannot delete group '{name}': remove all {len(group.members)} member(s) first"
-            )
-        self._c.delete(name)
+        """Delete the named group. Raises KeyError if missing, ValueError if it has members.
+
+        The delete removes the group only while it still has no members, so a member
+        another replica adds at the same moment is never deleted with it.
+        """
+        for _ in range(DEFAULT_ATTEMPTS):
+            group = self.get(name)
+            if group is None:
+                raise KeyError(f"Group '{name}' not found")
+            if group.members:
+                raise ValueError(
+                    f"Cannot delete group '{name}': remove all {len(group.members)} member(s) first"
+                )
+            if self._c.delete(name, only_if={"members": []}):
+                return
+        raise DocumentConflictError(f"group {name} kept changing under its delete")
 
     def add_member(self, group_name: str, username: str) -> None:
         """Add a username to the group's member list (idempotent). Raises KeyError if missing."""
-        group = self.get(group_name)
-        if group is None:
-            raise KeyError(f"Group '{group_name}' not found")
-        if username not in group.members:
-            updated = group.model_copy(update={"members": [*group.members, username]})
-            self._c.put(group_name, updated)
+
+        def apply(group: Group) -> Group:
+            if username in group.members:
+                return group
+            return group.model_copy(update={"members": [*group.members, username]})
+
+        self._mutate(group_name, apply)
 
     def remove_member(
         self, group_name: str, username: str, *, allow_protected: bool = False
@@ -753,15 +775,39 @@ class DocuStoreGroupStore:
         group; reserved for the reconcile paths. Raises ProtectedAccountError
         otherwise.
         """
-        group = self.get(group_name)
-        if group is None:
-            raise KeyError(f"Group '{group_name}' not found")
-        if not allow_protected:
-            self.protected.check_member_removal(group_name, [username])
-        updated_members = [m for m in group.members if m != username]
-        if updated_members != group.members:
-            updated = group.model_copy(update={"members": updated_members})
-            self._c.put(group_name, updated)
+
+        def apply(group: Group) -> Group:
+            if not allow_protected:
+                self.protected.check_member_removal(group_name, [username])
+            remaining = [m for m in group.members if m != username]
+            if remaining == group.members:
+                return group
+            return group.model_copy(update={"members": remaining})
+
+        self._mutate(group_name, apply)
+
+    def _bind(self, group: str, roles: Iterable[str]) -> None:
+        """Bind each of *roles* to *group* ahead of the write that gives them.
+
+        Raises:
+            RoleUnavailableError: A role does not exist or is being deleted.
+        """
+        if self._roles is None:
+            return
+        for role in roles:
+            self._roles.bind(role, group)
+
+    def _mutate(self, name: str, change: Callable[[Group], Group]) -> Group:
+        """Store ``change`` of the named group over the revision it was made from.
+
+        Raises:
+            KeyError: No group is stored under *name*, or none can be.
+            DocumentConflictError: Other writes kept landing first.
+        """
+        try:
+            return self._c.mutate(store_key(name), change)
+        except KeyError:
+            raise KeyError(f"Group '{name}' not found") from None
 
     def resolve_roles_for_member(self, username: str) -> builtins.list[str]:
         """Return the sorted unique list of roles held by a member across all groups."""
