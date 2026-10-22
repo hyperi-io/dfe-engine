@@ -37,6 +37,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
+from tests.support.accounts import admin_on_its_own_password
 from tests.support.core_sources import write_landing_definition
 
 # How long TopicAdmin.list_topic_names, the sweep's first broker call, waits for an answer.
@@ -101,7 +102,7 @@ def _leave_a_dropped_transform(settings: DFESettings) -> None:
     }
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            app.state.account_store.reset_password(new_password=ADMIN_PASSWORD, username="admin")
+            admin_on_its_own_password(app)
             created = client.post("/api/v1/sources", json=body, headers=headers)
             assert created.status_code == 201, created.text
             registry = get_source_registry()

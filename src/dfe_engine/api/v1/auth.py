@@ -206,6 +206,15 @@ def _token_data(
     }
 
 
+async def persist_session_end(request: Request, account: Account, *, actor: str) -> None:
+    """Commit *account*'s ended sessions to the deploy repo, which the next boot restores from.
+
+    A commit and a push, so it runs on a worker thread.
+    """
+    gc = getattr(request.app.state, "gitcrud", None)
+    await run_blocking(account_durability.publish_session_end, gc, account, actor=actor)
+
+
 def throttled(request: Request, wait: int) -> HTTPException:
     """The 429 a sign-in or password check answers while its caller must wait, counted."""
     metrics = getattr(request.app.state, "api_metrics", None) or ApiMetrics()
@@ -427,8 +436,9 @@ async def logout(user: CurrentUser, request: Request, settings: Settings) -> Res
     """
     account = bound_account(request, user.user_id)
     if account is not None:
-        request.app.state.account_store.end_sessions(account.username)
+        ended = request.app.state.account_store.end_sessions(account.username)
         audit_account_change(user.user_id, account.username, "sessions_ended")
+        await persist_session_end(request, ended, actor=user.user_id)
     response = Response(status_code=204)
     response.delete_cookie(
         TOKEN_COOKIE, secure=token_cookie_secure(settings), httponly=True, samesite="lax"

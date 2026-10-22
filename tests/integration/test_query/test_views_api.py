@@ -36,6 +36,7 @@ from dfe_engine.settings import (
     LocalAuthSettings,
     SecretsSettings,
 )
+from tests.support.accounts import admin_on_its_own_password
 
 pytestmark = pytest.mark.integration
 
@@ -112,7 +113,7 @@ def stack(ch_params, ch_client, tmp_path, monkeypatch):
     app = create_app(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            app.state.account_store.reset_password("admin", ADMIN_PASSWORD)
+            admin_on_its_own_password(app)
             app.state.account_store.update("admin", org="default")
             token = create_access_token(data={"sub": "admin"}, settings=settings)
             yield SimpleNamespace(

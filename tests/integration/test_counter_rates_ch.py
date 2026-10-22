@@ -54,6 +54,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
+from tests.support.accounts import admin_on_its_own_password
 
 pytestmark = pytest.mark.integration
 
@@ -113,7 +114,7 @@ def console(ch_params, manager_client, otel_db, monkeypatch, tmp_path):
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             # Off the issued password, which refuses every other call until changed.
-            app.state.account_store.reset_password("admin", "test-admin-pw")
+            admin_on_its_own_password(app)
             gc = GitCrud(
                 GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry()
             )

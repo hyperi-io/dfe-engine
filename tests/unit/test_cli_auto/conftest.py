@@ -33,6 +33,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
+from tests.support.accounts import admin_on_its_own_password
 
 # The admin password these fixtures inject, as a deployment's secret store would.
 ADMIN_PASSWORD = "test-admin-pw"
@@ -141,9 +142,8 @@ def harness(api_settings: DFESettings, tmp_path: Path, monkeypatch):
     # cannot back a sync httpx.Client - hence TestClient.)
     with TestClient(app) as tc:
         tc.event_hooks = {"request": [record]}
-        # Seed operator/admin exactly like the API conftest so RBAC works.
-        account_store = app.state.account_store
-        account_store.reset_password("admin", "test-admin-pw")
+        # Seed the admin exactly like the API conftest so RBAC works.
+        admin_on_its_own_password(app)
 
         # A real, valid admin API key (groups -> admin role via dfe-admins).
         _, admin_api_key = app.state.api_key_store.create(

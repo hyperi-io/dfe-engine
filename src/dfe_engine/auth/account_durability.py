@@ -26,9 +26,12 @@ is configured, hands back the git commands to merge the branch.
 When gitops is disabled (no deploy repo) the live store IS the durable store -- a
 plain file share -- so there is nothing to mirror and ``git_merged`` is trivially
 true.
-"""
 
-from __future__ import annotations
+A session end skips that routing and goes straight to main on every posture
+(:func:`publish_session_end`): it only takes access away, and the boot hydrate would
+otherwise put the old one back. The hydrate also keeps the later of the two copies'
+session ends.
+"""
 
 from typing import TYPE_CHECKING
 
@@ -36,9 +39,10 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.auth import breakglass
+from dfe_engine.auth.accounts import Account, later_session_end
 from dfe_engine.gitcrud.auto_merge import resolve_state
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
-from dfe_engine.gitcrud.engine import ResourceNotFoundError
+from dfe_engine.gitcrud.engine import ConcurrencyConflictError, ResourceNotFoundError
 from dfe_engine.gitcrud.routing import (
     ReviewRequiredError,
     WriteOutcome,
@@ -50,7 +54,7 @@ from dfe_engine.yaml_utils import yaml_load_string
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
+    from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
     from dfe_engine.gitcrud.engine import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
     from dfe_engine.gitops.repo import PublishResult
@@ -59,6 +63,18 @@ if TYPE_CHECKING:
 # so routing forces a review PR on production+team and a direct commit otherwise.
 ACCOUNTS_CLASS = "accounts"
 _RBAC_CLASS = "governance"
+
+# The fields a session end writes onto the deploy repo's copy, only ever to take access away.
+_SESSION_STATE = (
+    "session_epoch",
+    "session_generation",
+    "enabled",
+    "disabled_at",
+    "blocked",
+    "blocked_at",
+)
+# One read-and-write, then one more when another write lands between the two.
+_SESSION_END_ATTEMPTS = 2
 
 
 # -- Response / state models ----------------------------------
@@ -442,11 +458,13 @@ def hydrate_from_deploy_repo(
     password survives the rebuild. Runs BEFORE the seed-admin-if-empty check, so a
     persisted admin is never overwritten by the shipped default. Best-effort: a
     missing/empty deploy repo just restores nothing.
+
+    An account the live store still holds keeps the later of the two session ends
+    (:func:`~dfe_engine.auth.accounts.later_session_end`), so a token it refused is
+    not let back in, and that later end is committed back to the deploy repo.
     """
     if gc is None:
         return 0
-
-    from dfe_engine.auth.accounts import Account
 
     restored = 0
     for name in gc.list(ACCOUNTS_CLASS):
@@ -454,12 +472,73 @@ def hydrate_from_deploy_repo(
             doc = gc.get(ACCOUNTS_CLASS, name)
         except ResourceNotFoundError:
             continue
-        account = Account.model_validate({**doc, "username": name})
+        durable = Account.model_validate({**doc, "username": name})
+        live = account_store.get(name)
+        account = durable if live is None else later_session_end(durable, live)
         # The deploy repo is the durable authority, so it may hold a retired admin
         # the protected-name floor would otherwise refuse to write back disabled.
         account_store.put(account, allow_protected=True)
+        if account != durable:
+            publish_session_end(gc, account, actor="dfe-engine")
         restored += 1
     return restored
+
+
+def publish_session_end(gc: GitCrud | None, account: Account, *, actor: str) -> None:
+    """Commit *account*'s ended sessions onto the deploy repo's copy (best-effort).
+
+    The boot hydrate puts that copy back over the live store, so a session end that
+    stops at the live store comes undone at the next start. Only the session state is
+    written, straight to main on every posture: it only takes access away, and a
+    password change still under review stays on its review branch. An account the
+    deploy repo does not carry is never restored, so nothing is written for it.
+    """
+    if gc is None:
+        return
+    # The clone's own tree answers for the account cheaply, so another account's
+    # session end never waits on the forge.
+    if not (gc.repo_path / _account_rel(gc, account.username)).is_file():
+        return
+    try:
+        _commit_session_state(gc, account, actor)
+    except Exception as exc:  # durability is best-effort; never fail the caller
+        logger.warning(
+            "Session end not persisted to the deploy repo",
+            account=account.username,
+            error=str(exc),
+        )
+
+
+def _commit_session_state(gc: GitCrud, account: Account, actor: str) -> None:
+    """Write the later session end onto the deploy repo's copy, conditional on its head."""
+    for _ in range(_SESSION_END_ATTEMPTS):
+        try:
+            doc, revision = gc.get_with_revision(ACCOUNTS_CLASS, account.username)
+        except ResourceNotFoundError:
+            return
+        durable = Account.model_validate({**doc, "username": account.username})
+        merged = later_session_end(durable, account)
+        changes = {
+            field: getattr(merged, field)
+            for field in _SESSION_STATE
+            if getattr(merged, field) != getattr(durable, field)
+        }
+        if not changes:
+            return
+        message = _commit_message(account.username, "end sessions", actor, "")
+        try:
+            gc.put(
+                ACCOUNTS_CLASS,
+                account.username,
+                {**doc, **changes},
+                actor,
+                message,
+                base_revision=revision,
+            )
+            return
+        except ConcurrencyConflictError:
+            continue
+    raise RuntimeError("the deploy repo kept moving under the session end")
 
 
 def publish_direct(

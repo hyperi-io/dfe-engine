@@ -1033,7 +1033,7 @@ def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Iterator
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
     from dfe_engine.gitcrud import GitCrud, default_registry
     from dfe_engine.gitops.repo import GitopsRepo
-    from tests.support.engine_stack import ADMIN_PASSWORD
+    from tests.support.accounts import admin_on_its_own_password
 
     app = create_app(settings=settings)
     token = create_access_token(
@@ -1042,7 +1042,7 @@ def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Iterator
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             # Off the issued password, which refuses every other call until changed.
-            app.state.account_store.reset_password(new_password=ADMIN_PASSWORD, username="admin")
+            admin_on_its_own_password(app)
             crud = app.state.gitcrud
             if crud is None:
                 crud = GitCrud(

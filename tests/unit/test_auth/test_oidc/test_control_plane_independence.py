@@ -37,6 +37,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 from dfe_engine.yaml_utils import yaml_dump
+from tests.support.accounts import admin_on_its_own_password
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -85,8 +86,7 @@ def app(auth_settings: DFESettings):
 def client(app, auth_settings: DFESettings) -> Iterator[TestClient]:
     """TestClient with lifespan — bootstrap groups already seeded."""
     with TestClient(app, raise_server_exceptions=False) as c:
-        account_store = app.state.account_store
-        account_store.reset_password("admin", "test-admin-pw")
+        admin_on_its_own_password(app)
         yield c
 
 

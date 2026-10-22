@@ -415,6 +415,23 @@ class TestBreakGlassHash:
         assert store.verify_password(breakglass.USERNAME, MINTED_BREAKGLASS)
         assert not store.verify_password(breakglass.USERNAME, MINTED_BREAKGLASS + "-a-later-edit")
 
+    def test_putting_the_committed_hash_back_ends_the_accounts_sessions(self, tmp_path: Path, crud):
+        """A change still under review moves the live hash off main's, and the boot moves it back."""
+        auth_dir = tmp_path / "auth"
+        store, *_ = bootstrap_auth(
+            auth_dir,
+            default_admin_password=MINTED_ADMIN,
+            gitcrud=crud,
+            breakglass_password=MINTED_BREAKGLASS,
+        )
+        on_main = present(store.get(breakglass.USERNAME)).session_marker()
+        store.reset_password(breakglass.USERNAME, secrets.token_urlsafe(16))
+
+        store, *_ = bootstrap_auth(auth_dir, default_admin_password=MINTED_ADMIN, gitcrud=crud)
+
+        assert store.verify_password(breakglass.USERNAME, MINTED_BREAKGLASS)
+        assert present(store.get(breakglass.USERNAME)).session_marker() != on_main
+
     def test_no_gitcrud_means_no_break_glass_account(self, tmp_path: Path):
         store, *_ = bootstrap_auth(
             tmp_path / "auth",

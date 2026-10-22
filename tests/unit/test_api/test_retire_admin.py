@@ -84,14 +84,17 @@ def _token(settings: DFESettings, username: str) -> dict[str, str]:
 
 def _admin_after_its_change(client: TestClient, settings: DFESettings) -> dict[str, str]:
     """Headers for the bootstrap admin once it has replaced its issued password."""
-    headers = _token(settings, "admin")
+    chosen = secrets.token_urlsafe(16)
     resp = client.post(
         "/api/v1/auth/accounts/reset-password",
-        json={"current_password": MINTED_ADMIN, "new_password": secrets.token_urlsafe(16)},
-        headers=headers,
+        json={"current_password": MINTED_ADMIN, "new_password": chosen},
+        headers=_token(settings, "admin"),
     )
     assert resp.status_code == 200, resp.text
-    return headers
+    # The change ends every session the admin held, so it signs in again.
+    login = client.post("/api/v1/auth/login", json={"username": "admin", "password": chosen})
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
 def _complete_setup(app, *, admin_of_our_own: bool = True) -> None:

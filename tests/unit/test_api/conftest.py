@@ -27,6 +27,7 @@ from dfe_engine.settings import (
     SigmaSettings,
     SourceSettings,
 )
+from tests.support.accounts import admin_on_its_own_password
 from tests.support.core_sources import write_landing_definition
 from tests.unit.test_query.view_fakes import OneViewCatalog, RecordingClient, view_definition
 
@@ -144,14 +145,12 @@ def app(api_settings: DFESettings):
 def client(app, api_settings: DFESettings) -> Iterator[TestClient]:
     """TestClient with lifespan events (registries bootstrapped)."""
     with TestClient(app, raise_server_exceptions=False) as c:
-        # After lifespan runs, bootstrap_auth has created admin with
-        # default "changeme" password. Now add operator + viewer accounts
-        # and reset admin password to match test expectations.
+        # The lifespan issues admin ADMIN_PASSWORD with a forced change. Clear the
+        # change, then add the operator and viewer accounts.
         account_store = app.state.account_store
         group_store = app.state.group_store
 
-        # Reset admin password to test password
-        account_store.reset_password("admin", ADMIN_PASSWORD)
+        admin_on_its_own_password(app)
 
         # Create operator account (data_analyst + infra_admin)
         if account_store.get("operator") is None:
