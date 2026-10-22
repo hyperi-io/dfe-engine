@@ -297,7 +297,8 @@ class DocumentCollection[T: BaseModel]:
         """Replace ``key_value`` with ``change`` of what is stored, unless another write landed first.
 
         Reads the document and its ``_rev``, applies ``change``, and replaces it only
-        while ``_rev`` is still the one read. When another write got there first it
+        while it is still that document at the ``_rev`` read, so one deleted and made
+        again since is never overwritten. When another write got there first it
         reads again and reapplies, so ``change`` may run more than once and must judge
         only the model it is given. A domain check that raises inside ``change``
         writes nothing. A ``change`` that alters nothing writes nothing.
@@ -324,6 +325,8 @@ class DocumentCollection[T: BaseModel]:
             stored = self._c.find_one({self._key: key_value})
             if stored is None:
                 raise KeyError(key_value)
+            # A document deleted and made again restarts at revision 1, so _id tells it apart.
+            identity = stored["_id"]
             rev = stored.get(REV)
             current = self._load(stored)
             if current is None:
@@ -339,7 +342,8 @@ class DocumentCollection[T: BaseModel]:
             expected = {REV: rev} if rev is not None else {REV: {"$exists": False}}
             try:
                 result = self._c.replace_one(
-                    {self._key: key_value, **expected}, after | {REV: (rev or 0) + 1}
+                    {"_id": identity, self._key: key_value, **expected},
+                    after | {REV: (rev or 0) + 1},
                 )
             except OperationFailure as exc:
                 if exc.code not in _CONFLICT_CODES:
