@@ -97,7 +97,7 @@ def _boot(settings: DFESettings) -> _Replica:
         push=True,
     )
     crud = GitCrud(repo)
-    deps.bootstrap_registries(settings, gitcrud=crud)
+    deps.bootstrap_registries(settings, gitcrud=crud, secrets=build_secrets(settings.secrets))
     built = dict(deps._registries)
     # The registries are module-global, so the next replica's bootstrap needs an empty dict.
     deps._registries.clear()
