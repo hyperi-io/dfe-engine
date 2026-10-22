@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.59](https://github.com/hyperi-io/dfe-engine/compare/v1.22.58...v1.22.59) (2026-10-22)
+
+### Bug Fixes
+
+* **api:** derive operation ids, add the route map ([#940](https://github.com/hyperi-io/dfe-engine/issues/940)) ([ebbcec4](https://github.com/hyperi-io/dfe-engine/commit/ebbcec4c67ec6cd7f6e0369255f7eed9e1924af7))
+* **orgs:** compile tenancy into receiver, loader and fetcher ([#941](https://github.com/hyperi-io/dfe-engine/issues/941)) ([57ab7ca](https://github.com/hyperi-io/dfe-engine/commit/57ab7ca4c2c6d0fbc9618f543c1b1392c27bad34))
+
 ## [1.22.58](https://github.com/hyperi-io/dfe-engine/compare/v1.22.57...v1.22.58) (2026-10-21)
 
 ### Bug Fixes
