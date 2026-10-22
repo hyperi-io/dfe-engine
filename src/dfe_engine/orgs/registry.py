@@ -29,7 +29,7 @@ import builtins
 import contextlib
 import re
 import uuid
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Generator, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -286,7 +286,7 @@ class OrgRegistry(_OrgEvents):
         self._changed(name)
 
     @contextlib.contextmanager
-    def reserved(self, name: str, org_ids: Iterable[str]) -> Iterator[None]:
+    def reserved(self, name: str, org_ids: Iterable[str]) -> Generator[None]:
         """Refuse a create that collides with another org, before its hunts are written.
 
         One engine writes these files and its writes take turns, so nothing needs holding.
@@ -303,7 +303,7 @@ class OrgRegistry(_OrgEvents):
         yield
 
     @contextlib.contextmanager
-    def deleting(self, name: str) -> Iterator[None]:
+    def deleting(self, name: str) -> Generator[None]:
         """Refuse a delete the org's dependants forbid, before its hunts are written.
 
         Raises:
@@ -427,7 +427,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
         return org
 
     @contextlib.contextmanager
-    def reserved(self, name: str, org_ids: Iterable[str]) -> Iterator[None]:
+    def reserved(self, name: str, org_ids: Iterable[str]) -> Generator[None]:
         """Hold the name and tenant ids of a create while its hunts are written, then its record.
 
         The name is locked against every other create held this way, and the name and
@@ -517,7 +517,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
         self._changed(name)
 
     @contextlib.contextmanager
-    def deleting(self, name: str) -> Iterator[None]:
+    def deleting(self, name: str) -> Generator[None]:
         """Hold *name* against new bindings while its hunts are written and then its delete.
 
         A delete refused because a credential binds the org, or a write binding it is in
@@ -607,7 +607,7 @@ class DocuStoreOrgRegistry(_OrgEvents):
         ]
 
     @contextlib.contextmanager
-    def _marked_for_delete(self, name: str) -> Iterator[Claim | None]:
+    def _marked_for_delete(self, name: str) -> Generator[Claim | None]:
         """Mark *name* as being deleted for as long as the block runs, and yield the mark.
 
         Every delete of one org shares the mark, so a delete held by :meth:`deleting`
