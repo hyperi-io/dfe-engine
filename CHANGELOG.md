@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.62](https://github.com/hyperi-io/dfe-engine/compare/v1.22.61...v1.22.62) (2026-10-22)
+
+### Bug Fixes
+
+* **backing:** count the resolver's sizing as declared ([#944](https://github.com/hyperi-io/dfe-engine/issues/944)) ([ae5c314](https://github.com/hyperi-io/dfe-engine/commit/ae5c314621dc1b1f1e656a20ef269bb35ac42f0d)), closes [#830](https://github.com/hyperi-io/dfe-engine/issues/830)
+
 ## [1.22.61](https://github.com/hyperi-io/dfe-engine/compare/v1.22.60...v1.22.61) (2026-10-22)
 
 ### Bug Fixes
