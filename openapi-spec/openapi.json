@@ -6366,7 +6366,7 @@
           "Sources"
         ],
         "summary": "Create Sources From Catalogue",
-        "description": "Create a source for each catalogue entry, on the intake it arrives by.\n\nEach entry's file is the write body for its default intake, and another intake\nswaps in the match rule that intake derives. A variant the deployed transform's\ncontract does not list is refused for that entry, and one whose contract is not\nmounted is allowed. Everything after that is the ordinary create, so each source\nis indistinguishable from a hand-written one.\n\nAt most 50 entries. A longer selection is refused before anything is stored.\nEntries are stored in the order given. One entry's refusal is recorded in\n``failed`` and the rest continue. The apps are reconciled once, after the\nentries that could be stored.",
+        "description": "Create a source for each catalogue entry, on the intake it arrives by.\n\nEach entry's file is the write body for its default intake, and another intake\nswaps in the match rule that intake derives. A variant the deployed transform's\ncontract does not list is refused for that entry, and one whose contract is not\nmounted is allowed. The source records the catalogue entry and the intake that\nwas selected, and a later edit leaves both in place.\n\nAt most 50 entries. A longer selection is refused before anything is stored.\nEntries are stored in the order given. One entry's refusal is recorded in\n``failed`` and the rest continue. The apps are reconciled once, after the\nentries that could be stored.",
         "operationId": "sources.from-catalogue",
         "requestBody": {
           "content": {
@@ -45436,6 +45436,35 @@
             "title": "Description",
             "description": "Source description"
           },
+          "from_catalogue_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Catalogue Item",
+            "description": "Catalogue entry this source was created from; absent when written by hand"
+          },
+          "from_catalogue_intake": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "beats",
+                  "receiver",
+                  "fetcher"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Catalogue Intake",
+            "description": "Intake selected for that catalogue entry: beats, receiver or fetcher"
+          },
           "state": {
             "type": "string",
             "enum": [
@@ -47180,6 +47209,35 @@
             "title": "Archive",
             "description": "Keep the raw record as it arrived, on either transport",
             "default": false
+          },
+          "from_catalogue_item": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Catalogue Item",
+            "description": "Catalogue entry this source was created from; absent when written by hand"
+          },
+          "from_catalogue_intake": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "beats",
+                  "receiver",
+                  "fetcher"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Catalogue Intake",
+            "description": "Intake selected for that catalogue entry: beats, receiver or fetcher"
           },
           "views": {
             "anyOf": [

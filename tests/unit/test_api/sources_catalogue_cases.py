@@ -43,6 +43,8 @@ CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
         "body": {},
         "expected_stored": {
             "fetcher": None,
+            "from_catalogue_intake": "beats",
+            "from_catalogue_item": "cisco-asa",
             "match": {
                 "field": "data_stream.dataset",
                 "operator": "equals",
@@ -59,6 +61,8 @@ CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
         "body": {"intake": "receiver"},
         "expected_stored": {
             "fetcher": None,
+            "from_catalogue_intake": "receiver",
+            "from_catalogue_item": "cisco-asa",
             "match": {"field": "_source", "operator": "equals", "value": "cisco-asa"},
             "meta_schema": "meta/elastic/ecs",
             "origin": "receiver",
@@ -71,6 +75,8 @@ CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
         "body": {"intake": "receiver", "name": "edge-firewall"},
         "expected_stored": {
             "fetcher": None,
+            "from_catalogue_intake": "receiver",
+            "from_catalogue_item": "cisco-asa",
             "match": {"field": "_source", "operator": "equals", "value": "edge-firewall"},
             "meta_schema": "meta/elastic/ecs",
             "origin": "receiver",
@@ -83,6 +89,8 @@ CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
         "body": {},
         "expected_stored": {
             "fetcher": "aws",
+            "from_catalogue_intake": "fetcher",
+            "from_catalogue_item": "aws-cloudtrail",
             "match": None,
             "meta_schema": "meta/elastic/ecs",
             "origin": "fetcher",
@@ -95,6 +103,8 @@ CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
         "body": {"intake": "beats"},
         "expected_stored": {
             "fetcher": None,
+            "from_catalogue_intake": "beats",
+            "from_catalogue_item": "okta",
             "match": {"field": "data_stream.dataset", "operator": "equals", "value": "okta.system"},
             "meta_schema": "meta/elastic/ecs",
             "origin": "receiver",
@@ -107,6 +117,8 @@ CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
         "body": {"variant": "filebeat.coredns_log.json"},
         "expected_stored": {
             "fetcher": None,
+            "from_catalogue_intake": "beats",
+            "from_catalogue_item": "coredns-log",
             "match": {"field": "data_stream.dataset", "operator": "equals", "value": "coredns.log"},
             "meta_schema": "meta/elastic/ecs",
             "origin": "receiver",

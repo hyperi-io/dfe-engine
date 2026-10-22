@@ -20,6 +20,8 @@ the standard views they expose. What a Source IS lives in
 source: filebeat                        # The _source label -- immutable identifier
 display_name: Filebeat
 description: Elastic Filebeat log collector
+# from_catalogue_item: okta             # Catalogue entry name. Omitted when the source was written by hand
+# from_catalogue_intake: beats          # Intake selected for that entry: beats | receiver | fetcher
 state: active                           # active | dormant | disabled (see source-registry.md)
 
 # --- Flow (optional; see source-flow.md) ---

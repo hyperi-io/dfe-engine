@@ -47,6 +47,8 @@ def _stored(*, client: TestClient, headers: dict[str, str], name: str) -> dict[s
         "fetcher": fetcher["source_type"] if fetcher else None,
         "match": stored["match"],
         "meta_schema": version["schema"]["meta_schema"],
+        "from_catalogue_intake": stored["from_catalogue_intake"],
+        "from_catalogue_item": stored["from_catalogue_item"],
         "origin": stored["origin"],
         "variant": stored["transform"]["variant"],
     }

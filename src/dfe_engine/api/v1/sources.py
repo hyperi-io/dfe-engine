@@ -1419,8 +1419,8 @@ def create_sources_from_catalogue(
     Each entry's file is the write body for its default intake, and another intake
     swaps in the match rule that intake derives. A variant the deployed transform's
     contract does not list is refused for that entry, and one whose contract is not
-    mounted is allowed. Everything after that is the ordinary create, so each source
-    is indistinguishable from a hand-written one.
+    mounted is allowed. The source records the catalogue entry and the intake that
+    was selected, and a later edit leaves both in place.
 
     At most 50 entries. A longer selection is refused before anything is stored.
     Entries are stored in the order given. One entry's refusal is recorded in
