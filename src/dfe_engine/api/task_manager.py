@@ -16,12 +16,19 @@ to be re-submitted.
 A task can be held to a set of orgs at submit. A reader held to its own orgs then
 sees only the tasks held to a subset of them, and the hold is evicted with the task.
 
+This manager answers only for the tasks its own process runs, which is right for one
+engine. :class:`dfe_engine.api.document_tasks.DocumentTaskManager` keeps them in the
+document store, so every replica answers for every task.
+
+Every call is awaited, so a manager whose tasks live in a store reaches it off the
+event loop.
+
 Usage::
 
     manager = TaskManager()
-    task = manager.submit("hunt:execute", coro_fn, arg1, arg2)
-    status = manager.get(task.id)
-    manager.cancel(task.id)
+    task = await manager.submit("hunt:execute", coro_fn, arg1, arg2)
+    status = await manager.get(task.id)
+    await manager.cancel(task.id)
 """
 
 import asyncio
@@ -37,6 +44,9 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 TASK_FAILED_MESSAGE = "The task failed; the engine log has the reason"
+TASK_STOPPED_MESSAGE = "The engine running the task stopped before it finished"
+CLOSE_TIMEOUT_SECONDS = 5.0
+"""How long :meth:`TaskManager.aclose` waits for cancelled tasks to record how they ended."""
 
 
 def _json_safe(value: Any) -> Any:
@@ -69,6 +79,27 @@ def _json_safe(value: Any) -> Any:
 def _held(org_ids: Iterable[str] | None) -> frozenset[str] | None:
     """The orgs as a set, keeping None, which means every org."""
     return None if org_ids is None else frozenset(org_ids)
+
+
+def _visible(held_to: frozenset[str] | None, reader_orgs: frozenset[str] | None) -> bool:
+    """Whether a reader held to ``reader_orgs`` sees a task held to ``held_to``. None sees all."""
+    if reader_orgs is None:
+        return True
+    return held_to is not None and held_to <= reader_orgs
+
+
+class TaskLimitError(RuntimeError):
+    """Every task a kind may run at once is already pending or running.
+
+    Attributes:
+        kind: The task kind.
+        limit: How many tasks of the kind may be pending or running at once.
+    """
+
+    def __init__(self, kind: str, limit: int) -> None:
+        super().__init__(f"{limit} {kind} tasks are already pending or running")
+        self.kind = kind
+        self.limit = limit
 
 
 class TaskStatus(str, Enum):
@@ -117,13 +148,14 @@ class _Task:
         self.result: Any | None = None
         self.error: str | None = None
         self.asyncio_task: asyncio.Task | None = None
+        # Moved by every set_progress, so a store can tell a report it has not written yet.
+        self.revision = 0
+        self.cancel_sent = False
         self._progress_event = asyncio.Event()
 
     def visible_to(self, reader_orgs: frozenset[str] | None) -> bool:
-        """Whether a reader held to ``reader_orgs`` may see this task; None sees every task."""
-        if reader_orgs is None:
-            return True
-        return self.held_to is not None and self.held_to <= reader_orgs
+        """Whether a reader held to ``reader_orgs`` may see this task. None sees every task."""
+        return _visible(self.held_to, reader_orgs)
 
     def to_info(self) -> TaskInfo:
         payload = {
@@ -146,8 +178,16 @@ class _Task:
         self.progress = min(progress, 100)
         if message:
             self.message = message
+        self.revision += 1
         self._progress_event.set()
         self._progress_event.clear()
+
+    async def wait_changed(self, timeout: float) -> None:
+        """Return when the task reports progress or ends, or after ``timeout`` seconds."""
+        try:
+            await asyncio.wait_for(self._progress_event.wait(), timeout=timeout)
+        except TimeoutError:
+            pass
 
 
 class TaskManager:
@@ -160,14 +200,16 @@ class TaskManager:
     def __init__(self, max_completed: int = 1000) -> None:
         self._tasks: dict[str, _Task] = {}
         self._max_completed = max_completed
+        self._closing = False
 
-    def submit(
+    async def submit(
         self,
         kind: str,
         coro_fn,
         *args,
         held_to: Iterable[str] | None = None,
         reportable: tuple[type[Exception], ...] = (),
+        max_active: int | None = None,
         **kwargs,
     ) -> TaskInfo:
         """Submit an async callable for background execution.
@@ -189,28 +231,34 @@ class TaskManager:
                 any org's data, so only a reader of every org sees it.
             reportable: Exception types whose message the engine composes about the
                 request, and which a reader may therefore see.
+            max_active: How many tasks of ``kind`` may be pending or running at once,
+                this one included. None for no limit.
             **kwargs: Keyword arguments for ``coro_fn``.
 
         Returns:
             TaskInfo snapshot at submission time.
+
+        Raises:
+            TaskLimitError: ``max_active`` tasks of ``kind`` are already pending or running.
         """
         task_id = str(uuid.uuid4())
         task = _Task(task_id, kind, _held(held_to))
+        await self._admit(task, max_active)
         self._tasks[task_id] = task
 
         async def _run() -> None:
-            task.status = TaskStatus.RUNNING
-            task.started_at = datetime.now(UTC).isoformat()
-            task.message = "Running"
             try:
+                task.status = TaskStatus.RUNNING
+                task.started_at = datetime.now(UTC).isoformat()
+                task.message = "Running"
+                await self._record(task)
                 result = await coro_fn(*args, task=task, **kwargs)
                 task.status = TaskStatus.COMPLETED
                 task.progress = 100
                 task.result = result
                 task.message = "Completed"
             except asyncio.CancelledError:
-                task.status = TaskStatus.CANCELLED
-                task.message = "Cancelled"
+                self._end_cancelled(task)
             except Exception as exc:
                 logger.warning("background task failed", task_id=task.id, kind=kind, error=str(exc))
                 task.status = TaskStatus.FAILED
@@ -218,13 +266,60 @@ class TaskManager:
                 task.message = f"Failed: {task.error}"
             finally:
                 task.completed_at = datetime.now(UTC).isoformat()
+                await self._record(task)
                 task._progress_event.set()
                 self._evict_completed()
 
+        def _settle_unstarted(_: asyncio.Task) -> None:
+            # A task cancelled before its first step never enters _run, so nothing else ends it.
+            if task.status is not TaskStatus.PENDING:
+                return
+            self._end_cancelled(task)
+            task.completed_at = datetime.now(UTC).isoformat()
+            task._progress_event.set()
+            self._evict_completed()
+
         task.asyncio_task = asyncio.get_running_loop().create_task(_run())
+        task.asyncio_task.add_done_callback(_settle_unstarted)
+        self._submitted(task)
         return task.to_info()
 
-    def get(self, task_id: str, *, reader_orgs: Iterable[str] | None = None) -> TaskInfo | None:
+    async def _admit(self, task: _Task, max_active: int | None) -> None:
+        """Refuse ``task`` when ``max_active`` tasks of its kind are pending or running here.
+
+        Never suspends, so no other submit is counted between this check and the one
+        :meth:`submit` makes.
+
+        Raises:
+            TaskLimitError: The limit is reached.
+        """
+        if max_active is None:
+            return
+        active = sum(
+            1 for t in self._tasks.values() if t.kind == task.kind and not t.status.is_terminal
+        )
+        if active >= max_active:
+            raise TaskLimitError(task.kind, max_active)
+
+    def _submitted(self, task: _Task) -> None:
+        """Called once ``task`` is running in the background. Nothing more to do in memory."""
+
+    async def _record(self, task: _Task) -> None:
+        """Keep ``task``'s state where readers find it. In memory it already is."""
+
+    def _end_cancelled(self, task: _Task) -> None:
+        """Mark ``task`` ended by a cancel: one asked for, or the engine stopping."""
+        if self._closing:
+            task.status = TaskStatus.FAILED
+            task.error = TASK_STOPPED_MESSAGE
+            task.message = f"Failed: {TASK_STOPPED_MESSAGE}"
+        else:
+            task.status = TaskStatus.CANCELLED
+            task.message = "Cancelled"
+
+    async def get(
+        self, task_id: str, *, reader_orgs: Iterable[str] | None = None
+    ) -> TaskInfo | None:
         """Get current task state, or None if not found or not visible to the reader.
 
         Args:
@@ -240,7 +335,7 @@ class TaskManager:
             return None
         return task.to_info()
 
-    def list(
+    async def list(
         self, kind: str | None = None, *, reader_orgs: Iterable[str] | None = None
     ) -> builtins.list[TaskInfo]:
         """List the tasks visible to the reader, most recent first, optionally filtered by kind.
@@ -258,25 +353,42 @@ class TaskManager:
         ]
         return [t.to_info() for t in sorted(tasks, key=lambda t: t.created_at, reverse=True)]
 
-    def cancel(self, task_id: str) -> bool:
+    async def cancel(self, task_id: str) -> bool:
         """Cancel a running task. Returns True if cancellation was requested."""
         task = self._tasks.get(task_id)
         if task is None:
             return False
-        if task.asyncio_task and not task.asyncio_task.done():
+        return self._cancel_local(task)
+
+    def _cancel_local(self, task: _Task) -> bool:
+        """Cancel the coroutine running ``task`` here, once. True while it has not ended."""
+        if task.status.is_terminal or task.asyncio_task is None or task.asyncio_task.done():
+            return False
+        # A second cancel would land in _run's finally and stop it recording how the task ended.
+        if not task.cancel_sent:
+            task.cancel_sent = True
             task.asyncio_task.cancel()
-            return True
-        return False
+        return True
+
+    async def aclose(self) -> None:
+        """Stop every task this process runs, each recorded as stopped by the engine.
+
+        Waits up to :data:`CLOSE_TIMEOUT_SECONDS` for them to record it.
+        """
+        self._closing = True
+        running: builtins.list[asyncio.Task] = []
+        for task in builtins.list(self._tasks.values()):
+            if self._cancel_local(task) and task.asyncio_task is not None:
+                running.append(task.asyncio_task)
+        if running:
+            await asyncio.wait(running, timeout=CLOSE_TIMEOUT_SECONDS)
 
     async def wait_for_progress(self, task_id: str, timeout: float = 30.0) -> TaskInfo | None:
         """Block until the task reports progress or completes. For SSE polling."""
         task = self._tasks.get(task_id)
         if task is None:
             return None
-        try:
-            await asyncio.wait_for(task._progress_event.wait(), timeout=timeout)
-        except TimeoutError:
-            pass
+        await task.wait_changed(timeout)
         return task.to_info()
 
     async def await_terminal(self, task_id: str, wait: float) -> TaskInfo | None:
@@ -291,7 +403,7 @@ class TaskManager:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + wait
         while True:
-            info = self.get(task_id)
+            info = await self.get(task_id)
             if info is None or info.status.is_terminal:
                 return info
             remaining = deadline - loop.time()

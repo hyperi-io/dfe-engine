@@ -606,10 +606,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         source_provider_bindings=settings.auth.source_provider_bindings,
     )
 
-    # Bootstrap task manager for async background tasks
-    from dfe_engine.api.task_manager import TaskManager
+    # Background tasks live in the document store when there is one, so every replica
+    # answers for every task, and in this process otherwise.
+    if doc_store is not None:
+        from dfe_engine.api.document_tasks import DocumentTaskManager
 
-    app.state.task_manager = TaskManager()
+        app.state.task_manager = DocumentTaskManager(doc_store)
+    else:
+        from dfe_engine.api.task_manager import TaskManager
+
+        app.state.task_manager = TaskManager()
 
     # Sampler singleton (holds the shared logreducer concurrency gate)
     from dfe_engine.sampling import Sampler
@@ -728,6 +734,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         import asyncio
 
         await asyncio.gather(*autostart_tasks, return_exceptions=True)
+    task_manager = getattr(app.state, "task_manager", None)
+    if task_manager is not None:
+        # Each task records how it ended in the document store, so they stop before it closes.
+        await task_manager.aclose()
     doc = getattr(app.state, "document_store", None)
     if doc:
         doc.close()

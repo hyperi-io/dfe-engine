@@ -156,7 +156,7 @@ async def _submit(
     org_ids = sample_org_scope(request, user)
     await check_sample_scope(sampler, req, ch, source_registry, org_ids)
 
-    info = manager.submit(
+    info = await manager.submit(
         _TASK_KIND,
         sampler.run,
         req,
@@ -220,7 +220,7 @@ async def get_sample(task_id: str, request: Request, user: CurrentUser) -> Sampl
     does not exist.
     """
     org_ids = sample_org_scope(request, user)
-    info = _task_manager(request).get(task_id, reader_orgs=org_ids)
+    info = await _task_manager(request).get(task_id, reader_orgs=org_ids)
     if info is None:
         raise HTTPException(404, detail={"code": "not_found", "message": "sample task not found"})
     return _to_response(info)
@@ -230,4 +230,4 @@ async def get_sample(task_id: str, request: Request, user: CurrentUser) -> Sampl
 async def list_samples(request: Request, user: CurrentUser) -> list[TaskInfo]:
     """List recent sample tasks (most recent first); a caller held to its orgs sees only theirs."""
     org_ids = sample_org_scope(request, user)
-    return _task_manager(request).list(kind=_TASK_KIND, reader_orgs=org_ids)
+    return await _task_manager(request).list(kind=_TASK_KIND, reader_orgs=org_ids)

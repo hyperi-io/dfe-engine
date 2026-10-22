@@ -788,7 +788,7 @@ async def sync_provider_endpoint(
     provider = _make_provider(request, config)
     catalog = _catalog(request)
     manager = _task_manager(request)
-    info = manager.submit("sigma:sync", _run_sync, provider, catalog, user.user_id, since_dt)
+    info = await manager.submit("sigma:sync", _run_sync, provider, catalog, user.user_id, since_dt)
     audit_resource_change(user.user_id, "sigma_provider", name, "synced")
     if wait > 0:
         info = await manager.await_terminal(info.id, wait) or info
@@ -798,7 +798,7 @@ async def sync_provider_endpoint(
 @router.get("/syncs/{task_id}", response_model=SyncResponse, dependencies=[_READ])
 async def get_sync(task_id: str, request: Request, user: CurrentUser) -> SyncResponse:
     """Poll a provider-sync task."""
-    info = _task_manager(request).get(task_id)
+    info = await _task_manager(request).get(task_id)
     # Match the EXACT kind (mirroring GET /sigma/propagations). A startswith
     # 'sigma:' also let a 'sigma:propagate' task through, whose result dict then
     # failed SyncReportModel validation -> 500 instead of the 404 contract.
@@ -1127,7 +1127,7 @@ async def propagate(
     refuse_unknown_orgs(request, options.hunt_customers)
     propagator = _propagator(request, rules, hunts, user.user_id)
     manager = _task_manager(request)
-    info = manager.submit("sigma:propagate", _run_propagate, propagator, options)
+    info = await manager.submit("sigma:propagate", _run_propagate, propagator, options)
     audit_resource_change(user.user_id, "sigma_propagation", "selection", "propagated")
     if wait > 0:
         info = await manager.await_terminal(info.id, wait) or info
@@ -1141,7 +1141,7 @@ async def get_propagation(
     task_id: str, request: Request, user: CurrentUser, response: Response
 ) -> PropagateResponse:
     """Poll a propagate task."""
-    info = _task_manager(request).get(task_id)
+    info = await _task_manager(request).get(task_id)
     if info is None or info.kind != "sigma:propagate":
         raise HTTPException(
             404, detail={"code": "not_found", "message": "propagation task not found"}
