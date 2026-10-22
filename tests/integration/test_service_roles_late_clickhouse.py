@@ -38,6 +38,7 @@ from dfe_engine.settings import (
     LocalAuthSettings,
     SecretsSettings,
 )
+from tests.support.accounts import admin_on_its_own_password
 
 pytestmark = pytest.mark.integration
 
@@ -115,7 +116,7 @@ def test_the_hunt_runner_user_appears_once_a_late_clickhouse_answers(
             assert getattr(app.state, trigger).wait_idle(0.0) is False
 
             # The API is up for configuration work while ClickHouse is absent.
-            app.state.account_store.reset_password("admin", ADMIN_PASSWORD)
+            admin_on_its_own_password(app)
             token = create_access_token(data={"sub": "admin"}, settings=settings)
             orgs = api.get("/api/v1/orgs", headers={"Authorization": f"Bearer {token}"})
             assert orgs.status_code == 200, orgs.text

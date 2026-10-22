@@ -16,6 +16,7 @@ direct commit vs review PR vs CLI fallback -- is exercised end to end.
 
 from pathlib import Path
 
+import pytest
 from dulwich import porcelain
 from dulwich.objects import Commit
 from dulwich.repo import Repo
@@ -258,6 +259,120 @@ def test_hydrate_restores_accounts_from_deploy_repo(tmp_path):
 def test_hydrate_is_a_noop_when_gitops_disabled(tmp_path):
     fresh = AccountStore(tmp_path / "accounts")
     assert ad.hydrate_from_deploy_repo(None, fresh) == 0
+
+
+# ── Hydration never moves a session end back ─────────────────
+
+
+def _live(tmp_path: Path, account: Account) -> AccountStore:
+    store = AccountStore(tmp_path / "live")
+    store.put(account)
+    return store
+
+
+def test_hydrate_keeps_a_session_end_the_deploy_repo_lacks(tmp_path):
+    gc = _gc(tmp_path)
+    _publish_seed(gc, _account())
+    live = _live(tmp_path, _account())
+    ended = live.end_sessions("admin")
+
+    ad.hydrate_from_deploy_repo(gc, live)
+
+    assert present(live.get("admin")).session_marker() == ended.session_marker()
+
+
+@pytest.mark.parametrize(
+    ("change", "field"),
+    [({"enabled": False}, "disabled_at"), ({"blocked": True}, "blocked_at")],
+    ids=["disabled", "blocked"],
+)
+def test_hydrate_keeps_a_disable_or_block_the_deploy_repo_lacks(tmp_path, change, field):
+    gc = _gc(tmp_path)
+    _publish_seed(gc, _account(username="kaz"))
+    live = _live(tmp_path, _account(username="kaz"))
+    changed = live.update("kaz", **change)
+
+    ad.hydrate_from_deploy_repo(gc, live)
+
+    restored = present(live.get("kaz"))
+    assert restored.session_denied() is not None
+    assert getattr(restored, field) == getattr(changed, field)
+
+
+def test_hydrate_takes_the_deploy_repos_later_session_end(tmp_path):
+    gc = _gc(tmp_path)
+    other_replica = AccountStore(tmp_path / "other-replica")
+    other_replica.put(_account())
+    other_replica.end_sessions("admin")
+    later = other_replica.end_sessions("admin")
+    _publish_seed(gc, later)
+    live = _live(tmp_path, _account())
+    live.end_sessions("admin")
+
+    ad.hydrate_from_deploy_repo(gc, live)
+
+    assert present(live.get("admin")).session_epoch == later.session_epoch
+
+
+def test_hydrate_ends_every_session_when_the_copies_cannot_be_ordered(tmp_path):
+    gc = _gc(tmp_path)
+    _publish_seed(gc, _account().model_copy(update={"session_epoch": "durable"}))
+    live = _live(tmp_path, _account().model_copy(update={"session_epoch": "live"}))
+
+    ad.hydrate_from_deploy_repo(gc, live)
+
+    assert present(live.get("admin")).session_epoch not in {"durable", "live"}
+
+
+def test_hydrate_writes_a_later_session_end_back_to_the_deploy_repo(tmp_path):
+    gc = _gc(tmp_path)
+    _publish_seed(gc, _account())
+    live = _live(tmp_path, _account())
+    ended = live.end_sessions("admin")
+
+    ad.hydrate_from_deploy_repo(gc, live)
+    rebuilt = AccountStore(tmp_path / "rebuilt")
+    ad.hydrate_from_deploy_repo(gc, rebuilt)
+
+    assert present(rebuilt.get("admin")).session_marker() == ended.session_marker()
+
+
+# ── A session end reaches the deploy repo ────────────────────
+
+
+def test_a_session_end_is_committed_onto_the_deploy_repos_copy(tmp_path):
+    gc = _gc(tmp_path)
+    _publish_seed(gc, _account())
+    ended = _live(tmp_path, _account()).end_sessions("admin")
+
+    ad.publish_session_end(gc, ended, actor="admin")
+
+    rebuilt = AccountStore(tmp_path / "rebuilt")
+    ad.hydrate_from_deploy_repo(gc, rebuilt)
+    assert present(rebuilt.get("admin")).session_marker() == ended.session_marker()
+
+
+def test_a_session_end_leaves_the_rest_of_the_deploy_repos_copy_alone(tmp_path):
+    # A password change still under review stays under review: only the session state
+    # goes straight to main.
+    gc = _gc(tmp_path)
+    _publish_seed(gc, _account(password_hash=_HASH_A))
+    ended = _live(tmp_path, _account(password_hash=_HASH_B)).end_sessions("admin")
+
+    ad.publish_session_end(gc, ended, actor="admin")
+
+    doc = gc.get(ad.ACCOUNTS_CLASS, "admin")
+    assert doc["password_hash"] == _HASH_A
+    assert doc["session_epoch"] == ended.session_epoch
+
+
+def test_a_session_end_commits_nothing_for_an_account_the_deploy_repo_lacks(tmp_path):
+    gc = _gc(tmp_path)
+    ended = _live(tmp_path, _account(username="alice")).end_sessions("alice")
+
+    ad.publish_session_end(gc, ended, actor="alice")
+
+    assert gc.list(ad.ACCOUNTS_CLASS) == []
 
 
 def test_publish_direct_persists_the_account(tmp_path):

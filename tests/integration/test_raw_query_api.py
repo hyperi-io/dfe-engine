@@ -35,6 +35,7 @@ from dfe_engine.settings import (
     LocalAuthSettings,
     SecretsSettings,
 )
+from tests.support.accounts import admin_on_its_own_password
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 
 pytestmark = pytest.mark.integration
@@ -88,7 +89,7 @@ def stack(ch_params, ch_client, tmp_path):
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             # Off the issued password, which refuses every other call until changed.
-            app.state.account_store.reset_password("admin", ADMIN_PASSWORD)
+            admin_on_its_own_password(app)
             app.state.group_store.create("raw-viewers", roles=["data_viewer"], members=["reader"])
             app.state.account_store.create("reader", "reader-password-2026", groups=["raw-viewers"])
             yield SimpleNamespace(
