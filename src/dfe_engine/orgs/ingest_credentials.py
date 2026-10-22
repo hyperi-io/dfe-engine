@@ -31,7 +31,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.store.documents import (
     DEFAULT_ATTEMPTS,
-    REV,
     Claim,
     DocumentConflictError,
     DocuStore,
@@ -235,8 +234,9 @@ class DocuStoreIngestCredentialRegistry:
 
     The interface of :class:`IngestCredentialRegistry`, built by
     :class:`~dfe_engine.orgs.registry.DocuStoreOrgRegistry`. The unique index on the id
-    decides a create, and a conditional write lands only at the revision the stored
-    credential was read at, so replicas racing one id never both land. *binder* claims
+    decides a create, and a conditional write lands only on the document and revision the
+    stored credential was read at, so replicas racing one id never both land, and a write
+    never lands on one deleted and made again since. *binder* claims
     each org a write binds before the write, so a delete of that org running at the same
     time refuses or is refused.
     """
@@ -319,8 +319,7 @@ class DocuStoreIngestCredentialRegistry:
         held, rev = found
         if current is not None and held != current:
             raise CredentialChangedError(f"Ingest credential '{name}' changed")
-        only_if = None if current is None else {REV: rev}
-        if not self._c.delete(name, only_if=only_if):
+        if not self._c.delete(name, expected_rev=None if current is None else rev):
             if current is not None and self._c.exists(name):
                 raise CredentialChangedError(f"Ingest credential '{name}' changed")
             raise KeyError(name)

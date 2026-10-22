@@ -31,6 +31,7 @@ import builtins
 import functools
 import uuid
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -90,6 +91,40 @@ class StaleRevisionError(RuntimeError):
     """The document is no longer at the revision a write was made against."""
 
 
+@dataclass(frozen=True, slots=True)
+class Revision:
+    """The document a read found and the revision it was at, for a later write to hold to.
+
+    A document deleted and made again is back at revision 1, so the number alone would
+    match it. Its ``_id`` never does.
+
+    Attributes:
+        identity: The document's ``_id``.
+        number: Its ``_rev``, 0 for one written outside this layer.
+    """
+
+    identity: Any
+    number: int
+
+    def condition(self) -> dict[str, Any]:
+        """The filter that matches this document at this revision and nothing else."""
+        rev = {REV: self.number} if self.number else {REV: {"$exists": False}}
+        return {"_id": self.identity, **rev}
+
+    def refuse_unless(self, found: Revision, what: str) -> None:
+        """Refuse a write held to this revision when *found* is not it.
+
+        Raises:
+            StaleRevisionError: *found* is another document, or this one at another revision.
+        """
+        if found.identity != self.identity:
+            raise StaleRevisionError(
+                f"{what} was deleted and made again since revision {self.number}"
+            )
+        if found.number != self.number:
+            raise StaleRevisionError(f"{what} is at revision {found.number}, not {self.number}")
+
+
 def converge[R](write: Callable[[], Sequence[R]], *, passes: int = CONVERGE_PASSES) -> list[R]:
     """Run *write* again until a pass changes nothing, at most *passes* times.
 
@@ -112,6 +147,11 @@ def converge[R](write: Callable[[], Sequence[R]], *, passes: int = CONVERGE_PASS
             break
         changed.extend(made)
     return changed
+
+
+def _revision(stored: Mapping[str, Any]) -> Revision:
+    """The revision *stored*, a raw document, is at. Taken before loading it drops ``_id``."""
+    return Revision(stored["_id"], int(stored.get(REV) or 0))
 
 
 def _backoff(attempt: int) -> None:
@@ -281,18 +321,19 @@ class DocumentCollection[T: BaseModel]:
         """Return the document with ``key == key_value``, or None."""
         return self._load(self._c.find_one({self._key: key_value}))
 
-    def get_with_revision(self, key_value: str) -> tuple[T, int] | None:
+    def get_with_revision(self, key_value: str) -> tuple[T, Revision] | None:
         """Return the document with ``key == key_value`` and its revision, or None.
 
         A document written outside this layer, which carries no ``_rev``, reads as
-        revision 0. The revision is what :meth:`mutate` takes as ``expected_rev``.
+        revision 0. The revision is what :meth:`mutate` and :meth:`delete` take as
+        ``expected_rev``.
         """
         stored = self._c.find_one({self._key: key_value})
         if stored is None:
             return None
-        rev = int(stored.get(REV, 0))
+        revision = _revision(stored)
         model = self._load(stored)
-        return (model, rev) if model is not None else None
+        return (model, revision) if model is not None else None
 
     def get_by(self, field: str, value: str) -> T | None:
         """Return the document whose ``field`` is ``value``, one of the ``unique`` fields, or None."""
@@ -354,7 +395,7 @@ class DocumentCollection[T: BaseModel]:
         change: Callable[[T], T],
         *,
         attempts: int = DEFAULT_ATTEMPTS,
-        expected_rev: int | None = None,
+        expected_rev: Revision | None = None,
     ) -> T:
         """Replace ``key_value`` with ``change`` of what is stored, unless another write landed first.
 
@@ -365,14 +406,15 @@ class DocumentCollection[T: BaseModel]:
         only the model it is given. A domain check that raises inside ``change``
         writes nothing. A ``change`` that alters nothing writes nothing.
 
-        ``expected_rev`` holds the write to the revision a caller read earlier, as an
-        ``If-Match`` does: a document at any other revision is not reapplied to.
+        ``expected_rev`` holds the write to the document and revision a caller read
+        earlier, as an ``If-Match`` does: one at any other revision, or deleted and made
+        again since, is not reapplied to.
 
         Args:
             key_value: The document's key.
             change: Returns the new model from the stored one. Must keep the key.
             attempts: Reads and conditional writes before giving up.
-            expected_rev: The revision the document must still be at, from
+            expected_rev: The document and revision it must still be, from
                 :meth:`get_with_revision`. None takes whatever is stored.
 
         Returns:
@@ -380,7 +422,7 @@ class DocumentCollection[T: BaseModel]:
 
         Raises:
             KeyError: No document holds ``key_value``.
-            StaleRevisionError: The document is not at ``expected_rev``.
+            StaleRevisionError: The document is not the one ``expected_rev`` names.
             ValueError: ``change`` altered the key, or ``attempts`` is below 1.
             DocumentConflictError: Another write landed between the read and the
                 write on every attempt.
@@ -393,13 +435,9 @@ class DocumentCollection[T: BaseModel]:
             stored = self._c.find_one({self._key: key_value})
             if stored is None:
                 raise KeyError(key_value)
-            # A document deleted and made again restarts at revision 1, so _id tells it apart.
-            identity = stored["_id"]
-            rev = stored.get(REV)
-            if expected_rev is not None and (rev or 0) != expected_rev:
-                raise StaleRevisionError(
-                    f"{self._c.name}/{key_value} is at revision {rev or 0}, not {expected_rev}"
-                )
+            found = _revision(stored)
+            if expected_rev is not None:
+                expected_rev.refuse_unless(found, f"{self._c.name}/{key_value}")
             current = self._load(stored)
             if current is None:
                 raise KeyError(key_value)
@@ -410,12 +448,9 @@ class DocumentCollection[T: BaseModel]:
                 return updated
             if after.get(self._key) != key_value:
                 raise ValueError(f"mutate may not change the key {self._key!r} of {key_value!r}")
-            # A document written outside this layer carries no _rev until its first write here.
-            expected = {REV: rev} if rev is not None else {REV: {"$exists": False}}
             try:
                 result = self._c.replace_one(
-                    {"_id": identity, self._key: key_value, **expected},
-                    after | {REV: (rev or 0) + 1},
+                    {self._key: key_value, **found.condition()}, after | {REV: found.number + 1}
                 )
             except OperationFailure as exc:
                 if exc.code not in _CONFLICT_CODES:
@@ -428,15 +463,24 @@ class DocumentCollection[T: BaseModel]:
             f"{self._c.name}/{key_value} changed under {attempts} attempts to mutate it"
         )
 
-    def delete(self, key_value: str, *, only_if: Mapping[str, Any] | None = None) -> bool:
+    def delete(
+        self,
+        key_value: str,
+        *,
+        only_if: Mapping[str, Any] | None = None,
+        expected_rev: Revision | None = None,
+    ) -> bool:
         """Delete the document with ``key == key_value``, and say whether one was removed.
 
         ``only_if`` names further field values the document must hold to be removed.
+        ``expected_rev`` holds the delete to the document and revision a caller read, as
+        :meth:`mutate` does.
 
         Raises:
             DocumentConflictError: Every attempt lost a race.
         """
-        query = {**(only_if or {}), self._key: key_value}
+        held = expected_rev.condition() if expected_rev is not None else {}
+        query = {**(only_if or {}), **held, self._key: key_value}
         deleted = _retrying(
             lambda: self._c.delete_one(query).deleted_count > 0, what=f"{self._c.name} delete"
         )

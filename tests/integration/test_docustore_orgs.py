@@ -427,6 +427,44 @@ class TestCredentials:
 
         assert credentials[0].get("agents") is not None
 
+    @staticmethod
+    def _made_again_after_the_read(credentials, monkeypatch) -> None:
+        """Replica 1 deletes the credential and makes it again, unchanged, after replica 0 reads it.
+
+        The one made again is back at revision 1, as the one read was.
+        """
+        first, second = credentials
+        real = first._c.get_with_revision
+
+        def read_then_made_again(name):
+            monkeypatch.setattr(first._c, "get_with_revision", real)
+            found = real(name)
+            second.delete(name)
+            second.put(found[0], new=True)
+            return found
+
+        monkeypatch.setattr(first._c, "get_with_revision", read_then_made_again)
+
+    def test_a_replace_never_lands_on_one_made_again_since_its_read(self, credentials, monkeypatch):
+        credentials[0].put(_credential("agents"), new=True)
+        read = credentials[0].get("agents")
+        self._made_again_after_the_read(credentials, monkeypatch)
+
+        with pytest.raises(CredentialChangedError):
+            credentials[0].put(_credential("agents", listeners=("grpc",)), current=read)
+
+        assert credentials[1].get("agents") == read
+
+    def test_a_delete_never_removes_one_made_again_since_its_read(self, credentials, monkeypatch):
+        credentials[0].put(_credential("agents"), new=True)
+        read = credentials[0].get("agents")
+        self._made_again_after_the_read(credentials, monkeypatch)
+
+        with pytest.raises(CredentialChangedError):
+            credentials[0].delete("agents", current=read)
+
+        assert credentials[1].get("agents") == read
+
     def test_a_delete_of_a_missing_id_is_a_keyerror(self, credentials):
         with pytest.raises(KeyError):
             credentials[0].delete("ghost")
