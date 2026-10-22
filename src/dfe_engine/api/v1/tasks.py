@@ -20,6 +20,7 @@ import asyncio
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from scalo.concurrency import run_blocking
 from sse_starlette.sse import EventSourceResponse
 
 from dfe_engine.api.deps import CurrentUser, held_tenant_ids, require_action
@@ -40,7 +41,7 @@ async def _visible_task(request: Request, user: AuthContext, task_id: str, actio
     Raises:
         HTTPException: 404 when the task does not exist or is not held to the caller's orgs.
     """
-    reader_orgs = held_tenant_ids(request, user, action)
+    reader_orgs = await run_blocking(held_tenant_ids, request, user, action)
     info = await _get_task_manager(request).get(task_id, reader_orgs=reader_orgs)
     if info is None:
         raise HTTPException(
@@ -61,7 +62,7 @@ async def list_tasks(
     kind: str | None = Query(None, description="Filter by task kind"),
 ) -> list[TaskInfo]:
     """List the tasks the caller may see, optionally filtered by kind."""
-    reader_orgs = held_tenant_ids(request, user, scopes_dict["task_read"])
+    reader_orgs = await run_blocking(held_tenant_ids, request, user, scopes_dict["task_read"])
     return await _get_task_manager(request).list(kind=kind, reader_orgs=reader_orgs)
 
 
