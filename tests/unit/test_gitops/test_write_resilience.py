@@ -466,13 +466,17 @@ def test_a_callers_own_timeout_does_not_make_a_hard_failure_transient(
     assert len(timeouts) == 1
 
 
-def test_the_budget_bounds_a_call_to_a_silent_forge(tmp_path: Path, no_proxy) -> None:
+def test_the_budget_bounds_a_call_to_a_silent_forge(
+    tmp_path: Path, no_proxy, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A retry waits only for what is left of the budget, so the budget ends the call.
 
     With every retry waiting its full timeout, a forge that accepts and goes silent
-    cost two timeouts plus the budget.
+    cost two timeouts plus the budget. The bound is read off the timeout each attempt
+    is handed: the silent forge holds an attempt for at least that long, and elapsed
+    time would also count whatever the host stalled for.
     """
-    timeout, budget = 2.0, 0.5
+    write_timeout, budget = 1.0, 0.5
     bare, branch = _seed(tmp_path)
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
@@ -484,17 +488,31 @@ def test_the_budget_bounds_a_call_to_a_silent_forge(tmp_path: Path, no_proxy) ->
             branch,
             f"http://127.0.0.1:{listener.getsockname()[1]}/deploy.git",
             write=GitopsWriteSettings(
-                timeout_seconds=timeout, wait_initial=0.05, wait_max=0.1, budget_seconds=budget
+                timeout_seconds=write_timeout,
+                wait_initial=0.05,
+                wait_max=0.1,
+                budget_seconds=budget,
             ),
         )
-        started = time.monotonic()
+        real_fetch = repo._fetch
+        handed: list[float] = []
+
+        def recording_fetch(errstream: Any, *, timeout: float) -> Any:
+            handed.append(timeout)
+            return real_fetch(errstream, timeout=timeout)
+
+        monkeypatch.setattr(repo, "_fetch", recording_fetch)
         with pytest.raises(GitopsUnavailableError):
             repo.publish({"x.yaml": "v: 1\n"}, message="silent forge")
-        elapsed = time.monotonic() - started
     finally:
         listener.close()
 
-    assert elapsed < timeout + budget + 0.5
+    first, *retries = handed
+    assert first == write_timeout
+    assert retries, "the first failure was not retried"
+    assert max(retries) <= budget, handed
+    # A retry lasts at least the shortest timeout, so the budget fits only so many.
+    assert len(retries) <= budget / repo_module._MIN_ATTEMPT_TIMEOUT_SECONDS, handed
 
 
 @pytest.fixture
@@ -541,12 +559,9 @@ def test_the_breaker_opens_after_spent_budgets_and_answers_without_dialling(
     assert dialled >= 2
     assert _breaker(manager, "opened") == 1
 
-    started = time.monotonic()
     with pytest.raises(GitopsUnavailableError) as caught:
         repo.publish({"x.yaml": "v: 1\n"}, message="breaker open")
-    elapsed = time.monotonic() - started
 
-    assert elapsed < timeout
     assert black_hole.connections == dialled
     assert caught.value.remote == url
     assert reset - 5 <= caught.value.retry_after_seconds <= reset
