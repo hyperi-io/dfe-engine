@@ -132,6 +132,8 @@ The engine's OpenBao policy needs create, read, update, delete and list on `<mou
 
 More than one engine (`DFE_ENGINE_REPLICAS` above 1) needs `openbao` or `aws`. Both store a secret only when the name is free (KV v2 `cas=0`, `CreateSecret`), so replicas minting the same secret keep one value. `gcp` and `azure` are refused: their secret names allow no `/`, and every engine path has one.
 
+More than one engine also needs every node's clock synced by NTP, because a replica judges another's claims and task heartbeats stale by its own clock, against windows of 30 to 60 seconds.
+
 ## The dfe-docker special case - keep it small
 
 dfe-docker is the primary developer-desktop use case and is Kaz's repo (changes go
