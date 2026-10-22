@@ -1514,6 +1514,8 @@ class AccountStoreSettings(BaseModel):
     - DFE_AUTH_ACCOUNTS_STORE_COLLECTION -> auth.accounts_store.collection
     - DFE_AUTH_ACCOUNTS_STORE_SERVER_SELECTION_TIMEOUT_SECONDS ->
       auth.accounts_store.server_selection_timeout_seconds
+    - DFE_AUTH_ACCOUNTS_STORE_SOCKET_TIMEOUT_SECONDS ->
+      auth.accounts_store.socket_timeout_seconds
     """
 
     uri: str = Field(
@@ -1532,6 +1534,18 @@ class AccountStoreSettings(BaseModel):
             "How long a document-store call waits for a store it cannot reach before it "
             "fails, in seconds. pymongo's own default is 30. "
             "DFE_AUTH_ACCOUNTS_STORE_SERVER_SELECTION_TIMEOUT_SECONDS."
+        ),
+    )
+    socket_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "How long a document-store call waits for an answer from a store it reached "
+            "before it fails, in seconds. The engine's slowest calls, index builds at boot "
+            "and writes racing other replicas, take a few seconds at most, so this only "
+            "ends calls to a store that has stopped answering, which otherwise hold their "
+            "worker thread for ever. "
+            "DFE_AUTH_ACCOUNTS_STORE_SOCKET_TIMEOUT_SECONDS."
         ),
     )
 
@@ -2881,6 +2895,8 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("accounts_store", {})["server_selection_timeout_seconds"] = (
             float(val)
         )
+    if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_SOCKET_TIMEOUT_SECONDS"):
+        overrides["auth"].setdefault("accounts_store", {})["socket_timeout_seconds"] = float(val)
 
     # HyperDX settings
     if val := _get_env("DFE_HYPERDX_BASE_URL"):

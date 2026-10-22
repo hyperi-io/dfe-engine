@@ -9,6 +9,8 @@
 
 The store here is a listening socket that never accepts, which is what a stalled or
 partitioned store looks like to the client: the connection opens and nothing comes back.
+A store that answers the handshake and then stalls is covered against a real store in
+``tests/integration/test_docustore_socket_timeout.py``.
 """
 
 import socket
@@ -55,7 +57,7 @@ def test_the_engine_builds_its_store_with_the_configured_timeout(silent_store):
     started = time.monotonic()
 
     backend = resolve_store_backend(
-        "auto", silent_store, "dfe_engine_test", server_selection_timeout=0.3
+        "auto", silent_store, "dfe_engine_test", server_selection_timeout=0.3, socket_timeout=30.0
     )
 
     assert backend == ("yaml", None)
@@ -75,3 +77,18 @@ def test_the_timeout_is_set_from_the_environment(monkeypatch):
 def test_a_timeout_of_zero_is_refused():
     with pytest.raises(ValueError, match="greater than 0"):
         AccountStoreSettings(server_selection_timeout_seconds=0)
+
+
+def test_the_answer_timeout_defaults_to_thirty_seconds():
+    assert AccountStoreSettings().socket_timeout_seconds == 30.0
+
+
+def test_the_answer_timeout_is_set_from_the_environment(monkeypatch):
+    monkeypatch.setenv("DFE_AUTH_ACCOUNTS_STORE_SOCKET_TIMEOUT_SECONDS", "12.5")
+
+    assert load_settings().auth.accounts_store.socket_timeout_seconds == 12.5
+
+
+def test_an_answer_timeout_of_zero_is_refused():
+    with pytest.raises(ValueError, match="greater than 0"):
+        AccountStoreSettings(socket_timeout_seconds=0)
