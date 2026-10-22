@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.60](https://github.com/hyperi-io/dfe-engine/compare/v1.22.59...v1.22.60) (2026-10-22)
+
+### Bug Fixes
+
+* **auth:** make session ends outlive a restart ([#942](https://github.com/hyperi-io/dfe-engine/issues/942)) ([82887c4](https://github.com/hyperi-io/dfe-engine/commit/82887c4763aaf442d2a7ee1eb80b8ca9853d36b8))
+
 ## [1.22.59](https://github.com/hyperi-io/dfe-engine/compare/v1.22.58...v1.22.59) (2026-10-22)
 
 ### Bug Fixes
