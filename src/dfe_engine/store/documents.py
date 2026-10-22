@@ -501,7 +501,8 @@ class Claims:
 
         The grace leaves alone a claim whose owner is still writing the record that will
         hold it. The release matches the claim as read, so one renewed, or released and
-        made again, since is kept.
+        made again, since is kept. The age compares this replica's clock with the
+        claimer's, so replicas need clocks synced by NTP.
 
         Args:
             claim: A claim as read.
