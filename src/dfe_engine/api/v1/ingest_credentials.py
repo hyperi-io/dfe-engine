@@ -330,11 +330,20 @@ def _put(
     _sync_tokens(request)
 
 
-def _mint(request: Request, credential: IngestCredential, token: str, *, created: bool) -> None:
+def _mint(
+    request: Request,
+    credential: IngestCredential,
+    token: str,
+    *,
+    current: IngestCredential | None = None,
+) -> None:
     """Store *token* as the credential's, then the credential, then the bearer secrets.
 
     The token goes first, so a credential is never stored with nothing a sender
-    could present. A create whose record write fails takes its token back out.
+    could present. Without ``current`` it is a create, whose token is taken back out
+    when the record write fails. With it, the credential is replaced only while it is
+    still ``current``, so a rotate never brings back one deleted since or undoes a
+    binding changed since.
     """
     secrets = _secrets(request)
     try:
@@ -342,9 +351,9 @@ def _mint(request: Request, credential: IngestCredential, token: str, *, created
     except SecretsError as exc:
         raise _secrets_failure(exc) from exc
     try:
-        _put(request, credential, new=created)
+        _put(request, credential, new=current is None, current=current)
     except HTTPException, ProblemError:
-        if created:
+        if current is None:
             drop_token(secrets, credential.name)
         raise
 
@@ -452,7 +461,7 @@ async def apply_ingest_credential(
     now = _now()
     minted = desired.model_copy(update={"created_at": now, "rotated_at": now})
     token = mint_token()
-    await run_blocking(functools.partial(_mint, request, minted, token, created=True))
+    await run_blocking(functools.partial(_mint, request, minted, token))
     audit_resource_change(user.user_id, _RESOURCE, credential, "created", {"org": org})
     synced = await run_blocking(functools.partial(reconcile_tenancy, request, user))
     response.status_code = 201
@@ -493,7 +502,8 @@ async def rotate_ingest_credential(
     """Mint a new token for an ingest credential. The old one stops working and the binding stays.
 
     The new token comes back in this response and never again. ``If-Match`` is
-    honoured when sent.
+    honoured when sent. When another write changes or removes the credential first,
+    it answers 412, as a stale precondition does.
     """
     held = _require_owned(_registry(request), org, credential)
     preconditions.check(credential_etag(held), require=False)
@@ -502,6 +512,6 @@ async def rotate_ingest_credential(
         return _written(held, dry_run=True)
     rotated = held.model_copy(update={"rotated_at": _now()})
     token = mint_token()
-    await run_blocking(functools.partial(_mint, request, rotated, token, created=False))
+    await run_blocking(functools.partial(_mint, request, rotated, token, current=held))
     audit_resource_change(user.user_id, _RESOURCE, credential, "rotated", {"org": org})
     return _written(rotated, dry_run=False, token=token)

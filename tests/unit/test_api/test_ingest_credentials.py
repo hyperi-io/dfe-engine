@@ -330,6 +330,30 @@ class TestAWriteThatLandsAfterThePreconditionCheck:
         assert resp.json()["code"] == "resource_exists"
         assert credentials.get("agents") == other
 
+    def test_a_rotate_of_one_deleted_since_answers_412_and_leaves_it_gone(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        _create(client, admin_headers, listeners=["http"])
+        credentials = app.state.org_registry.ingest_credentials
+        _first_write_lands_before(monkeypatch, app, "put", lambda: credentials.delete("agents"))
+
+        resp = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
+
+        assert resp.status_code == 412, resp.text
+        assert resp.json()["code"] == "resource_missing"
+        assert credentials.get("agents") is None
+
+    def test_a_rotate_answers_412_and_keeps_a_binding_changed_since(
+        self, client, app, admin_headers, orgs, monkeypatch
+    ):
+        _create(client, admin_headers, listeners=["http"])
+        _first_write_lands_before(monkeypatch, app, "put", lambda: self._otlp_only(app))
+
+        resp = client.post(f"{BASE}/agents/rotate", headers=admin_headers)
+
+        assert resp.status_code == 412, resp.text
+        assert client.get(f"{BASE}/agents", headers=admin_headers).json()["listeners"] == ["otlp"]
+
 
 @pytest.fixture
 def acme_admin(client, app, admin_headers, api_settings, orgs) -> dict[str, str]:
