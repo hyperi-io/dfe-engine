@@ -191,20 +191,14 @@ class CatalogueSchemaLayers:
 
 @dataclass(frozen=True, slots=True)
 class CatalogueBinding:
-    """An app that ships a catalogue of sources it already knows how to handle.
+    """An app whose transforms the shipped source catalogue selects.
 
-    The app owns the catalogue; this says which file carries it, where the
-    entries sit inside that file, how one entry names the compiled-in program it
-    selects, and which schema files an entry's table is built from. All of them
-    are the app's own conventions, so an app with a differently shaped catalogue
-    joins by being declared here rather than by a branch in the engine.
+    The catalogue itself is dfe-schemas package data; this says how one entry
+    names the compiled-in program it selects and which schema files an entry's
+    table is built from. Both are the app's own conventions, so an app with a
+    differently shaped catalogue joins by being declared here rather than by a
+    branch in the engine.
     """
-
-    file: str
-    """Filename the app publishes it under - what a mounted copy is checked against."""
-
-    entries_key: str
-    """Top-level key in that file holding the entries, one per source."""
 
     variant_pattern: str
     """How an entry becomes ``transform.variant``; ``{entry}`` and ``{transform}``."""
@@ -215,6 +209,18 @@ class CatalogueBinding:
     def variant(self, entry: str, transform: str) -> str:
         """The compiled-in program an entry's named transform selects."""
         return self.variant_pattern.format(entry=entry, transform=transform)
+
+    def parse_variant(self, variant: str) -> tuple[str, str] | None:
+        """The entry and transform a variant names, or None when the pattern cannot produce it."""
+        prefix, _, rest = self.variant_pattern.partition("{entry}")
+        middle, _, suffix = rest.partition("{transform}")
+        if not (variant.startswith(prefix) and variant.endswith(suffix)):
+            return None
+        body = variant[len(prefix) : len(variant) - len(suffix)]
+        entry, sep, transform = body.rpartition(middle)
+        if not sep or not entry or not transform:
+            return None
+        return entry, transform
 
 
 @dataclass(frozen=True, slots=True)
@@ -784,15 +790,11 @@ def _catalogue_from(service: str, raw: object) -> CatalogueBinding | None:
         raise CatalogueError(f"{service}: catalogue must be a mapping")
     try:
         binding = CatalogueBinding(
-            file=str(raw["file"]),
-            entries_key=str(raw["entries_key"]),
             variant_pattern=str(raw["variant_pattern"]),
             schema_layers=_schema_layers_from(service, raw),
         )
     except KeyError as exc:
-        raise CatalogueError(
-            f"{service}: catalogue needs file, entries_key and variant_pattern; missing {exc}"
-        ) from exc
+        raise CatalogueError(f"{service}: catalogue needs variant_pattern; missing {exc}") from exc
     # Rendered here rather than at the first use, so a pattern naming a
     # placeholder the engine never substitutes is a manifest error, not a
     # transform instance told to run a program with a brace in its name.
@@ -1240,23 +1242,6 @@ def source_type_for_package(package: str) -> str | None:
             if package in packages:
                 return family
     return None
-
-
-def catalogue_app(filename: str) -> AppDescriptor:
-    """The app whose catalogue a mounted file carries.
-
-    Matched on the filename the app declares, so the transform that owns a
-    mounted catalogue is a fact in the manifest rather than an assumption about
-    which app is the only one with a catalogue today.
-    """
-    declared = {app.catalogue.file: app for app in APP_CATALOGUE.values() if app.catalogue}
-    try:
-        return declared[filename]
-    except KeyError:
-        raise CatalogueError(
-            f"no catalogued app ships a source catalogue named {filename!r} "
-            f"(declared: {', '.join(sorted(declared)) or 'none'})"
-        ) from None
 
 
 def instance_routed_apps() -> list[AppDescriptor]:

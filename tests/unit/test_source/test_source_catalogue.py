@@ -7,8 +7,8 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """What a catalogue entry becomes, asserted on the write body it compiles to.
 
-The vendored fixture is the real shipped catalogue, so these run against the
-shapes a deployment actually gets rather than against a hand-built entry that
+The fixture is the catalogue the installed dfe-schemas ships, so these run against
+the shapes a deployment actually gets rather than against a hand-built entry that
 could quietly diverge from it.
 """
 
@@ -16,20 +16,15 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.manifest import ManifestError
 from dfe_engine.settings import DFESettings
 from dfe_engine.source import catalogue as sc
 from dfe_engine.yaml_utils import yaml_dump
 
-SHIPPED = Path(__file__).parents[2] / "fixtures" / "catalogue" / "sources.yaml"
-
 
 @pytest.fixture(scope="module")
 def shipped() -> sc.SourceCatalogue:
-    """The vendored copy of the catalogue dfe-transform-elastic publishes."""
-    catalogue = sc.load_source_catalogue(SHIPPED)
-    assert catalogue is not None
-    return catalogue
+    """The catalogue the installed dfe-schemas ships."""
+    return sc.load_source_catalogue()
 
 
 @pytest.fixture
@@ -37,80 +32,70 @@ def settings() -> DFESettings:
     return DFESettings(env="dev")
 
 
-def _write(tmp_path: Path, entries: dict, name: str = "sources.yaml") -> Path:
-    path = tmp_path / name
-    yaml_dump({"sources": entries}, path)
-    return path
+def _entry(source: str, *, engine: str = "elastic", **catalogue: object) -> dict:
+    block = {
+        "package": "p",
+        "data_stream": "d",
+        "intakes": ["beats"],
+        "variants": ["filebeat.thing.default"],
+        **catalogue,
+    }
+    return {"source": source, "transform": {"engine": engine}, "catalogue": block}
+
+
+def _write(tmp_path: Path, *docs: dict) -> Path:
+    for doc in docs:
+        yaml_dump(doc, tmp_path / f"{doc.get('source', 'unnamed')}.yaml")
+    return tmp_path
 
 
 class TestReading:
-    def test_a_deployment_with_no_catalogue_mounted_has_none(self, tmp_path, monkeypatch):
-        monkeypatch.delenv(sc.CATALOGUE_FILE_ENV, raising=False)
-        monkeypatch.setattr(sc, "DEFAULT_CATALOGUE_PATH", tmp_path / "absent.yaml")
+    def test_the_catalogue_is_read_from_the_installed_dfe_schemas(self, shipped):
+        assert shipped.path == sc.catalogue_dir()
+        assert shipped.app.service == "dfe-transform-elastic"
+        assert shipped.engine == "elastic"
 
-        assert sc.load_source_catalogue() is None
+    def test_a_directory_with_no_catalogue_files_is_refused(self, tmp_path):
+        with pytest.raises(sc.SourceCatalogueError, match="no source catalogue"):
+            sc.load_source_catalogue(tmp_path)
 
-    def test_the_environment_names_the_mounted_file(self, tmp_path, monkeypatch):
-        path = _write(
-            tmp_path,
-            {
-                "thing": {
-                    "package": "p",
-                    "data_stream": "d",
-                    "intakes": ["beats"],
-                    "transforms": ["default"],
-                }
-            },
-        )
-        monkeypatch.setenv(sc.CATALOGUE_FILE_ENV, str(path))
+    def test_an_engine_no_app_catalogues_is_refused_by_name(self, tmp_path):
+        _write(tmp_path, _entry("thing", engine="nobody"))
 
-        catalogue = sc.load_source_catalogue()
+        with pytest.raises(sc.SourceCatalogueError, match="dfe-transform-nobody"):
+            sc.load_source_catalogue(tmp_path)
 
-        assert catalogue is not None
-        assert catalogue.path == path
-        assert catalogue.app.service == "dfe-transform-elastic"
-        assert catalogue.engine == "elastic"
+    def test_an_entry_missing_a_key_names_the_file(self, tmp_path):
+        doc = _entry("thing")
+        del doc["catalogue"]["data_stream"]
+        _write(tmp_path, doc)
 
-    def test_a_file_no_app_ships_is_refused_by_name(self, tmp_path):
-        # The owning app is matched on the filename it declares, so a file no app
-        # claims has no engine to name and no variant pattern to render.
-        path = _write(tmp_path, {"thing": {}}, name="somebody-elses.yaml")
+        with pytest.raises(sc.SourceCatalogueError, match=r"thing\.yaml is missing"):
+            sc.load_source_catalogue(tmp_path)
 
-        with pytest.raises(ManifestError, match=r"somebody-elses\.yaml"):
-            sc.load_source_catalogue(path)
+    def test_a_variant_the_pattern_cannot_produce_is_refused(self, tmp_path):
+        _write(tmp_path, _entry("thing", variants=["thing.default"]))
 
-    def test_a_named_file_that_is_not_there_is_refused(self, tmp_path):
-        with pytest.raises(ManifestError, match="not found"):
-            sc.load_source_catalogue(tmp_path / "sources.yaml")
+        with pytest.raises(sc.SourceCatalogueError, match="do not follow"):
+            sc.load_source_catalogue(tmp_path)
 
-    def test_a_document_without_the_declared_entries_key_names_that_key(self, tmp_path):
-        path = tmp_path / "sources.yaml"
-        yaml_dump({"entries": {"thing": {}}}, path)
+    def test_an_entry_without_a_default_transform_is_refused(self, tmp_path):
+        _write(tmp_path, _entry("thing", variants=["filebeat.thing.audit"]))
 
-        with pytest.raises(sc.SourceCatalogueError, match="'sources' mapping"):
-            sc.load_source_catalogue(path)
-
-    def test_an_entry_missing_a_key_names_the_entry(self, tmp_path):
-        path = _write(tmp_path, {"thing": {"package": "p", "intakes": ["beats"]}})
-
-        with pytest.raises(sc.SourceCatalogueError, match="'thing' is missing"):
-            sc.load_source_catalogue(path)
+        with pytest.raises(sc.SourceCatalogueError, match="'default'"):
+            sc.load_source_catalogue(tmp_path)
 
     def test_an_intake_no_source_definition_maps_to_is_refused(self, tmp_path):
-        path = _write(
-            tmp_path,
-            {
-                "thing": {
-                    "package": "p",
-                    "data_stream": "d",
-                    "intakes": ["beats", "carrier-pigeon"],
-                    "transforms": ["default"],
-                }
-            },
-        )
+        _write(tmp_path, _entry("thing", intakes=["beats", "carrier-pigeon"]))
 
         with pytest.raises(sc.SourceCatalogueError, match="carrier-pigeon"):
-            sc.load_source_catalogue(path)
+            sc.load_source_catalogue(tmp_path)
+
+    def test_a_source_name_no_label_admits_is_refused(self, tmp_path):
+        _write(tmp_path, _entry("1thing"))
+
+        with pytest.raises(sc.SourceCatalogueError, match="DNS-1123"):
+            sc.load_source_catalogue(tmp_path)
 
     def test_the_shipped_catalogue_parses_whole(self, shipped):
         assert len(shipped.entries) == 1069
@@ -120,18 +105,16 @@ class TestReading:
 
 
 class TestSourceName:
-    def test_the_separator_is_swapped_for_the_one_a_label_allows(self, shipped):
+    def test_the_catalogue_names_each_source(self, shipped):
         assert shipped.entries["aws_cloudtrail"].source_name() == "aws-cloudtrail"
 
-    def test_a_name_too_long_for_a_label_is_refused_rather_than_truncated(self, shipped):
+    def test_a_vendor_name_too_long_for_a_label_ships_a_shorter_one(self, shipped):
         entry = shipped.entries["microsoft_defender_endpoint_machine_action"]
 
-        with pytest.raises(ValueError, match="exceeds max length"):
-            entry.source_name()
+        assert entry.source_name() == "ms-defender-endpoint-machine-action"
 
-    def test_a_name_starting_with_a_digit_is_refused(self, shipped):
-        with pytest.raises(ValueError, match="DNS-1123"):
-            shipped.entries["1password_audit_events"].source_name()
+    def test_a_vendor_name_starting_with_a_digit_ships_one_that_does_not(self, shipped):
+        assert shipped.entries["1password_audit_events"].source_name() == "onepassword-audit-events"
 
 
 class TestCompile:
@@ -183,11 +166,33 @@ class TestCompile:
         assert write.fetcher is not None
         assert write.fetcher.source_type == "onepassword"
 
-    def test_a_package_no_fetcher_polls_is_refused_by_package_name(self, shipped, settings):
-        entry = shipped.entries["zoom_activity"]
+    def test_the_shipped_catalogue_offers_fetcher_only_where_a_family_polls(self, shipped):
+        offered = [e for e in shipped.entries.values() if "fetcher" in e.intakes]
+
+        assert offered
+        assert "fetcher" not in shipped.entries["zoom_activity"].intakes
+        for entry in offered:
+            assert sc.apps.source_type_for_package(entry.package), entry.name
+
+    def test_a_package_no_fetcher_polls_is_refused_by_package_name(
+        self, shipped, settings, tmp_path
+    ):
+        _write(
+            tmp_path,
+            _entry(
+                "zoom-activity",
+                package="zoom",
+                data_stream="activity",
+                intakes=["fetcher"],
+                variants=["filebeat.zoom_activity.default"],
+            ),
+        )
+        catalogue = sc.load_source_catalogue(tmp_path)
 
         with pytest.raises(sc.SourceCatalogueError, match="'zoom' package"):
-            sc.write_request_for(shipped, entry, intake="fetcher", settings=settings)
+            sc.write_request_for(
+                catalogue, catalogue.entries["zoom_activity"], intake="fetcher", settings=settings
+            )
 
     def test_an_intake_the_entry_does_not_arrive_by_is_refused(self, shipped, settings):
         with pytest.raises(sc.SourceCatalogueError, match="does not arrive by 'receiver'"):

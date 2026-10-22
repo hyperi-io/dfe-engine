@@ -324,9 +324,15 @@ class TestShippedManifest:
 
         assert set(shipping) == {"dfe-transform-elastic"}
         binding = shipping["dfe-transform-elastic"]
-        assert binding.file == "sources.yaml"
-        assert binding.entries_key == "sources"
         assert binding.variant("okta", "default") == "filebeat.okta.default"
+
+    def test_a_variant_parses_back_to_its_entry_and_transform(self):
+        binding = catalogue.descriptor("dfe-transform-elastic").catalogue
+        assert binding is not None
+
+        assert binding.parse_variant("filebeat.panw.traffic") == ("panw", "traffic")
+        assert binding.parse_variant("filebeat.cisco_ios.default") == ("cisco_ios", "default")
+        assert binding.parse_variant("panw.traffic") is None
 
     def test_elastic_names_ecs_and_a_derived_and_vendor_layer_per_stream(self):
         binding = catalogue.descriptor("dfe-transform-elastic").catalogue
@@ -337,13 +343,6 @@ class TestShippedManifest:
         assert layers.meta_schema == "meta/elastic/ecs"
         assert layers.derived("cisco_ios", "log") == "derived/cisco_ios/log"
         assert layers.additional("cisco_ios", "log") == "additional/cisco_ios/log"
-
-    def test_the_mounted_catalogue_finds_its_owner_by_filename(self):
-        assert catalogue.catalogue_app("sources.yaml").service == "dfe-transform-elastic"
-
-    def test_a_catalogue_no_app_ships_is_refused_with_what_is_declared(self):
-        with pytest.raises(CatalogueError, match=r"declared: sources\.yaml"):
-            catalogue.catalogue_app("elsewhere.yaml")
 
     def test_a_package_the_fetcher_names_the_same_way_needs_no_mapping(self):
         assert catalogue.source_type_for_package("okta") == "okta"
@@ -697,9 +696,9 @@ class TestManifestParsing:
             catalogue.load_mesh(path)
 
     def test_a_catalogue_missing_a_key_names_what_it_needs(self, tmp_path):
-        path = self._manifest(tmp_path, {"catalogue": {"file": "sources.yaml"}})
+        path = self._manifest(tmp_path, {"catalogue": {"meta_schema": "meta/x"}})
 
-        with pytest.raises(CatalogueError, match="file, entries_key and variant_pattern"):
+        with pytest.raises(CatalogueError, match="needs variant_pattern"):
             load_catalogue(path)
 
     def test_a_variant_pattern_naming_an_unknown_placeholder_is_refused(self, tmp_path):
@@ -707,8 +706,6 @@ class TestManifestParsing:
             tmp_path,
             {
                 "catalogue": {
-                    "file": "sources.yaml",
-                    "entries_key": "sources",
                     "variant_pattern": "{vendor}.{entry}",
                 }
             },
@@ -721,8 +718,6 @@ class TestManifestParsing:
     def _catalogue(**layers: str) -> dict:
         return {
             "catalogue": {
-                "file": "sources.yaml",
-                "entries_key": "sources",
                 "variant_pattern": "{entry}.{transform}",
                 **layers,
             }

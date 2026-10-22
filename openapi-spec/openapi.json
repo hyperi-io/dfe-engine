@@ -6129,7 +6129,7 @@
           "Sources"
         ],
         "summary": "List Catalogue",
-        "description": "List the sources the deployed transforms already handle.\n\nEmpty when no catalogue is mounted, which is a deployment without one rather\nthan an error: the app that ships the catalogue prints it from its own image.\nEach entry says whether its table's schema layers resolve on this deployment,\nand names the first one that does not, so a console can hold back an entry\nthe create would refuse.",
+        "description": "List the sources the deployed transforms already handle.\n\nThe catalogue is dfe-schemas package data, so every deployment has it. Each entry says whether its table's schema layers resolve on this deployment,\nand names the first one that does not, so a console can hold back an entry\nthe create would refuse.",
         "operationId": "sources.catalogue",
         "parameters": [
           {
@@ -30959,7 +30959,7 @@
           "source": {
             "type": "string",
             "title": "Source",
-            "description": "Source name this entry derives; empty when the entry's own name is not a legal source name and one must be supplied on create",
+            "description": "Source name a source created from this entry takes unless one is supplied",
             "default": ""
           },
           "schema_layers": {

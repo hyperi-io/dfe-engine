@@ -5,17 +5,14 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The catalogue routes, over the vendored copy of the shipped catalogue."""
+"""The catalogue routes, over the catalogue the installed dfe-schemas ships."""
 
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.source import catalogue as sc
 from dfe_engine.yaml_utils import yaml_dump
-
-SHIPPED = Path(__file__).parents[2] / "fixtures" / "catalogue" / "sources.yaml"
 
 _ECS_SELECTION = {
     "base": "meta/elastic/ecs",
@@ -51,36 +48,8 @@ def _ship_layers(api_settings, stream: str) -> None:
         yaml_dump(doc, path)
 
 
-@pytest.fixture
-def mounted(monkeypatch):
-    """A deployment with the catalogue mounted, and none held after the test."""
-    monkeypatch.setenv(sc.CATALOGUE_FILE_ENV, str(SHIPPED))
-    sc.reload_source_catalogue()
-    yield
-    monkeypatch.delenv(sc.CATALOGUE_FILE_ENV, raising=False)
-    sc.reload_source_catalogue()
-
-
-@pytest.fixture
-def unmounted(monkeypatch, tmp_path):
-    """A deployment that mounts no catalogue at all."""
-    monkeypatch.delenv(sc.CATALOGUE_FILE_ENV, raising=False)
-    monkeypatch.setattr(sc, "DEFAULT_CATALOGUE_PATH", tmp_path / "absent.yaml")
-    sc.reload_source_catalogue()
-    yield
-    sc.reload_source_catalogue()
-
-
 class TestListCatalogue:
-    def test_a_deployment_with_no_catalogue_lists_nothing(
-        self, client: TestClient, admin_headers: dict, unmounted
-    ):
-        resp = client.get("/api/v1/sources/catalogue", headers=admin_headers)
-
-        assert resp.status_code == 200
-        assert resp.json()["total"] == 0
-
-    def test_the_whole_catalogue_paginates(self, client: TestClient, admin_headers: dict, mounted):
+    def test_the_whole_catalogue_paginates(self, client: TestClient, admin_headers: dict):
         resp = client.get("/api/v1/sources/catalogue?per_page=5", headers=admin_headers)
 
         assert resp.status_code == 200
@@ -89,7 +58,7 @@ class TestListCatalogue:
         assert len(data["items"]) == 5
 
     def test_an_entry_carries_what_the_console_needs_to_offer_it(
-        self, client: TestClient, admin_headers: dict, mounted
+        self, client: TestClient, admin_headers: dict
     ):
         resp = client.get("/api/v1/sources/catalogue?search=okta", headers=admin_headers)
 
@@ -112,7 +81,7 @@ class TestListCatalogue:
         }
 
     def test_an_entry_whose_layers_resolve_says_so(
-        self, client: TestClient, admin_headers: dict, api_settings, mounted
+        self, client: TestClient, admin_headers: dict, api_settings
     ):
         _ship_layers(api_settings, "aws/cloudtrail")
 
@@ -126,7 +95,7 @@ class TestListCatalogue:
         }
 
     def test_an_entry_with_no_derived_schema_names_that_layer(
-        self, client: TestClient, admin_headers: dict, api_settings, mounted
+        self, client: TestClient, admin_headers: dict, api_settings
     ):
         """The entry the create would refuse with 422, named before anyone tries."""
         _ship_layers(api_settings, "aws/cloudtrail")
@@ -140,17 +109,17 @@ class TestListCatalogue:
             "missing_reference": "derived/okta/system",
         }
 
-    def test_an_entry_whose_name_is_not_a_legal_source_name_says_so(
-        self, client: TestClient, admin_headers: dict, mounted
+    def test_every_entry_lists_the_source_name_the_catalogue_gives_it(
+        self, client: TestClient, admin_headers: dict
     ):
         resp = client.get("/api/v1/sources/catalogue?search=1password", headers=admin_headers)
 
         rows = resp.json()["items"]
         assert rows
-        assert all(row["source"] == "" for row in rows)
+        assert all(row["source"].startswith("onepassword-") for row in rows)
 
     def test_the_intake_filter_only_returns_entries_that_arrive_that_way(
-        self, client: TestClient, admin_headers: dict, mounted
+        self, client: TestClient, admin_headers: dict
     ):
         resp = client.get("/api/v1/sources/catalogue?intake=receiver", headers=admin_headers)
 
@@ -158,7 +127,7 @@ class TestListCatalogue:
         assert data["total"] == 135
         assert all("receiver" in row["intakes"] for row in data["items"])
 
-    def test_an_unknown_intake_is_refused(self, client: TestClient, admin_headers: dict, mounted):
+    def test_an_unknown_intake_is_refused(self, client: TestClient, admin_headers: dict):
         resp = client.get("/api/v1/sources/catalogue?intake=carrier", headers=admin_headers)
 
         assert resp.status_code == 422
@@ -169,7 +138,7 @@ class TestListCatalogue:
 
 
 class TestCreateFromCatalogue:
-    def test_an_entry_becomes_a_real_source(self, client: TestClient, admin_headers: dict, mounted):
+    def test_an_entry_becomes_a_real_source(self, client: TestClient, admin_headers: dict):
         resp = client.post(
             "/api/v1/sources/from-catalogue/okta",
             json={"intake": "beats"},
@@ -194,7 +163,7 @@ class TestCreateFromCatalogue:
         }
 
     def test_a_pulled_entry_becomes_a_fetcher_based_source(
-        self, client: TestClient, admin_headers: dict, api_settings, mounted
+        self, client: TestClient, admin_headers: dict, api_settings
     ):
         _ship_layers(api_settings, "aws/cloudtrail")
         resp = client.post(
@@ -211,7 +180,7 @@ class TestCreateFromCatalogue:
         assert version["fetcher"]["source_type"] == "aws"
 
     def test_a_pulled_entry_whose_layers_do_not_resolve_is_refused_not_saved_dead(
-        self, client: TestClient, admin_headers: dict, mounted
+        self, client: TestClient, admin_headers: dict
     ):
         """Its fetcher sits on its own topic with no schema, which could never deploy."""
         resp = client.post(
@@ -228,7 +197,7 @@ class TestCreateFromCatalogue:
 
     @pytest.mark.parametrize("shipped", [True, False], ids=["layers-shipped", "no-layers"])
     def test_the_listing_says_ahead_of_time_what_the_pulled_create_answers(
-        self, client: TestClient, admin_headers: dict, api_settings, mounted, shipped
+        self, client: TestClient, admin_headers: dict, api_settings, shipped
     ):
         if shipped:
             _ship_layers(api_settings, "aws/cloudtrail")
@@ -248,7 +217,7 @@ class TestCreateFromCatalogue:
         )
 
     def test_an_entry_is_built_on_ecs_and_the_layers_shipped_for_its_stream(
-        self, client: TestClient, admin_headers: dict, api_settings, mounted
+        self, client: TestClient, admin_headers: dict, api_settings
     ):
         schemas = Path(api_settings.schemas.schemas_dir)
         for reference, doc in (
@@ -273,18 +242,10 @@ class TestCreateFromCatalogue:
         assert schema["derived_schema"] == "derived/cisco_ios/log"
         assert schema["additional_fields"] == "additional/cisco_ios/log"
 
-    def test_an_entry_whose_name_is_not_a_legal_source_name_takes_one(
-        self, client: TestClient, admin_headers: dict, api_settings, mounted
+    def test_a_supplied_name_replaces_the_catalogue_one(
+        self, client: TestClient, admin_headers: dict, api_settings
     ):
         _ship_layers(api_settings, "1password/audit_events")
-        refused = client.post(
-            "/api/v1/sources/from-catalogue/1password_audit_events",
-            json={"intake": "fetcher"},
-            headers=admin_headers,
-        )
-        assert refused.status_code == 422
-        assert "DNS-1123" in refused.json()["message"]
-
         named = client.post(
             "/api/v1/sources/from-catalogue/1password_audit_events",
             json={"intake": "fetcher", "name": "onepassword-audit"},
@@ -294,7 +255,7 @@ class TestCreateFromCatalogue:
         assert named.json()["source"] == "onepassword-audit"
 
     def test_an_intake_the_entry_does_not_arrive_by_is_refused(
-        self, client: TestClient, admin_headers: dict, mounted
+        self, client: TestClient, admin_headers: dict
     ):
         resp = client.post(
             "/api/v1/sources/from-catalogue/okta",
@@ -306,7 +267,7 @@ class TestCreateFromCatalogue:
         assert resp.json()["code"] == "catalogue_error"
 
     def test_an_entry_that_is_not_in_the_catalogue_is_refused(
-        self, client: TestClient, admin_headers: dict, mounted
+        self, client: TestClient, admin_headers: dict
     ):
         resp = client.post(
             "/api/v1/sources/from-catalogue/not-a-source",
@@ -318,7 +279,7 @@ class TestCreateFromCatalogue:
         assert "not-a-source" in resp.json()["message"]
 
     def test_creating_twice_conflicts_like_any_other_create(
-        self, client: TestClient, admin_headers: dict, mounted
+        self, client: TestClient, admin_headers: dict
     ):
         body = {"intake": "beats"}
         first = client.post("/api/v1/sources/from-catalogue/okta", json=body, headers=admin_headers)
@@ -326,18 +287,6 @@ class TestCreateFromCatalogue:
 
         again = client.post("/api/v1/sources/from-catalogue/okta", json=body, headers=admin_headers)
         assert again.status_code == 409
-
-    def test_a_deployment_with_no_catalogue_says_so(
-        self, client: TestClient, admin_headers: dict, unmounted
-    ):
-        resp = client.post(
-            "/api/v1/sources/from-catalogue/okta",
-            json={"intake": "beats"},
-            headers=admin_headers,
-        )
-
-        assert resp.status_code == 503
-        assert resp.json()["code"] == "not_configured"
 
     def test_creating_from_the_catalogue_needs_source_write(self, client: TestClient):
         resp = client.post("/api/v1/sources/from-catalogue/okta", json={"intake": "beats"})

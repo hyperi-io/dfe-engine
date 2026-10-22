@@ -26,8 +26,6 @@ from dfe_engine.source import catalogue as sc
 from dfe_engine.source.models import SourceWriteRequest, source_from_write
 from dfe_engine.yaml_utils import yaml_dump
 
-SHIPPED = Path(__file__).parents[2] / "fixtures" / "catalogue" / "sources.yaml"
-
 ECS = "meta/elastic/ecs"
 DEPLOY_SCHEMAS = Path("config") / "schemas"
 
@@ -96,10 +94,8 @@ def _built_columns(write: SourceWriteRequest, settings: DFESettings) -> list[str
 
 @pytest.fixture(scope="module")
 def shipped() -> sc.SourceCatalogue:
-    """The vendored copy of the catalogue dfe-transform-elastic publishes."""
-    catalogue = sc.load_source_catalogue(SHIPPED)
-    assert catalogue is not None
-    return catalogue
+    """The catalogue the installed dfe-schemas ships."""
+    return sc.load_source_catalogue()
 
 
 def _compile(

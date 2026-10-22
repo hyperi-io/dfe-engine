@@ -446,18 +446,16 @@ class TestFlows:
     def _catalogue_flow(
         self, shape: shapes.FlowShape, transport: str, engine, e2e, ch_client, flow_sources
     ) -> None:
-        """A source compiled from a mounted catalogue entry, where one is mounted."""
-        offered = engine.json("GET", "/sources/catalogue")
-        entries = offered.get("entries") if isinstance(offered, dict) else offered
-        if not entries:
-            pytest.skip(
-                f"{shapes.EXPECTED_SKIP} this deployment mounts nothing at "
-                "/etc/dfe/catalogue/sources.yaml (or DFE_SOURCE_CATALOGUE_FILE), so the "
-                "engine offers no entry to compile; the file comes from the "
-                "dfe-transform-elastic image's emit-catalogue (dfe-transform-elastic#92)"
-            )
-        entry = str(entries[0]["name"] if isinstance(entries[0], dict) else entries[0])
-        created = engine.call("POST", f"/sources/from-catalogue/{entry}", {"transport": transport})
+        """A source compiled from a catalogue entry the receiver carries."""
+        offered = engine.json("GET", "/sources/catalogue?intake=receiver")
+        entries = offered["items"]
+        assert entries, "the dfe-schemas catalogue offers no entry the receiver carries"
+        entry = str(entries[0]["name"])
+        created = engine.call(
+            "POST",
+            f"/sources/from-catalogue/{entry}",
+            {"intake": "receiver", "transport": transport},
+        )
         assert created.status_code in (200, 201), (
             f"the catalogue entry {entry!r} would not compile into a source: "
             f"{created.status_code} {created.text}"

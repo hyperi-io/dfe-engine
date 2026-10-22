@@ -177,28 +177,15 @@ class TestACreateTheAppsDidNotFollowIsAccepted:
         assert resp.status_code == 200, resp.text
         assert _rules(gc) == ["kvproof"]
 
-    def test_a_catalogue_create_answers_the_same(
-        self, client, app, admin_headers, tmp_path, monkeypatch
-    ):
-        from pathlib import Path
+    def test_a_catalogue_create_answers_the_same(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _refuse_overlay_writes(app)
 
-        from dfe_engine.source import catalogue as sc
-
-        shipped = Path(__file__).parents[2] / "fixtures" / "catalogue" / "sources.yaml"
-        monkeypatch.setenv(sc.CATALOGUE_FILE_ENV, str(shipped))
-        sc.reload_source_catalogue()
-        try:
-            _wire(app, tmp_path)
-            _refuse_overlay_writes(app)
-
-            resp = client.post(
-                "/api/v1/sources/from-catalogue/okta",
-                json={"intake": "beats"},
-                headers=admin_headers,
-            )
-        finally:
-            monkeypatch.delenv(sc.CATALOGUE_FILE_ENV, raising=False)
-            sc.reload_source_catalogue()
+        resp = client.post(
+            "/api/v1/sources/from-catalogue/okta",
+            json={"intake": "beats"},
+            headers=admin_headers,
+        )
 
         assert resp.status_code == 202, resp.text
         assert resp.json()["apps_sync_error"]
