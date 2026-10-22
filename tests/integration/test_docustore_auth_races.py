@@ -15,7 +15,7 @@ writes to overlap and one round rarely shows it.
 from pathlib import Path
 
 import pytest
-from pymongo.errors import DuplicateKeyError
+from pymongo.errors import DuplicateKeyError, InvalidOperation
 
 from dfe_engine.auth import account_durability
 from dfe_engine.auth.accounts import DocuStoreAccountStore
@@ -374,6 +374,42 @@ class TestCustomRolesAcrossReplicas:
         prompt.delete("auditor", holders=lambda _role: [])
 
         assert patient.get("auditor") is None
+
+    def test_a_mark_a_dead_delete_left_stops_refusing_binds_past_the_grace(self, docustore_pair):
+        from dfe_engine.auth.role_store import DocuStoreRoleStore, RoleUnavailableError
+
+        survivor, dying = docustore_pair
+        DocuStoreRoleStore(survivor).create("auditor", description="", permissions=["source:read"])
+
+        def die(_role: str) -> list[str]:
+            # The replica stops between its mark and its unmark, store connection and all.
+            dying.close()
+            raise RuntimeError("replica stopped")
+
+        with pytest.raises(InvalidOperation):
+            DocuStoreRoleStore(dying).delete("auditor", holders=die)
+
+        with pytest.raises(RoleUnavailableError):
+            DocuStoreRoleStore(survivor).bind("auditor", "analysts")
+        DocuStoreRoleStore(survivor, binding_grace_seconds=0).bind("auditor", "analysts")
+        DocuStoreRoleStore(survivor).bind("auditor", "auditors")
+
+    def test_a_delete_whose_mark_a_bind_took_away_leaves_the_role(self, docustore_pair):
+        """Past the grace a delete still running looks like one that died, so the bind wins."""
+        from dfe_engine.auth.role_store import DocuStoreRoleStore, RoleInUseError
+
+        deleter = DocuStoreRoleStore(docustore_pair[0], binding_grace_seconds=0)
+        binder = DocuStoreRoleStore(docustore_pair[1], binding_grace_seconds=0)
+        deleter.create("auditor", description="", permissions=["source:read"])
+
+        def bind_meanwhile(_role: str) -> list[str]:
+            binder.bind("auditor", "analysts")
+            return []
+
+        with pytest.raises(RoleInUseError):
+            deleter.delete("auditor", holders=bind_meanwhile)
+
+        assert deleter.get("auditor") is not None
 
     def test_a_refused_delete_leaves_the_role_bindable(self, docustore_pair):
         from dfe_engine.auth.role_store import DocuStoreRoleStore, RoleInUseError
