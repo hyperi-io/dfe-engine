@@ -42,8 +42,11 @@ from scalo.logger import logger
 
 TASK_FAILED_MESSAGE = "The task failed; the engine log has the reason"
 TASK_STOPPED_MESSAGE = "The engine running the task stopped before it finished"
+TASK_RESULT_TOO_LARGE = "The task finished, but its result is too large to keep"
 CLOSE_TIMEOUT_SECONDS = 5.0
 """How long :meth:`TaskManager.aclose` waits for cancelled tasks to record how they ended."""
+# Half the 16 MiB document the store takes, so the record holding the largest result fits.
+MAX_RESULT_BYTES = 8 * 1024 * 1024
 
 
 def _json_safe(value: Any) -> Any:
@@ -71,6 +74,11 @@ def _json_safe(value: Any) -> Any:
         return value
     except TypeError:
         return str(value)
+
+
+def _result_size(value: Any) -> int:
+    """The bytes ``value`` takes as the JSON a task result is kept as, ASCII-escaped."""
+    return len(json.dumps(_json_safe(value), default=str))
 
 
 def _held(org_ids: Iterable[str] | None) -> frozenset[str] | None:
@@ -220,6 +228,9 @@ class TaskManager:
         :data:`TASK_FAILED_MESSAGE`, because a backend's own error text can carry
         statement fragments, user names and password hashes.
 
+        A result over :data:`MAX_RESULT_BYTES` as JSON is not kept, and the task fails
+        with :data:`TASK_RESULT_TOO_LARGE`, so one engine and a cluster agree.
+
         Args:
             kind: The task kind, for ``list(kind=...)``.
             coro_fn: The coroutine function to run, called with ``*args`` and ``**kwargs``.
@@ -250,10 +261,23 @@ class TaskManager:
                 task.message = "Running"
                 await self._record(task)
                 result = await coro_fn(*args, task=task, **kwargs)
-                task.status = TaskStatus.COMPLETED
-                task.progress = 100
-                task.result = result
-                task.message = "Completed"
+                size = _result_size(result)
+                if size > MAX_RESULT_BYTES:
+                    logger.warning(
+                        "background task result too large to keep",
+                        task_id=task.id,
+                        kind=kind,
+                        size_bytes=size,
+                        limit_bytes=MAX_RESULT_BYTES,
+                    )
+                    task.status = TaskStatus.FAILED
+                    task.error = TASK_RESULT_TOO_LARGE
+                    task.message = f"Failed: {TASK_RESULT_TOO_LARGE}"
+                else:
+                    task.status = TaskStatus.COMPLETED
+                    task.progress = 100
+                    task.result = result
+                    task.message = "Completed"
             except asyncio.CancelledError:
                 self._end_cancelled(task)
             except Exception as exc:
