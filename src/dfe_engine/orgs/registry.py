@@ -76,7 +76,8 @@ CLAIM_GRACE_SECONDS = 60.0
 Longer than any write takes between claiming a key and writing the record that holds
 it, so a write still in flight keeps its claims. A key an update or delete gives up is
 held this long after its last claim, so taking it straight back for another org is
-refused until then.
+refused until then. The age compares this replica's clock with the claimer's, so
+replicas need clocks synced by NTP.
 """
 
 # The fields an update may change. Anything else it names is ignored.
