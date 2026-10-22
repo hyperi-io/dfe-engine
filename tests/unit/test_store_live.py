@@ -44,6 +44,26 @@ class _Collection:
         return self.builds
 
 
+class _Clock:
+    """A clock the test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _aging(collection: _Collection, clock: _Clock) -> Live[int]:
+    return Live(
+        collection.build,
+        lambda: collection.revision,
+        refresh_seconds=0,
+        max_age_seconds=60,
+        clock=clock,
+    )
+
+
 def test_it_builds_once_up_front():
     collection = _Collection()
 
@@ -80,6 +100,31 @@ def test_within_the_floor_the_counter_is_not_read():
     collection.revision += 1
 
     assert (live.get(), len(reads)) == (1, 1)
+
+
+def test_a_value_at_the_max_age_is_built_again_though_the_counter_never_moved():
+    """A write whose counter bump failed leaves the counter where it was, so only age shows it."""
+    collection = _Collection()
+    clock = _Clock()
+    live = _aging(collection, clock)
+
+    clock.now = 59.9
+    assert live.get() == 1
+    clock.now = 60.0
+    assert live.get() == 2
+    clock.now = 119.9
+    assert live.get() == 2
+
+
+def test_on_an_event_loop_a_value_at_the_max_age_is_built_again_behind_the_read():
+    collection = _Collection()
+    clock = _Clock()
+    live = _aging(collection, clock)
+
+    clock.now = 60.0
+    _read_on_a_loop(live)
+
+    _until(lambda: live.value == 2)
 
 
 def test_refresh_builds_now_whatever_the_floor():
