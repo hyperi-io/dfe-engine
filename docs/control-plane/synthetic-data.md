@@ -5,9 +5,11 @@ inbound stream for sales demos, and repeatable data for testing. Never a load
 generator - every knob is a ceiling, and the shipped defaults generate
 nothing until an operator or caller asks.
 
-Every synthetic event carries `tags.synthetic: true` (overridable per
-request), which the common header lands in `_tags` - synthetic data is always
-identifiable downstream.
+Every synthetic event carries a marker (overridable per request), which the common header lands in `_tags` - synthetic data is always identifiable downstream.
+
+Where the pack's own `tags` is an object the event carries `tags.synthetic: true`, found as `_tags.synthetic`.
+
+Where it is an ECS keyword list (`meta/elastic/ecs` and the beats packs that map ECS `tags`) the event carries the keyword `synthetic` in that list, found with ``has(_tags.list.:`Array(Nullable(String))`, 'synthetic')``, and extra `tags` in the request are refused because a list cannot hold keys.
 
 ```mermaid
 flowchart LR

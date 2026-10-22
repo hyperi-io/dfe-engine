@@ -14,7 +14,7 @@ import pytest
 
 from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
 from dfe_engine.source.models import SchemaColumn
-from dfe_engine.synthetic_data.models import SyntheticDataError
+from dfe_engine.synthetic_data.models import ColumnHints, SyntheticDataError
 from dfe_engine.synthetic_data.schema_source import (
     SchemaEventFactory,
     load_synthetic_hints,
@@ -81,6 +81,56 @@ class TestSetPath:
         assert event["Resource"]["ResourceType"] == "AwsEc2Instance"
         assert event["Resources"][0]["Type"] == "AwsIamUser"
         assert event["Id"] == "abc"
+
+
+def tags_factory(static=None, **kwargs) -> SchemaEventFactory:
+    """A one-column pack whose own `tags` value is `static` (or a generated token)."""
+    column = SchemaColumn(name="tags", type="string", expr="@source: tags")
+    hints = {} if static is None else {"tags": ColumnHints(static=static)}
+    return SchemaEventFactory([column], seed=1, hints=hints, **kwargs)
+
+
+class TestTagsShape:
+    def test_object_tags_take_the_marker_key(self):
+        event = tags_factory({"env": "demo"}).event(when=FIXED_END)
+        assert event["tags"] == {"env": "demo", "synthetic": True}
+
+    def test_string_tags_become_a_list_with_the_marker_last(self):
+        event = tags_factory("forwarded").event(when=FIXED_END)
+        assert event["tags"] == ["forwarded", "synthetic"]
+
+    def test_generated_string_tags_become_a_list(self):
+        tags = tags_factory().event(when=FIXED_END)["tags"]
+        assert isinstance(tags, list)
+        assert len(tags) == 2
+        assert tags[-1] == "synthetic"
+
+    def test_list_tags_keep_their_values(self):
+        event = tags_factory(["a", "b"]).event(when=FIXED_END)
+        assert event["tags"] == ["a", "b", "synthetic"]
+
+    def test_marker_is_added_once(self):
+        event = tags_factory(["synthetic", "a"]).event(when=FIXED_END)
+        assert event["tags"] == ["synthetic", "a"]
+
+    def test_no_marker_leaves_the_pack_value_alone(self):
+        event = tags_factory("forwarded", mark_synthetic=False).event(when=FIXED_END)
+        assert event["tags"] == "forwarded"
+
+    @pytest.mark.parametrize("value", [5, 1.5, True])
+    def test_a_tags_value_that_cannot_hold_the_marker_is_refused(self, value):
+        with pytest.raises(SyntheticDataError, match="tags"):
+            tags_factory(value).event(when=FIXED_END)
+
+    def test_extra_tags_are_refused_beside_a_list(self):
+        factory = tags_factory(["a"], tags={"scenario": "demo-1"})
+        with pytest.raises(SyntheticDataError, match="scenario"):
+            factory.event(when=FIXED_END)
+
+    def test_extra_tags_still_merge_into_an_object(self):
+        factory = tags_factory({"env": "demo"}, tags={"scenario": "demo-1"})
+        tags = factory.event(when=FIXED_END)["tags"]
+        assert tags == {"env": "demo", "scenario": "demo-1", "synthetic": True}
 
 
 @pytest.mark.skipif(

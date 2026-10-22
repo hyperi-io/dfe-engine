@@ -33714,12 +33714,12 @@
               }
             ],
             "title": "Tags",
-            "description": "Extra tags merged into events"
+            "description": "Extra tags merged into events (refused for a pack whose tags is a keyword list)"
           },
           "mark_synthetic": {
             "type": "boolean",
             "title": "Mark Synthetic",
-            "description": "Emit tags.synthetic=true",
+            "description": "Mark events synthetic: tags.synthetic=true for an object tags, or a 'synthetic' keyword in the list for an ECS keyword-array tags",
             "default": true
           }
         },
@@ -36081,12 +36081,12 @@
               }
             ],
             "title": "Tags",
-            "description": "Extra tags merged into events"
+            "description": "Extra tags merged into events (refused for a pack whose tags is a keyword list)"
           },
           "mark_synthetic": {
             "type": "boolean",
             "title": "Mark Synthetic",
-            "description": "Emit tags.synthetic=true",
+            "description": "Mark events synthetic: tags.synthetic=true for an object tags, or a 'synthetic' keyword in the list for an ECS keyword-array tags",
             "default": true
           }
         },
@@ -45472,12 +45472,12 @@
               }
             ],
             "title": "Tags",
-            "description": "Extra tags merged into events"
+            "description": "Extra tags merged into events (refused for a pack whose tags is a keyword list)"
           },
           "mark_synthetic": {
             "type": "boolean",
             "title": "Mark Synthetic",
-            "description": "Emit tags.synthetic=true",
+            "description": "Mark events synthetic: tags.synthetic=true for an object tags, or a 'synthetic' keyword in the list for an ECS keyword-array tags",
             "default": true
           },
           "wait": {

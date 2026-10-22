@@ -15,9 +15,22 @@ from pathlib import Path
 import pytest
 
 from dfe_engine.schema.schema_loader import _resolve_schemas_root
+from dfe_engine.settings import SyntheticDataSettings
 from dfe_engine.synthetic_data.schema_source import SchemaEventFactory
+from dfe_engine.synthetic_data.service import SyntheticDataService
 
 FIXED_END = datetime(2026, 8, 18, 12, 0, 0, tzinfo=UTC)
+
+# Packs whose own `tags` is an ECS keyword array (`Array(String)`), so an object
+# there is an encoding error in the loader.
+ECS_KEYWORD_TAG_PACKS = (
+    "meta/beats/auditbeat",
+    "meta/beats/heartbeat",
+    "meta/beats/metricbeat",
+    "meta/beats/packetbeat",
+    "meta/beats/winlogbeat",
+    "meta/elastic/ecs",
+)
 
 SYSLOG_SEVERITIES = {"info", "notice", "warning", "err", "crit"}
 OTEL_SEVERITY_BANDS = {"DEBUG": (5, 8), "INFO": (9, 12), "WARN": (13, 16), "ERROR": (17, 20)}
@@ -37,6 +50,22 @@ def load(relpath: str, seed: int = 42) -> SchemaEventFactory:
     if not path.exists():
         pytest.skip(f"reference pack not present: {relpath}")
     return SchemaEventFactory.from_schema(path, seed=seed)
+
+
+def shipped_pack_refs() -> list[str]:
+    """Every pack the engine lists, the way the API lists them."""
+    if schemas_root() is None:
+        return []
+    service = SyntheticDataService(SyntheticDataSettings())
+    return [pack.ref for pack in service.list_packs()]
+
+
+def marker_is_findable(event: dict) -> bool:
+    """`tags.synthetic` for an object `tags`, the `synthetic` keyword for a list."""
+    tags = event["tags"]
+    if isinstance(tags, dict):
+        return tags.get("synthetic") is True
+    return isinstance(tags, list) and "synthetic" in tags
 
 
 class TestSyslogPack:
@@ -139,3 +168,24 @@ class TestBeatsFilebeatPack:
             elif dataset == "nginx.error":
                 assert path == "/var/log/nginx/error.log"
                 assert "upstream" in message
+
+
+class TestEcsKeywordTagPacks:
+    @pytest.mark.parametrize("ref", ECS_KEYWORD_TAG_PACKS)
+    def test_marker_is_a_keyword_beside_the_pack_value(self, ref):
+        events = load(f"{ref}.yaml").events(20, end=FIXED_END)
+        for event in events:
+            json.dumps(event)
+            tags = event["tags"]
+            assert isinstance(tags, list)
+            assert all(isinstance(tag, str) for tag in tags)
+            assert tags.count("synthetic") == 1
+            assert tags[:-1], "the pack's own generated tags value must survive"
+
+
+class TestEveryShippedPack:
+    @pytest.mark.parametrize("ref", shipped_pack_refs())
+    def test_event_carries_a_findable_marker(self, ref):
+        event = load(f"{ref}.yaml").event(when=FIXED_END)
+        json.dumps(event)
+        assert marker_is_findable(event), f"{ref}: tags={event['tags']!r}"
