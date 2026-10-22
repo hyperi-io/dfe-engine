@@ -20,6 +20,7 @@ caller holds system-wide, and an unscoped role only what the caller reads across
 orgs with, so holding role:write never adds up to more than the caller already has.
 """
 
+import functools
 from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -161,11 +162,12 @@ def _refuse_ungrantable(
         raise AuthorizationError(reason)
 
 
-def _role_in_use(request: Request, role_name: str) -> bool:
+def _role_holders(request: Request, role_name: str) -> list[str]:
+    """The groups that hold *role_name*."""
     from dfe_engine.auth.groups import GroupStore
 
     group_store: GroupStore = request.app.state.group_store
-    return any(role_name in group.roles for group in group_store.list())
+    return [group.name for group in group_store.list() if role_name in group.roles]
 
 
 @router.get(
@@ -338,17 +340,10 @@ async def delete_role(
     request: Request,
 ) -> None:
     """Delete a role no group holds, for a caller holding role:delete."""
-    if _role_in_use(request, name):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": f"Role '{name}' is assigned to one or more groups",
-            },
-        )
     store: RoleStore = request.app.state.role_store
     try:
-        store.delete(name)
+        # The store decides, so a group given the role on another replica meanwhile counts.
+        store.delete(name, holders=functools.partial(_role_holders, request))
     except ValueError as exc:
         raise HTTPException(
             status_code=409,

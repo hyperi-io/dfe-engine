@@ -165,6 +165,7 @@ class ErrorCode:
 
 
 SERVICE_UNAVAILABLE_MESSAGE = "Backing service is unreachable, retry shortly"
+DOCUMENT_CONFLICT_MESSAGE = "The record changed while this request was writing it, retry"
 GITOPS_UNAVAILABLE_MESSAGE = "The deploy repo is unreachable, retry after the Retry-After interval"
 
 
@@ -446,6 +447,27 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(SecretNameHeldError)
     async def secret_name_held_handler(_request: Request, exc: SecretNameHeldError):
         body = ErrorResponse(code=ErrorCode.CONFLICT, message=exc.message)
+        return JSONResponse(status_code=409, content=_error_response_json(body))
+
+    # A group was to be given a role that is gone or being deleted, which the caller can see.
+    from dfe_engine.auth.role_store import RoleUnavailableError
+
+    @app.exception_handler(RoleUnavailableError)
+    async def role_unavailable_handler(_request: Request, exc: RoleUnavailableError):
+        body = ErrorResponse(code=ErrorCode.CONFLICT, message=str(exc))
+        return JSONResponse(status_code=409, content=_error_response_json(body))
+
+    # Another replica kept writing the same record first, so the write never landed.
+    from dfe_engine.store.documents import DocumentConflictError
+
+    @app.exception_handler(DocumentConflictError)
+    async def document_conflict_handler(request: Request, exc: DocumentConflictError):
+        logger.warning(
+            "write lost to concurrent writers", route=route_template(request.scope), error=str(exc)
+        )
+        if is_scim(request):
+            return scim_error(409, DOCUMENT_CONFLICT_MESSAGE)
+        body = ErrorResponse(code=ErrorCode.CONFLICT, message=DOCUMENT_CONFLICT_MESSAGE)
         return JSONResponse(status_code=409, content=_error_response_json(body))
 
     @app.exception_handler(Exception)
