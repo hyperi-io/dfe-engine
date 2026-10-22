@@ -108,7 +108,6 @@ from dfe_engine.services.models import transform_wasm as services_models_transfo
 from dfe_engine.services.schema import schema_sources as services_schema_schema_sources
 from dfe_engine.sigma import sigma_backend_clickhouse as sigma_sigma_backend_clickhouse
 from dfe_engine.sigma.providers import base as sigma_providers_base
-from dfe_engine.source import catalogue as source_catalogue
 from dfe_engine.source import deployment as source_deployment
 from dfe_engine.source import engine_registry as source_engine_registry
 from dfe_engine.source import expression as source_expression
@@ -632,7 +631,6 @@ services_plugins.config_classes
 services_registry.ServiceConfigRegistry.export_yaml
 services_schema_schema_sources.import_schema
 settings.load_clickhouse_settings
-source_catalogue.reload_source_catalogue
 source_deployment.SourceDeploymentStore.load_plan
 source_deployment.SourceDeploymentStore.save_plan
 source_deployment.deploy_statements_for_build
