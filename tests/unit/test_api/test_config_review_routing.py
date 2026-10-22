@@ -24,7 +24,9 @@ from dfe_engine.governance import PolicyStore
 from dfe_engine.hunts.alert import ALERT_CLASS, AlertDestinationRegistry
 from dfe_engine.hunts.deploy_repo import DeployRepoStore
 from dfe_engine.schema.registry import META_CLASS, SchemaRegistry
+from dfe_engine.secrets import build_secrets
 from dfe_engine.services.registry import SERVICE_CONFIG_CLASS, ServiceConfigRegistry
+from dfe_engine.settings import SecretsSettings
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -62,9 +64,12 @@ def _rebind(crud: GitCrud, tmp_path, *, environment: str, mode: str, forge=None)
             commit_type=commit_type,
         )
 
+    secrets = build_secrets(SecretsSettings(provider="file", path=str(tmp_path / "secrets")))
     replacements = {
         "fieldmap": FieldMapRegistry(deploy_repo=store(FIELDMAP_CLASS, "schema")),
-        "alert_destinations": AlertDestinationRegistry(deploy_repo=store(ALERT_CLASS, "hunt")),
+        "alert_destinations": AlertDestinationRegistry(
+            deploy_repo=store(ALERT_CLASS, "hunt"), secrets=secrets
+        ),
         "service_config": ServiceConfigRegistry(deploy_repo=store(SERVICE_CONFIG_CLASS, "cfg")),
         "meta_schema": SchemaRegistry(
             tmp_path / "shipped-schemas", deploy_repo=store(META_CLASS, "schema")
@@ -293,9 +298,9 @@ class TestTheDeployRepoLayer:
 
 
 class TestTheAppriseUrlStaysACredential:
-    """The name rule reads `url` as a setting, so the class says otherwise itself."""
+    """The secrets backend holds the URL, and the deploy repo only the path to it."""
 
-    def test_the_generic_vars_route_masks_it(
+    def test_the_generic_vars_route_shows_the_path_and_no_url(
         self, app, client, admin_headers, viewer_headers, deploy_repo, tmp_path
     ):
         _rebind(deploy_repo, tmp_path, environment="dev", mode="solo")
@@ -312,8 +317,34 @@ class TestTheAppriseUrlStaysACredential:
         )
 
         assert resp.status_code == 200, resp.text
-        assert {row["path"]: row["value"] for row in resp.json()}["url"] == contract.REDACTED
+        rows = {row["path"]: row["value"] for row in resp.json()}
+        assert "url" not in rows
+        assert rows["url_path"].startswith("alerts/oncall/")
+        assert rows["url_scheme"] == "slack"
         assert "T1/B2/C3" not in resp.text
+
+    def test_the_mask_written_back_keeps_the_stored_url(
+        self, client, admin_headers, deploy_repo, tmp_path
+    ):
+        _rebind(deploy_repo, tmp_path, environment="dev", mode="solo")
+        client.post(
+            "/api/v1/alerts/destinations",
+            json={"name": "oncall", "url": "slack://T1/B2/C3"},
+            headers=admin_headers,
+        )
+        path = deploy_repo.get(ALERT_CLASS, "oncall")["url_path"]
+
+        resp = client.put(
+            "/api/v1/alerts/destinations/oncall",
+            json={"name": "oncall", "url": contract.REDACTED, "description": "renamed"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["url"] == contract.REDACTED
+        assert resp.json()["url_scheme"] == "slack"
+        assert deploy_repo.get(ALERT_CLASS, "oncall")["url_path"] == path
+        assert _registries["alert_destinations"].resolve("oncall") == "slack://T1/B2/C3"
 
     def test_an_action_may_not_carry_one(self, app, client, admin_headers, deploy_repo, tmp_path):
         app.state.settings.env = "dev"

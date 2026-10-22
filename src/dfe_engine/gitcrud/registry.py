@@ -103,7 +103,8 @@ def default_registry() -> ResourceClassRegistry:
             # paths. Its derived/ subtree belongs to derived_schemas.
             ResourceClass("meta_schemas", "config/schemas", rbac_prefix="schema", nested=True),
             ResourceClass("fieldmaps", "config/fieldmaps", rbac_prefix="fieldmap", nested=True),
-            # An Apprise URL is the destination's credential, so every read masks it.
+            # A destination's Apprise URL is its credential, so the secrets backend holds it
+            # and the document keeps only its path.
             ResourceClass("alert_destinations", "config/alert-destinations", rbac_prefix="alert"),
             ResourceClass("service_configs", "config/services", rbac_prefix="service"),
             # library class - the versioned artefact library an app instance links
