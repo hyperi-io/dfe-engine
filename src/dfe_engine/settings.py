@@ -97,6 +97,9 @@ Transport (what carries a source's records between its stages):
 Schemas:
 - DFE_SCHEMAS_DIR -> schemas.schemas_dir (dfe-schemas tree root)
 
+Ingest tenancy (compiled into dfe-receiver):
+- DFE_INGEST_SOURCE_ORG_ID -> ingest.source_org_id (disallow | allow)
+
 Auth (local):
 - DFE_AUTH_LOCAL_ENABLED -> auth.local.enabled
 - DFE_AUTH_LOCAL_ADMIN_NAME -> auth.local.admin_name
@@ -331,7 +334,7 @@ class ClickHouseSettings(BaseModel):
     # What an unauthored source header inherits. A deploy-repo override replaces
     # these; the strings are SourceHeader's compiled-in default.
     default_header_type: str = Field(default="timeseries")
-    default_header_version: str = Field(default="1.0.0")
+    default_header_version: str = Field(default="1.0.3")
     cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
     resilience: ClickHouseResilienceSettings = Field(default_factory=ClickHouseResilienceSettings)
     interactive_budget_seconds: float = Field(
@@ -2167,6 +2170,23 @@ class SeedOrg(BaseModel):
     )
 
 
+class IngestSettings(BaseModel):
+    """Tenancy settings the engine compiles into dfe-receiver.
+
+    Environment variables:
+    - DFE_INGEST_SOURCE_ORG_ID -> ingest.source_org_id (disallow | allow)
+    """
+
+    source_org_id: Literal["disallow", "allow"] = Field(
+        default="disallow",
+        description=(
+            "Whether a sender may set _org_id, the field that picks the tenant. disallow "
+            "strips it before the org rules run; allow keeps it, held to the orgs the "
+            "sender's ingest credential binds. Compiled as routing.source_org_id."
+        ),
+    )
+
+
 class OrgsSettings(BaseModel):
     """Organisation bootstrap config."""
 
@@ -2214,6 +2234,7 @@ class DFESettings(BaseModel):
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     orgs: OrgsSettings = Field(default_factory=OrgsSettings)
+    ingest: IngestSettings = Field(default_factory=IngestSettings)
     hyperdx: HyperDXSettings = Field(default_factory=HyperDXSettings)
     gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
@@ -2357,6 +2378,7 @@ def _get_env_overrides() -> dict:
         "helm": {},
         "auth": {},
         "orgs": {},
+        "ingest": {},
         "hyperdx": {},
         "gitops": {},
         "api": {},
@@ -2805,6 +2827,8 @@ def _get_env_overrides() -> dict:
         except json.JSONDecodeError as exc:
             raise ValueError(f"DFE_ORGS_SEED_ORGS is not valid JSON: {exc}") from exc
         overrides["orgs"]["seed_orgs"] = seed
+    if val := _get_env("DFE_INGEST_SOURCE_ORG_ID"):
+        overrides["ingest"]["source_org_id"] = val.lower()
 
     # Failed sign-in backoff (nested under auth.login_throttle)
     if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_ENABLED"):

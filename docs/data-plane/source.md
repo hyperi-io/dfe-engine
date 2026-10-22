@@ -46,8 +46,8 @@ config*, and the deployment layer decides which instance runs it.
 
 | Source component | Runs on | How |
 |-----------------|---------|-----|
-| `source.match` | the receiver pool | compiled into receiver `source_rules` |
-| `source.fetcher` | one fetcher instance per source | the stanza is compiled into its overlay |
+| `source.match` | the receiver pool | compiled into a receiver `rules` row |
+| `source.fetcher` | one fetcher instance per source | the stanza, and the org `fetcher.org` names, are compiled into its overlay |
 | `source.transform` | one transform instance per source | the stanza is compiled into its overlay |
 | `source.schema` | dfe-engine | DDL generated and applied by the engine |
 | `source.rules` | the hunt runner | SQL on a schedule, matches to alerts |

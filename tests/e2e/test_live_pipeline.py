@@ -33,8 +33,8 @@ def test_https_ingest_lands_in_clickhouse(e2e: E2EConfig, ch_client) -> None:
 
     # A unique marker so we can find exactly our event in the shared table.
     #
-    # NO `_source` ON THE EVENT, deliberately. The receiver's shipped routing rule
-    # is `_source` / key_value_use: an event carrying `_source: x` is routed to
+    # NO `_source` ON THE EVENT, deliberately. The receiver's shipped rule takes
+    # `_source` from the event: an event carrying `_source: x` is routed to
     # topic `x_land` and lands in table `dfe.x`, not `dfe.main`. Setting it here
     # sent the event to a per-source table that does not exist, so the loader
     # DLQ'd it on schema_pending_timeout while this test polled `dfe.main` and

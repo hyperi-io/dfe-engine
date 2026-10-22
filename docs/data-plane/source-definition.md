@@ -72,6 +72,7 @@ match:
 #   routes:                             # Fetched records that belong to ANOTHER source
 #     - match: {field: eventType, operator: starts_with, value: policy.}
 #       source: okta-policy             # Their landing, table and transform, not this source's
+#   org: acme                           # The registered org every fetched record belongs to, unset is the default org
 
 # --- Topics (derived, not configured) ---
 # topic_land: filebeat_land             # Auto: {_source}_land

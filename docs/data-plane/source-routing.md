@@ -16,46 +16,43 @@ is [source-flow.md](source-flow.md); the fields are
 
 ## The receiver
 
-`compile_receiver_routing` emits the exact serde the receiver deserialises
-(`SourceRule` / `RoutingConfig` in the receiver's `src/config/mod.rs`):
+The engine emits four receiver blocks, each the exact serde the receiver deserialises (`src/config/mod.rs`, and scalo-rs `rules::RuleSetConfig` for `rules`):
 
 1. Iterate ACTIVE sources -- dormant and disabled are excluded
-2. Each `match` becomes one `source_rules` entry, first match wins
-3. A matching rule stamps `_source` into the JSON payload
+2. Each `match` becomes one `rules` row, `source.<name>`, first match wins
+3. A matching row sets `_source` in the JSON payload. No row sets `_org_id`: a record's org is its ingest credential's binding, else `routing.default_org_id`
 4. Topic = `source_to_topic[_source]` when overridden, else `{_source}{topic_suffix}`
 5. An unmatched record gets `default_source`
 
 ```yaml
 routing:
-  source_rules:                   # Compiled from Source.match, first match wins
-    - field: tags.collector.type  # Dotted path into the incoming payload
-      mode: key_value_set         # key_present | key_value_set | key_value_use
-      match_value: filebeat       # key_value_set only
-      source: filebeat            # _source to stamp
   default_source: main            # _source when no rule matches
+  default_org_id: default         # _org_id an unbound sender's records take
   topic_suffix: _land             # Topic derives as {_source}{topic_suffix}
   source_to_topic: {}             # Per-source topic overrides (rarely needed)
+  source_org_id: disallow         # ingest.source_org_id: whether a sender's _org_id is kept
+rules:
+  targets: [_source, _org_id]     # The order the receiver sets them in
+  rules:                          # Compiled from Source.match, first match wins
+    - id: source.filebeat
+      match: {field: tags.collector.type, op: equals, value: filebeat}
+      set: {_source: {value: filebeat}}
+ingest_bindings:                  # Compiled from the ingest credentials, as tenant ids
+  credentials:
+    acme-agents: {orgs: [acme-prod, acme-dev], default_org: acme-prod}
 ```
 
-| Source `match.operator` | Receiver `mode` |
-|-------------------------|-----------------|
-| `equals` | `key_value_set` |
-| `exists` | `key_present` |
-| `always` | no rule; `default_source` already sends an unmatched record there |
+| Source `match.operator` | Receiver row `op` |
+|-------------------------|-------------------|
+| `equals` | `equals` |
+| `exists` | `exists` |
+| `always` | no row, because `default_source` already sends an unmatched record there |
 
-The other four operators (`not_equals`, `includes`, `starts_with`, `ends_with`)
-have no receiver mode -- a documented receiver gap. The registry rejects them at
-save time for any non-disabled source; a legacy stored doc that still carries
-one is skipped at compile with a loud warning rather than failing the whole
-receiver config.
+Four operators (`not_equals`, `includes`, `starts_with`, `ends_with`) compile to no row. Saving a non-disabled source that uses one is refused, and a stored doc that still carries one is skipped at compile with a loud warning rather than failing the whole receiver config.
 
-On the direct transport there is no topic between stages, so the same match
-compiles a second time into `destinations`: a rule carrying that field and value
-sends the record to a named endpoint -- the source's transform instance when it
-has one, else the loader -- and every name it uses is listed beside the rules as
-`<name>: {grpc: {endpoint: <uri>}}`. A match that tests no value (`exists`)
-cannot name a destination, so a direct source with a transform is refused at
-save.
+`ingest_bindings` holds each ingest credential's orgs as the tenant ids they own, and its default as its default org's first tenant id. Every record's `_org_id` is held to the binding of the credential that sent it, and a credential with no entry may land records in the default org alone. A credential naming an org that is no longer registered is left out for that reason.
+
+On the direct transport there is no topic between stages, so `destinations.sources` keys each source's landing label to a named endpoint -- the source's transform instance when it has one, else the loader -- and every name it uses is listed beside it as `<name>: {grpc: {endpoint: <uri>}}`. The key is the `_source` the row set, so the one rule evaluation that labels a record also picks where it goes.
 
 ## The loader
 
@@ -71,11 +68,12 @@ with no lookup at all:
 ```yaml
 # The compiled loader block (dfe-loader RoutingConfig):
 routing:
-  table_fields: [_source]         # The field the receiver stamped
-  default_db: dfe                 # Database (or per-org via db_fields + org_routes)
-  default_table: main             # Where a record with no _source lands
+  default_db: dfe                 # Database (or per-org via org_routes)
+  default_org_id: default         # Tenant for a record with no _org_id
   source_to_table: {}             # ACTIVE sources whose table name differs
 ```
+
+A fetched source's fetcher is compiled with `org_id`, the first tenant id of the org its `fetcher.org` names (the default org when unset), and `default_org_id`.
 
 Every key the engine emits must exist in dfe-loader's `RoutingConfig`
 (`src/config/pipeline.rs`): serde drops an unknown key without complaint, so an

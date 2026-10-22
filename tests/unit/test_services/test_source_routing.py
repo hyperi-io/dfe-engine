@@ -1,10 +1,10 @@
 """Tests for source routing config generation.
 
 Both emits target REAL Rust serde contracts - the receiver's
-(dfe-receiver src/config/mod.rs SourceRule/RoutingConfig) and the loader's
-(dfe-loader src/config/pipeline.rs RoutingConfig). The receiver side is pinned
-by a round-trip over its exact field names; the loader side is pinned by
-reading the Rust struct itself, because serde drops an unknown key without
+(dfe-receiver src/config/mod.rs RoutingConfig and scalo-rs rules::RuleSetConfig)
+and the loader's (dfe-loader src/config/pipeline.rs RoutingConfig). The receiver
+side is pinned by goldens over its exact field names. The loader side is pinned
+by reading the Rust struct itself, because serde drops an unknown key without
 complaint and a wrong key therefore has no signal until data lands in the wrong
 table. The struct comes from a dfe-loader checkout, else from the release pinned
 in ``tests/support/producer_contract.py``.
@@ -15,19 +15,22 @@ from collections.abc import Collection
 from dataclasses import dataclass
 
 import pytest
+from pydantic import ValidationError
 
 from dfe_engine.services.models.loader import LoaderConfig, LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
-    DestinationRule,
     DestinationsConfig,
+    IngestBindingsConfig,
     ReceiverRoutingConfig,
-    SourceRule,
+    Rule,
+    RuleSet,
 )
 from dfe_engine.services.registry import stored_form
 from dfe_engine.services.source_routing import (
     UnsupportedMatchOperatorError,
     compile_loader_routing,
     compile_receiver_routing,
+    compile_receiver_rules,
 )
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceNotFoundError
@@ -260,33 +263,36 @@ def _fetched_source(name: str, *, topic: str = "own", state: str = "active") -> 
     )
 
 
-class TestFetcherSourcesInReceiverRouting:
-    """The fetcher stamps ``_source`` with the landing label; the receiver keys on it."""
+def _rules(registry) -> list[dict]:
+    """The compiled ``_source`` rows, as the receiver's overlay carries them."""
+    return compile_receiver_rules(registry).model_dump(mode="json", exclude_defaults=True)["rules"]
 
-    def test_an_own_topic_source_gets_an_explicit_rule(self):
-        config = compile_receiver_routing(FakeSourceRegistry([_fetched_source("okta-audit")]))
-        assert [r.model_dump() for r in config.source_rules] == [
+
+class TestFetcherSourcesInReceiverRules:
+    """The fetcher stamps ``_source`` with the landing label, and a row keeps it."""
+
+    def test_an_own_topic_source_gets_an_explicit_row(self):
+        assert _rules(FakeSourceRegistry([_fetched_source("okta-audit")])) == [
             {
-                "field": "_source",
-                "mode": "key_value_set",
-                "match_value": "okta-audit",
-                "source": "okta-audit",
+                "id": "source.okta-audit",
+                "match": {"field": "_source", "op": "equals", "value": "okta-audit"},
+                "set": {"_source": {"value": "okta-audit"}},
             }
         ]
 
-    def test_a_main_topic_source_needs_no_rule(self):
+    def test_a_main_topic_source_needs_no_row(self):
         # default_source already sends an unmatched record to the main topic.
-        config = compile_receiver_routing(
+        rules = compile_receiver_rules(
             FakeSourceRegistry([_fetched_source("okta-audit", topic="main")])
         )
-        assert config.source_rules == []
+        assert rules.rules == []
 
     @pytest.mark.parametrize("state", ["dormant", "disabled"])
-    def test_a_source_that_is_not_active_gets_no_rule(self, state):
-        config = compile_receiver_routing(
+    def test_a_source_that_is_not_active_gets_no_row(self, state):
+        rules = compile_receiver_rules(
             FakeSourceRegistry([_fetched_source("okta-audit", state=state)])
         )
-        assert config.source_rules == []
+        assert rules.rules == []
 
     def test_the_loader_maps_a_fetched_source_to_its_table(self):
         config = compile_loader_routing(FakeSourceRegistry([_fetched_source("okta-audit")]))
@@ -294,39 +300,75 @@ class TestFetcherSourcesInReceiverRouting:
 
 
 # ---------------------------------------------------------------------------
-# Tests: SourceRule model (receiver serde contract)
+# Tests: the receiver models (dfe-receiver and scalo-rs serde contracts)
 # ---------------------------------------------------------------------------
 
 
-class TestSourceRuleModel:
-    def test_create(self):
-        rule = SourceRule(
-            field="agent.type", mode="key_value_set", match_value="filebeat", source="filebeat"
+class TestRuleModel:
+    def test_a_row_serialises_with_the_scalo_field_names(self):
+        rule = Rule.model_validate(
+            {
+                "id": "copy",
+                "match": {"field": "a", "op": "exists"},
+                "set": {"_org_id": {"from": "b"}},
+            }
         )
-        assert rule.field == "agent.type"
-        assert rule.mode == "key_value_set"
-        assert rule.match_value == "filebeat"
-        assert rule.source == "filebeat"
+        assert rule.model_dump(mode="json", exclude_defaults=True) == {
+            "id": "copy",
+            "match": {"field": "a", "op": "exists"},
+            "set": {"_org_id": {"from": "b"}},
+        }
 
-    def test_serialization_matches_receiver_serde(self):
-        rule = SourceRule(field="x", mode="key_value_set", match_value="y", source="z")
-        d = rule.model_dump()
-        # EXACT receiver field names (dfe-receiver src/config/mod.rs SourceRule)
-        assert d == {"field": "x", "mode": "key_value_set", "match_value": "y", "source": "z"}
+    def test_a_row_sets_exactly_one_field(self):
+        with pytest.raises(ValidationError, match="exactly one field"):
+            Rule.model_validate(
+                {"id": "two", "set": {"_source": {"value": "a"}, "_org_id": {"value": "b"}}}
+            )
 
-    def test_rejects_unknown_mode(self):
-        with pytest.raises(ValueError):
-            SourceRule(field="x", mode="regex_match", source="z")  # ty: ignore[invalid-argument-type]  # the refused mode is the point of the test
+    def test_a_row_sets_only_a_receiver_target(self):
+        with pytest.raises(ValidationError, match="_source, _org_id"):
+            Rule.model_validate({"id": "x", "set": {"host": {"value": "a"}}})
+
+    def test_a_misspelt_key_is_refused_as_the_receiver_refuses_it(self):
+        with pytest.raises(ValidationError):
+            Rule.model_validate({"id": "x", "set": {"_source": {"vaule": "a"}}})
+
+    def test_the_receiver_s_target_order_is_the_only_one_taken(self):
+        with pytest.raises(ValidationError, match="in that order"):
+            RuleSet(targets=["_org_id", "_source"])
 
 
 class TestReceiverRoutingConfigModel:
     def test_defaults_match_receiver_defaults(self):
         config = ReceiverRoutingConfig()
-        assert config.source_rules == []
         assert config.default_source == "main"
+        assert config.default_org_id == "default"
+        assert config.source_org_id == "disallow"
         assert config.topic_suffix == "_land"
         assert config.source_to_topic == {}
-        assert config.legacy_compat is False
+
+    @pytest.mark.parametrize("retired", ["source_rules", "legacy_compat"])
+    def test_a_retired_routing_key_is_refused(self, retired):
+        # The receiver refuses an unknown routing key, so the engine must not write one.
+        with pytest.raises(ValidationError, match=retired):
+            ReceiverRoutingConfig.model_validate({retired: []})
+
+    def test_an_empty_default_org_is_refused(self):
+        with pytest.raises(ValidationError):
+            ReceiverRoutingConfig(default_org_id="")
+
+
+class TestIngestBindingsModel:
+    def test_a_default_outside_the_binding_is_refused(self):
+        # The receiver refuses the whole config for it, so every listener stops.
+        with pytest.raises(ValidationError, match="not one of orgs"):
+            IngestBindingsConfig.model_validate(
+                {"credentials": {"agents": {"orgs": ["acme"], "default_org": "beta"}}}
+            )
+
+    def test_a_binding_with_no_org_is_refused(self):
+        with pytest.raises(ValidationError):
+            IngestBindingsConfig.model_validate({"credentials": {"agents": {"orgs": []}}})
 
 
 class TestDestinationsModel:
@@ -336,24 +378,18 @@ class TestDestinationsModel:
 
     def _fanned(self, **extra):
         return DestinationsConfig(
-            default="loader",
-            rules=[
-                DestinationRule(
-                    match_field="app", match_value="auth", destination=["loader", "dfe-archiver"]
-                )
-            ],
-            **extra,
+            default="loader", sources={"auth": ["loader", "dfe-archiver"]}, **extra
         )
 
-    def test_a_rule_may_name_several_destinations(self):
+    def test_a_source_may_name_several_destinations(self):
         config = self._fanned(**{"dfe-archiver": self.ARCHIVER})
 
-        assert config.rules[0].destination == ["loader", "dfe-archiver"]
+        assert config.sources["auth"] == ["loader", "dfe-archiver"]
 
     def test_a_fan_out_serialises_as_the_list_the_receiver_reads(self):
         dumped = self._fanned(**{"dfe-archiver": self.ARCHIVER}).model_dump(mode="json")
 
-        assert dumped["rules"][0]["destination"] == ["loader", "dfe-archiver"]
+        assert dumped["sources"]["auth"] == ["loader", "dfe-archiver"]
 
     def test_an_undeclared_name_inside_a_fan_out_is_still_refused(self):
         # Every name in the list is resolved, so one that is neither built in nor
@@ -370,54 +406,54 @@ class TestDestinationsModel:
 
     def test_a_fan_out_naming_nothing_is_refused(self):
         with pytest.raises(ValueError, match="at least one destination"):
-            DestinationsConfig(
-                rules=[DestinationRule(match_field="app", match_value="auth", destination=[])]
-            )
+            DestinationsConfig(sources={"auth": []})
+
+    def test_the_retired_rules_list_is_refused_as_a_named_destination(self):
+        with pytest.raises(ValueError, match="rules"):
+            DestinationsConfig.model_validate({"rules": []})
 
 
 # ---------------------------------------------------------------------------
-# Tests: compile_receiver_routing
+# Tests: compile_receiver_rules and compile_receiver_routing
 # ---------------------------------------------------------------------------
 
 
-class TestCompileReceiverRouting:
-    def test_compiles_source_rules(self, registry):
-        config = compile_receiver_routing(registry)
-        assert config.default_source == "main"
-        assert config.topic_suffix == "_land"
+class TestCompileReceiverRules:
+    def test_the_golden_rule_set(self, registry):
+        """Every active matched source, in source order, as the receiver reads it."""
+        assert compile_receiver_rules(registry).model_dump(mode="json", exclude_defaults=True) == {
+            "targets": ["_source", "_org_id"],
+            "rules": [
+                {
+                    "id": "source.filebeat",
+                    "match": {"field": "agent.type", "op": "equals", "value": "filebeat"},
+                    "set": {"_source": {"value": "filebeat"}},
+                },
+                {
+                    "id": "source.syslog",
+                    "match": {"field": "tags.event.category", "op": "equals", "value": "syslog"},
+                    "set": {"_source": {"value": "syslog"}},
+                },
+                {
+                    "id": "source.crowdstrike-edr",
+                    "match": {"field": "_source_fetcher", "op": "equals", "value": "crowdstrike"},
+                    "set": {"_source": {"value": "crowdstrike-edr"}},
+                },
+                {
+                    "id": "source.present-src",
+                    "match": {"field": "tags.present_marker", "op": "exists"},
+                    "set": {"_source": {"value": "present-src"}},
+                },
+            ],
+        }
 
-        # active sources with a match (disabled + dormant excluded)
-        by_source = {r.source: r for r in config.source_rules}
-        assert set(by_source) == {"filebeat", "syslog", "crowdstrike-edr", "present-src"}
-
-    def test_equals_maps_to_key_value_set(self, registry):
-        config = compile_receiver_routing(registry)
-        fb = next(r for r in config.source_rules if r.source == "filebeat")
-        assert fb.mode == "key_value_set"
-        assert fb.field == "agent.type"
-        assert fb.match_value == "filebeat"
-
-    def test_exists_maps_to_key_present(self, registry):
-        config = compile_receiver_routing(registry)
-        pr = next(r for r in config.source_rules if r.source == "present-src")
-        assert pr.mode == "key_present"
-        assert pr.field == "tags.present_marker"
-        assert pr.match_value is None
-
-    def test_excludes_disabled_and_dormant_sources(self, registry):
-        config = compile_receiver_routing(registry)
-        stamped = {r.source for r in config.source_rules}
-        assert "disabled-src" not in stamped
-        assert "dormant-src" not in stamped
-
-    def test_no_topic_overrides_for_default_derivation(self, registry):
-        # topic_land == f"{source}{topic_suffix}" for every source, so no
-        # source_to_topic entries are emitted.
-        config = compile_receiver_routing(registry)
-        assert config.source_to_topic == {}
+    def test_no_row_sets_an_org(self, registry):
+        # A record's org is its sender's binding, else routing.default_org_id.
+        targets = {next(iter(rule.set)) for rule in compile_receiver_rules(registry).rules}
+        assert targets == {"_source"}
 
     def test_unsupported_operator_skipped_with_warning(self):
-        """A stored legacy-operator source is skipped LOUDLY, not a compile failure."""
+        """A stored source the rules cannot express is skipped LOUDLY, not a compile failure."""
         from scalo.logger import logger
 
         reg = FakeSourceRegistry(
@@ -426,16 +462,15 @@ class TestCompileReceiverRouting:
         captured: list[str] = []
         handler_id = logger.add(captured.append, level="WARNING")
         try:
-            config = compile_receiver_routing(reg)
+            rules = compile_receiver_rules(reg)
         finally:
             logger.remove(handler_id)
 
-        assert config.source_rules == []  # the legacy source is absent, no raise
-        assert any("documented receiver gap" in msg for msg in captured)
+        assert rules.rules == []  # the stored source is absent, no raise
         assert any("'bad'" in msg and "'includes'" in msg for msg in captured)
 
     def test_unsupported_operator_does_not_brick_other_sources(self):
-        """One legacy stored doc must not fail the whole receiver config compile."""
+        """One stored doc must not fail the whole receiver config compile."""
         reg = FakeSourceRegistry(
             [
                 _make_source("bad", match_field="f", match_value="v", match_operator="includes"),
@@ -443,48 +478,47 @@ class TestCompileReceiverRouting:
                 _make_source("present", match_field="tags.marker", match_operator="exists"),
             ]
         )
-        config = compile_receiver_routing(reg)
-        stamped = {r.source for r in config.source_rules}
-        assert stamped == {"good", "present"}
+        assert [rule.id for rule in compile_receiver_rules(reg).rules] == [
+            "source.good",
+            "source.present",
+        ]
 
     def test_unsupported_operator_error_message(self):
         """The registry save path still surfaces this error's message on save."""
         err = UnsupportedMatchOperatorError("bad", "includes")
-        assert "documented receiver gap" in str(err)
+        assert "compiles to no dfe-receiver rule" in str(err)
         assert err.source == "bad"
         assert err.operator == "includes"
 
     def test_empty_registry(self):
-        empty = FakeSourceRegistry([])
-        config = compile_receiver_routing(empty)
-        assert config.source_rules == []
+        assert compile_receiver_rules(FakeSourceRegistry([])).rules == []
 
-    def test_round_trip_against_receiver_serde_shape(self, registry):
-        """The emitted YAML/JSON round-trips against the receiver's serde shape.
-
-        Pins the exact key set the Rust receiver deserialises:
-        routing.source_rules[].{field,mode,match_value,source} +
-        default_source + topic_suffix + source_to_topic.
-        """
+    def test_the_emitted_set_round_trips_through_the_model(self, registry):
         from dfe_engine.yaml_utils import yaml_dump_string, yaml_load_string
 
+        emitted = compile_receiver_rules(registry).model_dump(mode="json", exclude_defaults=True)
+        reread = RuleSet.model_validate(yaml_load_string(yaml_dump_string(emitted)))
+        assert reread == compile_receiver_rules(registry)
+
+
+class TestCompileReceiverRouting:
+    def test_the_golden_routing_block(self, registry):
         config = compile_receiver_routing(registry)
-        emitted = yaml_load_string(yaml_dump_string(config.model_dump(mode="json")))
-
-        assert set(emitted) == {
-            "source_rules",
-            "default_source",
-            "topic_suffix",
-            "source_to_topic",
-            "legacy_compat",
-            "dlq",
+        assert config.model_dump(mode="json", exclude_unset=True) == {
+            "default_source": "main",
+            "default_org_id": "default",
+            "topic_suffix": "_land",
+            "source_to_topic": {},
+            "source_org_id": "disallow",
         }
-        for rule in emitted["source_rules"]:
-            assert set(rule) == {"field", "mode", "match_value", "source"}
-            assert rule["mode"] in ("key_present", "key_value_set", "key_value_use")
 
-        # the engine model itself re-validates the emitted doc (serde-compatible)
-        assert ReceiverRoutingConfig.model_validate(emitted).default_source == "main"
+    def test_the_deployment_may_keep_a_sender_s_org(self, registry):
+        config = compile_receiver_routing(registry, source_org_id="allow")
+        assert config.source_org_id == "allow"
+
+    def test_the_emitted_block_carries_no_retired_key(self, registry):
+        emitted = compile_receiver_routing(registry).model_dump(mode="json")
+        assert not {"source_rules", "legacy_compat"} & set(emitted)
 
 
 # ---------------------------------------------------------------------------
@@ -493,6 +527,22 @@ class TestCompileReceiverRouting:
 
 
 class TestCompileLoaderRouting:
+    def test_the_golden_routing_block(self, registry):
+        """What reaches the loader's overlay: the database, the default org and the table map."""
+        compiled = compile_loader_routing(registry, db="prod").model_dump(
+            mode="json", exclude_unset=True
+        )
+        assert compiled == {
+            "default_db": "prod",
+            "default_org_id": "default",
+            "source_to_table": {
+                "filebeat": "filebeat",
+                "syslog": "syslog",
+                "crowdstrike-edr": "crowdstrike-edr",
+                "present-src": "present-src",
+            },
+        }
+
     def test_routes_on_the_field_the_receiver_stamps(self, registry):
         # _source is what compile_receiver_routing stamps, and the loader's own
         # default table_fields, so the two halves meet with no map at all.

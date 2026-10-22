@@ -136,20 +136,18 @@ class TestSourceHeader:
     def test_defaults(self):
         h = SourceHeader()
         assert h.type == "timeseries"
-        assert h.version == "1.0.0"
+        assert h.version == "1.0.3"
 
     def test_custom(self):
         h = SourceHeader(type="minimal", version="2.0.0")
         assert h.type == "minimal"
         assert h.version == "2.0.0"
 
-    def test_default_version_lags_its_own_profile_marker_deliberately(self):
-        """The default header's version and ITS profile's ``current`` may differ
-        only while dfe-engine#440 is open.
+    def test_default_version_is_its_own_profile_s_current_marker(self):
+        """An unpinned header lands on the revision its profile ships as ``current``.
 
         Reads the profile ``SourceHeader.type`` actually defaults to, not the
-        minimal one: the two carry independent ``current`` markers, so watching
-        the wrong file leaves the tripwire green while the lag moves.
+        minimal one: the two carry independent ``current`` markers.
         """
         from dfe_engine.schema.schema_loader import _resolve_profile_yaml_path
         from dfe_engine.yaml_utils import yaml_load
@@ -157,15 +155,8 @@ class TestSourceHeader:
         default = SourceHeader()
         path = _resolve_profile_yaml_path(f"common-header/{default.type}", None)
         assert path.is_file(), f"no profile on disk for the default header type {default.type!r}"
-        marker = str(yaml_load(path).get("current") or "")
 
-        assert marker, f"{path} carries no current marker"
-        if marker == default.version:
-            pytest.fail(
-                f"common-header/{default.type} is back at {marker}, so "
-                "SourceHeader.version is no longer a deliberate lag -- close "
-                "dfe-engine#440 and drop the comment above it"
-            )
+        assert str(yaml_load(path).get("current") or "") == default.version
 
 
 # ---------------------------------------------------------------------------

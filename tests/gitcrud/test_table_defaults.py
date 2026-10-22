@@ -46,7 +46,7 @@ class TestResolve:
         assert state.header_type == "timeseries"
         assert state.header_type_stored is None
         assert state.header_type_origin == "deployment"
-        assert state.header_version == "1.0.0"
+        assert state.header_version == "1.0.3"
         assert state.header_version_stored is None
         assert state.engine == "MergeTree"
         assert state.engine_stored is None

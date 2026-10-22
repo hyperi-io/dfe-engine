@@ -317,6 +317,15 @@ class TestANameThatIsAPath:
 
         assert outside.exists()
 
+    def test_a_link_out_of_the_directory_is_not_followed(self, registry, outside):
+        # The name is a valid org name, and its file links to one outside the store.
+        (registry._dir / "linked.yaml").symlink_to(outside)
+
+        assert registry.get("linked") is None
+        with pytest.raises(KeyError):
+            registry.update("linked", display_name="rewritten")
+        assert "rewritten" not in outside.read_text()
+
 
 # ---------------------------------------------------------------------------
 # on_change

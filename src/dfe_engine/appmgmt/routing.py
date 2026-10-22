@@ -9,10 +9,15 @@
 
 A source declares how its data enters: a receiver match rule, or a fetcher
 that polls it in. ``services/source_routing.py`` turns every source into the
-receiver's ``source_rules`` and the loader's table map. What was missing is
+receiver's ``rules`` and the loader's table map. What was missing is
 DELIVERY: the compiled block had no path into the overlay Argo applies, so a
 deployed receiver ran on its built-in defaults and every event landed in the
 default topic whatever the sources said.
+
+Tenancy is compiled the same way, from a :class:`~dfe_engine.orgs.tenancy.Tenancy`
+read once per pass: the default org's tenant id into the receiver, loader and
+fetcher, each fetched source's org into its fetcher, and each ingest credential's
+orgs into the receiver's ``ingest_bindings``.
 
 This module is that path. The compiled block is DERIVED state, so it behaves
 like a resolved link rather than an edited value: ``status`` compares what the
@@ -43,6 +48,8 @@ from typing import TYPE_CHECKING, Any
 from scalo.logger import logger
 
 from dfe_engine.gitcrud.engine import del_path, get_path, set_path
+from dfe_engine.orgs.models import DEFAULT_ORG_ID
+from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError, compile_ingest_bindings
 from dfe_engine.source.alignment import require_one_type
 from dfe_engine.source.models import Source
 from dfe_engine.source.reader import SourceReader
@@ -83,6 +90,14 @@ class RoutingNotApplicableError(ValueError):
 
     The instance names a source that does not exist, or one whose origin is not
     this app's: a fetcher instance for a receiver-based source has nothing to run.
+    """
+
+
+class TenancyNotGivenError(TypeError):
+    """A compiler that writes tenancy was called with no tenancy to compile from.
+
+    Not a :class:`RoutingNotApplicableError`, which removes an instance: a caller
+    that forgot the tenancy must fail, never compile the bindings away.
     """
 
 
@@ -189,26 +204,44 @@ def into_blocks(app: AppDescriptor, values: dict[str, object]) -> dict[str, Any]
     return blocks
 
 
+def _required(tenancy: Tenancy | None, app: AppDescriptor) -> Tenancy:
+    """The tenancy a compiler needs, or the error a caller that passed none gets."""
+    if tenancy is None:
+        raise TenancyNotGivenError(f"{app.service}'s routing compiles tenancy, and none was given")
+    return tenancy
+
+
 def _receiver(
-    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
+    app: AppDescriptor,
+    registry: SourceReader,
+    settings: Any,
+    instance: str | None,
+    tenancy: Tenancy | None,
 ) -> dict[str, Any]:
     from dfe_engine.services.source_routing import (
         compile_receiver_destinations,
         compile_receiver_routing,
+        compile_receiver_rules,
     )
 
-    # Only the keys the sources derive: the block is written whole, so a model
+    # Only the keys the engine derives: the block is written whole, so a model
     # default in it would overwrite the deployment's own setting for that key.
-    routing = compile_receiver_routing(registry)
+    routing = compile_receiver_routing(registry, source_org_id=settings.ingest.source_org_id)
     destinations = compile_receiver_destinations(registry, settings)
     return {
         "routing": routing.model_dump(mode="json", exclude_unset=True),
+        "rules": compile_receiver_rules(registry).model_dump(mode="json", exclude_defaults=True),
+        "ingest_bindings": compile_ingest_bindings(_required(tenancy, app)),
         "destinations": destinations.model_dump(mode="json", exclude_unset=True),
     }
 
 
 def _loader(
-    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
+    app: AppDescriptor,
+    registry: SourceReader,
+    settings: Any,
+    instance: str | None,
+    tenancy: Tenancy | None,
 ) -> dict[str, Any]:
     from dfe_engine.schema.derived_registry import derived_reference_root
     from dfe_engine.services.source_routing import compile_loader_capture, compile_loader_routing
@@ -239,7 +272,11 @@ def _loader(
 
 
 def _archiver(
-    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
+    app: AppDescriptor,
+    registry: SourceReader,
+    settings: Any,
+    instance: str | None,
+    tenancy: Tenancy | None,
 ) -> dict[str, Any]:
     from dfe_engine.services.source_routing import compile_archiver_topics
 
@@ -299,10 +336,32 @@ def _fetcher_route(
     return route.source, spec, rule
 
 
+def _fetched_tenant(source: Source, tenancy: Tenancy | None, app: AppDescriptor) -> str:
+    """The ``_org_id`` a fetched source's records carry: its org's first tenant id.
+
+    Raises:
+        RoutingNotApplicableError: The source names an org that is not registered,
+            so the fetcher is not run rather than stamping another org's tenant.
+    """
+    org = source.fetcher.org if source.fetcher is not None else None
+    if org is None:
+        return DEFAULT_ORG_ID
+    try:
+        return _required(tenancy, app).tenant_id(org)
+    except UnknownOrgError as exc:
+        raise RoutingNotApplicableError(
+            f"source {source.source!r} belongs to org {org!r}, which is not registered"
+        ) from exc
+
+
 def _fetcher(
-    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
+    app: AppDescriptor,
+    registry: SourceReader,
+    settings: Any,
+    instance: str | None,
+    tenancy: Tenancy | None,
 ) -> dict[str, Any]:
-    """What this fetcher instance polls, and where the records it pulls are sent.
+    """What this fetcher instance polls, where the records it pulls are sent, and their org.
 
     A source is one connector type, so the composed block carries one; a stored
     source that spans two is refused here rather than deployed, which is the
@@ -316,6 +375,7 @@ def _fetcher(
     if fetcher is None:
         raise RoutingNotApplicableError(f"source {instance!r} is receiver-based, not fetched")
     flow = _flow(source, settings)
+    org_id = _fetched_tenant(source, tenancy, app)
 
     stanza: dict[str, Any] = {
         "enabled": True,
@@ -346,11 +406,20 @@ def _fetcher(
         output["destinations"] = destinations
         output["routes"] = rules
 
-    return {"sources": polls, "output": output}
+    return {
+        "sources": polls,
+        "output": output,
+        "org_id": org_id,
+        "default_org_id": DEFAULT_ORG_ID,
+    }
 
 
 def _transform(
-    app: AppDescriptor, registry: SourceReader, settings: Any, instance: str | None
+    app: AppDescriptor,
+    registry: SourceReader,
+    settings: Any,
+    instance: str | None,
+    tenancy: Tenancy | None,
 ) -> dict[str, Any]:
     """One transform instance's input and output, for the source it is named for.
 
@@ -388,7 +457,7 @@ def _transform(
     return blocks
 
 
-Compiler = Callable[[AppDescriptor, SourceReader, Any, str | None], dict[str, Any]]
+Compiler = Callable[[AppDescriptor, SourceReader, Any, str | None, Tenancy | None], dict[str, Any]]
 
 # Named because callers outside the compile path select a stage by them.
 LOADER_COMPILER = "loader"
@@ -414,11 +483,16 @@ def compile_for(
     settings: Any,
     *,
     instance: str | None = None,
+    tenancy: Tenancy | None = None,
 ) -> dict[str, Any]:
-    """What this app's routing block should be, given the current sources.
+    """What this app's routing block should be, given the current sources and tenancy.
 
     ``instance`` is the bound source for an instance-scoped app and ignored by a
-    stack-scoped one.
+    stack-scoped one. ``tenancy`` is required where the app's compiler writes it:
+    the receiver's always, a fetcher's when its source names an org.
+
+    Raises:
+        TenancyNotGivenError: The compiler needs ``tenancy`` and none was given.
     """
     if not app.has_compiled_routing:
         raise RoutingNotCompiledError(
@@ -429,7 +503,8 @@ def compile_for(
         compiler = _COMPILERS[app.routing_compiler]
     except KeyError:
         raise UnknownRoutingCompilerError(app.routing_compiler) from None
-    blocks = compiler(app, registry, settings, instance if app.routing_is_per_instance else None)
+    bound = instance if app.routing_is_per_instance else None
+    blocks = compiler(app, registry, settings, bound, tenancy)
     undeclared = set(blocks) - set(app.routing_paths)
     if undeclared:
         raise CatalogueError(
@@ -446,9 +521,10 @@ def status(
     settings: Any,
     *,
     instance: str | None = None,
+    tenancy: Tenancy | None = None,
 ) -> RoutingStatus:
     """Compare the compiled routing against what the overlay carries."""
-    compiled = compile_for(app, registry, settings, instance=instance)
+    compiled = compile_for(app, registry, settings, instance=instance, tenancy=tenancy)
     deployed: dict[str, Any] = {}
     for name, path in app.routing_paths.items():
         found = get_path(doc, path, default=None)
@@ -482,12 +558,13 @@ def sync(
     settings: Any,
     *,
     instance: str | None = None,
+    tenancy: Tenancy | None = None,
 ) -> bool:
-    """Bring the overlay into step with the sources. Mutates ``doc``.
+    """Bring the overlay into step with the sources and tenancy. Mutates ``doc``.
 
     Returns whether anything changed, so an unchanged sync is not a commit.
     """
-    current = status(app, doc, registry, settings, instance=instance)
+    current = status(app, doc, registry, settings, instance=instance, tenancy=tenancy)
     if not current.drift:
         return False
     apply(app, doc, current.compiled)
@@ -495,7 +572,11 @@ def sync(
 
 
 def instances_needing_sync(
-    apps: list[tuple[AppInstance, dict]], registry: SourceReader, settings: Any
+    apps: list[tuple[AppInstance, dict]],
+    registry: SourceReader,
+    settings: Any,
+    *,
+    tenancy: Tenancy | None = None,
 ) -> list[tuple[AppInstance, RoutingStatus]]:
     """Every instance whose overlay routing disagrees with the sources.
 
@@ -507,7 +588,9 @@ def instances_needing_sync(
         if not app.descriptor.has_compiled_routing:
             continue
         try:
-            found = status(app.descriptor, doc, registry, settings, instance=app.instance)
+            found = status(
+                app.descriptor, doc, registry, settings, instance=app.instance, tenancy=tenancy
+            )
         except RoutingNotApplicableError:
             continue
         if found.drift:

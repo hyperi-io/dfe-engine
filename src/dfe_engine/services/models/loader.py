@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
+from dfe_engine.orgs.models import DEFAULT_ORG_ID
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
     AcknowledgementsConfig,
@@ -159,36 +160,30 @@ class LoaderRoutingConfig(BaseModel):
     author never asked for. The Rust struct is the SSoT; anything added here
     must exist there first.
 
-    Routing resolves in order: a ``rules`` CEL match wins outright, otherwise
-    the table comes from the first ``table_fields`` hit (mapped through
-    ``source_to_table`` when it has an entry) and the database from
-    ``db_fields`` / ``org_routes``, falling back to ``default_table`` and
-    ``default_db``.
+    The table comes from the first ``table_fields`` hit (mapped through
+    ``source_to_table`` when it has an entry), else ``default_table``. The tenant
+    is the ``org_id_field`` value, else ``default_org_id``, and ``org_routes``
+    gives a tenant its own database, every other one taking ``default_db``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    rules: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="CEL rules {when, target, db?}, top to bottom, first match wins",
-    )
-    db_fields: list[str] = []
     table_fields: list[str] = Field(default_factory=lambda: ["_source"])
     default_db: str = "dfe"
     # The key names the fallback mechanism; its value is the landing table's name.
     default_table: str = DEFAULT_LANDING_LABEL
     org_id_field: str | None = "_org_id"
+    default_org_id: str = Field(
+        default=DEFAULT_ORG_ID,
+        min_length=1,
+        description="Tenant for a record whose org_id_field is absent, null or empty",
+    )
     org_routes: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Per-org database routing {org_id, database?}; unlisted orgs use default_db",
     )
     source_to_table: dict[str, str] = Field(default_factory=dict)
-    mapping_file: str | None = None
     topic_suffixes: list[str] = Field(default_factory=lambda: ["_land", "_load"])
-    compat_v2_source: bool = Field(
-        default=False,
-        description="Prepend the pre-2.2 event_category fields to source_fields/table_fields",
-    )
     dlq: LoaderDlqConfig = Field(default_factory=LoaderDlqConfig)
 
 
@@ -359,6 +354,17 @@ class SchemaConfig(BaseModel):
     refresh_on_error: bool = True
 
 
+class LoaderHotReloadConfig(BaseModel):
+    """dfe-loader ``HotReloadConfig``: watch the config file and apply a routing edit in place."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    # On by default: the deployment contract lists routing in hot_paths, so its edit rolls no pod.
+    enabled: bool = True
+    poll_interval_secs: int = Field(default=5, gt=0)
+    debounce_ms: int = Field(default=500, ge=0)
+
+
 # ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
@@ -392,6 +398,7 @@ class LoaderConfig(BaseServiceConfig):
         alias="schema",
         description="Schema cache config (aliased from 'schema' in YAML)",
     )
+    hot_reload: LoaderHotReloadConfig = Field(default_factory=LoaderHotReloadConfig)
 
     @model_validator(mode="before")
     @classmethod

@@ -803,16 +803,15 @@ class SourceRegistry:
 
         ``always`` is the default flow's rule and compiles to the receiver's
         ``default_source`` rather than to a rule, so it is legal only for the
-        reserved source that flow belongs to. Everything else must map onto a
-        hot-path router mode; the operators that do not are a documented
-        receiver gap.
+        reserved source that flow belongs to. Everything else must compile to a
+        receiver rule op.
         """
         if match is None:
             return
         # Lazy import: source_routing imports this module (cycle).
         from dfe_engine.services.source_routing import (
             UnsupportedMatchOperatorError,
-            operator_mode,
+            match_op,
         )
 
         if match.operator in RULELESS_OPERATORS:
@@ -823,7 +822,7 @@ class SourceRegistry:
                     "source that defines the main flow"
                 )
             return
-        if operator_mode(match.operator) is None:
+        if match_op(match.operator) is None:
             raise SourceValidationError(
                 str(UnsupportedMatchOperatorError(source.source, match.operator))
             )

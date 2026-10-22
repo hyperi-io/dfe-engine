@@ -3,21 +3,20 @@
 Compiles Source definitions from SourceRegistry into receiver, loader and
 archiver routing configuration.
 
-The receiver emit targets the REAL dfe-receiver ``routing`` contract
-(``src/config/mod.rs`` SourceRule/RoutingConfig): ``source_rules`` stamp
-``_source`` (first match wins) and the topic derives as
-``source_to_topic[_source]`` else ``{_source}{topic_suffix}``.
+The receiver emit targets the dfe-receiver contract (``src/config/mod.rs``):
+``rules`` is a scalo rule set whose rows set ``_source`` (first match wins), and
+the topic derives as ``routing.source_to_topic[_source]`` else
+``{_source}{topic_suffix}``.
 
-One source match drives BOTH receiver blocks. It compiles to the ``source_rules``
-entry that labels the record, and on the direct transport to the
-``destinations.rules`` entry that sends it to the stage that handles it - the
-same field and value, read twice, so a source cannot be labelled one way and
-routed another.
+One rule evaluation drives both receiver blocks. A source's match compiles to the
+row that labels the record, and on the direct transport ``destinations.sources``
+keys on that same label to send it to the stage that handles it, so a source
+cannot be labelled one way and routed another.
 
 Usage:
-    from dfe_engine.services.source_routing import compile_receiver_routing, compile_loader_routing
+    from dfe_engine.services.source_routing import compile_receiver_rules, compile_loader_routing
 
-    receiver_routing = compile_receiver_routing(source_registry)
+    receiver_rules = compile_receiver_rules(source_registry)
     loader_routing = compile_loader_routing(source_registry, db="prod")
 """
 
@@ -26,16 +25,22 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.orgs.models import DEFAULT_ORG_ID
 from dfe_engine.services.models.loader import LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
     BUS_DESTINATION,
     LOADER_DESTINATION,
+    RULE_TARGETS,
+    SOURCE_FIELD,
     DestinationRef,
-    DestinationRule,
     DestinationsConfig,
-    ReceiverMatchMode,
+    MatchOp,
     ReceiverRoutingConfig,
-    SourceRule,
+    Rule,
+    RuleMatch,
+    RuleSet,
+    RuleSetAction,
+    SourceOrgId,
 )
 from dfe_engine.source.flow import (
     ARCHIVER_SERVICE,
@@ -53,21 +58,22 @@ from dfe_engine.source.models import (
 )
 from dfe_engine.source.reader import SourceReader
 
-# SourceMatch.operator -> receiver SourceRule.mode. The receiver's hot-path
-# router has exactly three modes; the other four engine operators (not_equals,
-# includes, starts_with, ends_with) have NO receiver equivalent - a DOCUMENTED
-# receiver gap. The registry save path rejects them for non-disabled sources
-# (see UnsupportedMatchOperatorError); compile skips a stored legacy one with
-# a loud warning instead of failing the whole receiver config.
-_OPERATOR_TO_MODE: dict[str, ReceiverMatchMode] = {
-    "equals": "key_value_set",
-    "exists": "key_present",
+# SourceMatch.operator -> the scalo rule op the receiver row runs. The registry
+# save path refuses the other operators for a receiver-routed source (see
+# UnsupportedMatchOperatorError), and compile skips a stored one with a loud
+# warning instead of failing the whole receiver config.
+_OPERATOR_TO_OP: dict[str, MatchOp] = {
+    "equals": "equals",
+    "exists": "exists",
 }
 
+SOURCE_RULE_PREFIX = "source."
+"""Every row a source compiles to is ``source.<name>``, apart from rows an operator writes."""
 
-def operator_mode(operator: str) -> ReceiverMatchMode | None:
-    """The receiver router mode for a match operator, or None when it has none."""
-    return _OPERATOR_TO_MODE.get(operator)
+
+def match_op(operator: str) -> MatchOp | None:
+    """The scalo rule op a source match operator compiles to, or None when it has none."""
+    return _OPERATOR_TO_OP.get(operator)
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,65 +81,97 @@ class ReceiverMatch:
     """What the receiver tests to recognise one source's records."""
 
     field: str
-    mode: ReceiverMatchMode
+    op: MatchOp
     value: str | None
-    """The operand, or None for a mode that only tests that the field is there."""
+    """The operand, or None for an op that only tests that the field is there."""
 
 
 def receiver_match(source: Source) -> ReceiverMatch | None:
     """How the receiver recognises this source, or None when it needs no rule.
 
-    The one reading of a source's match, so the rule that LABELS a record and the
-    destination rule that SENDS it on cannot disagree about which records belong
-    to the source.
+    The one reading of a source's match, so the row that LABELS a record cannot
+    disagree with anything else about which records belong to the source.
 
     A fetcher-based source has no match rule of its own: its fetcher stamps
     ``_source`` with the source's landing label on every record, so the match is
     ``_source == <label>``. One landing on ``main`` needs no rule, because the
     receiver's ``default_source`` already sends an unmatched record there. An
-    explicit per-source rule rather than ``key_value_use`` on ``_source``: the
-    receiver takes untrusted input, and a use-the-value rule would let any
-    sender pick any topic.
+    explicit per-source row rather than one copying ``_source``: the receiver
+    takes untrusted input, and a copy would let any sender pick any topic.
     """
     if source.match is None:
         label = source.landing_label()
         if source.fetcher is None or label == DEFAULT_LANDING_LABEL:
             return None
-        return ReceiverMatch(field=SOURCE_LABEL_FIELD, mode="key_value_set", value=label)
+        return ReceiverMatch(field=SOURCE_LABEL_FIELD, op="equals", value=label)
 
     # The main flow needs no rule: default_source already sends an unmatched
     # record there, and a match-everything rule would shadow the rules after it.
     if source.match.operator in RULELESS_OPERATORS:
         return None
 
-    mode = operator_mode(source.match.operator)
-    if mode is None:
+    op = match_op(source.match.operator)
+    if op is None:
         logger.warning(
             f"Source {source.source!r}: match operator {source.match.operator!r} has no "
-            f"receiver mode (documented receiver gap) - skipping this source in the "
-            f"receiver routing compile"
+            f"receiver rule op - skipping this source in the receiver routing compile"
         )
         return None
 
     return ReceiverMatch(
         field=source.match.field,
-        mode=mode,
-        value=source.match.value if mode == "key_value_set" else None,
+        op=op,
+        value=source.match.value if op == "equals" else None,
     )
 
 
 class UnsupportedMatchOperatorError(ValueError):
-    """A receiver-routed source uses a match operator the receiver cannot evaluate."""
+    """A receiver-routed source uses a match operator the engine compiles to no rule op."""
 
     def __init__(self, source: str, operator: str) -> None:
         super().__init__(
-            f"Source {source!r}: match operator {operator!r} has no dfe-receiver "
-            f"equivalent (hot-path router modes: key_present, key_value_set, "
-            f"key_value_use). Use 'equals' or 'exists', or route this source "
-            f"another way - the missing operators are a documented receiver gap."
+            f"Source {source!r}: match operator {operator!r} compiles to no dfe-receiver "
+            f"rule. Use 'equals' or 'exists', or route this source another way."
         )
         self.source = source
         self.operator = operator
+
+
+def source_rule(source: Source, match: ReceiverMatch) -> Rule:
+    """The receiver row that labels *source*'s records with its landing label."""
+    return Rule(
+        id=f"{SOURCE_RULE_PREFIX}{source.source}",
+        match=RuleMatch(field=match.field, op=match.op, value=match.value),
+        set={SOURCE_FIELD: RuleSetAction(value=source.landing_label())},
+    )
+
+
+def compile_receiver_rules(registry: SourceReader) -> RuleSet:
+    """Compile Source match rules into the receiver's ``rules`` set.
+
+    One ``_source`` row per ACTIVE source the receiver recognises (a dormant
+    source keeps its schema pre-positioned but its receiver redirect stays off),
+    in source-name order, first match wins:
+
+    - ``equals`` -> ``op: equals`` on the field, setting the landing label
+    - ``exists`` -> ``op: exists`` on the field, setting the landing label
+    - ``always`` -> no row at all, because that is the main flow and
+      ``routing.default_source`` already labels an unmatched record with it
+
+    No row sets ``_org_id``: a record's org comes from its sender's binding,
+    else ``routing.default_org_id``.
+
+    A stored source whose match operator has no rule op is SKIPPED with a loud
+    warning rather than raised on: the registry save path rejects new ones (see
+    ``UnsupportedMatchOperatorError``), and one stored doc must not brick the
+    whole receiver config compile.
+    """
+    rules: list[Rule] = []
+    for source in registry.get_all_sources(states=("active",)):
+        match = receiver_match(source)
+        if match is not None:
+            rules.append(source_rule(source, match))
+    return RuleSet(targets=list(RULE_TARGETS), rules=rules)
 
 
 def compile_receiver_routing(
@@ -141,66 +179,44 @@ def compile_receiver_routing(
     *,
     default_source: str = DEFAULT_LANDING_LABEL,
     topic_suffix: str = TOPIC_LAND_SUFFIX,
+    source_org_id: SourceOrgId = "disallow",
 ) -> ReceiverRoutingConfig:
-    """Compile Source match rules into the receiver's ``routing`` contract.
+    """Compile the receiver's ``routing`` block: defaults, tenancy and topic overrides.
 
-    Iterates ACTIVE sources (a dormant source keeps its schema pre-positioned
-    but its receiver redirect stays off), translating each ``match`` into a
-    receiver ``SourceRule``:
-
-    - ``equals`` -> ``key_value_set`` (match_value=value, source=_source name)
-    - ``exists`` -> ``key_present``  (source=_source name)
-    - ``always`` -> no rule at all; that is the main flow, and
-      ``default_source`` already sends an unmatched record to it
+    ``default_org_id`` is the default org's tenant id, the same value every app
+    is compiled with. ``source_org_id`` is the deployment's ``ingest.source_org_id``.
 
     ``source_to_topic`` is emitted only where a source's landing topic
     deviates from ``{_source}{topic_suffix}``, which is the rule the receiver
-    itself applies to the label it stamped - so the baseline is the landing
+    itself applies to the label a row set - so the baseline is the landing
     LABEL, never the source name. A source landing on the shared topic is not a
     deviation: label and topic move together.
-
-    A stored source whose match operator has no receiver mode is SKIPPED with
-    a loud warning rather than raised on: the registry save path rejects new
-    ones (see ``UnsupportedMatchOperatorError``), so this only fires for a
-    legacy stored doc - and one legacy doc must not brick the whole receiver
-    config compile.
     """
-    rules: list[SourceRule] = []
     source_to_topic: dict[str, str] = {}
-
     for source in registry.get_all_sources(states=("active",)):
-        match = receiver_match(source)
-        if match is None:
+        if receiver_match(source) is None:
             continue
-
-        rules.append(
-            SourceRule(
-                field=match.field,
-                mode=match.mode,
-                match_value=match.value,
-                source=source.landing_label(),
-            )
-        )
         expected_topic = f"{source.landing_label()}{topic_suffix}"
         if source.topic_land != expected_topic:
             source_to_topic[source.source] = source.topic_land
 
     return ReceiverRoutingConfig(
-        source_rules=rules,
         default_source=default_source,
+        default_org_id=DEFAULT_ORG_ID,
         topic_suffix=topic_suffix,
         source_to_topic=source_to_topic,
+        source_org_id=source_org_id,
     )
 
 
 def compile_receiver_destinations(registry: SourceReader, settings: Any) -> DestinationsConfig:
-    """Compile where the receiver sends each matched record, on the direct transport.
+    """Compile where the receiver sends each labelled record, on the direct transport.
 
     On the bus the receiver produces to a topic and the next stage consumes it,
-    so there is nothing to name: the default stays the bus and no rule is
+    so there is nothing to name: the default stays the bus and no source entry is
     emitted. On direct there is no store between stages, so every record has to
     be handed to a stage by address - its source's transform when it has one,
-    else the loader.
+    else the loader. ``sources`` keys each one on the landing label its row sets.
 
     The loader is the exception that carries no address: while the destination
     set declares no ``loader`` entry, the receiver resolves its built-in one from
@@ -227,7 +243,7 @@ def compile_receiver_destinations(registry: SourceReader, settings: Any) -> Dest
     default: DestinationRef = (
         LOADER_DESTINATION if settings.transport.default == "direct" else BUS_DESTINATION
     )
-    rules: list[DestinationRule] = []
+    sources: dict[str, DestinationRef] = {}
     named: dict[str, dict[str, Any]] = {}
 
     for source in registry.get_all_sources(states=("active",)):
@@ -265,30 +281,16 @@ def compile_receiver_destinations(registry: SourceReader, settings: Any) -> Dest
             }
             destination = [name, ARCHIVER_SERVICE]
 
-        match = receiver_match(source)
-        if match is None:
+        if receiver_match(source) is None:
             # The default flow: everything unmatched already arrives here.
             if source.match is not None and source.match.operator in RULELESS_OPERATORS:
                 default = destination
             continue
-        if match.value is None:
-            # A destination is picked on field AND value, so this source falls to
-            # the default. The save path refuses it where it would skip a
-            # transform; a stored one only reaches here after the deployment moved.
-            logger.warning(
-                f"Source {source.source!r}: its match tests no value, so on direct it takes "
-                f"the default destination rather than one of its own"
-            )
-            continue
-        rules.append(
-            DestinationRule(
-                match_field=match.field, match_value=match.value, destination=destination
-            )
-        )
+        sources[source.landing_label()] = destination
 
     return DestinationsConfig(
         default=default,
-        rules=rules,
+        sources=dict(sorted(sources.items())),
         **{name: {"grpc": grpc} for name, grpc in sorted(named.items())},
     )
 
@@ -400,6 +402,10 @@ def compile_loader_routing(
     Dormant and disabled sources are left out: their schema stays
     pre-positioned but they have no live loader path.
 
+    ``default_org_id`` is the default org's tenant id, the same value the
+    receiver and fetcher are compiled with, so a record no first hop stamped
+    lands in the org every other app would have put it in.
+
     Args:
         registry: Where the Source definitions are read from.
         db: Default database for the loader.
@@ -410,5 +416,6 @@ def compile_loader_routing(
 
     return LoaderRoutingConfig(
         default_db=db,
+        default_org_id=DEFAULT_ORG_ID,
         source_to_table=source_to_table,
     )

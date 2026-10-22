@@ -313,6 +313,12 @@ def _get_list(client: TestClient, path: str, headers: dict[str, str]) -> list[An
     return body
 
 
+def _labels(routing: dict[str, Any]) -> list[str]:
+    """The ``_source`` each deployed receiver row sets, from a routing status."""
+    rows = routing["deployed"].get("rules", {}).get("rules", [])
+    return [row["set"]["_source"]["value"] for row in rows]
+
+
 def _instances(client: TestClient, headers: dict[str, str], service: str) -> list[str]:
     listed = _get_list(client, _APPS, headers)
     by_service = {entry["service"]: entry for entry in listed}
@@ -422,10 +428,8 @@ class TestSeedSourceWithTransform:
         found = _get(appmgmt_client, f"{_APPS}/dfe-receiver/default/routing", headers)
         assert (found["drift"], found["absent"]) == (False, False)
         # The fetcher-based source is routed on the _source label its fetcher stamps.
-        assert [rule["source"] for rule in found["deployed"]["routing"]["source_rules"]] == [
-            _FETCHED,
-            _SOURCE,
-        ]
+        rows = found["deployed"]["rules"]["rules"]
+        assert [row["set"]["_source"]["value"] for row in rows] == [_FETCHED, _SOURCE]
 
     def test_the_loader_routing_is_synced_too(self, appmgmt_client):
         _seed(appmgmt_client, "seed_source_with_transform")
@@ -728,7 +732,7 @@ class TestResetKeepsTheDeployersPools:
         _seed(k8s_client, "seed_source_with_transform")
         headers = _admin(k8s_client)
         seeded = _get(k8s_client, f"{_APPS}/dfe-receiver/default/routing", headers)
-        assert _SOURCE in [r["source"] for r in seeded["deployed"]["routing"]["source_rules"]]
+        assert _SOURCE in _labels(seeded)
 
         _seed(k8s_client, "reset_all")
         headers = _admin(k8s_client)
@@ -737,7 +741,7 @@ class TestResetKeepsTheDeployersPools:
             found = _get(k8s_client, f"{_APPS}/{service}/default/routing", headers)
             assert (found["drift"], found["absent"]) == (False, False)
         rules = _get(k8s_client, f"{_APPS}/dfe-receiver/default/routing", headers)
-        names = [r["source"] for r in rules["deployed"]["routing"]["source_rules"]]
+        names = _labels(rules)
         assert _SOURCE not in names
         assert _FETCHED not in names
 

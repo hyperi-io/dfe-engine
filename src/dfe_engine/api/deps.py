@@ -45,6 +45,7 @@ from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.http_errors import describe_http_error, failure_reference
+from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.orgs.tenant_scope import resolve_orgs, tenant_ids_for
 from dfe_engine.secrets import DfeSecrets
 from dfe_engine.settings import DFESettings, is_dev_posture
@@ -930,6 +931,11 @@ def registered_orgs(request: Request) -> list[Any]:
     return list(org_registry.list()) if org_registry is not None else []
 
 
+def request_tenancy(request: Request) -> Tenancy:
+    """The orgs and ingest credentials as they are now, for a compile this request runs."""
+    return Tenancy.read(request.app.state.org_registry)
+
+
 def refuse_unknown_orgs(request: Request, names: Iterable[str]) -> None:
     """Refuse a write naming an org the registry does not hold, where an empty name names none.
 
@@ -1078,6 +1084,25 @@ def require_action(action: str, *, scope: Scope | None = None):
         if not result.allowed:
             audit_permission_denied(user.user_id, action, user.roles, result.reason)
             raise AuthorizationError(f"Action '{action}' denied: {result.reason}")
+
+    return _check
+
+
+def require_org_action(action: str):
+    """FastAPI dependency factory: ``action`` held at the scope of the ``{org}`` in the path.
+
+    For a resource an org owns, nested under ``/orgs/{org}``, so the one check
+    reads its scope straight from the URL. The spec names ``action`` as
+    ``x-scalo.action``, as :func:`require_action` does.
+    """
+
+    @permission(action)
+    async def _check(
+        request: Request,
+        org: str,
+        user: AuthContext = Depends(get_current_user),
+    ) -> None:
+        check_action(request, user, action, scope=Scope(type="org", id=org))
 
     return _check
 

@@ -48,10 +48,10 @@ def _deployment_body(*, editable: bool) -> dict:
             "deployment_default": "timeseries",
         },
         "common_header_version": {
-            "effective": "1.0.0",
+            "effective": "1.0.3",
             "stored": None,
             "origin": "deployment",
-            "deployment_default": "1.0.0",
+            "deployment_default": "1.0.3",
         },
         "engine": {
             "effective": "MergeTree",
@@ -260,7 +260,7 @@ class TestApplyDefaults:
         assert body["unchanged"] == []
         assert [entry["source"] for entry in body["live"]] == ["alpha"]
         alpha = _version(client, admin_headers, "alpha")
-        assert alpha["header"] == {"type": "minimal", "version": "1.0.0"}
+        assert alpha["header"] == {"type": "minimal", "version": "1.0.3"}
         assert alpha["schema"]["ttl_days"] == 90
         assert alpha["schema"]["engine"] == "ReplacingMergeTree"
         assert alpha["match"]["value"] == "alpha"
@@ -379,7 +379,7 @@ class TestDefaultDrift:
             json={
                 "source": "alpha",
                 "match": {"field": "tags.collector.type", "value": "alpha"},
-                "header": {"type": "common-header/timeseries", "version": "1.0.0"},
+                "header": {"type": "common-header/timeseries", "version": "1.0.3"},
                 "schema": {"ttl_days": 90, "engine": "MergeTree"},
             },
         )

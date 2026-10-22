@@ -210,7 +210,6 @@ def _assert_topics(deployed: dict[str, Any], expectation: shapes.FlowExpectation
 def _assert_receiver_routing(
     engine: EngineAPI,
     instance: str,
-    shape: shapes.FlowShape,
     transport: str,
     expectation: shapes.FlowExpectation,
 ) -> None:
@@ -227,24 +226,17 @@ def _assert_receiver_routing(
         f"{expectation.source}, so what Argo applies is not what was asked for"
     )
     compiled = routing["deployed"]
-    rules = compiled.get("routing", {}).get("source_rules") or []
-    assert any(r["source"] == expectation.source for r in rules), (
-        f"{expectation.source}: no receiver rule names it; compiled rules are "
-        f"{[r['source'] for r in rules]}"
+    rows = compiled.get("rules", {}).get("rules") or []
+    labels = [row["set"]["_source"]["value"] for row in rows]
+    assert expectation.source in labels, (
+        f"{expectation.source}: no receiver row labels a record with it; the rows set {labels}"
     )
     if transport != "direct" or expectation.destination is None:
         return
-    declared = next(s for s in shape.sources if s["source"] == expectation.source)
-    match = declared["match"]
-    destinations = compiled.get("destinations", {})
-    named = [
-        r["destination"]
-        for r in destinations.get("rules") or []
-        if r["match_field"] == match["field"] and r["match_value"] == match["value"]
-    ]
-    assert named == [expectation.destination], (
-        f"{expectation.source}: on direct the receiver must send {match['field']}="
-        f"{match['value']} to {expectation.destination}, and it names {named}"
+    named = compiled.get("destinations", {}).get("sources", {}).get(expectation.source)
+    assert named == expectation.destination, (
+        f"{expectation.source}: on direct the receiver must send its records to "
+        f"{expectation.destination}, and it names {named}"
     )
 
 
@@ -343,7 +335,7 @@ class TestFlows:
             if transport == "bus":
                 _assert_topics(deployed, expectation)
             if shape.origin == "receiver":
-                _assert_receiver_routing(engine, receiver_instance, shape, transport, expectation)
+                _assert_receiver_routing(engine, receiver_instance, transport, expectation)
             else:
                 assert expectation.source in _instances(engine, "dfe-fetcher"), (
                     f"{expectation.source}: the deploy reported "

@@ -116,7 +116,7 @@ class TestCreateOrg:
         )
         assert resp.status_code == 422
         listed = client.get("/api/v1/orgs", headers=admin_headers).json()
-        assert listed["items"] == []
+        assert [org["name"] for org in listed["items"]] == ["default"]
 
     def test_create_org_viewer_forbidden(self, client, viewer_headers):
         resp = client.post(
@@ -150,12 +150,12 @@ class TestCreateOrg:
 
 
 class TestListOrgs:
-    def test_list_empty_returns_empty(self, client, admin_headers):
+    def test_a_fresh_deployment_lists_the_default_org_alone(self, client, admin_headers):
         resp = client.get("/api/v1/orgs", headers=admin_headers)
         assert resp.status_code == 200
         body = resp.json()
-        assert body["items"] == []
-        assert body["total"] == 0
+        assert [org["name"] for org in body["items"]] == ["default"]
+        assert body["total"] == 1
 
     def test_list_returns_created_orgs(self, client, admin_headers):
         client.post(
@@ -171,7 +171,7 @@ class TestListOrgs:
         resp = client.get("/api/v1/orgs", headers=admin_headers)
         assert resp.status_code == 200
         names = {o["name"] for o in resp.json()["items"]}
-        assert names == {"acme", "beta"}
+        assert names == {"acme", "beta", "default"}
 
     def test_list_viewer_can_read(self, client, admin_headers, viewer_headers):
         client.post(
@@ -181,7 +181,7 @@ class TestListOrgs:
         )
         resp = client.get("/api/v1/orgs", headers=viewer_headers)
         assert resp.status_code == 200
-        assert len(resp.json()["items"]) == 1
+        assert [o["name"] for o in resp.json()["items"]] == ["acme", "default"]
 
 
 # ---------------------------------------------------------------------------

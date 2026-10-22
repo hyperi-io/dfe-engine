@@ -31,6 +31,7 @@ from dfe_engine.appmgmt import (
     seed_instances,
 )
 from dfe_engine.gitcrud.engine import get_path, set_path
+from dfe_engine.orgs.tenancy import Tenancy
 
 TRANSFORM_SERVICE = "dfe-transform-vrl"
 """The transform an instance of which IS a source's processing step."""
@@ -147,6 +148,7 @@ class Apps(Seed):
             self._require_source_registry(),
             self._require_settings(),
             instance=source,
+            tenancy=Tenancy.read(self._org_registry),
         )
         if not (fresh or synced):
             return False
@@ -237,7 +239,13 @@ class Apps(Seed):
         registry = self._source_registry
         if gc is None or registry is None:
             return []
-        return derived.reconcile(gc, registry, self._require_settings(), actor=SEED_ACTOR)
+        return derived.reconcile(
+            gc,
+            registry,
+            self._require_settings(),
+            actor=SEED_ACTOR,
+            tenancy=Tenancy.read(self._org_registry),
+        )
 
     def delete_run_state(self) -> None:
         """Clear the deploy-repo classes no seeder creates but a spec can change.
@@ -291,7 +299,11 @@ class Apps(Seed):
         app = instances.instance_of(service, instance)
         doc = instances.read_overlay(gc, app)
         if not routing.sync(
-            app.descriptor, doc, self._require_source_registry(), self._require_settings()
+            app.descriptor,
+            doc,
+            self._require_source_registry(),
+            self._require_settings(),
+            tenancy=Tenancy.read(self._org_registry),
         ):
             return False
         return self._put(app, doc, "sync routing")

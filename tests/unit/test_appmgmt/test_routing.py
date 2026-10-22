@@ -13,19 +13,45 @@ source rule ever defined was ignored.
 
 The compiled blocks are asserted as EXACT dicts per origin, per transport, and
 with and without a transform, because the whole point of compiling is that a
-source definition alone decides where its records go.
+source definition alone decides where its records go. The tenancy blocks are
+asserted the same way, because a wrong one lands a record in another org.
 """
-
-from __future__ import annotations
 
 from dataclasses import replace
 
 import pytest
 
 from dfe_engine.appmgmt import catalogue, instances, routing
+from dfe_engine.orgs.ingest_credentials import IngestCredential
+from dfe_engine.orgs.models import Org
+from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.source.alignment import MixedConnectorTypesError
 
 from .conftest import FakeRegistry
+
+# No org but the default and no ingest credential, as a fresh deployment starts.
+NO_TENANCY = Tenancy()
+
+# Two tenant-fenced orgs, one with a tenant id of its own, and a credential binding both.
+TENANCY = Tenancy(
+    orgs=(
+        Org(name="default", org_ids=["default"]),
+        Org(name="acme", org_ids=["acme-prod", "acme-dev"]),
+        Org(name="beta"),
+    ),
+    credentials=(
+        IngestCredential(
+            name="acme-agents",
+            org="acme",
+            orgs=["acme", "beta"],
+            default_org="acme",
+            listeners=["http", "otlp"],
+        ),
+        IngestCredential(
+            name="beta-hec", org="beta", orgs=["beta"], default_org="beta", listeners=["splunk_hec"]
+        ),
+    ),
+)
 
 RECEIVER = "dfe-receiver"
 LOADER = "dfe-loader"
@@ -115,12 +141,14 @@ def overlay():
 
 
 class TestManifest:
-    def test_the_receiver_owns_its_rules_and_its_destinations(self):
+    def test_the_receiver_owns_its_rules_bindings_and_destinations(self):
         app = catalogue.descriptor(RECEIVER)
         assert app.has_compiled_routing is True
         assert app.routing_compiler == "receiver"
         assert app.routing_paths == {
             "routing": "config.routing",
+            "rules": "config.rules",
+            "ingest_bindings": "config.ingest_bindings",
             "destinations": "config.destinations",
         }
 
@@ -134,10 +162,15 @@ class TestManifest:
             },
         )
 
-    def test_the_fetcher_owns_what_it_polls_and_where_it_sends(self):
+    def test_the_fetcher_owns_what_it_polls_where_it_sends_and_their_org(self):
         app = catalogue.descriptor(FETCHER)
         assert app.routing_is_per_instance is True
-        assert app.routing_paths == {"sources": "config.sources", "output": "config.output"}
+        assert app.routing_paths == {
+            "sources": "config.sources",
+            "output": "config.output",
+            "org_id": "config.org_id",
+            "default_org_id": "config.default_org_id",
+        }
 
     def test_a_transform_is_instance_routed_like_a_fetcher(self):
         app = catalogue.descriptor(VRL)
@@ -173,35 +206,62 @@ class TestStatus:
         self, overlay, source_registry, settings
     ):
         app = catalogue.descriptor(RECEIVER)
-        found = routing.status(app, overlay, source_registry, settings)
+        found = routing.status(app, overlay, source_registry, settings, tenancy=NO_TENANCY)
         assert found.absent is True
         assert found.drift is True
 
     def test_a_synced_overlay_reports_neither(self, overlay, source_registry, settings):
         app = catalogue.descriptor(RECEIVER)
-        assert routing.sync(app, overlay, source_registry, settings) is True
-        found = routing.status(app, overlay, source_registry, settings)
+        assert routing.sync(app, overlay, source_registry, settings, tenancy=NO_TENANCY) is True
+        found = routing.status(app, overlay, source_registry, settings, tenancy=NO_TENANCY)
         assert (found.drift, found.absent) == (False, False)
 
     def test_a_hand_edit_over_derived_routing_is_drift(self, overlay, source_registry, settings):
         app = catalogue.descriptor(RECEIVER)
-        routing.sync(app, overlay, source_registry, settings)
+        routing.sync(app, overlay, source_registry, settings, tenancy=NO_TENANCY)
         overlay["config"]["routing"]["default_source"] = "hand_edited"
-        assert routing.status(app, overlay, source_registry, settings).drift is True
+        assert routing.status(app, overlay, source_registry, settings, tenancy=NO_TENANCY).drift
 
     def test_a_hand_edit_over_the_destinations_is_drift(self, overlay, source_registry, settings):
         app = catalogue.descriptor(RECEIVER)
-        routing.sync(app, overlay, source_registry, settings)
+        routing.sync(app, overlay, source_registry, settings, tenancy=NO_TENANCY)
         overlay["config"]["destinations"]["default"] = "loader"
-        found = routing.status(app, overlay, source_registry, settings)
+        found = routing.status(app, overlay, source_registry, settings, tenancy=NO_TENANCY)
         assert found.drift is True
-        assert routing.sync(app, overlay, source_registry, settings) is True
+        assert routing.sync(app, overlay, source_registry, settings, tenancy=NO_TENANCY) is True
         assert overlay["config"]["destinations"]["default"] == "kafka"
+
+    def test_a_hand_edited_binding_is_drift_and_is_put_back(
+        self, overlay, source_registry, settings
+    ):
+        # A binding typed in by hand would land a credential's records in an org
+        # its owner never bound, so the sync takes it back out.
+        app = catalogue.descriptor(RECEIVER)
+        routing.sync(app, overlay, source_registry, settings, tenancy=TENANCY)
+        overlay["config"]["ingest_bindings"]["credentials"]["beta-hec"]["orgs"].append("acme-prod")
+
+        assert routing.status(app, overlay, source_registry, settings, tenancy=TENANCY).drift
+        assert routing.sync(app, overlay, source_registry, settings, tenancy=TENANCY) is True
+        assert overlay["config"]["ingest_bindings"]["credentials"]["beta-hec"]["orgs"] == ["beta"]
+
+    def test_a_credential_change_alone_is_drift(self, overlay, source_registry, settings):
+        app = catalogue.descriptor(RECEIVER)
+        routing.sync(app, overlay, source_registry, settings, tenancy=NO_TENANCY)
+
+        assert routing.status(app, overlay, source_registry, settings, tenancy=TENANCY).drift
 
     def test_syncing_twice_is_not_a_change(self, overlay, source_registry, settings):
         app = catalogue.descriptor(RECEIVER)
-        assert routing.sync(app, overlay, source_registry, settings) is True
-        assert routing.sync(app, overlay, source_registry, settings) is False
+        assert routing.sync(app, overlay, source_registry, settings, tenancy=NO_TENANCY) is True
+        assert routing.sync(app, overlay, source_registry, settings, tenancy=NO_TENANCY) is False
+
+    def test_a_receiver_compiled_with_no_tenancy_fails_rather_than_dropping_bindings(
+        self, overlay, source_registry, settings
+    ):
+        # A caller that forgot the tenancy would otherwise sync every binding away.
+        app = catalogue.descriptor(RECEIVER)
+        with pytest.raises(routing.TenancyNotGivenError):
+            routing.sync(app, overlay, source_registry, settings)
 
     def test_an_app_without_derived_routing_refuses(self, source_registry, settings):
         with pytest.raises(routing.RoutingNotCompiledError):
@@ -228,35 +288,108 @@ class TestUnknownCompiler:
     def test_a_block_the_manifest_gives_no_path_is_refused(self, source_registry, settings):
         app = replace(catalogue.descriptor(RECEIVER), routing_paths={"routing": "config.routing"})
         with pytest.raises(catalogue.CatalogueError, match="destinations"):
-            routing.compile_for(app, source_registry, settings)
+            routing.compile_for(app, source_registry, settings, tenancy=NO_TENANCY)
+
+
+def _receiver(registry, settings, tenancy=NO_TENANCY):
+    return routing.compile_for(catalogue.descriptor(RECEIVER), registry, settings, tenancy=tenancy)
+
+
+class TestReceiverGolden:
+    """Every block the receiver compiles, whole, for a deployment with orgs and credentials."""
+
+    def test_the_golden_receiver_blocks(self, fetched_registry, settings):
+        assert _receiver(fetched_registry, settings, TENANCY) == {
+            "routing": {
+                "default_source": "main",
+                "default_org_id": "default",
+                "topic_suffix": "_land",
+                "source_to_topic": {},
+                "source_org_id": "disallow",
+            },
+            "rules": {
+                "targets": ["_source", "_org_id"],
+                "rules": [
+                    {
+                        "id": "source.okta-audit",
+                        "match": {"field": "_source", "op": "equals", "value": "okta-audit"},
+                        "set": {"_source": {"value": "okta-audit"}},
+                    },
+                    {
+                        "id": "source.filebeat",
+                        "match": {"field": "_json.app", "op": "equals", "value": "filebeat"},
+                        "set": {"_source": {"value": "filebeat"}},
+                    },
+                ],
+            },
+            "ingest_bindings": {
+                "credentials": {
+                    "acme-agents": {
+                        "orgs": ["acme-prod", "acme-dev", "beta"],
+                        "default_org": "acme-prod",
+                    },
+                    "beta-hec": {"orgs": ["beta"], "default_org": "beta"},
+                }
+            },
+            "destinations": {"default": "kafka", "sources": {}},
+        }
+
+    def test_a_fresh_deployment_binds_no_credential(self, source_registry, settings):
+        assert _receiver(source_registry, settings)["ingest_bindings"] == {"credentials": {}}
+
+    def test_the_deployment_setting_reaches_source_org_id(self, source_registry, settings):
+        allowing = settings.model_copy(
+            update={"ingest": settings.ingest.model_copy(update={"source_org_id": "allow"})}
+        )
+        assert _receiver(source_registry, allowing)["routing"]["source_org_id"] == "allow"
+
+    def test_a_credential_naming_an_org_that_is_gone_is_left_unbound(
+        self, source_registry, settings
+    ):
+        # Unbound, its records may land in the default org alone: never in the org
+        # whose tenant id another org might take next.
+        orphaned = Tenancy(
+            orgs=TENANCY.orgs[:2],
+            credentials=TENANCY.credentials,
+        )
+        assert _receiver(source_registry, settings, orphaned)["ingest_bindings"] == {
+            "credentials": {}
+        }
+
+    def test_every_compiled_block_is_one_the_receiver_model_accepts(
+        self, fetched_registry, settings
+    ):
+        from dfe_engine.services.models.receiver import ReceiverConfig
+
+        compiled = _receiver(fetched_registry, settings, TENANCY)
+        accepted = ReceiverConfig.model_validate(compiled)
+        assert accepted.ingest_bindings.credentials["acme-agents"].default_org == "acme-prod"
 
 
 class TestReceiverOnTheBus:
-    def test_a_matched_source_gets_a_rule_and_no_destination(self, source_registry, settings):
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), source_registry, settings)
+    def test_a_matched_source_gets_a_row_and_no_destination(self, source_registry, settings):
+        compiled = _receiver(source_registry, settings)
 
-        assert compiled["routing"]["source_rules"] == [
+        assert compiled["rules"]["rules"] == [
             {
-                "field": "_json.app",
-                "mode": "key_value_set",
-                "match_value": "filebeat",
-                "source": "filebeat",
+                "id": "source.filebeat",
+                "match": {"field": "_json.app", "op": "equals", "value": "filebeat"},
+                "set": {"_source": {"value": "filebeat"}},
             }
         ]
         # The bus holds the record between stages, so nothing is addressed.
-        assert compiled["destinations"] == {"default": "kafka", "rules": []}
+        assert compiled["destinations"] == {"default": "kafka", "sources": {}}
 
     def test_a_fetcher_source_is_recognised_by_the_label_its_fetcher_stamps(
         self, fetched_registry, settings
     ):
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), fetched_registry, settings)
-        by_source = {r["source"]: r for r in compiled["routing"]["source_rules"]}
+        compiled = _receiver(fetched_registry, settings)
+        by_id = {r["id"]: r for r in compiled["rules"]["rules"]}
 
-        assert by_source["okta-audit"] == {
-            "field": "_source",
-            "mode": "key_value_set",
-            "match_value": "okta-audit",
-            "source": "okta-audit",
+        assert by_id["source.okta-audit"] == {
+            "id": "source.okta-audit",
+            "match": {"field": "_source", "op": "equals", "value": "okta-audit"},
+            "set": {"_source": {"value": "okta-audit"}},
         }
 
 
@@ -264,14 +397,11 @@ class TestReceiverOnDirect:
     def test_every_matched_source_is_addressed(self, direct_settings):
         registry = FakeRegistry([_matched("auth"), _fetched()])
 
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        compiled = _receiver(registry, direct_settings)
 
         assert compiled["destinations"] == {
             "default": "loader",
-            "rules": [
-                {"match_field": "_json.app", "match_value": "auth", "destination": "loader"},
-                {"match_field": "_source", "match_value": "okta-audit", "destination": "loader"},
-            ],
+            "sources": {"auth": "loader", "okta-audit": "loader"},
         }
 
     def test_a_transformed_source_is_addressed_to_its_transform_instance(
@@ -279,20 +409,24 @@ class TestReceiverOnDirect:
     ):
         registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"}), _fetched()])
 
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        compiled = _receiver(registry, direct_settings)
 
         assert compiled["destinations"] == {
             "default": "loader",
             "dfe-transform-vrl-auth": {"grpc": {"endpoint": VRL_AUTH_ENDPOINT}},
-            "rules": [
-                {
-                    "match_field": "_json.app",
-                    "match_value": "auth",
-                    "destination": "dfe-transform-vrl-auth",
-                },
-                {"match_field": "_source", "match_value": "okta-audit", "destination": "loader"},
-            ],
+            "sources": {"auth": "dfe-transform-vrl-auth", "okta-audit": "loader"},
         }
+
+    def test_an_exists_match_gets_a_destination_of_its_own(self, direct_settings):
+        # Destinations key on the label the row set, so a match that tests no
+        # value is addressed like any other rather than taking the default.
+        present = _matched("auth")
+        present.versions["1.0.0"].match.operator = "exists"
+        present.versions["1.0.0"].match.value = ""
+
+        compiled = _receiver(FakeRegistry([present]), direct_settings)
+
+        assert compiled["destinations"]["sources"] == {"auth": "loader"}
 
     def test_a_named_destination_is_addressed_the_way_the_fetcher_addresses_one(
         self, direct_settings, direct_transforms
@@ -310,7 +444,7 @@ class TestReceiverOnDirect:
         """
         registry = FakeRegistry([_fetched(transform={"engine": "vrl"})])
 
-        receiver = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        receiver = _receiver(registry, direct_settings)
         fetcher = routing.compile_for(
             catalogue.descriptor(FETCHER), registry, direct_settings, instance="okta-audit"
         )
@@ -329,26 +463,19 @@ class TestReceiverOnDirect:
         """
         registry = FakeRegistry([_matched("auth"), _fetched()])
 
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        compiled = _receiver(registry, direct_settings)
 
         assert "loader" not in compiled["destinations"]
         assert compiled["destinations"]["default"] == "loader"
-        assert [r["destination"] for r in compiled["destinations"]["rules"]] == [
-            "loader",
-            "loader",
-        ]
+        assert list(compiled["destinations"]["sources"].values()) == ["loader", "loader"]
 
-    def test_the_labelling_rule_and_the_destination_rule_read_one_match(self, direct_settings):
+    def test_the_destination_keys_on_the_label_the_row_sets(self, direct_settings):
         registry = FakeRegistry([_matched("auth")])
 
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        compiled = _receiver(registry, direct_settings)
 
-        rule = compiled["routing"]["source_rules"][0]
-        destination = compiled["destinations"]["rules"][0]
-        assert (rule["field"], rule["match_value"]) == (
-            destination["match_field"],
-            destination["match_value"],
-        )
+        row = compiled["rules"]["rules"][0]
+        assert list(compiled["destinations"]["sources"]) == [row["set"]["_source"]["value"]]
 
     def test_the_default_flow_compiles_to_the_default_destination(
         self, direct_settings, direct_transforms
@@ -359,11 +486,11 @@ class TestReceiverOnDirect:
         default_flow.versions["1.0.0"].match.operator = "always"
         registry = FakeRegistry([default_flow])
 
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        compiled = _receiver(registry, direct_settings)
 
         assert compiled["destinations"]["default"] == "dfe-transform-vrl-default"
-        assert compiled["destinations"]["rules"] == []
-        assert compiled["routing"]["source_rules"] == []
+        assert compiled["destinations"]["sources"] == {}
+        assert "rules" not in compiled["rules"]
 
 
 class TestArchivedOnDirect:
@@ -372,18 +499,12 @@ class TestArchivedOnDirect:
     def test_an_archived_source_reaches_the_archiver_beside_the_loader(self, direct_settings):
         registry = FakeRegistry([_matched("auth", archive=True)])
 
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        compiled = _receiver(registry, direct_settings)
 
         assert compiled["destinations"] == {
             "default": "loader",
             "dfe-archiver": {"grpc": {"endpoint": ARCHIVER_ENDPOINT, "confirms_delivery": False}},
-            "rules": [
-                {
-                    "match_field": "_json.app",
-                    "match_value": "auth",
-                    "destination": ["loader", ARCHIVER],
-                }
-            ],
+            "sources": {"auth": ["loader", ARCHIVER]},
         }
 
     def test_only_the_archiver_leg_is_declared_as_not_confirming_delivery(
@@ -395,9 +516,7 @@ class TestArchivedOnDirect:
             [_matched("auth", archive=True, transform={"engine": "vrl"}), _matched("syslog")]
         )
 
-        destinations = routing.compile_for(
-            catalogue.descriptor(RECEIVER), registry, direct_settings
-        )["destinations"]
+        destinations = _receiver(registry, direct_settings)["destinations"]
 
         assert destinations[ARCHIVER]["grpc"]["confirms_delivery"] is False
         assert destinations["dfe-transform-vrl-auth"] == {"grpc": {"endpoint": VRL_AUTH_ENDPOINT}}
@@ -410,19 +529,16 @@ class TestArchivedOnDirect:
         # record as it ARRIVED, so a transformed source must still name both.
         registry = FakeRegistry([_matched("auth", archive=True, transform={"engine": "vrl"})])
 
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        compiled = _receiver(registry, direct_settings)
 
-        assert compiled["destinations"]["rules"][0]["destination"] == [
-            "dfe-transform-vrl-auth",
-            ARCHIVER,
-        ]
+        assert compiled["destinations"]["sources"]["auth"] == ["dfe-transform-vrl-auth", ARCHIVER]
 
     def test_a_source_that_asked_for_none_names_one_destination(self, direct_settings):
         registry = FakeRegistry([_matched("auth")])
 
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        compiled = _receiver(registry, direct_settings)
 
-        assert compiled["destinations"]["rules"][0]["destination"] == "loader"
+        assert compiled["destinations"]["sources"]["auth"] == "loader"
         assert ARCHIVER not in compiled["destinations"]
 
     def test_the_default_flow_fans_out_through_the_default(self, direct_settings):
@@ -432,7 +548,7 @@ class TestArchivedOnDirect:
         main.versions["1.0.0"].match.operator = "always"
         registry = FakeRegistry([main])
 
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), registry, direct_settings)
+        compiled = _receiver(registry, direct_settings)
 
         assert compiled["destinations"]["default"] == ["loader", ARCHIVER]
         assert compiled["destinations"][ARCHIVER] == {
@@ -464,18 +580,10 @@ class TestAStoredArchiveNothingCopies:
             source_routing.logger, "warning", lambda message, **fields: warnings.append(message)
         )
 
-        compiled = routing.compile_for(
-            catalogue.descriptor(RECEIVER), FakeRegistry([_fetched(archive=True)]), direct_settings
-        )
+        compiled = _receiver(FakeRegistry([_fetched(archive=True)]), direct_settings)
 
         assert [w for w in warnings if "'okta-audit'" in w and "archived on the bus" in w]
-        assert compiled["destinations"]["rules"] == [
-            {
-                "match_field": "_source",
-                "match_value": "okta-audit",
-                "destination": ["loader", ARCHIVER],
-            }
-        ]
+        assert compiled["destinations"]["sources"] == {"okta-audit": ["loader", ARCHIVER]}
 
 
 class TestAStoredRouteIntoAnArchivedSource:
@@ -599,21 +707,26 @@ class TestArchiverStack:
 
 
 class TestReceiverStack:
-    def test_the_block_carries_only_the_keys_the_sources_derive(self, source_registry, settings):
+    def test_the_block_carries_only_the_keys_the_engine_derives(self, source_registry, settings):
         """#401: the deployment's own dead-letter settings must survive a sync.
 
-        ``ReceiverRoutingConfig.dlq`` and ``legacy_compat`` are model defaults the
-        compile never sets, and the block is written whole, so emitting them
-        stamps the deployment's own values back to the default every time.
+        ``ReceiverRoutingConfig.dlq`` is a model default the compile never sets,
+        and the block is written whole, so emitting it stamps the deployment's own
+        values back to the default every time.
         """
-        compiled = routing.compile_for(catalogue.descriptor(RECEIVER), source_registry, settings)
+        compiled = _receiver(source_registry, settings)
 
-        assert "dlq" not in compiled["routing"]
-        assert "legacy_compat" not in compiled["routing"]
+        assert set(compiled["routing"]) == {
+            "default_source",
+            "default_org_id",
+            "topic_suffix",
+            "source_to_topic",
+            "source_org_id",
+        }
 
 
 class TestLoaderStack:
-    def test_the_block_carries_only_the_keys_the_sources_derive(self, source_registry, settings):
+    def test_the_block_carries_only_the_keys_the_engine_derives(self, source_registry, settings):
         """A model default here would land on a key the deployment set itself.
 
         The block is written whole, and the loader's own struct defaults every
@@ -625,9 +738,15 @@ class TestLoaderStack:
         assert compiled == {
             "routing": {
                 "default_db": settings.clickhouse.effective_data_database,
+                "default_org_id": "default",
                 "source_to_table": {"filebeat": "filebeat"},
             }
         }
+
+    def test_the_loader_needs_no_tenancy_to_compile(self, source_registry, settings):
+        # Its default org is the suite's constant, so a caller holding no orgs still compiles it.
+        compiled = routing.compile_for(catalogue.descriptor(LOADER), source_registry, settings)
+        assert compiled["routing"]["default_org_id"] == "default"
 
 
 class TestLoaderCapture:
@@ -809,6 +928,8 @@ class TestFetcherInstance:
                 }
             },
             "output": {"type": "kafka"},
+            "org_id": "default",
+            "default_org_id": "default",
         }
 
     def test_a_rest_source_nests_its_stanza_under_its_name(self, settings):
@@ -1079,8 +1200,8 @@ class TestFetcherInstance:
     def test_a_stack_scoped_app_ignores_the_instance(self, fetched_registry, settings):
         app = catalogue.descriptor(RECEIVER)
         assert routing.compile_for(
-            app, fetched_registry, settings, instance="okta-audit"
-        ) == routing.compile_for(app, fetched_registry, settings)
+            app, fetched_registry, settings, instance="okta-audit", tenancy=NO_TENANCY
+        ) == routing.compile_for(app, fetched_registry, settings, tenancy=NO_TENANCY)
 
     def test_sync_writes_the_stanza_into_the_instance_overlay(self, fetched_registry, settings):
         app = instances.instance_of(FETCHER, "okta-audit")
@@ -1088,6 +1209,80 @@ class TestFetcherInstance:
         assert routing.sync(app.descriptor, doc, fetched_registry, settings, instance="okta-audit")
         assert doc["config"]["sources"]["okta"]["topic"] == "okta-audit"
         assert doc["config"]["instance_id"] == "okta-audit"
+        assert (doc["config"]["org_id"], doc["config"]["default_org_id"]) == ("default", "default")
+
+
+class TestFetcherOrg:
+    """A fetched source's org is stamped by its fetcher, as that org's first tenant id."""
+
+    def _bound(self, org: str):
+        return FakeRegistry([_fetched(fetcher={"org": org})])
+
+    def test_a_bound_source_stamps_its_org_s_first_tenant_id(self, settings):
+        compiled = routing.compile_for(
+            catalogue.descriptor(FETCHER),
+            self._bound("acme"),
+            settings,
+            instance="okta-audit",
+            tenancy=TENANCY,
+        )
+
+        assert (compiled["org_id"], compiled["default_org_id"]) == ("acme-prod", "default")
+
+    def test_an_org_with_no_tenant_ids_stamps_its_name(self, settings):
+        compiled = routing.compile_for(
+            catalogue.descriptor(FETCHER),
+            self._bound("beta"),
+            settings,
+            instance="okta-audit",
+            tenancy=TENANCY,
+        )
+
+        assert compiled["org_id"] == "beta"
+
+    def test_a_source_bound_to_an_org_that_is_gone_is_not_fetched(self, settings):
+        # Running it would stamp a tenant no org holds, which the next org to take
+        # that tenant id would read.
+        with pytest.raises(routing.RoutingNotApplicableError, match="not registered"):
+            routing.compile_for(
+                catalogue.descriptor(FETCHER),
+                self._bound("gone"),
+                settings,
+                instance="okta-audit",
+                tenancy=TENANCY,
+            )
+
+    def test_a_bound_source_compiled_with_no_tenancy_fails_rather_than_stamping_default(
+        self, settings
+    ):
+        with pytest.raises(routing.TenancyNotGivenError):
+            routing.compile_for(
+                catalogue.descriptor(FETCHER), self._bound("acme"), settings, instance="okta-audit"
+            )
+
+    def test_moving_a_source_to_another_org_is_drift(self, settings):
+        app = instances.instance_of(FETCHER, "okta-audit")
+        doc = instances.initial_overlay(app)
+        routing.sync(
+            app.descriptor,
+            doc,
+            self._bound("acme"),
+            settings,
+            instance="okta-audit",
+            tenancy=TENANCY,
+        )
+
+        moved = routing.status(
+            app.descriptor,
+            doc,
+            self._bound("beta"),
+            settings,
+            instance="okta-audit",
+            tenancy=TENANCY,
+        )
+
+        assert moved.drift is True
+        assert moved.compiled["org_id"] == "beta"
 
     def test_instances_needing_sync_skips_an_instance_with_no_source(
         self, fetched_registry, settings

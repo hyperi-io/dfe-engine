@@ -57,8 +57,10 @@ def _fetcher_body(name: str, **fetcher) -> dict:
 
 
 def _rules(gc) -> list[str]:
+    """The ``_source`` each compiled receiver row sets, in row order."""
     doc = gc.get("helmvars", RECEIVER_OVERLAY)
-    return [r["source"] for r in doc.get("config", {}).get("routing", {}).get("source_rules", [])]
+    rows = doc.get("config", {}).get("rules", {}).get("rules", [])
+    return [row["set"]["_source"]["value"] for row in rows]
 
 
 class TestReceiverRoutingFollowsTheSources:
@@ -231,7 +233,7 @@ class TestFetcherInstancesFollowTheSources:
         client.post("/api/v1/sources", json=_receiver_body("kvproof"), headers=admin_headers)
         # A hand edit over the derived block is drift the reconcile undoes.
         doc = gc.get("helmvars", RECEIVER_OVERLAY)
-        doc["config"]["routing"]["source_rules"] = []
+        doc["config"]["rules"]["rules"] = []
         gc.put("helmvars", RECEIVER_OVERLAY, doc, "test", message="test: hand edit")
 
         resp = client.post("/api/v1/sources/reconcile-apps", headers=admin_headers)

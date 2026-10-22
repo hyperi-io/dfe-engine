@@ -20,23 +20,56 @@ server:
     ca_file: /etc/tls/ca.crt
     client_auth: none
     refresh_interval_secs: 3600
+  # Each bearer listener reads the <id>:<token> lines the engine writes for every
+  # ingest credential it accepts, under the engine's KV mount (DFE_SECRETS_MOUNT).
   auth:
     mode: bearer
     bearer:
-      secret_source: "vault:secret/dfe/receiver:bearer_tokens"
+      secret_source: "vault:dfe/ingest/bearer-tokens/http:value"
       refresh_interval_secs: 300
 
 grpc:  # bind_address is the receiver's own default
   enabled: false
+  auth:
+    mode: bearer
+    bearer:
+      secret_source: "vault:dfe/ingest/bearer-tokens/grpc:value"
+      refresh_interval_secs: 300
+
+otlp:
+  enabled: false
+  auth:
+    mode: bearer
+    bearer:
+      secret_source: "vault:dfe/ingest/bearer-tokens/otlp:value"
+      refresh_interval_secs: 300
+
+splunk_hec:
+  enabled: false
+  auth:
+    mode: bearer
+    bearer:
+      secret_source: "vault:dfe/ingest/bearer-tokens/splunk_hec:value"
+      refresh_interval_secs: 300
+
+prometheus_rw:
+  enabled: false
+  auth:
+    mode: bearer
+    bearer:
+      secret_source: "vault:dfe/ingest/bearer-tokens/prometheus_rw:value"
+      refresh_interval_secs: 300
 
 validation:
   require_json: true
   required_fields: []
   dlq_on_invalid: true
 
+# The rules and ingest_bindings sections are compiled by the engine from the
+# Source definitions and the ingest credentials.
 routing:
-  source_rules: []  # compiled from Source definitions by the engine
   default_source: main
+  default_org_id: default
   topic_suffix: _land
   source_to_topic: {}
   dlq:
@@ -45,7 +78,6 @@ routing:
 
 destinations:
   default: kafka
-  rules: []
 
 kafka:
   brokers: []  # every deployment names its own brokers

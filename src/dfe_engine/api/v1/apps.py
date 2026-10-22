@@ -66,6 +66,7 @@ from dfe_engine.api.deps import (
     Settings,
     SourceReg,
     get_source_registry,
+    request_tenancy,
     require_action,
 )
 from dfe_engine.api.errors import ErrorResponse, backend_failure
@@ -2099,6 +2100,7 @@ def _routing_status(request: Request, app: AppInstance, doc: dict, source_regist
             source_registry,
             request.app.state.settings,
             instance=app.instance,
+            tenancy=request_tenancy(request),
         )
     except routing.RoutingNotApplicableError as exc:
         raise HTTPException(

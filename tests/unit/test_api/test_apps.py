@@ -953,6 +953,8 @@ class TestRouting:
         assert body["compiler"] == "receiver"
         assert body["values_paths"] == {
             "routing": "config.routing",
+            "rules": "config.rules",
+            "ingest_bindings": "config.ingest_bindings",
             "destinations": "config.destinations",
         }
 
@@ -964,9 +966,11 @@ class TestRouting:
         assert resp.json()["commit_sha"]
 
         doc = gc.get("helmvars", "dfe-receiver-default-values")
-        assert "source_rules" in doc["config"]["routing"]
-        # Both blocks land: the rules that label a record and the set that says
-        # where a matched one goes.
+        assert doc["config"]["routing"]["default_org_id"] == "default"
+        # Every block lands: the rules that label a record, the orgs each
+        # credential may write, and the set that says where a labelled one goes.
+        assert doc["config"]["rules"]["targets"] == ["_source", "_org_id"]
+        assert doc["config"]["ingest_bindings"] == {"credentials": {}}
         assert doc["config"]["destinations"]["default"] == "kafka"
 
     def test_after_sync_there_is_no_drift(self, client, app, admin_headers, tmp_path):

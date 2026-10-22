@@ -159,7 +159,7 @@ class TestOrgReads:
         # data_analyst_viewer (system scope via dfe-viewers) carries org:read
         resp = scoped_setup.get(ORGS, headers=viewer_headers)
         assert resp.status_code == 200
-        assert {o["name"] for o in resp.json()["items"]} == {"acme", "globex"}
+        assert {o["name"] for o in resp.json()["items"]} == {"default", "acme", "globex"}
 
 
 class TestScopeValidation:

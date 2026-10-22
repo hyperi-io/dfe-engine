@@ -316,7 +316,7 @@ class TestCoreSourceTravelsAsAReference:
         assert exported.status_code == 200, exported.text
         bundle = exported.json()
         assert bundle["resource_type"] == "core"
-        assert bundle["reference"] == {"path": "main", "version": "1.0.1"}
+        assert bundle["reference"] == {"path": "main", "version": "1.0.2"}
         assert "routing" not in bundle
         assert "schema" not in bundle
         assert "transform" not in bundle
