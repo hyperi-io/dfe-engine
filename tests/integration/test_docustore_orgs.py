@@ -45,7 +45,7 @@ from dfe_engine.orgs.registry import (
 from dfe_engine.orgs.seed import ensure_default_org, seed_orgs
 from dfe_engine.secrets import DfeSecrets, build_secrets
 from dfe_engine.settings import SecretsSettings, SeedOrg
-from dfe_engine.store.documents import Claim, DocuStore, converge
+from dfe_engine.store.documents import Claim, DocumentConflictError, DocuStore, converge
 from tests.support.races import race, raised
 
 pytestmark = pytest.mark.integration
@@ -153,6 +153,77 @@ class TestCreate:
 
         with pytest.raises(OrgCollisionError, match="'in-flight'"):
             registry.create("acme", ["t-1"])
+
+    def test_a_stored_org_whose_claims_are_gone_still_collides(self, docustore_pair):
+        registries = _registries(docustore_pair)
+        registries[0].create("acme", ["a-1"])
+        docustore_pair[0].collection(TENANT_KEYS_COLLECTION).delete_many({})
+
+        with pytest.raises(OrgCollisionError, match="tenant-fenced org 'acme'"):
+            registries[1].create("beta", ["a-1"])
+
+
+@pytest.fixture
+def lost_orgs_bump(docustore_pair, monkeypatch) -> None:
+    """Replica 0's orgs revision bump raises after the record write lands, as a store blip does."""
+    revisions = docustore_pair[0]._revisions
+    real = revisions.bump
+
+    def bump(name: str) -> None:
+        if name == "orgs":
+            raise DocumentConflictError("the orgs revision lost to concurrent writers 5 times")
+        real(name)
+
+    monkeypatch.setattr(revisions, "bump", bump)
+
+
+class TestAWriteThatLandsAndThenRaises:
+    """A failure after the org record is in leaves its tenant ids claimed, so no other org takes one."""
+
+    @staticmethod
+    def _fenced(registries: list[DocuStoreOrgRegistry], store: DocuStore, tenant_id: str) -> None:
+        _claims_match_records(registries[1], store)
+        with pytest.raises(OrgCollisionError):
+            registries[1].create("intruder", [tenant_id])
+
+    def test_a_create(self, docustore_pair, lost_orgs_bump):
+        registries = _registries(docustore_pair)
+
+        with pytest.raises(DocumentConflictError):
+            registries[0].create("acme", ["a-1"])
+
+        assert _org(registries[1], "acme").org_ids == ["a-1"]
+        self._fenced(registries, docustore_pair[1], "a-1")
+
+    def test_a_create_held_across_its_hunt_write(self, docustore_pair, lost_orgs_bump):
+        registries = _registries(docustore_pair)
+
+        with pytest.raises(DocumentConflictError):
+            with registries[0].reserved("acme", ["a-1"]):
+                registries[0].create("acme", ["a-1"])
+
+        assert _org(registries[1], "acme").org_ids == ["a-1"]
+        self._fenced(registries, docustore_pair[1], "a-1")
+
+    def test_a_held_create_whose_next_step_fails(self, docustore_pair):
+        registries = _registries(docustore_pair)
+
+        with pytest.raises(RuntimeError):
+            with registries[0].reserved("acme", ["a-1"]):
+                registries[0].create("acme", ["a-1"])
+                raise RuntimeError("the HyperDX team write failed")
+
+        self._fenced(registries, docustore_pair[1], "a-1")
+
+    def test_an_update(self, docustore_pair, lost_orgs_bump):
+        registries = _registries(docustore_pair)
+        registries[1].create("acme", ["a-1"])
+
+        with pytest.raises(DocumentConflictError):
+            registries[0].update("acme", org_ids=["a-1", "a-2"])
+
+        assert _org(registries[1], "acme").org_ids == ["a-1", "a-2"]
+        self._fenced(registries, docustore_pair[1], "a-2")
 
 
 class TestUpdate:
