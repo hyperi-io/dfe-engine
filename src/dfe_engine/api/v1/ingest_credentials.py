@@ -60,9 +60,17 @@ from dfe_engine.orgs.ingest_credentials import (
     IngestCredential,
     IngestListener,
 )
-from dfe_engine.orgs.ingest_tokens import drop_token, mint_token, store_token, sync_bearer_tokens
+from dfe_engine.orgs.ingest_tokens import (
+    BearerSourceUnreadableError,
+    bearer_secret_source,
+    drop_token,
+    mint_token,
+    store_token,
+    sync_bearer_tokens,
+)
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.secrets import DfeSecrets
+from dfe_engine.settings import SecretsSettings, get_settings
 
 router = APIRouter(
     prefix="/orgs/{org}/ingest-credentials",
@@ -204,14 +212,19 @@ def _field(field: str, detail: str) -> FieldError:
 
 
 def _desired(
-    registry: OrgRegistry, org: str, name: str, spec: IngestCredentialSpec
+    registry: OrgRegistry,
+    org: str,
+    name: str,
+    spec: IngestCredentialSpec,
+    backend: SecretsSettings,
 ) -> IngestCredential:
     """The credential *spec* describes, refused where the receiver could not hold it.
 
     Raises:
         ProblemError: 422 ``invalid_binding`` with one field error per problem: an
             org that is not registered or is listed twice, an ``orgs`` without the
-            owning org, a ``default_org`` outside ``orgs``, or a listener listed twice.
+            owning org, a ``default_org`` outside ``orgs``, a listener listed twice,
+            or listeners on a secrets *backend* the receiver cannot read its tokens from.
     """
     orgs = spec.orgs if spec.orgs is not None else [org]
     default_org = spec.default_org if spec.default_org is not None else org
@@ -234,6 +247,10 @@ def _desired(
         )
     if len(set(spec.listeners)) != len(spec.listeners):
         errors.append(_field("listeners", "a listener is listed twice"))
+    try:
+        bearer_secret_source(spec.listeners[0], backend)
+    except BearerSourceUnreadableError as exc:
+        errors.append(_field("listeners", str(exc)))
     if errors:
         raise ProblemError(
             422,
@@ -387,7 +404,7 @@ async def apply_ingest_credential(
                 "across every org because the receiver keys its bindings on them",
             },
         )
-    desired = _desired(registry, org, credential, body)
+    desired = _desired(registry, org, credential, body, get_settings().secrets)
     _check_bound_orgs(request, user, desired)
     response.headers["ETag"] = credential_etag(desired)
 
