@@ -32,9 +32,12 @@ tenancy is compiled from the orgs, so an update or delete is followed by the sam
 reconcile a source write runs.
 """
 
+import contextlib
 import functools
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Any
 
+import anyio
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from scalo.concurrency import run_blocking
@@ -155,7 +158,7 @@ async def create_org(
     lifecycle: OrgLifecycleManager = request.app.state.org_lifecycle
     try:
         # Held until the record is in, so a create that would lose is refused before its hunts move.
-        with registry.reserved(body.name, body.org_ids):
+        async with _held_off_loop(registry.reserved(body.name, body.org_ids)):
             outcome = await run_blocking(
                 functools.partial(_create_hunts_first, hunts, body, user.user_id)
             )
@@ -220,22 +223,26 @@ async def list_orgs(
     System-scope org:read holders see every org; org-scope holders see
     only the orgs their grants cover.
     """
-    registry: AnyOrgRegistry = request.app.state.org_registry
-    if is_action_allowed(request, user, scopes_dict["org_read"]):
-        visible = list(registry.list())
-    else:
-        visible = [
-            o
-            for o in registry.list()
-            if is_action_allowed(
-                request, user, scopes_dict["org_read"], scope=Scope(type="org", id=o.name)
-            )
-        ]
+    visible = await run_blocking(_visible_orgs, request, user)
     rows = [_org_response(o).model_dump() for o in visible]
     rows = apply_search(rows, search, ["name", "display_name"])
     rows = apply_sort(rows, sort_by, sort_order)
     summaries = [OrgResponse.model_validate(row) for row in rows]
     return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+
+
+def _visible_orgs(request: Request, user: Any) -> list[Org]:
+    """The orgs the caller may read: every org at system scope, else those its grants cover."""
+    orgs = request.app.state.org_registry.list()
+    if is_action_allowed(request, user, scopes_dict["org_read"]):
+        return orgs
+    return [
+        o
+        for o in orgs
+        if is_action_allowed(
+            request, user, scopes_dict["org_read"], scope=Scope(type="org", id=o.name)
+        )
+    ]
 
 
 @router.get(
@@ -262,7 +269,7 @@ async def available_org_ids(
     """
     database = settings.clickhouse.effective_data_database
     try:
-        org_ids = discover_available_org_ids(ch, database=database, limit=limit)
+        org_ids = await run_blocking(discover_available_org_ids, ch, database=database, limit=limit)
     except OrgIdDiscoveryError as exc:
         raise backend_failure(
             503,
@@ -287,7 +294,7 @@ async def get_org(
     """Get a single organisation by name (org:read at that org's scope)."""
     check_action(request, user, scopes_dict["org_read"], scope=Scope(type="org", id=name))
     registry: AnyOrgRegistry = request.app.state.org_registry
-    org = registry.get(name)
+    org = await run_blocking(registry.get, name)
     if org is None:
         raise HTTPException(
             status_code=404,
@@ -420,7 +427,7 @@ async def delete_org(
     try:
         # Held until the record is gone, so a delete that would be refused is refused before
         # its hunts move, and no credential write binds the org meanwhile.
-        with registry.deleting(name):
+        async with _held_off_loop(registry.deleting(name)):
             outcome = await run_blocking(
                 functools.partial(_delete_hunts_first, hunts, name, user.user_id)
             )
@@ -500,6 +507,25 @@ def reconcile_tenancy(request: Request, user: Any) -> AppsSync | None:
 
 
 # -- Helpers -----------------------------------------------------------------
+
+
+@contextlib.asynccontextmanager
+async def _held_off_loop(hold: contextlib.AbstractContextManager[None]) -> AsyncGenerator[None]:
+    """Enter and leave the registry's *hold* on worker threads, since both reach the store.
+
+    Leaving is shielded, so a cancelled request still gives back what the hold took.
+    """
+    await run_blocking(hold.__enter__)
+    try:
+        yield
+    except BaseException as exc:
+        with anyio.CancelScope(shield=True):
+            suppressed = await run_blocking(hold.__exit__, type(exc), exc, exc.__traceback__)
+        if not suppressed:
+            raise
+    else:
+        with anyio.CancelScope(shield=True):
+            await run_blocking(hold.__exit__, None, None, None)
 
 
 def refuse_held_tenant_ids(hunts: Any, org: str, tenant_ids: list[str]) -> None:
