@@ -9,7 +9,8 @@
 
 The engine reads runtime config secrets from env (ESO or compose fills it). This module
 is the WRITE seam for secrets the engine generates (the JWT signing key, the ClickHouse
-service, org and group passwords, OIDC client secrets): they go to ``scalo.secrets``,
+service, org and group passwords, OIDC client secrets and, with gitops on, alert destination
+URLs): they go to ``scalo.secrets``,
 provider selected by ``settings.secrets``. ``file`` is the default, a directory on the
 engine's volume. ``ansible_vault`` is an encrypted local file, ``openbao``/``vault`` a
 KV mount the deployment configures, and ``aws`` AWS Secrets Manager with every name
