@@ -462,15 +462,6 @@ def _grants_of(groups: Iterable[Group]) -> GroupResolution:
     return GroupResolution(sorted(roles), sorted(org_ids), grants, sorted(matched))
 
 
-def _resolve_roles_from_groups(
-    groups: list[str],
-    group_store: GroupStore,
-) -> tuple[list[str], list[str]]:
-    """Resolve (roles, org_ids) from group names -- see _resolve_group_grants."""
-    resolution = _resolve_group_grants(groups, group_store)
-    return resolution.roles, resolution.org_ids
-
-
 def groups_granting(identifiers: list[str], group_store: GroupStore) -> list[str]:
     """The names of the stored groups a session's roles come from.
 

@@ -252,7 +252,7 @@ async def get_preferences(
 ):
     """Effective merged preferences for the caller (system -> org -> group -> user)."""
     store = _store(ch_client, settings)
-    return _effective_preferences(store, user)
+    return await run_blocking(functools.partial(_effective_preferences, store, user))
 
 
 @router.patch("/preferences", response_model=PreferencesResponse, openapi_extra=CLI_HIDDEN)
@@ -268,7 +268,21 @@ async def patch_preferences(
     The theme toggle is one call: ``PATCH {"theme": "dark"}``. ``null``
     removes a user-layer key (falling back to the inherited value).
     """
-    store = _store(ch_client, settings)
+    return await run_blocking(
+        functools.partial(
+            _patch_user_preferences, _store(ch_client, settings), user, settings, patch, if_match
+        )
+    )
+
+
+def _patch_user_preferences(
+    store: RepositoryStore,
+    user: AuthContext,
+    settings: Any,
+    patch: dict[str, Any],
+    if_match: str | None,
+) -> PreferencesResponse | JSONResponse:
+    """The ClickHouse read, write and merge :func:`patch_preferences` makes, off the event loop."""
     current = store.get("user", user.user_id, _PREFS_NAMESPACE, _PREFS_KEY)
     current_doc = (_decode_json(current) or {}) if current else {}
     new_doc = json_merge_patch(current_doc, patch)
@@ -390,15 +404,18 @@ async def put_object(
 
     store = _store(ch_client, settings)
     try:
-        meta = store.put(
-            scope,
-            stored_id,
-            namespace,
-            key,
-            body,
-            content_type,
-            user.user_id,
-            if_match=if_match,
+        meta = await run_blocking(
+            functools.partial(
+                store.put,
+                scope,
+                stored_id,
+                namespace,
+                key,
+                body,
+                content_type,
+                user.user_id,
+                if_match=if_match,
+            )
         )
     except ConflictError as exc:
         return _precondition_failed(exc.current_etag)
