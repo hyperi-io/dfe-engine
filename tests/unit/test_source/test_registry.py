@@ -572,7 +572,7 @@ class TestList:
 
         assert present(registry.get_source("okta-audit").fetcher).routes[0].source == "okta-alerts"
 
-    def test_a_transform_that_does_not_carry_the_transport_is_refused(
+    def test_a_direct_source_may_name_the_elastic_transform(
         self, registry: SourceRegistry, direct_deployment
     ):
         direct = Source.model_validate(
@@ -583,8 +583,9 @@ class TestList:
                 "transform": {"engine": "elastic"},
             }
         )
-        with pytest.raises(SourceValidationError, match="carries only bus"):
-            registry.save_source(direct)
+        registry.save_source(direct)
+
+        assert registry.get_source("auth").transport == "direct"
 
     def test_disabling_is_the_exit_from_a_flow_the_deployment_cannot_run(
         self, registry: SourceRegistry
