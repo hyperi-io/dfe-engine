@@ -9,16 +9,16 @@
 description: A catalogue entry compiles into an ordinary source whose records land in its own table.
 origin: catalogue
 
-# {entry} is the catalogue entry the suite picks at run time; a deployment that
-# mounts no catalogue offers none, and the case reports an expected skip.
+# {entry} is the catalogue entry the suite picks at run time, one the deployed
+# transform's contract does not refuse. An engine whose dfe-schemas ships no
+# catalogue answers 502, which fails the case.
 catalogue:
   intake: receiver
 
-# The only app shipping a catalogue is dfe-transform-elastic (apps.yaml
-# catalogue:), and it carries the bus alone, so every entry compiles onto a
-# transform a direct source cannot name.
+# Every catalogue entry runs dfe-transform-elastic, and it carries the bus alone,
+# so every entry compiles onto a transform a direct source cannot name.
 expected_skip:
-  direct: the mounted catalogue belongs to dfe-transform-elastic, which carries the bus alone until its gRPC listener ships (dfe-transform-elastic#19)
+  direct: every catalogue entry runs dfe-transform-elastic, which carries the bus alone until its gRPC listener ships (dfe-transform-elastic#19)
 
 expect:
   - source: "{entry}"

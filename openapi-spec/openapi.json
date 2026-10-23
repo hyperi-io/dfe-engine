@@ -6129,7 +6129,7 @@
           "Sources"
         ],
         "summary": "List Catalogue",
-        "description": "List the sources the deployed transforms already handle.\n\nThe catalogue is dfe-schemas package data, so every deployment has it. Each entry says whether its table's schema layers resolve on this deployment,\nand names the first one that does not, so a console can hold back an entry\nthe create would refuse.",
+        "description": "List the sources the installed dfe-schemas catalogue ships ready to create.\n\nEach entry says whether the deployed transform ships its default variant, read off that app's mounted contract, so a console can hold back an entry the create would refuse.",
         "operationId": "sources.catalogue",
         "parameters": [
           {
@@ -6355,7 +6355,7 @@
           "Sources"
         ],
         "summary": "Create Source From Catalogue",
-        "description": "Create a source from a catalogue entry, on the intake it arrives by.\n\nThe entry supplies the match rule or the fetcher family and the transform\nvariant. Its table's schema layers are the ones the app manifest names,\nbound only when the entry's derived schema resolves over the manifest's\nmeta schema; otherwise the source carries no schema. Everything after that\nis the ordinary create, so the source is indistinguishable from a\nhand-written one.",
+        "description": "Create a source from a catalogue entry, on one of the intakes it arrives by.\n\nThe entry's file is the write body for its default intake, and another intake swaps in the match rule that intake derives. A variant the deployed transform's contract does not list is refused with 409, and one whose contract is not mounted is allowed. Everything after that is the ordinary create, so the source is indistinguishable from a hand-written one.",
         "operationId": "sources.from-catalogue.post",
         "parameters": [
           {
@@ -6420,7 +6420,7 @@
             }
           },
           "409": {
-            "description": "A source of that name already exists, the name is the core landing the engine owns and reconciles itself, or its match duplicates another",
+            "description": "A source of that name already exists, the name is the core landing the engine owns and reconciles itself, its match duplicates another, or the deployed transform does not ship the variant (code missing_variant)",
             "content": {
               "application/json": {
                 "schema": {
@@ -6433,6 +6433,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MissingVariantErrorResponse"
                     }
                   ],
                   "title": "Response 409 Sources.From-Catalogue.Post"
@@ -30903,7 +30906,31 @@
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "The shipping app's key for this source"
+            "description": "The source name the entry creates, and its catalogue key"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "What the source carries"
           },
           "package": {
             "type": "string",
@@ -30926,7 +30953,17 @@
             },
             "type": "array",
             "title": "Intakes",
-            "description": "Ways this source's payload can reach the platform"
+            "description": "Ways this source's data can reach the platform"
+          },
+          "default_intake": {
+            "type": "string",
+            "enum": [
+              "beats",
+              "receiver",
+              "fetcher"
+            ],
+            "title": "Default Intake",
+            "description": "The intake a create takes when it names none: the first of fetcher, receiver and beats the entry lists"
           },
           "framing": {
             "anyOf": [
@@ -30938,15 +30975,7 @@
               }
             ],
             "title": "Framing",
-            "description": "Pushed intakes only: whether the pipeline wants the syslog line or the body"
-          },
-          "transforms": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Transforms",
-            "description": "Programs the app compiled for this source"
+            "description": "Receiver intakes only: whether the pipeline wants the syslog line or the body"
           },
           "beats": {
             "additionalProperties": {
@@ -30956,15 +30985,57 @@
             "title": "Beats",
             "description": "Beats module and fileset carrying the same source, when one does"
           },
-          "source": {
-            "type": "string",
-            "title": "Source",
-            "description": "Source name a source created from this entry takes unless one is supplied",
-            "default": ""
+          "has_schema": {
+            "type": "boolean",
+            "title": "Has Schema",
+            "description": "Whether the entry binds a table schema. A fetcher intake without one is refused on create (422), because a fetcher on its own topic needs one"
           },
-          "schema_layers": {
-            "$ref": "#/components/schemas/CatalogueSchemaAvailability",
-            "description": "Whether the entry's table schema resolves here, and which layer does not"
+          "engine": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Engine",
+            "description": "The transform engine the source runs, e.g. elastic"
+          },
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant",
+            "description": "The variant a create runs when it names none"
+          },
+          "variants": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Variants",
+            "description": "Every variant the entry compiles to, the default first"
+          },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "available",
+              "missing_variant",
+              "unknown"
+            ],
+            "title": "Availability",
+            "description": "Whether the deployed transform ships the default variant, read off its mounted contract: available, missing_variant (a create is refused with 409), or unknown (no contract is mounted or it is unreadable, and a create is allowed)"
+          },
+          "availability_reason": {
+            "type": "string",
+            "title": "Availability Reason",
+            "description": "Why availability says what it does"
           }
         },
         "type": "object",
@@ -30974,55 +31045,32 @@
           "data_stream",
           "dataset",
           "intakes",
-          "transforms",
-          "schema_layers"
+          "default_intake",
+          "has_schema",
+          "availability",
+          "availability_reason"
         ],
         "title": "CatalogueEntryObject",
-        "description": "One source a deployed transform already handles, as the console lists it."
+        "description": "One source DFE ships ready to create, as the console lists it."
       },
-      "CatalogueSchemaAvailability": {
+      "CatalogueSourceRequest": {
         "properties": {
-          "resolves": {
-            "type": "boolean",
-            "title": "Resolves",
-            "description": "Whether the meta and derived schemas the entry's table composes from resolve here. When not, a source created from it carries no schema, and the fetcher intake refuses it (422) because a fetcher on its own topic needs one"
-          },
-          "missing_layer": {
+          "intake": {
             "anyOf": [
               {
                 "type": "string",
                 "enum": [
-                  "meta_schema",
-                  "derived_schema"
+                  "beats",
+                  "receiver",
+                  "fetcher"
                 ]
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Missing Layer",
-            "description": "The first layer that does not resolve, or null when resolves is true"
-          },
-          "missing_reference": {
-            "type": "string",
-            "title": "Missing Reference",
-            "description": "That layer's schema reference, such as derived/cisco_ios/log. Empty when resolves is true, or when the app manifest names no schema layers at all",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "required": [
-          "resolves"
-        ],
-        "title": "CatalogueSchemaAvailability",
-        "description": "Whether a catalogue entry's table schema layers resolve on this deployment."
-      },
-      "CatalogueSourceRequest": {
-        "properties": {
-          "intake": {
-            "type": "string",
             "title": "Intake",
-            "description": "How this source's data arrives: beats, receiver or fetcher"
+            "description": "How this source's data arrives, the entry's default intake when omitted"
           },
           "name": {
             "anyOf": [
@@ -31034,13 +31082,19 @@
               }
             ],
             "title": "Name",
-            "description": "Source name; defaults to the entry's own name as a Kubernetes label"
+            "description": "Source name, the entry's own name when omitted"
           },
-          "transform": {
-            "type": "string",
-            "title": "Transform",
-            "description": "Which of the entry's transforms this source runs",
-            "default": "default"
+          "variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Variant",
+            "description": "The full name of one of the entry's variants, the first when omitted"
           },
           "transport": {
             "anyOf": [
@@ -31067,9 +31121,6 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "intake"
-        ],
         "title": "CatalogueSourceRequest",
         "description": "Create a source from a catalogue entry."
       },
@@ -36643,6 +36694,59 @@
         ],
         "title": "MetricsResponse",
         "description": "An instance's current gauges and rates over a window."
+      },
+      "MissingVariantContext": {
+        "properties": {
+          "transform": {
+            "type": "string",
+            "title": "Transform",
+            "description": "The transform app the source's engine selects"
+          },
+          "variant": {
+            "type": "string",
+            "title": "Variant",
+            "description": "The variant the source would run"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transform",
+          "variant"
+        ],
+        "title": "MissingVariantContext",
+        "description": "Structured context for a catalogue create naming a variant the deployed transform lacks."
+      },
+      "MissingVariantErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "missing_variant",
+            "title": "Code",
+            "default": "missing_variant"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation, naming the variant and transform"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "context": {
+            "$ref": "#/components/schemas/MissingVariantContext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "context"
+        ],
+        "title": "MissingVariantErrorResponse",
+        "description": "409 when a catalogue create names a variant the deployed transform's contract does not list."
       },
       "NonEmptyDict_str_SchemaVersionCreate_": {
         "additionalProperties": {

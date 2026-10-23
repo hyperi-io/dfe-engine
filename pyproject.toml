@@ -70,9 +70,8 @@ dependencies = [
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
-    # wheel. Floor is the release with the platform probe, the one DDL shape and
-    # the replication refusal the schema phase calls, and a cluster probe that
-    # counts each replica once. uv.lock pins the hash.
+    # wheel. Floor is the first release that ships the source catalogue under
+    # catalogue/. uv.lock pins the hash.
     # Upper bound: <1 is the API-stability boundary while dfe-schemas is 0.x.
     "dfe-schemas>=0.2.18,<1",
     # Data processing
@@ -82,6 +81,8 @@ dependencies = [
     "clickhouse-connect>=1.10.0",
     # Configuration and parsing
     "ruamel-yaml>=0.19.1",
+    # libyaml reads the source catalogue's thousand-odd files where ruamel's pure-Python parser takes seconds.
+    "pyyaml>=6.0.3",
     "pydantic>=2.14.1",
     # AWS
     "boto3>=1.43.113",
@@ -196,6 +197,10 @@ dev = [
     # 2.4.0 (2025-05) is the latest release and the repo is active (commit 2026-10-15).
     "pytest-timeout>=2.4.0",
 ]
+
+[tool.uv]
+# Same-org packages are exempt from any uv release-age gate, so a fresh dfe-schemas or scalo release resolves at once.
+exclude-newer-package = { dfe-schemas = false, scalo = false }
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "tests"]

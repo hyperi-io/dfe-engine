@@ -1,0 +1,152 @@
+[
+  {
+    "kind": "transform",
+    "name": "elastic",
+    "description": "Elastic ingest-pipeline logic compiled to native Rust: field extraction, mutation and enrichment applied per event, selected by source name.",
+    "maturity": "beta",
+    "fields": [
+      {
+        "name": "source.name",
+        "type": "string",
+        "required": true,
+        "description": "Which compiled transform to apply, e.g. filebeat.okta.default."
+      },
+      {
+        "name": "source.envelope",
+        "type": "enum",
+        "required": false,
+        "default": "auto",
+        "description": "How the payload is wrapped on the way in. `auto` reads it off each event; `receiver` (spelled `syslog` before it grew the other transports) reads dfe-receiver's output and applies only to device sources; `fetcher` reads dfe-fetcher's and applies only to sources Elastic pulls from an API.",
+        "enum_values": [
+          "auto",
+          "beats",
+          "receiver",
+          "syslog",
+          "fetcher"
+        ]
+      }
+    ],
+    "children": [
+      {
+        "kind": "service",
+        "name": "filebeat.1password_audit_events.default",
+        "description": "Compiled transform. Accepts the envelopes: beats, fetcher.",
+        "maturity": "beta"
+      },
+      {
+        "kind": "service",
+        "name": "filebeat.aws_cloudtrail.default",
+        "description": "Compiled transform. Accepts the envelopes: beats, fetcher.",
+        "maturity": "beta"
+      },
+      {
+        "kind": "service",
+        "name": "filebeat.cisco_asa.default",
+        "description": "Compiled transform. Accepts the envelopes: beats, receiver.",
+        "maturity": "beta"
+      },
+      {
+        "kind": "service",
+        "name": "filebeat.coredns_log.default",
+        "description": "Compiled transform. Accepts the envelopes: beats.",
+        "maturity": "beta"
+      },
+      {
+        "kind": "service",
+        "name": "filebeat.okta.default",
+        "description": "Compiled transform. Accepts the envelopes: beats, fetcher.",
+        "maturity": "beta"
+      }
+    ]
+  },
+  {
+    "kind": "source",
+    "name": "kafka",
+    "description": "Kafka consumer and producer via the scalo transport.",
+    "maturity": "stable",
+    "fields": [
+      {
+        "name": "source.topics",
+        "type": "list",
+        "required": true,
+        "description": "Topics to consume."
+      },
+      {
+        "name": "sink.topic",
+        "type": "string",
+        "required": true,
+        "description": "Topic the normalised events are produced to, and on the direct transport the routing key every push carries."
+      },
+      {
+        "name": "source.max_batch_bytes",
+        "type": "int",
+        "required": false,
+        "default": 16777216,
+        "description": "Ceiling on the bytes one fetch brings back, applied as librdkafka's fetch.max.bytes. The pod's memory limit has to cover this plus the parsed documents, which are several times larger."
+      }
+    ]
+  },
+  {
+    "kind": "enrichment",
+    "name": "geoip",
+    "description": "City and ASN lookups for the geoip processors 14 of the source pipelines carry. scalo downloads and refreshes the MMDB files; the lookup runs in-process behind a bounded cache. A database that cannot be obtained leaves the geo fields empty and never stops the service.",
+    "maturity": "beta",
+    "fields": [
+      {
+        "name": "geoip.enabled",
+        "type": "bool",
+        "required": false,
+        "default": true,
+        "description": "Provision databases at all."
+      },
+      {
+        "name": "geoip.provider",
+        "type": "enum",
+        "required": false,
+        "default": "db_ip_lite",
+        "description": "Where the databases come from. Only db_ip_lite and max_mind_geo_lite2 publish both city and ASN.",
+        "enum_values": [
+          "db_ip_lite",
+          "max_mind_geo_lite2",
+          "ip_locate",
+          "ip_info_lite",
+          "sapics",
+          "custom"
+        ]
+      },
+      {
+        "name": "geoip.city_db_path",
+        "type": "string",
+        "required": false,
+        "description": "Mounted city MMDB. Setting either path bypasses the provider and downloads nothing."
+      },
+      {
+        "name": "geoip.asn_db_path",
+        "type": "string",
+        "required": false,
+        "description": "Mounted ASN MMDB. See geoip.city_db_path."
+      },
+      {
+        "name": "geoip.auto_download.data_dir",
+        "type": "string",
+        "required": false,
+        "default": "/var/lib/dfe/geoip",
+        "description": "Directory the downloaded databases are written to."
+      },
+      {
+        "name": "geoip.auto_download.max_age_days",
+        "type": "int",
+        "required": false,
+        "default": 30,
+        "description": "Age past which a local database is re-downloaded."
+      },
+      {
+        "name": "geoip.auto_download.maxmind_license_key",
+        "type": "secret",
+        "required": false,
+        "description": "Required by the max_mind_geo_lite2 provider, with the account id.",
+        "secret": true
+      }
+    ]
+  }
+]

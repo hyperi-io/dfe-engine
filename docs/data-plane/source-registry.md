@@ -78,7 +78,7 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
 | Operation | Effect |
 |-----------|--------|
 | **Create** | Validates the definition and updates receiver match rules. No topics, no DDL -- those land on deploy |
-| **Create from catalogue** | Compiles one entry of a transform's shipped catalogue into that same write body -- the match rule or fetcher family for the intake chosen, the transform variant, and the schema layers its table is built from -- then takes the ordinary create path. The app manifest's `catalogue` block names the layers: `meta_schema`, plus `derived_pattern` and `additional_pattern` filled with the entry's `package` and `data_stream`. They bind only over a derived schema that resolves and selects from that meta schema, because without it the CREATE can exceed ClickHouse's `max_query_size`; the vendor fields join when they resolve. The derived schema resolves in the deploy repo first, then the shipped schemas tree |
+| **Create from catalogue** | Reads one file of the dfe-schemas `catalogue/` tree the engine installs, which is already the write body for the entry's default intake, swaps in the match rule another intake derives and the variant the caller picks, then takes the ordinary create path. A variant the deployed transform's contract does not list is refused with 409 `missing_variant` ([source-flow.md](source-flow.md)) |
 | **Deploy** | Runs the schema DDL, then creates that source's Kafka topics for the version being deployed |
 | **Read** | Definition plus status overlay (topic exists, table exists, transform running) |
 | **Update** | Validates, migrates the schema if fields changed, recompiles receiver and transform config |
@@ -102,7 +102,7 @@ Sources are the primary API entity (see
 ```text
 GET    /api/v1/sources                  # List sources (paginated)
 POST   /api/v1/sources                  # Create source (flat write body; views/transform/fetcher inline)
-GET    /api/v1/sources/catalogue        # Sources a deployed transform already handles, each saying whether its schema layers resolve (filter: intake, search)
+GET    /api/v1/sources/catalogue        # Sources DFE ships ready to create, each saying whether the deployed transform ships its variant (filter: intake, search)
 POST   /api/v1/sources/from-catalogue/{entry}  # Create a source from a catalogue entry on one of its intakes
 GET    /api/v1/sources/{name}           # Get source (deployed-version accessors + state + enabled)
 GET    /api/v1/sources/{name}/versions/{version}  # One immutable version snapshot

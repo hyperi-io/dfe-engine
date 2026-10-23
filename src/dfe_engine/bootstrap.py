@@ -26,6 +26,9 @@ from dfe_engine.settings import DFESettings
 DEFAULT_CONFIG_DIR = "/app/config"
 SEED_MARKER_NAME = ".seeded"
 
+SEED_SKIPPED = frozenset({".git", "catalogue"})
+"""Seed entries the schemas directory never takes: git metadata, and the source catalogue the engine reads from its installed package."""
+
 
 def _seed_stamp() -> str:
     """Identify the shipped tree, so a marker written by another version re-seeds."""
@@ -33,9 +36,9 @@ def _seed_stamp() -> str:
 
 
 def _copy_seed(*, schemas_dir: Path, seed_dir: Path) -> None:
-    """Copy every entry from the seed directory into the schemas directory."""
+    """Copy every entry from the seed directory into the schemas directory, bar the ones it never takes."""
     for entry in sorted(seed_dir.iterdir()):
-        if entry.name == ".git":
+        if entry.name in SEED_SKIPPED:
             continue
         destination = schemas_dir / entry.name
         if entry.is_dir():

@@ -1,413 +1,344 @@
 #  Project:      dfe-engine
 #  File:         source/catalogue.py
-#  Purpose:      The sources DFE ships ready to create, offered as source definitions
+#  Purpose:      The sources DFE ships ready to create, read from the installed dfe-schemas package
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The pre-canned sources dfe-schemas ships, turned into source definitions.
+"""The source catalogue, and the write body an entry compiles to on the intake chosen.
 
-dfe-schemas carries one file per source under ``catalogue/``: the ``POST /sources``
-body for its default intake plus a ``catalogue`` block saying which vendor
-package and data stream it is, every way its data can reach the platform, and
-the transforms compiled for it. Nothing about that is derivable and nothing about
-it is the engine's, so it is DATA read from the installed dfe-schemas package,
-and creating a source from an entry compiles the same write body a person would
-otherwise have typed.
-
-An INTAKE is a way the entry's data reaches the platform, and the three are three
-different source definitions rather than three values of one: a pushed source is
-a receiver match rule, a pulled one is a fetcher stanza with no rule at all. So
-the set is closed here - a fourth intake is engine code either way, and refusing
-an unknown one keeps the catalogue and the compiler from disagreeing silently.
-
-See docs/data-plane/source.md for the source definition this produces.
+Each ``catalogue/<source>.yaml`` in dfe-schemas is the ``POST /sources`` body for the source's default intake, plus a ``catalogue`` block the write model ignores. It is read from the installed wheel, never the seeded schemas volume, because the seed never deletes and an entry dropped from the catalogue would survive there.
 """
 
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, get_args
+from typing import Any, Literal, get_args
 
-from dfe_schemas import schemas_root
-from pydantic import ValidationError
-from ruamel.yaml import YAMLError
+import dfe_schemas
+import yaml
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from scalo.logger import logger
 
-from dfe_engine.appmgmt import catalogue as apps
-from dfe_engine.appmgmt.catalogue import AppDescriptor, CatalogueBinding, CatalogueSchemaLayers
-from dfe_engine.manifest import ManifestError, read_manifest
-from dfe_engine.schema.derived import DerivedSchema
+from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, transform_service
+from dfe_engine.appmgmt.contract import ContractError, contract
+from dfe_engine.manifest import ManifestError
 from dfe_engine.source.models import (
     SOURCE_LABEL_FIELD,
-    SourceFetcher,
-    SourceMatch,
-    SourceSchema,
     SourceTransform,
     SourceWriteRequest,
     validate_source_name,
 )
 from dfe_engine.transport import SourceTransport
-from dfe_engine.yaml_utils import yaml_load
 
-if TYPE_CHECKING:
-    from dfe_engine.settings import DFESettings
+CATALOGUE_DIR = "catalogue"
+"""The catalogue's directory under the dfe-schemas trees."""
 
 CatalogueIntake = Literal["beats", "receiver", "fetcher"]
-"""How an entry's data reaches the platform, and so which source definition it is."""
+"""How an entry's data reaches the platform, and so which origin its source has."""
 
 INTAKES: frozenset[str] = frozenset(get_args(CatalogueIntake))
 
+DEFAULT_ORIGIN_ORDER: tuple[CatalogueIntake, ...] = ("fetcher", "receiver", "beats")
+"""The body carries the first of these the entry lists, which is the dfe-schemas rule."""
+
 BEATS_DATASET_FIELD = "data_stream.dataset"
-"""Beats and Elastic Agent stamp the integration's dataset here, on every event.
+"""Beats and Elastic Agent stamp ``<package>.<data_stream>`` here on every event."""
 
-The receiver's router reads a dotted path straight out of the payload, so this is
-the field it tests - and it is the one field a Beats event carries that says
-which integration produced it.
-"""
+TRANSFORM_CAPABILITY_KIND = "transform"
+"""The capability-catalogue kind a transform app lists its compiled variants under, named for its engine."""
 
-DEFAULT_TRANSFORM = "default"
-"""The transform every catalogue entry has; the others are per-entry extras."""
+Availability = Literal["available", "missing_variant", "unknown"]
+"""Whether the deployed transform ships a variant, with ``unknown`` kept apart from both answers."""
+
+FILE_KEYS = frozenset(
+    {
+        "source",
+        "display_name",
+        "description",
+        "match",
+        "fetcher",
+        "schema",
+        "transform",
+        "catalogue",
+    }
+)
+"""The top-level keys a catalogue file may carry, so a key the write body would drop unread is refused."""
+
+_held: SourceCatalogue | None = None
+_HOLD_LOCK = threading.Lock()
 
 
 class SourceCatalogueError(ManifestError):
-    """Raised when the source catalogue cannot be read or an entry cannot be used."""
+    """Raised when the catalogue cannot be read or an entry cannot be used as asked."""
+
+
+class _CatalogueBlock(BaseModel):
+    """The ``catalogue`` block beside a file's write body, typed strictly."""
+
+    model_config = ConfigDict(extra="ignore", strict=True)
+
+    package: str
+    data_stream: str
+    intakes: list[CatalogueIntake] = Field(min_length=1)
+    framing: str | None = None
+    beats: dict[str, str] = Field(default_factory=dict)
+    variants: list[str] = Field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
 class CatalogueEntry:
-    """One source the catalogue already knows how to transform."""
+    """One catalogue file: the write body for its default intake, and its catalogue block."""
 
     name: str
-    """The transform's own key for it, and the stem of every variant it selects."""
+    """The source name the entry creates, which is also its file name."""
+
+    request: SourceWriteRequest
+    """The body as the file carries it, on the default intake."""
 
     package: str
-    """Vendor integration package the transform came from."""
-
     data_stream: str
-    """Data stream within that package."""
 
-    intakes: frozenset[str]
-    """Every way this source's payload can reach the platform."""
+    intakes: tuple[CatalogueIntake, ...]
+    """Every way the data can arrive, in the order the file lists them."""
 
     framing: str | None
-    """Pushed intakes only: whether the pipeline wants the syslog line or the body."""
-
-    transforms: tuple[str, ...]
-    """The programs the transform compiled for this source, in the catalogue's order."""
+    """Receiver intakes only: whether the pipeline wants the syslog line or the body."""
 
     beats: dict[str, str]
-    """The Beats module and fileset carrying the same source, when one does."""
+    """The Beats module and fileset carrying the same source, where one does."""
 
-    source: str
-    """The source name the catalogue gives it, already a valid Kubernetes label."""
+    variants: tuple[str, ...]
+    """Every compiled transform variant for the source, the body's first."""
 
     @property
     def dataset(self) -> str:
-        """``<package>.<data_stream>`` - what a Beats event stamps as its dataset."""
+        """``<package>.<data_stream>``, what a Beats event stamps as its dataset."""
         return f"{self.package}.{self.data_stream}"
 
-    def source_name(self) -> str:
-        """The source name a source created from this entry takes by default."""
-        return validate_source_name(self.source)
+    @property
+    def default_intake(self) -> CatalogueIntake:
+        """The intake the body carries: the first of fetcher, receiver and beats the entry lists."""
+        return next(intake for intake in DEFAULT_ORIGIN_ORDER if intake in self.intakes)
 
 
 @dataclass(frozen=True, slots=True)
 class SourceCatalogue:
-    """The shipped catalogue, and the app whose transforms it selects."""
+    """Every entry the catalogue directory holds, by name, in name order."""
 
-    app: AppDescriptor
-    path: Path
+    directory: Path
     entries: dict[str, CatalogueEntry]
 
-    @property
-    def engine(self) -> str:
-        """The ``transform.engine`` a source created from this catalogue names."""
-        return self.app.service.removeprefix(apps.TRANSFORM_SERVICE_PREFIX)
-
-    def entry(self, name: str) -> CatalogueEntry:
-        """One entry by name, or a refusal naming the catalogue it is not in."""
+    def entry(self, *, name: str) -> CatalogueEntry:
+        """One entry by name, or a refusal naming it."""
         try:
             return self.entries[name]
         except KeyError:
-            raise SourceCatalogueError(
-                f"no catalogue entry named {name!r} in {self.path}"
-            ) from None
-
-
-def catalogue_dir() -> Path:
-    """Where the installed dfe-schemas keeps the catalogue."""
-    return schemas_root() / "catalogue"
-
-
-def _app_for(engine: str, path: Path) -> tuple[AppDescriptor, CatalogueBinding]:
-    service = f"{apps.TRANSFORM_SERVICE_PREFIX}{engine}"
-    app = apps.APP_CATALOGUE.get(service)
-    if app is None or app.catalogue is None:
-        raise SourceCatalogueError(
-            f"{path} names transform engine {engine!r}, but the app manifest declares no "
-            f"catalogue for {service}"
-        )
-    return app, app.catalogue
-
-
-def _entry_from(path: Path, doc: dict, binding: CatalogueBinding) -> CatalogueEntry:
-    raw = doc.get("catalogue")
-    if not isinstance(raw, dict):
-        raise SourceCatalogueError(f"{path} carries no catalogue block")
-    try:
-        variants = [str(v) for v in raw["variants"]]
-        parsed = [binding.parse_variant(v) for v in variants]
-        if not parsed or any(p is None for p in parsed):
-            raise SourceCatalogueError(
-                f"{path}: variants {variants} do not follow {binding.variant_pattern!r}"
-            )
-        stems = {p[0] for p in parsed if p}
-        if len(stems) != 1:
-            raise SourceCatalogueError(
-                f"{path}: variants name more than one entry: {sorted(stems)}"
-            )
-        transforms = [p[1] for p in parsed if p]
-        entry = CatalogueEntry(
-            name=stems.pop(),
-            package=str(raw["package"]),
-            data_stream=str(raw["data_stream"]),
-            intakes=frozenset(str(i) for i in raw["intakes"]),
-            framing=str(raw["framing"]) if raw.get("framing") else None,
-            transforms=tuple(transforms),
-            beats={str(k): str(v) for k, v in (raw.get("beats") or {}).items()},
-            source=str(doc["source"]),
-        )
-    except (KeyError, TypeError) as exc:
-        raise SourceCatalogueError(f"{path} is missing {exc}") from exc
-    unknown = entry.intakes - INTAKES
-    if unknown:
-        raise SourceCatalogueError(
-            f"{path} declares intake(s) {', '.join(sorted(unknown))}, which no source "
-            f"definition maps to; valid: {', '.join(sorted(INTAKES))}"
-        )
-    if DEFAULT_TRANSFORM not in entry.transforms:
-        raise SourceCatalogueError(f"{path} has no {DEFAULT_TRANSFORM!r} transform")
-    try:
-        entry.source_name()
-    except ValueError as exc:
-        raise SourceCatalogueError(f"{path}: {exc}") from exc
-    return entry
-
-
-def load_source_catalogue(directory: Path | str | None = None) -> SourceCatalogue:
-    """Read every catalogue file, from dfe-schemas unless a directory is given."""
-    root = Path(directory) if directory is not None else catalogue_dir()
-    files = sorted(root.glob("*.yaml")) if root.is_dir() else []
-    if not files:
-        raise SourceCatalogueError(f"no source catalogue under {root}")
-    app: AppDescriptor | None = None
-    entries: dict[str, CatalogueEntry] = {}
-    for path in files:
-        doc = read_manifest(path, what="source catalogue entry")
-        engine = str((doc.get("transform") or {}).get("engine") or "")
-        file_app, binding = _app_for(engine, path)
-        if app is not None and file_app is not app:
-            raise SourceCatalogueError(
-                f"{path} selects {file_app.service}, but the catalogue already selects "
-                f"{app.service}; one catalogue serves one transform"
-            )
-        app = file_app
-        entry = _entry_from(path, doc, binding)
-        if entry.name in entries:
-            raise SourceCatalogueError(f"{path} repeats catalogue entry {entry.name!r}")
-        entries[entry.name] = entry
-    if app is None:
-        raise SourceCatalogueError(f"no source catalogue under {root}")
-    if app.catalogue is not None and app.catalogue.schema_layers is None:
-        logger.warning(
-            f"The app manifest names no schema layers for {app.service}'s catalogue, so a "
-            "source created from it binds no table schema"
-        )
-    return SourceCatalogue(app=app, path=root, entries=entries)
-
-
-# Read on first use, never on import: parsing the catalogue costs seconds and most
-# processes never serve it.
-_HELD: SourceCatalogue | None = None
-
-
-def source_catalogue(directory: Path | str | None = None) -> SourceCatalogue:
-    """The shipped catalogue, read once and held. An explicit directory is never held."""
-    global _HELD
-    if directory is not None:
-        return load_source_catalogue(directory)
-    if _HELD is None:
-        _HELD = load_source_catalogue()
-    return _HELD
-
-
-SchemaLayer = Literal["meta_schema", "derived_schema"]
-"""A schema layer an entry's table needs. The vendor fields are optional, so never missing."""
+            raise SourceCatalogueError(f"no catalogue entry named {name!r}") from None
 
 
 @dataclass(frozen=True, slots=True)
-class SchemaLayersResolution:
-    """The schema an entry binds on this deployment, or the first layer that does not resolve."""
+class VariantAvailability:
+    """Whether the deployed transform ships a variant, and the reason for the answer."""
 
-    schema: SourceSchema | None
-    """The layers bound, or None when one does not resolve."""
-
-    missing_layer: SchemaLayer | None = None
-    """The first layer that does not resolve, or None when ``schema`` is set."""
-
-    missing_reference: str = ""
-    """That layer's reference, empty when the app manifest names no layers at all."""
-
-    @property
-    def resolves(self) -> bool:
-        """Whether every layer the table needs resolved, so the schema is bound."""
-        return self.schema is not None
+    state: Availability
+    reason: str
 
 
-def resolve_schema_layers(
-    entry: CatalogueEntry, layers: CatalogueSchemaLayers | None, settings: DFESettings
-) -> SchemaLayersResolution:
-    """The schema files this entry's table composes from, or the first one that does not resolve.
-
-    The app manifest names them, because the transform decides the shape of its
-    own output: one meta schema for every entry, and per stream a derived
-    schema that narrows it and the vendor fields appended after. Only the
-    derived schema makes the table fit - the meta schema alone, or with the
-    vendor fields on top, composes a CREATE wider than ClickHouse accepts for
-    the widest vendors - so the layers are bound over a derived schema that
-    selects from the manifest's meta schema, or not at all. The vendor fields
-    join when they resolve too.
-
-    The derived schema resolves under the deployment's own store first and the
-    schemas tree after it, the order the table build reads it in; the meta
-    schema and the vendor fields resolve under the schemas tree. A reference to
-    a file the build cannot read fails the first deploy instead of the create,
-    so nothing unresolved is bound.
-    """
-    if layers is None:
-        return SchemaLayersResolution(schema=None, missing_layer="meta_schema")
-    from dfe_engine.schema.derived_registry import (
-        derived_reference_root,
-        resolve_derived_reference,
-    )
-    from dfe_engine.schema.schema_loader import _resolve_schemas_root, resolve_schema_yaml_path
-
-    configured = settings.schemas.schemas_dir
-    root = Path(configured) if configured else _resolve_schemas_root()
-    if root is None or not resolve_schema_yaml_path(root, layers.meta_schema).is_file():
-        return SchemaLayersResolution(
-            schema=None, missing_layer="meta_schema", missing_reference=layers.meta_schema
-        )
-
-    derived = layers.derived(entry.package, entry.data_stream)
-    derived_path = resolve_derived_reference(derived, derived_reference_root(settings), root)
-    if not _selects_from(derived_path, layers.meta_schema):
-        return SchemaLayersResolution(
-            schema=None, missing_layer="derived_schema", missing_reference=derived
-        )
-    additional = layers.additional(entry.package, entry.data_stream)
-    return SchemaLayersResolution(
-        schema=SourceSchema(
-            meta_schema=layers.meta_schema,
-            derived_schema=derived,
-            additional_fields=(
-                additional if resolve_schema_yaml_path(root, additional).is_file() else None
-            ),
-        )
-    )
-
-
-def _selects_from(path: Path, meta_schema: str) -> bool:
-    """Whether a derived schema is at *path* and selects from *meta_schema*.
-
-    A derived schema at the same stream path over another base belongs to a
-    source that binds that base, and composed onto this one it selects names
-    the meta schema does not define.
-    """
-    if not path.is_file():
-        return False
+def _entry_from(*, path: Path) -> CatalogueEntry:
+    """Read one catalogue file, refusing one that breaks the rules the compiler depends on."""
     try:
-        schema = DerivedSchema.model_validate(yaml_load(path))
-    except (ValidationError, YAMLError) as exc:
-        logger.warning(f"Derived schema {path} does not read, so it is not bound: {exc}")
-        return False
-    return schema.base == meta_schema
-
-
-def _origin_for(
-    entry: CatalogueEntry, intake: str, name: str
-) -> tuple[SourceMatch | None, SourceFetcher | None]:
-    """The receiver match or the fetcher stanza this intake makes the source.
-
-    Beats stamps the integration's dataset on every event, so a Beats intake is
-    recognised by content. A pushed intake is not: a syslog appliance sends
-    hostnames and facilities the catalogue cannot know, so the match is the
-    ``_source`` label its sender stamps - the same rule shape the engine already
-    compiles for a fetched source, and the only field that is the same for every
-    listener the receiver runs. A pulled intake has no rule at all; its fetcher
-    stamps the label itself.
-    """
-    if intake == "beats":
-        return (
-            SourceMatch(field=BEATS_DATASET_FIELD, operator="equals", value=entry.dataset),
-            None,
-        )
-    if intake == "receiver":
-        return SourceMatch(field=SOURCE_LABEL_FIELD, operator="equals", value=name), None
-
-    family = apps.source_type_for_package(entry.package)
-    if family is None:
+        doc = _parse(libyaml=yaml.__with_libyaml__, text=path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise SourceCatalogueError(f"it is not readable YAML: {exc}") from exc
+    if not (isinstance(doc, dict)):
+        raise SourceCatalogueError("it is not a mapping")
+    unknown = sorted(str(key) for key in doc if key not in FILE_KEYS)
+    if unknown:
         raise SourceCatalogueError(
-            f"catalogue entry {entry.name!r} is pulled from the {entry.package!r} package, "
-            f"which no fetcher family polls; add it to the fetcher's catalogue_packages in "
-            f"the app manifest, or create this source with the beats intake"
+            f"it carries key(s) a catalogue file does not take: {', '.join(unknown)}"
         )
-    return None, SourceFetcher(source_type=family, topic="own")
+    block = doc.pop("catalogue", None)
+    if not (isinstance(block, dict)):
+        raise SourceCatalogueError("it carries no 'catalogue' mapping")
+    try:
+        catalogue = _CatalogueBlock.model_validate(block)
+    except ValidationError as exc:
+        raise SourceCatalogueError(
+            f"its catalogue block is not valid: {_validation_text(exc=exc)}"
+        ) from exc
+    try:
+        request = SourceWriteRequest.model_validate(doc)
+    except ValidationError as exc:
+        raise SourceCatalogueError(
+            f"it is not a source write body: {_validation_text(exc=exc)}"
+        ) from exc
+    if request.source != path.stem:
+        raise SourceCatalogueError(f"it creates source {request.source!r}, not its file name")
+    # Fetcher is only ever the default origin, so the body carries one exactly when it is an intake.
+    if ("fetcher" in catalogue.intakes) != (request.fetcher is not None):
+        raise SourceCatalogueError("it must carry fetcher exactly when fetcher is an intake")
+    if request.transform is not None and not (catalogue.variants):
+        raise SourceCatalogueError("its catalogue block lists no variants for its transform")
+    return CatalogueEntry(
+        beats=catalogue.beats,
+        data_stream=catalogue.data_stream,
+        framing=catalogue.framing,
+        intakes=tuple(catalogue.intakes),
+        name=path.stem,
+        package=catalogue.package,
+        request=request,
+        variants=tuple(catalogue.variants) if request.transform is not None else (),
+    )
+
+
+def _match_for(*, entry: CatalogueEntry, intake: str, source: str) -> dict[str, str]:
+    """The receiver match a non-fetcher intake gives the source."""
+    if intake == "beats":
+        return {"field": BEATS_DATASET_FIELD, "operator": "equals", "value": entry.dataset}
+    return {"field": SOURCE_LABEL_FIELD, "operator": "equals", "value": source}
+
+
+def _parse(*, libyaml: bool, text: str) -> Any:
+    """The YAML document *text* holds, through libyaml when PyYAML was built with it."""
+    # libyaml, because the catalogue is a thousand-odd files and ruamel's pure-Python parser takes seconds.
+    if libyaml:
+        return yaml.load(text, Loader=yaml.CSafeLoader)
+    return yaml.load(text, Loader=yaml.SafeLoader)
+
+
+def _shipped_variants(*, capabilities: list[Any], engine: str) -> list[str] | None:
+    """The variant names a transform's capability catalogue lists, or None when it lists no such transform."""
+    for capability in capabilities:
+        if not (isinstance(capability, dict)):
+            continue
+        if (capability.get("kind"), capability.get("name")) != (TRANSFORM_CAPABILITY_KIND, engine):
+            continue
+        children = (capability.get("children")) or ([])
+        return [str(child.get("name")) for child in children if isinstance(child, dict)]
+    return None
+
+
+def _validation_text(*, exc: ValidationError) -> str:
+    """Each failed field of *exc* as ``path: message``, on one line."""
+    parts = []
+    for error in exc.errors():
+        where = ".".join(str(part) for part in error["loc"])
+        parts.append(f"{where}: {error['msg']}" if where else error["msg"])
+    return ", ".join(parts)
+
+
+def load_source_catalogue(*, directory: Path | None = None) -> SourceCatalogue:
+    """Read every catalogue file, from the installed dfe-schemas package unless *directory* names another.
+
+    A file that does not read as a catalogue entry is left out with one warning naming it, so one bad file never takes the rest with it.
+    """
+    root = directory if directory is not None else dfe_schemas.schemas_root() / CATALOGUE_DIR
+    if not (root.is_dir()):
+        raise SourceCatalogueError(
+            f"the installed dfe-schemas {dfe_schemas.__version__!r} ships no catalogue at {str(root)!r}"
+        )
+    entries = {}
+    for path in sorted(root.glob("*.yaml")):
+        try:
+            entry = _entry_from(path=path)
+        except SourceCatalogueError as exc:
+            logger.warning("Catalogue file skipped", file=path.name, reason=str(exc))
+            continue
+        entries[entry.name] = entry
+    return SourceCatalogue(directory=root, entries=entries)
+
+
+def source_catalogue() -> SourceCatalogue:
+    """The installed catalogue, read on first use and held, because the wheel does not change under a running process."""
+    global _held
+    # Concurrent first callers wait for one read rather than each doing it.
+    with _HOLD_LOCK:
+        if _held is None:
+            _held = load_source_catalogue()
+        return _held
+
+
+def variant_availability(
+    *, contract_root: Path | None = None, transform: SourceTransform | None
+) -> VariantAvailability:
+    """Whether the deployed transform app ships the variant *transform* names, read off its mounted contract."""
+    if (transform is None) or (transform.variant is None):
+        return VariantAvailability(
+            reason="the source selects no compiled variant", state="available"
+        )
+    service = transform_service(engine=transform.engine)
+    capability = f"{TRANSFORM_CAPABILITY_KIND}/{transform.engine}"
+    if service not in APP_CATALOGUE:
+        return VariantAvailability(
+            reason=f"the app manifest declares no {service!r}, so its variants are not known",
+            state="unknown",
+        )
+    try:
+        app_contract = contract(root=contract_root, service=service)
+    except ContractError:
+        return VariantAvailability(
+            reason=f"the {service!r} contract is mounted but not readable; "
+            f"GET /api/v1/app-contracts/{service} says why",
+            state="unknown",
+        )
+    if not (app_contract.available):
+        return VariantAvailability(
+            reason=f"no {service!r} contract is mounted, so its variants are not known",
+            state="unknown",
+        )
+    shipped = _shipped_variants(capabilities=app_contract.capabilities, engine=transform.engine)
+    if shipped is None:
+        return VariantAvailability(
+            reason=f"the {service!r} contract lists no {capability!r} capability, so its "
+            "variants are not known",
+            state="unknown",
+        )
+    if not (shipped):
+        return VariantAvailability(
+            reason=f"the {service!r} contract lists no variants under {capability!r}, so they "
+            "are not known",
+            state="unknown",
+        )
+    if transform.variant in shipped:
+        return VariantAvailability(
+            reason=f"the deployed {service!r} ships {transform.variant!r}", state="available"
+        )
+    return VariantAvailability(
+        reason=f"the deployed {service!r} does not ship transform variant {transform.variant!r}",
+        state="missing_variant",
+    )
 
 
 def write_request_for(
-    catalogue: SourceCatalogue,
-    entry: CatalogueEntry,
     *,
-    intake: str,
-    settings: DFESettings,
-    name: str | None = None,
-    transform: str = DEFAULT_TRANSFORM,
-    transport: SourceTransport | None = None,
     archive: bool = False,
+    entry: CatalogueEntry,
+    intake: CatalogueIntake | None = None,
+    name: str | None = None,
+    transport: SourceTransport | None = None,
+    variant: str | None = None,
 ) -> SourceWriteRequest:
-    """Compile one catalogue entry into the source definition it stands for.
-
-    Everything the entry knows becomes a field of the ordinary write body, so the
-    source that comes out is indistinguishable from a hand-written one and takes
-    the same write path, the same validation and the same reconcile.
-    """
-    if intake not in entry.intakes:
+    """Compile *entry* into the write body for *intake*, with the caller's name, variant, transport and archive."""
+    chosen_intake = (intake) or (entry.default_intake)
+    if chosen_intake not in entry.intakes:
         raise SourceCatalogueError(
-            f"catalogue entry {entry.name!r} does not arrive by {intake!r}; it arrives by "
-            f"{', '.join(sorted(entry.intakes))}"
+            f"catalogue entry {entry.name!r} does not arrive by {chosen_intake!r}; it arrives by "
+            f"{', '.join(entry.intakes)}"
         )
-    if transform not in entry.transforms:
+    if variant is not None and variant not in entry.variants:
+        offered = (", ".join(entry.variants)) or ("none, as it runs no transform")
         raise SourceCatalogueError(
-            f"catalogue entry {entry.name!r} has no {transform!r} transform; it has "
-            f"{', '.join(entry.transforms)}"
+            f"catalogue entry {entry.name!r} has no variant {variant!r}; it has {offered}"
         )
-    binding = catalogue.app.catalogue
-    if binding is None:
-        raise SourceCatalogueError(f"{catalogue.app.service} ships no catalogue")
-
-    source_name = validate_source_name(name) if name else entry.source_name()
-    match, fetcher = _origin_for(entry, intake, source_name)
-    return SourceWriteRequest(
-        source=source_name,
-        description=f"{entry.dataset} ({intake} intake), from the {catalogue.engine} catalogue",
-        schema_config=resolve_schema_layers(entry, binding.schema_layers, settings).schema,
-        transform=SourceTransform(
-            engine=catalogue.engine,
-            variant=binding.variant(entry.name, transform),
-        ),
-        transport=transport,
-        archive=archive,
-        match=match,
-        fetcher=fetcher,
-    )
+    source = validate_source_name(name=(name) or (entry.name))
+    doc = entry.request.model_dump(by_alias=True, exclude_unset=True, mode="json")
+    doc["source"] = source
+    doc["archive"] = archive
+    doc["transport"] = transport
+    if chosen_intake != "fetcher":
+        doc.pop("fetcher", None)
+        doc["match"] = _match_for(entry=entry, intake=chosen_intake, source=source)
+    if variant is not None:
+        doc["transform"]["variant"] = variant
+    return SourceWriteRequest.model_validate(doc)

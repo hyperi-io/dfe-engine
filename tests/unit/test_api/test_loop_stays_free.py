@@ -303,7 +303,7 @@ def test_the_loop_answers_while_a_password_is_checked(seeded, monkeypatch, metho
 
 
 def test_the_loop_answers_while_the_source_catalogue_is_read(seeded, monkeypatch):
-    """Polled by the Sources page; it reads a mounted file, not the deploy repo."""
+    """Polled by the Sources page, and its first read parses every installed catalogue file."""
     client, headers = seeded
     park = _Park.on_function(source_catalogue_module, "source_catalogue", monkeypatch)
 
