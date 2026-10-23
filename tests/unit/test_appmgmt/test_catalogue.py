@@ -249,15 +249,12 @@ class TestShippedManifest:
     def test_the_apps_nothing_deploys_by_default_are_the_per_source_ones_and_the_door(self):
         # An instance of a per-source app arrives with its source, and the edge
         # door is dialled by an appliance fleet a deployment may not have, so
-        # neither is seeded by a profile. The fetcher and the vrl and elastic
-        # transforms are the exception: each declares idle_when, so the tiers in
-        # its default_in seed one idle and the source it is later given fills it.
+        # neither is seeded by a profile. The fetcher and the transforms are the
+        # exception: each declares idle_when, so the tiers in its default_in
+        # seed one idle and the source it is later given fills it.
         optional = {name for name, app in catalogue.APP_CATALOGUE.items() if app.optional}
 
-        assert optional == {
-            "dfe-transform-vector",
-            "culvert",
-        }
+        assert optional == {"culvert"}
 
     def test_the_stack_wide_apps_are_deployed_wherever_they_may_be(self):
         # The core data path plus the two consoles: a DFE without them is not one,
@@ -306,6 +303,10 @@ class TestShippedManifest:
                 "config.ingest.enabled",
             ),
             "dfe-transform-vrl": ("config.source.topics",),
+            "dfe-transform-vector": (
+                "config.source.topics",
+                "config.dfe_source",
+            ),
             "dfe-transform-elastic": (
                 "config.source.name",
                 "config.source.topics",
