@@ -83,11 +83,11 @@ class TestShippedManifest:
             "dfe-fetcher",
             "dfe-transform-vrl",
             "dfe-transform-vector",
+            "dfe-transform-elastic",
         }
 
-    def test_vrl_and_vector_are_the_transforms_that_carry_direct(self):
-        # Each runs a Push listener beside its bus consumer; elastic carries
-        # the bus alone until its listener ships, which is a manifest edit.
+    def test_every_shipped_transform_carries_direct(self):
+        # Each runs a Push listener beside its bus consumer.
         carriers = {
             name: app.carries("direct")
             for name, app in catalogue.APP_CATALOGUE.items()
@@ -97,7 +97,7 @@ class TestShippedManifest:
         assert carriers == {
             "dfe-transform-vrl": True,
             "dfe-transform-vector": True,
-            "dfe-transform-elastic": False,
+            "dfe-transform-elastic": True,
         }
 
     def test_the_archiver_takes_the_record_on_either_transport(self):
@@ -108,8 +108,11 @@ class TestShippedManifest:
         assert archiver.transports == frozenset({"bus", "direct"})
         assert archiver.endpoints[catalogue.PUSH_ENDPOINT].port == 6000
 
-    def test_elastic_is_bus_only_until_its_listener_ships(self):
-        assert catalogue.descriptor("dfe-transform-elastic").transports == frozenset({"bus"})
+    def test_elastic_takes_the_record_on_either_transport(self):
+        elastic = catalogue.descriptor("dfe-transform-elastic")
+
+        assert elastic.transports == frozenset({"bus", "direct"})
+        assert elastic.endpoints[catalogue.PUSH_ENDPOINT].port == 6000
 
     def test_hot_reload_is_declared_per_app(self):
         # A fact about each app, not a dial: the pods roll on any config change
@@ -193,6 +196,7 @@ class TestShippedManifest:
             "dfe-archiver",
             "dfe-transform-vrl",
             "dfe-transform-vector",
+            "dfe-transform-elastic",
         }
 
     def test_every_app_a_flow_can_send_to_on_direct_declares_its_listener(self):
