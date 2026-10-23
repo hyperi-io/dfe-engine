@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.65](https://github.com/hyperi-io/dfe-engine/compare/v1.22.64...v1.22.65) (2026-10-23)
+
+### Bug Fixes
+
+* check a view's role gates at the scope each grant was given ([#965](https://github.com/hyperi-io/dfe-engine/issues/965)) ([fe5105a](https://github.com/hyperi-io/dfe-engine/commit/fe5105a14f96580834e2e96fdd3f00d05a734ef5))
+* let a direct source name the elastic transform ([#966](https://github.com/hyperi-io/dfe-engine/issues/966)) ([6fe3f56](https://github.com/hyperi-io/dfe-engine/commit/6fe3f566d0d008141adbb734aae903e675482011))
+
 ## [1.22.64](https://github.com/hyperi-io/dfe-engine/compare/v1.22.63...v1.22.64) (2026-10-23)
 
 ### Bug Fixes
