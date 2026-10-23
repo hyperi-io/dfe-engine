@@ -1363,9 +1363,12 @@ def _catalogue_status(
     *,
     apps_error: str | None,
 ) -> int:
-    """201 when every entry was stored, 202 when the apps did not follow, 200 when some were refused.
+    """201 when every entry was stored, 202 when the apps did not follow.
 
-    Nothing stored is 409 when every refusal is a conflict or a missing variant, and 422 otherwise.
+    A request that was accepted answers 200 when any entry was refused, including
+    when every entry was refused for a reason other than a conflict. Nothing stored
+    is 409 when every refusal is a conflict or a missing variant. A failure before
+    any source can be written is not decided here: it is the ordinary ``{code, message}`` error.
     """
     if created:
         if apps_error:
@@ -1375,7 +1378,7 @@ def _catalogue_status(
         return 201
     if failed and all(item.code in _CATALOGUE_CONFLICTS for item in failed):
         return 409
-    return 422
+    return 200
 
 
 @router.post(
@@ -1386,8 +1389,8 @@ def _catalogue_status(
         200: {
             "model": CatalogueSourcesResponse,
             "description": (
-                "Some entries were stored and some were refused. failed names each "
-                "refusal; created is what was stored"
+                "The request was accepted. created is what was stored and failed "
+                "names each entry that was not, including when every entry was refused"
             ),
         },
         202: {
@@ -1409,11 +1412,10 @@ def _catalogue_status(
             ),
         },
         422: {
-            "model": CatalogueSourcesResponse,
+            "model": ErrorResponse,
             "description": (
-                "Nothing was stored. The selection is longer than 50, an entry is not "
-                "in the catalogue, does not arrive by the intake given, names a variant "
-                "it does not compile to, or cannot be saved"
+                "The request failed before any source could be written. The body is "
+                "{code, message}: the selection is longer than 50, empty, or not a valid request"
             ),
         },
     },
@@ -1434,10 +1436,13 @@ def create_sources_from_catalogue(
     mounted is allowed. The source records the catalogue entry and the intake that
     was selected, and a later edit leaves both in place.
 
-    At most 50 entries. A longer selection is refused before anything is stored.
-    Entries are stored in the order given. One entry's refusal is recorded in
-    ``failed`` and the rest continue. The apps are reconciled once, after the
-    entries that could be stored.
+    At most 50 entries. A longer or empty selection is refused before anything is
+    stored, as ``{code, message}``. Entries are stored in the order given. One
+    entry's refusal is recorded in ``failed`` and the rest continue. The response
+    is 200 when any entry was refused for a reason other than a conflict, including
+    when nothing was stored. Nothing stored is 409 when every refusal is a conflict
+    or a missing variant. The apps are reconciled once, after the entries that
+    could be stored.
     """
     catalogue = _source_catalogue()
     created: list[CatalogueCreatedSource] = []

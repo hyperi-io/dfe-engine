@@ -6366,7 +6366,7 @@
           "Sources"
         ],
         "summary": "Create Sources From Catalogue",
-        "description": "Create a source for each catalogue entry, on the intake it arrives by.\n\nEach entry's file is the write body for its default intake, and another intake\nswaps in the match rule that intake derives. A variant the deployed transform's\ncontract does not list is refused for that entry, and one whose contract is not\nmounted is allowed. The source records the catalogue entry and the intake that\nwas selected, and a later edit leaves both in place.\n\nAt most 50 entries. A longer selection is refused before anything is stored.\nEntries are stored in the order given. One entry's refusal is recorded in\n``failed`` and the rest continue. The apps are reconciled once, after the\nentries that could be stored.",
+        "description": "Create a source for each catalogue entry, on the intake it arrives by.\n\nEach entry's file is the write body for its default intake, and another intake\nswaps in the match rule that intake derives. A variant the deployed transform's\ncontract does not list is refused for that entry, and one whose contract is not\nmounted is allowed. The source records the catalogue entry and the intake that\nwas selected, and a later edit leaves both in place.\n\nAt most 50 entries. A longer or empty selection is refused before anything is\nstored, as ``{code, message}``. Entries are stored in the order given. One\nentry's refusal is recorded in ``failed`` and the rest continue. The response\nis 200 when any entry was refused for a reason other than a conflict, including\nwhen nothing was stored. Nothing stored is 409 when every refusal is a conflict\nor a missing variant. The apps are reconciled once, after the entries that\ncould be stored.",
         "operationId": "sources.from-catalogue",
         "requestBody": {
           "content": {
@@ -6380,7 +6380,7 @@
         },
         "responses": {
           "200": {
-            "description": "Some entries were stored and some were refused. failed names each refusal; created is what was stored",
+            "description": "The request was accepted. created is what was stored and failed names each entry that was not, including when every entry was refused",
             "content": {
               "application/json": {
                 "schema": {
@@ -6440,11 +6440,11 @@
             }
           },
           "422": {
-            "description": "Nothing was stored. The selection is longer than 50, an entry is not in the catalogue, does not arrive by the intake given, names a variant it does not compile to, or cannot be saved",
+            "description": "The request failed before any source could be written. The body is {code, message}: the selection is longer than 50, empty, or not a valid request",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CatalogueSourcesResponse"
+                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }

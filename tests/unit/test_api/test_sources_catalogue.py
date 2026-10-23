@@ -219,6 +219,9 @@ class TestCreateSourceFromCatalogue:
             json={"entries": [{"entry": "okta", "intake": "beats"}] * 51},
         )
         assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert resp.json()["message"]
+        assert "created" not in resp.json()
         assert client.get("/api/v1/sources/okta", headers=admin_headers).status_code == 404
 
     def test_one_refusal_leaves_the_other_entries_stored(
@@ -306,7 +309,7 @@ class TestCreateSourceFromCatalogue:
         if case["id"] == "the_retired_transform_field":
             assert (resp.status_code, resp.json()) == (422, expected)
             return
-        assert resp.status_code == 422, resp.text
+        assert resp.status_code == 200, resp.text
         assert resp.json()["created"] == []
         assert resp.json()["failed"] == [
             {
