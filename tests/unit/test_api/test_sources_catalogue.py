@@ -1,294 +1,214 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_api/test_sources_catalogue.py
-#  Purpose:      Listing a shipped source catalogue, and creating a source from an entry
+#  Purpose:      Listing the dfe-schemas source catalogue, and creating a source from an entry
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The catalogue routes, over the catalogue the installed dfe-schemas ships."""
 
-from pathlib import Path
+"""The catalogue routes, over the installed dfe-schemas catalogue and a mounted elastic contract."""
+
+from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.yaml_utils import yaml_dump
+from dfe_engine.appmgmt import contract
+from dfe_engine.source import catalogue as sc
+from tests.unit.test_api.sources_catalogue_cases import (
+    CREATE_AGAINST_THE_CONTRACT_CASES,
+    CREATE_FROM_CATALOGUE_CASES,
+    CREATE_FROM_CATALOGUE_REJECT_CASES,
+    LIST_AGAINST_THE_CONTRACT_CASES,
+    CreateAgainstTheContractCase,
+    CreateFromCatalogueCase,
+    CreateFromCatalogueRejectCase,
+    ListAgainstTheContractCase,
+)
+from tests.unit.test_source.source_catalogue_cases import ELASTIC_CONTRACT, NO_CONTRACT
 
-_ECS_SELECTION = {
-    "base": "meta/elastic/ecs",
-    "base_version": "1.0.0",
-    "current": "1.0.0",
-    "versions": {"1.0.0": {"date": "2026-09-21", "select": [{"name": "event_action"}]}},
-}
+CATALOGUE = "/api/v1/sources/catalogue"
+FROM_CATALOGUE = "/api/v1/sources/from-catalogue"
 
 
-def _columns(*names: str) -> dict:
-    """A one-version meta or additional document declaring string columns."""
-    columns = [{"name": name, "type": "string", "use_case": "exact_match"} for name in names]
+def _row(*, client: TestClient, headers: dict[str, str], name: str) -> dict[str, Any]:
+    """The listed row for one entry, found by searching its name."""
+    resp = client.get(CATALOGUE, headers=headers, params={"search": name})
+    return next(row for row in resp.json()["items"] if row["name"] == name)
+
+
+def _stored(*, client: TestClient, headers: dict[str, str], name: str) -> dict[str, Any]:
+    """The origin, transform and schema a created source was stored with."""
+    stored = client.get(f"/api/v1/sources/{name}", headers=headers).json()
+    version = stored["versions"][stored["current"]]
+    fetcher = version["fetcher"]
     return {
-        "current": "1.0.0",
-        "versions": {"1.0.0": {"date": "2026-09-21", "type": "model", "columns": columns}},
+        "fetcher": fetcher["source_type"] if fetcher else None,
+        "match": stored["match"],
+        "meta_schema": version["schema"]["meta_schema"],
+        "origin": stored["origin"],
+        "variant": stored["transform"]["variant"],
     }
 
 
-def _ship_layers(api_settings, stream: str) -> None:
-    """Write the meta, derived and additional schema files a pulled entry's table composes from.
+@pytest.fixture(autouse=True)
+def _no_contract(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """A deployment that mounts no app contracts, and none held after the test."""
+    monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(NO_CONTRACT))
+    contract.reload_contracts()
+    yield
+    contract.reload_contracts()
 
-    A fetcher on its own topic is refused without a schema, so an entry whose layers
-    do not resolve cannot be created.
-    """
-    schemas = Path(api_settings.schemas.schemas_dir)
-    for reference, doc in (
-        ("meta/elastic/ecs", _columns("event_action", "host_name")),
-        (f"derived/{stream}", _ECS_SELECTION),
-        (f"additional/{stream}", _columns("vendor_field")),
-    ):
-        path = schemas / f"{reference}.yaml"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        yaml_dump(doc, path)
+
+@pytest.fixture
+def elastic_contract(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deployment that mounts the trimmed dfe-transform-elastic contract."""
+    monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(ELASTIC_CONTRACT))
+    contract.reload_contracts()
 
 
 class TestListCatalogue:
-    def test_the_whole_catalogue_paginates(self, client: TestClient, admin_headers: dict):
-        resp = client.get("/api/v1/sources/catalogue?per_page=5", headers=admin_headers)
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["total"] == 1069
-        assert len(data["items"]) == 5
-
-    def test_an_entry_carries_what_the_console_needs_to_offer_it(
-        self, client: TestClient, admin_headers: dict
+    def test_an_entry_carries_what_the_console_offers(
+        self, admin_headers: dict[str, str], client: TestClient
     ):
-        resp = client.get("/api/v1/sources/catalogue?search=okta", headers=admin_headers)
-
-        rows = {row["name"]: row for row in resp.json()["items"]}
-        assert rows["okta"] == {
+        assert _row(client=client, headers=admin_headers, name="okta") == {
             "name": "okta",
+            "display_name": "okta.system",
+            "description": "The system data stream of the Elastic okta integration.",
             "package": "okta",
             "data_stream": "system",
             "dataset": "okta.system",
             "intakes": ["beats", "fetcher"],
+            "default_intake": "fetcher",
             "framing": None,
-            "transforms": ["default"],
             "beats": {"module": "okta", "fileset": "system"},
-            "source": "okta",
-            "schema_layers": {
-                "resolves": False,
-                "missing_layer": "meta_schema",
-                "missing_reference": "meta/elastic/ecs",
-            },
-        }
-
-    def test_an_entry_whose_layers_resolve_says_so(
-        self, client: TestClient, admin_headers: dict, api_settings
-    ):
-        _ship_layers(api_settings, "aws/cloudtrail")
-
-        resp = client.get("/api/v1/sources/catalogue?search=aws_cloudtrail", headers=admin_headers)
-
-        rows = {row["name"]: row for row in resp.json()["items"]}
-        assert rows["aws_cloudtrail"]["schema_layers"] == {
-            "resolves": True,
-            "missing_layer": None,
-            "missing_reference": "",
-        }
-
-    def test_an_entry_with_no_derived_schema_names_that_layer(
-        self, client: TestClient, admin_headers: dict, api_settings
-    ):
-        """The entry the create would refuse with 422, named before anyone tries."""
-        _ship_layers(api_settings, "aws/cloudtrail")
-
-        resp = client.get("/api/v1/sources/catalogue?search=okta", headers=admin_headers)
-
-        rows = {row["name"]: row for row in resp.json()["items"]}
-        assert rows["okta"]["schema_layers"] == {
-            "resolves": False,
-            "missing_layer": "derived_schema",
-            "missing_reference": "derived/okta/system",
-        }
-
-    def test_every_entry_lists_the_source_name_the_catalogue_gives_it(
-        self, client: TestClient, admin_headers: dict
-    ):
-        resp = client.get("/api/v1/sources/catalogue?search=1password", headers=admin_headers)
-
-        rows = resp.json()["items"]
-        assert rows
-        assert all(row["source"].startswith("onepassword-") for row in rows)
-
-    def test_the_intake_filter_only_returns_entries_that_arrive_that_way(
-        self, client: TestClient, admin_headers: dict
-    ):
-        resp = client.get("/api/v1/sources/catalogue?intake=receiver", headers=admin_headers)
-
-        data = resp.json()
-        assert data["total"] == 135
-        assert all("receiver" in row["intakes"] for row in data["items"])
-
-    def test_an_unknown_intake_is_refused(self, client: TestClient, admin_headers: dict):
-        resp = client.get("/api/v1/sources/catalogue?intake=carrier", headers=admin_headers)
-
-        assert resp.status_code == 422
-        assert "beats, fetcher, receiver" in resp.json()["message"]
-
-    def test_reading_the_catalogue_needs_source_read(self, client: TestClient):
-        assert client.get("/api/v1/sources/catalogue").status_code == 401
-
-
-class TestCreateFromCatalogue:
-    def test_an_entry_becomes_a_real_source(self, client: TestClient, admin_headers: dict):
-        resp = client.post(
-            "/api/v1/sources/from-catalogue/okta",
-            json={"intake": "beats"},
-            headers=admin_headers,
-        )
-
-        assert resp.status_code == 201, resp.text
-        assert resp.json()["source"] == "okta"
-
-        stored = client.get("/api/v1/sources/okta", headers=admin_headers).json()
-        assert stored["match"] == {
-            "field": "data_stream.dataset",
-            "operator": "equals",
-            "value": "okta.system",
-        }
-        assert stored["transform"] == {
+            "has_schema": True,
             "engine": "elastic",
             "variant": "filebeat.okta.default",
-            "config_file": None,
-            "env": {},
-            "files": [],
+            "variants": ["filebeat.okta.default"],
+            "availability": "unknown",
+            "availability_reason": "no 'dfe-transform-elastic' contract is mounted, so its "
+            "variants are not known",
         }
 
-    def test_a_pulled_entry_becomes_a_fetcher_based_source(
-        self, client: TestClient, admin_headers: dict, api_settings
+    @pytest.mark.parametrize(
+        "case",
+        LIST_AGAINST_THE_CONTRACT_CASES,
+        ids=[case["id"] for case in LIST_AGAINST_THE_CONTRACT_CASES],
+    )
+    def test_against_the_contract(
+        self,
+        admin_headers: dict[str, str],
+        client: TestClient,
+        elastic_contract: None,
+        case: ListAgainstTheContractCase,
     ):
-        _ship_layers(api_settings, "aws/cloudtrail")
-        resp = client.post(
-            "/api/v1/sources/from-catalogue/aws_cloudtrail",
-            json={"intake": "fetcher"},
-            headers=admin_headers,
+        row = _row(client=client, headers=admin_headers, name=case["entry"])
+        assert row["availability"] == case["expected_availability"]
+
+    def test_pages(self, admin_headers: dict[str, str], client: TestClient):
+        data = client.get(CATALOGUE, headers=admin_headers, params={"per_page": 5}).json()
+        assert (data["total"], len(data["items"])) == (len(sc.source_catalogue().entries), 5)
+
+    def test_intake_filter(self, admin_headers: dict[str, str], client: TestClient):
+        params = {"intake": "receiver", "per_page": -1}
+        listed = client.get(CATALOGUE, headers=admin_headers, params=params).json()["items"]
+        entries = sc.source_catalogue().entries
+        receivers = [name for name, entry in entries.items() if "receiver" in entry.intakes]
+        assert [row["name"] for row in listed] == receivers
+
+    def test_unknown_intake(self, admin_headers: dict[str, str], client: TestClient):
+        resp = client.get(CATALOGUE, headers=admin_headers, params={"intake": "carrier"})
+        assert (resp.status_code, resp.json()["message"]) == (
+            422,
+            "Unknown intake 'carrier'. Must be: beats, fetcher, receiver",
         )
 
+    def test_needs_source_read(self, client: TestClient):
+        assert client.get(CATALOGUE).status_code == 401
+
+    def test_a_viewer_may_list(self, client: TestClient, viewer_headers: dict[str, str]):
+        assert client.get(CATALOGUE, headers=viewer_headers).status_code == 200
+
+
+class TestCreateSourceFromCatalogue:
+    @pytest.mark.parametrize(
+        "case",
+        CREATE_FROM_CATALOGUE_CASES,
+        ids=[case["id"] for case in CREATE_FROM_CATALOGUE_CASES],
+    )
+    def test_matches_expected(
+        self, admin_headers: dict[str, str], client: TestClient, case: CreateFromCatalogueCase
+    ):
+        resp = client.post(
+            f"{FROM_CATALOGUE}/{case['entry']}", headers=admin_headers, json=case["body"]
+        )
         assert resp.status_code == 201, resp.text
-        stored = client.get("/api/v1/sources/aws-cloudtrail", headers=admin_headers).json()
-        assert stored["origin"] == "fetcher"
-        assert stored["match"] is None
-        version = stored["versions"][stored["current"]]
-        assert version["fetcher"]["source_type"] == "aws"
+        stored = _stored(client=client, headers=admin_headers, name=resp.json()["source"])
+        assert stored == case["expected_stored"]
 
-    def test_a_pulled_entry_whose_layers_do_not_resolve_is_refused_not_saved_dead(
-        self, client: TestClient, admin_headers: dict
-    ):
-        """Its fetcher sits on its own topic with no schema, which could never deploy."""
-        resp = client.post(
-            "/api/v1/sources/from-catalogue/aws_cloudtrail",
-            json={"intake": "fetcher"},
-            headers=admin_headers,
-        )
-
-        assert resp.status_code == 422, resp.text
-        assert "needs a schema" in resp.json()["message"]
-        assert (
-            client.get("/api/v1/sources/aws-cloudtrail", headers=admin_headers).status_code == 404
-        )
-
-    @pytest.mark.parametrize("shipped", [True, False], ids=["layers-shipped", "no-layers"])
-    def test_the_listing_says_ahead_of_time_what_the_pulled_create_answers(
-        self, client: TestClient, admin_headers: dict, api_settings, shipped
-    ):
-        if shipped:
-            _ship_layers(api_settings, "aws/cloudtrail")
-        listed = client.get(
-            "/api/v1/sources/catalogue?search=aws_cloudtrail", headers=admin_headers
-        )
-        (row,) = [row for row in listed.json()["items"] if row["name"] == "aws_cloudtrail"]
-
-        resp = client.post(
-            "/api/v1/sources/from-catalogue/aws_cloudtrail",
-            json={"intake": "fetcher"},
-            headers=admin_headers,
-        )
-
-        assert (row["schema_layers"]["resolves"], resp.status_code) == (
-            (True, 201) if shipped else (False, 422)
-        )
-
-    def test_an_entry_is_built_on_ecs_and_the_layers_shipped_for_its_stream(
-        self, client: TestClient, admin_headers: dict, api_settings
-    ):
-        schemas = Path(api_settings.schemas.schemas_dir)
-        for reference, doc in (
-            ("meta/elastic/ecs", _columns("event_action", "host_name")),
-            ("derived/cisco_ios/log", _ECS_SELECTION),
-            ("additional/cisco_ios/log", _columns("cisco_ios_facility")),
-        ):
-            path = schemas / f"{reference}.yaml"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            yaml_dump(doc, path)
-
-        resp = client.post(
-            "/api/v1/sources/from-catalogue/cisco_ios",
-            json={"intake": "receiver"},
-            headers=admin_headers,
-        )
-
-        assert resp.status_code == 201, resp.text
-        stored = client.get("/api/v1/sources/cisco-ios", headers=admin_headers).json()
-        schema = stored["versions"][stored["current"]]["schema"]
-        assert schema["meta_schema"] == "meta/elastic/ecs"
-        assert schema["derived_schema"] == "derived/cisco_ios/log"
-        assert schema["additional_fields"] == "additional/cisco_ios/log"
-
-    def test_a_supplied_name_replaces_the_catalogue_one(
-        self, client: TestClient, admin_headers: dict, api_settings
-    ):
-        _ship_layers(api_settings, "1password/audit_events")
-        named = client.post(
-            "/api/v1/sources/from-catalogue/1password_audit_events",
-            json={"intake": "fetcher", "name": "onepassword-audit"},
-            headers=admin_headers,
-        )
-        assert named.status_code == 201, named.text
-        assert named.json()["source"] == "onepassword-audit"
-
-    def test_an_intake_the_entry_does_not_arrive_by_is_refused(
-        self, client: TestClient, admin_headers: dict
+    @pytest.mark.parametrize(
+        "case",
+        CREATE_AGAINST_THE_CONTRACT_CASES,
+        ids=[case["id"] for case in CREATE_AGAINST_THE_CONTRACT_CASES],
+    )
+    def test_against_the_contract(
+        self,
+        admin_headers: dict[str, str],
+        client: TestClient,
+        elastic_contract: None,
+        case: CreateAgainstTheContractCase,
     ):
         resp = client.post(
-            "/api/v1/sources/from-catalogue/okta",
-            json={"intake": "receiver"},
-            headers=admin_headers,
+            f"{FROM_CATALOGUE}/{case['entry']}", headers=admin_headers, json=case["body"]
         )
+        assert resp.status_code == case["expected_status"], resp.text
 
-        assert resp.status_code == 422
-        assert resp.json()["code"] == "catalogue_error"
-
-    def test_an_entry_that_is_not_in_the_catalogue_is_refused(
-        self, client: TestClient, admin_headers: dict
+    def test_missing_variant(
+        self, admin_headers: dict[str, str], client: TestClient, elastic_contract: None
     ):
         resp = client.post(
-            "/api/v1/sources/from-catalogue/not-a-source",
-            json={"intake": "beats"},
-            headers=admin_headers,
+            f"{FROM_CATALOGUE}/o365-metrics-entra-alerts", headers=admin_headers, json={}
+        )
+        saved = client.get("/api/v1/sources/o365-metrics-entra-alerts", headers=admin_headers)
+        assert (resp.status_code, resp.json(), saved.status_code) == (
+            409,
+            {
+                "code": "missing_variant",
+                "message": "the deployed 'dfe-transform-elastic' does not ship transform variant "
+                "'filebeat.o365_metrics_entra_alerts.default'",
+                "errors": [],
+                "context": {
+                    "transform": "dfe-transform-elastic",
+                    "variant": "filebeat.o365_metrics_entra_alerts.default",
+                },
+            },
+            404,
         )
 
-        assert resp.status_code == 422
-        assert "not-a-source" in resp.json()["message"]
-
-    def test_creating_twice_conflicts_like_any_other_create(
-        self, client: TestClient, admin_headers: dict
+    @pytest.mark.parametrize(
+        "case",
+        CREATE_FROM_CATALOGUE_REJECT_CASES,
+        ids=[case["id"] for case in CREATE_FROM_CATALOGUE_REJECT_CASES],
+    )
+    def test_rejects(
+        self, admin_headers: dict[str, str], client: TestClient, case: CreateFromCatalogueRejectCase
     ):
-        body = {"intake": "beats"}
-        first = client.post("/api/v1/sources/from-catalogue/okta", json=body, headers=admin_headers)
-        assert first.status_code == 201
+        resp = client.post(
+            f"{FROM_CATALOGUE}/{case['entry']}", headers=admin_headers, json=case["body"]
+        )
+        assert (resp.status_code, resp.json()) == (422, case["expected_response"])
 
-        again = client.post("/api/v1/sources/from-catalogue/okta", json=body, headers=admin_headers)
-        assert again.status_code == 409
+    def test_twice(self, admin_headers: dict[str, str], client: TestClient):
+        first = client.post(f"{FROM_CATALOGUE}/cisco-asa", headers=admin_headers, json={})
+        again = client.post(f"{FROM_CATALOGUE}/cisco-asa", headers=admin_headers, json={})
+        assert (first.status_code, again.status_code) == (201, 409)
 
-    def test_creating_from_the_catalogue_needs_source_write(self, client: TestClient):
-        resp = client.post("/api/v1/sources/from-catalogue/okta", json={"intake": "beats"})
+    def test_needs_source_write(self, client: TestClient):
+        assert client.post(f"{FROM_CATALOGUE}/cisco-asa", json={}).status_code == 401
 
-        assert resp.status_code == 401
+    def test_a_viewer_may_not_create(self, client: TestClient, viewer_headers: dict[str, str]):
+        resp = client.post(f"{FROM_CATALOGUE}/cisco-asa", headers=viewer_headers, json={})
+        saved = client.get("/api/v1/sources/cisco-asa", headers=viewer_headers)
+        assert (resp.status_code, saved.status_code) == (403, 404)

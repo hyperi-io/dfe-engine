@@ -8,7 +8,7 @@
 """One way to find and read a manifest, for every manifest the engine reflects.
 
 Several files here are DATA another repo owns and this one only reads: the app
-manifest from dfe-infra, the source catalogue a transform ships. They resolve the
+manifest from dfe-infra, the contracts the apps emit. They resolve the
 same way - an explicit path, then an environment variable a deployment sets to a
 mounted copy, then whatever the engine falls back on - and they fail the same
 way, so the resolution and the reading live here once.

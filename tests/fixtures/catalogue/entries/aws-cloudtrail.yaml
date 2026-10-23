@@ -1,0 +1,22 @@
+# Catalogue source aws-cloudtrail: the POST /sources write body that creates it.
+# See the Catalogue section of README.md.
+
+source: aws-cloudtrail
+display_name: aws.cloudtrail
+description: The cloudtrail data stream of the Elastic aws integration.
+fetcher:
+  source_type: aws
+  topic: own
+schema:
+  meta_schema: meta/elastic/ecs
+  derived_schema: derived/aws/cloudtrail
+  additional_fields: additional/aws/cloudtrail
+transform:
+  engine: elastic
+  variant: filebeat.aws_cloudtrail.default
+catalogue:
+  package: aws
+  data_stream: cloudtrail
+  intakes: [beats, fetcher]
+  variants:
+    - filebeat.aws_cloudtrail.default

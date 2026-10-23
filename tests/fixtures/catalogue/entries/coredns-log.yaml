@@ -1,0 +1,24 @@
+# Catalogue source coredns-log: the POST /sources write body that creates it.
+# See the Catalogue section of README.md.
+
+source: coredns-log
+display_name: coredns.log
+description: The log data stream of the Elastic coredns integration.
+match:
+  field: data_stream.dataset
+  operator: equals
+  value: coredns.log
+schema:
+  meta_schema: meta/elastic/ecs
+  derived_schema: derived/coredns/log
+  additional_fields: additional/coredns/log
+transform:
+  engine: elastic
+  variant: filebeat.coredns_log.default
+catalogue:
+  package: coredns
+  data_stream: log
+  intakes: [beats]
+  variants:
+    - filebeat.coredns_log.default
+    - filebeat.coredns_log.json

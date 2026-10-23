@@ -91,6 +91,14 @@ class TestEnsureStorage:
         assert not (schemas_dir / ".git").exists()
         assert (schemas_dir / "top.yaml").exists()
 
+    def test_skips_the_source_catalogue_when_seeding(self, config_dir, schemas_dir, seed_dir):
+        # The engine reads the catalogue from its installed package, and the schema store would parse every file.
+        (seed_dir / "catalogue").mkdir()
+        (seed_dir / "catalogue" / "acme-log.yaml").write_text("source: acme-log\n")
+        ensure_storage(settings=make_settings(config_dir=config_dir, schemas_dir=schemas_dir))
+        assert not (schemas_dir / "catalogue").exists()
+        assert (schemas_dir / "top.yaml").exists()
+
     def test_missing_seed_leaves_schemas_empty(
         self, config_dir, monkeypatch, schemas_dir, tmp_path
     ):

@@ -317,46 +317,6 @@ class TestShippedManifest:
 
         assert variants == {"dfe-transform-elastic": "config.source.name"}
 
-    def test_elastic_is_the_one_app_shipping_a_source_catalogue(self):
-        shipping = {
-            name: app.catalogue for name, app in catalogue.APP_CATALOGUE.items() if app.catalogue
-        }
-
-        assert set(shipping) == {"dfe-transform-elastic"}
-        binding = shipping["dfe-transform-elastic"]
-        assert binding.variant("okta", "default") == "filebeat.okta.default"
-
-    def test_a_variant_parses_back_to_its_entry_and_transform(self):
-        binding = catalogue.descriptor("dfe-transform-elastic").catalogue
-        assert binding is not None
-
-        assert binding.parse_variant("filebeat.panw.traffic") == ("panw", "traffic")
-        assert binding.parse_variant("filebeat.cisco_ios.default") == ("cisco_ios", "default")
-        assert binding.parse_variant("panw.traffic") is None
-
-    def test_elastic_names_ecs_and_a_derived_and_vendor_layer_per_stream(self):
-        binding = catalogue.descriptor("dfe-transform-elastic").catalogue
-        assert binding is not None
-        layers = binding.schema_layers
-
-        assert layers is not None
-        assert layers.meta_schema == "meta/elastic/ecs"
-        assert layers.derived("cisco_ios", "log") == "derived/cisco_ios/log"
-        assert layers.additional("cisco_ios", "log") == "additional/cisco_ios/log"
-
-    def test_a_package_the_fetcher_names_the_same_way_needs_no_mapping(self):
-        assert catalogue.source_type_for_package("okta") == "okta"
-        assert catalogue.source_type_for_package("aws") == "aws"
-
-    def test_the_manifest_carries_the_names_the_two_spell_apart(self):
-        assert catalogue.source_type_for_package("1password") == "onepassword"
-        assert catalogue.source_type_for_package("cisco_duo") == "duo"
-        assert catalogue.source_type_for_package("golang") == "go_modules"
-        assert catalogue.source_type_for_package("o365") == "m365"
-
-    def test_a_package_no_family_polls_has_none(self):
-        assert catalogue.source_type_for_package("zoom") is None
-
     def test_the_fetchers_instance_maps_are_its_keyed_families(self):
         # dfe-fetcher's SourcesConfig carries rest, db and file as maps keyed by
         # instance id, and every other family as one flat block.
@@ -695,89 +655,17 @@ class TestManifestParsing:
         with pytest.raises(CatalogueError, match="'mesh' must be a mapping"):
             catalogue.load_mesh(path)
 
-    def test_a_catalogue_missing_a_key_names_what_it_needs(self, tmp_path):
-        path = self._manifest(tmp_path, {"catalogue": {"meta_schema": "meta/x"}})
-
-        with pytest.raises(CatalogueError, match="needs variant_pattern"):
-            load_catalogue(path)
-
-    def test_a_variant_pattern_naming_an_unknown_placeholder_is_refused(self, tmp_path):
-        path = self._manifest(
-            tmp_path,
-            {
-                "catalogue": {
-                    "variant_pattern": "{vendor}.{entry}",
-                }
-            },
-        )
-
-        with pytest.raises(CatalogueError, match="takes only"):
-            load_catalogue(path)
-
-    @staticmethod
-    def _catalogue(**layers: str) -> dict:
-        return {
-            "catalogue": {
-                "variant_pattern": "{entry}.{transform}",
-                **layers,
-            }
+    def test_a_manifest_still_carrying_the_retired_source_catalogue_keys_loads(self, tmp_path):
+        # A deploy repo's copy of the manifest may still carry them, and they name nothing now.
+        app = {
+            "source_types": ["duo"],
+            "catalogue_packages": {"duo": ["cisco_duo"]},
+            "catalogue": {"file": "sources.yaml", "entries_key": "sources"},
         }
 
-    def test_a_catalogue_naming_no_schema_layers_loads_with_none(self, tmp_path):
-        binding = load_catalogue(self._manifest(tmp_path, self._catalogue()))["dfe-thing"].catalogue
+        apps = load_catalogue(self._manifest(tmp_path, app))
 
-        assert binding is not None
-        assert binding.schema_layers is None
-
-    def test_some_schema_layers_without_the_rest_are_refused_by_name(self, tmp_path):
-        path = self._manifest(tmp_path, self._catalogue(meta_schema="meta/elastic/ecs"))
-
-        with pytest.raises(CatalogueError, match="without derived_pattern, additional_pattern"):
-            load_catalogue(path)
-
-    def test_a_meta_schema_with_a_file_extension_is_refused(self, tmp_path):
-        # A derived schema names its base extensionless, so this one could never match.
-        path = self._manifest(
-            tmp_path,
-            self._catalogue(
-                meta_schema="meta/elastic/ecs.yaml",
-                derived_pattern="derived/{package}/{data_stream}",
-                additional_pattern="additional/{package}/{data_stream}",
-            ),
-        )
-
-        with pytest.raises(CatalogueError, match="without a file extension"):
-            load_catalogue(path)
-
-    def test_a_layer_pattern_naming_an_unknown_placeholder_is_refused(self, tmp_path):
-        path = self._manifest(
-            tmp_path,
-            self._catalogue(
-                meta_schema="meta/elastic/ecs",
-                derived_pattern="derived/{vendor}/{data_stream}",
-                additional_pattern="additional/{package}/{data_stream}",
-            ),
-        )
-
-        with pytest.raises(CatalogueError, match=r"derived_pattern .* takes only \{package\}"):
-            load_catalogue(path)
-
-    def test_a_catalogue_package_naming_a_family_the_app_lacks_is_refused(self, tmp_path):
-        path = self._manifest(
-            tmp_path,
-            {"source_types": ["okta"], "catalogue_packages": {"duo": ["cisco_duo"]}},
-        )
-
-        with pytest.raises(CatalogueError, match="not one of its source_types"):
-            load_catalogue(path)
-
-    def test_an_empty_package_list_is_refused(self, tmp_path):
-        path = self._manifest(
-            tmp_path, {"source_types": ["duo"], "catalogue_packages": {"duo": []}}
-        )
-
-        with pytest.raises(CatalogueError, match="non-empty list of packages"):
-            load_catalogue(path)
+        assert apps["dfe-thing"].source_types == ("duo",)
 
     def test_an_app_naming_no_keyed_families_composes_every_family_flat(self, tmp_path):
         apps = load_catalogue(self._manifest(tmp_path, {"source_types": ["rest", "okta"]}))

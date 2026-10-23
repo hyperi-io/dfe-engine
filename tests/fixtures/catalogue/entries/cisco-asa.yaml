@@ -1,0 +1,24 @@
+# Catalogue source cisco-asa: the POST /sources write body that creates it.
+# See the Catalogue section of README.md.
+
+source: cisco-asa
+display_name: cisco_asa.log
+description: The log data stream of the Elastic cisco_asa integration.
+match:
+  field: _source
+  operator: equals
+  value: cisco-asa
+schema:
+  meta_schema: meta/elastic/ecs
+  derived_schema: derived/cisco_asa/log
+  additional_fields: additional/cisco_asa/log
+transform:
+  engine: elastic
+  variant: filebeat.cisco_asa.default
+catalogue:
+  package: cisco_asa
+  data_stream: log
+  intakes: [beats, receiver]
+  framing: line
+  variants:
+    - filebeat.cisco_asa.default

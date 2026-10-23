@@ -2,7 +2,7 @@
 
 GET    /api/v1/sources                  -> Paginated source list
 POST   /api/v1/sources                  -> Create source
-GET    /api/v1/sources/catalogue        -> The sources a deployed transform already handles
+GET    /api/v1/sources/catalogue        -> The sources DFE ships ready to create
 POST   /api/v1/sources/from-catalogue/{entry} -> Create a source from a catalogue entry
 GET    /api/v1/sources/{name}           -> Get source details
 GET    /api/v1/sources/{name}/flow      -> The stages its records travel, resolved
@@ -63,6 +63,7 @@ from dfe_engine.api.errors import (
     TOPICS_NOT_CREATED,
     CoreResourceConflictErrorResponse,
     ErrorResponse,
+    MissingVariantErrorResponse,
     SourceCreateConflictResponse,
     SourceWriteConflictResponse,
     TopicsNotCreatedErrorResponse,
@@ -698,53 +699,47 @@ class TableEngineObject(BaseModel):
     )
 
 
-class CatalogueSchemaAvailability(BaseModel):
-    """Whether a catalogue entry's table schema layers resolve on this deployment."""
-
-    resolves: bool = Field(
-        description=(
-            "Whether the meta and derived schemas the entry's table composes from resolve "
-            "here. When not, a source created from it carries no schema, and the fetcher "
-            "intake refuses it (422) because a fetcher on its own topic needs one"
-        )
-    )
-    missing_layer: Literal["meta_schema", "derived_schema"] | None = Field(
-        default=None,
-        description="The first layer that does not resolve, or null when resolves is true",
-    )
-    missing_reference: str = Field(
-        default="",
-        description=(
-            "That layer's schema reference, such as derived/cisco_ios/log. Empty when "
-            "resolves is true, or when the app manifest names no schema layers at all"
-        ),
-    )
-
-
 class CatalogueEntryObject(BaseModel):
-    """One source a deployed transform already handles, as the console lists it."""
+    """One source DFE ships ready to create, as the console lists it."""
 
-    name: str = Field(description="The shipping app's key for this source")
+    name: str = Field(description="The source name the entry creates, and its catalogue key")
+    display_name: str | None = Field(default=None, description="Human-readable display name")
+    description: str | None = Field(default=None, description="What the source carries")
     package: str = Field(description="Vendor integration package it came from")
     data_stream: str = Field(description="Data stream within that package")
     dataset: str = Field(description="package.data_stream - what a Beats event stamps")
-    intakes: list[str] = Field(description="Ways this source's payload can reach the platform")
+    intakes: list[str] = Field(description="Ways this source's data can reach the platform")
+    default_intake: source_catalogue_module.CatalogueIntake = Field(
+        description="The intake a create takes when it names none: the first of fetcher, "
+        "receiver and beats the entry lists"
+    )
     framing: str | None = Field(
         default=None,
-        description="Pushed intakes only: whether the pipeline wants the syslog line or the body",
+        description="Receiver intakes only: whether the pipeline wants the syslog line or the body",
     )
-    transforms: list[str] = Field(description="Programs the app compiled for this source")
     beats: dict[str, str] = Field(
         default_factory=dict,
         description="Beats module and fileset carrying the same source, when one does",
     )
-    source: str = Field(
-        default="",
-        description="Source name a source created from this entry takes unless one is supplied",
+    has_schema: bool = Field(
+        description="Whether the entry binds a table schema. A fetcher intake without one is "
+        "refused on create (422), because a fetcher on its own topic needs one"
     )
-    schema_layers: CatalogueSchemaAvailability = Field(
-        description="Whether the entry's table schema resolves here, and which layer does not"
+    engine: str | None = Field(
+        default=None, description="The transform engine the source runs, e.g. elastic"
     )
+    variant: str | None = Field(
+        default=None, description="The variant a create runs when it names none"
+    )
+    variants: list[str] = Field(
+        default_factory=list, description="Every variant the entry compiles to, the default first"
+    )
+    availability: source_catalogue_module.Availability = Field(
+        description="Whether the deployed transform ships the default variant, read off its "
+        "mounted contract: available, missing_variant (a create is refused with 409), or "
+        "unknown (no contract is mounted or it is unreadable, and a create is allowed)"
+    )
+    availability_reason: str = Field(description="Why availability says what it does")
 
 
 class CatalogueSourceRequest(BaseModel):
@@ -752,14 +747,17 @@ class CatalogueSourceRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    intake: str = Field(description="How this source's data arrives: beats, receiver or fetcher")
+    intake: source_catalogue_module.CatalogueIntake | None = Field(
+        default=None,
+        description="How this source's data arrives, the entry's default intake when omitted",
+    )
     name: str | None = Field(
         default=None,
-        description="Source name; defaults to the entry's own name as a Kubernetes label",
+        description="Source name, the entry's own name when omitted",
     )
-    transform: str = Field(
-        default=source_catalogue_module.DEFAULT_TRANSFORM,
-        description="Which of the entry's transforms this source runs",
+    variant: str | None = Field(
+        default=None,
+        description="The full name of one of the entry's variants, the first when omitted",
     )
     transport: SourceTransport | None = Field(
         default=None,
@@ -1096,18 +1094,15 @@ def create_source(
 )
 def list_catalogue(
     user: CurrentUser,
-    settings: Settings,
     pagination: PaginationParams = Depends(),
     intake: str | None = Query(
         None, description="Only entries that arrive this way (beats, receiver, fetcher)"
     ),
     search: str | None = Query(None, description="Search the entry name, package and data stream"),
 ) -> PaginatedResponse[CatalogueEntryObject]:
-    """List the sources the deployed transforms already handle.
+    """List the sources the installed dfe-schemas catalogue ships ready to create.
 
-    The catalogue is dfe-schemas package data, so every deployment has it. Each entry says whether its table's schema layers resolve on this deployment,
-    and names the first one that does not, so a console can hold back an entry
-    the create would refuse.
+    Each entry says whether the deployed transform ships its default variant, read off that app's mounted contract, so a console can hold back an entry the create would refuse.
     """
     catalogue = _source_catalogue()
     if intake is not None and intake not in source_catalogue_module.INTAKES:
@@ -1134,14 +1129,11 @@ def list_catalogue(
             or needle in entry.package.lower()
             or needle in entry.data_stream.lower()
         ]
-    entries.sort(key=lambda entry: entry.name)
-    # Resolving reads the schema files, so only the page served is resolved.
+    # Entries are held in name order, and only the page served is judged against the contract.
     page = PaginatedResponse[str].from_list(
         [entry.name for entry in entries], pagination.page, pagination.per_page
     )
-    rows = [
-        _to_catalogue_object(catalogue, catalogue.entries[name], settings) for name in page.items
-    ]
+    rows = [_to_catalogue_object(entry=catalogue.entries[name]) for name in page.items]
     return PaginatedResponse[CatalogueEntryObject](
         items=rows, total=page.total, page=page.page, per_page=page.per_page
     )
@@ -1176,10 +1168,11 @@ def list_table_engines(
     responses={
         202: _CREATED_APPS_NOT_SYNCED,
         409: {
-            "model": SourceCreateConflictResponse,
+            "model": SourceCreateConflictResponse | MissingVariantErrorResponse,
             "description": (
                 "A source of that name already exists, the name is the core landing "
-                "the engine owns and reconciles itself, or its match duplicates another"
+                "the engine owns and reconciles itself, its match duplicates another, "
+                "or the deployed transform does not ship the variant (code missing_variant)"
             ),
         },
     },
@@ -1190,30 +1183,22 @@ def create_source_from_catalogue(
     body: CatalogueSourceRequest,
     user: CurrentUser,
     registry: SourceReg,
-    settings: Settings,
     request: Request,
     response: Response,
 ):
-    """Create a source from a catalogue entry, on the intake it arrives by.
+    """Create a source from a catalogue entry, on one of the intakes it arrives by.
 
-    The entry supplies the match rule or the fetcher family and the transform
-    variant. Its table's schema layers are the ones the app manifest names,
-    bound only when the entry's derived schema resolves over the manifest's
-    meta schema; otherwise the source carries no schema. Everything after that
-    is the ordinary create, so the source is indistinguishable from a
-    hand-written one.
+    The entry's file is the write body for its default intake, and another intake swaps in the match rule that intake derives. A variant the deployed transform's contract does not list is refused with 409, and one whose contract is not mounted is allowed. Everything after that is the ordinary create, so the source is indistinguishable from a hand-written one.
     """
     catalogue = _source_catalogue()
     try:
         write = source_catalogue_module.write_request_for(
-            catalogue,
-            catalogue.entry(entry),
-            intake=body.intake,
-            settings=settings,
-            name=body.name,
-            transform=body.transform,
-            transport=body.transport,
             archive=body.archive,
+            entry=catalogue.entry(name=entry),
+            intake=body.intake,
+            name=body.name,
+            transport=body.transport,
+            variant=body.variant,
         )
     except source_catalogue_module.SourceCatalogueError as exc:
         raise HTTPException(
@@ -1225,6 +1210,17 @@ def create_source_from_catalogue(
             status_code=422,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
+    available = source_catalogue_module.variant_availability(transform=write.transform)
+    if available.state == "missing_variant" and write.transform is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "missing_variant",
+                "message": available.reason,
+                "transform": app_catalogue.transform_service(engine=write.transform.engine),
+                "variant": write.transform.variant,
+            },
+        )
     return create_source(write, user, registry, request, response)
 
 
@@ -2994,41 +2990,41 @@ def import_source(
 
 
 def _source_catalogue() -> source_catalogue_module.SourceCatalogue:
-    """The shipped catalogue, or a 502 naming what is wrong with the installed copy."""
+    """The installed catalogue, or a 502 whose detail goes to the engine log, not the caller."""
     try:
         return source_catalogue_module.source_catalogue()
     except ManifestError as exc:
+        logger.error("Source catalogue unreadable", error=str(exc))
         raise HTTPException(
             status_code=502,
-            detail={"code": "catalogue_error", "message": str(exc)},
+            detail={
+                "code": "catalogue_error",
+                "message": "the source catalogue could not be read; the engine log has the reason",
+            },
         ) from exc
 
 
-def _to_catalogue_object(
-    catalogue: source_catalogue_module.SourceCatalogue,
-    entry: source_catalogue_module.CatalogueEntry,
-    settings: Any,
-) -> CatalogueEntryObject:
-    derived = entry.source_name()
-    binding = catalogue.app.catalogue
-    resolution = source_catalogue_module.resolve_schema_layers(
-        entry, binding.schema_layers if binding else None, settings
-    )
+def _to_catalogue_object(*, entry: source_catalogue_module.CatalogueEntry) -> CatalogueEntryObject:
+    """One catalogue entry as the console lists it, judged against the deployed transform."""
+    transform = entry.request.transform
+    available = source_catalogue_module.variant_availability(transform=transform)
     return CatalogueEntryObject(
-        name=entry.name,
-        package=entry.package,
+        availability=available.state,
+        availability_reason=available.reason,
+        beats=dict(entry.beats),
         data_stream=entry.data_stream,
         dataset=entry.dataset,
-        intakes=sorted(entry.intakes),
+        default_intake=entry.default_intake,
+        description=entry.request.description,
+        display_name=entry.request.display_name,
+        engine=transform.engine if transform else None,
         framing=entry.framing,
-        transforms=list(entry.transforms),
-        beats=dict(entry.beats),
-        source=derived,
-        schema_layers=CatalogueSchemaAvailability(
-            resolves=resolution.resolves,
-            missing_layer=resolution.missing_layer,
-            missing_reference=resolution.missing_reference,
-        ),
+        has_schema=entry.request.schema_config is not None,
+        intakes=sorted(entry.intakes),
+        name=entry.name,
+        package=entry.package,
+        variant=transform.variant if transform else None,
+        variants=list(entry.variants),
     )
 
 

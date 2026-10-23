@@ -192,6 +192,9 @@ api_v1_schemas.SchemaDiff.copy_directives
 api_v1_sigma.CatalogRuleSummary.upstream_modified
 api_v1_sigma.SigmaViewSummary.json_derived_count
 api_v1_sigma.SourceMappingSummary.field_count
+api_v1_sources.CatalogueEntryObject.availability
+api_v1_sources.CatalogueEntryObject.availability_reason
+api_v1_sources.CatalogueEntryObject.has_schema
 api_v1_sources.DDLResult.create_table
 api_v1_sources.SourceImportResponse.apps_sync_error
 api_v1_sources.SourceImportResponse.apps_synced

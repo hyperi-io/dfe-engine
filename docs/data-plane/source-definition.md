@@ -215,7 +215,7 @@ emits the schema YAML, which the source then names. The mapping table is in
 | fetcher connector type | one type per source, however many connections it polls; the refusal names the source and the types |
 | flow | runnable here: the deployment offers the transport, and every app in the flow carries it |
 | transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |
-| catalogue entry | the intake must be one the entry arrives by, the transform one it ships, and the source name a legal label - the entry's own name is used when it is one |
+| catalogue entry | the intake must be one the entry arrives by, the variant one it compiles to and not one a mounted contract of the deployed transform leaves out (409 `missing_variant`), and the source name a legal label |
 | schema | files exist and pass SchemaBuilder validation, and carry `_source` as a column (injected if missing) |
 
 The connector-type rule is the source-schema alignment, enforced: one source is
