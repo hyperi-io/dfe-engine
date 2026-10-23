@@ -144,7 +144,7 @@ With no sources defined, every record the receiver accepts is stamped `_source: 
 
 ## Adding a transform
 
-A transform is an apps.yaml entry with a `source_binding` and its `transports`, and a chart that exposes the transport dial and the Push Service. No engine release is involved. dfe-transform-vrl and dfe-transform-vector run a Push listener beside their bus consumer and list both transports, so a direct source may name either. dfe-transform-elastic lists the bus alone until its listener ships, so a direct source that names it is refused at save with that reason, and its `source.name` selects one of the compiled-in transforms its contract lists.
+A transform is an apps.yaml entry with a `source_binding` and its `transports`, and a chart that exposes the transport dial and the Push Service. No engine release is involved. dfe-transform-vrl, dfe-transform-vector and dfe-transform-elastic run a Push listener beside their bus consumer and list both transports, so a direct source may name any of them. A transform that lists the bus alone is refused at save for a direct source, with that reason. dfe-transform-elastic's `source.name` selects one of the compiled-in transforms its contract lists.
 
 ## Content another repo ships
 

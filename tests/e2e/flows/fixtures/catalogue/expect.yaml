@@ -15,11 +15,6 @@ origin: catalogue
 catalogue:
   intake: receiver
 
-# Every catalogue entry runs dfe-transform-elastic, and it carries the bus alone,
-# so every entry compiles onto a transform a direct source cannot name.
-expected_skip:
-  direct: every catalogue entry runs dfe-transform-elastic, which carries the bus alone until its gRPC listener ships (dfe-transform-elastic#19)
-
 expect:
   - source: "{entry}"
     table: "{entry}"

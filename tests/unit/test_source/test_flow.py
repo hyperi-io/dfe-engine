@@ -213,10 +213,16 @@ class TestRefusals:
             )
 
     def test_transform_that_does_not_carry_the_transport(self):
+        bus_only = dict(catalogue.APP_CATALOGUE)
+        bus_only["dfe-transform-elastic"] = replace(
+            catalogue.descriptor("dfe-transform-elastic"), transports=frozenset({"bus"})
+        )
+
         with pytest.raises(FlowError, match="dfe-transform-elastic carries only bus"):
             resolve_flow(
                 _source(transport="direct", transform={"engine": "elastic"}),
                 _settings(default="direct"),
+                bus_only,
             )
 
     @pytest.mark.parametrize("engine", BUS_ONLY_ENGINES)
