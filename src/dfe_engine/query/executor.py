@@ -24,6 +24,7 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.auth.models import Scope, ScopedGrant
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.clickhouse.quoting import BARE_REFERENCE, column_reference, quote_identifier
 from dfe_engine.query.catalog import RESERVED_PARAMS, ViewCatalog
@@ -46,6 +47,12 @@ class ViewExecutionError(Exception):
 
 class ViewRequestError(ViewExecutionError):
     """The request's options cannot form a valid query; the caller must change them."""
+
+
+def _holds_role_at(auth: AuthContext, roles: list[str], scope: Scope) -> bool:
+    """Whether a grant of one of *roles* covers *scope*, read the way ``authorize`` reads grants."""
+    grants = auth.grants or [ScopedGrant(role=name) for name in auth.roles]
+    return any(grant.role in roles and grant.scope.covers(scope) for grant in grants)
 
 
 def _cursor_text(value: Any, option: str = "after_key") -> str:
@@ -182,13 +189,15 @@ class ViewExecutor:
         if not result.allowed:
             raise AuthorizationError(f"View '{view_def.label}': access denied ({result.reason})")
 
+        # A cross-org view needs the role system-wide, and an isolated one at the org it reads.
+        scope = Scope(type="org", id=auth.org_id) if view_def.tenant_isolated else Scope()
         if view_def.required_roles:
-            if not any(role in auth.roles for role in view_def.required_roles):
+            if not _holds_role_at(auth, view_def.required_roles, scope):
                 raise AuthorizationError(
                     f"View '{view_def.label}' requires one of roles: {view_def.required_roles}"
                 )
 
-        if not view_def.tenant_isolated and "admin" not in auth.roles:
+        if not view_def.tenant_isolated and not _holds_role_at(auth, ["admin"], Scope()):
             raise AuthorizationError(
                 f"View '{view_def.label}' is not tenant-isolated and requires admin role"
             )

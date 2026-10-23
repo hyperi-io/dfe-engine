@@ -4,6 +4,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dfe_engine.auth.models import Scope, ScopedGrant
 from dfe_engine.query.catalog import ViewCatalog
 from dfe_engine.query.executor import ViewExecutionError, ViewExecutor, ViewRequestError
 from dfe_engine.query.models import (
@@ -144,6 +145,57 @@ class TestViewExecutorSecurity:
         auth = _make_auth(roles=["admin"])
         result = executor.execute("analytics/events", params={}, auth=auth)
         assert result.num_rows == 5
+
+    def test_non_tenant_isolated_refuses_an_org_scoped_admin(self):
+        view_def = _make_view_def(tenant_isolated=False)
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_scoped_auth(("data_analyst", Scope()), ("admin", _org("tenant-123")))
+        with pytest.raises(AuthorizationError, match="not tenant-isolated"):
+            executor.execute("analytics/events", params={}, auth=auth)
+        client.query.assert_not_called()
+
+    def test_required_role_must_cover_the_bound_org(self):
+        view_def = _make_view_def(required_roles=["analyst"])
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_scoped_auth(("data_analyst", Scope()), ("analyst", _org("other-org")))
+        with pytest.raises(AuthorizationError, match="requires one of roles"):
+            executor.execute("analytics/events", params={}, auth=auth)
+        client.query.assert_not_called()
+
+    def test_required_role_held_at_the_bound_org_passes(self):
+        view_def = _make_view_def(required_roles=["analyst"])
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        client.query.return_value = _make_query_result()
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_scoped_auth(("data_analyst", Scope()), ("analyst", _org("tenant-123")))
+        result = executor.execute("analytics/events", params={}, auth=auth)
+        assert result.num_rows == 5
+
+
+def _org(org_id: str) -> Scope:
+    return Scope(type="org", id=org_id)
+
+
+def _make_scoped_auth(*grants: tuple[str, Scope]) -> AuthContext:
+    """AuthContext as login builds it: flat role names plus the scoped grants they came from."""
+    return AuthContext(
+        org_id="tenant-123",
+        user_id="user-456",
+        roles=sorted({role for role, _ in grants}),
+        grants=[ScopedGrant(role=role, scope=scope) for role, scope in grants],
+        request_id="req-001",
+    )
 
 
 class TestViewExecutorLimits:
