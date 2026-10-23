@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.66](https://github.com/hyperi-io/dfe-engine/compare/v1.22.65...v1.22.66) (2026-10-23)
+
+### Bug Fixes
+
+* seed dfe-transform-vector idle on the docker single ([#967](https://github.com/hyperi-io/dfe-engine/issues/967)) ([ad11849](https://github.com/hyperi-io/dfe-engine/commit/ad11849f896119bacedc0387b84a8090d969b247))
+
 ## [1.22.65](https://github.com/hyperi-io/dfe-engine/compare/v1.22.64...v1.22.65) (2026-10-23)
 
 ### Bug Fixes
