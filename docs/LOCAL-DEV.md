@@ -58,6 +58,10 @@ env DFE_ENV=dev \
   (`DFE_AUTH_ACCOUNTS_STORE_URI` empty), so you get a file-backed account/group
   store under `DFE_CONFIG_DIR/auth` with no FerretDB. Force it with
   `DFE_AUTH_STORE_BACKEND=yaml` if you want to be explicit.
+- A document store the engine cannot reach fails a call in 5 s, not pymongo's 30.
+  `DFE_AUTH_ACCOUNTS_STORE_SERVER_SELECTION_TIMEOUT_SECONDS` sets it, and the same
+  wait decides how long `auto` takes to fall back to yaml at boot.
+- A store that stops answering mid-call fails that call in 30 s, where pymongo would wait for ever. `DFE_AUTH_ACCOUNTS_STORE_SOCKET_TIMEOUT_SECONDS` sets it.
 - **Attribute request bodies are wrapped.** `PUT
   /api/v1/auth/accounts/{username}/attributes` takes `{"attributes": {...}}`, not
   the bare object, and the `GET` returns the same shape. A bare object is a 422.
