@@ -1,0 +1,25 @@
+# Catalogue source okta: the POST /sources write body that creates it.
+# See the Catalogue section of README.md.
+
+source: okta
+display_name: okta.system
+description: The system data stream of the Elastic okta integration.
+fetcher:
+  source_type: okta
+  topic: own
+schema:
+  meta_schema: meta/elastic/ecs
+  derived_schema: derived/okta/system
+  additional_fields: additional/okta/system
+transform:
+  engine: elastic
+  variant: filebeat.okta.default
+catalogue:
+  package: okta
+  data_stream: system
+  intakes: [beats, fetcher]
+  beats:
+    module: okta
+    fileset: system
+  variants:
+    - filebeat.okta.default

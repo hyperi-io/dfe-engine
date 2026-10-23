@@ -162,68 +162,6 @@ class AppEndpoint:
 
 
 @dataclass(frozen=True, slots=True)
-class CatalogueSchemaLayers:
-    """The schema files a catalogue entry's table composes from, named by the app.
-
-    The transform decides what shape its output has, so which meta schema it
-    fills and where each stream's selection and vendor fields are filed are the
-    app's facts. The engine substitutes an entry into the two patterns and
-    knows no reference of its own.
-    """
-
-    meta_schema: str
-    """Registry path of the meta schema every entry's table is built on, extensionless."""
-
-    derived_pattern: str
-    """An entry's derived-schema reference; ``{package}`` and ``{data_stream}``."""
-
-    additional_pattern: str
-    """An entry's vendor-fields reference; ``{package}`` and ``{data_stream}``."""
-
-    def derived(self, package: str, data_stream: str) -> str:
-        """The derived schema that narrows the meta schema to one stream's fields."""
-        return self.derived_pattern.format(package=package, data_stream=data_stream)
-
-    def additional(self, package: str, data_stream: str) -> str:
-        """The vendor fields appended after that stream's selection."""
-        return self.additional_pattern.format(package=package, data_stream=data_stream)
-
-
-@dataclass(frozen=True, slots=True)
-class CatalogueBinding:
-    """An app whose transforms the shipped source catalogue selects.
-
-    The catalogue itself is dfe-schemas package data; this says how one entry
-    names the compiled-in program it selects and which schema files an entry's
-    table is built from. Both are the app's own conventions, so an app with a
-    differently shaped catalogue joins by being declared here rather than by a
-    branch in the engine.
-    """
-
-    variant_pattern: str
-    """How an entry becomes ``transform.variant``; ``{entry}`` and ``{transform}``."""
-
-    schema_layers: CatalogueSchemaLayers | None = None
-    """The schema files an entry's table is built from; None binds no schema at all."""
-
-    def variant(self, entry: str, transform: str) -> str:
-        """The compiled-in program an entry's named transform selects."""
-        return self.variant_pattern.format(entry=entry, transform=transform)
-
-    def parse_variant(self, variant: str) -> tuple[str, str] | None:
-        """The entry and transform a variant names, or None when the pattern cannot produce it."""
-        prefix, _, rest = self.variant_pattern.partition("{entry}")
-        middle, _, suffix = rest.partition("{transform}")
-        if not (variant.startswith(prefix) and variant.endswith(suffix)):
-            return None
-        body = variant[len(prefix) : len(variant) - len(suffix)]
-        entry, sep, transform = body.rpartition(middle)
-        if not sep or not entry or not transform:
-            return None
-        return entry, transform
-
-
-@dataclass(frozen=True, slots=True)
 class AppDescriptor:
     """One deployable DFE app."""
 
@@ -258,13 +196,6 @@ class AppDescriptor:
 
     source_types: tuple[str, ...] = ()
     """The source families a source-bound instance of this app can poll."""
-
-    catalogue_packages: dict[str, tuple[str, ...]] = field(default_factory=dict)
-    """Family -> the catalogue packages it polls, where the two spell the vendor apart.
-
-    An exact name match needs no entry, so this stays the exceptions list rather
-    than a second copy of ``source_types``.
-    """
 
     keyed_source_types: frozenset[str] = frozenset()
     """The families whose stanza is a map of instances keyed by id, not one flat block.
@@ -339,9 +270,6 @@ class AppDescriptor:
     Declared per app so the engine writes a source's ``transform.variant`` into
     whatever the app calls it, without knowing which app it is.
     """
-
-    catalogue: CatalogueBinding | None = None
-    """The catalogue of sources this app ships, when it ships one."""
 
     config_file: str = ""
     """The config file this app's own image reads, by name; empty where it reads none.
@@ -568,9 +496,6 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         routing_paths=_routing_paths_from(service, routing.get("values_paths")),
         routing_scope=scope,
         source_types=families,
-        catalogue_packages=_catalogue_packages_from(
-            service, raw.get("catalogue_packages"), families
-        ),
         keyed_source_types=_keyed_source_types_from(
             service, raw.get("keyed_source_types"), families
         ),
@@ -585,7 +510,6 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         restart_paths=_restart_paths_from(service, raw.get("restart_paths"), hot_reload=hot_reload),
         endpoints=_endpoints_from(service, raw.get("endpoints")),
         variant_path=str(raw.get("variant_path", "")),
-        catalogue=_catalogue_from(service, raw.get("catalogue")),
         config_file=_config_file_from(service, raw.get("consumes")),
         display_name=_display_name_from(service, raw.get("display_name")),
         deployment_owned=_owned_paths_from(
@@ -730,36 +654,6 @@ def _routing_paths_from(service: str, raw: object) -> dict[str, str]:
     return {str(name): str(path) for name, path in raw.items()}
 
 
-def _catalogue_packages_from(
-    service: str, raw: object, families: tuple[str, ...]
-) -> dict[str, tuple[str, ...]]:
-    """Which catalogue packages each of this app's families polls.
-
-    Every key has to be one of the app's own ``source_types``: a family it does
-    not have cannot poll anything, and a typo there would silently offer a
-    catalogue entry a fetcher family that does not exist.
-    """
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        raise CatalogueError(
-            f"{service}: catalogue_packages must be a mapping of family to packages"
-        )
-    out: dict[str, tuple[str, ...]] = {}
-    for family, packages in raw.items():
-        if str(family) not in families:
-            raise CatalogueError(
-                f"{service}: catalogue_packages names {family!r}, which is not one of its "
-                f"source_types ({', '.join(families) or 'none'})"
-            )
-        if not isinstance(packages, list) or not packages:
-            raise CatalogueError(
-                f"{service}: catalogue_packages[{family!r}] must be a non-empty list of packages"
-            )
-        out[str(family)] = tuple(str(p) for p in packages)
-    return out
-
-
 def _keyed_source_types_from(
     service: str, raw: object, families: tuple[str, ...]
 ) -> frozenset[str]:
@@ -780,81 +674,6 @@ def _keyed_source_types_from(
                 f"source_types ({', '.join(families) or 'none'})"
             )
     return frozenset(str(f) for f in raw)
-
-
-def _catalogue_from(service: str, raw: object) -> CatalogueBinding | None:
-    """The catalogue this app ships, or None when it ships none."""
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise CatalogueError(f"{service}: catalogue must be a mapping")
-    try:
-        binding = CatalogueBinding(
-            variant_pattern=str(raw["variant_pattern"]),
-            schema_layers=_schema_layers_from(service, raw),
-        )
-    except KeyError as exc:
-        raise CatalogueError(f"{service}: catalogue needs variant_pattern; missing {exc}") from exc
-    # Rendered here rather than at the first use, so a pattern naming a
-    # placeholder the engine never substitutes is a manifest error, not a
-    # transform instance told to run a program with a brace in its name.
-    try:
-        binding.variant("entry", "transform")
-    except (KeyError, IndexError) as exc:
-        raise CatalogueError(
-            f"{service}: catalogue.variant_pattern {binding.variant_pattern!r} takes only "
-            f"{{entry}} and {{transform}}: {exc}"
-        ) from exc
-    return binding
-
-
-SCHEMA_LAYER_KEYS = ("meta_schema", "derived_pattern", "additional_pattern")
-"""The catalogue keys that name an entry's schema files, declared all together or not at all."""
-
-
-def _schema_layers_from(service: str, raw: dict) -> CatalogueSchemaLayers | None:
-    """The schema files a catalogue's entries are built from, or None when it names none.
-
-    None is a manifest that predates the keys: its catalogue still lists and
-    creates sources, with no table schema, rather than refusing to load. Some
-    of the keys without the rest is refused, because the table is bound from
-    all three or not at all.
-    """
-    declared = [key for key in SCHEMA_LAYER_KEYS if raw.get(key) is not None]
-    if not declared:
-        return None
-    missing = [key for key in SCHEMA_LAYER_KEYS if key not in declared]
-    if missing:
-        raise CatalogueError(
-            f"{service}: catalogue declares {', '.join(declared)} without "
-            f"{', '.join(missing)}; the schema layers are declared together or not at all"
-        )
-    meta = str(raw["meta_schema"]).replace("\\", "/").strip("/")
-    # A derived schema names its base extensionless, and the two are compared verbatim.
-    if meta.lower().endswith((".yaml", ".yml")) or any(
-        part in ("", ".", "..") for part in meta.split("/")
-    ):
-        raise CatalogueError(
-            f"{service}: catalogue.meta_schema {raw['meta_schema']!r} must be a schema "
-            "registry path without a file extension, e.g. meta/elastic/ecs"
-        )
-    layers = CatalogueSchemaLayers(
-        meta_schema=meta,
-        derived_pattern=str(raw["derived_pattern"]),
-        additional_pattern=str(raw["additional_pattern"]),
-    )
-    for key, render in (
-        ("derived_pattern", layers.derived),
-        ("additional_pattern", layers.additional),
-    ):
-        try:
-            render("package", "data_stream")
-        except (KeyError, IndexError) as exc:
-            raise CatalogueError(
-                f"{service}: catalogue.{key} {raw[key]!r} takes only "
-                f"{{package}} and {{data_stream}}: {exc}"
-            ) from exc
-    return layers
 
 
 def _transports_from(service: str, raw: object) -> frozenset[str]:
@@ -1225,23 +1044,6 @@ def source_types() -> set[str]:
     manifest edit rather than an engine release.
     """
     return {t for app in APP_CATALOGUE.values() for t in app.source_types}
-
-
-def source_type_for_package(package: str) -> str | None:
-    """The fetcher family that polls a catalogue package, or None when none does.
-
-    A catalogue names its packages the way its own vendor does, and the fetcher
-    names its families the way ITS vendor does; the two agree most of the time
-    and the manifest carries the handful of places they do not. An unmapped
-    package is a real answer: the fetcher cannot poll that source.
-    """
-    for app in APP_CATALOGUE.values():
-        if package in app.source_types:
-            return package
-        for family, packages in app.catalogue_packages.items():
-            if package in packages:
-                return family
-    return None
 
 
 def instance_routed_apps() -> list[AppDescriptor]:

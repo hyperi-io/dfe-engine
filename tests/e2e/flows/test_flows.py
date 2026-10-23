@@ -446,15 +446,27 @@ class TestFlows:
     def _catalogue_flow(
         self, shape: shapes.FlowShape, transport: str, engine, e2e, ch_client, flow_sources
     ) -> None:
-        """A source compiled from a catalogue entry the receiver carries."""
-        offered = engine.json("GET", "/sources/catalogue?intake=receiver")
-        entries = offered["items"]
-        assert entries, "the dfe-schemas catalogue offers no entry the receiver carries"
-        entry = str(entries[0]["name"])
+        """A source compiled from an installed catalogue entry the deployed transform can run."""
+        intake = shape.catalogue_intake
+        offered = engine.json("GET", f"/sources/catalogue?intake={intake}&per_page=-1")
+        items = offered.get("items") if isinstance(offered, dict) else None
+        if not (items):
+            pytest.skip(
+                f"{shapes.EXPECTED_SKIP} the engine's installed catalogue holds no entry "
+                f"arriving by {intake!r}, so there is none to compile"
+            )
+        # A variant the deployed transform's contract does not list is refused, so it is never picked.
+        usable = [row for row in items if row.get("availability") != "missing_variant"]
+        assert usable, (
+            f"the deployed transform ships none of the {len(items)} catalogue entries "
+            f"arriving by {intake!r}"
+        )
+        shipped = [row for row in usable if row.get("availability") == "available"]
+        entry = str(((shipped) or (usable))[0]["name"])
         created = engine.call(
             "POST",
             f"/sources/from-catalogue/{entry}",
-            {"intake": "receiver", "transport": transport},
+            {"intake": intake, "transport": transport},
         )
         assert created.status_code in (200, 201), (
             f"the catalogue entry {entry!r} would not compile into a source: "

@@ -1,6 +1,6 @@
 # Project:   dfe-engine
 # File:      tests/e2e/flows/fixtures/catalogue/source.yaml
-# Purpose:   A source compiled from a mounted source catalogue, not typed
+# Purpose:   A source compiled from the dfe-schemas source catalogue, not typed
 # Language:  YAML
 #
 # License:   BUSL-1.1

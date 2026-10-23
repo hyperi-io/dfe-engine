@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Config",
+  "description": "Top-level service configuration.",
+  "type": "object",
+  "properties": {
+    "source": {
+      "description": "Inbound side.\n\nDefaulted so an instance nothing has configured yet still PARSES and\nreaches the idle gate. Without it the process dies on a missing\n`source` field before `ServiceRuntime::build`, so no `/livez` or\n`/readyz` is serving when it exits and the pod crash-loops.",
+      "$ref": "#/$defs/SourceConfig",
+      "default": {
+        "name": "",
+        "transport": "bus",
+        "listen": "0.0.0.0:6000",
+        "envelope": "auto",
+        "topics": [],
+        "batch_size": 20000,
+        "max_batch_bytes": 16777216,
+        "group_id": "",
+        "brokers": [],
+        "acknowledgements": {
+          "enabled": true
+        }
+      }
+    },
+    "sink": {
+      "description": "Outbound side.",
+      "$ref": "#/$defs/SinkConfig",
+      "default": {
+        "topic": "",
+        "transport": "bus",
+        "endpoint": "http://dfe-loader:6000",
+        "brokers": null,
+        "max_message_bytes": 15728640
+      }
+    },
+    "geoip": {
+      "description": "Which MMDB databases the geoip processors read, and how to obtain them.\n\nscalo's type verbatim: provisioning is shared across the fleet, and the\nlookup engine and its cache stay in `dfe-runtime`. Read once at startup,\nso a change needs a restart.",
+      "$ref": "#/$defs/GeoIpConfig",
+      "default": {
+        "enabled": true,
+        "provider": "db_ip_lite",
+        "city_db_path": null,
+        "asn_db_path": null,
+        "auto_download": {
+          "enabled": true,
+          "data_dir": "/var/lib/geoip",
+          "maxmind_account_id": null,
+          "maxmind_license_key": null,
+          "ipinfo_token": null,
+          "max_age_days": 30
+        }
+      }
+    }
+  },
+  "$defs": {
+    "SourceConfig": {
+      "description": "Inbound configuration.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Beats or Agent source whose transform to apply, e.g. `filebeat.okta`.",
+          "type": "string",
+          "default": ""
+        },
+        "transport": {
+          "description": "Which transport the inbound side uses: `bus` consumes `topics`, `direct`\naccepts pushes on `listen`.",
+          "$ref": "#/$defs/Transport",
+          "default": "bus"
+        },
+        "listen": {
+          "description": "Address the Push listener binds on the direct transport, ignored on the\nbus. The listener speaks plaintext gRPC with no authentication of its\nown, so it belongs behind the mesh route dfe-infra provisions and never\non an interface reachable from outside the cluster.",
+          "type": "string",
+          "default": "0.0.0.0:6000"
+        },
+        "envelope": {
+          "description": "Which producer wrapped the payload. The transform is the same for all\nof them; only the unwrapping differs.\n\nDefaults to `auto`, which reads it off each event. Naming a family\ninstead pins it, and validation then rejects one the source cannot\nactually arrive in.",
+          "$ref": "#/$defs/EnvelopeSetting",
+          "default": "auto"
+        },
+        "topics": {
+          "description": "Topics to consume.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "batch_size": {
+          "description": "Events pulled per batch.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 20000
+        },
+        "max_batch_bytes": {
+          "description": "Ceiling on the BYTES one fetch may bring back, the inbound mirror of\n`sink.max_message_bytes`.\n\n`batch_size` bounds the event count and nothing bounds their size, so a\nproducer sending large records decides this service's memory. Applied as\nlibrdkafka's `fetch.max.bytes`, which enforces it at the broker rather\nthan after the bytes have arrived; the pod's memory limit has to cover\nthis plus the parsed document trees, which are several times larger.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 16777216
+        },
+        "group_id": {
+          "description": "Kafka consumer group.",
+          "type": "string",
+          "default": ""
+        },
+        "brokers": {
+          "description": "Broker list.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "acknowledgements": {
+          "description": "When the source is told its records are safe: a Kafka offset commit on\nthe bus, the answer to a push on direct.\n\n`enabled: true`, the default, holds it until every event built from a\nrecord is delivered, or dropped and counted, so a crash or a sink outage\nredelivers rather than loses. `enabled: false` releases it at receipt,\nbefore the transform runs, and loses what was in flight.",
+          "$ref": "#/$defs/AcknowledgementsConfig",
+          "default": {
+            "enabled": true
+          }
+        }
+      }
+    },
+    "Transport": {
+      "description": "Which transport a side of the service uses.\n\n`bus` is Kafka between the stages; `direct` is a scalo Push listener inbound and a gRPC client outbound, needing no broker at all. The record and the transform are identical either way -- only who hands the record over changes. `kafka` and `grpc` are read as the same two, the names dfe-engine renders, and a config always writes `bus` and `direct` back.",
+      "oneOf": [
+        {
+          "description": "Kafka topics.",
+          "type": "string",
+          "enum": [
+            "bus",
+            "kafka"
+          ]
+        },
+        {
+          "description": "A scalo Push listener inbound, a gRPC client outbound.",
+          "type": "string",
+          "enum": [
+            "direct",
+            "grpc"
+          ]
+        }
+      ]
+    },
+    "EnvelopeSetting": {
+      "description": "What the operator said about the envelope.\n\n`auto` is the default: the family is read off the first event of each batch,\nso a deployment that changes producer needs no config change. Naming one\npins it, which is the way through for a shape that carries no marker.",
+      "oneOf": [
+        {
+          "description": "Detect the family from each batch's first event.",
+          "type": "string",
+          "const": "auto"
+        },
+        {
+          "description": "Beats, Elastic Agent, or anything passed through unaltered.",
+          "type": "string",
+          "const": "beats"
+        },
+        {
+          "description": "dfe-receiver, on any of its transports.",
+          "type": "string",
+          "const": "receiver"
+        },
+        {
+          "description": "dfe-fetcher.",
+          "type": "string",
+          "const": "fetcher"
+        }
+      ]
+    },
+    "AcknowledgementsConfig": {
+      "description": "The `acknowledgements` section of an ack-capable transport.\n\nWith `enabled: true` (the default) a source releases its acknowledgement --\na Kafka offset commit, a gRPC or HTTP response -- only once every piece of\nwork built from the record has been delivered, dead-lettered with the DLQ's\nconfirmation, or dropped by policy. A failed delivery withholds it, so the\nrecord is delivered again: duplicates are possible, loss is not.\n\nWith `enabled: false` the source acknowledges at receipt, before the record\nis processed: a crash or a failed delivery loses what was acknowledged.\n\n```yaml\nkafka:\n  acknowledgements:\n    enabled: true\n```",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Hold the source acknowledgement until every piece is delivered.",
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "SinkConfig": {
+      "description": "Outbound configuration.",
+      "type": "object",
+      "properties": {
+        "topic": {
+          "description": "Where the events land: the topic produced to on the bus, and the\nrouting key every push carries on direct. Required on both once the\nconfiguration names work.",
+          "type": "string",
+          "default": ""
+        },
+        "transport": {
+          "description": "Which transport the outbound side uses: `bus` produces to `topic`,\n`direct` pushes to `endpoint` with `topic` as the routing key.",
+          "$ref": "#/$defs/Transport",
+          "default": "bus"
+        },
+        "endpoint": {
+          "description": "Downstream Push listener on the direct transport, ignored on the bus.\nReached in the clear, so it too stays inside the mesh.",
+          "type": "string",
+          "default": "http://dfe-loader:6000"
+        },
+        "brokers": {
+          "description": "Broker list. Defaults to the source brokers when unset.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "default": null
+        },
+        "max_message_bytes": {
+          "description": "Ceiling on one outbound record. An event that serialises larger is\ndropped and counted on `events_oversize_total`.\n\nThe default fits the stack's 16 MiB record ceiling. Against a broker or\ntopic whose `message.max.bytes` is lower, set this below that limit, or\nthe broker refuses those events instead and they count on\n`send_filtered_dlq_total`.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 15728640
+        }
+      }
+    },
+    "GeoIpConfig": {
+      "description": "GeoIP database provisioning configuration.\n\n`PartialEq` is part of the contract: a consumer nests this inside its own\nconfig and compares old against new to decide whether a reload needs a\nrestart. Comparing serialised forms instead would read every credential\nchange as no change, because [`SensitiveString`] redacts in `Serialize`.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Provision databases at all. Defaults to true: calling\n[`ensure_databases`](super::ensure_databases) is the opt-in, so this is\nthe config-side opt-out for an app that wires the call unconditionally.",
+          "type": "boolean",
+          "default": true
+        },
+        "provider": {
+          "description": "Where the databases come from.",
+          "$ref": "#/$defs/GeoIpProvider",
+          "default": "db_ip_lite"
+        },
+        "city_db_path": {
+          "description": "Explicit city MMDB path. Set on either path field and the provider is\nbypassed entirely -- nothing is downloaded and nothing is checked.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "asn_db_path": {
+          "description": "Explicit ASN MMDB path. See [`city_db_path`](Self::city_db_path).",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "auto_download": {
+          "description": "Auto-download settings.",
+          "$ref": "#/$defs/AutoDownloadConfig",
+          "default": {
+            "enabled": true,
+            "data_dir": "/var/lib/geoip",
+            "maxmind_account_id": null,
+            "maxmind_license_key": null,
+            "ipinfo_token": null,
+            "max_age_days": 30
+          }
+        }
+      }
+    },
+    "GeoIpProvider": {
+      "description": "Source of the MMDB databases.\n\n| Variant | Auth | City | ASN |\n|---|---|---|---|\n| [`DbIpLite`](Self::DbIpLite) | none | yes | yes |\n| [`MaxMindGeoLite2`](Self::MaxMindGeoLite2) | HTTP basic | yes | yes |\n| [`IpLocate`](Self::IpLocate) | none | no | yes |\n| [`IpInfoLite`](Self::IpInfoLite) | token | yes | no |\n| [`Sapics`](Self::Sapics) | none | no | yes |\n| [`Custom`](Self::Custom) | n/a | explicit path | explicit path |",
+      "oneOf": [
+        {
+          "description": "DB-IP Lite -- free, anonymous download, city-level, CC BY 4.0.",
+          "type": "string",
+          "const": "db_ip_lite"
+        },
+        {
+          "description": "MaxMind GeoLite2 -- free account required (account id + licence key).",
+          "type": "string",
+          "const": "max_mind_geo_lite2"
+        },
+        {
+          "description": "IPLocate.io -- free, anonymous, country + ASN only.",
+          "type": "string",
+          "const": "ip_locate"
+        },
+        {
+          "description": "IPinfo Lite -- free token required, country + ASN only.",
+          "type": "string",
+          "const": "ip_info_lite"
+        },
+        {
+          "description": "sapics/ip-location-db -- free CC0, country + ASN only.",
+          "type": "string",
+          "const": "sapics"
+        },
+        {
+          "description": "Caller supplies the MMDB paths directly; nothing is downloaded.",
+          "type": "string",
+          "const": "custom"
+        }
+      ]
+    },
+    "AutoDownloadConfig": {
+      "description": "Auto-download settings.\n\nThe three credential fields are [`SensitiveString`], so they are redacted\nin `Debug` output and in any serialised form (config dumps, JSON schema\nexamples, error reports). Only the download call itself exposes them.",
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "description": "Download a database when the local copy is missing or stale.\n\nWhen false, [`ensure_databases`](super::ensure_databases) returns only\nthe files that already exist on disk.",
+          "type": "boolean",
+          "default": true
+        },
+        "data_dir": {
+          "description": "Directory the downloaded MMDB files are written to.",
+          "type": "string",
+          "default": "/var/lib/geoip"
+        },
+        "maxmind_account_id": {
+          "description": "MaxMind account id, required by\n[`GeoIpProvider::MaxMindGeoLite2`].",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-scalo-secret": true,
+          "writeOnly": true,
+          "default": null
+        },
+        "maxmind_license_key": {
+          "description": "MaxMind licence key, required by\n[`GeoIpProvider::MaxMindGeoLite2`].",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-scalo-secret": true,
+          "writeOnly": true,
+          "default": null
+        },
+        "ipinfo_token": {
+          "description": "IPinfo API token, required by [`GeoIpProvider::IpInfoLite`].",
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-scalo-secret": true,
+          "writeOnly": true,
+          "default": null
+        },
+        "max_age_days": {
+          "description": "Age, in days, past which a local database is treated as stale.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0,
+          "default": 30
+        }
+      }
+    }
+  }
+}

@@ -209,13 +209,12 @@ class TestTheTransportRule:
         for transport in shapes.transports_for("both"):
             assert plain.refusal(transport, (transport,), EVERY_APP) is None
 
-    def test_the_catalogue_shape_runs_wherever_the_app_shipping_it_does(self) -> None:
-        # Every entry compiles onto the transform of the app that ships the
-        # catalogue, so the shape can only run where that app can.
-        shipper = catalogue.APP_CATALOGUE["dfe-transform-elastic"]
+    def test_the_catalogue_shape_runs_wherever_the_elastic_transform_does(self) -> None:
+        # Every catalogue entry runs dfe-transform-elastic, so the shape can only run where it can.
+        elastic = catalogue.APP_CATALOGUE["dfe-transform-elastic"]
         entry = next(s for s in shapes.load_shapes() if s.name == "catalogue")
         for transport in shapes.transports_for("both"):
-            assert (entry.skip_reason(transport) is None) is shipper.carries(transport)
+            assert (entry.skip_reason(transport) is None) is elastic.carries(transport)
 
 
 class TestAnAppTheDeploymentDoesNotDeploy:
