@@ -6,6 +6,7 @@ import pytest
 
 from dfe_engine.fieldmap.models import FieldMap
 from dfe_engine.fieldmap.registry import FieldMapRegistry
+from dfe_engine.ingest.models import IngestRules
 from dfe_engine.source.models import Source, SourceView
 from dfe_engine.source.registry import SourceNotFoundError
 from dfe_engine.source.type_registry import TypeRegistry
@@ -68,6 +69,9 @@ class FakeSourceRegistry:
         if enabled_only:
             sources = [s for s in sources if s.enabled]
         return sources
+
+    def ingest_rules(self) -> IngestRules:
+        return IngestRules()
 
 
 # ---------------------------------------------------------------------------

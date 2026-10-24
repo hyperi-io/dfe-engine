@@ -189,6 +189,7 @@ def test_post_sources_409_documents_the_core_landing_conflict(committed):
         "#/components/schemas/SourceNameConflictErrorResponse",
         "#/components/schemas/CoreResourceConflictErrorResponse",
         "#/components/schemas/MatchConflictErrorResponse",
+        "#/components/schemas/AliasConflictErrorResponse",
     }
 
 

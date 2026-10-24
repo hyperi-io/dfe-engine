@@ -11,6 +11,7 @@ from dfe_engine.source.registry import (
     SourceMatchConflictError,
     SourceNotFoundError,
     SourceRegistry,
+    SourceRuleError,
     SourceValidationError,
 )
 from dfe_engine.yaml_utils import yaml_load
@@ -215,29 +216,32 @@ class TestList:
         with pytest.raises(SourceMatchConflictError):
             registry.save_source(_make_source("act", match_value="shared", state="active"))
 
-    def test_unsupported_match_operator_rejected_on_save(self, registry: SourceRegistry):
-        """Receiver-routed sources must use an operator that compiles to a receiver rule op."""
-        bad = Source.model_validate(
-            {
-                "source": "bad-op",
-                "match": {"field": "f", "operator": "includes", "value": "v"},
-            }
+    def test_every_match_operator_saves_as_a_receiver_rule(self, registry: SourceRegistry):
+        includes = Source.model_validate(
+            {"source": "has-op", "match": {"field": "f", "operator": "includes", "value": "v"}}
         )
-        with pytest.raises(SourceValidationError, match="compiles to no dfe-receiver rule"):
-            registry.save_source(bad)
+        registry.save_source(includes)
+        assert present(registry.get_source("has-op").match).operator == "includes"
 
-    def test_disabled_source_with_legacy_operator_saves(self, registry: SourceRegistry):
-        """Disabling is how an operator retires a legacy-operator source - the
-        operator gate must not block that exit path (active/dormant still reject)."""
-        legacy = Source.model_validate(
-            {
-                "source": "legacy-op",
-                "state": "disabled",
-                "match": {"field": "f", "operator": "includes", "value": "v"},
-            }
+    def test_a_when_the_receiver_refuses_is_refused_at_the_function(self, registry: SourceRegistry):
+        when = 'message.matches("^a")'
+        with pytest.raises(SourceRuleError) as caught:
+            registry.save_source(Source.model_validate({"source": "regex", "when": when}))
+
+        [problem] = caught.value.problems
+        assert problem.field == "when"
+        assert "matches()" in problem.detail
+        assert problem.span is not None
+        assert when[problem.span[0] : problem.span[1]] == "matches"
+        assert not registry.source_exists("regex")
+
+    def test_disabled_source_with_a_refused_when_saves(self, registry: SourceRegistry):
+        """Disabling is how an operator retires a source the receiver would refuse."""
+        retired = Source.model_validate(
+            {"source": "regex", "state": "disabled", "when": 'message.matches("^a")'}
         )
-        registry.save_source(legacy)
-        assert registry.get_source("legacy-op").state == "disabled"
+        registry.save_source(retired)
+        assert registry.get_source("regex").state == "disabled"
 
     def test_always_is_reserved_for_the_main_source(self, registry: SourceRegistry):
         """It matches every record, so on any other source it would shadow the rest."""
@@ -646,33 +650,6 @@ class TestValidation:
         registry.save_source(_make_source("filebeat", match_value="fb", enabled=False))
         # Same match value but first source is disabled — should be OK
         registry.save_source(_make_source("another", match_value="fb"))
-
-
-# ---------------------------------------------------------------------------
-# Match Table
-# ---------------------------------------------------------------------------
-
-
-class TestMatchTable:
-    def test_compile_empty(self, registry: SourceRegistry):
-        assert registry.compile_match_table() == []
-
-    def test_compile_multiple(self, registry: SourceRegistry):
-        registry.save_source(_make_source("filebeat", match_value="filebeat"))
-        registry.save_source(_make_source("syslog", match_value="syslog"))
-
-        table = registry.compile_match_table()
-        assert len(table) == 2
-        values = {r["source"] for r in table}
-        assert values == {"filebeat", "syslog"}
-
-    def test_compile_excludes_disabled(self, registry: SourceRegistry):
-        registry.save_source(_make_source("filebeat", match_value="filebeat"))
-        registry.save_source(_make_source("disabled", match_value="disabled", enabled=False))
-
-        table = registry.compile_match_table()
-        assert len(table) == 1
-        assert table[0]["source"] == "filebeat"
 
 
 # ---------------------------------------------------------------------------

@@ -34,7 +34,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
-from dfe_engine.source.models import SourceHeader, SourceSchema, SourceVersion
+from dfe_engine.source.models import Source, SourceHeader, SourceSchema, SourceVersion
 from dfe_engine.yaml_utils import yaml_dump
 from tests.support.accounts import admin_on_its_own_password
 from tests.support.core_sources import write_landing_definition
@@ -549,6 +549,32 @@ class TestSampleRows:
             headers=admin_headers,
         )
         assert resp.status_code == 404
+
+    @pytest.mark.parametrize(
+        "origin",
+        [
+            {
+                "match": {
+                    "any": [
+                        {"field": "data_stream.dataset", "value": "cisco_ios.log"},
+                        {"field": "data_stream.dataset", "value": "cisco_ios.debug"},
+                    ]
+                }
+            },
+            {"when": "data_stream.dataset == 'cisco_ios.log'"},
+        ],
+        ids=["group", "when"],
+    )
+    def test_a_condition_no_table_filter_holds_is_refused_before_any_query(
+        self, client: TestClient, admin_headers, origin
+    ):
+        # The default client fails the test if ClickHouse is queried at all.
+        _registries["source"].save_source(Source.model_validate({"source": "cisco-ios", **origin}))
+
+        resp = client.get("/api/v1/schemas/cisco-ios/sample-rows", headers=admin_headers)
+
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "match_not_sampleable"
 
 
 class TestPromoteField:

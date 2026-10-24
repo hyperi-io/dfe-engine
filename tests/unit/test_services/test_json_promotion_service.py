@@ -705,16 +705,18 @@ class TestDiscoverPaths:
     def test_one_nested_match_field_works_for_routing_and_for_discovery(self):
         # The same string through both readers: the receiver rule the routing
         # compiles, and the SQL the discovery endpoint builds.
-        from dfe_engine.services.source_routing import receiver_match
+        from dfe_engine.services.source_routing import source_rules
         from dfe_engine.source.models import Source, SourceMatch
 
         source = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
             source="filebeat",
             match=SourceMatch(field="tags.collector.type", value="syslog"),
         )
-        rule = receiver_match(source)
+        [row] = source_rules(source)
+        rule = row.match
         assert rule is not None
         assert rule.field == "tags.collector.type"
+        assert rule.value is not None
 
         client = _RecordingClient(discover_rows=[("a", "String")])
         discover_paths(
