@@ -860,10 +860,9 @@ class TestSampleRows:
             limit=5,
         )
         sql, params = client.calls[0]
-        assert (
-            "positionCaseInsensitive(toString(assumeNotNull(_json).`message`), {match_value:String})"
-            in sql
-        )
+        # Case-sensitive, as the receiver's contains is.
+        assert "position(toString(assumeNotNull(_json).`message`), {match_value:String}) > 0" in sql
+        assert "positionCaseInsensitive" not in sql
         assert params == {"limit": 5, "match_value": "error"}
 
     def test_empty_result_still_returns_columns(self):

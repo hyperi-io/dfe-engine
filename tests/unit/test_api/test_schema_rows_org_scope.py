@@ -31,7 +31,10 @@ from tests.unit.test_api.test_json_promotion import (
 )
 
 HELD = "_org_id IN {orgs:Array(String)}"
-MATCH = "toString(assumeNotNull(_json).`tags.collector.type`) = {match_value:String}"
+MATCH = (
+    "toString(assumeNotNull(_json).`tags.collector.type`) = {match_value:String} AND NOT "
+    "match(dynamicType(assumeNotNull(_json).`tags.collector.type`), '^(None|Array|JSON|Tuple|Map)')"
+)
 
 
 class _Rows:

@@ -1645,20 +1645,26 @@ def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None,
         if _dedicated_source_table_ready(source, version_id, ch=ch, db=db, table=source.table_name):
             return source.table_name, None, columns
     if ver.when is not None:
-        raise _not_sampleable(source.source, "it is selected by a CEL Fast condition")
+        raise _not_sampleable(source.source, "when")
     return target_table, match_rule, columns
 
 
-def _not_sampleable(source_name: str, why: str) -> HTTPException:
+MATCH_NOT_SAMPLEABLE_MESSAGE = (
+    "Preview is not available for grouped, negated or CEL matches until the source is "
+    "deployed and its own table can be read."
+)
+"""Shown as written: the landing-table filter expresses one plain field test only."""
+
+
+def _not_sampleable(source_name: str, match: Literal["group", "negated", "when"]) -> HTTPException:
     """The 422 for a landing-table read no filter can hold to the source's records."""
     return HTTPException(
         status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         detail={
             "code": "match_not_sampleable",
-            "message": (
-                f"Source {source_name!r} cannot be sampled on the shared landing table: {why}. "
-                "Deploy it, and its own table is read instead"
-            ),
+            "message": MATCH_NOT_SAMPLEABLE_MESSAGE,
+            "source": source_name,
+            "match": match,
         },
     )
 
@@ -1698,8 +1704,10 @@ def _match_query_kwargs(match_rule, source_name: str) -> dict[str, Any]:
             "match_value": None,
             "match_operator": "equals",
         }
-    if not match_rule.is_test or match_rule.negate:
-        raise _not_sampleable(source_name, "its match is more than one field test")
+    if not match_rule.is_test:
+        raise _not_sampleable(source_name, "group")
+    if match_rule.negate:
+        raise _not_sampleable(source_name, "negated")
     return {
         "match_field": match_rule.field,
         "match_value": match_rule.value if match_rule.operator != "exists" else None,
