@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.69](https://github.com/hyperi-io/dfe-engine/compare/v1.22.68...v1.22.69) (2026-10-24)
+
+### Bug Fixes
+
+* refuse a stored fetcher route whose operator is not equals ([#970](https://github.com/hyperi-io/dfe-engine/issues/970)) ([c2eb966](https://github.com/hyperi-io/dfe-engine/commit/c2eb9661fbcb43c827cd7ce9318f588d3ae5158d))
+
 ## [1.22.68](https://github.com/hyperi-io/dfe-engine/compare/v1.22.67...v1.22.68) (2026-10-24)
 
 ### Bug Fixes
