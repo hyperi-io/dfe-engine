@@ -54,7 +54,7 @@ from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError, compile_ingest_bin
 from dfe_engine.source.alignment import require_one_type
 from dfe_engine.source.models import Source
 from dfe_engine.source.reader import SourceReader
-from dfe_engine.source.registry import SourceNotFoundError
+from dfe_engine.source.registry import SourceNotFoundError, require_equals_route
 
 from . import catalogue
 from .catalogue import AppDescriptor, CatalogueError
@@ -306,10 +306,17 @@ def _fetcher_route(
     sender from, and the rule naming it. The fetcher reaches a route target
     through ``output.destinations`` and matches on the name (``config/mod.rs``
     ``OutputRoute``), so a rule carrying the address itself is refused at load.
+
+    Raises:
+        SourceValidationError: The route compares with anything but ``equals``.
+        RoutingNotApplicableError: The target is missing, not active, or on the
+            other transport.
     """
     # Imported here for the same reason as in ``_flow``.
     from dfe_engine.source.flow import route_archive_gap
 
+    # A route stored before the save path refused this one still reaches here.
+    require_equals_route(flow.source, route)
     try:
         target = registry.get_source(route.source)
     except SourceNotFoundError as exc:
