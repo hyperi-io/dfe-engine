@@ -87,10 +87,11 @@ def stop_directories() -> None:
 
 
 def fast_http(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Make every adapter's HTTP client try once and wait half a second for an answer.
+    """Make every adapter's HTTP client try once and give up after half a second without an answer.
 
-    The production client retries a 5xx with backoff and waits 30 s for a reply, so a
-    test of an outage would otherwise spend that long per call.
+    Only for a directory that never answers, which would otherwise hold the test for the
+    production 30 s. A directory that answers keeps the production timeout: an answer a
+    stalled test worker reads after half a second is an outage, so a refusal test fails.
     """
     monkeypatch.setattr(
         scalo.http,

@@ -10,6 +10,7 @@
 
 import json
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -54,6 +55,7 @@ def _handler_for(*, okta: LocalOkta) -> type[BaseHTTPRequestHandler]:
             index = int(parse_qs(split.query).get("page", ["0"])[0])
             okta.pages_requested.append(index)
             okta.authorizations.append(self.headers.get("Authorization", ""))
+            time.sleep(okta.answer_after)
             body: object
             if okta.fail_page == index:
                 status, body = okta.fail_status, okta.fail_body
@@ -87,8 +89,9 @@ class LocalOkta:
     index of one that answers 200 with an object rather than a list of groups.
     ``next_query`` is appended to every next-page URL the ``Link`` header hands out, as
     a provider's paging cursor is. ``next_base``, when set, is the origin the ``Link``
-    header names instead of this server's own. ``pages_requested`` records the index of
-    each request and ``authorizations`` its ``Authorization`` header.
+    header names instead of this server's own. ``answer_after`` is the seconds each
+    request waits before its answer, as a slow directory's does. ``pages_requested``
+    records the index of each request and ``authorizations`` its ``Authorization`` header.
     """
 
     def __init__(self, *, pages: list[list[dict[str, Any]]], next_query: str = "") -> None:
@@ -99,6 +102,7 @@ class LocalOkta:
         self.fail_body: dict[str, Any] = {}
         self.malformed_page: int | None = None
         self.next_base: str | None = None
+        self.answer_after = 0.0
         self.pages_requested: list[int] = []
         self.authorizations: list[str] = []
         self._server = ThreadingHTTPServer(("127.0.0.1", 0), _handler_for(okta=self))

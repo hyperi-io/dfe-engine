@@ -29,7 +29,7 @@ from dfe_engine.auth.oidc.rp import (
     OidcRelyingParty,
 )
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
-from tests.unit.test_auth.test_oidc.local_directory import AppTokenEntra, fast_http
+from tests.unit.test_auth.test_oidc.local_directory import AppTokenEntra
 from tests.unit.test_auth.test_oidc.local_graph import LocalGraph
 from tests.unit.test_auth.test_oidc.local_okta import LocalOkta, okta_adapter
 
@@ -87,7 +87,6 @@ class TestAnOutage:
     async def test_okta_failing_keeps_the_token_groups_counted_and_logged_once(
         self, tmp_path, monkeypatch, audit_events
     ):
-        fast_http(monkeypatch)
         okta = LocalOkta(pages=[[]])
         okta.fail_page = 0
         okta.fail_status = 503
@@ -119,7 +118,6 @@ class TestAnOutage:
     async def test_an_overage_token_with_no_groups_claim_is_marked_for_the_stored_groups(
         self, tmp_path, monkeypatch, audit_events
     ):
-        fast_http(monkeypatch)
         graph = LocalGraph()
         graph.refuse[f"users/{OID}"] = (503, {"error": {"code": "ServiceUnavailable"}})
         graph.start()
