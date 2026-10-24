@@ -77,6 +77,23 @@ class SourceValidationError(SourceRegistryError):
     """Source definition failed validation."""
 
 
+def require_equals_route(source: str, route: Any) -> None:
+    """Refuse a fetcher route that compares with anything but ``equals``.
+
+    A fetcher route compares one field to one value, which is all dfe-fetcher's
+    routes do, so any other operator is refused rather than compiled as ``equals``.
+
+    Raises:
+        SourceValidationError: The route's match operator is not ``equals``.
+    """
+    if route.match.operator != "equals":
+        raise SourceValidationError(
+            f"source {source!r}: the fetcher route to {route.source!r} compares "
+            f"with {route.match.operator!r}, and a fetcher route matches one field "
+            "equalling one value"
+        )
+
+
 def _first_error_message(exc: ValidationError) -> str:
     """The readable half of a pydantic error, so the API can hand it to a caller.
 
@@ -1073,9 +1090,7 @@ class SourceRegistry:
     def _validate_fetcher_routes(source: Source, version: SourceVersion | None) -> None:
         """A fetcher route sends records ELSEWHERE, so it may not name its own source.
 
-        It compares one field to one value, which is all dfe-fetcher's routes do,
-        so any other operator is refused rather than compiled as ``equals``. That
-        the named source exists is checked when the fetcher instance is compiled:
+        The operator is checked by ``require_equals_route``. That the named source exists is checked when the fetcher instance is compiled:
         a route may legitimately be written before its target is.
         """
         fetcher = version.fetcher if version else None
@@ -1085,12 +1100,7 @@ class SourceRegistry:
                     f"source {source.source!r}: a fetcher route names its own source, and "
                     "records with no route already land there"
                 )
-            if route.match.operator != "equals":
-                raise SourceValidationError(
-                    f"source {source.source!r}: the fetcher route to {route.source!r} compares "
-                    f"with {route.match.operator!r}, and a fetcher route matches one field "
-                    "equalling one value"
-                )
+            require_equals_route(source.source, route)
 
     @staticmethod
     def _validate_fetcher_types(source: Source, version: SourceVersion | None) -> None:

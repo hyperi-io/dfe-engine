@@ -682,6 +682,40 @@ class TestAStoredRouteIntoAnArchivedSource:
         assert warnings == []
 
 
+class TestAStoredRouteWithAnotherOperator:
+    """A route stored before the save path refused it must not compile as ``equals``."""
+
+    @pytest.mark.parametrize("operator", ["starts_with", "not_equals", "includes"])
+    def test_the_fetcher_compile_refuses_it_naming_the_source_and_operator(
+        self, settings, operator
+    ):
+        from dfe_engine.source.registry import SourceValidationError
+
+        route = {
+            "match": {"field": "event.kind", "operator": operator, "value": "alert"},
+            "source": "okta-alerts",
+        }
+        registry = FakeRegistry([_fetched(fetcher={"routes": [route]}), _matched("okta-alerts")])
+
+        with pytest.raises(SourceValidationError, match=rf"'okta-audit'.*'{operator}'"):
+            routing.compile_for(
+                catalogue.descriptor(FETCHER), registry, settings, instance="okta-audit"
+            )
+
+    def test_an_equals_route_still_compiles(self, settings):
+        route = {
+            "match": {"field": "event.kind", "operator": "equals", "value": "alert"},
+            "source": "okta-alerts",
+        }
+        registry = FakeRegistry([_fetched(fetcher={"routes": [route]}), _matched("okta-alerts")])
+
+        compiled = routing.compile_for(
+            catalogue.descriptor(FETCHER), registry, settings, instance="okta-audit"
+        )
+
+        assert compiled["output"]["routes"][0]["match_value"] == "alert"
+
+
 class TestArchiverStack:
     def test_it_reads_the_landing_topic_of_every_source_that_asked(self, settings):
         registry = FakeRegistry([_matched("auth", archive=True), _matched("filebeat")])
