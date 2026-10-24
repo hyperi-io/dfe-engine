@@ -851,6 +851,9 @@ def create_app(
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # A browser hides every other response header from a cross-origin
+        # caller, and If-Match writes need the ETag the read returned.
+        expose_headers=["ETag"],
     )
 
     # Session cookie for the OIDC relying-party flow: Authlib's starlette client
