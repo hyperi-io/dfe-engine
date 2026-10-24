@@ -50,8 +50,9 @@ def _google(base_url: str) -> OIDCGroupAdapter:
 
 
 @pytest.fixture
-def silent() -> Iterator[str]:
-    """A directory origin that accepts every connection and never answers."""
+def silent(monkeypatch) -> Iterator[str]:
+    """A directory origin that accepts every connection and never answers, and a client that gives up on it."""
+    fast_http(monkeypatch)
     listener = CountingListener(hold=True)
     yield f"http://127.0.0.1:{listener.port}"
     listener.close()
@@ -90,8 +91,7 @@ ADAPTERS = {
 
 @pytest.mark.parametrize("provider", sorted(ADAPTERS))
 @pytest.mark.parametrize("status", [429, 500, 503])
-async def test_a_failing_directory_is_an_outage(monkeypatch, provider, status):
-    fast_http(monkeypatch)
+async def test_a_failing_directory_is_an_outage(provider, status):
     build, serve, directory_id = ADAPTERS[provider]
     base_url, stop = serve(status)
     try:
@@ -103,8 +103,7 @@ async def test_a_failing_directory_is_an_outage(monkeypatch, provider, status):
 
 
 @pytest.mark.parametrize("provider", sorted(ADAPTERS))
-async def test_a_directory_that_never_answers_is_an_outage(monkeypatch, silent, provider):
-    fast_http(monkeypatch)
+async def test_a_directory_that_never_answers_is_an_outage(silent, provider):
     build, _serve, directory_id = ADAPTERS[provider]
 
     failure = await build(silent).resolve_user_groups(directory_id)
@@ -115,11 +114,8 @@ async def test_a_directory_that_never_answers_is_an_outage(monkeypatch, silent, 
 @pytest.mark.parametrize(
     ("status", "failure"), [(429, "outage"), (503, "outage"), (401, "refused"), (403, "refused")]
 )
-async def test_google_logs_a_failed_user_token_lookup_as_what_it_was(
-    monkeypatch, audit_events, status, failure
-):
+async def test_google_logs_a_failed_user_token_lookup_as_what_it_was(audit_events, status, failure):
     """An outage is never logged as Google refusing the lookup."""
-    fast_http(monkeypatch)
     base_url, stop = _cloud_identity_answering(status)
     try:
         await _google(base_url).resolve_user_groups("alice@acme.test")
@@ -133,8 +129,7 @@ async def test_google_logs_a_failed_user_token_lookup_as_what_it_was(
 
 @pytest.mark.parametrize("provider", sorted(ADAPTERS))
 @pytest.mark.parametrize("status", [401, 403])
-async def test_a_directory_that_refuses_is_a_refusal(monkeypatch, provider, status):
-    fast_http(monkeypatch)
+async def test_a_directory_that_refuses_is_a_refusal(provider, status):
     build, serve, directory_id = ADAPTERS[provider]
     base_url, stop = serve(status)
     try:
