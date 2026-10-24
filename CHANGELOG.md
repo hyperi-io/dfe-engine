@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.67](https://github.com/hyperi-io/dfe-engine/compare/v1.22.66...v1.22.67) (2026-10-24)
+
+### Bug Fixes
+
+* take scalo 2.32.1 for the secrets health log and filelock fix ([#968](https://github.com/hyperi-io/dfe-engine/issues/968)) ([e445b11](https://github.com/hyperi-io/dfe-engine/commit/e445b11d2ea43681450fb82488c2630cca242c5e))
+
 ## [1.22.66](https://github.com/hyperi-io/dfe-engine/compare/v1.22.65...v1.22.66) (2026-10-23)
 
 ### Bug Fixes
