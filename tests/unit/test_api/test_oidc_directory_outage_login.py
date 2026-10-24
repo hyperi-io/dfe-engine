@@ -120,7 +120,6 @@ class _DirectRp(OidcRelyingParty):
 @pytest.fixture
 def directory(app, client: TestClient, tmp_path, monkeypatch) -> Iterator[Callable[..., None]]:
     """A setter pointing the login at a directory of one kind that fails one way."""
-    fast_http(monkeypatch)
     app.state.group_store.create(
         "idp-admins", roles=["admin"], source_provider=PROVIDER, source_id=ADMINS_ID
     )
@@ -140,8 +139,9 @@ def directory(app, client: TestClient, tmp_path, monkeypatch) -> Iterator[Callab
 
 
 @pytest.fixture
-def silent() -> Iterator[str]:
-    """A directory origin that accepts every connection and never answers."""
+def silent(monkeypatch) -> Iterator[str]:
+    """A directory origin that accepts every connection and never answers, and a client that gives up on it."""
+    fast_http(monkeypatch)
     listener = CountingListener(hold=True)
     yield f"http://127.0.0.1:{listener.port}"
     listener.close()
@@ -213,4 +213,23 @@ class TestARefusalAtLogin:
 
         assert resp.status_code == 401, resp.text
         assert resp.json()["code"] == "no_role_granted"
+        assert app.state.account_store.get(SUBJECT).groups == []
+
+    def test_a_refusal_that_answers_slowly_is_still_a_refusal(
+        self, app, client: TestClient, directory
+    ):
+        """A directory that answers late has answered: only no answer at all keeps the groups."""
+        _seed_account(app)
+        okta = LocalOkta(pages=[[]])
+        okta.fail_page = 0
+        okta.fail_status = 401
+        okta.answer_after = 1.0
+        okta.start()
+        try:
+            directory("okta", base_url=okta.base_url)
+            resp = client.get(f"/api/v1/auth/oidc/{PROVIDER}/callback")
+        finally:
+            okta.stop()
+
+        assert resp.status_code == 401, resp.text
         assert app.state.account_store.get(SUBJECT).groups == []
