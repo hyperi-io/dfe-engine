@@ -38,18 +38,33 @@ header:
   type: timeseries                      # Profile name (timeseries, minimal, passthrough)
   version: 1.0.0                        # Common header version (semver)
 
-# --- Origin: receiver match OR fetcher (exactly one) ---
+# --- Origin: receiver match or when, OR fetcher (exactly one) ---
 # A receiver-based source is identified by the always-present receiver pool:
 # the receiver evaluates match rules and sets _source in the JSON payload.
 match:
   field: tags.collector.type            # Dotted path into the incoming JSON payload
-  operator: equals                      # equals (default) | exists - the receiver-evaluable set
+  operator: equals                      # equals (default) | not_equals | exists | includes | starts_with | ends_with
   value: filebeat                       # Operand (unused when operator is exists or always)
-  # The model also defines not_equals / includes / starts_with / ends_with,
-  # but the receiver's hot-path router cannot evaluate them (a documented
-  # receiver gap) - saves reject them for any non-disabled source.
   # `always` matches every record and is reserved for the `main` source,
   # which is how the main flow is defined - see source-flow.md.
+# A match may instead group tests, nested up to four deep, and negate any of them:
+# match:
+#   all:
+#     - {field: data_stream.dataset, value: cisco_ios.log}
+#     - any:
+#         - {field: agent.type, value: filebeat}
+#         - {field: agent.type, value: elastic-agent}
+#     - {field: event.dataset, operator: exists, negate: true}
+# Or carry a CEL Fast condition in place of match:
+# when: "data_stream.dataset == 'cisco_ios.log' && agent.type == 'filebeat'"
+
+# --- Compatibility profiles (optional) ---
+# Unset binds the deployment's list, [] binds none.
+# compat_profiles:
+#   - profile: elastic-agent
+#     opt_in: [org-namespace]           # Rows the profile leaves off until a binding names them
+# aliases:                              # Per profile, the values its lookup maps to this source
+#   elastic-agent: [cisco_ios.log]
 
 # A fetcher-based source has no match rule. The engine deploys one dfe-fetcher
 # instance named for the source, with this stanza compiled into it, when the
@@ -209,9 +224,10 @@ emits the schema YAML, which the source then names. The mapping table is in
 | What | Rule |
 |---|---|
 | `_source` label | unique, and `[a-z]([a-z0-9-]*[a-z0-9])?` up to 40 chars |
-| match rule | no conflict across non-disabled sources (same field+operator+value); a dormant source HOLDS its match, only disabling releases it |
-| match operator | receiver-evaluable (`equals` or `exists`); `always` only on the reserved `main` source |
-| fetcher route | must not name its own source |
+| match rule | no conflict across non-disabled sources (an identical match or `when`). A dormant source HOLDS its match, only disabling releases it |
+| match and `when` | compile to rows scalo.rules accepts under the receiver's CEL Fast profile, at most 32 of them, else 422 `invalid_rule` with each problem's field and span. `always` only on the reserved `main` source |
+| compatibility profiles | each binding names a stored profile, a version it publishes and only opt-in rows it offers, one version of a profile per deployment, and every alias is unique per profile across non-disabled sources (409 `alias_conflict`) |
+| fetcher route | must not name its own source, and compares one field with `equals` |
 | fetcher connector type | one type per source, however many connections it polls; the refusal names the source and the types |
 | flow | runnable here: the deployment offers the transport, and every app in the flow carries it |
 | transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |

@@ -99,7 +99,8 @@ Those topics are the engine's for the source's whole life, and nothing depends o
 
 | Source field | Compiles into |
 |---|---|
-| `match` (field, operator, value) | the receiver `rules` row that labels the record, and on direct a `destinations.sources` entry sending that label to the source's transform instance, else to the loader |
+| `match` or `when` | the receiver `rules` rows that label the record, and on direct a `destinations.sources` entry sending that label to the source's transform instance, else to the loader. The entry keys on the label, so any match reaches the transform |
+| `compat_profiles`, `aliases` | the bound profiles' `rules` rows, and each profile's alias lookup ([source-routing.md](source-routing.md)) |
 | `fetcher` (source_type, config, topic, routes, org) | one fetcher instance overlay: the `org_id` it stamps, and on direct its `output` endpoint, and one `output.destinations` entry plus the `output.routes` rule naming it per data-match route |
 | `transform` (engine, variant, config) | one transform instance overlay: `_land` in and `_load` out on the bus; a Push listener in and the loader's endpoint out on direct, with `_load` still the record key the loader picks the source's table by |
 | landing label | loader routing, source to table |

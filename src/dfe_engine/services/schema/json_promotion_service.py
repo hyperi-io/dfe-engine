@@ -271,7 +271,7 @@ def json_subcolumn(path: str) -> str:
     return f"assumeNotNull({JSON_COLUMN}).{quote_identifier(path)}"
 
 
-def _match_accessor(match_field: str) -> str:
+def _match_accessor(match_field: str) -> tuple[str, bool]:
     """SQL accessor for a source match field, in the receiver router's spelling.
 
     The router walks the raw payload by splitting the field on ``.``, so a source
@@ -283,15 +283,31 @@ def _match_accessor(match_field: str) -> str:
 
     ``_json.<path>`` stays accepted for the same path, since the JSON column is
     itself ``_``-prefixed. Rejects backticks either way to keep it injection-safe.
+
+    Returns:
+        The accessor, and whether it reads a path inside the JSON column.
     """
     prefix = f"{JSON_COLUMN}."
     if match_field.startswith(prefix):
-        return json_subcolumn(match_field[len(prefix) :])
+        return json_subcolumn(match_field[len(prefix) :]), True
     if "`" in match_field:
         raise JsonPromotionError(f"Illegal match field: {match_field!r}")
     if match_field.startswith("_"):
-        return quote_identifier(match_field)
-    return json_subcolumn(match_field)
+        return quote_identifier(match_field), False
+    return json_subcolumn(match_field), True
+
+
+# The JSON values the receiver's text tests read no text from, by ClickHouse type name.
+_NOT_TEXT = "'^(None|Array|JSON|Tuple|Map)'"
+
+# Each receiver test's SQL over the field's text, case-sensitive as the receiver compares.
+_TEXT_TESTS = {
+    "equals": "{expr} = {{match_value:String}}",
+    "not_equals": "{expr} = {{match_value:String}}",
+    "includes": "position({expr}, {{match_value:String}}) > 0",
+    "starts_with": "startsWith({expr}, {{match_value:String}})",
+    "ends_with": "endsWith({expr}, {{match_value:String}})",
+}
 
 
 def match_condition(
@@ -308,12 +324,18 @@ def match_condition(
     source's rows are identified by its match. ``match_field`` is resolved by
     ``_match_accessor``: a bare name targets a JSON subcolumn, the way the
     receiver router reads it, and a ``_``-prefixed name a header column.
-    Operands are parameterised (injection-safe); the
-    field goes through ``_match_accessor`` which rejects backticks.
+    Operands are parameterised (injection-safe), and the field goes through
+    ``_match_accessor``, which rejects backticks.
+
+    Each operator selects the rows the receiver's rule for it routes
+    (scalo-rs ``docs/pipeline/rules.md``, "Native tests"): every text test is
+    case-sensitive and reads a string, number or boolean only, so null, an
+    object or an array fails it. ``not_equals`` is the negated ``equals`` and so
+    holds there. ``exists`` holds for non-empty text, an object or an array.
     """
     if not match_field:
         return "", {}
-    sub = _match_accessor(match_field)
+    sub, in_json = _match_accessor(match_field)
     op = match_operator or "equals"
 
     if op == "exists":
@@ -322,19 +344,13 @@ def match_condition(
     if not match_value:
         return "", {}
 
+    if op not in _TEXT_TESTS:
+        raise JsonPromotionError(f"Unsupported match operator: {op!r}")
+    test = _TEXT_TESTS[op].format(expr=f"toString({sub})")
+    if in_json:
+        test = f"{test} AND NOT match(dynamicType({sub}), {_NOT_TEXT})"
     params = {"match_value": match_value}
-    expr = f"toString({sub})"
-    if op == "equals":
-        return f"{expr} = {{match_value:String}}", params
-    if op == "not_equals":
-        return f"{expr} != {{match_value:String}}", params
-    if op == "includes":
-        return f"positionCaseInsensitive({expr}, {{match_value:String}}) > 0", params
-    if op == "starts_with":
-        return f"startsWith({expr}, {{match_value:String}})", params
-    if op == "ends_with":
-        return f"endsWith({expr}, {{match_value:String}})", params
-    raise JsonPromotionError(f"Unsupported match operator: {op!r}")
+    return (f"NOT ({test})" if op == "not_equals" else test), params
 
 
 def _has_org_id_column(client: Any, db: str, table: str) -> bool:

@@ -1580,6 +1580,7 @@ def _source_write_after_promote(
         display_name=source.display_name,
         description=source.description,
         match=snap.match,
+        when=snap.when,
         header=_header_for_promote_attach(snap, had_meta_schema=had_meta_schema),
         schema_config=schema_cfg,
         transform=snap.transform,
@@ -1626,20 +1627,46 @@ def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None,
         ``(target_table, match_rule_or_none, existing_columns)``. ``match_rule_or_none``
         is set when sampling/discovery runs on the landing table filtered by the
         version's match; null when the dedicated source table is queried whole.
+
+    Raises:
+        HTTPException: 422 ``match_not_sampleable`` when the landing table would be
+            read for a source selected by a CEL Fast ``when``, which no table filter
+            expresses.
     """
     match_rule = ver.match
     landing = landing_table_name()
+    target_table, columns = landing, []
     if ver.effective_schema().meta_schema:
         _canonical, meta, _ = _resolve_meta_schema(
             ver.effective_schema().meta_schema, source.source, schema_registry
         )
         pin = _pinned_meta_schema_version(ver, meta)
         columns = _columns_for_meta_version(meta, pin)
-        target_table = source.table_name
-        if not _dedicated_source_table_ready(source, version_id, ch=ch, db=db, table=target_table):
-            return landing, match_rule, columns
-        return target_table, None, columns
-    return landing, match_rule, []
+        if _dedicated_source_table_ready(source, version_id, ch=ch, db=db, table=source.table_name):
+            return source.table_name, None, columns
+    if ver.when is not None:
+        raise _not_sampleable(source.source, "when")
+    return target_table, match_rule, columns
+
+
+MATCH_NOT_SAMPLEABLE_MESSAGE = (
+    "Preview is not available for grouped, negated or CEL matches until the source is "
+    "deployed and its own table can be read."
+)
+"""Shown as written: the landing-table filter expresses one plain field test only."""
+
+
+def _not_sampleable(source_name: str, match: Literal["group", "negated", "when"]) -> HTTPException:
+    """The 422 for a landing-table read no filter can hold to the source's records."""
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={
+            "code": "match_not_sampleable",
+            "message": MATCH_NOT_SAMPLEABLE_MESSAGE,
+            "source": source_name,
+            "match": match,
+        },
+    )
 
 
 def _promotion_refused(exc: Exception, code: str, source_name: str) -> HTTPException:
@@ -1664,14 +1691,23 @@ def _held_read_refused(exc: Exception) -> HTTPException:
     )
 
 
-def _match_query_kwargs(match_rule) -> dict[str, Any]:
-    """ClickHouse filter kwargs from a ``SourceMatch`` (or none for whole-table)."""
+def _match_query_kwargs(match_rule, source_name: str) -> dict[str, Any]:
+    """ClickHouse filter kwargs from a ``SourceMatch`` (or none for whole-table).
+
+    Raises:
+        HTTPException: 422 ``match_not_sampleable`` for a group or a negated test,
+            which the one-field filter does not express.
+    """
     if match_rule is None:
         return {
             "match_field": None,
             "match_value": None,
             "match_operator": "equals",
         }
+    if not match_rule.is_test:
+        raise _not_sampleable(source_name, "group")
+    if match_rule.negate:
+        raise _not_sampleable(source_name, "negated")
     return {
         "match_field": match_rule.field,
         "match_value": match_rule.value if match_rule.operator != "exists" else None,
@@ -1764,7 +1800,7 @@ async def discover_json_paths(
         ch=ch,
         db=db,
     )
-    match_kw = _match_query_kwargs(match_rule)
+    match_kw = _match_query_kwargs(match_rule, source.source)
 
     path_filter = [p.strip() for p in paths.split(",") if p.strip()] if paths else None
 
@@ -1870,7 +1906,7 @@ async def sample_source_rows(
         ch=ch,
         db=db,
     )
-    match_kw = _match_query_kwargs(match_rule)
+    match_kw = _match_query_kwargs(match_rule, source.source)
 
     try:
         columns, rows = sample_rows(
@@ -2005,7 +2041,7 @@ async def promote_field(
         ch=ch,
         db=db,
     )
-    match_kw = _match_query_kwargs(match_rule)
+    match_kw = _match_query_kwargs(match_rule, source.source)
 
     # Discover ClickHouse types only when a request relies on auto-derivation.
     path_types: dict[str, list[str]] = {}

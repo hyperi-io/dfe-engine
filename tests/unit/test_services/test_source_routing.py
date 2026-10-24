@@ -17,6 +17,7 @@ from dataclasses import dataclass
 import pytest
 from pydantic import ValidationError
 
+from dfe_engine.ingest.models import IngestRules
 from dfe_engine.services.models.loader import LoaderConfig, LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
     DestinationsConfig,
@@ -27,7 +28,7 @@ from dfe_engine.services.models.receiver import (
 )
 from dfe_engine.services.registry import stored_form
 from dfe_engine.services.source_routing import (
-    UnsupportedMatchOperatorError,
+    MAX_SOURCE_ROWS,
     compile_loader_routing,
     compile_receiver_routing,
     compile_receiver_rules,
@@ -60,8 +61,12 @@ def _make_source(
 
 
 class FakeSourceRegistry:
-    def __init__(self, sources: list[Source]) -> None:
+    def __init__(self, sources: list[Source], ingest: IngestRules | None = None) -> None:
         self._sources = {s.source: s for s in sources}
+        self._ingest = ingest or IngestRules()
+
+    def ingest_rules(self) -> IngestRules:
+        return self._ingest
 
     def get_source(self, source_name: str) -> Source:
         if source_name not in self._sources:
@@ -420,29 +425,29 @@ class TestDestinationsModel:
 
 class TestCompileReceiverRules:
     def test_the_golden_rule_set(self, registry):
-        """Every active matched source, in source order, as the receiver reads it."""
+        """Every active matched source, by name while no order names them, as the receiver reads it."""
         assert compile_receiver_rules(registry).model_dump(mode="json", exclude_defaults=True) == {
             "targets": ["_source", "_org_id"],
             "rules": [
-                {
-                    "id": "source.filebeat",
-                    "match": {"field": "agent.type", "op": "equals", "value": "filebeat"},
-                    "set": {"_source": {"value": "filebeat"}},
-                },
-                {
-                    "id": "source.syslog",
-                    "match": {"field": "tags.event.category", "op": "equals", "value": "syslog"},
-                    "set": {"_source": {"value": "syslog"}},
-                },
                 {
                     "id": "source.crowdstrike-edr",
                     "match": {"field": "_source_fetcher", "op": "equals", "value": "crowdstrike"},
                     "set": {"_source": {"value": "crowdstrike-edr"}},
                 },
                 {
+                    "id": "source.filebeat",
+                    "match": {"field": "agent.type", "op": "equals", "value": "filebeat"},
+                    "set": {"_source": {"value": "filebeat"}},
+                },
+                {
                     "id": "source.present-src",
                     "match": {"field": "tags.present_marker", "op": "exists"},
                     "set": {"_source": {"value": "present-src"}},
+                },
+                {
+                    "id": "source.syslog",
+                    "match": {"field": "tags.event.category", "op": "equals", "value": "syslog"},
+                    "set": {"_source": {"value": "syslog"}},
                 },
             ],
         }
@@ -452,12 +457,31 @@ class TestCompileReceiverRules:
         targets = {next(iter(rule.set)) for rule in compile_receiver_rules(registry).rules}
         assert targets == {"_source"}
 
-    def test_unsupported_operator_skipped_with_warning(self):
-        """A stored source the rules cannot express is skipped LOUDLY, not a compile failure."""
+    @pytest.mark.parametrize(
+        ("operator", "test"),
+        [
+            ("includes", {"field": "f", "op": "contains", "value": "v"}),
+            ("starts_with", {"field": "f", "op": "starts_with", "value": "v"}),
+            ("ends_with", {"field": "f", "op": "ends_with", "value": "v"}),
+            ("not_equals", {"field": "f", "op": "equals", "value": "v", "negate": True}),
+        ],
+    )
+    def test_every_operator_compiles_to_a_receiver_test(self, operator, test):
+        reg = FakeSourceRegistry(
+            [_make_source("one", match_field="f", match_value="v", match_operator=operator)]
+        )
+        assert _rules(reg) == [
+            {"id": "source.one", "match": test, "set": {"_source": {"value": "one"}}}
+        ]
+
+    def test_a_match_too_wide_is_skipped_loudly_and_bricks_no_other_source(self):
+        """One stored doc must not fail the whole receiver config compile."""
         from scalo.logger import logger
 
+        branches = [{"field": "f", "value": str(n)} for n in range(MAX_SOURCE_ROWS + 1)]
+        wide = Source.model_validate({"source": "wide", "match": {"any": branches}})
         reg = FakeSourceRegistry(
-            [_make_source("bad", match_field="f", match_value="v", match_operator="includes")]
+            [wide, _make_source("good", match_field="agent.type", match_value="good")]
         )
         captured: list[str] = []
         handler_id = logger.add(captured.append, level="WARNING")
@@ -466,29 +490,8 @@ class TestCompileReceiverRules:
         finally:
             logger.remove(handler_id)
 
-        assert rules.rules == []  # the stored source is absent, no raise
-        assert any("'bad'" in msg and "'includes'" in msg for msg in captured)
-
-    def test_unsupported_operator_does_not_brick_other_sources(self):
-        """One stored doc must not fail the whole receiver config compile."""
-        reg = FakeSourceRegistry(
-            [
-                _make_source("bad", match_field="f", match_value="v", match_operator="includes"),
-                _make_source("good", match_field="agent.type", match_value="good"),
-                _make_source("present", match_field="tags.marker", match_operator="exists"),
-            ]
-        )
-        assert [rule.id for rule in compile_receiver_rules(reg).rules] == [
-            "source.good",
-            "source.present",
-        ]
-
-    def test_unsupported_operator_error_message(self):
-        """The registry save path still surfaces this error's message on save."""
-        err = UnsupportedMatchOperatorError("bad", "includes")
-        assert "compiles to no dfe-receiver rule" in str(err)
-        assert err.source == "bad"
-        assert err.operator == "includes"
+        assert [rule.id for rule in rules.rules] == ["source.good"]
+        assert any("'wide'" in msg and str(MAX_SOURCE_ROWS) in msg for msg in captured)
 
     def test_empty_registry(self):
         assert compile_receiver_rules(FakeSourceRegistry([])).rules == []

@@ -20,6 +20,7 @@ from dfe_engine.alerting import dispatcher as alerting_dispatcher
 from dfe_engine.alerting import models as alerting_models
 from dfe_engine.api import conventions as api_conventions
 from dfe_engine.api import deps as api_deps
+from dfe_engine.api import errors as api_errors
 from dfe_engine.api.v1 import alerts as api_v1_alerts
 from dfe_engine.api.v1 import api_keys as api_v1_api_keys
 from dfe_engine.api.v1 import app_contracts as api_v1_app_contracts
@@ -134,6 +135,7 @@ ai_interface.SchemaOptimiser.Output.proposed_columns
 ai_interface.SchemaOptimiser.Output.proposed_indices
 ai_interface.SchemaOptimiser.Output.rationale
 alerting_models.AlertDestination.secret_ref
+api_errors.InvalidRuleContext.rule_errors
 api_v1_alerts.AlertDestination.url_scheme
 api_v1_alerts.AlertDestinationSummary.url_scheme
 api_v1_api_keys.APIKeyResponse.expired
@@ -514,6 +516,7 @@ auth_oidc.__getattr__
 cli_auto_errors.DfeCliError.show
 cli_auto_vendor_table.MultiTable()._rendering_index
 click.Group().context_settings
+source_models.SourceMatch._shape_only
 source_models.__getattr__
 
 # A published contract declares these, and no engine code reads them yet.
@@ -640,7 +643,6 @@ source_deployment.deploy_statements_for_build
 source_deployment.execute_ddl_statements
 source_expression.ExprValidationResult.candidate_fields
 source_models.materialisation_action
-source_registry.SourceRegistry.compile_match_table
 source_type_registry.TypeRegistry.attribute_names
 source_type_registry.TypeRegistry.valid_primitives_for_attribute
 transport_filter_validate.warn_suboptimal_ordering

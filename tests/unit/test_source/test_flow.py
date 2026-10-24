@@ -252,21 +252,21 @@ class TestRefusals:
         with pytest.raises(FlowError, match="dfe-loader carries only bus"):
             resolve_flow(_source(transport="direct"), _settings(default="direct"), bus_only)
 
-    def test_a_transform_on_direct_needs_a_match_the_receiver_can_route_on(self):
-        # The receiver picks a destination on field AND value, so an `exists`
-        # match would send the source to the loader untransformed.
-        with pytest.raises(FlowError, match="tests no value"):
-            resolve_flow(
-                Source.model_validate(
-                    {
-                        "source": "auth",
-                        "match": {"field": "_json.app", "operator": "exists"},
-                        "transport": "direct",
-                        "transform": {"engine": "vrl"},
-                    }
-                ),
-                _settings(default="direct"),
-            )
+    def test_a_transform_on_direct_takes_any_match(self):
+        # The receiver keys a destination on the label the source's row sets, so
+        # an `exists` match reaches the transform as an `equals` one does.
+        flow = resolve_flow(
+            Source.model_validate(
+                {
+                    "source": "auth",
+                    "match": {"field": "_json.app", "operator": "exists"},
+                    "transport": "direct",
+                    "transform": {"engine": "vrl"},
+                }
+            ),
+            _settings(default="direct"),
+        )
+        assert flow.transform is not None
 
     def test_the_same_match_is_fine_without_a_transform(self):
         flow = resolve_flow(
