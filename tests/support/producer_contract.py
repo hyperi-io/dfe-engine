@@ -127,7 +127,7 @@ DFE_TRANSFORM_VRL = Producer(
 )
 DFE_TRANSFORM_VECTOR = Producer(
     repo="dfe-transform-vector",
-    ref="v1.0.54",
+    ref="v1.0.55",
     dir_env="DFE_TRANSFORM_VECTOR_DIR",
     files=("docs/config-schema.json",),
 )
