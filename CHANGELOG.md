@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.68](https://github.com/hyperi-io/dfe-engine/compare/v1.22.67...v1.22.68) (2026-10-24)
+
+### Bug Fixes
+
+* compound Source conditions, rule ordering and compatibility profiles ([#969](https://github.com/hyperi-io/dfe-engine/issues/969)) ([ca16bac](https://github.com/hyperi-io/dfe-engine/commit/ca16bacb6d5b4bafe561e7d434dc515c1c9beb8a))
+
 ## [1.22.67](https://github.com/hyperi-io/dfe-engine/compare/v1.22.66...v1.22.67) (2026-10-24)
 
 ### Bug Fixes
