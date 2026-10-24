@@ -12,8 +12,6 @@ the VALUES it produces - the topic pair, the endpoint, the instance name - rathe
 than that a resolve happened.
 """
 
-from __future__ import annotations
-
 from dataclasses import replace
 
 import pytest
@@ -45,12 +43,8 @@ def _fetched(name: str = "okta", **fields) -> Source:
     return Source.model_validate(data)
 
 
-BUS_ONLY_ENGINES = sorted(
-    engine
-    for engine in catalogue.transform_engines()
-    if not catalogue.descriptor(catalogue.transform_service(engine)).carries("direct")
-)
-"""The transforms still waiting on a Push listener, read off the shipped manifest."""
+TRANSFORM_ENGINES = sorted(catalogue.transform_engines())
+"""Every shipped transform engine, so the parametrised set can never be empty."""
 
 
 class TestBusTransport:
@@ -225,15 +219,19 @@ class TestRefusals:
                 bus_only,
             )
 
-    @pytest.mark.parametrize("engine", BUS_ONLY_ENGINES)
-    def test_a_transform_without_a_listener_refuses_direct(self, engine):
+    @pytest.mark.parametrize("engine", TRANSFORM_ENGINES)
+    def test_direct_follows_the_transform_listener_the_manifest_declares(self, engine):
         # Shipping the listener and declaring it is the whole change; nothing
         # here names an app.
-        with pytest.raises(FlowError, match="carries only bus"):
-            resolve_flow(
-                _source(transport="direct", transform={"engine": engine}),
-                _settings(default="direct"),
-            )
+        source = _source(transport="direct", transform={"engine": engine})
+        service = catalogue.transform_service(engine)
+        if catalogue.descriptor(service).carries("direct"):
+            flow = resolve_flow(source, _settings(default="direct"))
+            assert flow.transport == "direct"
+            assert flow.transform is not None
+        else:
+            with pytest.raises(FlowError, match="carries only bus"):
+                resolve_flow(source, _settings(default="direct"))
 
     def test_transform_app_missing_from_the_catalogue(self):
         stripped = {
