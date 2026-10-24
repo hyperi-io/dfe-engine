@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.70](https://github.com/hyperi-io/dfe-engine/compare/v1.22.69...v1.22.70) (2026-10-24)
+
+### Bug Fixes
+
+* expose ETag to cross-origin callers and move producer pins to the fleet releases ([#971](https://github.com/hyperi-io/dfe-engine/issues/971)) ([755dd17](https://github.com/hyperi-io/dfe-engine/commit/755dd17c77fa87ad50f038fa6fbae9c4626ab2b4))
+
 ## [1.22.69](https://github.com/hyperi-io/dfe-engine/compare/v1.22.68...v1.22.69) (2026-10-24)
 
 ### Bug Fixes
