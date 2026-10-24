@@ -103,19 +103,19 @@ class ProducerFile:
 # release, never to a branch: a branch compares against whatever merged last.
 DFE_LOADER = Producer(
     repo="dfe-loader",
-    ref="v1.18.57",
+    ref="v1.18.58",
     dir_env="DFE_LOADER_DIR",
     files=("src/config/pipeline.rs", "src/config/loader.rs", "docs/config-schema.json"),
 )
 DFE_RECEIVER = Producer(
     repo="dfe-receiver",
-    ref="v1.15.55",
+    ref="v1.15.58",
     dir_env="DFE_RECEIVER_DIR",
     files=("docs/config-schema.json",),
 )
 SCALO_RS = Producer(
     repo="scalo-rs",
-    ref="v2.12.11",
+    ref="v2.14.20",
     dir_env="SCALO_RS_DIR",
     files=("tests/fixtures/cel_classifier_parity.json",),
 )
