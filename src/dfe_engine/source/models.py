@@ -23,8 +23,10 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SerializerFunctionWrapHandler,
     computed_field,
     field_validator,
+    model_serializer,
     model_validator,
 )
 
@@ -103,6 +105,16 @@ RULELESS_OPERATORS = frozenset({"always"})
 receiver's ``default_source``, so a rule matching everything would shadow every
 rule after it. Reserved for the ``default`` source.
 """
+
+MATCH_NESTING_LIMIT = 4
+"""How deep ``all`` and ``any`` groups may nest inside one match."""
+
+COMPAT_PROFILE_ID_PATTERN = r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+"""A compatibility profile id: dfe-schemas ``compat-profiles/profile.schema.json`` ``$defs.name``."""
+
+COMPAT_PROFILE_ID_MAX_LENGTH = 63
+
+SEMVER_PATTERN = r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"
 
 # Tri-state source lifecycle:
 # - active   - schema materialised + receiver redirect + transform all ON.
@@ -353,37 +365,200 @@ class SourceHeader(BaseModel):
 
 
 class SourceMatch(BaseModel):
-    """Receiver match rule: how the receiver identifies this source."""
+    """How the receiver recognises this source's records: one test, or all or any of several.
 
-    field: str = Field(
-        ...,
+    A test compares one ``field`` with an ``operator``. ``all`` holds when every
+    part does and ``any`` when at least one does. Each part is a match of its
+    own, so groups nest, and ``negate`` inverts the test or group it sits on.
+    """
+
+    # One schema for request and response, which the pruning serializer would otherwise split.
+    model_config = ConfigDict(json_schema_mode_override="validation")
+
+    field: str | None = Field(
+        default=None,
         description=(
-            "Field to match on: a dotted path into the record as it arrives "
+            "Field a test reads: a dotted path into the record as it arrives "
             "(e.g. 'tags.collector.type', or a bare '_source'). The receiver "
             "matches the JSON payload, not a ClickHouse column, so a '_json.' "
-            "prefix would be read as a first segment no record has."
+            "prefix would be read as a first segment no record has. Absent on a "
+            "group"
         ),
     )
-    operator: SourceMatchOperator = Field(
-        default="equals",
+    operator: SourceMatchOperator | None = Field(
+        default=None,
         description=(
-            "How to compare ``field`` to ``value``: equals (default), exists, "
-            "includes, starts_with, ends_with, not_equals, always. ``always`` "
-            "matches every record and is reserved for the ``default`` source"
+            "How a test compares ``field`` to ``value``: equals (the default for a "
+            "test), exists, includes, starts_with, ends_with, not_equals, always. "
+            "``always`` matches every record and is reserved for the ``default`` "
+            "source. Absent on a group"
         ),
     )
     value: str = Field(
         default="",
         description="Operand for the operator (not used by ``exists`` or ``always``)",
     )
+    negate: bool = Field(default=False, description="Invert this test or group")
+    all: list[SourceMatch] = Field(
+        default_factory=list, description="A group that holds when every part holds"
+    )
+    any: list[SourceMatch] = Field(
+        default_factory=list, description="A group that holds when at least one part holds"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _equals_by_default(cls, data: Any) -> Any:
+        """A test that names no operator compares with ``equals``, as a single match always has."""
+        if (
+            isinstance(data, dict)
+            and data.get("field") is not None
+            and data.get("operator") is None
+        ):
+            return {**data, "operator": "equals"}
+        return data
 
     @model_validator(mode="after")
-    def _validate_value_for_operator(self) -> SourceMatch:
+    def _one_shape(self) -> SourceMatch:
+        if self.all and self.any:
+            raise ValueError("a match takes all or any, not both: nest one group inside the other")
+        if self.all or self.any:
+            stray = [key for key in ("field", "operator") if getattr(self, key) is not None]
+            if self.value:
+                stray.append("value")
+            if stray:
+                raise ValueError(f"{', '.join(stray)} do not apply beside all or any")
+            if any(part.has_always() for part in self.parts):
+                raise ValueError(
+                    "'always' matches every record, so it stands alone, never in a group"
+                )
+            if self.depth() > MATCH_NESTING_LIMIT:
+                raise ValueError(f"a match nests at most {MATCH_NESTING_LIMIT} groups deep")
+            return self
+        if self.field is None:
+            raise ValueError("a match tests a field, or groups tests under all or any")
+        if self.operator == "always" and self.negate:
+            raise ValueError("'always' cannot be negated: it would match no record")
         if self.operator in OPERATORS_WITHOUT_OPERAND:
             return self
         if not self.value.strip():
             raise ValueError(f"match.value is required when operator is {self.operator!r}")
         return self
+
+    @property
+    def is_test(self) -> bool:
+        """Whether this is one test on a field rather than a group."""
+        return not (self.all or self.any)
+
+    @property
+    def parts(self) -> list[SourceMatch]:
+        """A group's parts, empty for a test."""
+        return self.all or self.any
+
+    def depth(self) -> int:
+        """How many groups nest here: 0 for a test."""
+        if self.is_test:
+            return 0
+        return 1 + max(part.depth() for part in self.parts)
+
+    def has_always(self) -> bool:
+        """Whether an ``always`` test sits anywhere in this match."""
+        if self.is_test:
+            return self.operator == "always"
+        return any(part.has_always() for part in self.parts)
+
+    def describe(self) -> str:
+        """The match as one line of text, for a report or a console card."""
+        if self.is_test:
+            if self.operator in OPERATORS_WITHOUT_OPERAND:
+                text = "always" if self.operator == "always" else f"{self.field} exists"
+            else:
+                text = f"{self.field} {self.operator} {self.value}"
+        else:
+            joiner = " and " if self.all else " or "
+            text = "(" + joiner.join(part.describe() for part in self.parts) + ")"
+        return f"not {text}" if self.negate else text
+
+    @model_serializer(mode="wrap")
+    def _shape_only(self, handler: SerializerFunctionWrapHandler):
+        return _shape_of(handler(self))
+
+
+def _shape_of(match: Any) -> Any:
+    """A dumped match without the keys its shape leaves at their defaults.
+
+    A test keeps ``field``, ``operator`` and ``value`` as it always has, so a
+    single-condition match reads and stores exactly as before groups existed.
+    """
+    if not isinstance(match, dict):
+        return match
+    pruned = {key: value for key, value in match.items() if value is not None}
+    for key in ("all", "any"):
+        if not pruned.get(key):
+            pruned.pop(key, None)
+    if not pruned.get("negate"):
+        pruned.pop("negate", None)
+    if ("all" in pruned or "any" in pruned) and not pruned.get("value"):
+        pruned.pop("value", None)
+    return pruned
+
+
+class CompatBinding(BaseModel):
+    """One compatibility profile bound to a source, or to every source by default."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profile: str = Field(
+        pattern=COMPAT_PROFILE_ID_PATTERN,
+        max_length=COMPAT_PROFILE_ID_MAX_LENGTH,
+        description="The profile's id, e.g. dfe-legacy-2x",
+    )
+    version: str | None = Field(
+        default=None,
+        pattern=SEMVER_PATTERN,
+        description="The profile version bound. Unset follows the profile's current",
+    )
+    opt_in: list[str] = Field(
+        default_factory=list,
+        description="Rows the profile leaves off until a binding turns them on, by row id",
+    )
+
+    @field_validator("opt_in")
+    @classmethod
+    def _opt_in_once(cls, v: list[str]) -> list[str]:
+        if len(set(v)) != len(v):
+            raise ValueError("opt_in names a row twice")
+        return v
+
+
+def _bound_once(bindings: list[CompatBinding]) -> list[CompatBinding]:
+    """Refuse a binding list naming one profile twice."""
+    names = [binding.profile for binding in bindings]
+    twice = sorted({name for name in names if names.count(name) > 1})
+    if twice:
+        raise ValueError(f"compatibility profile bound twice: {', '.join(twice)}")
+    return bindings
+
+
+def _aliases_well_formed(aliases: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Refuse an alias map naming a malformed profile id, an empty alias or one alias twice."""
+    for profile, values in aliases.items():
+        if len(profile) > COMPAT_PROFILE_ID_MAX_LENGTH or not re.match(
+            COMPAT_PROFILE_ID_PATTERN, profile
+        ):
+            raise ValueError(f"aliases names {profile!r}, which is not a compatibility profile id")
+        if any(not value.strip() for value in values):
+            raise ValueError(f"aliases.{profile} holds an empty alias, which no record carries")
+        if len(set(values)) != len(values):
+            raise ValueError(f"aliases.{profile} lists an alias twice")
+    return aliases
+
+
+def _when_text(value: str | None) -> str | None:
+    """Refuse a blank CEL Fast condition, which tests nothing."""
+    if value is not None and not value.strip():
+        raise ValueError("when is empty: give a CEL Fast condition, or use match")
+    return value
 
 
 class SourceSchema(BaseModel):
@@ -636,13 +811,27 @@ class FetcherRoute(BaseModel):
     they get that source's table and transform instead.
     """
 
-    match: SourceMatch = Field(..., description="Which fetched records take this route")
+    match: SourceMatch = Field(
+        ...,
+        description=(
+            "Which fetched records take this route: one test of a field equalling a "
+            "value, which is all dfe-fetcher's routes compare"
+        ),
+    )
     source: str = Field(..., description="The source whose landing the matched records go to")
 
     @field_validator("source")
     @classmethod
     def _validate_source(cls, v: str) -> str:
         return validate_source_name(v)
+
+    @field_validator("match")
+    @classmethod
+    def _one_field_test(cls, v: SourceMatch) -> SourceMatch:
+        # dfe-fetcher's OutputRoute carries one match_field and one match_value.
+        if not v.is_test or v.negate:
+            raise ValueError("a fetcher route matches one field on one value: no group or negate")
+        return v
 
 
 class SourceFetcher(BaseModel):
@@ -797,9 +986,12 @@ _VERSIONED_KEYS = (
     "views",
     "fetcher",
     "match",
+    "when",
     "transform",
     "transport",
     "archive",
+    "aliases",
+    "compat_profiles",
 )
 
 # ``variant`` selects which compiled-in program the transform runs; it changes
@@ -807,7 +999,30 @@ _VERSIONED_KEYS = (
 _TRANSFORM_KEYS_WITHOUT_TABLE_EFFECT = {"variant"}
 
 # Named alike on SourceWriteRequest and SourceVersion; an update omitting one keeps the stored value.
-_INHERITED_ON_ABSENCE = ("header", "schema_config", "views", "transform", "transport", "archive")
+_INHERITED_ON_ABSENCE = (
+    "header",
+    "schema_config",
+    "views",
+    "transform",
+    "transport",
+    "archive",
+    "aliases",
+    "compat_profiles",
+)
+
+_ALIASES_DESCRIPTION = (
+    "Per compatibility profile, the values its lookup rows map to this source, e.g. "
+    "the DFE 2.x categories under dfe-legacy-2x. Read only while the source binds "
+    "that profile"
+)
+_COMPAT_PROFILES_DESCRIPTION = (
+    "The compatibility profiles bound to this source. Unset takes the deployment's "
+    "list, and an empty list binds none"
+)
+_WHEN_DESCRIPTION = (
+    "A CEL Fast condition the receiver tests each record with, in place of match. "
+    "It is checked at save under the profile the receiver compiles it with"
+)
 
 
 class SourceVersion(BaseModel):
@@ -846,6 +1061,11 @@ class SourceVersion(BaseModel):
     match: SourceMatch | None = Field(
         default=None, description="Receiver match rule (receiver-based sources)"
     )
+    when: str | None = Field(default=None, description=_WHEN_DESCRIPTION)
+    aliases: dict[str, list[str]] = Field(default_factory=dict, description=_ALIASES_DESCRIPTION)
+    compat_profiles: list[CompatBinding] | None = Field(
+        default=None, description=_COMPAT_PROFILES_DESCRIPTION
+    )
     transform: SourceTransform | None = Field(
         default=None, description="Transform stage (optional)"
     )
@@ -865,14 +1085,37 @@ class SourceVersion(BaseModel):
         ),
     )
 
+    @field_validator("when")
+    @classmethod
+    def _validate_when(cls, v: str | None) -> str | None:
+        return _when_text(v)
+
+    @field_validator("aliases")
+    @classmethod
+    def _validate_aliases(cls, v: dict[str, list[str]]) -> dict[str, list[str]]:
+        return _aliases_well_formed(v)
+
+    @field_validator("compat_profiles")
+    @classmethod
+    def _validate_compat_profiles(cls, v: list[CompatBinding] | None) -> list[CompatBinding] | None:
+        return v if v is None else _bound_once(v)
+
     @model_validator(mode="after")
     def _at_most_one_origin(self) -> SourceVersion:
         # Declaring both is always wrong. Declaring NEITHER is legal only for a core source fronting the landing table, which the receiver reaches through default_source rather than through a rule -- so the exactly-one rule is enforced one level up, on Source, where resource_type is known.
-        if self.match is not None and self.fetcher is not None:
+        if self.match is not None and self.when is not None:
+            raise ValueError("a receiver-based source takes match or when, not both")
+        if self.receives and self.fetcher is not None:
             raise ValueError(
-                "a source is receiver-based (match) or fetcher-based (fetcher): set one, not both"
+                "a source is receiver-based (match or when) or fetcher-based (fetcher): set "
+                "one, not both"
             )
         return self
+
+    @property
+    def receives(self) -> bool:
+        """Whether the receiver recognises this version's records by a match or a condition."""
+        return self.match is not None or self.when is not None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -880,11 +1123,11 @@ class SourceVersion(BaseModel):
         """Which way this version's data enters the platform, or None when nothing selects it.
 
         Serialized on API responses (source detail ``versions`` and the single-version
-        GET). Derived from ``match`` / ``fetcher``, never stored in YAML.
+        GET). Derived from ``match`` / ``when`` / ``fetcher``, never stored in YAML.
         """
         if self.fetcher is not None:
             return "fetcher"
-        return "receiver" if self.match is not None else None
+        return "receiver" if self.receives else None
 
     def effective_header(self) -> SourceHeader:
         """Header for runtime/DDL resolution, defaulting the profile when unauthored."""
@@ -903,12 +1146,13 @@ class SourceVersion(BaseModel):
         # origin is derived for the API; writing it back would duplicate match/fetcher.
         raw = self.model_dump(mode="json", by_alias=True, exclude_none=True, exclude={"origin"})
         # Prune empty per-view containers (e.g. custom_mappings: {}) for clean YAML.
-        for view in raw.get("views") or []:
-            for key in list(view.keys()):
-                if isinstance(view[key], (dict, list)) and not view[key]:
-                    del view[key]
+        for entry in [*(raw.get("views") or []), *(raw.get("compat_profiles") or [])]:
+            for key in list(entry.keys()):
+                if isinstance(entry[key], (dict, list)) and not entry[key]:
+                    del entry[key]
         for key in list(raw.keys()):
-            if isinstance(raw[key], (dict, list)) and not raw[key]:
+            # An empty compat_profiles binds none, which absence would read as the default.
+            if key != "compat_profiles" and isinstance(raw[key], (dict, list)) and not raw[key]:
                 del raw[key]
         return raw
 
@@ -965,8 +1209,9 @@ class SourceWriteRequest(BaseModel):
     """Flat source definition for create/update API (no version tree).
 
     On update, an omitted ``header``, ``schema``, ``views``, ``transform``,
-    ``transport`` or ``archive`` keeps the stored value; ``null`` (or ``[]``,
-    ``false``) clears it.
+    ``transport``, ``archive``, ``aliases`` or ``compat_profiles`` keeps the stored
+    value. ``null`` (or ``[]``, ``{}``, ``false``) clears it, and ``compat_profiles:
+    null`` returns the source to the deployment's list.
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")
@@ -988,7 +1233,12 @@ class SourceWriteRequest(BaseModel):
     )
     match: SourceMatch | None = Field(
         default=None,
-        description="Receiver match rule; required unless ``fetcher`` is set",
+        description="Receiver match rule. One of match, when or fetcher is set",
+    )
+    when: str | None = Field(default=None, description=_WHEN_DESCRIPTION)
+    aliases: dict[str, list[str]] = Field(default_factory=dict, description=_ALIASES_DESCRIPTION)
+    compat_profiles: list[CompatBinding] | None = Field(
+        default=None, description=_COMPAT_PROFILES_DESCRIPTION
     )
     header: SourceHeader | None = Field(
         default=None,
@@ -1003,7 +1253,7 @@ class SourceWriteRequest(BaseModel):
         default=None, description="Transform stage (optional, top-level)"
     )
     fetcher: SourceFetcher | None = Field(
-        default=None, description="Fetcher-based origin; required unless ``match`` is set"
+        default=None, description="Fetcher-based origin. One of match, when or fetcher is set"
     )
     transport: SourceTransport | None = Field(
         default=None,
@@ -1018,11 +1268,30 @@ class SourceWriteRequest(BaseModel):
         description="Naming-standard views for this revision (sigma, ecs, cim, ocsf)",
     )
 
+    @field_validator("when")
+    @classmethod
+    def _validate_when(cls, v: str | None) -> str | None:
+        return _when_text(v)
+
+    @field_validator("aliases")
+    @classmethod
+    def _validate_aliases(cls, v: dict[str, list[str]]) -> dict[str, list[str]]:
+        return _aliases_well_formed(v)
+
+    @field_validator("compat_profiles")
+    @classmethod
+    def _validate_compat_profiles(cls, v: list[CompatBinding] | None) -> list[CompatBinding] | None:
+        return v if v is None else _bound_once(v)
+
     @model_validator(mode="after")
     def _exactly_one_origin(self) -> SourceWriteRequest:
-        if (self.match is None) == (self.fetcher is None):
+        if self.match is not None and self.when is not None:
+            raise ValueError("a receiver-based source takes match or when, not both")
+        receives = self.match is not None or self.when is not None
+        if receives == (self.fetcher is not None):
             raise ValueError(
-                "a source is receiver-based (match) or fetcher-based (fetcher): set exactly one"
+                "a source is receiver-based (match or when) or fetcher-based (fetcher): set "
+                "exactly one"
             )
         return self
 
@@ -1065,6 +1334,9 @@ class SourceWriteRequest(BaseModel):
             views=self.views or [],
             fetcher=self.fetcher,
             match=self.match,
+            when=self.when,
+            aliases=self.aliases,
+            compat_profiles=self.compat_profiles,
             transform=self.transform,
             transport=self.transport,
             archive=self.archive,
@@ -1401,9 +1673,9 @@ class Source(BaseModel):
         if self.resource_type == "core":
             return
         for version_id, version in self.versions.items():
-            if version.match is None and version.fetcher is None:
+            if version.origin is None:
                 raise ValueError(
-                    f"version '{version_id}': a source is receiver-based (match) or "
+                    f"version '{version_id}': a source is receiver-based (match or when) or "
                     "fetcher-based (fetcher): set exactly one"
                 )
 
@@ -1457,6 +1729,22 @@ class Source(BaseModel):
     def match(self) -> SourceMatch | None:
         """Receiver match rule on the deployed version (serialized for API compat)."""
         return self.version().match
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def when(self) -> str | None:
+        """The CEL Fast condition on the deployed version, in place of a match."""
+        return self.version().when
+
+    @property
+    def aliases(self) -> dict[str, list[str]]:
+        """The deployed version's aliases, per compatibility profile."""
+        return self.version().aliases
+
+    @property
+    def compat_profiles(self) -> list[CompatBinding] | None:
+        """The compatibility profiles the deployed version binds, None for the deployment's."""
+        return self.version().compat_profiles
 
     @computed_field  # type: ignore[prop-decorator]
     @property

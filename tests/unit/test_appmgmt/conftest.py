@@ -19,6 +19,7 @@ import pytest
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitops.repo import GitopsRepo
+from dfe_engine.ingest.models import IngestRules
 from dfe_engine.settings import DFESettings
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceNotFoundError
@@ -49,10 +50,14 @@ def direct_settings() -> DFESettings:
 
 
 class FakeRegistry:
-    """The two reader methods the routing compilers call, as SourceReader declares them."""
+    """The reader methods the routing compilers call, as SourceReader declares them."""
 
-    def __init__(self, sources: list[Source]) -> None:
+    def __init__(self, sources: list[Source], ingest: IngestRules | None = None) -> None:
         self._sources = {s.source: s for s in sources}
+        self._ingest = ingest or IngestRules()
+
+    def ingest_rules(self) -> IngestRules:
+        return self._ingest
 
     def get_source(self, source_name: str) -> Source:
         if source_name not in self._sources:

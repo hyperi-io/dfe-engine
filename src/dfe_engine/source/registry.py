@@ -23,7 +23,8 @@ Usage:
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -42,8 +43,8 @@ from dfe_engine.source.engine_registry import InvalidEngineError
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
     RULELESS_OPERATORS,
+    CompatBinding,
     Source,
-    SourceMatch,
     SourceVersion,
     SourceWriteRequest,
     apply_source_write_update,
@@ -54,7 +55,11 @@ from dfe_engine.source.models import (
 from dfe_engine.yaml_utils import yaml_dump
 
 if TYPE_CHECKING:
+    from scalo.rules import RuleDiagnostic
+
     from dfe_engine.gitcrud.engine import GitCrud
+    from dfe_engine.ingest.models import CompatProfile, IngestRules
+    from dfe_engine.ingest.store import IngestStore
     from dfe_engine.source.deployment import SourceDeploymentStore
 
 _SOURCES_CLASS = "sources"
@@ -100,25 +105,183 @@ class SourceCoreResourceError(SourceValidationError):
 
 
 class SourceMatchConflictError(SourceValidationError):
-    """Two enabled sources share the same receiver match (field + value)."""
+    """Two enabled sources share the same receiver condition.
+
+    ``field`` and ``value`` name a single test. A group or a ``when`` condition
+    leaves both empty, and the message carries the condition.
+    """
 
     def __init__(
         self,
         *,
         source: str,
         conflicting_source: str,
-        field: str,
-        value: str,
+        condition: str,
+        field: str = "",
+        value: str = "",
     ) -> None:
         self.source = source
         self.conflicting_source = conflicting_source
         self.field = field
         self.value = value
         super().__init__(
-            f"Cannot save source {source!r}: the match field {field!r} with value {value!r} "
-            f"is already used by enabled source {conflicting_source!r}. "
-            f"Use a different field/value pair, or disable {conflicting_source!r} first."
+            f"Cannot save source {source!r}: the receiver condition {condition!r} is already "
+            f"used by enabled source {conflicting_source!r}. Use a different condition, or "
+            f"disable {conflicting_source!r} first."
         )
+
+
+class SourceAliasConflictError(SourceValidationError):
+    """Two enabled sources claim one alias under the same compatibility profile."""
+
+    def __init__(self, *, source: str, conflicting_source: str, profile: str, alias: str) -> None:
+        self.source = source
+        self.conflicting_source = conflicting_source
+        self.profile = profile
+        self.alias = alias
+        super().__init__(
+            f"Cannot save source {source!r}: alias {alias!r} under compatibility profile "
+            f"{profile!r} already maps to enabled source {conflicting_source!r}, so a record "
+            "carrying it would have two sources."
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RuleProblem:
+    """One reason a source's receiver condition is refused.
+
+    Attributes:
+        field: The body field at fault: ``when``, ``match`` or ``compat_profiles``.
+        detail: What is wrong.
+        span: The UTF-16 offsets of the text at fault in ``when``, as a browser indexes it.
+    """
+
+    field: str
+    detail: str
+    span: tuple[int, int] | None = None
+
+
+class SourceRuleError(SourceValidationError):
+    """A source's match, condition or profile bindings would not compile in the receiver."""
+
+    def __init__(self, source: str, problems: list[RuleProblem]) -> None:
+        self.source = source
+        self.problems = problems
+        super().__init__(
+            f"source {source!r}: the receiver would refuse its rule. "
+            + " ".join(f"{problem.field}: {problem.detail}." for problem in problems)
+        )
+
+
+def _rule_problem(finding: RuleDiagnostic, version: SourceVersion) -> RuleProblem:
+    """Where in the source body a scalo.rules finding points, its span as a browser counts it."""
+    if version.when is None or not finding.location.endswith(".when"):
+        return RuleProblem("match", finding.message)
+    span = None
+    if finding.span is not None:
+        try:
+            span = finding.span.utf16_offsets(version.when)
+        except ValueError:
+            span = None
+    return RuleProblem("when", finding.message, span)
+
+
+def bound_versions(
+    bindings: Iterable[CompatBinding], profiles: Mapping[str, CompatProfile]
+) -> dict[str, str]:
+    """The version each binding to a stored profile compiles: its own, else the profile's current."""
+    return {
+        binding.profile: profiles[binding.profile].resolve(binding.version)
+        for binding in bindings
+        if binding.profile in profiles
+    }
+
+
+def binding_problems(
+    bindings: Sequence[CompatBinding],
+    profiles: Mapping[str, CompatProfile],
+    *,
+    field: str = "compat_profiles",
+) -> list[RuleProblem]:
+    """Every binding naming a profile, version or opt-in row that is not stored."""
+    problems: list[RuleProblem] = []
+    for index, binding in enumerate(bindings):
+        where = f"{field}.{index}"
+        profile = profiles.get(binding.profile)
+        if profile is None:
+            problems.append(RuleProblem(where, f"no compatibility profile {binding.profile!r}"))
+            continue
+        entry = profile.versions.get(profile.resolve(binding.version))
+        if entry is None:
+            problems.append(
+                RuleProblem(where, f"{binding.profile} publishes no version {binding.version}")
+            )
+            continue
+        unknown = sorted(set(binding.opt_in) - set(entry.opt_in))
+        if unknown:
+            problems.append(
+                RuleProblem(
+                    where,
+                    f"{binding.profile} offers no opt-in row {', '.join(unknown)}, only "
+                    f"{', '.join(entry.opt_in) or 'none'}",
+                )
+            )
+    return problems
+
+
+def rule_id_problems(
+    bindings: Iterable[CompatBinding],
+    profiles: Mapping[str, CompatProfile],
+    source: str,
+    *,
+    field: str = "compat_profiles",
+) -> list[RuleProblem]:
+    """Every rule id the bindings would compile for *source* that scalo.rules refuses as too long."""
+    from dfe_engine.services.source_routing import COMPAT_RULE_PREFIX, MAX_RULE_ID_LENGTH
+
+    problems: list[RuleProblem] = []
+    for binding in bindings:
+        profile = profiles.get(binding.profile)
+        entry = profile.versions.get(profile.resolve(binding.version)) if profile else None
+        for row_id in entry.row_ids() if entry else ():
+            rule_id = f"{COMPAT_RULE_PREFIX}{binding.profile}.{row_id}.{source}"
+            if len(rule_id) > MAX_RULE_ID_LENGTH:
+                problems.append(
+                    RuleProblem(
+                        field,
+                        f"rule id {rule_id!r} is over {MAX_RULE_ID_LENGTH} characters",
+                    )
+                )
+    return problems
+
+
+def version_problems(
+    mine: Mapping[str, str],
+    theirs: Iterable[tuple[str, Mapping[str, str]]],
+    *,
+    field: str = "compat_profiles",
+) -> list[RuleProblem]:
+    """Every profile *mine* binds at a version one of *theirs* binds differently."""
+    held = list(theirs)
+    problems: list[RuleProblem] = []
+    for profile_id, chosen in sorted(mine.items()):
+        clash = next(
+            (
+                (holder, versions[profile_id])
+                for holder, versions in held
+                if versions.get(profile_id, chosen) != chosen
+            ),
+            None,
+        )
+        if clash is not None:
+            problems.append(
+                RuleProblem(
+                    field,
+                    f"{profile_id} {chosen} is bound, and {clash[0]} binds {clash[1]}: one "
+                    "version of a profile compiles per deployment",
+                )
+            )
+    return problems
 
 
 class SourceRegistry:
@@ -717,27 +880,24 @@ class SourceRegistry:
         return self._get_raw(source_name) is not None
 
     # -----------------------------------------------------------------
-    # Match Table
+    # Ingest rules: the order and compatibility profiles the sources compile with
     # -----------------------------------------------------------------
 
-    def compile_match_table(self) -> list[dict[str, str]]:
-        """Compile the receiver match table from all enabled sources.
+    @property
+    def ingest_store(self) -> IngestStore | None:
+        """Where the ingest rules live: the deploy repo the sources do, or None without one."""
+        if self._crud is None:
+            return None
+        from dfe_engine.ingest.store import IngestStore
 
-        Returns:
-            List of match rules: [{field, value, source}]
-        """
-        rules = []
-        for source in self.get_all_sources(enabled_only=True):
-            if source.match:
-                rules.append(
-                    {
-                        "field": source.match.field,
-                        "operator": source.match.operator,
-                        "value": source.match.value,
-                        "source": source.source,
-                    }
-                )
-        return rules
+        return IngestStore(self._crud)
+
+    def ingest_rules(self) -> IngestRules:
+        """The rule order, profiles and default bindings, empty without a deploy repo."""
+        from dfe_engine.ingest.models import IngestRules
+
+        store = self.ingest_store
+        return store.read() if store is not None else IngestRules()
 
     # -----------------------------------------------------------------
     # Validation
@@ -750,13 +910,16 @@ class SourceRegistry:
             raise SourceCoreResourceError(action="modify", source=source.source)
 
         candidate_version = source.versions.get(source.current)
-        candidate_match = candidate_version.match if candidate_version else None
+        live = source.state != "disabled"
 
         # A DISABLED source skips every gate below - disabling is exactly how an
         # operator retires a stored source the current rules would reject;
         # active/dormant still reject (a dormant source may activate later).
-        if source.state != "disabled":
-            self._validate_match_operator(source, candidate_match)
+        ingest = self.ingest_rules() if live else None
+        if live and candidate_version is not None and ingest is not None:
+            self._validate_receiver_rule(source, candidate_version)
+            self._validate_compat(source, candidate_version, ingest)
+        if live:
             self._validate_fetcher_routes(source, candidate_version)
             self._validate_fetcher_types(source, candidate_version)
             self._validate_fetcher_schema(source, candidate_version)
@@ -764,6 +927,7 @@ class SourceRegistry:
             self._validate_flow(source)
             self._validate_instance_room(source)
 
+        others: list[Source] = []
         for table in self._names():
             if table == source.source:
                 continue  # Same source (update)
@@ -777,44 +941,73 @@ class SourceRegistry:
             except Exception:
                 logger.warning(f"Failed to parse source {table!r}, skipping its conflict check")
                 continue
+            # Dormant counts as conflicting, because its schema is pre-positioned and it
+            # may activate later. Only a disabled source releases its condition.
+            if existing.state != "disabled":
+                others.append(existing)
 
-            # Check match conflicts: same field+value on different sources.
-            # Dormant counts as conflicting (its schema is pre-positioned and it
-            # may activate later); only disabled sources release their match.
-            if (
-                candidate_match
-                and existing.match
-                and existing.state != "disabled"
-                and source.state != "disabled"
-                and candidate_match.field == existing.match.field
-                and candidate_match.operator == existing.match.operator
-                and candidate_match.value == existing.match.value
-            ):
-                raise SourceMatchConflictError(
+        if live and candidate_version is not None and ingest is not None:
+            for existing in others:
+                self._refuse_shared_condition(source, candidate_version, existing)
+                self._refuse_shared_alias(source, candidate_version, existing)
+            self._refuse_second_profile_version(source, candidate_version, others, ingest)
+
+    @staticmethod
+    def _refuse_shared_condition(source: Source, version: SourceVersion, existing: Source) -> None:
+        """Refuse a condition another enabled source already has, which would never fire."""
+        match = version.match
+        if match is not None and existing.match is not None and match == existing.match:
+            raise SourceMatchConflictError(
+                source=source.source,
+                conflicting_source=existing.source,
+                condition=match.describe(),
+                field=(match.field or "") if match.is_test else "",
+                value=match.value if match.is_test else "",
+            )
+        if version.when is not None and version.when.strip() == (existing.when or "").strip():
+            raise SourceMatchConflictError(
+                source=source.source, conflicting_source=existing.source, condition=version.when
+            )
+
+    @staticmethod
+    def _refuse_shared_alias(source: Source, version: SourceVersion, existing: Source) -> None:
+        """Refuse an alias another enabled source holds under the same profile."""
+        for profile, aliases in sorted(version.aliases.items()):
+            held = set(existing.aliases.get(profile, []))
+            shared = next((alias for alias in aliases if alias in held), None)
+            if shared is not None:
+                raise SourceAliasConflictError(
                     source=source.source,
                     conflicting_source=existing.source,
-                    field=candidate_match.field,
-                    value=candidate_match.value,
+                    profile=profile,
+                    alias=shared,
                 )
 
     @staticmethod
-    def _validate_match_operator(source: Source, match: SourceMatch | None) -> None:
-        """A receiver-routed source's operator must be one the receiver can act on.
+    def _validate_receiver_rule(source: Source, version: SourceVersion) -> None:
+        """A receiver-routed source's condition must compile in the receiver as written.
 
         ``always`` is the default flow's rule and compiles to the receiver's
         ``default_source`` rather than to a rule, so it is legal only for the
-        reserved source that flow belongs to. Everything else must compile to a
-        receiver rule op.
+        reserved source that flow belongs to. Every other match and every ``when``
+        is compiled to its receiver rows and checked by scalo.rules under the CEL
+        Fast profile the receiver compiles with, so a condition the receiver would
+        refuse is refused here, naming where it stopped.
+
+        Raises:
+            SourceValidationError: ``always`` outside the main flow.
+            SourceRuleError: The rows do not compile.
         """
-        if match is None:
-            return
         # Lazy import: source_routing imports this module (cycle).
+        from dfe_engine.services.models.receiver import RULE_TARGETS, RuleSet
         from dfe_engine.services.source_routing import (
-            UnsupportedMatchOperatorError,
-            match_op,
+            MatchTooWideError,
+            check_rule_set,
+            version_rules,
         )
 
-        if match.operator in RULELESS_OPERATORS:
+        match = version.match
+        if match is not None and match.is_test and match.operator in RULELESS_OPERATORS:
             if source.source != DEFAULT_LANDING_LABEL:
                 raise SourceValidationError(
                     f"source {source.source!r}: match operator {match.operator!r} matches "
@@ -822,24 +1015,81 @@ class SourceRegistry:
                     "source that defines the main flow"
                 )
             return
-        if match_op(match.operator) is None:
-            raise SourceValidationError(
-                str(UnsupportedMatchOperatorError(source.source, match.operator))
-            )
+        label = version.fetcher.landing_label(source.source) if version.fetcher else source.source
+        try:
+            rules = version_rules(source.source, label, version)
+        except MatchTooWideError as exc:
+            raise SourceRuleError(source.source, [RuleProblem("match", str(exc))]) from exc
+        findings = check_rule_set(RuleSet(targets=list(RULE_TARGETS), rules=rules))
+        problems = [_rule_problem(finding, version) for finding in findings if finding.is_error]
+        if problems:
+            raise SourceRuleError(source.source, problems)
+
+    @staticmethod
+    def _validate_compat(source: Source, version: SourceVersion, ingest: IngestRules) -> None:
+        """Every profile the source binds, and every alias it names, must exist as written.
+
+        Aliases under a profile the source does not bind are kept, and read once it does.
+
+        Raises:
+            SourceRuleError: Naming each binding or alias at fault.
+        """
+        own = version.compat_profiles
+        bindings = list(own) if own is not None else list(ingest.defaults)
+        problems = binding_problems(own or [], ingest.profiles)
+        problems += rule_id_problems(bindings, ingest.profiles, source.source)
+        problems += [
+            RuleProblem(f"aliases.{profile_id}", f"no compatibility profile {profile_id!r}")
+            for profile_id in sorted(version.aliases)
+            if profile_id not in ingest.profiles
+        ]
+        if problems:
+            raise SourceRuleError(source.source, problems)
+
+    @staticmethod
+    def _refuse_second_profile_version(
+        source: Source, version: SourceVersion, others: list[Source], ingest: IngestRules
+    ) -> None:
+        """One version of a profile compiles per deployment, so every binding must name it.
+
+        Raises:
+            SourceRuleError: A binding names a version another source or the
+                deployment's list binds differently.
+        """
+        from dfe_engine.services.source_routing import effective_bindings
+
+        own = version.compat_profiles
+        mine = bound_versions(list(own) if own is not None else ingest.defaults, ingest.profiles)
+        theirs = [
+            (existing.source, bound_versions(effective_bindings(existing, ingest), ingest.profiles))
+            for existing in others
+        ]
+        theirs.append(("the deployment's list", bound_versions(ingest.defaults, ingest.profiles)))
+        problems = version_problems(mine, theirs)
+        if problems:
+            raise SourceRuleError(source.source, problems)
 
     @staticmethod
     def _validate_fetcher_routes(source: Source, version: SourceVersion | None) -> None:
         """A fetcher route sends records ELSEWHERE, so it may not name its own source.
 
-        That the named source exists is checked when the fetcher instance is
-        compiled: a route may legitimately be written before its target is.
+        It compares one field to one value, which is all dfe-fetcher's routes do,
+        so any other operator is refused rather than compiled as ``equals``. That
+        the named source exists is checked when the fetcher instance is compiled:
+        a route may legitimately be written before its target is.
         """
         fetcher = version.fetcher if version else None
         for route in fetcher.routes if fetcher else ():
             if route.source == source.source:
                 raise SourceValidationError(
-                    f"source {source.source!r}: a fetcher route names its own source; "
+                    f"source {source.source!r}: a fetcher route names its own source, and "
                     "records with no route already land there"
+                )
+            if route.match.operator != "equals":
+                raise SourceValidationError(
+                    f"source {source.source!r}: the fetcher route to {route.source!r} compares "
+                    f"with {route.match.operator!r}, and a fetcher route matches one field "
+                    "equalling one value"
                 )
 
     @staticmethod

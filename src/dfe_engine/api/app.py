@@ -316,6 +316,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     from dfe_engine.api.deps import get_source_registry_optional
 
     source_registry = get_source_registry_optional()
+    # Ahead of the reconcile, which compiles the profiles a source binds.
+    if gitcrud is not None:
+        from dfe_engine.ingest.store import IngestStore
+
+        try:
+            for profile in IngestStore(gitcrud).seed_core_profiles():
+                logger.info("Seeded a compatibility profile from dfe-schemas", profile=profile)
+        except (
+            Exception
+        ) as exc:  # seeded again on the next start, and a source binding it is refused until then
+            logger.warning("compatibility profiles not seeded at startup", error=str(exc))
     if gitcrud is not None and source_registry is not None:
         from dfe_engine.api.v1.sources import transform_instances
         from dfe_engine.appmgmt import derived

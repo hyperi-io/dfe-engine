@@ -24,6 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_valid
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.schema.models import SchemaVersion
 from dfe_engine.source.models import (
+    CompatBinding,
     SourceFetcher,
     SourceHeader,
     SourceMatch,
@@ -163,6 +164,18 @@ class SourceBundle(BaseModel):
         default=None,
         description="Receiver match rule (receiver-based sources)",
     )
+    when: str | None = Field(
+        default=None,
+        description="CEL Fast condition the receiver tests records with, in place of routing",
+    )
+    aliases: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Per compatibility profile, the values its lookup rows map to this source",
+    )
+    compat_profiles: list[CompatBinding] | None = Field(
+        default=None,
+        description="The compatibility profiles the source binds. Absent takes the deployment's",
+    )
     fetcher: SourceFetcher | None = Field(
         default=None,
         description="Fetcher origin (fetcher-based sources)",
@@ -191,7 +204,8 @@ class SourceBundle(BaseModel):
         if self.resource_type == "core":
             if self.reference is None:
                 raise ValueError("a core source exports as a reference: 'reference' is required")
-            if self.routing or self.fetcher or self.schema_section or self.transform:
+            carried = (self.routing, self.when, self.fetcher, self.schema_section, self.transform)
+            if any(carried) or self.aliases or self.compat_profiles is not None:
                 raise ValueError(
                     "a core source must not carry its definition: the engine reconciles it from "
                     "the deployment's own settings"
@@ -201,9 +215,13 @@ class SourceBundle(BaseModel):
             raise ValueError("'reference' is for a core source; a custom one exports in full")
         if not self.version:
             raise ValueError("a custom source exports a version snapshot: 'version' is required")
-        if (self.routing is None) == (self.fetcher is None):
+        if self.routing is not None and self.when is not None:
+            raise ValueError("a receiver-based source takes routing or when, not both")
+        receives = self.routing is not None or self.when is not None
+        if receives == (self.fetcher is not None):
             raise ValueError(
-                "a source is receiver-based (routing) or fetcher-based (fetcher): set exactly one"
+                "a source is receiver-based (routing or when) or fetcher-based (fetcher): set "
+                "exactly one"
             )
         return self
 

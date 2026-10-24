@@ -32,11 +32,7 @@ from typing import TYPE_CHECKING
 from dfe_engine.appmgmt import catalogue
 from dfe_engine.appmgmt.catalogue import AppDescriptor
 from dfe_engine.appmgmt.scaling import DeployTarget, instance_ceiling
-from dfe_engine.source.models import (
-    OPERATORS_WITHOUT_OPERAND,
-    RULELESS_OPERATORS,
-    Source,
-)
+from dfe_engine.source.models import Source
 from dfe_engine.transport import SourceTransport
 
 if TYPE_CHECKING:
@@ -45,11 +41,6 @@ if TYPE_CHECKING:
 ARCHIVER_SERVICE = "dfe-archiver"
 FETCHER_SERVICE = "dfe-fetcher"
 LOADER_SERVICE = "dfe-loader"
-
-# The receiver picks a destination on field AND value, so a match that tests no
-# value cannot name one. The main flow is exempt: it IS the destination
-# everything unmatched already goes to.
-_UNROUTABLE_ON_DIRECT = OPERATORS_WITHOUT_OPERAND - RULELESS_OPERATORS
 
 
 class FlowError(ValueError):
@@ -128,15 +119,11 @@ class SourceFlow:
 
 
 def _match_expression(source: Source) -> str:
-    """The receiver match as one line, for a report or a console card."""
+    """The receiver match or condition as one line, for a report or a console card."""
+    if source.when is not None:
+        return f"when {source.when}"
     match = source.match
-    if match is None:
-        return ""
-    if match.operator == "always":
-        return "always"
-    if match.operator == "exists":
-        return f"{match.field} exists"
-    return f"{match.field} {match.operator} {match.value}"
+    return "" if match is None else match.describe()
 
 
 def _resolve_transport(source: Source, settings: DFESettings) -> SourceTransport:
@@ -230,14 +217,6 @@ def _resolve_transform(
         purpose=f"run its {transform.engine} transform",
         settings=settings,
     )
-
-    match = source.match
-    if transport == "direct" and match is not None and match.operator in _UNROUTABLE_ON_DIRECT:
-        raise FlowError(
-            f"source {source.source!r} is matched by {match.operator!r}, which tests no value: "
-            "on direct the receiver hands a record to its transform by field AND value, so "
-            "this source would reach the loader untransformed"
-        )
 
     return FlowTransform(
         app=service,

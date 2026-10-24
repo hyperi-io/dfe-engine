@@ -314,16 +314,17 @@ class TestReceiverGolden:
             },
             "rules": {
                 "targets": ["_source", "_org_id"],
+                # By name while the deployment's order names no block.
                 "rules": [
-                    {
-                        "id": "source.okta-audit",
-                        "match": {"field": "_source", "op": "equals", "value": "okta-audit"},
-                        "set": {"_source": {"value": "okta-audit"}},
-                    },
                     {
                         "id": "source.filebeat",
                         "match": {"field": "_json.app", "op": "equals", "value": "filebeat"},
                         "set": {"_source": {"value": "filebeat"}},
+                    },
+                    {
+                        "id": "source.okta-audit",
+                        "match": {"field": "_source", "op": "equals", "value": "okta-audit"},
+                        "set": {"_source": {"value": "okta-audit"}},
                     },
                 ],
             },

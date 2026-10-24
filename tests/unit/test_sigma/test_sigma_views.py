@@ -18,6 +18,7 @@ import pytest
 
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
+from dfe_engine.ingest.models import IngestRules
 from dfe_engine.sigma.views import (
     SigmaViewColumn,
     SigmaViewDefinition,
@@ -261,6 +262,9 @@ class _FakeSourceRegistry:
         self, enabled_only: bool = False, *, states: Collection[str] | None = None
     ) -> list[Source]:
         return list(self._sources.values())
+
+    def ingest_rules(self) -> IngestRules:
+        return IngestRules()
 
 
 def _source(name: str, mappings: dict[str, str]) -> Source:

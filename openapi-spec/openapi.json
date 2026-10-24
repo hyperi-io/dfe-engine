@@ -6070,7 +6070,7 @@
             }
           },
           "409": {
-            "description": "Source name already exists (code conflict), the name is the core landing the engine owns and reconciles itself (code conflict), or receiver match duplicates another enabled source (code match_conflict)",
+            "description": "Source name already exists (code conflict), the name is the core landing the engine owns and reconciles itself (code conflict), receiver match duplicates another enabled source (code match_conflict), or an alias is another source's under the same profile (code alias_conflict)",
             "content": {
               "application/json": {
                 "schema": {
@@ -6083,6 +6083,9 @@
                     },
                     {
                       "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AliasConflictErrorResponse"
                     }
                   ],
                   "title": "Response 409 Sources.Create"
@@ -6091,11 +6094,19 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Refused, nothing written. The body failed validation (code validation_error), or the receiver would refuse the source's rule (code invalid_rule): context.rule_errors names each field at fault and, for when, the span the check stopped at",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidRuleErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Sources.Create"
                 }
               }
             }
@@ -6435,6 +6446,9 @@
                       "$ref": "#/components/schemas/MatchConflictErrorResponse"
                     },
                     {
+                      "$ref": "#/components/schemas/AliasConflictErrorResponse"
+                    },
+                    {
                       "$ref": "#/components/schemas/MissingVariantErrorResponse"
                     }
                   ],
@@ -6444,11 +6458,19 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Refused, nothing written. The body failed validation (code validation_error), or the receiver would refuse the source's rule (code invalid_rule): context.rule_errors names each field at fault and, for when, the span the check stopped at",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidRuleErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Sources.From-Catalogue.Post"
                 }
               }
             }
@@ -7113,7 +7135,7 @@
           "Sources"
         ],
         "summary": "Update Source",
-        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and a\ntable-shaping field changes: schema pins (``meta_schema``, ``meta_schema_version``,\n``derived_schema``, ``additional_fields``), ``ttl_days``, ``engine``, common-header\ntype/version, ``views``, or ``transform``. Draft versions (``current`` not deployed)\nupdate in place.\n\nOrigin (receiver vs fetcher) cannot change, and a pinned ``meta_schema`` cannot be\ncleared: once a source owns its own table it cannot move back onto ``main``.\n\nA field the body omits keeps its stored value (``header``, ``schema``, ``views``,\n``transform``, ``transport``, ``archive``); ``null``, ``[]`` or ``false`` clears it.\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.",
+        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and a\ntable-shaping field changes: schema pins (``meta_schema``, ``meta_schema_version``,\n``derived_schema``, ``additional_fields``), ``ttl_days``, ``engine``, common-header\ntype/version, ``views``, or ``transform``. Draft versions (``current`` not deployed)\nupdate in place.\n\nOrigin (receiver vs fetcher) cannot change, and a pinned ``meta_schema`` cannot be\ncleared: once a source owns its own table it cannot move back onto ``main``.\n\nA field the body omits keeps its stored value (``header``, ``schema``, ``views``,\n``transform``, ``transport``, ``archive``, ``aliases``, ``compat_profiles``), and\n``null``, ``[]`` or ``false`` clears it. ``compat_profiles: null`` returns the source\nto the deployment's profiles.\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.",
         "operationId": "sources.apply",
         "parameters": [
           {
@@ -7168,7 +7190,7 @@
             }
           },
           "409": {
-            "description": "Receiver match duplicates another enabled source (code match_conflict), or the source is engine-owned and no write path may change it (code conflict)",
+            "description": "Receiver match duplicates another enabled source (code match_conflict), an alias is another source's under the same profile (code alias_conflict), or the source is engine-owned and no write path may change it (code conflict)",
             "content": {
               "application/json": {
                 "schema": {
@@ -7178,13 +7200,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/CoreResourceConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AliasConflictErrorResponse"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "match_conflict": "#/components/schemas/MatchConflictErrorResponse",
-                      "conflict": "#/components/schemas/CoreResourceConflictErrorResponse"
+                      "conflict": "#/components/schemas/CoreResourceConflictErrorResponse",
+                      "alias_conflict": "#/components/schemas/AliasConflictErrorResponse"
                     }
                   },
                   "title": "Response 409 Sources.Apply"
@@ -7193,11 +7219,19 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Refused, nothing written. The body failed validation (code validation_error), or the receiver would refuse the source's rule (code invalid_rule): context.rule_errors names each field at fault and, for when, the span the check stopped at",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidRuleErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Sources.Apply"
                 }
               }
             }
@@ -7284,7 +7318,7 @@
             }
           },
           "409": {
-            "description": "Enabling would duplicate another enabled source's receiver match (code match_conflict), or the source is engine-owned and no write path may change it (code conflict)",
+            "description": "Enabling would duplicate another enabled source's receiver match (code match_conflict) or alias (code alias_conflict), or the source is engine-owned and no write path may change it (code conflict)",
             "content": {
               "application/json": {
                 "schema": {
@@ -7294,13 +7328,17 @@
                     },
                     {
                       "$ref": "#/components/schemas/CoreResourceConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/AliasConflictErrorResponse"
                     }
                   ],
                   "discriminator": {
                     "propertyName": "code",
                     "mapping": {
                       "match_conflict": "#/components/schemas/MatchConflictErrorResponse",
-                      "conflict": "#/components/schemas/CoreResourceConflictErrorResponse"
+                      "conflict": "#/components/schemas/CoreResourceConflictErrorResponse",
+                      "alias_conflict": "#/components/schemas/AliasConflictErrorResponse"
                     }
                   },
                   "title": "Response 409 Sources.Update"
@@ -7309,11 +7347,19 @@
             }
           },
           "422": {
-            "description": "Validation Error",
+            "description": "Refused, nothing written. The body failed validation (code validation_error), or the receiver would refuse the source's rule (code invalid_rule): context.rule_errors names each field at fault and, for when, the span the check stopped at",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/InvalidRuleErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrorResponse"
+                    }
+                  ],
+                  "title": "Response 422 Sources.Update"
                 }
               }
             }
@@ -7990,6 +8036,741 @@
             "positional": []
           },
           "action": "source:write"
+        }
+      }
+    },
+    "/api/v1/ingest/rules": {
+      "get": {
+        "tags": [
+          "Ingest rules"
+        ],
+        "summary": "List Rule Blocks",
+        "description": "List every rule block, ``_source`` first, each field's in the order it runs.\n\nIts ``ETag`` is the ``If-Match`` a reorder takes. Takes no filter or order_by.",
+        "operationId": "ingest.rules.list",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items per page: 0 means 50, above 1000 is cut to it",
+              "default": 0,
+              "title": "Page Size"
+            },
+            "description": "Items per page: 0 means 50, above 1000 is cut to it"
+          },
+          {
+            "name": "page_token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_page_token of the previous page",
+              "title": "Page Token"
+            },
+            "description": "The next_page_token of the previous page"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression",
+              "title": "Filter"
+            },
+            "description": "Filter expression"
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Ordering, such as `name desc`",
+              "title": "Order By"
+            },
+            "description": "Ordering, such as `name desc`"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_RuleBlockResponse_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "ingest",
+          "resource": "rules",
+          "hierarchy": [
+            "ingest",
+            "rules"
+          ],
+          "verb": "list",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "source:read"
+        }
+      }
+    },
+    "/api/v1/ingest/rules/order": {
+      "post": {
+        "tags": [
+          "Ingest rules"
+        ],
+        "summary": "Reorder Rule Blocks",
+        "description": "Set the order one field's rule blocks run in.\n\n``If-Match`` is required, and a stale one answers 412 with the current ETag.\nThe pinned ``default`` keeps its place last. A rules-only change is one the\nreceiver reloads where it stands, so ``reload`` answers ``hot``.",
+        "operationId": "ingest.rules.order",
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Validate and report the change without committing it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Validate and report the change without committing it"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The current ETag: the write fails with 412 if it has changed",
+              "title": "If-Match"
+            },
+            "description": "The current ETag: the write fails with 412 if it has changed"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`*` to create: the write fails with 412 if the resource exists",
+              "title": "If-None-Match"
+            },
+            "description": "`*` to create: the write fails with 412 if the resource exists"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleOrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleOrderResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The list names other blocks than the field has now, because a source or a binding changed since it was read (code order_conflict, the current list in context.blocks), or the deploy repo kept moving (code conflict)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Refused, nothing written: a block named twice or a pinned block (code invalid_order), or a binding the receiver could not compile (code invalid_binding)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No deploy repo, where the ingest rules live",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "ingest",
+          "resource": "rules",
+          "hierarchy": [
+            "ingest",
+            "rules"
+          ],
+          "verb": "order",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "source:write"
+        }
+      }
+    },
+    "/api/v1/ingest/compat": {
+      "get": {
+        "tags": [
+          "Ingest rules"
+        ],
+        "summary": "Get Compat",
+        "description": "Get the profiles every source binds unless it names its own list. Its ``ETag`` is an apply's ``If-Match``.",
+        "operationId": "ingest.compat.get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompatResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "ingest",
+          "resource": "compat",
+          "hierarchy": [
+            "ingest",
+            "compat"
+          ],
+          "verb": "get",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "source:read"
+        }
+      },
+      "put": {
+        "tags": [
+          "Ingest rules"
+        ],
+        "summary": "Apply Compat",
+        "description": "Set the profiles every source binds unless it names its own list.\n\n``If-Match`` is required. Each binding must name a stored profile, a version it\npublishes and only opt-in rows it offers, and one version of a profile compiles\nper deployment, so a version another source binds differently is refused with\n422 ``invalid_binding``. A rules-only change answers ``reload: hot``.",
+        "operationId": "ingest.compat.apply",
+        "parameters": [
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Validate and report the change without committing it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Validate and report the change without committing it"
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The current ETag: the write fails with 412 if it has changed",
+              "title": "If-Match"
+            },
+            "description": "The current ETag: the write fails with 412 if it has changed"
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`*` to create: the write fails with 412 if the resource exists",
+              "title": "If-None-Match"
+            },
+            "description": "`*` to create: the write fails with 412 if the resource exists"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompatSetting"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompatWriteResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Refused, nothing written: a block named twice or a pinned block (code invalid_order), or a binding the receiver could not compile (code invalid_binding)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No deploy repo, where the ingest rules live",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "ingest",
+          "resource": "compat",
+          "hierarchy": [
+            "ingest",
+            "compat"
+          ],
+          "verb": "apply",
+          "read_only": false,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "source:write"
+        }
+      }
+    },
+    "/api/v1/ingest/compat-profiles": {
+      "get": {
+        "tags": [
+          "Ingest rules"
+        ],
+        "summary": "List Compat Profiles",
+        "description": "List the stored compatibility profiles by id, each at its current version. Takes no filter or order_by.",
+        "operationId": "ingest.compat-profiles.list",
+        "parameters": [
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Items per page: 0 means 50, above 1000 is cut to it",
+              "default": 0,
+              "title": "Page Size"
+            },
+            "description": "Items per page: 0 means 50, above 1000 is cut to it"
+          },
+          {
+            "name": "page_token",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The next_page_token of the previous page",
+              "title": "Page Token"
+            },
+            "description": "The next_page_token of the previous page"
+          },
+          {
+            "name": "filter",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression",
+              "title": "Filter"
+            },
+            "description": "Filter expression"
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Ordering, such as `name desc`",
+              "title": "Order By"
+            },
+            "description": "Ordering, such as `name desc`"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_CompatProfileSummary_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "ingest",
+          "resource": "compat-profiles",
+          "hierarchy": [
+            "ingest",
+            "compat-profiles"
+          ],
+          "verb": "list",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "source:read"
+        }
+      }
+    },
+    "/api/v1/ingest/compat-profiles/{profile}": {
+      "get": {
+        "tags": [
+          "Ingest rules"
+        ],
+        "summary": "Get Compat Profile",
+        "description": "Get one compatibility profile with every version it publishes.",
+        "operationId": "ingest.compat-profiles.get",
+        "parameters": [
+          {
+            "name": "profile",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Profile"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompatProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such profile is stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "ingest",
+          "resource": "compat-profiles",
+          "hierarchy": [
+            "ingest",
+            "compat-profiles"
+          ],
+          "verb": "get",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "source:read"
         }
       }
     },
@@ -29537,6 +30318,71 @@
         "title": "AlertDestinationSummary",
         "description": "An alert destination in a listing, without its URL."
       },
+      "AliasConflictContext": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source identifier being saved"
+          },
+          "conflicting_source": {
+            "type": "string",
+            "title": "Conflicting Source",
+            "description": "Other enabled source that already has the alias"
+          },
+          "profile": {
+            "type": "string",
+            "title": "Profile",
+            "description": "The compatibility profile both name it under"
+          },
+          "alias": {
+            "type": "string",
+            "title": "Alias",
+            "description": "The alias"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "conflicting_source",
+          "profile",
+          "alias"
+        ],
+        "title": "AliasConflictContext",
+        "description": "Structured context for an alias two enabled sources claim under one profile."
+      },
+      "AliasConflictErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "alias_conflict",
+            "title": "Code",
+            "default": "alias_conflict"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "context": {
+            "$ref": "#/components/schemas/AliasConflictContext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "context"
+        ],
+        "title": "AliasConflictErrorResponse",
+        "description": "409 when two enabled sources claim one alias under the same compatibility profile."
+      },
       "AppConfigResponse": {
         "properties": {
           "etag": {
@@ -31434,6 +32280,397 @@
         "title": "CloudServiceStateResponse",
         "description": "CH Cloud service control-plane state."
       },
+      "CompatBinding": {
+        "properties": {
+          "profile": {
+            "type": "string",
+            "maxLength": 63,
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+            "title": "Profile",
+            "description": "The profile's id, e.g. dfe-legacy-2x"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "The profile version bound. Unset follows the profile's current"
+          },
+          "opt_in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Opt In",
+            "description": "Rows the profile leaves off until a binding turns them on, by row id"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "profile"
+        ],
+        "title": "CompatBinding",
+        "description": "One compatibility profile bound to a source, or to every source by default."
+      },
+      "CompatCover": {
+        "properties": {
+          "platform": {
+            "type": "string",
+            "title": "Platform",
+            "description": "The platform, e.g. dfe or elastic-agent"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "The platform versions read, when only some"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "platform"
+        ],
+        "title": "CompatCover",
+        "description": "A sender a profile reads, shown as a chip."
+      },
+      "CompatProfile": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The profile's id, its file name without .yaml"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core ships in dfe-schemas and refuses edits, custom is an operator's"
+          },
+          "current": {
+            "type": "string",
+            "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+            "title": "Current",
+            "description": "The version a binding takes by default"
+          },
+          "versions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/CompatProfileVersion"
+            },
+            "type": "object",
+            "minProperties": 1,
+            "title": "Versions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "resource_type",
+          "current",
+          "versions"
+        ],
+        "title": "CompatProfile",
+        "description": "A compatibility profile: versioned rule rows reading another platform's header."
+      },
+      "CompatProfileSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "The version a binding takes when it names none"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Versions",
+            "description": "Every published version"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "What it reads and what it sets"
+          },
+          "covers": {
+            "items": {
+              "$ref": "#/components/schemas/CompatCover"
+            },
+            "type": "array",
+            "title": "Covers",
+            "description": "The senders it reads"
+          },
+          "targets": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "_source",
+                "_org_id",
+                "_timestamp"
+              ]
+            },
+            "type": "array",
+            "title": "Targets",
+            "description": "The header fields its rows set"
+          },
+          "opt_in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Opt In",
+            "description": "Rows left out until a binding opts in to them"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "resource_type",
+          "current",
+          "versions",
+          "title",
+          "description",
+          "covers",
+          "targets",
+          "opt_in"
+        ],
+        "title": "CompatProfileSummary",
+        "description": "A stored profile at its current version, as a list shows it."
+      },
+      "CompatProfileVersion": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "title": "Date",
+            "description": "Publication date"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "model",
+              "addition",
+              "revision"
+            ],
+            "title": "Type",
+            "description": "SchemaVer: model is a major change, addition a minor one, revision a patch"
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Summary"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Title",
+            "description": "The name the UI shows"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Description",
+            "description": "The UI tooltip: what it reads and sets"
+          },
+          "covers": {
+            "items": {
+              "$ref": "#/components/schemas/CompatCover"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Covers",
+            "description": "The senders it reads"
+          },
+          "targets": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "_source",
+                "_org_id",
+                "_timestamp"
+              ]
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Targets",
+            "description": "The header fields its rows set, in evaluation order"
+          },
+          "lookups": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "object",
+            "title": "Lookups",
+            "description": "Lookup tables its rows read. A shipped aliases table is empty"
+          },
+          "rules": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rules",
+            "description": "The rows, in scalo.rules' format and in the order they fire"
+          },
+          "opt_in": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Opt In",
+            "description": "Rows left out until a binding opts in to them"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "date",
+          "type",
+          "summary",
+          "title",
+          "description",
+          "covers",
+          "targets",
+          "rules"
+        ],
+        "title": "CompatProfileVersion",
+        "description": "One published version of a profile: a complete snapshot that never changes."
+      },
+      "CompatResponse": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/CompatBinding"
+            },
+            "type": "array",
+            "title": "Profiles",
+            "description": "The deployment's default bindings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "profiles"
+        ],
+        "title": "CompatResponse",
+        "description": "The profiles every source binds unless it names its own list."
+      },
+      "CompatSetting": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/CompatBinding"
+            },
+            "type": "array",
+            "title": "Profiles",
+            "description": "The deployment's default bindings"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "CompatSetting",
+        "description": "The profiles every source binds unless it names its own list."
+      },
+      "CompatWriteResponse": {
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "description": "Nothing was written: this is what the write would do"
+          },
+          "reload": {
+            "type": "string",
+            "enum": [
+              "hot",
+              "restart"
+            ],
+            "title": "Reload",
+            "description": "hot where every app took the change where it stands, restart where restart_required names a command"
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes made so the apps follow the change"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps were not brought into step, if not"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app that cannot take the change in place"
+          },
+          "profiles": {
+            "items": {
+              "$ref": "#/components/schemas/CompatBinding"
+            },
+            "type": "array",
+            "title": "Profiles",
+            "description": "The deployment's default bindings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dry_run",
+          "reload",
+          "profiles"
+        ],
+        "title": "CompatWriteResponse",
+        "description": "The bindings an apply leaves, and what the apps did with them."
+      },
       "CompileRequest": {
         "properties": {
           "language": {
@@ -33267,7 +34504,7 @@
         "properties": {
           "match": {
             "$ref": "#/components/schemas/SourceMatch",
-            "description": "Which fetched records take this route"
+            "description": "Which fetched records take this route: one test of a field equalling a value, which is all dfe-fetcher's routes compare"
           },
           "source": {
             "type": "string",
@@ -35315,6 +36552,62 @@
         "title": "IntDefault",
         "description": "One integer default: the value in force, and where it came from."
       },
+      "InvalidRuleContext": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source identifier being saved"
+          },
+          "rule_errors": {
+            "items": {
+              "$ref": "#/components/schemas/RuleError"
+            },
+            "type": "array",
+            "title": "Rule Errors",
+            "description": "Every refusal, each with its span"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "rule_errors"
+        ],
+        "title": "InvalidRuleContext",
+        "description": "Structured context for a source whose rule the receiver would refuse."
+      },
+      "InvalidRuleErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "invalid_rule",
+            "title": "Code",
+            "default": "invalid_rule"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "context": {
+            "$ref": "#/components/schemas/InvalidRuleContext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "context"
+        ],
+        "title": "InvalidRuleErrorResponse",
+        "description": "422 when a source's match, when or profile bindings would not compile in the receiver."
+      },
       "InvokeRequest": {
         "properties": {
           "params": {
@@ -36165,17 +37458,17 @@
           "conflicting_source": {
             "type": "string",
             "title": "Conflicting Source",
-            "description": "Other enabled source that already uses this (field, value) pair"
+            "description": "Other enabled source that already uses this condition"
           },
           "field": {
             "type": "string",
             "title": "Field",
-            "description": "Receiver match JSON field name"
+            "description": "Receiver match JSON field name, empty for a group or a when"
           },
           "value": {
             "type": "string",
             "title": "Value",
-            "description": "Receiver match expected value"
+            "description": "Receiver match expected value, empty for a group or a when"
           }
         },
         "type": "object",
@@ -36186,7 +37479,7 @@
           "value"
         ],
         "title": "MatchConflictContext",
-        "description": "Structured context for duplicate receiver match (field + value)."
+        "description": "Structured context for a receiver condition another enabled source already has."
       },
       "MatchConflictErrorResponse": {
         "properties": {
@@ -37343,6 +38636,44 @@
         "title": "PackInfo",
         "description": "A generatable schema pack (a meta schema under the schemas root)."
       },
+      "Page_CompatProfileSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CompatProfileSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_page_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page Token"
+          },
+          "total_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "Page[CompatProfileSummary]"
+      },
       "Page_IngestCredentialResponse_": {
         "properties": {
           "items": {
@@ -37380,6 +38711,44 @@
           "items"
         ],
         "title": "Page[IngestCredentialResponse]"
+      },
+      "Page_RuleBlockResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuleBlockResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "next_page_token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page Token"
+          },
+          "total_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Size"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "Page[RuleBlockResponse]"
       },
       "PaginatedResponse_APIKeyResponse_": {
         "properties": {
@@ -40548,6 +41917,96 @@
         "title": "RoutingResponse",
         "description": "Source-derived routing: what it should be, and what the overlay carries."
       },
+      "RuleBlockResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "source.<name>, compat.<profile> or default"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "_source",
+              "_org_id"
+            ],
+            "title": "Target",
+            "description": "The header field the block's rows set"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position",
+            "description": "Where it runs among the field's blocks, from 1"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "source",
+              "profile",
+              "default"
+            ],
+            "title": "Kind",
+            "description": "source, profile, or the receiver's own default"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The source's name or the profile's id, empty for the default"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "The profile version compiled"
+          },
+          "pinned": {
+            "type": "boolean",
+            "title": "Pinned",
+            "description": "Runs last whatever the order says, and refuses a move"
+          },
+          "compiled": {
+            "type": "boolean",
+            "title": "Compiled",
+            "description": "Whether its rows are in the receiver's rule set. False where they do not compile"
+          },
+          "rules": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rules",
+            "description": "The rows as the receiver reads them, in the order they fire. Empty for the default"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "What is wrong with it: a row that does not compile, or one an earlier row shadows"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "target",
+          "position",
+          "kind",
+          "name",
+          "pinned",
+          "compiled",
+          "rules"
+        ],
+        "title": "RuleBlockResponse",
+        "description": "One block of the receiver's rule set: a source's rows, a profile's, or the default."
+      },
       "RuleCreateRequest": {
         "properties": {
           "display_name": {
@@ -40715,6 +42174,59 @@
         "title": "RuleEditRequest",
         "description": "Operator edit of a rule's content (marks it locally edited -> survives re-import)."
       },
+      "RuleError": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field",
+            "description": "The body field at fault: when, match, aliases or compat_profiles"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "What is wrong, as the receiver's rule engine reports it"
+          },
+          "span": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleErrorSpan"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "For when: the function name or character the check stopped at"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "message"
+        ],
+        "title": "RuleError",
+        "description": "One reason the receiver would refuse a source's rule."
+      },
+      "RuleErrorSpan": {
+        "properties": {
+          "start": {
+            "type": "integer",
+            "title": "Start",
+            "description": "First code unit of the text at fault"
+          },
+          "end": {
+            "type": "integer",
+            "title": "End",
+            "description": "One past the last code unit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "start",
+          "end"
+        ],
+        "title": "RuleErrorSpan",
+        "description": "Where in a CEL Fast condition a refusal points, in UTF-16 code units as a browser indexes."
+      },
       "RuleFromHyperdxRequest": {
         "properties": {
           "raw_sql": {
@@ -40812,6 +42324,105 @@
         ],
         "title": "RuleFromHyperdxResponse",
         "description": "The rule created from a HyperDX query."
+      },
+      "RuleOrderRequest": {
+        "properties": {
+          "target": {
+            "type": "string",
+            "enum": [
+              "_source",
+              "_org_id"
+            ],
+            "title": "Target",
+            "description": "The header field whose blocks are reordered"
+          },
+          "blocks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Blocks",
+            "description": "Every block id GET /ingest/rules lists for target bar the pinned default"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "target",
+          "blocks"
+        ],
+        "title": "RuleOrderRequest",
+        "description": "One field's blocks, every one of them, in the order they are to run."
+      },
+      "RuleOrderResponse": {
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "description": "Nothing was written: this is what the write would do"
+          },
+          "reload": {
+            "type": "string",
+            "enum": [
+              "hot",
+              "restart"
+            ],
+            "title": "Reload",
+            "description": "hot where every app took the change where it stands, restart where restart_required names a command"
+          },
+          "apps_synced": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Apps Synced",
+            "description": "Deploy-repo writes made so the apps follow the change"
+          },
+          "apps_sync_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Apps Sync Error",
+            "description": "Why the apps were not brought into step, if not"
+          },
+          "restart_required": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Restart Required",
+            "description": "One command per app that cannot take the change in place"
+          },
+          "target": {
+            "type": "string",
+            "enum": [
+              "_source",
+              "_org_id"
+            ],
+            "title": "Target"
+          },
+          "blocks": {
+            "items": {
+              "$ref": "#/components/schemas/RuleBlockResponse"
+            },
+            "type": "array",
+            "title": "Blocks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dry_run",
+          "reload",
+          "target",
+          "blocks"
+        ],
+        "title": "RuleOrderResponse",
+        "description": "The field's blocks as the reorder leaves them."
       },
       "RuleResponse": {
         "properties": {
@@ -43276,13 +44887,52 @@
           "routing": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SourceMatch"
+                "$ref": "#/components/schemas/SourceMatch",
+                "description": "Which fetched records take this route: one test of a field equalling a value, which is all dfe-fetcher's routes compare"
               },
               {
                 "type": "null"
               }
             ],
             "description": "Receiver match rule (receiver-based sources)"
+          },
+          "when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When",
+            "description": "CEL Fast condition the receiver tests records with, in place of routing"
+          },
+          "aliases": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Aliases",
+            "description": "Per compatibility profile, the values its lookup rows map to this source"
+          },
+          "compat_profiles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CompatBinding"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compat Profiles",
+            "description": "The compatibility profiles the source binds. Absent takes the deployment's"
           },
           "fetcher": {
             "anyOf": [
@@ -43457,13 +45107,52 @@
           "routing": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SourceMatch"
+                "$ref": "#/components/schemas/SourceMatch",
+                "description": "Which fetched records take this route: one test of a field equalling a value, which is all dfe-fetcher's routes compare"
               },
               {
                 "type": "null"
               }
             ],
             "description": "Receiver match rule (receiver-based sources)"
+          },
+          "when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When",
+            "description": "CEL Fast condition the receiver tests records with, in place of routing"
+          },
+          "aliases": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Aliases",
+            "description": "Per compatibility profile, the values its lookup rows map to this source"
+          },
+          "compat_profiles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CompatBinding"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compat Profiles",
+            "description": "The compatibility profiles the source binds. Absent takes the deployment's"
           },
           "fetcher": {
             "anyOf": [
@@ -43722,6 +45411,19 @@
             "description": "Receiver match rule on the deployed version (serialized for API compat).",
             "readOnly": true
           },
+          "when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When",
+            "description": "The CEL Fast condition on the deployed version, in place of a match.",
+            "readOnly": true
+          },
           "transform": {
             "anyOf": [
               {
@@ -43780,6 +45482,7 @@
           "source",
           "enabled",
           "match",
+          "when",
           "transform",
           "origin",
           "transport",
@@ -44139,38 +45842,70 @@
       "SourceMatch": {
         "properties": {
           "field": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Field",
-            "description": "Field to match on: a dotted path into the record as it arrives (e.g. 'tags.collector.type', or a bare '_source'). The receiver matches the JSON payload, not a ClickHouse column, so a '_json.' prefix would be read as a first segment no record has."
+            "description": "Field a test reads: a dotted path into the record as it arrives (e.g. 'tags.collector.type', or a bare '_source'). The receiver matches the JSON payload, not a ClickHouse column, so a '_json.' prefix would be read as a first segment no record has. Absent on a group"
           },
           "operator": {
-            "type": "string",
-            "enum": [
-              "equals",
-              "not_equals",
-              "exists",
-              "includes",
-              "starts_with",
-              "ends_with",
-              "always"
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "equals",
+                  "not_equals",
+                  "exists",
+                  "includes",
+                  "starts_with",
+                  "ends_with",
+                  "always"
+                ]
+              },
+              {
+                "type": "null"
+              }
             ],
             "title": "Operator",
-            "description": "How to compare ``field`` to ``value``: equals (default), exists, includes, starts_with, ends_with, not_equals, always. ``always`` matches every record and is reserved for the ``default`` source",
-            "default": "equals"
+            "description": "How a test compares ``field`` to ``value``: equals (the default for a test), exists, includes, starts_with, ends_with, not_equals, always. ``always`` matches every record and is reserved for the ``default`` source. Absent on a group"
           },
           "value": {
             "type": "string",
             "title": "Value",
             "description": "Operand for the operator (not used by ``exists`` or ``always``)",
             "default": ""
+          },
+          "negate": {
+            "type": "boolean",
+            "title": "Negate",
+            "description": "Invert this test or group",
+            "default": false
+          },
+          "all": {
+            "items": {
+              "$ref": "#/components/schemas/SourceMatch"
+            },
+            "type": "array",
+            "title": "All",
+            "description": "A group that holds when every part holds"
+          },
+          "any": {
+            "items": {
+              "$ref": "#/components/schemas/SourceMatch"
+            },
+            "type": "array",
+            "title": "Any",
+            "description": "A group that holds when at least one part holds"
           }
         },
         "type": "object",
-        "required": [
-          "field"
-        ],
         "title": "SourceMatch",
-        "description": "Receiver match rule: how the receiver identifies this source."
+        "description": "How the receiver recognises this source's records: one test, or all or any of several.\n\nA test compares one ``field`` with an ``operator``. ``all`` holds when every\npart does and ``any`` when at least one does. Each part is a match of its\nown, so groups nest, and ``negate`` inverts the test or group it sits on."
       },
       "SourceNameConflictErrorResponse": {
         "properties": {
@@ -44850,6 +46585,44 @@
             ],
             "description": "Receiver match rule (receiver-based sources)"
           },
+          "when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When",
+            "description": "A CEL Fast condition the receiver tests each record with, in place of match. It is checked at save under the profile the receiver compiles it with"
+          },
+          "aliases": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Aliases",
+            "description": "Per compatibility profile, the values its lookup rows map to this source, e.g. the DFE 2.x categories under dfe-legacy-2x. Read only while the source binds that profile"
+          },
+          "compat_profiles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CompatBinding"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compat Profiles",
+            "description": "The compatibility profiles bound to this source. Unset takes the deployment's list, and an empty list binds none"
+          },
           "transform": {
             "anyOf": [
               {
@@ -44919,7 +46692,7 @@
               }
             ],
             "title": "Origin",
-            "description": "Which way this version's data enters the platform, or None when nothing selects it.\n\nSerialized on API responses (source detail ``versions`` and the single-version\nGET). Derived from ``match`` / ``fetcher``, never stored in YAML.",
+            "description": "Which way this version's data enters the platform, or None when nothing selects it.\n\nSerialized on API responses (source detail ``versions`` and the single-version\nGET). Derived from ``match`` / ``when`` / ``fetcher``, never stored in YAML.",
             "readOnly": true
           }
         },
@@ -45188,13 +46961,52 @@
           "match": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SourceMatch"
+                "$ref": "#/components/schemas/SourceMatch",
+                "description": "Which fetched records take this route: one test of a field equalling a value, which is all dfe-fetcher's routes compare"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Receiver match rule; required unless ``fetcher`` is set"
+            "description": "Receiver match rule. One of match, when or fetcher is set"
+          },
+          "when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "When",
+            "description": "A CEL Fast condition the receiver tests each record with, in place of match. It is checked at save under the profile the receiver compiles it with"
+          },
+          "aliases": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Aliases",
+            "description": "Per compatibility profile, the values its lookup rows map to this source, e.g. the DFE 2.x categories under dfe-legacy-2x. Read only while the source binds that profile"
+          },
+          "compat_profiles": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/CompatBinding"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compat Profiles",
+            "description": "The compatibility profiles bound to this source. Unset takes the deployment's list, and an empty list binds none"
           },
           "header": {
             "anyOf": [
@@ -45238,7 +47050,7 @@
                 "type": "null"
               }
             ],
-            "description": "Fetcher-based origin; required unless ``match`` is set"
+            "description": "Fetcher-based origin. One of match, when or fetcher is set"
           },
           "transport": {
             "anyOf": [
@@ -45280,7 +47092,7 @@
         },
         "type": "object",
         "title": "SourceWriteRequest",
-        "description": "Flat source definition for create/update API (no version tree).\n\nOn update, an omitted ``header``, ``schema``, ``views``, ``transform``,\n``transport`` or ``archive`` keeps the stored value; ``null`` (or ``[]``,\n``false``) clears it."
+        "description": "Flat source definition for create/update API (no version tree).\n\nOn update, an omitted ``header``, ``schema``, ``views``, ``transform``,\n``transport``, ``archive``, ``aliases`` or ``compat_profiles`` keeps the stored\nvalue. ``null`` (or ``[]``, ``{}``, ``false``) clears it, and ``compat_profiles:\nnull`` returns the source to the deployment's list."
       },
       "SqlValidationError": {
         "properties": {

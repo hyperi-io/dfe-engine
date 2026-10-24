@@ -10,11 +10,11 @@ One row per operation the engine serves today. **New** is where it goes, and its
 |---|---|---|
 | moved | 89 | A new path, method or both |
 | merged into | 9 | Folded into the operation **New** names |
-| unchanged | 30 | Same method and path |
+| unchanged | 36 | Same method and path |
 | frozen | 54 | Kept as it is |
 | decide | 130 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 312 | |
+| total | 318 | |
 
 ## Questions
 
@@ -131,6 +131,17 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | `DELETE /api/v1/auth/roles/{name}` | `DELETE /api/v1/identity/roles/{role}` | `identity.roles.delete` | `dfe identity roles delete` | `dfe_identity_roles_delete` | moved | ui 2 |  |
 | `GET /api/v1/auth/roles/{name}` | `GET /api/v1/identity/roles/{role}` | `identity.roles.get` | `dfe identity roles get` | `dfe_identity_roles_get` | moved | ui 2 |  |
 | `PUT /api/v1/auth/roles/{name}` | `PUT /api/v1/identity/roles/{role}` | `identity.roles.apply` | `dfe identity roles apply` | `dfe_identity_roles_apply` | moved | ui 2 |  |
+
+## ingest
+
+| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
+|---|---|---|---|---|---|---|---|
+| `GET /api/v1/ingest/compat` | `GET /api/v1/ingest/compat` | `ingest.compat.get` | `dfe ingest compat get` | `dfe_ingest_compat_get` | unchanged | 0 |  |
+| `PUT /api/v1/ingest/compat` | `PUT /api/v1/ingest/compat` | `ingest.compat.apply` | `dfe ingest compat apply` | `dfe_ingest_compat_apply` | unchanged | 0 |  |
+| `GET /api/v1/ingest/compat-profiles` | `GET /api/v1/ingest/compat-profiles` | `ingest.compat-profiles.list` | `dfe ingest compat-profiles list` | `dfe_ingest_compat_profiles_list` | unchanged | 0 |  |
+| `GET /api/v1/ingest/compat-profiles/{profile}` | `GET /api/v1/ingest/compat-profiles/{profile}` | `ingest.compat-profiles.get` | `dfe ingest compat-profiles get` | `dfe_ingest_compat_profiles_get` | unchanged | 0 |  |
+| `GET /api/v1/ingest/rules` | `GET /api/v1/ingest/rules` | `ingest.rules.list` | `dfe ingest rules list` | `dfe_ingest_rules_list` | unchanged | 0 |  |
+| `POST /api/v1/ingest/rules/order` | `POST /api/v1/ingest/rules/order` | `ingest.rules.order` | `dfe ingest rules order` | `dfe_ingest_rules_order` | unchanged | 0 |  |
 
 ## orgs
 

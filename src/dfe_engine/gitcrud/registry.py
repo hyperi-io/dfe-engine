@@ -80,6 +80,14 @@ def default_registry() -> ResourceClassRegistry:
             # model owns its own semver version envelope (current/versions/
             # deployed_version), which is what versioned=True declares here.
             ResourceClass("sources", "config/sources", rbac_prefix="sources", versioned=True),
+            # datamodel class - compatibility profiles, the rule rows a source binds to
+            # read another platform's header. Core ones are seeded from dfe-schemas.
+            ResourceClass(
+                "compat_profiles",
+                "config/compat-profiles",
+                rbac_prefix="sources",
+                versioned=True,
+            ),
             # datamodel class - a deployment's own column selections over a meta
             # schema, versioned and audited beside the sources that name them.
             # nested: the registry key carries a group (beats/filebeat_auth).

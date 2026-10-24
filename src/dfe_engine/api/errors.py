@@ -60,14 +60,14 @@ class SourceNameConflictErrorResponse(BaseModel):
 
 
 class MatchConflictContext(BaseModel):
-    """Structured context for duplicate receiver match (field + value)."""
+    """Structured context for a receiver condition another enabled source already has."""
 
     source: str = Field(description="Source identifier being saved")
     conflicting_source: str = Field(
-        description="Other enabled source that already uses this (field, value) pair",
+        description="Other enabled source that already uses this condition",
     )
-    field: str = Field(description="Receiver match JSON field name")
-    value: str = Field(description="Receiver match expected value")
+    field: str = Field(description="Receiver match JSON field name, empty for a group or a when")
+    value: str = Field(description="Receiver match expected value, empty for a group or a when")
 
 
 class MatchConflictErrorResponse(BaseModel):
@@ -77,6 +77,59 @@ class MatchConflictErrorResponse(BaseModel):
     message: str = Field(description="Human-readable explanation")
     errors: list[FieldError] = Field(default_factory=list)
     context: MatchConflictContext
+
+
+class AliasConflictContext(BaseModel):
+    """Structured context for an alias two enabled sources claim under one profile."""
+
+    source: str = Field(description="Source identifier being saved")
+    conflicting_source: str = Field(description="Other enabled source that already has the alias")
+    profile: str = Field(description="The compatibility profile both name it under")
+    alias: str = Field(description="The alias")
+
+
+class AliasConflictErrorResponse(BaseModel):
+    """409 when two enabled sources claim one alias under the same compatibility profile."""
+
+    code: Literal["alias_conflict"] = "alias_conflict"
+    message: str = Field(description="Human-readable explanation")
+    errors: list[FieldError] = Field(default_factory=list)
+    context: AliasConflictContext
+
+
+class RuleErrorSpan(BaseModel):
+    """Where in a CEL Fast condition a refusal points, in UTF-16 code units as a browser indexes."""
+
+    start: int = Field(description="First code unit of the text at fault")
+    end: int = Field(description="One past the last code unit")
+
+
+class RuleError(BaseModel):
+    """One reason the receiver would refuse a source's rule."""
+
+    field: str = Field(
+        description="The body field at fault: when, match, aliases or compat_profiles"
+    )
+    message: str = Field(description="What is wrong, as the receiver's rule engine reports it")
+    span: RuleErrorSpan | None = Field(
+        default=None, description="For when: the function name or character the check stopped at"
+    )
+
+
+class InvalidRuleContext(BaseModel):
+    """Structured context for a source whose rule the receiver would refuse."""
+
+    source: str = Field(description="Source identifier being saved")
+    rule_errors: list[RuleError] = Field(description="Every refusal, each with its span")
+
+
+class InvalidRuleErrorResponse(BaseModel):
+    """422 when a source's match, when or profile bindings would not compile in the receiver."""
+
+    code: Literal["invalid_rule"] = "invalid_rule"
+    message: str = Field(description="Human-readable explanation")
+    errors: list[FieldError] = Field(default_factory=list)
+    context: InvalidRuleContext
 
 
 class CoreResourceConflictContext(BaseModel):
@@ -146,11 +199,14 @@ class TopicsNotCreatedErrorResponse(BaseModel):
 # CoreResourceConflictErrorResponse both carry code "conflict", which
 # Field(discriminator="code") refuses to build a union over.
 SourceCreateConflictResponse = (
-    SourceNameConflictErrorResponse | CoreResourceConflictErrorResponse | MatchConflictErrorResponse
+    SourceNameConflictErrorResponse
+    | CoreResourceConflictErrorResponse
+    | MatchConflictErrorResponse
+    | AliasConflictErrorResponse
 )
 
 SourceWriteConflictResponse = Annotated[
-    MatchConflictErrorResponse | CoreResourceConflictErrorResponse,
+    MatchConflictErrorResponse | CoreResourceConflictErrorResponse | AliasConflictErrorResponse,
     Field(discriminator="code"),
 ]
 

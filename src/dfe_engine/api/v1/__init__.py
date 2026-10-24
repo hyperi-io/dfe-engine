@@ -22,6 +22,7 @@ from dfe_engine.api.v1.governance import router as governance_router
 from dfe_engine.api.v1.helm import router as helm_router
 from dfe_engine.api.v1.hunts import router as hunts_router
 from dfe_engine.api.v1.hyperdx import router as hyperdx_router
+from dfe_engine.api.v1.ingest import router as ingest_router
 from dfe_engine.api.v1.ingest_credentials import router as ingest_credentials_router
 from dfe_engine.api.v1.kafka_topics import router as kafka_topics_router
 from dfe_engine.api.v1.library import router as library_router
@@ -110,6 +111,8 @@ def build_v1_router(settings: DFESettings) -> APIRouter:
     # The bearer tokens an org owns, each bound to the orgs its records may land in
     v1_router.include_router(ingest_credentials_router)
     v1_router.include_router(sources_router)
+    # The order the sources' receiver rules run in, and the compatibility profiles they bind
+    v1_router.include_router(ingest_router)
     # The Kafka topics those sources imply: ensure, converge, status, remove
     v1_router.include_router(kafka_topics_router)
     v1_router.include_router(services_router)

@@ -43,6 +43,8 @@ from typing import Any, Literal, NamedTuple, NoReturn
 from dfe_schemas.clickhouse import PlatformProbe, ReplicationNotConfiguredError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from scalo.api import FieldError as ProblemFieldError
+from scalo.api import ProblemError
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
@@ -63,7 +65,10 @@ from dfe_engine.api.errors import (
     TOPICS_NOT_CREATED,
     CoreResourceConflictErrorResponse,
     ErrorResponse,
+    InvalidRuleErrorResponse,
     MissingVariantErrorResponse,
+    RuleError,
+    RuleErrorSpan,
     SourceCreateConflictResponse,
     SourceWriteConflictResponse,
     TopicsNotCreatedErrorResponse,
@@ -126,9 +131,11 @@ from dfe_engine.source.models import (
     engine_registry,
 )
 from dfe_engine.source.registry import (
+    SourceAliasConflictError,
     SourceCoreResourceError,
     SourceMatchConflictError,
     SourceNotFoundError,
+    SourceRuleError,
     SourceValidationError,
 )
 from dfe_engine.transport import SourceTransport
@@ -169,6 +176,44 @@ def _require_replication(probe: PlatformProbe, source: str) -> None:
         raise _ch_unreadable(exc, source) from exc
 
 
+_INVALID_RULE: dict[int | str, dict[str, Any]] = {
+    422: {
+        "model": InvalidRuleErrorResponse | ErrorResponse,
+        "description": (
+            "Refused, nothing written. The body failed validation (code validation_error), or "
+            "the receiver would refuse the source's rule (code invalid_rule): context.rule_errors "
+            "names each field at fault and, for when, the span the check stopped at"
+        ),
+    },
+}
+
+
+def invalid_rule_problem(exc: SourceRuleError) -> ProblemError:
+    """The 422 for a source whose rule the receiver would refuse, each problem with its span."""
+    return ProblemError(
+        422,
+        str(exc),
+        code="invalid_rule",
+        errors=[
+            ProblemFieldError(
+                field=problem.field, location="body", detail=problem.detail, code="invalid_rule"
+            )
+            for problem in exc.problems
+        ],
+        source=exc.source,
+        rule_errors=[
+            RuleError(
+                field=problem.field,
+                message=problem.detail,
+                span=None
+                if problem.span is None
+                else RuleErrorSpan(start=problem.span[0], end=problem.span[1]),
+            ).model_dump(mode="json")
+            for problem in exc.problems
+        ],
+    )
+
+
 def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
     """Map registry validation errors to HTTP responses (never 500)."""
     # 409, matching the core-resource guard's answer for roles, schemas and field maps.
@@ -193,6 +238,20 @@ def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
                 "value": exc.value,
             },
         ) from exc
+    if isinstance(exc, SourceAliasConflictError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "alias_conflict",
+                "message": str(exc),
+                "source": exc.source,
+                "conflicting_source": exc.conflicting_source,
+                "profile": exc.profile,
+                "alias": exc.alias,
+            },
+        ) from exc
+    if isinstance(exc, SourceRuleError):
+        raise invalid_rule_problem(exc) from exc
     raise HTTPException(
         status_code=422,
         detail={
@@ -212,6 +271,10 @@ def _failure_code(exc: Exception) -> str:
         return "conflict"
     if isinstance(exc, SourceMatchConflictError):
         return "match_conflict"
+    if isinstance(exc, SourceAliasConflictError):
+        return "alias_conflict"
+    if isinstance(exc, SourceRuleError):
+        return "invalid_rule"
     if isinstance(exc, SourceNotFoundError):
         return "not_found"
     if isinstance(exc, SourceValidationError):
@@ -1029,10 +1092,12 @@ _CREATED_APPS_NOT_SYNCED = {
             "model": SourceCreateConflictResponse,
             "description": (
                 "Source name already exists (code conflict), the name is the core "
-                "landing the engine owns and reconciles itself (code conflict), or "
-                "receiver match duplicates another enabled source (code match_conflict)"
+                "landing the engine owns and reconciles itself (code conflict), "
+                "receiver match duplicates another enabled source (code match_conflict), "
+                "or an alias is another source's under the same profile (code alias_conflict)"
             ),
         },
+        **_INVALID_RULE,
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
@@ -1175,6 +1240,7 @@ def list_table_engines(
                 "or the deployed transform does not ship the variant (code missing_variant)"
             ),
         },
+        **_INVALID_RULE,
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
@@ -2496,9 +2562,11 @@ def export_source(
             "model": SourceWriteConflictResponse,
             "description": (
                 "Receiver match duplicates another enabled source (code match_conflict), "
+                "an alias is another source's under the same profile (code alias_conflict), "
                 "or the source is engine-owned and no write path may change it (code conflict)"
             ),
         },
+        **_INVALID_RULE,
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
@@ -2522,7 +2590,9 @@ def update_source(
     cleared: once a source owns its own table it cannot move back onto ``main``.
 
     A field the body omits keeps its stored value (``header``, ``schema``, ``views``,
-    ``transform``, ``transport``, ``archive``); ``null``, ``[]`` or ``false`` clears it.
+    ``transform``, ``transport``, ``archive``, ``aliases``, ``compat_profiles``), and
+    ``null``, ``[]`` or ``false`` clears it. ``compat_profiles: null`` returns the source
+    to the deployment's profiles.
 
     A schema pin naming nothing is accepted here so a source can be written before
     its schema, while ``/sources/import`` refuses one because an exported bundle
@@ -2566,10 +2636,11 @@ def update_source(
             "model": SourceWriteConflictResponse,
             "description": (
                 "Enabling would duplicate another enabled source's receiver match (code "
-                "match_conflict), or the source is engine-owned and no write path may "
-                "change it (code conflict)"
+                "match_conflict) or alias (code alias_conflict), or the source is "
+                "engine-owned and no write path may change it (code conflict)"
             ),
         },
+        **_INVALID_RULE,
     },
     dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
