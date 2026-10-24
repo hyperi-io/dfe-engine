@@ -14,7 +14,9 @@ receiver binds at startup, so ``reload: hot`` is that judgement, not a constant.
 """
 
 import pytest
+from fastapi.testclient import TestClient
 
+from dfe_engine.api.app import create_app
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
@@ -114,6 +116,14 @@ class TestListingTheBlocks:
 
     def test_without_a_deploy_repo_the_rules_are_not_configured(self, client, admin_headers):
         assert client.get("/api/v1/ingest/rules", headers=admin_headers).status_code == 503
+
+    def test_a_cross_origin_console_can_read_the_etag(self, api_settings):
+        origin = "https://console.example"
+        with TestClient(create_app(settings=api_settings, cors_origins=[origin])) as c:
+            resp = c.get("/api/v1/ingest/rules", headers={"Origin": origin})
+
+        assert resp.headers["access-control-allow-origin"] == origin
+        assert "etag" in resp.headers["access-control-expose-headers"].lower()
 
 
 class TestReordering:
