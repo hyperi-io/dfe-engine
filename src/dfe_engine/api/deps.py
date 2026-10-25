@@ -910,6 +910,28 @@ def is_action_allowed(
     ).allowed
 
 
+def allowed_at_system_or_own_org(request: Request, user: AuthContext, action: str) -> bool:
+    """Whether ``action`` is allowed at system scope or at the scope of one of the caller's orgs.
+
+    A role bound at an org's scope grants nothing at system scope, so a system-scope
+    check alone refuses every caller whose grant an org's group carries.
+
+    Args:
+        request: The request, for the settings and role definitions.
+        user: The caller's auth context.
+        action: The action to check.
+
+    Returns:
+        True when some grant the caller holds allows ``action`` there.
+    """
+    if is_action_allowed(request, user, action):
+        return True
+    return any(
+        is_action_allowed(request, user, action, scope=Scope(type="org", id=org_id))
+        for org_id in user.org_ids
+    )
+
+
 def reads_every_org(request: Request, user: AuthContext, action: str) -> bool:
     """Whether a grant that may read across orgs (``platform_grants``) allows ``action``.
 
@@ -1103,6 +1125,27 @@ def require_org_action(action: str):
         user: AuthContext = Depends(get_current_user),
     ) -> None:
         check_action(request, user, action, scope=Scope(type="org", id=org))
+
+    return _check
+
+
+def require_own_org_action(action: str):
+    """FastAPI dependency factory: ``action`` held at system scope or at one of the caller's orgs.
+
+    For a read whose handler then holds the caller to the orgs it is allowed in
+    (:func:`allowed_at_system_or_own_org`). The spec names ``action`` as
+    ``x-scalo.action``, as :func:`require_action` does.
+    """
+
+    @permission(action)
+    async def _check(
+        request: Request,
+        user: AuthContext = Depends(get_current_user),
+    ) -> None:
+        if not allowed_at_system_or_own_org(request, user, action):
+            reason = f"no role grants '{action}' at scope 'system' or at any of the caller's orgs"
+            audit_permission_denied(user.user_id, action, user.roles, reason)
+            raise AuthorizationError(f"Action '{action}' denied: {reason}")
 
     return _check
 

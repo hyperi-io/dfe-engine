@@ -223,6 +223,80 @@ def test_the_roles_that_hold_usage_read(app, api_settings, acme, tables, role):
     assert caller.get("/api/v1/usage/overview").status_code == 200
 
 
+# -- a role bound at an org's scope --------------------------------------------
+
+
+@pytest.fixture
+def org_bound(app, api_settings, acme):
+    """An org_viewer whose group is bound at acme's scope, as a deployment binds a tenant."""
+    return caller_in_group(
+        app, api_settings, "acme-bound", roles=["org_viewer"], org_ids=["acme"], scope="org:acme"
+    )
+
+
+def test_an_org_bound_viewer_reads_its_own_orgs_overview(org_bound, tables):
+    tables.rows = {INGESTED_BYTES: [(0, 50.0)], EVENTS_PER_SECOND: [(0, 3.0)]}
+
+    resp = org_bound.get("/api/v1/usage/overview")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["orgs"] == ["acme"]
+    metrics = _by_metric(body)
+    for withheld in (CORES_DEPLOYED, NODE_CORES):
+        assert (metrics[withheld]["status"], metrics[withheld]["series"]) == ("not_permitted", [])
+    assert metrics[INGESTED_BYTES]["status"] == "measured"
+    assert tables.metrics_read() == [INGESTED_BYTES, EVENTS_PER_SECOND]
+    assert tables.scopes_read() == [ACME_TENANTS, ACME_TENANTS]
+
+
+def test_an_org_bound_viewer_reads_its_own_orgs_series(org_bound, tables):
+    tables.rows = {INGESTED_BYTES: [(0, 5.0)]}
+
+    resp = _usage(org_bound, metric=INGESTED_BYTES)
+    cores = _usage(org_bound, metric=CORES_DEPLOYED)
+
+    assert resp.status_code == 200, resp.text
+    assert (resp.json()["orgs"], resp.json()["status"]) == (["acme"], "measured")
+    assert cores.status_code == 200, cores.text
+    assert cores.json()["status"] == "not_permitted"
+    assert tables.scopes_read() == [ACME_TENANTS]
+
+
+def test_an_org_without_usage_read_is_never_read_for_a_caller_holding_it_elsewhere(
+    app, api_settings, acme, tables
+):
+    """usage:read bound at acme reads acme, never beta, where the caller holds only data_viewer."""
+    app.state.group_store.create("beta-dv", roles=["data_viewer"], scope="org:beta")
+    app.state.group_store.update("beta-dv", org_ids=["beta"])
+    caller = caller_in_group(
+        app, api_settings, "split", roles=["org_viewer"], org_ids=["acme"], scope="org:acme"
+    )
+    app.state.account_store.update("split", groups=["split-group", "beta-dv"])
+    app.state.group_store.add_member("beta-dv", "split")
+
+    overview = caller.get("/api/v1/usage/overview")
+    named = _usage(caller, metric=INGESTED_BYTES, org="beta")
+
+    assert overview.status_code == 200, overview.text
+    assert overview.json()["orgs"] == ["acme"]
+    assert set(map(tuple, tables.scopes_read())) == {tuple(ACME_TENANTS)}
+    assert named.status_code == 403, named.text
+    assert named.json()["code"] == "org_not_granted"
+
+
+def test_an_org_bound_caller_without_usage_read_is_refused(app, api_settings, acme, tables):
+    viewer = caller_in_group(
+        app, api_settings, "acme-dv", roles=["data_viewer"], org_ids=["acme"], scope="org:acme"
+    )
+
+    overview = viewer.get("/api/v1/usage/overview")
+    series = _usage(viewer, metric=INGESTED_BYTES)
+
+    assert (overview.status_code, series.status_code) == (403, 403), overview.text
+    assert tables.reads == []
+
+
 def test_a_failed_read_is_a_503_that_keeps_the_backend_text_in_the_log(
     client, admin_headers, tables
 ):

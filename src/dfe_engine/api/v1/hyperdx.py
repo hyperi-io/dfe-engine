@@ -44,13 +44,12 @@ from scalo.concurrency import run_blocking
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
-    is_action_allowed,
+    allowed_at_system_or_own_org,
     reads_every_org,
     registered_orgs,
     require_action,
     secrets_store,
 )
-from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch.models import org_user_name
 from dfe_engine.orgs.tenant_scope import resolve_orgs
@@ -80,20 +79,13 @@ def _ch_host_url(settings) -> str:
 
 
 def _can_execute_queries(request: Request, user) -> bool:
-    """Whether the caller holds ``query:execute``, evaluated scope-aware.
+    """Whether the caller holds ``query:execute`` at system scope or at one of its orgs.
 
     An org_viewer holds ``query:execute`` only at its OWN org scope, so a plain
     system-scope check (the default ``require_action``) locks every org_viewer out
-    of its own connection - the exact caller this endpoint exists to serve. Pass
-    if the caller can execute at system scope OR at any org they belong to.
+    of its own connection - the exact caller this endpoint exists to serve.
     """
-    action = scopes_dict["query_execute"]
-    if is_action_allowed(request, user, action):
-        return True
-    return any(
-        is_action_allowed(request, user, action, scope=Scope(type="org", id=org_id))
-        for org_id in user.org_ids
-    )
+    return allowed_at_system_or_own_org(request, user, scopes_dict["query_execute"])
 
 
 def _reads_every_org(request: Request, user) -> bool:
