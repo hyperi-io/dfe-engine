@@ -186,3 +186,60 @@ def test_the_where_builder_binds_the_orgs_and_refuses_none():
             until=None,
             timestamp_field="timestamp_load",
         )
+
+
+# -- a role bound at an org's scope --------------------------------------------
+
+
+def _org_bound(app, api_settings, name: str, bindings: dict[str, list[str]]) -> TestClient:
+    """A caller in one group per ``{org: roles}``, each group bound at that org's scope."""
+    from tests.support.held_callers import caller_in_group
+
+    (first, *rest) = bindings.items()
+    caller = caller_in_group(
+        app, api_settings, name, roles=first[1], org_ids=[first[0]], scope=f"org:{first[0]}"
+    )
+    groups = [f"{name}-group"]
+    for org, roles in rest:
+        group = f"{name}-{org}"
+        app.state.group_store.create(group, roles=roles, scope=f"org:{org}")
+        app.state.group_store.update(group, org_ids=[org])
+        app.state.group_store.add_member(group, name)
+        groups.append(group)
+    app.state.account_store.update(name, groups=groups)
+    return caller
+
+
+@pytest.mark.parametrize("route", ROUTES)
+def test_an_org_bound_viewer_samples_its_own_org(app, api_settings, table, route):
+    viewer = _org_bound(app, api_settings, "bound-viewer", {"test_org": ["org_viewer"]})
+
+    resp = _sample(viewer, route)
+
+    assert resp.status_code == 200, resp.text
+    [(_, params)] = table.reads
+    assert params["orgs"] == ["test_org"]
+    assert [task["id"] for task in viewer.get("/api/v1/samples").json()] == [resp.json()["task_id"]]
+
+
+def test_an_org_where_the_caller_holds_no_sampler_read_is_never_sampled(app, api_settings, table):
+    split = _org_bound(
+        app,
+        api_settings,
+        "split-viewer",
+        {"test_org": ["org_viewer"], "test_org_2": ["infra_viewer"]},
+    )
+
+    resp = _sample(split)
+
+    assert resp.status_code == 200, resp.text
+    [(_, params)] = table.reads
+    assert params["orgs"] == ["test_org"]
+
+
+def test_an_org_bound_caller_without_sampler_read_is_refused(app, api_settings, table):
+    infra = _org_bound(app, api_settings, "bound-infra", {"test_org": ["infra_viewer"]})
+
+    assert _sample(infra).status_code == 403
+    assert infra.get("/api/v1/samples").status_code == 403
+    assert table.reads == []

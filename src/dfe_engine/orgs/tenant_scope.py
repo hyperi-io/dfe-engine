@@ -11,7 +11,7 @@ The ClickHouse row policy pins each org's user to the org's tenant ids. A group'
 ``org_ids`` list org markers, each an org's name or one of its tenant ids, and
 :func:`resolve_orgs` is the one rule that turns them into registered orgs: the
 HyperDX connection read, the ClickHouse group bindings and every engine-side read
-held to a caller's orgs (:func:`tenant_ids_for`) all go through it. A hunt names
+held to a caller's orgs (``api/deps.py::held_tenant_ids``) all go through it. A hunt names
 its orgs by name, and :func:`tenant_ids_by_org` resolves them when it is written. The registry
 refuses a write whose name or tenant ids would collide with another org's markers
 (:func:`colliding_org`), so a marker only ever resolves ambiguously on data that
@@ -65,22 +65,6 @@ def resolve_orgs(markers: Iterable[str], orgs: Iterable[Any]) -> list[Any]:
         if org is not None:
             named.add(org.name)
     return [org for org in registered if org.name in named]
-
-
-def tenant_ids_for(markers: Iterable[str], orgs: Iterable[Any]) -> list[str]:
-    """The tenant ids of the registered orgs that ``markers`` name (:func:`resolve_orgs`).
-
-    Args:
-        markers: The org markers a caller's groups list.
-        orgs: The org registry's entries.
-
-    Returns:
-        The tenant ids, sorted and each once; empty when no marker resolves.
-    """
-    ids: set[str] = set()
-    for org in resolve_orgs(markers, orgs):
-        ids.update(org_tenant_ids(org))
-    return sorted(ids)
 
 
 def tenant_ids_by_org(names: Iterable[str], orgs: Iterable[Any]) -> dict[str, list[str]]:

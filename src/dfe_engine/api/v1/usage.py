@@ -41,17 +41,17 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
-    is_action_allowed,
+    held_orgs,
     reads_every_org,
     refuse_unknown_orgs,
     registered_orgs,
     require_own_org_action,
 )
 from dfe_engine.api.errors import ErrorResponse, backend_failure
-from dfe_engine.auth.models import AuthContext, Scope
+from dfe_engine.auth.models import AuthContext
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
-from dfe_engine.orgs.tenant_scope import org_tenant_ids, resolve_orgs
+from dfe_engine.orgs.tenant_scope import org_tenant_ids
 from dfe_engine.usage import (
     UsagePoint,
     UsageReader,
@@ -188,12 +188,7 @@ def usage_scope(request: Request, user: AuthContext, org: str | None) -> UsageSc
         (named,) = [entry for entry in registered if entry.name == org]
         return UsageScope(held=False, orgs=[org], tenant_ids=org_tenant_ids(named))
 
-    # An org the caller's groups name but grant no usage:read at is never read.
-    granted = [
-        entry
-        for entry in resolve_orgs(user.org_ids, registered)
-        if is_action_allowed(request, user, _ACTION, scope=Scope(type="org", id=entry.name))
-    ]
+    granted = held_orgs(request, user, _ACTION)
     chosen = granted if org is None else [entry for entry in granted if entry.name == org]
     if org is not None and not chosen:
         raise HTTPException(

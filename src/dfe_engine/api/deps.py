@@ -46,7 +46,7 @@ from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.http_errors import describe_http_error, failure_reference
 from dfe_engine.orgs.tenancy import Tenancy
-from dfe_engine.orgs.tenant_scope import resolve_orgs, tenant_ids_for
+from dfe_engine.orgs.tenant_scope import org_tenant_ids, resolve_orgs
 from dfe_engine.secrets import DfeSecrets
 from dfe_engine.settings import DFESettings, is_dev_posture
 
@@ -978,14 +978,33 @@ def refuse_unknown_orgs(request: Request, names: Iterable[str]) -> None:
         )
 
 
+def held_orgs(request: Request, user: AuthContext, action: str) -> list[Any]:
+    """The registered orgs a held caller's ``action`` reaches: named by its groups, allowed there.
+
+    An org its groups name but grant ``action`` at no scope covering it is left out,
+    so a grant bound at one org never opens another the caller belongs to.
+
+    Args:
+        request: The request, for the role definitions and the org registry.
+        user: The caller's auth context.
+        action: The action the read is gated on.
+
+    Returns:
+        The orgs, in registry order.
+    """
+    return [
+        org
+        for org in resolve_orgs(user.org_ids, registered_orgs(request))
+        if is_action_allowed(request, user, action, scope=Scope(type="org", id=org.name))
+    ]
+
+
 def held_tenant_ids(request: Request, user: AuthContext, action: str) -> list[str] | None:
     """The tenant ids a caller's reads are held to, or None when it may read every org.
 
     A caller is held unless :func:`reads_every_org` passes for ``action``. A held
-    caller's org markers, each an org's name or one of its tenant ids, map to the
-    tenant ids the ClickHouse row policy binds
-    (:func:`~dfe_engine.orgs.tenant_scope.tenant_ids_for`); a marker that names no
-    registered org maps to none, and an empty list is refused, never read.
+    caller reads the tenant ids the ClickHouse row policy binds for its
+    :func:`held_orgs`, and an empty list is refused, never read.
 
     Args:
         request: The request, for the role definitions and the org registry.
@@ -997,7 +1016,10 @@ def held_tenant_ids(request: Request, user: AuthContext, action: str) -> list[st
     """
     if reads_every_org(request, user, action):
         return None
-    return tenant_ids_for(user.org_ids, registered_orgs(request))
+    tenant_ids: set[str] = set()
+    for org in held_orgs(request, user, action):
+        tenant_ids.update(org_tenant_ids(org))
+    return sorted(tenant_ids)
 
 
 def granted_bound_org(request: Request, user: AuthContext, action: str) -> str:
