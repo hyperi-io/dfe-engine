@@ -44,6 +44,7 @@ from scalo.logger import logger
 from dfe_engine.api.deps import (
     Settings,
     _get_client_ip,
+    get_role_config,
     jwt_authority_for,
     require_local_account_enabled,
     resolve_live_grants_for_user,
@@ -393,7 +394,7 @@ async def _complete_login(
             "email": identity.email,
             "groups": groups,
             # dfe-hyperdx gates changing what a team sees on this one value.
-            hyperdx_role.CLAIM: hyperdx_role.role_claim(live.grants),
+            hyperdx_role.CLAIM: hyperdx_role.role_claim(live.grants, get_role_config(request)),
             **session_claims(account, auth_time=now),
         },
         expires_delta=timedelta(seconds=lifetime),

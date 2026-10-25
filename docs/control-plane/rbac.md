@@ -256,7 +256,7 @@ A `scoped` role grants only `...:read` patterns and `query:execute`, as at syste
 | Domain | Actions | Scoped by service? |
 |--------|---------|---------------------|
 | `hunt` | `read`, `write`, `delete`, `execute`, `*` | No |
-| `query` | `read`, `execute`, `*` | No |
+| `query` | `read`, `execute`, `write` (save searches and dashboards in HyperDX, section 7.2), `*` | No |
 | `source` | `read`, `write`, `delete`, `deploy`, `*` | No |
 | `fieldmap` | `read`, `write`, `delete`, `*` | No |
 | `alert` | `read`, `write`, `delete`, `*` | No |
@@ -640,6 +640,7 @@ Each hunt rewritten emits `resource.hunt.updated` naming the org.
 
 - **Team name.** JIT picks it from the caller's grants (`auth/jit.py`, `resolve_hyperdx_team`): `dfe-admin` for `admin` or `infra_admin` at system scope, `dfe-analysts` for `data_analyst` at system scope, else `customer-<org>` for the caller's first org, else none.
 - **Connection.** A team's ClickHouse connection is whatever `GET /api/v1/hyperdx/connection` returned to the user whose token seeded it (section 5.2): the platform reader, or that user's org's pinned user.
+- **Role.** `GET /api/v1/auth/me` hands the fork `hyperdx_role` (`auth/hyperdx_role.py`). `admin` goes to `admin` or `infra_admin` at system scope and may change what a whole team sees. `member` goes to anyone whose roles allow `query:write`, the HyperDX authoring permission, and may save searches and dashboards in the observe embed. Everyone else is `viewer`, and the fork refuses it every write. So `admin` and `data_analyst` author, and the other shipped roles read.
 
 ---
 

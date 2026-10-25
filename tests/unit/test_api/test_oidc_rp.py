@@ -527,7 +527,7 @@ def test_callback_token_carries_the_role_the_group_files_resolve(client, app):
     app.state.oidc_rp = _FakeOidcRp()
     resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)
     claims = pyjwt.decode(resp.json()["access_token"], options={"verify_signature": False})
-    assert claims[hyperdx_role.CLAIM] == hyperdx_role.MEMBER
+    assert claims[hyperdx_role.CLAIM] == hyperdx_role.VIEWER
 
     app.state.group_store.create("g1", ["infra_admin"], members=["stub-user"])
     resp = client.get("/api/v1/auth/oidc/stub/callback", follow_redirects=False)

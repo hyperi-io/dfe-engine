@@ -493,17 +493,8 @@ def bound_account(request: Request, user_id: str) -> Any:
 
 
 def get_role_config(request: Request) -> RoleConfig:
-    """Load the current role definitions from disk (not a stale in-memory snapshot)."""
-    role_store = getattr(request.app.state, "role_store", None)
-    if role_store is not None:
-        try:
-            return role_store.load_config()
-        except FileNotFoundError:
-            pass
-    role_config = getattr(request.app.state, "role_config", None)
-    if role_config is not None:
-        return role_config
-    return RoleConfig.load_builtin()
+    """The role definitions ``authorize()`` reads: the live copy role writes refresh, else the shipped ones."""
+    return live_role_config(request) or RoleConfig.load_builtin()
 
 
 def provider_bindings(request: Request) -> dict[str, str]:
