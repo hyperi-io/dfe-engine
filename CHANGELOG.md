@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.72](https://github.com/hyperi-io/dfe-engine/compare/v1.22.71...v1.22.72) (2026-10-25)
+
+### Bug Fixes
+
+* let an org-bound holder use the usage, sampler, task and schema reads ([#978](https://github.com/hyperi-io/dfe-engine/issues/978)) ([14ae763](https://github.com/hyperi-io/dfe-engine/commit/14ae763e9be3715748823e87e0a4e94233a83c86))
+* refuse a scoped role that grants anything beyond reads ([#979](https://github.com/hyperi-io/dfe-engine/issues/979)) ([f304abf](https://github.com/hyperi-io/dfe-engine/commit/f304abf6368c41a4a78bf10e272245d32613ba67))
+
 ## [1.22.71](https://github.com/hyperi-io/dfe-engine/compare/v1.22.70...v1.22.71) (2026-10-25)
 
 ### Bug Fixes
