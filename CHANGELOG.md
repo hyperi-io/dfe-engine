@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.71](https://github.com/hyperi-io/dfe-engine/compare/v1.22.70...v1.22.71) (2026-10-25)
+
+### Bug Fixes
+
+* give an OIDC login's directory lookup one overall deadline ([#975](https://github.com/hyperi-io/dfe-engine/issues/975)) ([6fc3063](https://github.com/hyperi-io/dfe-engine/commit/6fc306321e1b2679aee506efda4017bade4954f0)), closes [#974](https://github.com/hyperi-io/dfe-engine/issues/974)
+* **security:** refuse the four ClickHouse 26.10 table functions the guard missed ([#976](https://github.com/hyperi-io/dfe-engine/issues/976)) ([d6c84d2](https://github.com/hyperi-io/dfe-engine/commit/d6c84d2e1327cee3f32ba4b4db2e3977768e9003))
+
 ## [1.22.70](https://github.com/hyperi-io/dfe-engine/compare/v1.22.69...v1.22.70) (2026-10-24)
 
 ### Bug Fixes
