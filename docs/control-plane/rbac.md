@@ -705,6 +705,7 @@ class AuthSettings(BaseModel):
     trust_proxy_auth_headers: bool = False  # Read the X-Oidc-* headers (Path 1)
     oidc_group_sync_enabled: bool = True  # Background sync of api-mode providers
     oidc_group_sync_tick_seconds: int = 60  # How often the sync checks which providers are due
+    oidc_login_directory_deadline_seconds: float = 10.0  # Longest a login waits on the directory group lookup
     proxy_provider: str = "oidc"  # Provider name the header path stamps on accounts it provisions
     source_provider_bindings: dict[str, str] = {}  # e.g. {"scim": "entra"}
     api_key_default_ttl_days: int = 90  # 0 = keys created without expires_at never expire
@@ -714,8 +715,11 @@ Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`,
 `DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`, `DFE_AUTH_PROXY_PROVIDER`,
 `DFE_AUTH_SOURCE_PROVIDER_BINDINGS` (a JSON object),
 `DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS`, `DFE_AUTH_OIDC_GROUP_SYNC_ENABLED`,
-`DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS`. OIDC provider files always live in the
+`DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS`,
+`DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS`. OIDC provider files always live in the
 auth directory's `oidc-providers/`.
+
+A login whose directory lookup is still running at the deadline is handled as a directory that did not answer: it keeps the groups the token carries, else the account's stored groups, and logs the timeout once with the elapsed time.
 
 ---
 
