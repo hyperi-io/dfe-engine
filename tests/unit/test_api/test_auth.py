@@ -13,6 +13,7 @@ from dfe_engine.api.deps import _registries, create_access_token
 from dfe_engine.auth import hyperdx_role
 from dfe_engine.auth.groups import GROUPS_SKIPPED
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
+from tests.support.held_callers import caller_in_group, define_role
 
 
 def _claims(token: str) -> dict:
@@ -981,6 +982,33 @@ class TestOnlyASessionBoundToAnAccountRefreshes:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["user_id"] == "dev"
+
+
+class TestTheHyperdxRoleReadsWhatAuthorizeReads:
+    """``/auth/me`` decides the fork's role on the grants and role definitions authz uses."""
+
+    def test_with_auth_disabled_the_dev_root_is_a_hyperdx_admin(self, api_settings):
+        """The dev posture's anonymous session holds admin as a bare role, with no grants."""
+        settings = api_settings.model_copy(
+            update={"env": "dev", "auth": api_settings.auth.model_copy(update={"enabled": False})}
+        )
+        app = create_app(settings=settings)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                me = client.get("/api/v1/auth/me")
+        finally:
+            _registries.clear()
+
+        assert me.status_code == 200, me.text
+        assert me.json()["hyperdx_role"] == "admin"
+
+    def test_a_role_in_the_live_definitions_decides_the_claim(self, app, client, api_settings):
+        define_role(app, "live_author", ["query:write"], scoped=False)
+        author = caller_in_group(
+            app, api_settings, "live-author", roles=["live_author"], org_ids=[]
+        )
+
+        assert author.get("/api/v1/auth/me").json()["hyperdx_role"] == "member"
 
 
 class TestAMembershipTakenAwayIsGoneFromTheNextRequest:

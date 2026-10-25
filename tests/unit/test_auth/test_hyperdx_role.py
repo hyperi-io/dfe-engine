@@ -95,3 +95,15 @@ def test_one_authoring_role_among_viewers_makes_a_member():
 def test_a_system_admin_beside_an_org_scoped_one_is_still_an_admin():
     grants = [ScopedGrant(role="admin", scope=ACME), ScopedGrant(role="infra_admin")]
     assert hyperdx_role.role_claim(grants) == ADMIN
+
+
+@pytest.mark.parametrize(
+    ("role", "expected"), [("admin", ADMIN), ("data_analyst", MEMBER), ("data_viewer", VIEWER)]
+)
+def test_a_context_with_bare_roles_reads_them_as_authorize_does(role, expected):
+    """Auth disabled, the dev root and the local provider carry roles with no grants."""
+    from dfe_engine.auth.models import AuthContext, held_grants
+
+    context = AuthContext(user_id="dev", roles=[role])
+
+    assert hyperdx_role.role_claim(held_grants(context)) == expected

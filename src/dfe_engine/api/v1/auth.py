@@ -46,7 +46,7 @@ from dfe_engine.auth.audit import (
 from dfe_engine.auth.bootstrap import admin_account_name, admin_on_default_password
 from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.login_throttle import LoginThrottle
-from dfe_engine.auth.models import AuthenticationError, ScopedGrant
+from dfe_engine.auth.models import AuthenticationError, ScopedGrant, held_grants
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import (
@@ -476,7 +476,7 @@ async def get_me(user: CurrentUser, request: Request):
         disabled_at=account.disabled_at if account else "",
         blocked_at=account.blocked_at if account else "",
         password_change_required=bool(account and account.password_change_required),
-        hyperdx_role=hyperdx_role.role_claim(user.grants, role_config),
+        hyperdx_role=hyperdx_role.role_claim(held_grants(user), role_config),
         hyperdx_identity=hyperdx_identity(request, user),
     )
 
