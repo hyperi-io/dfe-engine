@@ -40,7 +40,7 @@ from dfe_engine.auth.jit import (
     JitSubjectUnusableError,
 )
 from dfe_engine.auth.membership import groups_held, groups_held_by
-from dfe_engine.auth.models import platform_caller
+from dfe_engine.auth.models import held_grants, is_platform_role, platform_caller
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import session_ended
 from dfe_engine.gitcrud.retention import effective_settings
@@ -443,20 +443,19 @@ def _grants_of(groups: Iterable[Group]) -> GroupResolution:
     org_ids: set[str] = set()
     matched: set[str] = set()
     grants: list[ScopedGrant] = []
-    seen_grants: set[tuple[str, str]] = set()
+    seen_grants: set[ScopedGrant] = set()
     for group in groups:
         matched.add(group.name)
         scope_org = group.scope_org
         scope = Scope(type="org", id=scope_org) if scope_org else Scope()
-        if scope_org:
-            org_ids.add(scope_org)
-        org_ids.update(group.org_ids)
+        claimed = group.org_markers
+        org_ids.update(claimed)
         for role in group.roles:
             roles.add(role)
-            key = (role, str(scope))
-            if key not in seen_grants:
-                seen_grants.add(key)
-                grants.append(ScopedGrant(role=role, scope=scope))
+            grant = ScopedGrant(role=role, scope=scope, org_ids=claimed)
+            if grant not in seen_grants:
+                seen_grants.add(grant)
+                grants.append(grant)
     return GroupResolution(sorted(roles), sorted(org_ids), grants, sorted(matched))
 
 
@@ -911,25 +910,20 @@ def is_action_allowed(
 
 
 def allowed_at_system_or_own_org(request: Request, user: AuthContext, action: str) -> bool:
-    """Whether ``action`` is allowed at system scope or at the scope of one of the caller's orgs.
+    """Whether ``action`` is allowed at system scope or in one of the caller's :func:`held_orgs`.
 
     A role bound at an org's scope grants nothing at system scope, so a system-scope
     check alone refuses every caller whose grant an org's group carries.
 
     Args:
-        request: The request, for the settings and role definitions.
+        request: The request, for the settings, role definitions and org registry.
         user: The caller's auth context.
         action: The action to check.
 
     Returns:
         True when some grant the caller holds allows ``action`` there.
     """
-    if is_action_allowed(request, user, action):
-        return True
-    return any(
-        is_action_allowed(request, user, action, scope=Scope(type="org", id=org_id))
-        for org_id in user.org_ids
-    )
+    return is_action_allowed(request, user, action) or bool(held_orgs(request, user, action))
 
 
 def reads_every_org(request: Request, user: AuthContext, action: str) -> bool:
@@ -978,25 +972,55 @@ def refuse_unknown_orgs(request: Request, names: Iterable[str]) -> None:
         )
 
 
-def held_orgs(request: Request, user: AuthContext, action: str) -> list[Any]:
-    """The registered orgs a held caller's ``action`` reaches: named by its groups, allowed there.
+def grant_orgs(grant: ScopedGrant, orgs: list[Any], role_config: RoleConfig) -> list[Any]:
+    """The registered orgs a held read through ``grant`` reaches, as its group's ClickHouse user does.
 
-    An org its groups name but grant ``action`` at no scope covering it is left out,
-    so a grant bound at one org never opens another the caller belongs to.
+    A grant bound at an org's scope reaches that org. A system grant of a platform
+    role (:func:`~dfe_engine.auth.models.is_platform_role`) reaches every org. Any
+    other system grant, ``org_viewer`` or a ``scoped`` role, reaches only the orgs its
+    own group names (``ScopedGrant.org_ids``), never one another group names.
 
     Args:
-        request: The request, for the role definitions and the org registry.
+        grant: One of the caller's grants.
+        orgs: The org registry's entries.
+        role_config: The role definitions ``authorize()`` reads.
+
+    Returns:
+        The orgs, in registry order.
+    """
+    if grant.scope.type == "org":
+        return [org for org in orgs if org.name == grant.scope.id]
+    if grant.scope.type != "system":
+        return []
+    if is_platform_role(grant.role, role_config):
+        return list(orgs)
+    return resolve_orgs(grant.org_ids, orgs)
+
+
+def held_orgs(request: Request, user: AuthContext, action: str) -> list[Any]:
+    """The registered orgs a held caller's ``action`` reaches through the grants holding it.
+
+    An org counts only when a grant that allows ``action`` reaches it
+    (:func:`grant_orgs`), so neither a grant bound at one org nor a tenant role bound
+    system-wide opens an org that only another of the caller's groups names.
+
+    Args:
+        request: The request, for the settings, role definitions and org registry.
         user: The caller's auth context.
         action: The action the read is gated on.
 
     Returns:
         The orgs, in registry order.
     """
-    return [
-        org
-        for org in resolve_orgs(user.org_ids, registered_orgs(request))
-        if is_action_allowed(request, user, action, scope=Scope(type="org", id=org.name))
-    ]
+    registered = registered_orgs(request)
+    if not request.app.state.settings.auth.enabled:
+        return resolve_orgs(user.org_ids, registered)
+    config = live_role_config(request) or RoleConfig.load_builtin()
+    reached: set[str] = set()
+    for grant in held_grants(user):
+        if config.has_permission(grant.role, action):
+            reached.update(org.name for org in grant_orgs(grant, registered, config))
+    return [org for org in registered if org.name in reached]
 
 
 def held_tenant_ids(request: Request, user: AuthContext, action: str) -> list[str] | None:
@@ -1026,7 +1050,7 @@ def granted_bound_org(request: Request, user: AuthContext, action: str) -> str:
     """The org a session's org-bound read is held to: the one its account is bound to.
 
     The binding grants nothing by itself. The caller must also read every org with
-    ``action`` (:func:`reads_every_org`), or hold the org through its groups.
+    ``action`` (:func:`reads_every_org`), or hold it among its :func:`held_orgs`.
 
     Args:
         request: The request, for the settings, role definitions and org registry.
@@ -1053,8 +1077,7 @@ def granted_bound_org(request: Request, user: AuthContext, action: str) -> str:
         )
     if reads_every_org(request, user, action):
         return user.org_id
-    granted = resolve_orgs(user.org_ids, registered_orgs(request))
-    if user.org_id not in {org.name for org in granted}:
+    if user.org_id not in {org.name for org in held_orgs(request, user, action)}:
         raise HTTPException(
             status_code=403,
             detail={

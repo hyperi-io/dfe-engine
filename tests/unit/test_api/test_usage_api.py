@@ -470,3 +470,53 @@ def test_every_metric_dfe_schemas_declares_has_a_label():
     from dfe_schemas.usage import METRICS
 
     assert [metric.name for metric in METRICS] == list(METRIC_LABELS)
+
+
+def test_a_system_bound_viewer_never_reads_an_org_only_another_group_names(
+    app, api_settings, acme, tables
+):
+    """org_viewer at system scope over acme, plus data_viewer bound at beta: beta is never read."""
+    app.state.group_store.create("beta-dv", roles=["data_viewer"], scope="org:beta")
+    app.state.group_store.update("beta-dv", org_ids=["beta"])
+    caller = caller_in_group(app, api_settings, "mixed", roles=["org_viewer"], org_ids=["acme"])
+    app.state.account_store.update("mixed", groups=["mixed-group", "beta-dv"])
+    app.state.group_store.add_member("beta-dv", "mixed")
+
+    overview = caller.get("/api/v1/usage/overview")
+    named = _usage(caller, metric=INGESTED_BYTES, org="beta")
+
+    assert overview.status_code == 200, overview.text
+    assert overview.json()["orgs"] == ["acme"]
+    assert set(map(tuple, tables.scopes_read())) == {tuple(ACME_TENANTS)}
+    assert named.status_code == 403, named.text
+    assert named.json()["code"] == "org_not_granted"
+
+
+def test_an_org_bound_group_naming_only_a_tenant_id_reads_its_org(app, api_settings, acme, tables):
+    viewer = caller_in_group(
+        app, api_settings, "by-tenant", roles=["org_viewer"], org_ids=["t-acme-1"], scope="org:acme"
+    )
+
+    resp = viewer.get("/api/v1/usage/overview")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["orgs"] == ["acme"]
+
+
+def test_a_jit_shaped_context_naming_only_a_tenant_id_holds_its_org(app, acme):
+    """The grants and org ids jit.py builds: an org-scoped grant, and only the tenant id."""
+    from starlette.requests import Request
+
+    from dfe_engine.api.deps import allowed_at_system_or_own_org, held_orgs
+    from dfe_engine.auth.models import AuthContext, Scope, ScopedGrant
+
+    request = Request({"type": "http", "app": app, "headers": []})
+    user = AuthContext(
+        user_id="jit",
+        roles=["org_viewer"],
+        grants=[ScopedGrant(role="org_viewer", scope=Scope(type="org", id="acme"))],
+        org_ids=["t-acme-1"],
+    )
+
+    assert allowed_at_system_or_own_org(request, user, "usage:read")
+    assert [org.name for org in held_orgs(request, user, "usage:read")] == ["acme"]

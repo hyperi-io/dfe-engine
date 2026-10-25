@@ -51,3 +51,21 @@ def test_the_same_role_unscoped_gets_the_platform_reader(app, client, api_settin
 
     assert conn.status_code == 200, conn.text
     assert conn.json()["username"] == "dfe_query_reader"
+
+
+def test_an_org_only_another_group_names_does_not_widen_the_connection(
+    app, client, api_settings, ch_secrets
+):
+    """org_viewer system-wide over acme, plus infra_viewer (no query:execute) bound at beta."""
+    app.state.org_registry.create("acme", org_ids=["t-acme"])
+    app.state.org_registry.create("beta")
+    app.state.group_store.create("beta-infra", roles=["infra_viewer"], scope="org:beta")
+    app.state.group_store.update("beta-infra", org_ids=["beta"])
+    viewer = caller_in_group(app, api_settings, "mixed", roles=["org_viewer"], org_ids=["acme"])
+    app.state.group_store.add_member("beta-infra", "mixed")
+    app.state.account_store.update("mixed", groups=["mixed-group", "beta-infra"])
+
+    conn = viewer.get("/api/v1/hyperdx/connection")
+
+    assert conn.status_code == 200, conn.text
+    assert conn.json()["username"] == org_user_name("acme")

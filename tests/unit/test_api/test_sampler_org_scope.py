@@ -243,3 +243,22 @@ def test_an_org_bound_caller_without_sampler_read_is_refused(app, api_settings, 
     assert _sample(infra).status_code == 403
     assert infra.get("/api/v1/samples").status_code == 403
     assert table.reads == []
+
+
+def test_a_system_bound_viewer_never_samples_an_org_only_another_group_names(
+    app, api_settings, table
+):
+    """org_viewer at system scope over test_org, plus dfe_operator bound at test_org_2."""
+    from tests.support.held_callers import caller_in_group
+
+    viewer = caller_in_group(app, api_settings, "mixed", roles=["org_viewer"], org_ids=["test_org"])
+    app.state.group_store.create("op-2", roles=["dfe_operator"], scope="org:test_org_2")
+    app.state.group_store.update("op-2", org_ids=["test_org_2"])
+    app.state.group_store.add_member("op-2", "mixed")
+    app.state.account_store.update("mixed", groups=["mixed-group", "op-2"])
+
+    resp = _sample(viewer)
+
+    assert resp.status_code == 200, resp.text
+    [(_, params)] = table.reads
+    assert params["orgs"] == ["test_org"]
