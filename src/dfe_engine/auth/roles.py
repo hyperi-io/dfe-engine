@@ -29,6 +29,7 @@ Usage:
 from __future__ import annotations
 
 import importlib.resources
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Literal
 
@@ -137,6 +138,36 @@ def permission_covers(held: str, requested: str) -> bool:
     if requested_parts[-1] == "*" or len(requested_parts) != len(held_parts):
         return False
     return all(segment_covers(h, r) for h, r in zip(held_parts, requested_parts, strict=True))
+
+
+# The one action beyond reads a scoped role may hold: a query held to its holder's orgs.
+SCOPED_ROLE_EXTRA_ACTIONS = frozenset({"query:execute"})
+
+
+def scoped_role_refusal(name: str, permissions: Iterable[str]) -> str | None:
+    """Why a ``scoped`` role may not grant ``permissions``, or None when it may.
+
+    A scoped role bound at system scope passes every org-scope check, so it may hold
+    only patterns whose last segment is ``read``, and ``query:execute``.
+
+    Args:
+        name: The role's name.
+        permissions: The permission patterns it would grant.
+
+    Returns:
+        A message naming the role and every pattern it may not hold, or None.
+    """
+    refused = [
+        pattern
+        for pattern in permissions
+        if pattern not in SCOPED_ROLE_EXTRA_ACTIONS and pattern.split(":")[-1] != "read"
+    ]
+    if not refused:
+        return None
+    return (
+        f"Scoped role '{name}' may grant only read actions and query:execute, "
+        f"not {', '.join(refused)}"
+    )
 
 
 class RoleDefinition(BaseModel):
@@ -248,7 +279,8 @@ class RoleConfig:
             RoleConfig instance.
 
         Raises:
-            ValueError: If the data is missing the "roles" key.
+            ValueError: If the data is missing the "roles" key, or a scoped role grants
+                more than :func:`scoped_role_refusal` allows.
         """
         if "roles" not in data:
             raise ValueError("YAML must contain a 'roles' key")
@@ -262,5 +294,9 @@ class RoleConfig:
                 normalized["resource_type"] = "core"
             else:
                 normalized.setdefault("resource_type", "custom")
-            roles[name] = RoleDefinition.model_validate(normalized)
+            definition = RoleDefinition.model_validate(normalized)
+            refusal = definition.scoped and scoped_role_refusal(name, definition.permissions)
+            if refusal:
+                raise ValueError(refusal)
+            roles[name] = definition
         return cls(roles=roles)

@@ -249,6 +249,8 @@ graph LR
 
 A role write grants only what its caller already holds. Creating a role, or changing what one grants, needs every permission it lists through the caller's system-scope grants, where a pattern covers another when it matches everything that one does (`config:*` covers `config:read`). An unscoped role reads every org once bound at system scope, so it needs those permissions through roles that themselves read every org. Handing a role to a group, an account or an API key follows the same rule at the group's scope, `role:write` adds nothing to it, and a role `roles.yaml` does not declare needs `*`.
 
+A `scoped` role grants only `...:read` patterns and `query:execute`, as at system scope it passes every org-scope check. Anything else fails the roles file's load, and the roles API answers 422.
+
 ### 2.3 Permission Taxonomy
 
 | Domain | Actions | Scoped by service? |
