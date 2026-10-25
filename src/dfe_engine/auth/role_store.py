@@ -17,6 +17,7 @@ from dfe_engine.auth.roles import (
     RoleDefinition,
     RoleResourceType,
     builtin_core_role_names,
+    scoped_role_refusal,
 )
 from dfe_engine.core_resources.yaml_resource_type import CORE_RESOURCE_MUTATION_MESSAGE
 from dfe_engine.yaml_utils import yaml_dump
@@ -140,6 +141,10 @@ class RoleStore:
         self._write_roles(roles)
 
     def _write_roles(self, roles: dict[str, RoleDefinition]) -> RoleConfig:
+        for role_name, definition in roles.items():
+            refusal = definition.scoped and scoped_role_refusal(role_name, definition.permissions)
+            if refusal:
+                raise ValueError(refusal)
         core_names = builtin_core_role_names()
         payload: dict[str, dict[str, object]] = {}
         for role_name, definition in sorted(roles.items()):

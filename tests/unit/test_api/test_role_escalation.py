@@ -206,19 +206,25 @@ class TestAScopedRoleDoesNotBecomeAPlatformOne:
         admin_headers: dict[str, str],
         api_settings: DFESettings,
     ) -> dict[str, str]:
+        """trent manages roles and groups, and holds query:execute only through a scoped role."""
         _create_role(
             client,
             admin_headers,
-            {
-                "name": "tenant-manager",
-                "permissions": ["role:*", "group:*", "query:execute"],
-                "scoped": True,
-            },
+            {"name": "tenant-manager", "permissions": ["role:*", "group:*"]},
+        )
+        _create_role(
+            client,
+            admin_headers,
+            {"name": "tenant-search", "permissions": ["query:execute"], "scoped": True},
         )
         app.state.account_store.create("trent", "pw-trent-12345678")
         resp = client.post(
             GROUPS,
-            json={"name": "tenant-managers", "roles": ["tenant-manager"], "members": ["trent"]},
+            json={
+                "name": "tenant-managers",
+                "roles": ["tenant-manager", "tenant-search"],
+                "members": ["trent"],
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 201, resp.text
