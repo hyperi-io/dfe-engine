@@ -1054,6 +1054,19 @@ class TestRelyingPartyStaysInSync:
         _create_provider(client, admin_headers, name="fresh")
         assert app.state.oidc_rp.has_provider("fresh")
 
+    @pytest.fixture
+    def login_deadline(self, api_settings) -> None:
+        api_settings.auth.oidc_login_directory_deadline_seconds = 2.5
+
+    def test_the_login_directory_deadline_reaches_every_build(
+        self, login_deadline, client, app, admin_headers
+    ):
+        """Set before startup it reaches the first RP, and a rebuild reads it again."""
+        assert app.state.oidc_rp._directory_deadline_seconds == 2.5
+        app.state.settings.auth.oidc_login_directory_deadline_seconds = 4.0
+        _create_provider(client, admin_headers, name="fresh")
+        assert app.state.oidc_rp._directory_deadline_seconds == 4.0
+
     def test_created_credentials_reach_the_rp_without_a_restart(self, client, app, admin_headers):
         """The whole point of dfe-engine#392: no env edit, no restart, just a login."""
         _create_provider(

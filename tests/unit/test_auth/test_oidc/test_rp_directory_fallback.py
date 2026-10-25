@@ -12,22 +12,30 @@ else marks the identity for the account's stored ones. A refusal (a 401 or 403, 
 declined scope) is judged as no directory groups, so a user cannot keep groups by
 declining the scope the lookup needs. Each case runs the RP's token handling
 against a real adapter pointed at a local Okta, Graph or Cloud Identity service.
+
+A lookup still running at the login deadline is an outage. Those cases use a
+directory that never answers, so they hold whatever the machine's speed.
 """
 
+import asyncio
 import json
 
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.metrics import create_metrics
 
+from dfe_engine.auth.oidc.adapters.base import LookupFailure
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
-from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+from dfe_engine.auth.oidc.models import GroupInfo, GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.rp import (
+    DEFAULT_DIRECTORY_DEADLINE_SECONDS,
     DIRECTORY_GROUPS_FALLBACKS,
     DIRECTORY_GROUPS_REFUSALS,
     LoginMetrics,
     OidcRelyingParty,
+    build_relying_party,
 )
+from dfe_engine.settings import AuthSettings
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
 from tests.unit.test_auth.test_oidc.local_directory import AppTokenEntra
 from tests.unit.test_auth.test_oidc.local_graph import LocalGraph
@@ -81,6 +89,37 @@ def _manager():
 
 def _rp(tmp_path, manager) -> OidcRelyingParty:
     return OidcRelyingParty(OIDCProviderRegistry(tmp_path / "reg"), metrics=LoginMetrics(manager))
+
+
+def _rp_with_deadline(tmp_path, manager, seconds: float) -> OidcRelyingParty:
+    rp = build_relying_party(
+        OIDCProviderRegistry(tmp_path / "reg"),
+        metrics=LoginMetrics(manager),
+        directory_deadline_seconds=seconds,
+    )
+    assert rp is not None
+    return rp
+
+
+class _Directory:
+    """A directory adapter that gives *answer*, or never answers when *answer* is None."""
+
+    def __init__(self, answer: list[GroupInfo] | LookupFailure | None = None) -> None:
+        self.answer = answer
+        self.asked = 0
+
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo] | LookupFailure:
+        self.asked += 1
+        if self.answer is None:
+            await asyncio.Event().wait()
+        assert self.answer is not None
+        return self.answer
+
+
+def _point_at(monkeypatch, directory: _Directory) -> None:
+    monkeypatch.setattr(
+        "dfe_engine.auth.oidc.adapters.get_adapter", lambda *_args, **_kwargs: directory
+    )
 
 
 class TestAnOutage:
@@ -283,3 +322,82 @@ class TestADirectoryThatAnswers:
         assert identity.groups == ["dfe-viewers"]
         assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {}
         assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {}
+
+
+class TestTheLoginDeadline:
+    def test_an_rp_built_without_settings_waits_the_settings_default(self, tmp_path):
+        assert (
+            DEFAULT_DIRECTORY_DEADLINE_SECONDS
+            == AuthSettings().oidc_login_directory_deadline_seconds
+        )
+        assert (
+            _rp(tmp_path, _manager())._directory_deadline_seconds
+            == DEFAULT_DIRECTORY_DEADLINE_SECONDS
+        )
+
+    async def test_a_lookup_past_it_keeps_the_token_groups_counted_and_logged_once(
+        self, tmp_path, monkeypatch, audit_events
+    ):
+        directory = _Directory()
+        _point_at(monkeypatch, directory)
+        manager = _manager()
+
+        identity = await _rp_with_deadline(tmp_path, manager, 0.01)._identity_from_token(
+            client=None, provider=OKTA, provider_name="acme-okta", token=OKTA_TOKEN
+        )
+
+        assert directory.asked == 1
+        assert (identity.groups, identity.groups_unresolved) == (["dfe-admins", "soc"], False)
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {"acme-okta": 1.0}
+        assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {}
+        (line,) = [event for event in audit_events if event["event"] == OUTAGE_EVENT]
+        assert (line["provider_name"], line["kept"], line["error_type"]) == (
+            "acme-okta",
+            "token_groups",
+            "TimeoutError",
+        )
+        assert line["deadline_seconds"] == 0.01
+        assert line["elapsed_seconds"] >= 0.01
+
+    async def test_an_overage_past_it_is_marked_for_the_stored_groups(
+        self, tmp_path, monkeypatch, audit_events
+    ):
+        _point_at(monkeypatch, _Directory())
+        manager = _manager()
+        token = {"userinfo": {"_claim_names": {"groups": "src1"}, "oid": OID, "sub": "pairwise"}}
+
+        identity = await _rp_with_deadline(tmp_path, manager, 0.01)._identity_from_token(
+            client=None, provider=ENTRA, provider_name="acme-entra", token=token
+        )
+
+        assert (identity.groups, identity.groups_unresolved) == ([], True)
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {"acme-entra": 1.0}
+        (line,) = [event for event in audit_events if event["event"] == OUTAGE_EVENT]
+        assert line["kept"] == "stored_groups"
+
+    async def test_an_answer_inside_it_is_used_and_nothing_is_counted(
+        self, tmp_path, monkeypatch, audit_events
+    ):
+        _point_at(monkeypatch, _Directory([GroupInfo(id="00g1", name="dfe-viewers")]))
+        manager = _manager()
+
+        identity = await _rp(tmp_path, manager)._identity_from_token(
+            client=None, provider=OKTA, provider_name="acme-okta", token=OKTA_TOKEN
+        )
+
+        assert (identity.groups, identity.groups_unresolved) == (["00g1"], False)
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {}
+        assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {}
+        assert not [event for event in audit_events if event["event"] == OUTAGE_EVENT]
+
+    async def test_a_refusal_inside_it_is_still_a_refusal(self, tmp_path, monkeypatch):
+        _point_at(monkeypatch, _Directory(LookupFailure.REFUSED))
+        manager = _manager()
+
+        identity = await _rp(tmp_path, manager)._identity_from_token(
+            client=None, provider=OKTA, provider_name="acme-okta", token=OKTA_TOKEN
+        )
+
+        assert (identity.groups, identity.groups_unresolved) == ([], False)
+        assert _counted(manager, DIRECTORY_GROUPS_REFUSALS) == {"acme-okta": 1.0}
+        assert _counted(manager, DIRECTORY_GROUPS_FALLBACKS) == {}
