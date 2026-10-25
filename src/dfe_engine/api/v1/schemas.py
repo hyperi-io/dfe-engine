@@ -27,6 +27,7 @@ from dfe_engine.api.deps import (
     get_field_map_registry_optional,
     held_tenant_ids,
     require_action,
+    require_own_org_action,
     ttl_settings,
 )
 from dfe_engine.api.errors import ErrorResponse, engine_message, raise_exchange_http
@@ -1737,7 +1738,7 @@ def _resolve_source_version(source, version, source_name):
 @router.get(
     "/{source_name}/json-paths",
     response_model=JsonPathsResponse,
-    dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["schema_read"]))],
 )
 async def discover_json_paths(
     source_name: str,
@@ -1852,7 +1853,7 @@ async def discover_json_paths(
 @router.get(
     "/{source_name}/sample-rows",
     response_model=SampleRowsResponse,
-    dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["schema_read"]))],
 )
 async def sample_source_rows(
     source_name: str,

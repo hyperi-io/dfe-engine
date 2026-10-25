@@ -37,7 +37,7 @@ from dfe_engine.api.deps import (
     CurrentUser,
     SourceReg,
     held_tenant_ids,
-    require_action,
+    require_own_org_action,
 )
 from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
 from dfe_engine.auth.audit import audit_resource_change
@@ -54,7 +54,7 @@ from dfe_engine.sampling import (
 
 router = APIRouter(tags=["sampler"])
 
-_READ = Depends(require_action(scopes_dict["sampler_read"]))
+_READ = Depends(require_own_org_action(scopes_dict["sampler_read"]))
 
 _TASK_KIND = "sampler:sample"
 

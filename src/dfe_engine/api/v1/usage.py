@@ -12,10 +12,11 @@
     GET /usage           -> one metric per UTC day over a range, for the deployment
                             or one org
 
-Both read the usage rollup (:mod:`dfe_engine.usage`) and need ``usage:read``. A caller
-whose grant reads every org sees the whole deployment, and may name one org. Any
-other caller is held to the tenant ids of its registered orgs, as the sampler holds
-it: it reads its own orgs' bytes and events per second, and the two core counts,
+Both read the usage rollup (:mod:`dfe_engine.usage`) and need ``usage:read`` at system
+scope or at one of the caller's orgs. A caller whose grant reads every org sees the
+whole deployment, and may name one org. Any other caller is held to the tenant ids of
+the registered orgs it holds ``usage:read`` at: it reads their bytes and events per
+second, and the two core counts,
 which are measured for the deployment rather than per org, come back
 ``not_permitted``. A metric with no rows in the range is ``not_measured``, never 0.
 """
@@ -40,16 +41,17 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
-    held_tenant_ids,
+    held_orgs,
+    reads_every_org,
     refuse_unknown_orgs,
     registered_orgs,
-    require_action,
+    require_own_org_action,
 )
 from dfe_engine.api.errors import ErrorResponse, backend_failure
 from dfe_engine.auth.models import AuthContext
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
-from dfe_engine.orgs.tenant_scope import org_tenant_ids, resolve_orgs
+from dfe_engine.orgs.tenant_scope import org_tenant_ids
 from dfe_engine.usage import (
     UsagePoint,
     UsageReader,
@@ -61,7 +63,7 @@ from dfe_engine.usage import (
 router = APIRouter(prefix="/usage", tags=["usage"])
 
 _ACTION = scopes_dict["usage_read"]
-_READ = Depends(require_action(_ACTION))
+_READ = Depends(require_own_org_action(_ACTION))
 
 # The overview's series, and the window its highest is taken over, in UTC days to today.
 OVERVIEW_DAYS = 30
@@ -159,9 +161,10 @@ class UsageScope:
 def usage_scope(request: Request, user: AuthContext, org: str | None) -> UsageScope:
     """The usage *user* may read, narrowed to *org* when it names one.
 
-    A caller that reads every org with ``usage:read`` (:func:`held_tenant_ids`) reads
+    A caller that reads every org with ``usage:read`` (:func:`reads_every_org`) reads
     the whole deployment, or a registered org it names. Any other caller reads the
-    tenant ids of the registered orgs its groups name, or of the one it names.
+    tenant ids of the registered orgs its groups name and allow ``usage:read`` at, or
+    of the one it names.
 
     Args:
         request: The request, for the role definitions and the org registry.
@@ -177,28 +180,26 @@ def usage_scope(request: Request, user: AuthContext, org: str | None) -> UsageSc
             registered or not, and 403 ``no_org`` for a held caller holding no
             registered org.
     """
-    held_ids = held_tenant_ids(request, user, _ACTION)
     registered = registered_orgs(request)
-    if held_ids is None:
+    if reads_every_org(request, user, _ACTION):
         if org is None:
             return UsageScope(held=False, orgs=[], tenant_ids=[ALL_ORGS])
         refuse_unknown_orgs(request, [org])
         (named,) = [entry for entry in registered if entry.name == org]
         return UsageScope(held=False, orgs=[org], tenant_ids=org_tenant_ids(named))
 
-    granted = resolve_orgs(user.org_ids, registered)
-    if org is None:
-        names, tenant_ids = [entry.name for entry in granted], held_ids
-    else:
-        chosen = [entry for entry in granted if entry.name == org]
-        if not chosen:
-            raise HTTPException(
-                status_code=403,
-                detail={"code": "org_not_granted", "message": f"The caller holds no org '{org}'"},
-            )
-        names, tenant_ids = [org], org_tenant_ids(chosen[0])
+    granted = held_orgs(request, user, _ACTION)
+    chosen = granted if org is None else [entry for entry in granted if entry.name == org]
+    if org is not None and not chosen:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "org_not_granted", "message": f"The caller holds no org '{org}'"},
+        )
+    names = [entry.name for entry in chosen]
     # '' is the whole deployment's row, which no held read may reach.
-    tenant_ids = [tenant for tenant in tenant_ids if tenant != ALL_ORGS]
+    tenant_ids = [
+        tenant for entry in chosen for tenant in org_tenant_ids(entry) if tenant != ALL_ORGS
+    ]
     if not tenant_ids:
         raise HTTPException(
             status_code=403,

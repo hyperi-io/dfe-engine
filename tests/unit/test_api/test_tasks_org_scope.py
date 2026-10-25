@@ -111,3 +111,58 @@ def test_a_platform_task_reader_without_sampler_read_still_sees_every_task(
 
     assert {task["id"] for task in listed} == {every_org, own}
     assert auditor.get(f"/api/v1/tasks/{every_org}").status_code == 200
+
+
+@pytest.fixture
+def org_bound(app, client, api_settings, admin_headers):
+    """An admin's sample across every org, and one by a tenant whose group is bound at acme."""
+    app.dependency_overrides[get_clickhouse_client] = _Table
+    app.state.org_registry.create("acme", org_ids=["t-acme"])
+    define_role(app, "tenant_tasks", ["task:read", "task:write", "sampler:read"], scoped=True)
+    tenant = caller_in_group(
+        app, api_settings, "bound", roles=["tenant_tasks"], org_ids=["acme"], scope="org:acme"
+    )
+    body = {"mode": "recent", "table": EVENTS}
+    every_org = client.post("/api/v1/sample", json=body, headers=admin_headers).json()["task_id"]
+    own = tenant.post("/api/v1/sample", json=body)
+    assert own.status_code == 200, own.text
+    yield tenant, every_org, own.json()["task_id"]
+    app.dependency_overrides.pop(get_clickhouse_client, None)
+
+
+def test_an_org_bound_task_reader_sees_only_its_own_orgs_tasks(org_bound):
+    tenant, every_org, own = org_bound
+
+    listed = tenant.get("/api/v1/tasks")
+
+    assert listed.status_code == 200, listed.text
+    assert [task["id"] for task in listed.json()] == [own]
+    assert tenant.get(f"/api/v1/tasks/{own}").status_code == 200
+    assert tenant.get(f"/api/v1/tasks/{own}/stream").status_code == 200
+    assert tenant.post(f"/api/v1/tasks/{own}/cancel").status_code == 200
+    assert tenant.get(f"/api/v1/tasks/{every_org}").status_code == 404
+    assert tenant.post(f"/api/v1/tasks/{every_org}/cancel").status_code == 404
+
+
+def test_an_org_bound_caller_without_task_read_is_refused(app, api_settings, org_bound):
+    _tenant, _every_org, own = org_bound
+    viewer = caller_in_group(
+        app, api_settings, "bound-dv", roles=["data_viewer"], org_ids=["acme"], scope="org:acme"
+    )
+
+    assert viewer.get("/api/v1/tasks").status_code == 403
+    assert viewer.get(f"/api/v1/tasks/{own}").status_code == 403
+    assert viewer.post(f"/api/v1/tasks/{own}/cancel").status_code == 403
+
+
+def test_an_org_bound_task_reader_lists_tasks_without_any_sample(app, client, api_settings):
+    app.state.org_registry.create("acme", org_ids=["t-acme"])
+    define_role(app, "task_only", ["task:read"], scoped=True)
+    reader = caller_in_group(
+        app, api_settings, "task-only", roles=["task_only"], org_ids=["acme"], scope="org:acme"
+    )
+
+    resp = reader.get("/api/v1/tasks")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []
