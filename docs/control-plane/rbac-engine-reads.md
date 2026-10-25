@@ -12,11 +12,11 @@ The hunt runner's ClickHouse user reads every org, so every statement it compile
 
 ## Usage reads
 
-`GET /api/v1/usage` and `GET /api/v1/usage/overview` read the usage rollup (`usage_daily` and `usage_minute`) and need `usage:read` ([rbac.md](rbac.md#the-usage-scope)). The deciding step is the same one the other reads use: whether the caller's grant reads every org for `usage:read` (`api/deps.py::held_tenant_ids`).
+`GET /api/v1/usage` and `GET /api/v1/usage/overview` read the usage rollup (`usage_daily` and `usage_minute`) and need `usage:read` at system scope or at the scope of one of the caller's orgs ([rbac.md](rbac.md#the-usage-scope)). The deciding step is the same one the other reads use: whether the caller's grant reads every org for `usage:read` (`api/deps.py::reads_every_org`).
 
 A caller whose grant reads every org sees the deployment-wide rows, and may name any registered org with `org`. It can read all four metrics. An unregistered org answers `422 unknown_org`, and an org named for `cores_deployed` or `node_cores` answers `422 not_per_org`, because those two are measured for the deployment.
 
-Any other caller is held to the tenant ids of its registered orgs, resolved as for the sampler (`resolve_orgs`). It reads:
+Any other caller is held to the tenant ids of the registered orgs its groups name (`resolve_orgs`) and grant `usage:read` at. An org where its groups grant only some other role is never read. It reads:
 
 - `ingested_bytes` and `events_per_second` for those orgs added together, or for the one it names with `org`.
 - The two core counts as `not_permitted` with no series. Naming one of its own orgs changes nothing for them, and the response is still `200`.
