@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.73](https://github.com/hyperi-io/dfe-engine/compare/v1.22.72...v1.22.73) (2026-10-25)
+
+### Bug Fixes
+
+* hand dfe-hyperdx a viewer role for an account that cannot author ([#981](https://github.com/hyperi-io/dfe-engine/issues/981)) ([4dd5b99](https://github.com/hyperi-io/dfe-engine/commit/4dd5b99f0acb66789188eb5d6f81a6cf78050623))
+
 ## [1.22.72](https://github.com/hyperi-io/dfe-engine/compare/v1.22.71...v1.22.72) (2026-10-25)
 
 ### Bug Fixes
