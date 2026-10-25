@@ -377,7 +377,7 @@ class TestTheHyperdxRoleClaim:
         )
         assert resp.status_code == 200
         claim = _claims(resp.json()["access_token"])[hyperdx_role.CLAIM]
-        assert claim == hyperdx_role.MEMBER
+        assert claim == hyperdx_role.VIEWER
         assert claim not in hyperdx_role.FORK_ACCEPTS
 
     def test_a_refresh_resolves_the_claim_again_rather_than_copying_it(
@@ -387,7 +387,7 @@ class TestTheHyperdxRoleClaim:
         # token refuses whatever the presented one claimed.
         resp = client.post("/api/v1/auth/refresh", headers=viewer_headers)
         assert resp.status_code == 200
-        assert _claims(resp.json()["access_token"])[hyperdx_role.CLAIM] == hyperdx_role.MEMBER
+        assert _claims(resp.json()["access_token"])[hyperdx_role.CLAIM] == hyperdx_role.VIEWER
 
     def test_an_org_scoped_admin_carries_a_role_the_fork_refuses(self, client: TestClient, app):
         # Its admin role binds at one org's scope, and the fork's admin changes
@@ -440,9 +440,9 @@ class TestTheHyperdxSessionFields:
     def test_a_group_change_reaches_the_role_without_a_new_token(
         self, client: TestClient, admin_headers: dict, viewer_headers: dict
     ):
-        # The viewer's token says member; the account's groups decide at each request.
+        # The account's groups decide at each request, not the token's claim.
         before = client.get("/api/v1/auth/me", headers=viewer_headers)
-        assert before.json()["hyperdx_role"] == hyperdx_role.MEMBER
+        assert before.json()["hyperdx_role"] == hyperdx_role.VIEWER
 
         client.post(
             "/api/v1/auth/groups",
@@ -455,7 +455,7 @@ class TestTheHyperdxSessionFields:
 
         client.delete("/api/v1/auth/groups/hdx-role-live/members/viewer", headers=admin_headers)
         demoted = client.get("/api/v1/auth/me", headers=viewer_headers)
-        assert demoted.json()["hyperdx_role"] == hyperdx_role.MEMBER
+        assert demoted.json()["hyperdx_role"] == hyperdx_role.VIEWER
 
     def test_an_org_scoped_admin_is_a_member_on_its_org_identity(
         self, client: TestClient, app, api_settings
@@ -492,7 +492,7 @@ class TestTheHyperdxSessionFields:
 
         assert me.status_code == 200, me.text
         assert me.json()["hyperdx_identity"] == ""
-        assert me.json()["hyperdx_role"] == hyperdx_role.MEMBER
+        assert me.json()["hyperdx_role"] == hyperdx_role.VIEWER
 
 
 def _bearer(api_settings, sub: str, **claims) -> dict[str, str]:

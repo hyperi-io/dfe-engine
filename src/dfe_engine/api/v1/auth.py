@@ -48,6 +48,7 @@ from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.login_throttle import LoginThrottle
 from dfe_engine.auth.models import AuthenticationError, ScopedGrant
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import (
     remaining_seconds,
     session_auth_time,
@@ -178,6 +179,7 @@ def _token_data(
     org_ids: list[str],
     *,
     change_required: bool,
+    role_config: RoleConfig,
 ) -> dict:
     """The claims a session token carries for this account.
 
@@ -192,7 +194,7 @@ def _token_data(
             "roles": [],
             "groups": [],
             "org_ids": [],
-            hyperdx_role.CLAIM: hyperdx_role.role_claim([]),
+            hyperdx_role.CLAIM: hyperdx_role.role_claim([], role_config),
             PASSWORD_CHANGE_CLAIM: True,
         }
     return {
@@ -202,7 +204,7 @@ def _token_data(
         "groups": groups,
         "org_ids": org_ids,
         # dfe-hyperdx gates changing what a team sees on this one value.
-        hyperdx_role.CLAIM: hyperdx_role.role_claim(grants),
+        hyperdx_role.CLAIM: hyperdx_role.role_claim(grants, role_config),
     }
 
 
@@ -348,6 +350,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         auth_ctx.groups,
         auth_ctx.org_ids,
         change_required=change_required,
+        role_config=get_role_config(request),
     )
     now = int(time.time())
     token, lifetime = _mint(
@@ -413,6 +416,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings,
         resolve_live_groups_for_user(request, user.user_id),
         live.org_ids,
         change_required=change_required,
+        role_config=get_role_config(request),
     )
     token, lifetime = _mint(data, account, settings, auth_time=auth_time, now=now)
 
@@ -472,7 +476,7 @@ async def get_me(user: CurrentUser, request: Request):
         disabled_at=account.disabled_at if account else "",
         blocked_at=account.blocked_at if account else "",
         password_change_required=bool(account and account.password_change_required),
-        hyperdx_role=hyperdx_role.role_claim(user.grants),
+        hyperdx_role=hyperdx_role.role_claim(user.grants, role_config),
         hyperdx_identity=hyperdx_identity(request, user),
     )
 
