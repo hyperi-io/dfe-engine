@@ -32,6 +32,7 @@ from dfe_engine.auth.audit import audit_permission_denied, audit_role_change
 from dfe_engine.auth.models import ungrantable_permissions
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog, scopes_dict
 from dfe_engine.auth.role_store import Role, RoleStore
+from dfe_engine.auth.roles import scoped_role_refusal
 from dfe_engine.governance.ch import request_ch_rbac_reconcile
 from dfe_engine.names import StoreName
 
@@ -133,6 +134,20 @@ def _grant_details(role: Role) -> dict[str, object]:
     return {"permissions": role.permissions, "scoped": role.scoped}
 
 
+def _refuse_scoped_writes(name: str, *, permissions: list[str], scoped: bool) -> None:
+    """Refuse a scoped role granting more than reads and ``query:execute``.
+
+    Raises:
+        HTTPException: 422 ``scoped_role_not_read_only`` naming the role and the patterns.
+    """
+    refusal = scoped and scoped_role_refusal(name, permissions)
+    if refusal:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "scoped_role_not_read_only", "message": refusal},
+        )
+
+
 def _refuse_ungrantable(
     request: Request, user: AuthContext, *, permissions: list[str], scoped: bool
 ) -> None:
@@ -215,6 +230,7 @@ async def create_role(
     request: Request,
 ) -> RoleResponse:
     """Create a new RBAC role granting no more than the caller holds."""
+    _refuse_scoped_writes(body.name, permissions=body.permissions, scoped=body.scoped)
     _refuse_ungrantable(request, user, permissions=body.permissions, scoped=body.scoped)
     store: RoleStore = request.app.state.role_store
     try:
@@ -306,6 +322,7 @@ async def update_role(
         )
     permissions = stored.permissions if body.permissions is None else body.permissions
     scoped = stored.scoped if body.scoped is None else body.scoped
+    _refuse_scoped_writes(name, permissions=permissions, scoped=scoped)
     if (permissions, scoped) != (stored.permissions, stored.scoped):
         # Every holder of the role keeps, gains or loses what it grants before and after.
         _refuse_ungrantable(request, user, permissions=stored.permissions, scoped=stored.scoped)
