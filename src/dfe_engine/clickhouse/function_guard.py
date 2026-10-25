@@ -55,7 +55,7 @@ class CallNotPermittedError(ValueError):
     """Caller SQL calls a function that reads outside the row or calls out."""
 
 
-# ClickHouse 26.9.4 table functions, bar format and fuzzQuery, whose scalars read only their args.
+# ClickHouse 26.10.2 table functions, bar format and fuzzQuery, whose scalars read only their args.
 TABLE_FUNCTIONS = frozenset(
     {
         "arrowflight",
@@ -73,6 +73,7 @@ TABLE_FUNCTIONS = frozenset(
         "deltalakes3",
         "deltalakes3cluster",
         "dictionary",
+        "elasticsearch",
         "eval",
         "executable",
         "file",
@@ -113,6 +114,7 @@ TABLE_FUNCTIONS = frozenset(
         "null",
         "numbers",
         "numbers_mt",
+        "obfuscate",
         "odbc",
         "oss",
         "paimon",
@@ -141,6 +143,8 @@ TABLE_FUNCTIONS = frozenset(
         "timeseriessamples",
         "timeseriesselector",
         "timeseriestags",
+        "timeseriestimeranges",
+        "traceview",
         "url",
         "urlcluster",
         "values",
