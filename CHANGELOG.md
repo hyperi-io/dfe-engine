@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.74](https://github.com/hyperi-io/dfe-engine/compare/v1.22.73...v1.22.74) (2026-10-25)
+
+### Bug Fixes
+
+* **deps:** update the python and uv base image digests ([8dc9c0c](https://github.com/hyperi-io/dfe-engine/commit/8dc9c0c8ddab0021d148f61ea8d5f0de17441d5c))
+
 ## [1.22.73](https://github.com/hyperi-io/dfe-engine/compare/v1.22.72...v1.22.73) (2026-10-25)
 
 ### Bug Fixes
