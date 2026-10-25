@@ -94,7 +94,7 @@ def engine_deployment_contract() -> DeploymentContract:
         # Dockerfile's runtime FROM must match this literal (validate_dockerfile
         # substring check). Renovate bumps it with the Dockerfile through the
         # custom manager in renovate.json, so keep it on one line in this shape.
-        base_image="python:3.14-slim@sha256:a2b82f3c48559aa0a8446d9af49826b6e2b2016f4cd2afabfe6013ec53729170",
+        base_image="python:3.14-slim@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8",
         entrypoint_args=["run"],
         # Env names are the ones dfe_engine.settings reads, single-underscore under the DFE_ prefix.
         secrets=[
