@@ -69,3 +69,22 @@ def test_an_org_only_another_group_names_does_not_widen_the_connection(
 
     assert conn.status_code == 200, conn.text
     assert conn.json()["username"] == org_user_name("acme")
+
+
+def test_an_org_viewer_is_a_hyperdx_viewer(app, client, api_settings):
+    app.state.org_registry.create("acme", org_ids=["t-acme"])
+    viewer = caller_in_group(
+        app, api_settings, "acme-viewer", roles=["org_viewer"], org_ids=["acme"]
+    )
+
+    assert viewer.get("/api/v1/auth/me").json()["hyperdx_role"] == "viewer"
+
+
+def test_a_custom_role_holding_query_write_is_a_hyperdx_member(
+    app, client, admin_headers, api_settings
+):
+    body = {"name": "search_author", "permissions": ["query:read", "query:write"]}
+    assert client.post("/api/v1/auth/roles", json=body, headers=admin_headers).status_code == 201
+    author = caller_in_group(app, api_settings, "author", roles=["search_author"], org_ids=[])
+
+    assert author.get("/api/v1/auth/me").json()["hyperdx_role"] == "member"

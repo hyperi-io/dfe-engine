@@ -121,7 +121,7 @@ class TestTheIssuedAdmin:
         assert claims["groups"] == []
         assert claims["org_ids"] == []
         assert "org_id" not in claims
-        assert claims["role"] == "member"
+        assert claims["role"] == "viewer"
 
     def test_the_token_names_the_pending_change_for_a_peer_to_refuse(self, fresh):
         """dfe-hyperdx puts a claim-less token in its default team, so it refuses on this claim."""
