@@ -503,6 +503,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.oidc_provider_registry,
         secrets=app.state.dfe_secrets,
         metrics=app.state.oidc_login_metrics,
+        directory_deadline_seconds=settings.auth.oidc_login_directory_deadline_seconds,
     )
 
     # Bootstrap HyperDX client (optional)

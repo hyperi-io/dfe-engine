@@ -354,6 +354,19 @@ class TestEnvOverrides:
         with pytest.raises(ValidationError):
             load_settings()
 
+    def test_oidc_login_directory_deadline_defaults_to_ten_seconds(self):
+        assert load_settings().auth.oidc_login_directory_deadline_seconds == 10.0
+
+    def test_oidc_login_directory_deadline_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS", "2.5")
+        assert load_settings().auth.oidc_login_directory_deadline_seconds == 2.5
+
+    @pytest.mark.parametrize("value", ["0", "-1"])
+    def test_oidc_login_directory_deadline_must_be_positive(self, monkeypatch, value):
+        monkeypatch.setenv("DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS", value)
+        with pytest.raises(ValidationError):
+            load_settings()
+
     def test_a_config_file_still_carrying_auth_oidc_loads(self, tmp_path):
         # Older deployed files carry an auth.oidc block no field reads; they must still load.
         target = tmp_path / "dfe.yaml"

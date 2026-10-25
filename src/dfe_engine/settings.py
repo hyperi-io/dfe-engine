@@ -1572,6 +1572,7 @@ class AuthSettings(BaseModel):
     - DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS -> auth.api_key_default_ttl_days
     - DFE_AUTH_OIDC_GROUP_SYNC_ENABLED -> auth.oidc_group_sync_enabled
     - DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS -> auth.oidc_group_sync_tick_seconds
+    - DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS -> auth.oidc_login_directory_deadline_seconds
     """
 
     enabled: bool = Field(
@@ -1612,6 +1613,17 @@ class AuthSettings(BaseModel):
         description=(
             "How often the background group sync checks which providers are due. "
             "DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS."
+        ),
+    )
+    oidc_login_directory_deadline_seconds: float = Field(
+        default=10.0,
+        gt=0,
+        description=(
+            "Longest one OIDC login waits for the directory's group lookup, every page "
+            "and retry included. Past it the login keeps the groups it already has, "
+            "the same as a directory that does not answer. Each page alone may take "
+            "the HTTP client's full timeout, so without this a slow directory can hold "
+            "a login for minutes. DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS."
         ),
     )
     proxy_provider: str = Field(
@@ -2800,6 +2812,8 @@ def _get_env_overrides() -> dict:
         overrides["auth"]["oidc_group_sync_enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS"):
         overrides["auth"]["oidc_group_sync_tick_seconds"] = int(val)
+    if val := _get_env("DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS"):
+        overrides["auth"]["oidc_login_directory_deadline_seconds"] = float(val)
     if val := _get_env("DFE_AUTH_SOURCE_PROVIDER_BINDINGS"):
         # A JSON object of {source_provider_stamp: oidc_provider_name}. Fail loudly
         # on malformed config: a dropped binding locks every bound user out at login.

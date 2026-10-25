@@ -183,6 +183,9 @@ async def _reload_rp_if_provider_known(request: Request, provider: str):
             registry,
             secrets=getattr(request.app.state, "dfe_secrets", None),
             metrics=getattr(request.app.state, "oidc_login_metrics", None),
+            directory_deadline_seconds=(
+                request.app.state.settings.auth.oidc_login_directory_deadline_seconds
+            ),
         )
     )
     return request.app.state.oidc_rp

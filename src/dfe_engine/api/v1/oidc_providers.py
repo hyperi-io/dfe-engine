@@ -646,6 +646,9 @@ async def _refresh_rp(request: Request) -> None:
             _get_registry(request),
             secrets=getattr(request.app.state, "dfe_secrets", None),
             metrics=getattr(request.app.state, "oidc_login_metrics", None),
+            directory_deadline_seconds=(
+                request.app.state.settings.auth.oidc_login_directory_deadline_seconds
+            ),
         )
     )
 

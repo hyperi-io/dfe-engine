@@ -27,7 +27,11 @@ from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
-from dfe_engine.auth.oidc.rp import NormalizedIdentity, OidcRelyingParty
+from dfe_engine.auth.oidc.rp import (
+    DEFAULT_DIRECTORY_DEADLINE_SECONDS,
+    NormalizedIdentity,
+    OidcRelyingParty,
+)
 from tests.support.loopback import CountingListener
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
 from tests.unit.test_auth.test_oidc.local_directory import AppTokenEntra, fast_http
@@ -101,8 +105,8 @@ def _adapter(kind: str, base_url: str) -> OIDCGroupAdapter:
 class _DirectRp(OidcRelyingParty):
     """The real RP token handling, fed a validated token instead of an IdP exchange."""
 
-    def __init__(self, registry: OIDCProviderRegistry, kind: str) -> None:
-        super().__init__(registry)
+    def __init__(self, registry: OIDCProviderRegistry, kind: str, deadline: float) -> None:
+        super().__init__(registry, directory_deadline_seconds=deadline)
         self._kind = kind
 
     def has_provider(self, provider_name: str) -> bool:
@@ -125,13 +129,20 @@ def directory(app, client: TestClient, tmp_path, monkeypatch) -> Iterator[Callab
     )
     stops: list[Callable[[], None]] = []
 
-    def _point(kind: str, *, status: int | None = None, base_url: str = "") -> None:
+    def _point(
+        kind: str,
+        *,
+        status: int | None = None,
+        base_url: str = "",
+        deadline: float = DEFAULT_DIRECTORY_DEADLINE_SECONDS,
+    ) -> None:
         if status is not None:
             base_url, stop = _serving(kind, status)
             stops.append(stop)
         adapter = _adapter(kind, base_url)
         monkeypatch.setattr("dfe_engine.auth.oidc.adapters.get_adapter", lambda *_a, **_k: adapter)
-        app.state.oidc_rp = _DirectRp(OIDCProviderRegistry(tmp_path / "rp-registry"), kind)
+        registry = OIDCProviderRegistry(tmp_path / "rp-registry")
+        app.state.oidc_rp = _DirectRp(registry, kind, deadline)
 
     yield _point
     for stop in stops:
@@ -184,6 +195,24 @@ class TestAnOutageAtLogin:
         resp = client.get(f"/api/v1/auth/oidc/{PROVIDER}/callback")
 
         assert resp.status_code == 200, resp.text
+        stored = app.state.account_store.get(SUBJECT)
+        assert (stored.groups, stored.session_marker()) == ([ADMINS_ID], before.session_marker())
+
+    @pytest.mark.parametrize("kind", ["entra", "okta"])
+    def test_a_directory_still_reading_at_the_deadline_logs_in_on_the_stored_groups(
+        self, app, client: TestClient, directory, kind
+    ):
+        """The HTTP client keeps its full timeout here, so only the deadline ends the lookup."""
+        before = _seed_account(app)
+        listener = CountingListener(hold=True)
+        try:
+            directory(kind, base_url=f"http://127.0.0.1:{listener.port}", deadline=0.05)
+            resp = client.get(f"/api/v1/auth/oidc/{PROVIDER}/callback")
+        finally:
+            listener.close()
+
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["groups"] == [ADMINS_ID]
         stored = app.state.account_store.get(SUBJECT)
         assert (stored.groups, stored.session_marker()) == ([ADMINS_ID], before.session_marker())
 

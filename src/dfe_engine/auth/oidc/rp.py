@@ -25,6 +25,8 @@ Claim extraction is a PURE function (``extract_identity``) kept separate from
 the Authlib redirect plumbing so it is unit-testable without a live IdP.
 """
 
+import asyncio
+import time
 from typing import TYPE_CHECKING, Any
 
 from authlib.integrations.starlette_client import OAuth
@@ -33,6 +35,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.oidc.credential_env import resolve_credential
 from dfe_engine.http_errors import describe_http_error
+from dfe_engine.settings import AuthSettings
 
 if TYPE_CHECKING:
     from starlette.requests import Request
@@ -46,6 +49,11 @@ _USERINFO_FILL_CLAIMS = ("email", "name", "preferred_username")
 
 DIRECTORY_GROUPS_FALLBACKS = "auth_oidc_login_directory_fallbacks_total"
 DIRECTORY_GROUPS_REFUSALS = "auth_oidc_login_directory_refusals_total"
+
+# The settings default, for an RP built without the engine's settings.
+DEFAULT_DIRECTORY_DEADLINE_SECONDS: float = AuthSettings.model_fields[
+    "oidc_login_directory_deadline_seconds"
+].default
 
 
 class LoginMetrics:
@@ -289,6 +297,9 @@ class OidcRelyingParty:
 
     Zero enabled providers is a valid state: the RP holds an empty registry and
     every lookup reports the provider unknown (the router turns that into a 404).
+
+    ``directory_deadline_seconds`` bounds one login's directory group lookup,
+    ``auth.oidc_login_directory_deadline_seconds`` in the engine's settings.
     """
 
     def __init__(
@@ -297,10 +308,12 @@ class OidcRelyingParty:
         *,
         secrets: DfeSecrets | None = None,
         metrics: LoginMetrics | None = None,
+        directory_deadline_seconds: float = DEFAULT_DIRECTORY_DEADLINE_SECONDS,
     ) -> None:
         self._oauth = OAuth()
         self._secrets = secrets
         self._metrics = metrics if metrics is not None else LoginMetrics()
+        self._directory_deadline_seconds = directory_deadline_seconds
         # Only providers we actually registered (enabled + non-empty issuer).
         self._providers: dict[str, OIDCProvider] = {}
         for name, provider in registry.list():
@@ -454,18 +467,29 @@ class OidcRelyingParty:
         once, so a directory outage never locks a user out. Where the token carries
         none either, the identity is marked ``groups_unresolved`` and the login keeps
         the account's stored groups.
+
+        A lookup still running at ``directory_deadline_seconds`` is cancelled and
+        counts as an outage, so a slow refusal keeps the groups the login already has.
         """
         from dfe_engine.auth.oidc.adapters import get_adapter
         from dfe_engine.auth.oidc.adapters.base import LookupFailure, lookup_failure
 
         directory_id = str(userinfo.get("oid") or identity.email or identity.subject)
         failure: dict[str, Any] = {}
+        deadline = asyncio.timeout(self._directory_deadline_seconds)
+        started = time.monotonic()
         try:
             adapter = get_adapter(provider, access_token=access_token, secrets=self._secrets)
-            fetched = await adapter.resolve_user_groups(directory_id)
+            async with deadline:
+                fetched = await adapter.resolve_user_groups(directory_id)
         except Exception as exc:
-            fetched = lookup_failure(exc)
             failure = describe_http_error(exc)
+            if deadline.expired():
+                fetched = LookupFailure.OUTAGE
+                failure["deadline_seconds"] = self._directory_deadline_seconds
+                failure["elapsed_seconds"] = round(time.monotonic() - started, 3)
+            else:
+                fetched = lookup_failure(exc)
         if fetched is LookupFailure.OUTAGE:
             unresolved = not identity.groups
             self._metrics.directory_fallback(provider_name)
@@ -507,6 +531,7 @@ def build_relying_party(
     *,
     secrets: DfeSecrets | None = None,
     metrics: LoginMetrics | None = None,
+    directory_deadline_seconds: float = DEFAULT_DIRECTORY_DEADLINE_SECONDS,
 ) -> OidcRelyingParty | None:
     """Build an RP over the registry's CURRENT contents, or None if it cannot be built.
 
@@ -523,7 +548,12 @@ def build_relying_party(
     with malformed config must not take a CRUD write down with it.
     """
     try:
-        return OidcRelyingParty(registry, secrets=secrets, metrics=metrics)
+        return OidcRelyingParty(
+            registry,
+            secrets=secrets,
+            metrics=metrics,
+            directory_deadline_seconds=directory_deadline_seconds,
+        )
     except Exception as exc:
         # The text can quote a provider file's values, so the log takes the class and status only.
         logger.warning("OIDC relying party unavailable", **describe_http_error(exc))
