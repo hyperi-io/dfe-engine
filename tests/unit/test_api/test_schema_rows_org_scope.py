@@ -176,3 +176,36 @@ def test_a_platform_caller_reads_every_org_with_no_column_check(client, admin_he
     assert resp.status_code == 200, resp.text
     assert all("_org_id" not in sql for sql, _ in ch.calls)
     assert all("orgs" not in params for _, params in ch.calls)
+
+
+@pytest.fixture
+def org_bound(app, client, settings) -> TestClient:
+    """A caller whose scoped role holds schema:read and schema:write, bound at acme's scope."""
+    app.state.org_registry.create("acme", org_ids=["t-acme"])
+    define_role(app, "tenant_schema", ["schema:read", "schema:write"], scoped=True)
+    return caller_in_group(
+        app, settings, "bound", roles=["tenant_schema"], org_ids=["acme"], scope="org:acme"
+    )
+
+
+@pytest.mark.parametrize("route", ["sample-rows", "json-paths"])
+def test_an_org_bound_schema_reader_reads_its_own_orgs_rows(org_bound, ch, route):
+    resp = org_bound.get(f"/api/v1/schemas/{NOMETA_SOURCE}/{route}")
+
+    assert resp.status_code == 200, resp.text
+    assert ch.row_reads()
+    for sql, params in ch.row_reads():
+        assert HELD in sql
+        assert params["orgs"] == ["t-acme"]
+
+
+def test_an_org_bound_schema_writer_still_cannot_promote(org_bound, ch):
+    """A promotion changes a source every org shares, so only a system-scope grant may make it."""
+    resp = org_bound.post(
+        f"/api/v1/schemas/{PROMO_SOURCE}/promote-field",
+        json={"json_path": "user.id"},
+        params={"dry_run": True},
+    )
+
+    assert resp.status_code == 403, resp.text
+    assert ch.row_reads() == []

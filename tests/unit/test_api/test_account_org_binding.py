@@ -154,6 +154,27 @@ class TestATenantIsolatedViewReadsOnlyTheSessionsOrg:
         assert resp.json()["code"] == "org_not_granted"
         assert reader.sql == ""
 
+    def test_an_org_only_another_group_names_does_not_grant_the_bound_org(
+        self,
+        app: FastAPI,
+        client: TestClient,
+        admin_headers: dict[str, str],
+        orgs: None,
+        reader: RecordingClient,
+    ):
+        """org_viewer system-wide over acme, plus infra_viewer (no query:execute) bound at globex."""
+        headers = _tenant_viewer(app, client, admin_headers, org="globex", grants=["acme"])
+        app.state.group_store.create("globex-infra", roles=["infra_viewer"], scope="org:globex")
+        app.state.group_store.update("globex-infra", org_ids=["globex"])
+        app.state.group_store.add_member("globex-infra", "alice")
+        app.state.account_store.update("alice", groups=["tenant-viewers", "globex-infra"])
+
+        resp = client.post(EXECUTE, json={}, headers=headers)
+
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "org_not_granted"
+        assert reader.sql == ""
+
     def test_a_session_reads_the_org_it_is_bound_to(
         self,
         app: FastAPI,

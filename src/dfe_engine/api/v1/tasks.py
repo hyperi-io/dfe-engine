@@ -22,7 +22,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
-from dfe_engine.api.deps import CurrentUser, held_tenant_ids, require_action
+from dfe_engine.api.deps import CurrentUser, held_tenant_ids, require_own_org_action
 from dfe_engine.api.task_manager import TaskInfo, TaskManager
 from dfe_engine.auth.models import AuthContext
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -53,7 +53,7 @@ def _visible_task(request: Request, user: AuthContext, task_id: str, action: str
 @router.get(
     "",
     response_model=list[TaskInfo],
-    dependencies=[Depends(require_action(scopes_dict["task_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["task_read"]))],
 )
 async def list_tasks(
     request: Request,
@@ -68,7 +68,7 @@ async def list_tasks(
 @router.get(
     "/{task_id}",
     response_model=TaskInfo,
-    dependencies=[Depends(require_action(scopes_dict["task_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["task_read"]))],
 )
 async def get_task(
     request: Request,
@@ -82,7 +82,7 @@ async def get_task(
 @router.post(
     "/{task_id}/cancel",
     response_model=TaskInfo,
-    dependencies=[Depends(require_action(scopes_dict["task_write"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["task_write"]))],
 )
 async def cancel_task(
     request: Request,
@@ -102,7 +102,7 @@ async def cancel_task(
     "/{task_id}/stream",
     response_class=Response,
     include_in_schema=False,
-    dependencies=[Depends(require_action(scopes_dict["task_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["task_read"]))],
 )
 async def stream_task(
     request: Request,

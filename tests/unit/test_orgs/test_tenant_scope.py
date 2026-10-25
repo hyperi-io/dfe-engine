@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""``resolve_orgs``, ``tenant_ids_for`` and ``colliding_org`` over org markers.
+"""``resolve_orgs`` and ``colliding_org`` over org markers.
 
 A marker is an org's name or one of its tenant ids. Either names that org and
 maps to exactly that org's tenant ids; anything that does not name exactly one
@@ -16,7 +16,7 @@ plant a marker another org already owns.
 import pytest
 
 from dfe_engine.orgs.models import Org
-from dfe_engine.orgs.tenant_scope import colliding_org, resolve_orgs, tenant_ids_for
+from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids, resolve_orgs
 
 ACME = Org(name="acme", org_ids=["t-acme-1", "t-acme-2"])
 BETA = Org(name="beta", org_ids=[])
@@ -25,6 +25,14 @@ ORGS = [ACME, BETA]
 
 def _names(orgs: list[Org]) -> list[str]:
     return [org.name for org in orgs]
+
+
+def tenant_ids_for(markers: list[str], orgs: list[Org]) -> list[str]:
+    """The tenant ids the resolved orgs carry, as a held read binds them."""
+    ids: set[str] = set()
+    for org in resolve_orgs(markers, orgs):
+        ids.update(org_tenant_ids(org))
+    return sorted(ids)
 
 
 @pytest.mark.parametrize("marker", ["acme", "t-acme-1", "t-acme-2"])

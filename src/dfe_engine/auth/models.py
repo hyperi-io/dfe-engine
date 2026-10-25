@@ -76,6 +76,11 @@ class ScopedGrant(BaseModel):
 
     role: str
     scope: Scope = Field(default_factory=Scope)
+    org_ids: tuple[str, ...] = Field(
+        default=(),
+        description="The org markers of the group the grant came from: its owning org "
+        "and its org_ids, which a system-bound tenant role is held to",
+    )
 
 
 # The tenant role: holding it never unfences a group or a caller from its org.
@@ -187,13 +192,18 @@ def platform_caller(
 def held_grants(user: AuthContext) -> list[ScopedGrant]:
     """The grants ``authorize()`` reads for ``user``: its scoped grants, else its roles system-wide.
 
+    A bare role carries the context's ``org_ids``, the orgs a context with no group
+    behind its roles has always been held to.
+
     Args:
         user: The caller's auth context.
 
     Returns:
         The caller's grants.
     """
-    return user.grants or [ScopedGrant(role=name) for name in user.roles]
+    return user.grants or [
+        ScopedGrant(role=name, org_ids=tuple(user.org_ids)) for name in user.roles
+    ]
 
 
 def ungrantable_permissions(

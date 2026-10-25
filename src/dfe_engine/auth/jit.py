@@ -458,7 +458,10 @@ class JitProvisioner:
         org_ids: list[str] = []
         for group in self._linked(oidc_groups, source_provider, groups):
             scope = Scope(type="org", id=group.scope_org) if group.scope_org else Scope()
-            grants.extend(ScopedGrant(role=role, scope=scope) for role in group.roles)
+            grants.extend(
+                ScopedGrant(role=role, scope=scope, org_ids=group.org_markers)
+                for role in group.roles
+            )
             if group.org_ids:
                 org_ids.extend(group.org_ids)
             elif group.scope_org:

@@ -214,6 +214,12 @@ class Group(BaseModel):
             return self.scope[len(_ORG_SCOPE_PREFIX) :]
         return ""
 
+    @property
+    def org_markers(self) -> tuple[str, ...]:
+        """The orgs the group claims, sorted: its owning org and its ``org_ids``."""
+        owning = {self.scope_org} if self.scope_org else set()
+        return tuple(sorted(owning | set(self.org_ids)))
+
 
 def source_id_holder(*, groups: Iterable[Group], name: str, source_id: str) -> Group | None:
     """Return the group other than *name* that already carries *source_id* (None when no other does).
