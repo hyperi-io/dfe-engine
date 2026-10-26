@@ -774,7 +774,7 @@ class CatalogueEntryObject(BaseModel):
     intakes: list[str] = Field(description="Ways this source's data can reach the platform")
     default_intake: source_catalogue_module.CatalogueIntake = Field(
         description="The intake a create takes when it names none: the first of fetcher, "
-        "receiver and beats the entry lists"
+        "beats and receiver the entry lists"
     )
     framing: str | None = Field(
         default=None,
@@ -1254,7 +1254,7 @@ def create_source_from_catalogue(
 ):
     """Create a source from a catalogue entry, on one of the intakes it arrives by.
 
-    The entry's file is the write body for its default intake, and another intake swaps in the match rule that intake derives. A variant the deployed transform's contract does not list is refused with 409, and one whose contract is not mounted is allowed. Everything after that is the ordinary create, so the source is indistinguishable from a hand-written one.
+    The entry's file is the write body, and the intake chosen (the default when none is named) sets the match rule: the dataset a Beats event stamps, or the source's own label for a receiver intake. A variant the deployed transform's contract does not list is refused with 409, and one whose contract is not mounted is allowed. Everything after that is the ordinary create, so the source is indistinguishable from a hand-written one.
     """
     catalogue = _source_catalogue()
     try:

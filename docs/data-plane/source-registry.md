@@ -78,7 +78,7 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
 | Operation | Effect |
 |-----------|--------|
 | **Create** | Validates the definition and updates receiver match rules. No topics, no DDL -- those land on deploy |
-| **Create from catalogue** | Reads one file of the dfe-schemas `catalogue/` tree the engine installs, which is already the write body for the entry's default intake, swaps in the match rule another intake derives and the variant the caller picks, then takes the ordinary create path. A variant the deployed transform's contract does not list is refused with 409 `missing_variant` ([source-flow.md](source-flow.md)) |
+| **Create from catalogue** | Reads one file of the dfe-schemas `catalogue/` tree the engine installs, which is the write body for the entry, swaps in the match rule the chosen intake derives (beats before receiver when no intake is named) and the variant the caller picks, then takes the ordinary create path. A variant the deployed transform's contract does not list is refused with 409 `missing_variant` ([source-flow.md](source-flow.md)) |
 | **Deploy** | Runs the schema DDL, then creates that source's Kafka topics for the version being deployed |
 | **Read** | Definition plus status overlay (topic exists, table exists, transform running) |
 | **Update** | Validates, migrates the schema if fields changed, recompiles receiver and transform config |
