@@ -254,6 +254,133 @@ class TestSourceTransform:
             SourceTransform(engine="spark")
         assert ", ".join(sorted(transform_engines())) in str(exc.value)
 
+    @pytest.mark.parametrize(
+        ("id_", "fields", "mode", "detect"),
+        [
+            ("unset_leaves_the_app_default", {}, None, None),
+            (
+                "agent_names_its_variant",
+                {"mode": "agent", "variant": "filebeat.x.default"},
+                "agent",
+                None,
+            ),
+            ("agentless_with_no_variant", {"mode": "agentless"}, "agentless", None),
+            (
+                "agentless_defaults_detect",
+                {"mode": "agentless", "detect": {}},
+                "agentless",
+                {"unmatched": "passthrough", "fallback": "", "candidates": []},
+            ),
+            (
+                "fallback_names_its_source",
+                {
+                    "mode": "agentless",
+                    "detect": {"unmatched": "fallback", "fallback": " filebeat.cisco_asa.default "},
+                },
+                "agentless",
+                {
+                    "unmatched": "fallback",
+                    "fallback": "filebeat.cisco_asa.default",
+                    "candidates": [],
+                },
+            ),
+            (
+                "candidates_keep_their_order",
+                {
+                    "mode": "agentless",
+                    "detect": {
+                        "unmatched": "stop",
+                        "candidates": ["filebeat.cisco_ftd.default", "filebeat.cisco_asa.default"],
+                    },
+                },
+                "agentless",
+                {
+                    "unmatched": "stop",
+                    "fallback": "",
+                    "candidates": ["filebeat.cisco_ftd.default", "filebeat.cisco_asa.default"],
+                },
+            ),
+        ],
+    )
+    def test_elastic_mode_and_detect_are_accepted(self, id_, fields, mode, detect):
+        t = SourceTransform(engine="elastic", **fields)
+
+        assert t.mode == mode
+        assert (t.detect.model_dump() if t.detect else None) == detect, id_
+
+    @pytest.mark.parametrize(
+        ("id_", "fields", "refusal"),
+        [
+            ("an_unknown_mode", {"mode": "hybrid"}, "mode"),
+            (
+                "an_unknown_unmatched",
+                {"mode": "agentless", "detect": {"unmatched": "drop"}},
+                "unmatched",
+            ),
+            (
+                "fallback_without_the_fallback_source",
+                {"mode": "agentless", "detect": {"unmatched": "fallback"}},
+                "fallback is required when unmatched is fallback",
+            ),
+            (
+                "fallback_beside_passthrough",
+                {"mode": "agentless", "detect": {"fallback": "filebeat.cisco_asa.default"}},
+                "fallback is set but unmatched is 'passthrough'",
+            ),
+            (
+                "fallback_beside_stop",
+                {
+                    "mode": "agentless",
+                    "detect": {"unmatched": "stop", "fallback": "filebeat.cisco_asa.default"},
+                },
+                "fallback is set but unmatched is 'stop'",
+            ),
+            (
+                "a_blank_candidate",
+                {
+                    "mode": "agentless",
+                    "detect": {"candidates": ["filebeat.cisco_asa.default", " "]},
+                },
+                "cannot be blank",
+            ),
+            (
+                "a_repeated_candidate",
+                {"mode": "agentless", "detect": {"candidates": ["a.b.default", "a.b.default"]}},
+                "listed twice",
+            ),
+            (
+                "detect_without_agentless",
+                {"detect": {"unmatched": "stop"}},
+                "read only when transform.mode is agentless",
+            ),
+            (
+                "detect_in_agent_mode",
+                {"mode": "agent", "detect": {"unmatched": "stop"}},
+                "read only when transform.mode is agentless",
+            ),
+            (
+                "agentless_beside_a_variant",
+                {"mode": "agentless", "variant": "filebeat.cisco_asa.default"},
+                "takes no variant",
+            ),
+        ],
+    )
+    def test_elastic_mode_and_detect_refuse(self, id_, fields, refusal):
+        with pytest.raises(ValueError, match=refusal):
+            SourceTransform(engine="elastic", **fields)
+
+    @pytest.mark.parametrize(
+        ("engine", "fields", "refusal"),
+        [
+            ("vrl", {"mode": "agentless"}, "no agent or agentless mode"),
+            ("vector", {"mode": "agent"}, "no agent or agentless mode"),
+            ("vrl", {"mode": "agentless", "detect": {}}, "no agent or agentless mode"),
+        ],
+    )
+    def test_an_app_with_no_mode_path_refuses_one(self, engine, fields, refusal):
+        with pytest.raises(ValueError, match=refusal):
+            SourceTransform(engine=engine, **fields)
+
 
 # ---------------------------------------------------------------------------
 # SourceFetcher
@@ -1307,6 +1434,25 @@ class TestSourceWriteRequest:
             is True
         )
         assert source_version_bump_required(prev, SourceVersion.model_validate(base)) is False
+
+    @pytest.mark.parametrize(
+        "transform",
+        [
+            {"engine": "elastic", "mode": "agentless"},
+            {"engine": "elastic", "mode": "agentless", "detect": {"unmatched": "stop"}},
+            {"engine": "elastic", "variant": "filebeat.cisco_asa.default", "mode": "agent"},
+        ],
+    )
+    def test_the_mode_and_detect_of_a_transform_never_bump_the_version(self, transform):
+        base = {
+            "date_time": "2026-01-01",
+            "match": {"field": "f", "value": "v"},
+            "transform": {"engine": "elastic", "variant": "filebeat.cisco_asa.default"},
+        }
+        prev = SourceVersion.model_validate(base)
+        updated = SourceVersion.model_validate({**base, "transform": transform})
+
+        assert source_version_bump_required(prev, updated) is False
 
     def test_apply_write_update_bumps_on_meta_schema_path_after_deploy(self):
         existing = Source.model_validate(

@@ -1466,6 +1466,116 @@ class TestTransformInstance:
 
         assert compiled["source"]["name"] == "okta_system"
 
+    @pytest.mark.parametrize(
+        ("id_", "transport", "transform", "expected_source"),
+        [
+            (
+                "agent_default_writes_no_mode",
+                "bus",
+                {"engine": "elastic", "variant": "filebeat.cisco_asa.default"},
+                {
+                    "topics": ["syslog_land"],
+                    "group_id": "dfe-transform-elastic-syslog",
+                    "name": "filebeat.cisco_asa.default",
+                },
+            ),
+            (
+                "agentless_names_no_program",
+                "bus",
+                {"engine": "elastic", "mode": "agentless"},
+                {
+                    "topics": ["syslog_land"],
+                    "group_id": "dfe-transform-elastic-syslog",
+                    "mode": "agentless",
+                },
+            ),
+            (
+                "agentless_detect_with_defaults_is_an_empty_block",
+                "bus",
+                {"engine": "elastic", "mode": "agentless", "detect": {}},
+                {
+                    "topics": ["syslog_land"],
+                    "group_id": "dfe-transform-elastic-syslog",
+                    "mode": "agentless",
+                    "detect": {},
+                },
+            ),
+            (
+                "agentless_fallback_and_candidates",
+                "bus",
+                {
+                    "engine": "elastic",
+                    "mode": "agentless",
+                    "detect": {
+                        "unmatched": "fallback",
+                        "fallback": "filebeat.cisco_asa.default",
+                        "candidates": ["filebeat.cisco_asa.default", "filebeat.cisco_ftd.default"],
+                    },
+                },
+                {
+                    "topics": ["syslog_land"],
+                    "group_id": "dfe-transform-elastic-syslog",
+                    "mode": "agentless",
+                    "detect": {
+                        "unmatched": "fallback",
+                        "fallback": "filebeat.cisco_asa.default",
+                        "candidates": ["filebeat.cisco_asa.default", "filebeat.cisco_ftd.default"],
+                    },
+                },
+            ),
+            (
+                "agentless_stop_on_the_direct_transport_keeps_the_listener",
+                "direct",
+                {"engine": "elastic", "mode": "agentless", "detect": {"unmatched": "stop"}},
+                {
+                    "transport": "grpc",
+                    "listen": "0.0.0.0:6000",
+                    "mode": "agentless",
+                    "detect": {"unmatched": "stop"},
+                },
+            ),
+        ],
+    )
+    def test_the_mode_and_detect_land_where_the_app_names_them(
+        self, settings, direct_settings, id_, transport, transform, expected_source
+    ):
+        elastic = catalogue.descriptor("dfe-transform-elastic")
+        registry = FakeRegistry([_matched("syslog", transform=transform)])
+        chosen = settings if transport == "bus" else direct_settings
+
+        compiled = routing.compile_for(elastic, registry, chosen, instance="syslog")
+
+        assert compiled["source"] == expected_source, id_
+
+    def test_an_agentless_instance_is_keyed_by_its_source_and_not_by_a_program(self, settings):
+        # The variant is empty, so the instance identity cannot come from it.
+        registry = FakeRegistry(
+            [_matched("syslog", transform={"engine": "elastic", "mode": "agentless"})]
+        )
+        app = instances.instance_of("dfe-transform-elastic", "syslog")
+        doc = instances.initial_overlay(app)
+
+        routing.sync(app.descriptor, doc, registry, settings, instance="syslog")
+
+        assert app.overlay_name == "dfe-transform-elastic-syslog-values"
+        assert "name" not in doc["config"]["source"]
+        assert doc["config"]["source"]["mode"] == "agentless"
+        found = routing.status(app.descriptor, doc, registry, settings, instance="syslog")
+        assert not found.drift
+
+    def test_a_hand_edit_of_the_mode_is_drift_the_sync_reverts(self, settings):
+        registry = FakeRegistry(
+            [_matched("syslog", transform={"engine": "elastic", "mode": "agentless"})]
+        )
+        app = instances.instance_of("dfe-transform-elastic", "syslog")
+        doc = instances.initial_overlay(app)
+        routing.sync(app.descriptor, doc, registry, settings, instance="syslog")
+        doc["config"]["source"]["mode"] = "agent"
+
+        assert routing.status(app.descriptor, doc, registry, settings, instance="syslog").drift
+        assert routing.sync(app.descriptor, doc, registry, settings, instance="syslog")
+        assert doc["config"]["source"]["mode"] == "agentless"
+
     def test_a_source_with_no_transform_has_no_instance(self, settings):
         with pytest.raises(routing.RoutingNotApplicableError, match="no transform"):
             routing.compile_for(

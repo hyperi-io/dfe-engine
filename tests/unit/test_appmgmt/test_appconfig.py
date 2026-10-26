@@ -34,6 +34,7 @@ RECEIVER = "dfe-receiver"
 LOADER = "dfe-loader"
 VRL = "dfe-transform-vrl"
 VECTOR = "dfe-transform-vector"
+ELASTIC = "dfe-transform-elastic"
 
 MOUNT = "/etc/dfe/apps"
 
@@ -186,6 +187,66 @@ class TestWhatTheContainerReads:
         config = _rendered(settings, LOADER)
         assert config["routing"]["dlq"] == {"enabled": False}
         assert config["routing"]["source_to_table"] == {"filebeat": "filebeat"}
+
+    @pytest.mark.parametrize(
+        ("id_", "transform", "expected"),
+        [
+            (
+                "agent_names_its_program",
+                {"engine": "elastic", "variant": "filebeat.cisco_asa.default"},
+                {"name": "filebeat.cisco_asa.default"},
+            ),
+            (
+                "agentless_leaves_the_name_unwritten",
+                {"engine": "elastic", "mode": "agentless"},
+                {"mode": "agentless"},
+            ),
+            (
+                "agentless_with_a_fallback_and_candidates",
+                {
+                    "engine": "elastic",
+                    "mode": "agentless",
+                    "detect": {
+                        "unmatched": "fallback",
+                        "fallback": "filebeat.cisco_asa.default",
+                        "candidates": ["filebeat.cisco_asa.default", "filebeat.cisco_ftd.default"],
+                    },
+                },
+                {
+                    "mode": "agentless",
+                    "detect": {
+                        "unmatched": "fallback",
+                        "fallback": "filebeat.cisco_asa.default",
+                        "candidates": ["filebeat.cisco_asa.default", "filebeat.cisco_ftd.default"],
+                    },
+                },
+            ),
+        ],
+    )
+    def test_the_elastic_transform_file_carries_the_sources_mode_and_detect(
+        self, crud, tmp_path, id_, transform, expected
+    ):
+        settings = _settings(tmp_path)
+        source = Source.model_validate(
+            {
+                "source": "syslog",
+                "state": "active",
+                "match": {"field": "_json.app", "operator": "equals", "value": "syslog"},
+                "transform": transform,
+            }
+        )
+        app = instances.instance_of(ELASTIC, "syslog")
+        doc = instances.initial_overlay(app)
+        routing.sync(app.descriptor, doc, FakeRegistry([source]), settings, instance="syslog")
+        _put(crud, app, doc)
+
+        appconfig.render(crud, settings)
+
+        written = _rendered(settings, ELASTIC, "syslog")["source"]
+        assert {k: v for k, v in written.items() if k in {"name", "mode", "detect"}} == expected, (
+            id_
+        )
+        assert written["topics"] == ["syslog_land"]
 
     def test_an_app_with_no_overlay_still_gets_the_deployment_base(self, crud, tmp_path):
         # The resident container is started before any source exists, so it needs
@@ -585,6 +646,34 @@ class TestCustomEnvironment:
         # Sorted, so an unordered overlay does not rewrite the file every render.
         assert _env_file(settings, LOADER).read_text() == (
             "DFE_LOADER_HOUSE_KEY=kept\nSECOND=also\n"
+        )
+
+    def test_the_flat_env_form_of_the_elastic_detect_keys_reaches_the_container(
+        self, crud, tmp_path
+    ):
+        # The app reads these names itself and a list is one comma-joined string, so
+        # extraEnv carries them as scalars like any other variable.
+        settings = _settings(tmp_path)
+        _deploy(
+            crud,
+            ELASTIC,
+            "syslog",
+            extraEnv__DFE_TRANSFORM_ELASTIC_SOURCE_MODE="agentless",
+            extraEnv__DFE_TRANSFORM_ELASTIC_SOURCE_DETECT_UNMATCHED="fallback",
+            extraEnv__DFE_TRANSFORM_ELASTIC_SOURCE_DETECT_FALLBACK="filebeat.cisco_ios.default",
+            extraEnv__DFE_TRANSFORM_ELASTIC_SOURCE_DETECT_CANDIDATES=(
+                "filebeat.cisco_asa.default,filebeat.cisco_ftd.default"
+            ),
+        )
+
+        appconfig.render(crud, settings)
+
+        assert _env_file(settings, f"{ELASTIC}-syslog").read_text() == (
+            "DFE_TRANSFORM_ELASTIC_SOURCE_DETECT_CANDIDATES="
+            "filebeat.cisco_asa.default,filebeat.cisco_ftd.default\n"
+            "DFE_TRANSFORM_ELASTIC_SOURCE_DETECT_FALLBACK=filebeat.cisco_ios.default\n"
+            "DFE_TRANSFORM_ELASTIC_SOURCE_DETECT_UNMATCHED=fallback\n"
+            "DFE_TRANSFORM_ELASTIC_SOURCE_MODE=agentless\n"
         )
 
     def test_each_instance_writes_the_file_its_own_container_reads(self, crud, tmp_path):

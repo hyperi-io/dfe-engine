@@ -322,6 +322,15 @@ class TestShippedManifest:
 
         assert variants == {"dfe-transform-elastic": "config.source.name"}
 
+    def test_only_elastic_chooses_between_one_program_and_detecting_it(self):
+        paths = {
+            name: (app.mode_path, app.detect_path)
+            for name, app in catalogue.APP_CATALOGUE.items()
+            if app.mode_path or app.detect_path
+        }
+
+        assert paths == {"dfe-transform-elastic": ("config.source.mode", "config.source.detect")}
+
     def test_the_fetchers_instance_maps_are_its_keyed_families(self):
         # dfe-fetcher's SourcesConfig carries rest, db and file as maps keyed by
         # instance id, and every other family as one flat block.
@@ -344,6 +353,21 @@ class TestManifestParsing:
         path = tmp_path / "apps.yaml"
         yaml_dump({"apps": {"dfe-thing": app}, **top}, path)
         return path
+
+    @pytest.mark.parametrize("key", ["mode_path", "detect_path"])
+    def test_a_mode_or_detect_path_outside_the_derived_blocks_is_refused(self, tmp_path, key):
+        extra = {
+            "routing": {
+                "compiler": "transform",
+                "values_paths": {"source": "config.source"},
+                "scope": "instance",
+            },
+            "multiplicity": "per_config",
+            key: "config.elsewhere.mode",
+        }
+
+        with pytest.raises(CatalogueError, match="outside every derived block"):
+            load_catalogue(self._manifest(tmp_path, extra))
 
     def test_an_app_that_declares_no_transport_is_bus_only(self, tmp_path):
         apps = load_catalogue(self._manifest(tmp_path, {"multiplicity": "single"}))
