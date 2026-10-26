@@ -46490,6 +46490,33 @@
             "title": "Variant",
             "description": "The compiled-in program this instance runs, where the app offers a catalogue of them (dfe-transform-elastic selects one by source.name). None for an app whose program is the authored files it is given"
           },
+          "mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "agent",
+                  "agentless"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode",
+            "description": "agent runs the one program variant names. agentless detects the source of each event instead, takes no variant, and stamps each event with its detected source's label so the loader routes it per event. Unset leaves the app's own default, agent. Only an app whose manifest declares a mode_path takes it."
+          },
+          "detect": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TransformDetect"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How an agentless transform detects each event's source and what it does with one it cannot place. Read only when mode is agentless. Unset leaves the app's own defaults."
+          },
           "config_file": {
             "anyOf": [
               {
@@ -48232,6 +48259,38 @@
         ],
         "title": "TopicsNotCreatedErrorResponse",
         "description": "502 when a source on the bus transport is deployed and the broker did not create its topics.\n\nThe source is not marked deployed. Its ClickHouse table is already in place,\nand a later deploy re-runs both steps."
+      },
+      "TransformDetect": {
+        "properties": {
+          "unmatched": {
+            "type": "string",
+            "enum": [
+              "passthrough",
+              "fallback",
+              "stop"
+            ],
+            "title": "Unmatched",
+            "description": "What happens to an event nothing matches. passthrough emits it with no transform and no per-source label, so the loader lands it in the table the sink topic names. fallback runs the fallback source's transform on it. stop halts the service on it with the block unreleased.",
+            "default": "passthrough"
+          },
+          "fallback": {
+            "type": "string",
+            "title": "Fallback",
+            "description": "The registered source whose transform runs on an unmatched event, by registry name (e.g. filebeat.cisco_asa.default). Required when unmatched is fallback and refused otherwise.",
+            "default": ""
+          },
+          "candidates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Candidates",
+            "description": "The registered sources detection may name, by registry name. Empty means every source the transform can detect."
+          }
+        },
+        "type": "object",
+        "title": "TransformDetect",
+        "description": "How an agentless transform decides which source each event belongs to."
       },
       "TransportFacts": {
         "properties": {

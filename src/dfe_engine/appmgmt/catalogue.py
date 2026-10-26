@@ -271,6 +271,21 @@ class AppDescriptor:
     whatever the app calls it, without knowing which app it is.
     """
 
+    mode_path: str = ""
+    """This app's own config key choosing between naming one program and detecting per event.
+
+    Declared per app, as ``variant_path`` is, so the engine writes a source's
+    ``transform.mode`` into whatever the app calls it. Empty where the app has
+    no such choice, and a source naming a mode for it is refused.
+    """
+
+    detect_path: str = ""
+    """This app's own config block holding how it detects each event's source.
+
+    Written whole from a source's ``transform.detect``, and empty where the app
+    detects nothing.
+    """
+
     config_file: str = ""
     """The config file this app's own image reads, by name; empty where it reads none.
 
@@ -510,6 +525,8 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
         restart_paths=_restart_paths_from(service, raw.get("restart_paths"), hot_reload=hot_reload),
         endpoints=_endpoints_from(service, raw.get("endpoints")),
         variant_path=str(raw.get("variant_path", "")),
+        mode_path=str(raw.get("mode_path", "")),
+        detect_path=str(raw.get("detect_path", "")),
         config_file=_config_file_from(service, raw.get("consumes")),
         display_name=_display_name_from(service, raw.get("display_name")),
         deployment_owned=_owned_paths_from(
@@ -519,10 +536,11 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
             service, "deployment_owned_when", raw.get("deployment_owned_when")
         ),
     )
-    # The variant is written into one of the derived blocks, so a path outside
+    # The variant, mode and detect settings are written into one of the derived blocks, so a path outside
     # them would be compiled and then dropped on the next sync.
-    if app.variant_path:
-        app.block_for(app.variant_path)
+    for compiled_path in (app.variant_path, app.mode_path, app.detect_path):
+        if compiled_path:
+            app.block_for(compiled_path)
     # A gate on a path nothing owns is a typo that silently owns nothing.
     ungated = sorted(set(app.deployment_owned_when) - set(app.deployment_owned))
     if ungated:

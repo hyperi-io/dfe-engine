@@ -52,7 +52,7 @@ from dfe_engine.gitcrud.engine import del_path, get_path, set_path
 from dfe_engine.orgs.models import DEFAULT_ORG_ID
 from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError, compile_ingest_bindings
 from dfe_engine.source.alignment import require_one_type
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import Source, SourceTransform
 from dfe_engine.source.reader import SourceReader
 from dfe_engine.source.registry import SourceNotFoundError, require_equals_route
 
@@ -471,7 +471,28 @@ def _transform(
     if app.variant_path and flow.transform.variant:
         name, inner = app.block_for(app.variant_path)
         set_path(blocks.setdefault(name, {}), inner, flow.transform.variant)
+    _write_detection(app, blocks, source.transform)
     return blocks
+
+
+def _write_detection(
+    app: AppDescriptor, blocks: dict[str, Any], transform: SourceTransform | None
+) -> None:
+    """Write the source's mode and detect settings where the app names them.
+
+    Only what the source states reaches the overlay, so an app that detects nothing
+    and a source that sets nothing both leave the blocks as they were. The source
+    model has already refused a mode or detect for an app declaring no path.
+    """
+    if transform is None:
+        return
+    if transform.mode is not None and app.mode_path:
+        name, inner = app.block_for(app.mode_path)
+        set_path(blocks.setdefault(name, {}), inner, transform.mode)
+    if transform.detect is not None and app.detect_path:
+        name, inner = app.block_for(app.detect_path)
+        detect = transform.detect.model_dump(mode="json", exclude_defaults=True)
+        set_path(blocks.setdefault(name, {}), inner, detect)
 
 
 Compiler = Callable[[AppDescriptor, SourceReader, Any, str | None, Tenancy | None], dict[str, Any]]
