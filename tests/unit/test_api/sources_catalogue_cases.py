@@ -38,9 +38,25 @@ class CreateFromCatalogueCase(TypedDict):
 
 CREATE_FROM_CATALOGUE_CASES: list[CreateFromCatalogueCase] = [
     {
-        "id": "receiver_default_with_no_contract_mounted",
+        "id": "default_on_a_beats_and_receiver_entry_with_no_contract_mounted",
         "entry": "cisco-asa",
         "body": {},
+        "expected_stored": {
+            "fetcher": None,
+            "match": {
+                "field": "data_stream.dataset",
+                "operator": "equals",
+                "value": "cisco_asa.log",
+            },
+            "meta_schema": "meta/elastic/ecs",
+            "origin": "receiver",
+            "variant": "filebeat.cisco_asa.default",
+        },
+    },
+    {
+        "id": "explicit_receiver_matches_the_source_label",
+        "entry": "cisco-asa",
+        "body": {"intake": "receiver"},
         "expected_stored": {
             "fetcher": None,
             "match": {"field": "_source", "operator": "equals", "value": "cisco-asa"},
