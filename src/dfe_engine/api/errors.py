@@ -147,22 +147,6 @@ class CoreResourceConflictErrorResponse(BaseModel):
     context: CoreResourceConflictContext
 
 
-class MissingVariantContext(BaseModel):
-    """Structured context for a catalogue create naming a variant the deployed transform lacks."""
-
-    transform: str = Field(description="The transform app the source's engine selects")
-    variant: str = Field(description="The variant the source would run")
-
-
-class MissingVariantErrorResponse(BaseModel):
-    """409 when a catalogue create names a variant the deployed transform's contract does not list."""
-
-    code: Literal["missing_variant"] = "missing_variant"
-    message: str = Field(description="Human-readable explanation, naming the variant and transform")
-    errors: list[FieldError] = Field(default_factory=list)
-    context: MissingVariantContext
-
-
 TOPICS_NOT_CREATED = "topics_not_created"
 
 
