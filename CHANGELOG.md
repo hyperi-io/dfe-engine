@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.75](https://github.com/hyperi-io/dfe-engine/compare/v1.22.74...v1.22.75) (2026-10-26)
+
+### Bug Fixes
+
+* default a catalogue Source to beats when it lists beats ([#990](https://github.com/hyperi-io/dfe-engine/issues/990)) ([7034c58](https://github.com/hyperi-io/dfe-engine/commit/7034c587d977c4e5ca643f307e7d98f9def69dc8))
+
 ## [1.22.74](https://github.com/hyperi-io/dfe-engine/compare/v1.22.73...v1.22.74) (2026-10-25)
 
 ### Bug Fixes
