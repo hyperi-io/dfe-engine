@@ -630,6 +630,67 @@ class SourceSchema(BaseModel):
         return v
 
 
+TransformMode = Literal["agent", "agentless"]
+"""Whether a transform runs the one program ``variant`` names, or detects the program per event."""
+
+DetectUnmatched = Literal["passthrough", "fallback", "stop"]
+"""What an agentless transform does with an event no detector claims."""
+
+
+class TransformDetect(BaseModel):
+    """How an agentless transform decides which source each event belongs to."""
+
+    unmatched: DetectUnmatched = Field(
+        default="passthrough",
+        description=(
+            "What happens to an event nothing matches. passthrough emits it with no "
+            "transform and no per-source label, so the loader lands it in the table the "
+            "sink topic names. fallback runs the fallback source's transform on it. stop "
+            "halts the service on it with the block unreleased."
+        ),
+    )
+    fallback: str = Field(
+        default="",
+        description=(
+            "The registered source whose transform runs on an unmatched event, by registry "
+            "name (e.g. filebeat.cisco_asa.default). Required when unmatched is fallback "
+            "and refused otherwise."
+        ),
+    )
+    candidates: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The registered sources detection may name, by registry name. Empty means "
+            "every source the transform can detect."
+        ),
+    )
+
+    @field_validator("fallback")
+    @classmethod
+    def _strip_fallback(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("candidates")
+    @classmethod
+    def _validate_candidates(cls, v: list[str]) -> list[str]:
+        names = [name.strip() for name in v]
+        if any(not name for name in names):
+            raise ValueError("a candidate is a registry source name and cannot be blank")
+        if len(set(names)) != len(names):
+            raise ValueError("a candidate is listed twice")
+        return names
+
+    @model_validator(mode="after")
+    def _fallback_iff_unmatched_is_fallback(self) -> TransformDetect:
+        if self.unmatched == "fallback" and not self.fallback:
+            raise ValueError("fallback is required when unmatched is fallback")
+        if self.unmatched != "fallback" and self.fallback:
+            raise ValueError(
+                f"fallback is set but unmatched is {self.unmatched!r}, so it would never run"
+            )
+        return self
+
+
 class SourceTransform(BaseModel):
     """Transform stage configuration: the engine is one of the catalogue's transform apps."""
 
@@ -643,6 +704,23 @@ class SourceTransform(BaseModel):
             "The compiled-in program this instance runs, where the app offers a "
             "catalogue of them (dfe-transform-elastic selects one by source.name). "
             "None for an app whose program is the authored files it is given"
+        ),
+    )
+    mode: TransformMode | None = Field(
+        default=None,
+        description=(
+            "agent runs the one program variant names. agentless detects the source of each "
+            "event instead, takes no variant, and stamps each event with its detected "
+            "source's label so the loader routes it per event. Unset leaves the app's own "
+            "default, agent. Only an app whose manifest declares a mode_path takes it."
+        ),
+    )
+    detect: TransformDetect | None = Field(
+        default=None,
+        description=(
+            "How an agentless transform detects each event's source and what it does with "
+            "one it cannot place. Read only when mode is agentless. Unset leaves the app's "
+            "own defaults."
         ),
     )
     config_file: str | None = Field(default=None, description="Path to engine-specific config")
@@ -662,6 +740,26 @@ class SourceTransform(BaseModel):
         if v not in valid:
             raise ValueError(f"Invalid transform engine {v!r}. Valid: {', '.join(sorted(valid))}")
         return v
+
+    @model_validator(mode="after")
+    def _validate_mode_and_detect(self) -> SourceTransform:
+        if self.mode is None and self.detect is None:
+            return self
+        # Imported at call time for the cycle _validate_engine describes.
+        from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, transform_service
+
+        app = APP_CATALOGUE.get(transform_service(self.engine))
+        if self.mode is not None and not (app and app.mode_path):
+            raise ValueError(f"transform engine {self.engine!r} has no agent or agentless mode")
+        if self.detect is not None and not (app and app.detect_path):
+            raise ValueError(f"transform engine {self.engine!r} detects no source per event")
+        if self.detect is not None and self.mode != "agentless":
+            raise ValueError("transform.detect is read only when transform.mode is agentless")
+        if self.mode == "agentless" and self.variant:
+            raise ValueError(
+                "an agentless transform detects its source per event, so it takes no variant"
+            )
+        return self
 
 
 SourceOrigin = Literal["receiver", "fetcher"]
@@ -994,9 +1092,10 @@ _VERSIONED_KEYS = (
     "compat_profiles",
 )
 
-# ``variant`` selects which compiled-in program the transform runs; it changes
-# what a record becomes, never the shape of the table it lands in.
-_TRANSFORM_KEYS_WITHOUT_TABLE_EFFECT = {"variant"}
+# ``variant``, ``mode`` and ``detect`` select which compiled-in program the
+# transform runs on a record; they change what a record becomes, never the shape of
+# the table it lands in.
+_TRANSFORM_KEYS_WITHOUT_TABLE_EFFECT = {"variant", "mode", "detect"}
 
 # Named alike on SourceWriteRequest and SourceVersion; an update omitting one keeps the stored value.
 _INHERITED_ON_ABSENCE = (
@@ -1417,8 +1516,8 @@ def source_version_bump_required(previous: SourceVersion, updated: SourceVersion
     additional), ``ttl_days``, ``engine``, common-header type/version, ``views``,
     or table-affecting ``transform`` fields.
 
-    ``transport``, ``archive``, ``transform.variant`` and ``fetcher.routes`` are
-    deliberately absent: they move records around, and a version id exists to
+    ``transport``, ``archive``, ``transform.variant``, ``transform.mode``,
+    ``transform.detect`` and ``fetcher.routes`` are deliberately absent: they move records around, and a version id exists to
     pin the shape of the table those records land in.
     """
     prev_schema = previous.effective_schema()

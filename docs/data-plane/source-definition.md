@@ -98,6 +98,11 @@ match:
 transform:
   engine: vector                        # A catalogued transform app, by engine name (apps.yaml)
   variant: filebeat.okta.default        # The compiled-in program, where the app offers a catalogue
+  # mode: agentless                     # elastic only: detect each event's program, take no variant
+  # detect:                             # agentless only, all optional
+  #   unmatched: fallback               # passthrough (default), fallback or stop
+  #   fallback: filebeat.cisco_asa.default   # registry name, required exactly when unmatched is fallback
+  #   candidates: []                    # registry names detection may name, empty means every source
   config_file: /etc/vector/filebeat.yaml
   env: {}                               # Per-transform ENV overrides
   files: []                             # Enrichment files (CSV, MMDB)
@@ -231,6 +236,7 @@ emits the schema YAML, which the source then names. The mapping table is in
 | fetcher connector type | one type per source, however many connections it polls; the refusal names the source and the types |
 | flow | runnable here: the deployment offers the transport, and every app in the flow carries it |
 | transform | engine must be one the app manifest catalogues (`vrl`, `vector`, `elastic`) |
+| transform mode and detect | `mode` and `detect` only for an app whose manifest declares `mode_path` and `detect_path` (`elastic`). `detect` only with `mode: agentless`, which takes no `variant`. `detect.fallback` is required when `unmatched` is `fallback` and refused otherwise, and `candidates` holds distinct non-blank names |
 | catalogue entry | the intake must be one the entry arrives by, the variant one it compiles to and not one a mounted contract of the deployed transform leaves out (409 `missing_variant`), and the source name a legal label |
 | schema | files exist and pass SchemaBuilder validation, and carry `_source` as a column (injected if missing) |
 
