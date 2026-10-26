@@ -1323,6 +1323,17 @@ def _catalogue_http_failure(
     )
 
 
+def _catalogue_source_name(write: SourceWriteRequest) -> str:
+    """The name a compiled catalogue write carries.
+
+    ``SourceWriteRequest.source`` is optional because an update may omit it. A
+    catalogue compile always sets it.
+    """
+    if write.source is None:
+        raise ValueError("catalogue write has no source name")
+    return write.source
+
+
 def _compile_catalogue_item(
     catalogue: source_catalogue_module.SourceCatalogue,
     item: CatalogueSourceItem,
@@ -1339,18 +1350,20 @@ def _compile_catalogue_item(
             transport=item.transport,
             variant=item.variant,
         )
-        _refuse_unknown_fetched_org(request, write)
     except source_catalogue_module.SourceCatalogueError as exc:
         return _catalogue_failure(item.entry, exc)
     except ValueError as exc:
         return _catalogue_failure(item.entry, exc)
+    name = _catalogue_source_name(write)
+    try:
+        _refuse_unknown_fetched_org(request, write)
     except HTTPException as exc:
-        return _catalogue_http_failure(item.entry, exc, source=write.source)
+        return _catalogue_http_failure(item.entry, exc, source=name)
     available = source_catalogue_module.variant_availability(transform=write.transform)
     if available.state == "missing_variant" and write.transform is not None:
         return CatalogueSourceFailure(
             entry=item.entry,
-            source=write.source,
+            source=name,
             code="missing_variant",
             message=available.reason,
         )
@@ -1453,20 +1466,21 @@ def create_sources_from_catalogue(
             failed.append(compiled)
             continue
         write = compiled
-        if registry.source_exists(write.source):
+        name = _catalogue_source_name(write)
+        if registry.source_exists(name):
             failed.append(
                 CatalogueSourceFailure(
                     entry=item.entry,
-                    source=write.source,
+                    source=name,
                     code="conflict",
-                    message=f"Source {write.source!r} already exists",
+                    message=f"Source {name!r} already exists",
                 )
             )
             continue
         try:
             source = registry.create_source_from_write(write, created_by=git_author(user))
         except SourceValidationError as exc:
-            failed.append(_catalogue_failure(item.entry, exc, source=write.source))
+            failed.append(_catalogue_failure(item.entry, exc, source=name))
             continue
         audit_resource_change(user.user_id, "source", source.source, "created")
         created.append(
