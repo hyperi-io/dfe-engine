@@ -66,11 +66,7 @@ The archiver keeps the RAW record as it arrived, before any transform. On the bu
 
 The second diagram is the shape a transform takes once it declares `direct` - which transforms do, and how one gains it, is under [Adding a transform](#adding-a-transform).
 
-## Where parsing happens
-
-Parsing that is mechanical and predictable happens once, at the first hop. dfe-receiver and dfe-fetcher parse the transport layer (a syslog header, a beats or HEC envelope, OTLP framing) at full speed and emit JSON with the original payload in `message`. Parsing that is conditional on the content, such as a vendor's message body run through grok or dissect, happens downstream in a transform, which reads `message` and the parsed header fields.
-
-So a record carries its payload once. Raw capture (`_raw`, the bytes as they arrived) is off by default, because keeping it doubles every record. It's a fallback an operator turns on for a source that needs it. It isn't how a transform normally gets its input. A record parsed wrongly at the first hop is fixed in the receiver or the fetcher, not by switching raw capture on.
+Mechanical parsing happens once at the first hop: dfe-receiver and dfe-fetcher parse the transport layer (a syslog header, a beats envelope) into JSON with the payload in `message`. Content-dependent parsing, such as a vendor body through grok, happens in a transform reading `message`. Raw capture (`_raw`) is off by default because it doubles every record. A first-hop parse bug is fixed in the receiver or fetcher, never by turning raw capture on.
 
 ## Two transports, one per deployment
 
