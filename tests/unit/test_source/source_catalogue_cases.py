@@ -40,6 +40,11 @@ CISCO_ASA_BODY: dict[str, Any] = {
     "archive": False,
 }
 
+CISCO_ASA_BEATS_BODY: dict[str, Any] = {
+    **CISCO_ASA_BODY,
+    "match": {"field": "data_stream.dataset", "operator": "equals", "value": "cisco_asa.log"},
+}
+
 COREDNS_LOG_BODY: dict[str, Any] = {
     "source": "coredns-log",
     "display_name": "coredns.log",
@@ -92,7 +97,7 @@ class DefaultIntakeCase(TypedDict):
 
 DEFAULT_INTAKE_CASES: list[DefaultIntakeCase] = [
     {"id": "fetcher_first", "entry": "aws-cloudtrail", "expected_default_intake": "fetcher"},
-    {"id": "receiver_before_beats", "entry": "cisco-asa", "expected_default_intake": "receiver"},
+    {"id": "beats_before_receiver", "entry": "cisco-asa", "expected_default_intake": "beats"},
     {"id": "beats_alone", "entry": "coredns-log", "expected_default_intake": "beats"},
 ]
 
@@ -319,33 +324,38 @@ class WriteRequestForCase(TypedDict):
 
 WRITE_REQUEST_FOR_CASES: list[WriteRequestForCase] = [
     {
-        "id": "receiver_default",
+        "id": "default_on_a_beats_and_receiver_entry_matches_the_dataset",
         "entry": "cisco-asa",
         "arguments": {},
+        "expected_body": CISCO_ASA_BEATS_BODY,
+    },
+    {
+        "id": "explicit_receiver_matches_the_source_label",
+        "entry": "cisco-asa",
+        "arguments": {"intake": "receiver"},
         "expected_body": CISCO_ASA_BODY,
     },
     {
-        "id": "beats_on_a_receiver_entry_matches_the_dataset",
+        "id": "explicit_beats_matches_the_dataset",
         "entry": "cisco-asa",
         "arguments": {"intake": "beats"},
-        "expected_body": {
-            **CISCO_ASA_BODY,
-            "match": {
-                "field": "data_stream.dataset",
-                "operator": "equals",
-                "value": "cisco_asa.log",
-            },
-        },
+        "expected_body": CISCO_ASA_BEATS_BODY,
     },
     {
         "id": "receiver_renamed_matches_the_new_name",
         "entry": "cisco-asa",
-        "arguments": {"name": "edge-firewall"},
+        "arguments": {"intake": "receiver", "name": "edge-firewall"},
         "expected_body": {
             **CISCO_ASA_BODY,
             "source": "edge-firewall",
             "match": {"field": "_source", "operator": "equals", "value": "edge-firewall"},
         },
+    },
+    {
+        "id": "beats_renamed_still_matches_the_dataset",
+        "entry": "cisco-asa",
+        "arguments": {"name": "edge-firewall"},
+        "expected_body": {**CISCO_ASA_BEATS_BODY, "source": "edge-firewall"},
     },
     {
         "id": "fetcher_default_carries_no_match",

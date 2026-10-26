@@ -19,7 +19,11 @@ import dfe_schemas
 import pytest
 import yaml
 from scalo.logger import logger
+from scalo.rules import CompileOptions
+from scalo.rules import RuleSet as ScaloRuleSet
 
+from dfe_engine.services.models.receiver import RULE_TARGETS, RuleSet
+from dfe_engine.services.source_routing import RECEIVER_RULES_PROFILE, source_rules
 from dfe_engine.source import catalogue as sc
 from dfe_engine.source.models import source_from_write
 from dfe_engine.source.registry import SourceRegistry, SourceValidationError
@@ -102,6 +106,38 @@ def _save_refusals(*, catalogue: sc.SourceCatalogue, registry: SourceRegistry) -
                 except (SourceValidationError, ValueError) as exc:
                     refusals.append(f"{entry.name} {intake} {variant}: {exc}")
     return refusals
+
+
+def _elastic_agent_event(*, entry: sc.CatalogueEntry) -> dict[str, Any]:
+    """The envelope Elastic Agent ships a line of *entry* in, which carries no ``_source``."""
+    return {
+        "agent": {"type": "filebeat", "name": "agent-1", "version": "8.0.0"},
+        "data_stream": {"dataset": entry.dataset, "namespace": "ep", "type": "logs"},
+        "input": {"type": "tcp"},
+        "message": "a vendor line",
+    }
+
+
+def _routes_to_label(*, entry: sc.CatalogueEntry, intake: sc.CatalogueIntake | None) -> bool:
+    """Whether the source created from *entry* on *intake* labels its own Elastic Agent event."""
+    write = sc.write_request_for(entry=entry, intake=intake)
+    source = source_from_write(source_name=entry.name, write=write)
+    rule_set = RuleSet(targets=list(RULE_TARGETS), rules=source_rules(source))
+    compiled = ScaloRuleSet.compile(
+        rule_set.model_dump(mode="json", exclude_defaults=True),
+        CompileOptions(profile=RECEIVER_RULES_PROFILE),
+    )
+    event = _elastic_agent_event(entry=entry)
+    return compiled.evaluate(event).value("_source") == source.source
+
+
+def _beats_and_receiver(*, catalogue: sc.SourceCatalogue) -> list[sc.CatalogueEntry]:
+    """Every entry that arrives both by Beats and by the receiver."""
+    return [
+        entry
+        for entry in catalogue.entries.values()
+        if "beats" in entry.intakes and "receiver" in entry.intakes
+    ]
 
 
 @pytest.fixture
@@ -297,3 +333,34 @@ class TestWriteRequestFor:
         self, installed: sc.SourceCatalogue, registry: SourceRegistry
     ):
         assert _save_refusals(catalogue=installed, registry=registry) == []
+
+
+class TestElasticAgentRouting:
+    def test_installed_catalogue_has_entries_on_both_intakes(self, installed: sc.SourceCatalogue):
+        assert _beats_and_receiver(catalogue=installed)
+
+    def test_every_default_create_routes_its_elastic_agent_event(
+        self, installed: sc.SourceCatalogue
+    ):
+        unrouted = [
+            entry.name
+            for entry in _beats_and_receiver(catalogue=installed)
+            if not _routes_to_label(entry=entry, intake=None)
+        ]
+        assert unrouted == []
+
+    def test_an_explicit_beats_create_routes_its_elastic_agent_event(
+        self, installed: sc.SourceCatalogue
+    ):
+        unrouted = [
+            entry.name
+            for entry in _beats_and_receiver(catalogue=installed)
+            if not _routes_to_label(entry=entry, intake="beats")
+        ]
+        assert unrouted == []
+
+    def test_an_explicit_receiver_create_matches_the_source_label_only(
+        self, fixture_catalogue: sc.SourceCatalogue
+    ):
+        entry = fixture_catalogue.entry(name="cisco-asa")
+        assert not _routes_to_label(entry=entry, intake="receiver")

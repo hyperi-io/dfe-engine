@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The source catalogue, and the write body an entry compiles to on the intake chosen.
 
-Each ``catalogue/<source>.yaml`` in dfe-schemas is the ``POST /sources`` body for the source's default intake, plus a ``catalogue`` block the write model ignores. It is read from the installed wheel, never the seeded schemas volume, because the seed never deletes and an entry dropped from the catalogue would survive there.
+Each ``catalogue/<source>.yaml`` in dfe-schemas is the ``POST /sources`` body for the source, whose match rule the intake chosen replaces, plus a ``catalogue`` block the write model ignores. It is read from the installed wheel, never the seeded schemas volume, because the seed never deletes and an entry dropped from the catalogue would survive there.
 """
 
 import threading
@@ -39,8 +39,11 @@ CatalogueIntake = Literal["beats", "receiver", "fetcher"]
 
 INTAKES: frozenset[str] = frozenset(get_args(CatalogueIntake))
 
-DEFAULT_ORIGIN_ORDER: tuple[CatalogueIntake, ...] = ("fetcher", "receiver", "beats")
-"""The body carries the first of these the entry lists, which is the dfe-schemas rule."""
+DEFAULT_ORIGIN_ORDER: tuple[CatalogueIntake, ...] = ("fetcher", "beats", "receiver")
+"""A create with no intake takes the first of these the entry lists.
+
+Fetcher leads because the body carries the fetcher block exactly when it is an intake. Beats beats receiver because an entry that lists it is shipped by Elastic Agent, which stamps ``data_stream.dataset`` on every event, and the ``_source`` label a receiver source matches on is one no shipper sends.
+"""
 
 BEATS_DATASET_FIELD = "data_stream.dataset"
 """Beats and Elastic Agent stamp ``<package>.<data_stream>`` here on every event."""
@@ -118,7 +121,7 @@ class CatalogueEntry:
 
     @property
     def default_intake(self) -> CatalogueIntake:
-        """The intake the body carries: the first of fetcher, receiver and beats the entry lists."""
+        """The intake a create takes when it names none: the first of fetcher, beats and receiver the entry lists."""
         return next(intake for intake in DEFAULT_ORIGIN_ORDER if intake in self.intakes)
 
 
