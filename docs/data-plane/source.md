@@ -85,9 +85,7 @@ read it directly and carry no routing config of their own.
   characters, so a 40-character name deploys on Kubernetes too.
 - Unique across all sources
 
-A hyphenated name has to be quoted in a ClickHouse identifier position. The DDL
-generator does not quote it yet, so a hyphenated source cannot have its table
-DDL generated -- see `schema/schema_ddl.py`.
+A hyphenated name has to be quoted in a ClickHouse identifier position, so the DDL generator backtick-quotes every identifier (`quote_ident` in `schema/schema_ddl.py`).
 
 ## Where to read next
 
