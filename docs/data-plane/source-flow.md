@@ -66,7 +66,7 @@ The archiver keeps the RAW record as it arrived, before any transform. On the bu
 
 The second diagram is the shape a transform takes once it declares `direct` - which transforms do, and how one gains it, is under [Adding a transform](#adding-a-transform).
 
-Mechanical parsing happens once at the first hop: dfe-receiver and dfe-fetcher parse the transport layer (a syslog header, a beats envelope) into JSON with the payload in `message`. Content-dependent parsing, such as a vendor body through grok, happens in a transform reading `message`. Raw capture (`_raw`) is off by default because it doubles every record. A first-hop parse bug is fixed in the receiver or fetcher, never by turning raw capture on.
+**We parse mechanical transport at max efficiency at the edge.** dfe-receiver and dfe-fetcher parse the transport layer (a syslog header, a beats envelope) into JSON with the payload in `message`. Content-dependent parsing, such as a vendor body through grok, happens in a transform reading `message`. Raw capture (`_raw`) is off by default because it doubles every record. A first-hop parse bug is fixed in the receiver or fetcher, never by turning raw capture on.
 
 ## Two transports, one per deployment
 
