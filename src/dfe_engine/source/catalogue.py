@@ -322,7 +322,12 @@ def write_request_for(
     transport: SourceTransport | None = None,
     variant: str | None = None,
 ) -> SourceWriteRequest:
-    """Compile *entry* into the write body for *intake*, with the caller's name, variant, transport and archive."""
+    """Compile *entry* into the write body for *intake*.
+
+    The caller's name, variant, transport and archive are applied. The source records
+    the catalogue entry and the intake that was selected, and a later edit leaves both
+    in place.
+    """
     chosen_intake = (intake) or (entry.default_intake)
     if chosen_intake not in entry.intakes:
         raise SourceCatalogueError(
@@ -339,6 +344,8 @@ def write_request_for(
     doc["source"] = source
     doc["archive"] = archive
     doc["transport"] = transport
+    doc["from_catalogue_item"] = entry.name
+    doc["from_catalogue_intake"] = chosen_intake
     if chosen_intake != "fetcher":
         doc.pop("fetcher", None)
         doc["match"] = _match_for(entry=entry, intake=chosen_intake, source=source)

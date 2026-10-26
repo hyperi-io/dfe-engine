@@ -182,8 +182,8 @@ class TestACreateTheAppsDidNotFollowIsAccepted:
         _refuse_overlay_writes(app)
 
         resp = client.post(
-            "/api/v1/sources/from-catalogue/okta",
-            json={"intake": "beats"},
+            "/api/v1/sources/from-catalogue",
+            json={"entries": [{"entry": "okta", "intake": "beats"}]},
             headers=admin_headers,
         )
 

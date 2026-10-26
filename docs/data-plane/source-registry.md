@@ -102,8 +102,8 @@ Sources are the primary API entity (see
 ```text
 GET    /api/v1/sources                  # List sources (paginated)
 POST   /api/v1/sources                  # Create source (flat write body; views/transform/fetcher inline)
-GET    /api/v1/sources/catalogue        # Sources DFE ships ready to create, each saying whether the deployed transform ships its variant (filter: intake, search)
-POST   /api/v1/sources/from-catalogue/{entry}  # Create a source from a catalogue entry on one of its intakes
+GET    /api/v1/sources/catalogue        # Sources DFE ships ready to create, each saying whether the deployed transform ships its variant, omitting entries already stored (filter: intake, search)
+POST   /api/v1/sources/from-catalogue   # Create sources from catalogue entries, at most 50 in one request
 GET    /api/v1/sources/{name}           # Get source (deployed-version accessors + state + enabled)
 GET    /api/v1/sources/{name}/versions/{version}  # One immutable version snapshot
 GET    /api/v1/sources/{name}/columns   # Composed schema columns for a version

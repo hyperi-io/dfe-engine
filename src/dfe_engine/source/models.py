@@ -1362,6 +1362,14 @@ class SourceWriteRequest(BaseModel):
         default=False,
         description="Keep the raw record as it arrived, on either transport",
     )
+    from_catalogue_item: str | None = Field(
+        default=None,
+        description="Catalogue entry this source was created from; absent when written by hand",
+    )
+    from_catalogue_intake: Literal["beats", "receiver", "fetcher"] | None = Field(
+        default=None,
+        description="Intake selected for that catalogue entry: beats, receiver or fetcher",
+    )
     views: list[SourceView] | None = Field(
         default=None,
         description="Naming-standard views for this revision (sigma, ecs, cim, ocsf)",
@@ -1459,6 +1467,8 @@ def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
         ),
         "current": version_id,
         "versions": {version_id: snapshot.model_dump(mode="json", by_alias=True)},
+        "from_catalogue_item": write.from_catalogue_item,
+        "from_catalogue_intake": write.from_catalogue_intake,
     }
     return Source.model_validate(payload)
 
@@ -1623,6 +1633,16 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
         if write.display_name is not None
         else existing.display_name,
         "description": write.description if write.description is not None else existing.description,
+        "from_catalogue_item": (
+            write.from_catalogue_item
+            if write.from_catalogue_item is not None
+            else existing.from_catalogue_item
+        ),
+        "from_catalogue_intake": (
+            write.from_catalogue_intake
+            if write.from_catalogue_intake is not None
+            else existing.from_catalogue_intake
+        ),
         "state": write.effective_state(existing.state),
         "deployed_version": _derive_deployed_version(
             existing_deployed=existing.deployed_version,
@@ -1661,6 +1681,14 @@ class Source(BaseModel):
     )
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
+    from_catalogue_item: str | None = Field(
+        default=None,
+        description="Catalogue entry this source was created from; absent when written by hand",
+    )
+    from_catalogue_intake: Literal["beats", "receiver", "fetcher"] | None = Field(
+        default=None,
+        description="Intake selected for that catalogue entry: beats, receiver or fetcher",
+    )
     state: SourceState = Field(
         default="active",
         description="Lifecycle state: active (all on), dormant (schema pre-positioned, "
@@ -1935,6 +1963,10 @@ class Source(BaseModel):
             data["deployed_version"] = self.deployed_version
         if self.description is not None:
             data["description"] = self.description
+        if self.from_catalogue_item is not None:
+            data["from_catalogue_item"] = self.from_catalogue_item
+        if self.from_catalogue_intake is not None:
+            data["from_catalogue_intake"] = self.from_catalogue_intake
         return data
 
 
