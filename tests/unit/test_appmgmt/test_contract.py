@@ -455,6 +455,7 @@ class TestProvenance:
             "config.routing.dlq.enabled",
             "config.routing.dlq.topic",
             "config.routing.dlq.mode",
+            "config.server.max_body_size",
             *RECEIVER_LISTENERS,
         } == derived
 
