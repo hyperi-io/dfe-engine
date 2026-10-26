@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.77](https://github.com/hyperi-io/dfe-engine/compare/v1.22.76...v1.22.77) (2026-10-26)
+
+### Bug Fixes
+
+* fix source catalogue ([#993](https://github.com/hyperi-io/dfe-engine/issues/993)) ([a0a3939](https://github.com/hyperi-io/dfe-engine/commit/a0a3939aa2e54f5f5ec97120633eda050425df28))
+* release the bulk catalogue endpoint ([#995](https://github.com/hyperi-io/dfe-engine/issues/995)) ([51b1b89](https://github.com/hyperi-io/dfe-engine/commit/51b1b89a02cb73510c1d299281ba74a1a6cd8704)), closes [#993](https://github.com/hyperi-io/dfe-engine/issues/993)
+
 ## [1.22.76](https://github.com/hyperi-io/dfe-engine/compare/v1.22.75...v1.22.76) (2026-10-26)
 
 ### Bug Fixes
