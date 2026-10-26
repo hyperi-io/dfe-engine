@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.76](https://github.com/hyperi-io/dfe-engine/compare/v1.22.75...v1.22.76) (2026-10-26)
+
+### Bug Fixes
+
+* declare the receiver record cap as chart-supplied config ([#992](https://github.com/hyperi-io/dfe-engine/issues/992)) ([40de398](https://github.com/hyperi-io/dfe-engine/commit/40de398cff0a74294101c0e15d92c10083957396))
+* let a source set the elastic transform's agentless mode ([#991](https://github.com/hyperi-io/dfe-engine/issues/991)) ([2a5162f](https://github.com/hyperi-io/dfe-engine/commit/2a5162fcaf47ebb90a92575f80cb309c5fa03a06))
+
 ## [1.22.75](https://github.com/hyperi-io/dfe-engine/compare/v1.22.74...v1.22.75) (2026-10-26)
 
 ### Bug Fixes
