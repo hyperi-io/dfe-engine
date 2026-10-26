@@ -104,7 +104,7 @@ dry-run POST /api/v1/sigma/views
 dry-run POST /api/v1/sigma/views/{source_name}
 dry-run POST /api/v1/sources
 dry-run POST /api/v1/sources/bulk
-dry-run POST /api/v1/sources/from-catalogue/{entry}
+dry-run POST /api/v1/sources/from-catalogue
 dry-run POST /api/v1/sources/import
 dry-run POST /api/v1/sources/reconcile-apps
 dry-run POST /api/v1/sources/seed
@@ -350,7 +350,6 @@ hierarchy POST /api/v1/sigma/providers/{name}/enable
 hierarchy POST /api/v1/sigma/providers/{name}/sync
 hierarchy POST /api/v1/sigma/views
 hierarchy POST /api/v1/sigma/views/{source_name}
-hierarchy POST /api/v1/sources/from-catalogue/{entry}
 hierarchy POST /api/v1/synthetic-data/generate
 hierarchy POST /api/v1/synthetic-data/lookalike
 hierarchy POST /api/v1/synthetic-data/stream

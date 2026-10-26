@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_api/test_sources_catalogue.py
-#  Purpose:      Listing the dfe-schemas source catalogue, and creating a source from an entry
+#  Purpose:      Listing the dfe-schemas source catalogue, and creating sources from entries
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -47,9 +47,18 @@ def _stored(*, client: TestClient, headers: dict[str, str], name: str) -> dict[s
         "fetcher": fetcher["source_type"] if fetcher else None,
         "match": stored["match"],
         "meta_schema": version["schema"]["meta_schema"],
+        "from_catalogue_intake": stored["from_catalogue_intake"],
+        "from_catalogue_item": stored["from_catalogue_item"],
         "origin": stored["origin"],
         "variant": stored["transform"]["variant"],
     }
+
+
+def _create(client: TestClient, headers: dict[str, str], entry: str, body: dict[str, Any]) -> Any:
+    """Create one catalogue entry, with the entry name beside the caller's fields."""
+    return client.post(
+        FROM_CATALOGUE, headers=headers, json={"entries": [{"entry": entry, **body}]}
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -131,6 +140,39 @@ class TestListCatalogue:
     def test_a_viewer_may_list(self, client: TestClient, viewer_headers: dict[str, str]):
         assert client.get(CATALOGUE, headers=viewer_headers).status_code == 200
 
+    def test_an_entry_already_stored_is_left_out(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        before = client.get(CATALOGUE, headers=admin_headers, params={"per_page": 1}).json()[
+            "total"
+        ]
+        created = _create(client, admin_headers, "okta", {"intake": "beats"})
+        assert created.status_code == 201, created.text
+        listed = client.get(CATALOGUE, headers=admin_headers, params={"search": "okta"})
+        again = client.get(CATALOGUE, headers=admin_headers, params={"per_page": 1}).json()["total"]
+        assert "okta" not in {row["name"] for row in listed.json()["items"]}
+        assert again == before - 1
+
+    def test_a_renamed_catalogue_source_still_hides_its_entry(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        created = _create(client, admin_headers, "cisco-asa", {"name": "edge-firewall"})
+        assert created.status_code == 201, created.text
+        listed = client.get(CATALOGUE, headers=admin_headers, params={"search": "cisco-asa"})
+        assert "cisco-asa" not in {row["name"] for row in listed.json()["items"]}
+
+    def test_a_hand_written_source_leaves_its_catalogue_entry_listed(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        written = client.post(
+            "/api/v1/sources",
+            headers=admin_headers,
+            json={"source": "okta", "match": {"field": "tags.collector.type", "value": "okta"}},
+        )
+        assert written.status_code == 201, written.text
+        listed = client.get(CATALOGUE, headers=admin_headers, params={"search": "okta"})
+        assert "okta" in {row["name"] for row in listed.json()["items"]}
+
 
 class TestCreateSourceFromCatalogue:
     @pytest.mark.parametrize(
@@ -141,12 +183,85 @@ class TestCreateSourceFromCatalogue:
     def test_matches_expected(
         self, admin_headers: dict[str, str], client: TestClient, case: CreateFromCatalogueCase
     ):
+        resp = _create(client, admin_headers, case["entry"], case["body"])
+        assert resp.status_code == 201, resp.text
+        name = str(case["body"].get("name") or case["entry"])
+        assert resp.json()["failed"] == []
+        assert resp.json()["created"][0]["source"] == name
+        stored = _stored(client=client, headers=admin_headers, name=name)
+        assert stored == case["expected_stored"]
+
+    def test_several_entries_become_sources_together(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
         resp = client.post(
-            f"{FROM_CATALOGUE}/{case['entry']}", headers=admin_headers, json=case["body"]
+            FROM_CATALOGUE,
+            headers=admin_headers,
+            json={
+                "entries": [
+                    {"entry": "okta", "intake": "beats"},
+                    {"entry": "cisco-asa"},
+                ]
+            },
         )
         assert resp.status_code == 201, resp.text
-        stored = _stored(client=client, headers=admin_headers, name=resp.json()["source"])
-        assert stored == case["expected_stored"]
+        assert [row["source"] for row in resp.json()["created"]] == ["okta", "cisco-asa"]
+        assert resp.json()["failed"] == []
+        assert client.get("/api/v1/sources/okta", headers=admin_headers).status_code == 200
+        assert client.get("/api/v1/sources/cisco-asa", headers=admin_headers).status_code == 200
+
+    def test_more_than_fifty_entries_are_refused(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        resp = client.post(
+            FROM_CATALOGUE,
+            headers=admin_headers,
+            json={"entries": [{"entry": "okta", "intake": "beats"}] * 51},
+        )
+        assert resp.status_code == 422, resp.text
+        assert resp.json()["code"] == "validation_error"
+        assert resp.json()["message"]
+        assert "created" not in resp.json()
+        assert client.get("/api/v1/sources/okta", headers=admin_headers).status_code == 404
+
+    def test_one_refusal_leaves_the_other_entries_stored(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        resp = client.post(
+            FROM_CATALOGUE,
+            headers=admin_headers,
+            json={
+                "entries": [
+                    {"entry": "okta", "intake": "beats"},
+                    {"entry": "not-a-source", "intake": "beats"},
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [row["source"] for row in body["created"]] == ["okta"]
+        assert body["failed"][0]["entry"] == "not-a-source"
+        assert body["failed"][0]["code"] == "catalogue_error"
+        assert client.get("/api/v1/sources/okta", headers=admin_headers).status_code == 200
+
+    def test_a_repeated_entry_is_stored_once(
+        self, admin_headers: dict[str, str], client: TestClient
+    ):
+        resp = client.post(
+            FROM_CATALOGUE,
+            headers=admin_headers,
+            json={
+                "entries": [
+                    {"entry": "okta", "intake": "beats"},
+                    {"entry": "okta", "intake": "beats"},
+                ]
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert [row["source"] for row in body["created"]] == ["okta"]
+        assert body["failed"][0]["code"] == "conflict"
+        assert "already exists" in body["failed"][0]["message"]
 
     @pytest.mark.parametrize(
         "case",
@@ -160,32 +275,26 @@ class TestCreateSourceFromCatalogue:
         elastic_contract: None,
         case: CreateAgainstTheContractCase,
     ):
-        resp = client.post(
-            f"{FROM_CATALOGUE}/{case['entry']}", headers=admin_headers, json=case["body"]
-        )
+        resp = _create(client, admin_headers, case["entry"], case["body"])
         assert resp.status_code == case["expected_status"], resp.text
 
     def test_missing_variant(
         self, admin_headers: dict[str, str], client: TestClient, elastic_contract: None
     ):
-        resp = client.post(
-            f"{FROM_CATALOGUE}/o365-metrics-entra-alerts", headers=admin_headers, json={}
-        )
+        resp = _create(client, admin_headers, "o365-metrics-entra-alerts", {})
         saved = client.get("/api/v1/sources/o365-metrics-entra-alerts", headers=admin_headers)
-        assert (resp.status_code, resp.json(), saved.status_code) == (
-            409,
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["created"] == []
+        assert resp.json()["failed"] == [
             {
+                "entry": "o365-metrics-entra-alerts",
+                "source": "o365-metrics-entra-alerts",
                 "code": "missing_variant",
                 "message": "the deployed 'dfe-transform-elastic' does not ship transform variant "
                 "'filebeat.o365_metrics_entra_alerts.default'",
-                "errors": [],
-                "context": {
-                    "transform": "dfe-transform-elastic",
-                    "variant": "filebeat.o365_metrics_entra_alerts.default",
-                },
-            },
-            404,
-        )
+            }
+        ]
+        assert saved.status_code == 404
 
     @pytest.mark.parametrize(
         "case",
@@ -195,20 +304,36 @@ class TestCreateSourceFromCatalogue:
     def test_rejects(
         self, admin_headers: dict[str, str], client: TestClient, case: CreateFromCatalogueRejectCase
     ):
-        resp = client.post(
-            f"{FROM_CATALOGUE}/{case['entry']}", headers=admin_headers, json=case["body"]
-        )
-        assert (resp.status_code, resp.json()) == (422, case["expected_response"])
+        resp = _create(client, admin_headers, case["entry"], case["body"])
+        expected = case["expected_response"]
+        if case["id"] == "the_retired_transform_field":
+            assert (resp.status_code, resp.json()) == (422, expected)
+            return
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["created"] == []
+        assert resp.json()["failed"] == [
+            {
+                "entry": case["entry"],
+                "source": "",
+                "code": expected["code"],
+                "message": expected["message"],
+            }
+        ]
 
     def test_twice(self, admin_headers: dict[str, str], client: TestClient):
-        first = client.post(f"{FROM_CATALOGUE}/cisco-asa", headers=admin_headers, json={})
-        again = client.post(f"{FROM_CATALOGUE}/cisco-asa", headers=admin_headers, json={})
+        first = _create(client, admin_headers, "cisco-asa", {})
+        again = _create(client, admin_headers, "cisco-asa", {})
         assert (first.status_code, again.status_code) == (201, 409)
+        assert again.json()["created"] == []
+        assert again.json()["failed"][0]["code"] == "conflict"
 
     def test_needs_source_write(self, client: TestClient):
-        assert client.post(f"{FROM_CATALOGUE}/cisco-asa", json={}).status_code == 401
+        assert (
+            client.post(FROM_CATALOGUE, json={"entries": [{"entry": "cisco-asa"}]}).status_code
+            == 401
+        )
 
     def test_a_viewer_may_not_create(self, client: TestClient, viewer_headers: dict[str, str]):
-        resp = client.post(f"{FROM_CATALOGUE}/cisco-asa", headers=viewer_headers, json={})
+        resp = _create(client, viewer_headers, "cisco-asa", {})
         saved = client.get("/api/v1/sources/cisco-asa", headers=viewer_headers)
         assert (resp.status_code, saved.status_code) == (403, 404)

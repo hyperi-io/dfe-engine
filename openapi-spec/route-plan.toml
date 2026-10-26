@@ -280,7 +280,7 @@ routes = [
   { old = "POST /api/v1/sources/bulk", status = "unchanged" },
   { old = "GET /api/v1/sources/catalogue", status = "unchanged" },
   { old = "GET /api/v1/sources/engines", status = "unchanged" },
-  { old = "POST /api/v1/sources/from-catalogue/{entry}", status = "decide", note = "catalogue-entry" },
+  { old = "POST /api/v1/sources/from-catalogue", status = "unchanged" },
   { old = "POST /api/v1/sources/import", status = "unchanged" },
   { old = "POST /api/v1/sources/reconcile-apps", status = "unchanged" },
   { old = "POST /api/v1/sources/seed", status = "unchanged" },
@@ -339,7 +339,6 @@ gitops-log = "The gitops log is the change history."
 contract = "One contract per app image, so a singleton under the app."
 accounts-me = "The caller's own account: an `identity/accounts/me` alias, or an `identity/me` singleton beside the frozen `auth/me`."
 groups-scope = "A group is system- or org-scoped, so `orgs/{org}/groups` cannot own a system group: one `identity/groups/{group}` collection with the scope as a field, or split between the two."
-catalogue-entry = "Creating from a catalogue entry: a collection action `sources/from-catalogue` with the entry in the body, or catalogue entries as a resource of their own."
 source-schema-overlap = "Overlaps the sources router's own route for the same source: merge into it, or keep both."
 services-overlap = "ServiceConfigRegistry overlaps the apps router's instance config: merge into `deployment/apps/{app}/instances/{instance}`, or retire."
 fieldmap-defaults = "Default field maps belong to no source: an `ingest/field-maps/{field_map}` collection, or another root."

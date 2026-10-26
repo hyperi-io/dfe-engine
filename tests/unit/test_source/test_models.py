@@ -973,6 +973,32 @@ class TestSourceYaml:
         assert "fetcher" not in yaml_dict
         assert "views" not in yaml_dict
         assert "description" not in yaml_dict
+        assert "from_catalogue_item" not in yaml_dict
+        assert "from_catalogue_intake" not in yaml_dict
+
+    def test_catalogue_provenance_is_stored_and_kept_across_an_edit(self):
+        existing = Source.model_validate(
+            {
+                "source": "okta",
+                "from_catalogue_item": "okta",
+                "from_catalogue_intake": "beats",
+                "match": {"field": "f", "value": "v"},
+            }
+        )
+        dumped = existing.to_yaml_dict()
+        assert dumped["from_catalogue_item"] == "okta"
+        assert dumped["from_catalogue_intake"] == "beats"
+        assert Source.model_validate(dumped).from_catalogue_intake == "beats"
+
+        updated = apply_source_write_update(
+            existing,
+            SourceWriteRequest.model_validate(
+                {"description": "doc-only edit", "match": {"field": "f", "value": "v"}}
+            ),
+        )
+        assert updated.from_catalogue_item == "okta"
+        assert updated.from_catalogue_intake == "beats"
+        assert updated.description == "doc-only edit"
 
     def test_round_trip_preserves_data(self):
         data = {

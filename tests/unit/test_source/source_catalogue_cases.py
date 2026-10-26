@@ -38,11 +38,14 @@ CISCO_ASA_BODY: dict[str, Any] = {
     "transform": {"engine": "elastic", "variant": "filebeat.cisco_asa.default"},
     "transport": None,
     "archive": False,
+    "from_catalogue_item": "cisco-asa",
+    "from_catalogue_intake": "receiver",
 }
 
 CISCO_ASA_BEATS_BODY: dict[str, Any] = {
     **CISCO_ASA_BODY,
     "match": {"field": "data_stream.dataset", "operator": "equals", "value": "cisco_asa.log"},
+    "from_catalogue_intake": "beats",
 }
 
 COREDNS_LOG_BODY: dict[str, Any] = {
@@ -58,6 +61,8 @@ COREDNS_LOG_BODY: dict[str, Any] = {
     "transform": {"engine": "elastic", "variant": "filebeat.coredns_log.default"},
     "transport": None,
     "archive": False,
+    "from_catalogue_item": "coredns-log",
+    "from_catalogue_intake": "beats",
 }
 
 WELL_FORMED_FILE: dict[str, Any] = {
@@ -374,6 +379,8 @@ WRITE_REQUEST_FOR_CASES: list[WriteRequestForCase] = [
             "fetcher": {"source_type": "aws", "topic": "own"},
             "transport": None,
             "archive": False,
+            "from_catalogue_item": "aws-cloudtrail",
+            "from_catalogue_intake": "fetcher",
         },
     },
     {
@@ -393,6 +400,8 @@ WRITE_REQUEST_FOR_CASES: list[WriteRequestForCase] = [
             "transform": {"engine": "elastic", "variant": "filebeat.okta.default"},
             "transport": None,
             "archive": False,
+            "from_catalogue_item": "okta",
+            "from_catalogue_intake": "beats",
         },
     },
     {

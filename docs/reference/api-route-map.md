@@ -10,9 +10,9 @@ One row per operation the engine serves today. **New** is where it goes, and its
 |---|---|---|
 | moved | 89 | A new path, method or both |
 | merged into | 9 | Folded into the operation **New** names |
-| unchanged | 36 | Same method and path |
+| unchanged | 37 | Same method and path |
 | frozen | 54 | Kept as it is |
-| decide | 130 | Not placed yet: see its question |
+| decide | 129 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
 | total | 318 | |
 
@@ -43,7 +43,6 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | [pipeline-templates](#pipeline-templates) | 2 |
 | [source-schema-overlap](#source-schema-overlap) | 2 |
 | [usage-scope](#usage-scope) | 2 |
-| [catalogue-entry](#catalogue-entry) | 1 |
 | [client-config](#client-config) | 1 |
 | [defaults-apply](#defaults-apply) | 1 |
 | [deployment-facts](#deployment-facts) | 1 |
@@ -188,6 +187,7 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | `POST /api/v1/sources/bulk` | `POST /api/v1/sources/bulk` | `sources.bulk` | `dfe sources bulk` | `dfe_sources_bulk` | unchanged | ui 2 |  |
 | `GET /api/v1/sources/catalogue` | `GET /api/v1/sources/catalogue` | `sources.catalogue` | `dfe sources catalogue` | `dfe_sources_catalogue` | unchanged | ui 2 |  |
 | `GET /api/v1/sources/engines` | `GET /api/v1/sources/engines` | `sources.engines` | `dfe sources engines` | `dfe_sources_engines` | unchanged | ui 2 |  |
+| `POST /api/v1/sources/from-catalogue` | `POST /api/v1/sources/from-catalogue` | `sources.from-catalogue` | `dfe sources from-catalogue` | `dfe_sources_from_catalogue` | unchanged | ui 2 |  |
 | `POST /api/v1/sources/import` | `POST /api/v1/sources/import` | `sources.import` | `dfe sources import` | `dfe_sources_import` | unchanged | 0 |  |
 | `POST /api/v1/sources/reconcile-apps` | `POST /api/v1/sources/reconcile-apps` | `sources.reconcile-apps` | `dfe sources reconcile-apps` | `dfe_sources_reconcile_apps` | unchanged | 0 |  |
 | `POST /api/v1/sources/seed` | `POST /api/v1/sources/seed` | `sources.seed` | `dfe sources seed` | `dfe_sources_seed` | unchanged | ui 2 |  |
@@ -578,14 +578,6 @@ Usage reads the whole deployment or one org, and `orgs/{org}/usage` covers only 
 |---|---|---|---|---|---|---|---|
 | `GET /api/v1/usage` | - | - | - | - | decide | 0 |  |
 | `GET /api/v1/usage/overview` | - | - | - | - | decide | 0 |  |
-
-### catalogue-entry
-
-Creating from a catalogue entry: a collection action `sources/from-catalogue` with the entry in the body, or catalogue entries as a resource of their own.
-
-| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
-|---|---|---|---|---|---|---|---|
-| `POST /api/v1/sources/from-catalogue/{entry}` | - | - | - | - | decide | ui 2 |  |
 
 ### client-config
 

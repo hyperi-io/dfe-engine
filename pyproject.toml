@@ -303,6 +303,11 @@ external = ["V"]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
+# hyperi-ci's docstring gate is `ruff check --select D`, and a CLI --select
+# turns `ignore` back on. per-file-ignores still holds, so D105 and D107 stay
+# off: a magic method's meaning is the protocol, and Google style documents
+# __init__ on the class.
+"src/**/*.py" = ["D105", "D107"]
 "src/dfe_engine/sigma/*" = ["S701"]  # Jinja2 autoescape (controlled templates)
 # Vendored Apache-2.0 files (aws-cli/botocore) - kept as close to upstream as
 # possible; do not modernise idioms the upstream still uses. See vendor/NOTICE.
