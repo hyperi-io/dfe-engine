@@ -41,6 +41,7 @@ class Param:
     description: str = ""
     default: Any = None
     enum: list[Any] | None = None
+    item_type: str = "str"  # element type token when type == "array"
 
 
 @dataclass
@@ -54,6 +55,7 @@ class BodyProp:
     description: str = ""
     default: Any = None
     enum: list[Any] | None = None
+    item_type: str = "str"  # element type token when type == "array"
 
 
 @dataclass
@@ -142,6 +144,18 @@ def _scalar_type(schema: dict[str, Any]) -> str:
     return "str"
 
 
+def _item_type(schema: dict[str, Any]) -> str:
+    """The element type token of an array node, ``str`` when it is not one."""
+    if "anyOf" in schema:
+        for member in schema["anyOf"]:
+            if member.get("type") == "array":
+                return _item_type(member)
+        return "str"
+    if schema.get("type") != "array":
+        return "str"
+    return _scalar_type(schema.get("items") or {})
+
+
 def _enum_of(schema: dict[str, Any]) -> list[Any] | None:
     if "anyOf" in schema:
         for s in schema["anyOf"]:
@@ -167,6 +181,7 @@ def _parse_parameters(raw_params: list[dict[str, Any]]) -> tuple[list[Param], li
             description=p.get("description", "") or schema.get("description", ""),
             default=schema.get("default"),
             enum=_enum_of(schema),
+            item_type=_item_type(schema),
         )
         if location == "path":
             path_params.append(param)
@@ -238,6 +253,7 @@ def _parse_body(op: dict[str, Any], resolver: RefResolver) -> tuple[list[BodyPro
                 description=prop_schema.get("description", "") or prop_schema.get("title", ""),
                 default=prop_schema.get("default"),
                 enum=_enum_of(prop_schema),
+                item_type=_item_type(prop_schema),
             )
         )
     return out, False
