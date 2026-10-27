@@ -47,7 +47,14 @@ from dfe_engine.schema.manifest_applier import (
     ManifestReport,
     log_report,
 )
-from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, SchemaPlan, SchemaPlanError, build_plan
+from dfe_engine.schema.plan import (
+    LEDGER_ID,
+    LOCK_ID,
+    DatabaseEngineError,
+    SchemaPlan,
+    SchemaPlanError,
+    build_plan,
+)
 from dfe_engine.startup_stop import stoppable_wait
 
 if TYPE_CHECKING:
@@ -94,10 +101,10 @@ _SEE_LOG = "the engine log has the cause"
 def _failed_stage(exc: Exception) -> str:
     """The status route's account of a failed pass: the stage, never the backend's text.
 
-    A server refused for replication is the exception: dfe-schemas wrote that
-    message, and it names what the operator has to add.
+    A server refused for replication and a database on the wrong engine are the
+    exceptions: both messages are ours, and name what the operator has to change.
     """
-    if isinstance(exc, ReplicationNotConfiguredError):
+    if isinstance(exc, ReplicationNotConfiguredError | DatabaseEngineError):
         return str(exc)
     for kind, stage in _FAILED_STAGES:
         if isinstance(exc, kind):
