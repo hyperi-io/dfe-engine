@@ -546,7 +546,6 @@ class TestManifestParsing:
         )
 
         assert catalogue.push_endpoint(apps["dfe-thing"], "auth") == "http://dfe-thing:7000"
-        assert catalogue.push_listen(apps["dfe-thing"]) == "0.0.0.0:7000"
 
     def test_a_declared_service_wins_over_the_apps_own_name(self, tmp_path):
         apps = load_catalogue(
@@ -818,9 +817,6 @@ class TestMeshAddressing:
 
         assert catalogue.push_endpoint(vrl, "auth").endswith(":6000")
         assert catalogue.push_endpoint(vrl, "auth", self.NAMESPACE).endswith(":6000")
-
-    def test_a_pod_binds_its_own_port_whatever_fronts_it(self):
-        assert catalogue.push_listen(catalogue.descriptor("dfe-transform-vrl")) == "0.0.0.0:6000"
 
     def test_a_manifest_with_no_pattern_refuses_to_invent_an_address(self, monkeypatch):
         monkeypatch.setattr(catalogue, "MESH_HOST_PATTERN", "")

@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The naming and cleanup convention for containers this suite starts.
 
-Several runs share a developer machine -- this suite alone runs under xdist -n 4 --
+Several runs share a developer machine -- this suite alone runs under xdist --
 so a container has to say what it is, which suite started it, and whose run owns
 it. Otherwise ``docker ps`` is a wall of random hex and nobody can tell what is
 safe to remove. These tests pin the scheme so it cannot drift back.

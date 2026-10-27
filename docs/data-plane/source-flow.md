@@ -12,7 +12,7 @@ A source names where its records come in, whether they are transformed, and wher
 
 ## The flow in one diagram
 
-Two transports carry the same three stages. The bus (Kafka on the `single` and `scale` profiles) holds records between stages, so a stage can be down and nothing is lost. Direct gRPC (`slim`, `mesh`) stores nothing between stages, so the receiver's and the fetcher's own buffers are the only slack.
+Two transports carry the same three stages. The bus (Kafka on the `single` and `scale` profiles) holds records between stages, so a stage can be down and nothing is lost. Direct gRPC (`slim`, `mesh`) stores nothing between stages, so the receiver's own buffer is the only slack.
 
 ```mermaid
 flowchart LR
@@ -44,27 +44,19 @@ flowchart LR
 flowchart LR
   subgraph INPUT
     R[receiver pool]
-    F[fetcher<br/>one per source]
-  end
-  subgraph TRANSFORM
-    T[transform instance<br/>scalo Push listener]
   end
   subgraph OUTPUT
     L[loader pool<br/>scalo Push listener]
     A[archiver<br/>scalo Push listener]
   end
-  R -->|matched destination| T
-  F -->|output endpoint| T
-  T -->|sink endpoint| L
-  R -.->|no transform| L
-  F -.->|no transform| L
+  R -->|matched destination| L
   R -.->|archive: true| A
   L --> CH[(ClickHouse<br/>source table, else main)]
 ```
 
-The archiver keeps the RAW record as it arrived, before any transform. On the bus it reads the landing topic; on direct the receiver fans the record out to it beside the stage that loads it. A fetched record never passes the receiver, so on direct the save refuses a fetched source that asks to be archived, and a fetcher route into an archived source, because the archiver would see neither. A profile that apps.yaml does not offer dfe-archiver in refuses `archive: true` at save, naming the profile, while a source stored with it before still reads and compiles.
+Direct runs the receiver to loader path alone (the second diagram). A fetcher or a transform is an app of its own per source, and addressing a pool of those over gRPC needs the mesh, which is not GA. A source that needs one is refused at save on a direct deployment, and the compile leaves it out. `GET /api/v1/system/deployment` reports `transports.per_source_apps: false` there, and each `GET /api/v1/sources/catalogue` entry carries `runnable`, `runnable_reason` and `runnable_intakes`, judged by the same resolver as the save.
 
-The second diagram is the shape a transform takes once it declares `direct` - which transforms do, and how one gains it, is under [Adding a transform](#adding-a-transform).
+The archiver keeps the RAW record as it arrived, before any transform. On the bus it reads the landing topic; on direct the receiver fans the record out to it beside the loader. A profile that apps.yaml does not offer dfe-archiver in refuses `archive: true` at save, naming the profile, while a source stored with it before still reads and compiles.
 
 **We parse mechanical transport at max efficiency at the edge.** dfe-receiver and dfe-fetcher parse the transport layer (a syslog header, a beats envelope) into JSON with the payload in `message`. Content-dependent parsing, such as a vendor body through grok, happens in a transform reading `message`. Raw capture (`_raw`) is off by default because it doubles every record. A first-hop parse bug is fixed in the receiver or fetcher, never by turning raw capture on.
 
@@ -101,16 +93,16 @@ Those topics are the engine's for the source's whole life, and nothing depends o
 
 | Source field | Compiles into |
 |---|---|
-| `match` or `when` | the receiver `rules` rows that label the record, and on direct a `destinations.sources` entry sending that label to the source's transform instance, else to the loader. The entry keys on the label, so any match reaches the transform |
+| `match` or `when` | the receiver `rules` rows that label the record, and on direct a `destinations.sources` entry sending that label to the loader. The entry keys on the label, so any match reaches it |
 | `compat_profiles`, `aliases` | the bound profiles' `rules` rows, and each profile's alias lookup ([source-routing.md](source-routing.md)) |
-| `fetcher` (source_type, config, topic, routes, org) | one fetcher instance overlay: the `org_id` it stamps, and on direct its `output` endpoint, and one `output.destinations` entry plus the `output.routes` rule naming it per data-match route |
-| `transform` (engine, variant, config) | one transform instance overlay: `_land` in and `_load` out on the bus; a Push listener in and the loader's endpoint out on direct, with `_load` still the record key the loader picks the source's table by |
+| `fetcher` (source_type, config, topic, routes, org) | one fetcher instance overlay: the `org_id` it stamps, and one `output.destinations` entry plus the `output.routes` rule naming it per data-match route |
+| `transform` (engine, variant, config) | one transform instance overlay: `_land` in and `_load` out, bus only |
 | landing label | loader routing, source to table |
-| `archive: true` | the archiver's topic list on the bus; on direct a second destination on the source's own rule |
+| `archive: true` | the archiver's topic list on the bus. On direct a second destination on the source's own rule |
 
 A fetcher's composed config carries ONE connector type, because its source does: the composition refuses a second type, naming the source and the types, unless `DFE_SOURCE_ALLOW_MIXED_FETCHER_TYPES` says otherwise (see [source-definition.md](source-definition.md)).
 
-Every compiled block lands in the deploy repo under `values/`, Argo CD applies it on Kubernetes, and a hand edit to any of them is reported as drift and re-synced on the next source write. A block carries only the keys the sources derive, so the deployment's own settings survive it. Compose has no Argo, so there the engine renders each app's own config file from those blocks into a directory the containers mount. A Compose deployment that has the engine render nothing runs its apps on the static config files the stack mounts, so a source written there compiles but never reaches the receiver, and `GET /api/v1/system/deployment` reports `applies_routing: false`. The receiver's destinations are a named set: every transform instance and the loader are destinations, and a rule sends a matched record to one by name. The fetcher carries the same shape as `output.routes` over its default destination, and the transform sinks use the same gRPC sender, so there is one sink implementation in scalo for all three.
+Every compiled block lands in the deploy repo under `values/`, Argo CD applies it on Kubernetes, and a hand edit to any of them is reported as drift and re-synced on the next source write. A block carries only the keys the sources derive, so the deployment's own settings survive it. Compose has no Argo, so there the engine renders each app's own config file from those blocks into a directory the containers mount. A Compose deployment that has the engine render nothing runs its apps on the static config files the stack mounts, so a source written there compiles but never reaches the receiver, and `GET /api/v1/system/deployment` reports `applies_routing: false`. The receiver's destinations are a named set: the loader and the archiver are destinations, and a rule sends a matched record to one by name. The fetcher carries the same shape as `output.routes` over its default destination.
 
 ## How a change reaches a pod
 
@@ -147,7 +139,7 @@ With no sources defined, every record the receiver accepts is stamped `_source: 
 
 ## Adding a transform
 
-A transform is an apps.yaml entry with a `source_binding` and its `transports`, and a chart that exposes the transport dial and the Push Service. No engine release is involved. dfe-transform-vrl, dfe-transform-vector and dfe-transform-elastic run a Push listener beside their bus consumer and list both transports, so a direct source may name any of them. A transform that lists the bus alone is refused at save for a direct source, with that reason. dfe-transform-elastic's `source.name` selects one of the compiled-in transforms its contract lists.
+A transform is an apps.yaml entry with a `source_binding` and its `transports`, and a chart that exposes the transport dial and the Push Service. No engine release is involved. dfe-transform-vrl, dfe-transform-vector and dfe-transform-elastic run a Push listener beside their bus consumer, but a transform is one deployment per source, so none runs on a direct deployment until the mesh is GA. dfe-transform-elastic's `source.name` selects one of the compiled-in transforms its contract lists.
 
 ## Content another repo ships
 

@@ -65,6 +65,7 @@ from dfe_engine.schema.retention import (
     apply_pinned_defaults,
     reconcile_default_ttl,
 )
+from dfe_engine.source.flow import runs_per_source_apps
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceCoreResourceError, SourceNotFoundError
 from dfe_engine.yaml_health import write_health
@@ -223,6 +224,13 @@ class TransportFacts(BaseModel):
             "at save."
         )
     )
+    per_source_apps: bool = Field(
+        description=(
+            "Whether a source may need an app of its own (a fetcher or a transform). "
+            "False on direct, which runs the receiver to loader path only, and such a "
+            "source is refused at save."
+        )
+    )
 
 
 class MeshFacts(BaseModel):
@@ -375,6 +383,7 @@ def deployment_facts(request: Request, settings: Any) -> DeploymentResponse:
         transports=TransportFacts(
             default=transport.default,
             available=sorted(transport.available()),
+            per_source_apps=runs_per_source_apps(transport.default),
         ),
         mesh=MeshFacts(
             enabled=transport.mesh_enabled,
