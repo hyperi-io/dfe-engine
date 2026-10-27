@@ -53,9 +53,7 @@ def default_services(profile: str) -> list[str]:
     return sorted(
         service
         for service, app in APP_CATALOGUE.items()
-        if app.multiplicity is Multiplicity.SINGLE
-        and app.offered_in(profile)
-        and (app.default_in is None or profile in app.default_in)
+        if app.multiplicity is Multiplicity.SINGLE and app.runs_unasked_in(profile)
     )
 
 
