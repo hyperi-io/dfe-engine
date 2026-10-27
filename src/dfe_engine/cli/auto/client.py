@@ -43,6 +43,22 @@ def _parse_json(raw: str, name: str) -> Any:
         raise DfeCliError(f"invalid JSON for {name}: {exc}", ExitCode.VALIDATION) from exc
 
 
+def _array_value(items: Any, item_type: str, name: str) -> list[Any]:
+    """A repeatable option's values as the JSON array the schema declares.
+
+    Object and array items arrive as JSON text and are parsed one by one. Text that
+    does not open a JSON value stays a string, because some endpoints take a bare
+    name where they take an object (``sources bulk --sources <name>``).
+    """
+    values = list(items)
+    if item_type not in ("object", "array"):
+        return values
+    return [
+        _parse_json(v, name) if isinstance(v, str) and v.lstrip().startswith(("{", "[")) else v
+        for v in values
+    ]
+
+
 class Client:
     """Binds one base URL + credential to a scalo HTTP session (or an injected one)."""
 
@@ -112,8 +128,9 @@ class Client:
     def build_body(self, op: Operation, body_args: dict[str, Any]) -> Any:
         """Assemble the JSON request body from the body-prop options.
 
-        Object/array props whose value arrived as a JSON string are parsed; a
-        freeform body op takes the raw ``--body`` JSON string as the whole body.
+        Object props whose value arrived as a JSON string are parsed, and so are the
+        object/array items of an array prop. A freeform body op takes the raw
+        ``--body`` JSON string as the whole body.
         A malformed JSON string raises a friendly ``DfeCliError`` (param-error
         exit code) rather than surfacing a raw ``JSONDecodeError`` (exit 255).
         """
@@ -134,8 +151,8 @@ class Client:
                 continue
             if prop.type == "object" and isinstance(value, str):
                 value = _parse_json(value, prop.name)
-            elif prop.type == "array" and isinstance(value, tuple):
-                value = list(value)
+            elif prop.type == "array" and isinstance(value, (tuple, list)):
+                value = _array_value(value, prop.item_type, prop.name)
             body[prop.name] = value
         return body or None
 

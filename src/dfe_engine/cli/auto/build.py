@@ -117,6 +117,20 @@ def _param_name(cli_name: str) -> str:
     return cli_name.replace("-", "_")
 
 
+# Array items click converts itself. Object and array items stay text here and are
+# parsed as JSON when the body is built (``client.build_body``).
+_ITEM_CLICK_TYPES: dict[str, click.ParamType] = {
+    "int": click.INT,
+    "float": click.FLOAT,
+    "bool": click.BOOL,
+}
+
+
+def _given(value: Any) -> bool:
+    """Whether the user supplied *value*: a repeatable option left off comes back as ``()``."""
+    return value is not None and value != ()
+
+
 def _option_for(spec: Param | BodyProp, *, required: bool) -> click.Option:
     """Build a click Option for a query param or body prop."""
     name = _param_name(spec.cli_name)
@@ -138,6 +152,9 @@ def _option_for(spec: Param | BodyProp, *, required: bool) -> click.Option:
         kwargs["type"] = click.FLOAT
     elif spec.type == "array":
         kwargs["multiple"] = True
+        item_click_type = _ITEM_CLICK_TYPES.get(spec.item_type)
+        if item_click_type is not None:
+            kwargs["type"] = item_click_type
     if spec.enum and spec.type == "str":
         kwargs["type"] = click.Choice([str(e) for e in spec.enum])
     if not required and spec.type != "array":
@@ -195,7 +212,7 @@ def _run(op: Operation, global_opts: GlobalOptions, kwargs: dict[str, Any]) -> N
     query_args = {
         p.name: kwargs.get(_param_name(p.cli_name))
         for p in op.query_params
-        if kwargs.get(_param_name(p.cli_name)) is not None
+        if _given(kwargs.get(_param_name(p.cli_name)))
     }
     if op.freeform_body:
         body_args = {"body": kwargs.get("body")}
@@ -203,7 +220,7 @@ def _run(op: Operation, global_opts: GlobalOptions, kwargs: dict[str, Any]) -> N
         body_args = {
             p.name: kwargs.get(_param_name(p.cli_name))
             for p in op.body_props
-            if kwargs.get(_param_name(p.cli_name)) is not None
+            if _given(kwargs.get(_param_name(p.cli_name)))
         }
 
     _confirm_destructive(op, global_opts)
