@@ -330,6 +330,32 @@ class TestAProfileThatDeploysNoSuchApp:
         else:
             assert gap is None
 
+    @pytest.mark.parametrize(
+        ("profile", "deployed", "refused"),
+        [
+            pytest.param("docker-slim", (), True, id="slim_compose_runs_no_archiver"),
+            pytest.param("docker-slim", ("dfe-archiver",), False, id="unless_one_is_deployed"),
+            pytest.param("docker-single", (), False, id="single_compose_runs_it"),
+            pytest.param("slim", (), False, id="slim_kubernetes_runs_it"),
+            pytest.param("scale", (), False, id="scale_runs_it"),
+            pytest.param("my-own-tier", (), True, id="an_unlisted_tier_runs_none_unasked"),
+            pytest.param("", (), False, id="no_profile_is_unknown_and_refuses_nothing"),
+        ],
+    )
+    def test_an_archive_with_no_archiver_deployed_is_a_save_gap(self, profile, deployed, refused):
+        # The shipped manifest lists no `profiles` for the archiver, so it is offered
+        # everywhere: what separates the tiers is which of them run it unasked.
+        settings = _settings(default="bus", profile=profile)
+        flow = resolve_flow(_source(archive=True), settings)
+
+        gap = archiver_offer_gap(flow, settings, deployed=frozenset(deployed))
+
+        if refused:
+            assert gap is not None
+            assert f"the {profile} profile does not run dfe-archiver" in gap
+        else:
+            assert gap is None
+
     def test_the_rule_is_manifest_data_rather_than_a_branch_per_app(self):
         # A transform restricted to another tier is refused the same way, which
         # is what stops this growing an app name per stage.
