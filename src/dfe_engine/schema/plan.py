@@ -66,6 +66,10 @@ class SchemaPlanError(Exception):
     """The manifest could not be read, or the schema tree could not be resolved."""
 
 
+class DatabaseEngineError(SchemaPlanError):
+    """A database the plan writes to already exists without the Replicated engine."""
+
+
 @dataclass(frozen=True)
 class SchemaPlan:
     """Every object this deployment applies, rendered and checksummed."""
@@ -147,6 +151,32 @@ def platform_probe(
     return PlatformProbe(client, host=settings.clickhouse.host or None, override=override)
 
 
+_REPLICATED_ENGINES = ("Replicated", "Shared")
+
+
+def _require_replicated_databases(client: Any, databases: list[str]) -> None:
+    """Refuse a database that already exists as Atomic or Ordinary.
+
+    ``CREATE DATABASE IF NOT EXISTS`` leaves such a database alone, and the first table
+    that names the ``{uuid}`` macro then fails with ClickHouse code 36.
+
+    Raises:
+        DatabaseEngineError: A listed database exists under another engine.
+    """
+    for name in databases:
+        rows = client.query(
+            "SELECT engine FROM system.databases WHERE name = {name:String}",
+            parameters={"name": name},
+        ).result_rows
+        engine = str(rows[0][0]) if rows else ""
+        if engine and not engine.startswith(_REPLICATED_ENGINES):
+            raise DatabaseEngineError(
+                f"database {name!r} uses the {engine} engine, and every DFE table needs a "
+                "Replicated database. DFE 2.2 runs on a fresh deploy only: drop the database "
+                "or point DFE_CLICKHOUSE_DATA_DATABASE at a new one"
+            )
+
+
 def _renderer(
     manifest: Manifest,
     *,
@@ -206,6 +236,8 @@ def build_plan(
         ReplicationNotConfiguredError: *client* reaches a self-hosted ClickHouse
             without the Keeper, macros, cluster or access storage every DFE table
             and role needs.
+        DatabaseEngineError: *client* reaches a self-hosted ClickHouse that already
+            holds one of the plan's databases under a non-Replicated engine.
     """
     ch = settings.clickhouse
     database = ch.effective_data_database
@@ -230,6 +262,8 @@ def build_plan(
         kafka_tiered_storage=kafka_tiered_storage,
     )
     objects = _render_all(renderer, manifest.objects, source="core")
+    if client is not None and probe.platform is Platform.SELF_HOSTED:
+        _require_replicated_databases(client, [o.name for o in objects if o.kind == "database"])
 
     refused: list[str] = []
     overlay = overlay_root()
