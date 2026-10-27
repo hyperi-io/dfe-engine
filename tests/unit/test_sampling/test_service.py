@@ -13,8 +13,6 @@ absent-logreducer error is proved by hiding the module.
 """
 
 import asyncio
-import shutil
-import subprocess
 import sys
 
 import pytest
@@ -34,7 +32,7 @@ from dfe_engine.sampling.kafka_reader import build_source
 from dfe_engine.sampling.service import _reservoir
 from dfe_engine.settings import ClickHouseSettings, KafkaSettings, SamplerSettings
 from dfe_engine.source.registry import SourceNotFoundError
-from tests.support.present import present
+from tests.support.clickhouse_local import clickhouse_names
 
 
 class _Result:
@@ -253,35 +251,13 @@ def test_a_filter_that_skipped_request_validation_runs_no_query(filter_sql):
     assert ch.calls == []
 
 
-CLICKHOUSE_LOCAL = shutil.which("clickhouse-local")
-# The reason is matched by test.full.python.allow_skip in .hyperi-ci.yaml.
-needs_clickhouse_local = pytest.mark.skipif(
-    CLICKHOUSE_LOCAL is None, reason="clickhouse-local is not on PATH"
-)
-
-
-def _clickhouse_names(query: str) -> list[str]:
-    """Run ``query`` in clickhouse-local and return the names it prints, one per line."""
-    result = subprocess.run(
-        [present(CLICKHOUSE_LOCAL), "--query", query],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=True,
-    )
-    return result.stdout.split()
-
-
-@needs_clickhouse_local
 def test_every_clickhouse_table_function_is_refused_bar_the_two_that_read_only_their_args():
-    names = {name.lower() for name in _clickhouse_names("SELECT name FROM system.table_functions")}
+    names = {name.lower() for name in clickhouse_names("SELECT name FROM system.table_functions")}
     assert names - {"format", "fuzzquery"} == function_guard.TABLE_FUNCTIONS
 
 
-@needs_clickhouse_local
 def test_every_clickhouse_function_named_like_in_is_refused():
-    names = _clickhouse_names(
+    names = clickhouse_names(
         "SELECT name FROM system.functions WHERE match(name, '(^i|I)n(IgnoreSet)?$')"
     )
     assert set(IN_FUNCTIONS) <= set(names)
@@ -290,9 +266,8 @@ def test_every_clickhouse_function_named_like_in_is_refused():
             filter_predicate(f"{name}(_source, ('a', 'b')) = 1")
 
 
-@needs_clickhouse_local
 def test_every_clickhouse_dictionary_function_is_refused():
-    names = _clickhouse_names(
+    names = clickhouse_names(
         "SELECT name FROM system.functions "
         "WHERE categories IN ('Dictionary', 'Embedded Dictionary')"
     )
@@ -302,9 +277,8 @@ def test_every_clickhouse_dictionary_function_is_refused():
             filter_predicate(f"{name}('d', 'v', toUInt64(1)) = 'x'")
 
 
-@needs_clickhouse_local
 def test_every_clickhouse_ai_function_and_alias_is_refused():
-    names = _clickhouse_names(
+    names = clickhouse_names(
         "SELECT name FROM system.functions WHERE categories = 'AI' "
         "OR alias_to IN (SELECT name FROM system.functions WHERE categories = 'AI')"
     )
