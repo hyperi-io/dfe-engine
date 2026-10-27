@@ -980,6 +980,62 @@ class TestBrokerlessLocalE2e:
         assert _topics_skipped(settings) == "this deployment carries no bus"
 
 
+class TestBrokerListFromEnv:
+    """An empty broker list is the operator saying there is no broker, not leaving the key unset."""
+
+    @pytest.mark.parametrize(
+        ("env", "want", "refused"),
+        [
+            pytest.param({}, "localhost:9092", False, id="unset_keeps_the_dev_default"),
+            pytest.param(
+                {"DFE_KAFKA_BOOTSTRAP_SERVERS": "b1:9092,b2:9092"},
+                "b1:9092,b2:9092",
+                False,
+                id="a_list_is_read",
+            ),
+            pytest.param(
+                {"DFE_KAFKA_BOOTSTRAP_SERVERS": "", "DFE_TRANSPORT_BUS_PRESENT": "false"},
+                "",
+                False,
+                id="empty_without_a_bus_is_a_brokerless_deployment",
+            ),
+            pytest.param(
+                {"DFE_KAFKA_BOOTSTRAP_SERVERS": ""},
+                None,
+                True,
+                id="empty_with_a_bus_is_refused",
+            ),
+            pytest.param(
+                {"KAFKA_BOOTSTRAP_SERVERS": ""},
+                None,
+                True,
+                id="empty_legacy_name_is_refused_too",
+            ),
+            pytest.param(
+                {"DFE_KAFKA_BOOTSTRAP_SERVERS": "", "KAFKA_BOOTSTRAP_SERVERS": "old:9092"},
+                None,
+                True,
+                id="the_dfe_name_wins_even_when_empty",
+            ),
+        ],
+    )
+    def test_the_broker_list_follows_the_env(self, monkeypatch, env, want, refused):
+        from dfe_engine.settings import _get_env_overrides
+
+        if env.get("DFE_TRANSPORT_BUS_PRESENT") == "false":
+            monkeypatch.setenv("DFE_TRANSPORT_DEFAULT", "direct")
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        overrides = _get_env_overrides()
+        sections = {k: overrides.get(k, {}) for k in ("kafka", "transport")}
+
+        if refused:
+            with pytest.raises(ValidationError, match="DFE_KAFKA_BOOTSTRAP_SERVERS"):
+                DFESettings(env="test", **sections)
+            return
+        assert DFESettings(env="test", **sections).kafka.bootstrap_servers == want
+
+
 class TestTransportMesh:
     """The deployment's half of a pool address: whether, and where."""
 
