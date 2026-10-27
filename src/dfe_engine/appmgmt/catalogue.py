@@ -330,6 +330,13 @@ class AppDescriptor:
         """
         return not self.profiles or not profile or profile in self.profiles
 
+    def runs_unasked_in(self, profile: str) -> bool:
+        """Whether a deployment of *profile* runs this app without being asked.
+
+        The profile must offer the app, and ``default_in`` must name it or say nothing.
+        """
+        return self.offered_in(profile) and (self.default_in is None or profile in self.default_in)
+
     @property
     def optional(self) -> bool:
         """Whether a deployment runs without this app.

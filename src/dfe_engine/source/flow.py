@@ -26,6 +26,7 @@ See docs/data-plane/source-flow.md for the shape this builds.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -345,24 +346,43 @@ def archiver_offer_gap(
     flow: SourceFlow,
     settings: DFESettings,
     catalogue_apps: dict[str, AppDescriptor] | None = None,
+    deployed: Collection[str] = (),
 ) -> str | None:
-    """Why this flow asks to be archived on a profile that deploys no archiver, or None.
+    """Why this flow asks to be archived where nothing runs an archiver, or None.
 
-    The same offer ``_stage_app`` reads for every other stage, but kept out of
-    ``resolve_flow`` because that also compiles stored sources: one stored before
-    the deployment moved keeps compiling its routing and still reads.
+    The same offer ``_stage_app`` reads for every other stage, plus whether the
+    profile runs the archiver unasked or the operator has deployed one. Kept out
+    of ``resolve_flow`` because that also compiles stored sources: one stored
+    before the deployment moved keeps compiling its routing and still reads.
+
+    Args:
+        flow: The resolved flow.
+        settings: The deployment's settings.
+        catalogue_apps: The app catalogue to judge against, the shipped one by default.
+        deployed: The services with an instance in the deploy repo.
+
+    Returns:
+        The reason, or None where an archiver runs or the profile is unknown.
     """
     if not flow.outputs.archive:
         return None
     apps = catalogue_apps if catalogue_apps is not None else catalogue.APP_CATALOGUE
     archiver = apps.get(ARCHIVER_SERVICE)
     profile = settings.deployment.profile
-    if archiver is None or archiver.offered_in(profile):
+    if archiver is None or not profile or ARCHIVER_SERVICE in deployed:
+        return None
+    if not archiver.offered_in(profile):
+        return (
+            f"source {flow.source!r} asks to be archived, but the {profile} profile does not "
+            f"deploy {ARCHIVER_SERVICE}, so nothing would keep its records: set archive to "
+            "false, or archive it on a profile that deploys the archiver"
+        )
+    if archiver.runs_unasked_in(profile):
         return None
     return (
-        f"source {flow.source!r} asks to be archived, but the {profile} profile does not "
-        f"deploy {ARCHIVER_SERVICE}, so nothing would keep its records: set archive to "
-        "false, or archive it on a profile that deploys the archiver"
+        f"source {flow.source!r} asks to be archived, but the {profile} profile does not run "
+        f"{ARCHIVER_SERVICE} unless it is deployed, and none is, so the receiver would hold "
+        "every record waiting on it: set archive to false, or deploy the archiver first"
     )
 
 

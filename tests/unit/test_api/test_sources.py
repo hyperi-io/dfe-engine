@@ -548,6 +548,18 @@ class TestArchiveWhereTheProfileDeploysNoArchiver:
 
         assert resp.status_code == 201, resp.text
 
+    def test_a_profile_that_runs_no_archiver_unasked_is_refused_on_the_shipped_manifest(
+        self, client: TestClient, admin_headers: dict, sample_source: dict, api_settings
+    ):
+        api_settings.deployment.profile = "docker-slim"
+
+        resp = client.post(
+            "/api/v1/sources", json={**sample_source, "archive": True}, headers=admin_headers
+        )
+
+        assert resp.status_code == 422, resp.text
+        assert "the docker-slim profile does not run dfe-archiver" in resp.json()["message"]
+
     def test_a_profile_that_deploys_the_archiver_accepts_it(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):

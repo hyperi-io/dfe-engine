@@ -1161,6 +1161,7 @@ class SourceRegistry:
         is refused here and not in the resolver, which also compiles the sources
         already stored.
         """
+        from dfe_engine.appmgmt import instances
         from dfe_engine.settings import get_settings
         from dfe_engine.source.flow import (
             FlowError,
@@ -1173,7 +1174,12 @@ class SourceRegistry:
             flow = resolve_flow(source, settings)
         except FlowError as exc:
             raise SourceValidationError(str(exc)) from exc
-        gap = archiver_offer_gap(flow, settings)
+        deployed = (
+            {i.service for i in instances.list_instances(self._crud)}
+            if self._crud is not None
+            else set()
+        )
+        gap = archiver_offer_gap(flow, settings, deployed=deployed)
         if gap is not None:
             raise SourceValidationError(gap)
 
