@@ -41,7 +41,7 @@ from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.schema import phase
 from dfe_engine.schema.applier import SchemaApplier
 from dfe_engine.schema.phase import apply_plan, run_bootstrap
-from dfe_engine.schema.plan import build_plan
+from dfe_engine.schema.plan import DatabaseEngineError, build_plan
 from dfe_engine.schema.schema_ddl import DDLConfig
 from dfe_engine.schema.schema_loader import SchemaLoader
 from dfe_engine.settings import load_settings
@@ -356,3 +356,28 @@ def test_a_cluster_keeping_roles_locally_is_refused_with_the_reason(two_replicas
     assert _database_engines(r1, (data_database, META_DATABASE)) == [], (
         "a refused cluster was written to"
     )
+
+
+def test_an_atomic_database_from_an_older_install_is_refused_before_any_table(
+    ch_client, ch_params, data_database
+):
+    """Code 36 on the first `{uuid}` table is what this replaces with one sentence."""
+    ch_client.command(f"CREATE DATABASE {data_database} ENGINE = Atomic")
+    settings = _settings(ch_params, data_database)
+    try:
+        with pytest.raises(DatabaseEngineError) as refused:
+            build_plan(settings=settings, client=ch_client)
+        assert f"database {data_database!r} uses the Atomic engine" in str(refused.value)
+
+        ClickHouseManager.reset_instance()
+        try:
+            state = run_bootstrap(settings=settings, wait_seconds=5.0)
+        finally:
+            ClickHouseManager.reset_instance()
+            phase._set_state(phase.SchemaBootstrapState())
+
+        assert state.state == phase.STATE_FAILED
+        assert "uses the Atomic engine" in state.error
+        assert _table_count(ch_client, (data_database,)) == 0
+    finally:
+        ch_client.command(f"DROP DATABASE IF EXISTS {data_database} SYNC")
