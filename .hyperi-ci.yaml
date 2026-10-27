@@ -29,6 +29,8 @@ test:
   native_tools: [helm]
   python:
     parallel: auto
+    # Peak RSS of one process in a full core run was 1206 MiB (/usr/bin/time -v, 11 workers).
+    worker_mem_mb: 1280
   full:
     python:
       # Live tests need a deployed DFE; the full tier runs everything else.

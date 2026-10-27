@@ -16,7 +16,7 @@ Run examples:
     pytest tests/unit/                      # Run all unit tests
     pytest -m integration                   # Run integration tests only
     pytest -m "not integration"             # Skip integration tests
-    pytest -n 4                             # Run with 4 parallel workers
+    hyperi-ci run test                      # Parallel, workers sized from free CPU and memory
 """
 
 import os

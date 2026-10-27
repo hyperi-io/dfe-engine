@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from dfe_engine.appmgmt import catalogue
-from dfe_engine.appmgmt.catalogue import AppDescriptor
+from dfe_engine.appmgmt.catalogue import AppDescriptor, Multiplicity
 from dfe_engine.appmgmt.scaling import DeployTarget, instance_ceiling
 from dfe_engine.source.models import Source
 from dfe_engine.transport import SourceTransport
@@ -45,6 +45,16 @@ LOADER_SERVICE = "dfe-loader"
 
 class FlowError(ValueError):
     """Raised when a source's stages cannot be run as declared."""
+
+
+def runs_per_source_apps(transport: SourceTransport) -> bool:
+    """Whether a source on *transport* may have an app of its own (a fetcher or a transform).
+
+    Only the bus does. On direct each per-source pool needs the mesh to be
+    addressed, and the mesh is not GA, so a direct deployment runs the
+    receiver to loader path alone.
+    """
+    return transport == "bus"
 
 
 def stage_instance_ceiling(app: AppDescriptor, settings: DFESettings) -> int | None:
@@ -168,6 +178,12 @@ def _stage_app(
         raise FlowError(
             f"source {source!r} needs {service} to {purpose}, but the {profile} "
             f"profile does not deploy {service}"
+        )
+    if app.multiplicity is Multiplicity.PER_CONFIG and not runs_per_source_apps(transport):
+        raise FlowError(
+            f"source {source!r} needs its own {service} to {purpose}, but this deployment "
+            f"runs on {settings.transport.direct_protocol}. Sources that need a per-source "
+            f"app (fetcher, transform) need a {settings.transport.bus_provider} deployment"
         )
     if stage_instance_ceiling(app, settings) == 0:
         raise FlowError(
@@ -325,22 +341,6 @@ def _check_archive(
         )
 
 
-def archive_gap(flow: SourceFlow) -> str | None:
-    """Why this flow asks to be archived and nothing will copy it, or None.
-
-    On direct only the receiver fans a record out to the archiver, and a fetched
-    source never passes the receiver. Kept out of ``resolve_flow`` because that
-    also compiles stored sources, where a refusal would stop a running fetcher.
-    """
-    if not (flow.outputs.archive and flow.transport == "direct" and flow.origin == "fetcher"):
-        return None
-    return (
-        f"source {flow.source!r} is fetched on the direct transport and asks to be archived, "
-        "which would keep nothing: a fetched source is archived on the bus transport, because "
-        f"on direct only the receiver copies records to {ARCHIVER_SERVICE}"
-    )
-
-
 def archiver_offer_gap(
     flow: SourceFlow,
     settings: DFESettings,
@@ -349,7 +349,7 @@ def archiver_offer_gap(
     """Why this flow asks to be archived on a profile that deploys no archiver, or None.
 
     The same offer ``_stage_app`` reads for every other stage, but kept out of
-    ``resolve_flow`` for the same reason as ``archive_gap``: a source stored before
+    ``resolve_flow`` because that also compiles stored sources: one stored before
     the deployment moved keeps compiling its routing and still reads.
     """
     if not flow.outputs.archive:
@@ -363,23 +363,6 @@ def archiver_offer_gap(
         f"source {flow.source!r} asks to be archived, but the {profile} profile does not "
         f"deploy {ARCHIVER_SERVICE}, so nothing would keep its records: set archive to "
         "false, or archive it on a profile that deploys the archiver"
-    )
-
-
-def route_archive_gap(flow: SourceFlow, target: SourceFlow) -> str | None:
-    """Why a fetcher route from this flow into *target* skips the target's archive, or None.
-
-    On direct a routed record is sent to the target's transform or loader, never
-    through the receiver, so the archiver never sees it. Kept out of
-    ``resolve_flow`` for the same reason as ``archive_gap``.
-    """
-    if not (flow.transport == "direct" and target.transport == "direct" and target.outputs.archive):
-        return None
-    return (
-        f"source {flow.source!r} is fetched on the direct transport and routes records to "
-        f"{target.source!r}, which asks to be archived, and none of them would be kept: route "
-        "into an archived source on the bus transport, because on direct only the receiver "
-        f"copies records to {ARCHIVER_SERVICE}"
     )
 
 

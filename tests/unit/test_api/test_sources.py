@@ -447,6 +447,63 @@ class TestCreateOnATransportTheDeploymentLacks:
         assert resp.status_code == 201, resp.text
 
 
+class TestCreateNeedingAPerSourceAppOnDirect:
+    """A gRPC deployment runs the receiver to loader path alone, and says so at save."""
+
+    @pytest.fixture
+    def deployment(self, monkeypatch, api_settings):
+        monkeypatch.setattr("dfe_engine.settings.get_settings", lambda: api_settings)
+
+        def stand_on(default: str) -> None:
+            api_settings.transport.bus_present = default == "bus"
+            api_settings.transport.default = default
+
+        return stand_on
+
+    @pytest.mark.parametrize(
+        ("default", "extra", "status"),
+        [
+            pytest.param("direct", {}, 201, id="direct-receiver-only"),
+            pytest.param("direct", {"transform": {"engine": "vrl"}}, 422, id="direct-transform"),
+            pytest.param(
+                "direct",
+                {
+                    "fetcher": {"source_type": "okta", "topic": "own"},
+                    "schema_config": {"meta_schema": "meta/syslog"},
+                    "match": None,
+                },
+                422,
+                id="direct-fetcher",
+            ),
+            pytest.param("bus", {"transform": {"engine": "vrl"}}, 201, id="bus-transform"),
+            pytest.param(
+                "bus",
+                {
+                    "fetcher": {"source_type": "okta", "topic": "own"},
+                    "schema_config": {"meta_schema": "meta/syslog"},
+                    "match": None,
+                },
+                201,
+                id="bus-fetcher",
+            ),
+        ],
+    )
+    def test_a_source_is_saved_or_refused_by_whether_it_needs_its_own_app(
+        self, client, admin_headers, sample_source, deployment, default, extra, status
+    ):
+        deployment(default)
+        body = {k: v for k, v in {**sample_source, **extra}.items() if v is not None}
+
+        resp = client.post("/api/v1/sources", json=body, headers=admin_headers)
+
+        assert resp.status_code == status, resp.text
+        if status == 422:
+            assert resp.json()["code"] == "validation_error"
+            assert (
+                "Sources that need a per-source app (fetcher, transform)" in resp.json()["message"]
+            )
+
+
 class TestArchiveWhereTheProfileDeploysNoArchiver:
     """``archive: true`` on a profile without an archiver would keep nothing, so save refuses it."""
 

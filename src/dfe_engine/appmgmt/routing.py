@@ -64,15 +64,8 @@ from .scaling import DeployTarget
 if TYPE_CHECKING:
     from dfe_engine.source.flow import SourceFlow
 
-# The apps' own names for the two transports. A source records bus or direct;
-# the compiled config names the mechanism, because that is what the app reads.
+# The compiled config names the bus mechanism, because that is what the app reads.
 BUS_TRANSPORT = "kafka"
-DIRECT_TRANSPORT = "grpc"
-
-# A transform's two ends on the direct transport, where the wiring is scalo's
-# Push listener and sender and so is the same for every transform.
-SOURCE_BLOCK = "source"
-SINK_BLOCK = "sink"
 
 # The loader's per-table _json/_raw capture, compiled from the derived schemas.
 CAPTURE_BLOCK = "capture"
@@ -180,20 +173,6 @@ def _flow(source: Source, settings: Any) -> SourceFlow:
         return resolve_flow(source, settings)
     except FlowError as exc:
         raise RoutingNotApplicableError(str(exc)) from exc
-
-
-def _landing(source: Source, settings: Any) -> str:
-    """Where records BELONGING to this source are handed to its first stage.
-
-    Its transform when it has one, else the loader. On the bus that is a landing
-    label the app suffixes on delivery; on direct it is an endpoint URI.
-    """
-    flow = _flow(source, settings)
-    if flow.transport == "bus":
-        return source.landing_label()
-    if flow.transform is not None and flow.transform.endpoint:
-        return flow.transform.endpoint
-    return flow.outputs.loader
 
 
 def into_blocks(app: AppDescriptor, values: dict[str, object]) -> dict[str, Any]:
@@ -312,9 +291,6 @@ def _fetcher_route(
         RoutingNotApplicableError: The target is missing, not active, or on the
             other transport.
     """
-    # Imported here for the same reason as in ``_flow``.
-    from dfe_engine.source.flow import route_archive_gap
-
     # A route stored before the save path refused this one still reaches here.
     require_equals_route(flow.source, route)
     try:
@@ -333,18 +309,7 @@ def _fetcher_route(
             f"source {flow.source!r} routes to {route.source!r}, which is on the other "
             "transport; a fetcher delivers over one"
         )
-    # Refused at save only: refusing here would stop, and could remove, a running fetcher.
-    gap = route_archive_gap(flow, target_flow)
-    if gap is not None:
-        logger.warning(
-            f"{gap}. It is compiled as stored and archives none of the records it routes"
-        )
-    landing = _landing(target, settings)
-    spec: dict[str, Any] = (
-        {BUS_TRANSPORT: {"topic": landing}}
-        if flow.transport == "bus"
-        else {DIRECT_TRANSPORT: {"endpoint": landing}}
-    )
+    spec: dict[str, Any] = {BUS_TRANSPORT: {"topic": target.landing_label()}}
     rule = {
         "match_field": route.match.field,
         "match_value": route.match.value,
@@ -408,11 +373,6 @@ def _fetcher(
         polls = {fetcher.source_type: {source.source: stanza}}
 
     output: dict[str, Any] = {"type": BUS_TRANSPORT}
-    if flow.transport == "direct":
-        output = {
-            "type": DIRECT_TRANSPORT,
-            DIRECT_TRANSPORT: {"endpoint": _landing(source, settings)},
-        }
     destinations: dict[str, Any] = {}
     rules: list[dict[str, Any]] = []
     for route in fetcher.routes:
@@ -440,12 +400,8 @@ def _transform(
 ) -> dict[str, Any]:
     """One transform instance's input and output, for the source it is named for.
 
-    The manifest's ``source_binding`` ties the instance to its source on both
-    transports, because each transform names its topics, consumer group and
-    output key differently. On direct, scalo's Push listener and sender are the
-    same for every transform: the listener replaces the binding's source block
-    whole, and the sender's endpoint joins the sink block beside the output key,
-    which the next stage picks the source's table by as it does a topic on the bus.
+    The manifest's ``source_binding`` ties the instance to its source, because
+    each transform names its topics, consumer group and output key differently.
     """
     source = _bound_source(registry, instance)
     flow = _flow(source, settings)
@@ -457,17 +413,6 @@ def _transform(
         )
 
     blocks = into_blocks(app, catalogue.render_source_binding(app, source.source))
-    if flow.transport != "bus":
-        missing = {SOURCE_BLOCK, SINK_BLOCK} - set(app.routing_paths)
-        if missing:
-            raise CatalogueError(
-                f"{app.service} carries the direct transport but declares no "
-                f"{', '.join(sorted(missing))} block to wire its listener into"
-            )
-        # The consumer's topics and group name nothing once the listener takes its place.
-        blocks[SOURCE_BLOCK] = {"transport": DIRECT_TRANSPORT, "listen": catalogue.push_listen(app)}
-        sink = blocks.setdefault(SINK_BLOCK, {})
-        sink.update({"transport": DIRECT_TRANSPORT, "endpoint": flow.outputs.loader})
     if app.variant_path and flow.transform.variant:
         name, inner = app.block_for(app.variant_path)
         set_path(blocks.setdefault(name, {}), inner, flow.transform.variant)

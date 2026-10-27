@@ -802,6 +802,15 @@ class CatalogueEntryObject(BaseModel):
         "unknown (no contract is mounted or it is unreadable, and a create is allowed)"
     )
     availability_reason: str = Field(description="Why availability says what it does")
+    runnable: bool = Field(
+        description="Whether this deployment can run a create on the default intake. False "
+        "when the source needs a per-source app (a fetcher or a transform) and the "
+        "deployment runs on gRPC, which a create would refuse"
+    )
+    runnable_reason: str = Field(description="Why runnable is false; empty when it is true")
+    runnable_intakes: list[str] = Field(
+        description="The intakes of this entry a create can run here, a subset of intakes"
+    )
 
 
 class CatalogueSourceItem(BaseModel):
@@ -1209,6 +1218,7 @@ def create_source(
 def list_catalogue(
     user: CurrentUser,
     registry: SourceReg,
+    settings: Settings,
     pagination: PaginationParams = Depends(),
     intake: str | None = Query(
         None, description="Only entries that arrive this way (beats, receiver, fetcher)"
@@ -1221,7 +1231,9 @@ def list_catalogue(
     name even when the source was given a different one. A source written by hand
     does not hide an entry. Each entry says whether the deployed transform ships
     its default variant, read off that app's mounted contract, so a console can
-    hold back an entry the create would refuse.
+    hold back an entry the create would refuse. It also says whether this
+    deployment can run the entry at all: a source that needs a per-source app
+    (a fetcher or a transform) is refused on a gRPC deployment.
     """
     catalogue = _source_catalogue()
     if intake is not None and intake not in source_catalogue_module.INTAKES:
@@ -1259,7 +1271,10 @@ def list_catalogue(
     page = PaginatedResponse[str].from_list(
         [entry.name for entry in entries], pagination.page, pagination.per_page
     )
-    rows = [_to_catalogue_object(entry=catalogue.entries[name]) for name in page.items]
+    rows = [
+        _to_catalogue_object(entry=catalogue.entries[name], settings=settings)
+        for name in page.items
+    ]
     return PaginatedResponse[CatalogueEntryObject](
         items=rows, total=page.total, page=page.page, per_page=page.per_page
     )
@@ -3290,10 +3305,13 @@ def _source_catalogue() -> source_catalogue_module.SourceCatalogue:
         ) from exc
 
 
-def _to_catalogue_object(*, entry: source_catalogue_module.CatalogueEntry) -> CatalogueEntryObject:
-    """One catalogue entry as the console lists it, judged against the deployed transform."""
+def _to_catalogue_object(
+    *, entry: source_catalogue_module.CatalogueEntry, settings: Any
+) -> CatalogueEntryObject:
+    """One catalogue entry as the console lists it, judged against the deployed transform and transport."""
     transform = entry.request.transform
     available = source_catalogue_module.variant_availability(transform=transform)
+    refused = source_catalogue_module.intakes_refused_here(entry=entry, settings=settings)
     return CatalogueEntryObject(
         availability=available.state,
         availability_reason=available.reason,
@@ -3309,6 +3327,9 @@ def _to_catalogue_object(*, entry: source_catalogue_module.CatalogueEntry) -> Ca
         intakes=sorted(entry.intakes),
         name=entry.name,
         package=entry.package,
+        runnable=entry.default_intake not in refused,
+        runnable_intakes=sorted(set(entry.intakes) - set(refused)),
+        runnable_reason=refused.get(entry.default_intake, ""),
         variant=transform.variant if transform else None,
         variants=list(entry.variants),
     )

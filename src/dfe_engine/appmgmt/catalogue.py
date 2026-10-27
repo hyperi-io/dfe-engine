@@ -1028,16 +1028,6 @@ def push_address(app: AppDescriptor, instance: str = "") -> str:
     return f"{endpoint.service or deployed_name(app, instance)}:{endpoint.port}"
 
 
-def push_listen(app: AppDescriptor) -> str:
-    """The bind address this app's own Push listener takes.
-
-    The sender's view of the same manifest entry is ``push_endpoint``: one
-    declared port, rendered as an address to dial and an address to bind. A pod
-    binds every interface it has, so only the port comes from the manifest.
-    """
-    return f"0.0.0.0:{_push(app).port}"
-
-
 def file_set(service: str, name: str) -> ConsumedFileSet:
     """Resolve one of an app's consumed-file sets by name."""
     for candidate in descriptor(service).files:

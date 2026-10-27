@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import threading
 
+import pytest
+
 from dfe_engine import __version__
 from dfe_engine.api.v1 import system
 from dfe_engine.gitcrud import GitCrud, default_registry
@@ -52,23 +54,28 @@ class TestDeploymentFacts:
         assert resp.status_code == 200, resp.text
         assert resp.json()["profile"] == ""
 
-    def test_a_brokerless_deployment_offers_direct_only(self, client, app, admin_headers):
-        app.state.settings.transport.bus_present = False
-        app.state.settings.transport.default = "direct"
+    @pytest.mark.parametrize(
+        ("bus_present", "default", "per_source_apps"),
+        [
+            pytest.param(False, "direct", False, id="brokerless-direct-runs-no-per-source-app"),
+            # The loader consumes the topic here and serves no push listener, so a
+            # console offering direct would offer a flow that lands nowhere.
+            pytest.param(True, "bus", True, id="bus-offers-the-bus-alone"),
+        ],
+    )
+    def test_the_transport_a_deployment_offers_and_what_it_can_run_on_it(
+        self, client, app, admin_headers, bus_present, default, per_source_apps
+    ):
+        app.state.settings.transport.bus_present = bus_present
+        app.state.settings.transport.default = default
 
         body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
 
-        assert body["transports"] == {"default": "direct", "available": ["direct"]}
-
-    def test_a_deployment_with_a_bus_offers_the_bus_alone(self, client, app, admin_headers):
-        # The loader consumes the topic here and serves no push listener, so a
-        # console offering direct would offer a flow that lands nowhere.
-        app.state.settings.transport.bus_present = True
-        app.state.settings.transport.default = "bus"
-
-        body = client.get("/api/v1/system/deployment", headers=admin_headers).json()
-
-        assert body["transports"] == {"default": "bus", "available": ["bus"]}
+        assert body["transports"] == {
+            "default": default,
+            "available": [default],
+            "per_source_apps": per_source_apps,
+        }
 
     def test_the_mesh_pair_is_reported_together(self, client, app, admin_headers):
         app.state.settings.transport.mesh_enabled = True

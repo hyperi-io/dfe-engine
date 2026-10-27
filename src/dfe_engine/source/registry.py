@@ -1157,18 +1157,15 @@ class SourceRegistry:
 
         The resolver holds every transport rule (what the deployment offers, what
         each app carries, what archiving needs), so the save path asks it rather
-        than restating any of them. An archive nothing would copy, the source's own
-        or a route target's, or one on a profile that deploys no archiver, is
-        refused here and not in the resolver, which also compiles the sources
+        than restating any of them. An archive on a profile that deploys no archiver
+        is refused here and not in the resolver, which also compiles the sources
         already stored.
         """
         from dfe_engine.settings import get_settings
         from dfe_engine.source.flow import (
             FlowError,
-            archive_gap,
             archiver_offer_gap,
             resolve_flow,
-            route_archive_gap,
         )
 
         settings = get_settings()
@@ -1176,20 +1173,9 @@ class SourceRegistry:
             flow = resolve_flow(source, settings)
         except FlowError as exc:
             raise SourceValidationError(str(exc)) from exc
-        for gap in (archiver_offer_gap(flow, settings), archive_gap(flow)):
-            if gap is not None:
-                raise SourceValidationError(gap)
-
-        fetcher = source.fetcher
-        for route in fetcher.routes if fetcher else ():
-            # A target not yet written, or one that cannot run, is the compile's to report.
-            try:
-                target = resolve_flow(self.get_source(route.source), settings)
-            except SourceNotFoundError, ValidationError, FlowError:
-                continue
-            gap = route_archive_gap(flow, target)
-            if gap is not None:
-                raise SourceValidationError(gap)
+        gap = archiver_offer_gap(flow, settings)
+        if gap is not None:
+            raise SourceValidationError(gap)
 
     def _validate_instance_room(self, source: Source) -> None:
         """A stage needing its OWN deployment must have one free here.

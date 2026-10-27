@@ -73,8 +73,8 @@ dfe-engine#459 and 2.7 is dfe-loader#184. Nothing here is softened to make a run
 green.
 
 The steps share one source and one table, so run this file in ONE worker --
-`-o addopts=""` drops the suite's `-n 4`, which would otherwise split the
-sequence across processes that fight over it. Two waits are the product's, not
+pass `-p no:xdist`, because workers would split the sequence across
+processes that fight over it. Two waits are the product's, not
 the harness's: a new source's first record waits on dfe-loader's 60 s topic
 refresh, and a promoted column cannot be judged inside the loader's 300 s
 directive cache, so 1.3 sends a fresh record each poll until the cache turns

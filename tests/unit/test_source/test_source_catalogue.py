@@ -12,6 +12,7 @@ import json
 import re
 import shutil
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,7 @@ from scalo.rules import RuleSet as ScaloRuleSet
 
 from dfe_engine.services.models.receiver import RULE_TARGETS, RuleSet
 from dfe_engine.services.source_routing import RECEIVER_RULES_PROFILE, source_rules
+from dfe_engine.settings import DFESettings
 from dfe_engine.source import catalogue as sc
 from dfe_engine.source.models import source_from_write
 from dfe_engine.source.registry import SourceRegistry, SourceValidationError
@@ -364,3 +366,49 @@ class TestElasticAgentRouting:
     ):
         entry = fixture_catalogue.entry(name="cisco-asa")
         assert not _routes_to_label(entry=entry, intake="receiver")
+
+
+def _without_transform(entry: sc.CatalogueEntry, *intakes: sc.CatalogueIntake) -> sc.CatalogueEntry:
+    """*entry* as a receiver-only source: no transform, so nothing needs an app of its own."""
+    request = entry.request.model_copy(update={"transform": None, "fetcher": None})
+    return replace(entry, request=request, intakes=intakes, variants=())
+
+
+class TestIntakesRefusedHere:
+    """A picker offers an entry only where the save would take it."""
+
+    DIRECT = DFESettings(env="dev", transport={"default": "direct", "bus_present": False})
+    BUS = DFESettings(env="dev", transport={"default": "bus"})
+
+    def test_a_transformed_entry_is_refused_on_every_intake_on_direct(self, installed):
+        entry = installed.entry(name="cisco-asa")
+
+        refused = sc.intakes_refused_here(entry=entry, settings=self.DIRECT)
+
+        assert sorted(refused) == sorted(entry.intakes)
+        assert all("per-source app" in reason for reason in refused.values())
+
+    def test_a_fetcher_intake_is_refused_on_direct_and_a_receiver_intake_is_not(self, installed):
+        entry = _without_transform(installed.entry(name="okta"), "receiver")
+        fetched = replace(
+            installed.entry(name="okta"),
+            request=installed.entry(name="okta").request.model_copy(update={"transform": None}),
+            variants=(),
+        )
+
+        assert sc.intakes_refused_here(entry=entry, settings=self.DIRECT) == {}
+        assert list(sc.intakes_refused_here(entry=fetched, settings=self.DIRECT)) == ["fetcher"]
+
+    @pytest.mark.parametrize("name", ["cisco-asa", "okta"])
+    def test_the_bus_refuses_nothing(self, installed, name):
+        entry = installed.entry(name=name)
+
+        assert sc.intakes_refused_here(entry=entry, settings=self.BUS) == {}
+
+    def test_the_whole_catalogue_is_judged_without_raising(self, installed):
+        refused = {
+            name: sc.intakes_refused_here(entry=entry, settings=self.DIRECT)
+            for name, entry in installed.entries.items()
+        }
+
+        assert len(refused) == len(installed.entries)

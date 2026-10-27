@@ -56,7 +56,6 @@ from dfe_engine.services.models.receiver import (
 from dfe_engine.source.flow import (
     ARCHIVER_SERVICE,
     FlowError,
-    archive_gap,
     archiver_endpoint,
     resolve_flow,
 )
@@ -617,8 +616,9 @@ def compile_receiver_destinations(registry: SourceReader, settings: Any) -> Dest
     On the bus the receiver produces to a topic and the next stage consumes it,
     so there is nothing to name: the default stays the bus and no source entry is
     emitted. On direct there is no store between stages, so every record has to
-    be handed to a stage by address - its source's transform when it has one,
-    else the loader. ``sources`` keys each one on the landing label its row sets.
+    be handed to the loader by name. ``sources`` keys each one on the landing
+    label its row sets. A source that needs a per-source app cannot run on direct
+    and is left out with a warning.
 
     The loader is the exception that carries no address: while the destination
     set declares no ``loader`` entry, the receiver resolves its built-in one from
@@ -630,15 +630,13 @@ def compile_receiver_destinations(registry: SourceReader, settings: Any) -> Dest
     the receiver to resolve.
 
     The default destination follows the DEPLOYMENT, not a source, because it is
-    what an unmatched record takes. Unless the default flow itself is direct and
-    carries a transform, in which case that transform IS the destination for
-    everything unmatched, exactly as ``always`` compiles to ``default_source``
-    rather than to a rule.
+    what an unmatched record takes. A source with no rule of its own and an
+    always-true match IS the default flow, exactly as ``always`` compiles to
+    ``default_source`` rather than to a rule.
 
     An archived source names TWO: there is no landing topic for the archiver to
-    read on direct, so the sender fans the record out to it beside the stage that
-    handles it, and the raw copy is kept before any transform sees it. The
-    archiver's leg is declared as one that does not confirm delivery, because its
+    read on direct, so the sender fans the record out to it beside the loader.
+    The archiver's leg is declared as one that does not confirm delivery, because its
     listener answers a push once the record is queued rather than written, and the
     receiver reports its delivery guarantee from that.
     """
@@ -660,28 +658,16 @@ def compile_receiver_destinations(registry: SourceReader, settings: Any) -> Dest
         if flow.transport != "direct":
             continue
 
-        if flow.transform is not None and flow.transform.endpoint:
-            name = flow.transform.instance
-            named[name] = {"endpoint": flow.transform.endpoint}
-        else:
-            # Referenced by name and given no endpoint: an entry here would win
-            # over the receiver's own loader.grpc_endpoint, which is the address
-            # the loader is actually deployed on.
-            name = LOADER_DESTINATION
-
-        destination: DestinationRef = name
+        # Referenced by name and given no endpoint: an entry here would win over
+        # the receiver's own loader.grpc_endpoint, which is the address the loader
+        # is actually deployed on.
+        destination: DestinationRef = LOADER_DESTINATION
         if flow.outputs.archive:
-            gap = archive_gap(flow)
-            if gap is not None:
-                logger.warning(
-                    f"{gap}. It is compiled as stored and archives nothing until it moves to "
-                    "the bus or stops asking"
-                )
             named[ARCHIVER_SERVICE] = {
                 "endpoint": archiver_endpoint(settings),
                 "confirms_delivery": False,
             }
-            destination = [name, ARCHIVER_SERVICE]
+            destination = [LOADER_DESTINATION, ARCHIVER_SERVICE]
 
         if not has_receiver_rule(source):
             # The default flow: everything unmatched already arrives here.

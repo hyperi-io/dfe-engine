@@ -6140,7 +6140,7 @@
           "Sources"
         ],
         "summary": "List Catalogue",
-        "description": "List the sources the installed dfe-schemas catalogue ships ready to create.\n\nAn entry already stored as a source is left out, matched on the catalogue entry\nname even when the source was given a different one. A source written by hand\ndoes not hide an entry. Each entry says whether the deployed transform ships\nits default variant, read off that app's mounted contract, so a console can\nhold back an entry the create would refuse.",
+        "description": "List the sources the installed dfe-schemas catalogue ships ready to create.\n\nAn entry already stored as a source is left out, matched on the catalogue entry\nname even when the source was given a different one. A source written by hand\ndoes not hide an entry. Each entry says whether the deployed transform ships\nits default variant, read off that app's mounted contract, so a console can\nhold back an entry the create would refuse. It also says whether this\ndeployment can run the entry at all: a source that needs a per-source app\n(a fetcher or a transform) is refused on a gRPC deployment.",
         "operationId": "sources.catalogue",
         "parameters": [
           {
@@ -31902,6 +31902,24 @@
             "type": "string",
             "title": "Availability Reason",
             "description": "Why availability says what it does"
+          },
+          "runnable": {
+            "type": "boolean",
+            "title": "Runnable",
+            "description": "Whether this deployment can run a create on the default intake. False when the source needs a per-source app (a fetcher or a transform) and the deployment runs on gRPC, which a create would refuse"
+          },
+          "runnable_reason": {
+            "type": "string",
+            "title": "Runnable Reason",
+            "description": "Why runnable is false; empty when it is true"
+          },
+          "runnable_intakes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Runnable Intakes",
+            "description": "The intakes of this entry a create can run here, a subset of intakes"
           }
         },
         "type": "object",
@@ -31914,7 +31932,10 @@
           "default_intake",
           "has_schema",
           "availability",
-          "availability_reason"
+          "availability_reason",
+          "runnable",
+          "runnable_reason",
+          "runnable_intakes"
         ],
         "title": "CatalogueEntryObject",
         "description": "One source DFE ships ready to create, as the console lists it."
@@ -48444,12 +48465,18 @@
             "type": "array",
             "title": "Available",
             "description": "Every transport a source may name here. One entry: a deployment binds its stages to a single transport, and a source on the other is refused at save."
+          },
+          "per_source_apps": {
+            "type": "boolean",
+            "title": "Per Source Apps",
+            "description": "Whether a source may need an app of its own (a fetcher or a transform). False on direct, which runs the receiver to loader path only, and such a source is refused at save."
           }
         },
         "type": "object",
         "required": [
           "default",
-          "available"
+          "available",
+          "per_source_apps"
         ],
         "title": "TransportFacts",
         "description": "What this deployment can carry a source's records on, between its stages."
