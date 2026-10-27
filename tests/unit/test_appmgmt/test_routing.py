@@ -63,7 +63,6 @@ UI = "dfe-ui"
 
 LOADER_ENDPOINT = "http://dfe-loader:6000"
 ARCHIVER_ENDPOINT = "http://dfe-archiver:6000"
-VRL_AUTH_ENDPOINT = "http://dfe-transform-vrl-auth:6000"
 
 # Read off the shipped manifest, so a family added there is covered without an edit here.
 FLAT_FETCHER_FAMILIES = sorted(
@@ -104,24 +103,6 @@ def _routed_into(target):
     """A fetched source whose alert records belong to *target*, beside it."""
     route = {"match": {"field": "event.kind", "value": "alert"}, "source": target.source}
     return FakeRegistry([_fetched(fetcher={"routes": [route]}), target])
-
-
-@pytest.fixture
-def direct_transforms():
-    """The catalogue as it is once a transform ships its Push listener.
-
-    Declaring the transport and the endpoint is the WHOLE of what a transform
-    gains one, so a test of the direct form is a manifest edit, never a stub.
-    """
-    original = dict(catalogue.APP_CATALOGUE)
-    catalogue.APP_CATALOGUE[VRL] = replace(
-        original[VRL],
-        transports=frozenset({"bus", "direct"}),
-        endpoints={catalogue.PUSH_ENDPOINT: catalogue.AppEndpoint(port=6000)},
-    )
-    yield catalogue.APP_CATALOGUE
-    catalogue.APP_CATALOGUE.clear()
-    catalogue.APP_CATALOGUE.update(original)
 
 
 @pytest.fixture
@@ -428,27 +409,36 @@ class TestReceiverOnTheBus:
 
 class TestReceiverOnDirect:
     def test_every_matched_source_is_addressed(self, direct_settings):
-        registry = FakeRegistry([_matched("auth"), _fetched()])
+        registry = FakeRegistry([_matched("auth"), _matched("syslog")])
 
         compiled = _receiver(registry, direct_settings)
 
         assert compiled["destinations"] == {
             "default": "loader",
-            "sources": {"auth": "loader", "okta-audit": "loader"},
+            "sources": {"auth": "loader", "syslog": "loader"},
         }
 
-    def test_a_transformed_source_is_addressed_to_its_transform_instance(
-        self, direct_settings, direct_transforms
+    @pytest.mark.parametrize(
+        "needs_an_app",
+        [
+            pytest.param(lambda: _matched("auth", transform={"engine": "vrl"}), id="transform"),
+            pytest.param(lambda: _fetched("auth"), id="fetcher"),
+        ],
+    )
+    def test_a_source_needing_its_own_app_is_left_out_with_a_warning(
+        self, direct_settings, monkeypatch, needs_an_app
     ):
-        registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"}), _fetched()])
+        from dfe_engine.services import source_routing
 
-        compiled = _receiver(registry, direct_settings)
+        warnings: list[str] = []
+        monkeypatch.setattr(
+            source_routing.logger, "warning", lambda message, **fields: warnings.append(message)
+        )
 
-        assert compiled["destinations"] == {
-            "default": "loader",
-            "dfe-transform-vrl-auth": {"grpc": {"endpoint": VRL_AUTH_ENDPOINT}},
-            "sources": {"auth": "dfe-transform-vrl-auth", "okta-audit": "loader"},
-        }
+        compiled = _receiver(FakeRegistry([needs_an_app(), _matched("syslog")]), direct_settings)
+
+        assert compiled["destinations"]["sources"] == {"syslog": "loader"}
+        assert [w for w in warnings if "'auth'" in w and "per-source app" in w]
 
     def test_an_exists_match_gets_a_destination_of_its_own(self, direct_settings):
         # Destinations key on the label the row set, so a match that tests no
@@ -461,30 +451,6 @@ class TestReceiverOnDirect:
 
         assert compiled["destinations"]["sources"] == {"auth": "loader"}
 
-    def test_a_named_destination_is_addressed_the_way_the_fetcher_addresses_one(
-        self, direct_settings, direct_transforms
-    ):
-        """Both compilers hand the receiver and the fetcher the same gRPC block.
-
-        The receiver deserialises a named destination as ``DestinationSpec``
-        (``src/config/mod.rs``), so ``grpc`` is a struct with an ``endpoint``, not
-        a URI. Emitting the bare string made receiver v1.15.30 refuse the whole
-        config file, and a receiver that will not start takes the direct
-        transport with it - which no assertion on the rules would have caught.
-
-        Read on a transform instance, because the loader is the one destination
-        the receiver addresses itself.
-        """
-        registry = FakeRegistry([_fetched(transform={"engine": "vrl"})])
-
-        receiver = _receiver(registry, direct_settings)
-        fetcher = routing.compile_for(
-            catalogue.descriptor(FETCHER), registry, direct_settings, instance="okta-audit"
-        )
-
-        named = receiver["destinations"]["dfe-transform-vrl-okta-audit"]
-        assert named["grpc"] == fetcher["output"]["grpc"]
-
     def test_the_loader_destination_is_named_but_never_addressed(self, direct_settings):
         """#436: an endpoint here wins over the address the loader is deployed on.
 
@@ -494,7 +460,7 @@ class TestReceiverOnDirect:
         an endpoint here short-circuits that, which sent every record on the
         no-bus tier to a port the loader does not listen on.
         """
-        registry = FakeRegistry([_matched("auth"), _fetched()])
+        registry = FakeRegistry([_matched("auth"), _matched("syslog")])
 
         compiled = _receiver(registry, direct_settings)
 
@@ -510,18 +476,16 @@ class TestReceiverOnDirect:
         row = compiled["rules"]["rules"][0]
         assert list(compiled["destinations"]["sources"]) == [row["set"]["_source"]["value"]]
 
-    def test_the_default_flow_compiles_to_the_default_destination(
-        self, direct_settings, direct_transforms
-    ):
+    def test_the_default_flow_compiles_to_the_default_destination(self, direct_settings):
         # `always` matches everything, so it takes the destination an unmatched
         # record already goes to rather than a rule that would shadow the rest.
-        default_flow = _matched("default", transform={"engine": "vrl"})
+        default_flow = _matched("default")
         default_flow.versions["1.0.0"].match.operator = "always"
         registry = FakeRegistry([default_flow])
 
         compiled = _receiver(registry, direct_settings)
 
-        assert compiled["destinations"]["default"] == "dfe-transform-vrl-default"
+        assert compiled["destinations"]["default"] == "loader"
         assert compiled["destinations"]["sources"] == {}
         assert "rules" not in compiled["rules"]
 
@@ -540,31 +504,15 @@ class TestArchivedOnDirect:
             "sources": {"auth": ["loader", ARCHIVER]},
         }
 
-    def test_only_the_archiver_leg_is_declared_as_not_confirming_delivery(
-        self, direct_settings, direct_transforms
-    ):
+    def test_only_the_archiver_leg_is_declared_as_not_confirming_delivery(self, direct_settings):
         # The archiver answers a push once the record is queued, so the receiver
-        # must not report that leg at least once. The loader and a transform confirm.
-        registry = FakeRegistry(
-            [_matched("auth", archive=True, transform={"engine": "vrl"}), _matched("syslog")]
-        )
+        # must not report that leg at least once. The loader confirms.
+        registry = FakeRegistry([_matched("auth", archive=True), _matched("syslog")])
 
         destinations = _receiver(registry, direct_settings)["destinations"]
 
         assert destinations[ARCHIVER]["grpc"]["confirms_delivery"] is False
-        assert destinations["dfe-transform-vrl-auth"] == {"grpc": {"endpoint": VRL_AUTH_ENDPOINT}}
         assert "loader" not in destinations
-
-    def test_the_raw_copy_is_taken_before_the_transform_not_after(
-        self, direct_settings, direct_transforms
-    ):
-        # The archiver sits beside the transform, not behind it: archive keeps the
-        # record as it ARRIVED, so a transformed source must still name both.
-        registry = FakeRegistry([_matched("auth", archive=True, transform={"engine": "vrl"})])
-
-        compiled = _receiver(registry, direct_settings)
-
-        assert compiled["destinations"]["sources"]["auth"] == ["dfe-transform-vrl-auth", ARCHIVER]
 
     def test_a_source_that_asked_for_none_names_one_destination(self, direct_settings):
         registry = FakeRegistry([_matched("auth")])
@@ -587,99 +535,6 @@ class TestArchivedOnDirect:
         assert compiled["destinations"][ARCHIVER] == {
             "grpc": {"endpoint": ARCHIVER_ENDPOINT, "confirms_delivery": False}
         }
-
-
-class TestAStoredArchiveNothingCopies:
-    """Fetched and archived on direct: refused at save, compiled exactly as stored."""
-
-    def test_its_fetcher_routing_is_what_it_is_without_the_archive(self, direct_settings):
-        fetcher = catalogue.descriptor(FETCHER)
-
-        plain = routing.compile_for(
-            fetcher, FakeRegistry([_fetched()]), direct_settings, instance="okta-audit"
-        )
-        archived = routing.compile_for(
-            fetcher, FakeRegistry([_fetched(archive=True)]), direct_settings, instance="okta-audit"
-        )
-
-        assert archived == plain
-        assert archived["output"] == {"type": "grpc", "grpc": {"endpoint": LOADER_ENDPOINT}}
-
-    def test_the_receiver_compile_names_it_and_keeps_its_rule(self, direct_settings, monkeypatch):
-        from dfe_engine.services import source_routing
-
-        warnings: list[str] = []
-        monkeypatch.setattr(
-            source_routing.logger, "warning", lambda message, **fields: warnings.append(message)
-        )
-
-        compiled = _receiver(FakeRegistry([_fetched(archive=True)]), direct_settings)
-
-        assert [w for w in warnings if "'okta-audit'" in w and "archived on the bus" in w]
-        assert compiled["destinations"]["sources"] == {"okta-audit": ["loader", ARCHIVER]}
-
-
-class TestAStoredRouteIntoAnArchivedSource:
-    """A direct fetcher route into an archived source: refused at save, compiled as stored."""
-
-    def test_its_fetcher_routing_is_what_it_is_without_the_archive(self, direct_settings):
-        fetcher = catalogue.descriptor(FETCHER)
-
-        plain = routing.compile_for(
-            fetcher, _routed_into(_matched("okta-alerts")), direct_settings, instance="okta-audit"
-        )
-        archived = routing.compile_for(
-            fetcher,
-            _routed_into(_matched("okta-alerts", archive=True)),
-            direct_settings,
-            instance="okta-audit",
-        )
-
-        assert archived == plain
-        assert archived["output"] == {
-            "type": "grpc",
-            "grpc": {"endpoint": LOADER_ENDPOINT},
-            "destinations": {"okta-alerts": {"grpc": {"endpoint": LOADER_ENDPOINT}}},
-            "routes": [
-                {"match_field": "event.kind", "match_value": "alert", "destination": "okta-alerts"}
-            ],
-        }
-
-    def test_the_fetcher_compile_names_the_route_and_its_target(self, direct_settings, monkeypatch):
-        warnings: list[str] = []
-        monkeypatch.setattr(
-            routing.logger, "warning", lambda message, **fields: warnings.append(message)
-        )
-
-        routing.compile_for(
-            catalogue.descriptor(FETCHER),
-            _routed_into(_matched("okta-alerts", archive=True)),
-            direct_settings,
-            instance="okta-audit",
-        )
-
-        assert [
-            w
-            for w in warnings
-            if "'okta-audit'" in w and "'okta-alerts'" in w and "archived source on the bus" in w
-        ]
-
-    def test_a_route_into_a_source_that_is_not_archived_is_not_named(
-        self, direct_settings, monkeypatch
-    ):
-        warnings: list[str] = []
-        monkeypatch.setattr(
-            routing.logger, "warning", lambda message, **fields: warnings.append(message)
-        )
-
-        routing.compile_for(
-            catalogue.descriptor(FETCHER),
-            _routed_into(_matched("okta-alerts")),
-            direct_settings,
-            instance="okta-audit",
-        )
-
-        assert warnings == []
 
 
 class TestAStoredRouteWithAnotherOperator:
@@ -1075,31 +930,14 @@ class TestFetcherInstance:
         assert routing.sync(app.descriptor, doc, registry, settings, instance="runzero-assets")
         assert set(doc["config"]["sources"]["rest"]) == {doc["config"]["instance_id"]}
 
-    def test_on_direct_it_pushes_at_the_loader(self, direct_settings):
-        compiled = routing.compile_for(
-            catalogue.descriptor(FETCHER),
-            FakeRegistry([_fetched()]),
-            direct_settings,
-            instance="okta-audit",
-        )
-
-        assert compiled["output"] == {
-            "type": "grpc",
-            "grpc": {"endpoint": LOADER_ENDPOINT},
-        }
-
-    def test_on_direct_a_transformed_source_pushes_at_its_transform(
-        self, direct_settings, direct_transforms
-    ):
-        registry = FakeRegistry([_fetched(transform={"engine": "vrl"})])
-
-        compiled = routing.compile_for(
-            catalogue.descriptor(FETCHER), registry, direct_settings, instance="okta-audit"
-        )
-
-        assert compiled["output"]["grpc"] == {
-            "endpoint": "http://dfe-transform-vrl-okta-audit:6000"
-        }
+    def test_on_direct_it_is_not_run(self, direct_settings):
+        with pytest.raises(routing.RoutingNotApplicableError, match="per-source app"):
+            routing.compile_for(
+                catalogue.descriptor(FETCHER),
+                FakeRegistry([_fetched()]),
+                direct_settings,
+                instance="okta-audit",
+            )
 
     def test_two_connector_types_in_one_fetcher_are_refused(self, settings):
         """The composer is the second gate: a stored source that spans two is not deployed."""
@@ -1192,34 +1030,6 @@ class TestFetcherInstance:
 
         assert compiled["output"]["destinations"] == {
             "okta-alerts": {"kafka": {"topic": "okta-alerts"}}
-        }
-        assert compiled["output"]["routes"] == [
-            {"match_field": "event.kind", "match_value": "alert", "destination": "okta-alerts"}
-        ]
-
-    def test_a_route_on_direct_carries_an_endpoint(self, direct_settings, direct_transforms):
-        registry = FakeRegistry(
-            [
-                _fetched(
-                    fetcher={
-                        "routes": [
-                            {
-                                "match": {"field": "event.kind", "value": "alert"},
-                                "source": "okta-alerts",
-                            }
-                        ]
-                    }
-                ),
-                _matched("okta-alerts", transform={"engine": "vrl"}),
-            ]
-        )
-
-        compiled = routing.compile_for(
-            catalogue.descriptor(FETCHER), registry, direct_settings, instance="okta-audit"
-        )
-
-        assert compiled["output"]["destinations"] == {
-            "okta-alerts": {"grpc": {"endpoint": "http://dfe-transform-vrl-okta-alerts:6000"}}
         }
         assert compiled["output"]["routes"] == [
             {"match_field": "event.kind", "match_value": "alert", "destination": "okta-alerts"}
@@ -1377,84 +1187,17 @@ class TestTransformInstance:
             "sink": {"topic": "auth_load"},
         }
 
-    def test_on_direct_it_listens_and_pushes_at_the_loader_under_its_load_key(
-        self, direct_settings, direct_transforms
-    ):
-        # The loader takes a record's table from its key when the program left no
-        # _source in it, so an empty key lands the source in the main table.
-        registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"})])
+    @pytest.mark.parametrize("engine", ["vrl", "vector", "elastic"])
+    def test_on_direct_it_is_not_run(self, direct_settings, engine):
+        registry = FakeRegistry([_matched("auth", transform={"engine": engine})])
 
-        compiled = routing.compile_for(
-            catalogue.descriptor(VRL), registry, direct_settings, instance="auth"
-        )
-
-        assert compiled == {
-            "source": {"transport": "grpc", "listen": "0.0.0.0:6000"},
-            "sink": {"transport": "grpc", "endpoint": LOADER_ENDPOINT, "topic": "auth_load"},
-        }
-
-    def test_the_output_key_is_the_same_on_both_transports(
-        self, settings, direct_settings, direct_transforms
-    ):
-        registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"})])
-        app = catalogue.descriptor(VRL)
-
-        bus = routing.compile_for(app, registry, settings, instance="auth")
-        direct = routing.compile_for(app, registry, direct_settings, instance="auth")
-
-        assert direct["sink"]["topic"] == bus["sink"]["topic"] == "auth_load"
-
-    def test_on_direct_vector_keeps_the_name_it_derives_its_output_key_from(self, direct_settings):
-        # dfe-transform-vector derives sink.topic from dfe_source on either
-        # transport, and its bridge stamps that topic on every record it pushes.
-        registry = FakeRegistry([_matched("auth", transform={"engine": "vector"})])
-
-        compiled = routing.compile_for(
-            catalogue.descriptor("dfe-transform-vector"), registry, direct_settings, instance="auth"
-        )
-
-        assert compiled == {
-            "dfe_source": "auth",
-            "source": {"transport": "grpc", "listen": "0.0.0.0:6000"},
-            "sink": {"transport": "grpc", "endpoint": LOADER_ENDPOINT},
-        }
-
-    def test_moving_a_source_to_direct_clears_its_bus_wiring(
-        self, settings, direct_settings, direct_transforms
-    ):
-        # The overlay is seeded with the bus binding at deploy, so the listener
-        # has to replace the source block whole rather than sit beside its topics.
-        registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"})])
-        app = instances.instance_of(VRL, "auth")
-        doc = instances.initial_overlay(app)
-        routing.sync(app.descriptor, doc, registry, settings, instance="auth")
-        assert doc["config"]["source"]["topics"] == ["auth_land"]
-
-        routing.sync(app.descriptor, doc, registry, direct_settings, instance="auth")
-
-        assert doc["config"]["source"] == {"transport": "grpc", "listen": "0.0.0.0:6000"}
-        assert doc["config"]["sink"] == {
-            "transport": "grpc",
-            "endpoint": LOADER_ENDPOINT,
-            "topic": "auth_load",
-        }
-
-    def test_an_overlay_synced_before_the_load_key_is_drift(
-        self, direct_settings, direct_transforms
-    ):
-        # A direct instance deployed without the key has to be re-synced, not left
-        # sending every record the program strips of _source to the main table.
-        registry = FakeRegistry([_matched("auth", transform={"engine": "vrl"})])
-        app = instances.instance_of(VRL, "auth")
-        doc = instances.initial_overlay(app)
-        routing.sync(app.descriptor, doc, registry, direct_settings, instance="auth")
-        del doc["config"]["sink"]["topic"]
-
-        found = routing.status(app.descriptor, doc, registry, direct_settings, instance="auth")
-
-        assert found.drift
-        assert routing.sync(app.descriptor, doc, registry, direct_settings, instance="auth")
-        assert doc["config"]["sink"]["topic"] == "auth_load"
+        with pytest.raises(routing.RoutingNotApplicableError, match="per-source app"):
+            routing.compile_for(
+                catalogue.descriptor(catalogue.transform_service(engine)),
+                registry,
+                direct_settings,
+                instance="auth",
+            )
 
     def test_the_variant_lands_where_the_app_names_it(self, settings):
         elastic = catalogue.descriptor("dfe-transform-elastic")
@@ -1467,11 +1210,10 @@ class TestTransformInstance:
         assert compiled["source"]["name"] == "okta_system"
 
     @pytest.mark.parametrize(
-        ("id_", "transport", "transform", "expected_source"),
+        ("id_", "transform", "expected_source"),
         [
             (
                 "agent_default_writes_no_mode",
-                "bus",
                 {"engine": "elastic", "variant": "filebeat.cisco_asa.default"},
                 {
                     "topics": ["syslog_land"],
@@ -1481,7 +1223,6 @@ class TestTransformInstance:
             ),
             (
                 "agentless_names_no_program",
-                "bus",
                 {"engine": "elastic", "mode": "agentless"},
                 {
                     "topics": ["syslog_land"],
@@ -1491,7 +1232,6 @@ class TestTransformInstance:
             ),
             (
                 "agentless_detect_with_defaults_is_an_empty_block",
-                "bus",
                 {"engine": "elastic", "mode": "agentless", "detect": {}},
                 {
                     "topics": ["syslog_land"],
@@ -1502,7 +1242,6 @@ class TestTransformInstance:
             ),
             (
                 "agentless_fallback_and_candidates",
-                "bus",
                 {
                     "engine": "elastic",
                     "mode": "agentless",
@@ -1523,27 +1262,15 @@ class TestTransformInstance:
                     },
                 },
             ),
-            (
-                "agentless_stop_on_the_direct_transport_keeps_the_listener",
-                "direct",
-                {"engine": "elastic", "mode": "agentless", "detect": {"unmatched": "stop"}},
-                {
-                    "transport": "grpc",
-                    "listen": "0.0.0.0:6000",
-                    "mode": "agentless",
-                    "detect": {"unmatched": "stop"},
-                },
-            ),
         ],
     )
     def test_the_mode_and_detect_land_where_the_app_names_them(
-        self, settings, direct_settings, id_, transport, transform, expected_source
+        self, settings, id_, transform, expected_source
     ):
         elastic = catalogue.descriptor("dfe-transform-elastic")
         registry = FakeRegistry([_matched("syslog", transform=transform)])
-        chosen = settings if transport == "bus" else direct_settings
 
-        compiled = routing.compile_for(elastic, registry, chosen, instance="syslog")
+        compiled = routing.compile_for(elastic, registry, settings, instance="syslog")
 
         assert compiled["source"] == expected_source, id_
 

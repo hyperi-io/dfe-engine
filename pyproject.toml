@@ -231,7 +231,7 @@ filterwarnings = [
     # starlette 1.x deprecates httpx-0.x under TestClient and points at httpx2; the
     # httpx2 migration is a separate follow-up (test-infra only; prod unaffected).
     "ignore:Using .httpx. with .starlette.testclient",
-    # pytest-benchmark can't run under xdist and the suite always runs -n 4, so
+    # pytest-benchmark can't run under xdist and the suite runs under it, so
     # benchmarks are intentionally disabled here (run them with -p no:xdist).
     "ignore:Benchmarks are automatically disabled because xdist plugin is active",
     # Deliberate signal: {customer_filters} only handles 0/1 surrounding spaces;

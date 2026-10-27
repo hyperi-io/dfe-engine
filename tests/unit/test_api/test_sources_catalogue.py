@@ -99,7 +99,25 @@ class TestListCatalogue:
             "availability": "unknown",
             "availability_reason": "no 'dfe-transform-elastic' contract is mounted, so its "
             "variants are not known",
+            "runnable": True,
+            "runnable_reason": "",
+            "runnable_intakes": ["beats", "fetcher"],
         }
+
+    @pytest.mark.parametrize(
+        ("default", "runnable", "intakes"),
+        [("bus", True, ["beats", "fetcher"]), ("direct", False, [])],
+    )
+    def test_an_entry_says_whether_this_deployment_can_run_it(
+        self, admin_headers, client, app, default, runnable, intakes
+    ):
+        app.state.settings.transport.bus_present = default == "bus"
+        app.state.settings.transport.default = default
+
+        row = _row(client=client, headers=admin_headers, name="okta")
+
+        assert (row["runnable"], row["runnable_intakes"]) == (runnable, intakes)
+        assert ("per-source app" in row["runnable_reason"]) is (not runnable)
 
     @pytest.mark.parametrize(
         "case",

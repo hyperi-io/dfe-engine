@@ -23,10 +23,12 @@ from scalo.logger import logger
 from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, transform_service
 from dfe_engine.appmgmt.contract import ContractError, contract
 from dfe_engine.manifest import ManifestError
+from dfe_engine.source.flow import FlowError, resolve_flow
 from dfe_engine.source.models import (
     SOURCE_LABEL_FIELD,
     SourceTransform,
     SourceWriteRequest,
+    source_from_write,
     validate_source_name,
 )
 from dfe_engine.transport import SourceTransport
@@ -311,6 +313,23 @@ def variant_availability(
         reason=f"the deployed {service!r} does not ship transform variant {transform.variant!r}",
         state="missing_variant",
     )
+
+
+def intakes_refused_here(*, entry: CatalogueEntry, settings: Any) -> dict[CatalogueIntake, str]:
+    """Each intake of *entry* this deployment cannot run, with the resolver's reason.
+
+    Asks ``resolve_flow`` about the source a create would store, so the picker and the
+    save path cannot disagree.
+    """
+    refused: dict[CatalogueIntake, str] = {}
+    for intake in entry.intakes:
+        write = write_request_for(entry=entry, intake=intake)
+        source = source_from_write(write, source_name=entry.name)
+        try:
+            resolve_flow(source, settings)
+        except FlowError as exc:
+            refused[intake] = str(exc)
+    return refused
 
 
 def write_request_for(

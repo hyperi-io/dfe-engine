@@ -286,7 +286,7 @@ def _docker_prefix(spec: str) -> list[str]:
 # ---------------------------
 # A container has to say which repo, which suite and which service it is, so an
 # operator looking at `docker ps` can tell what left it behind. A random hex name
-# is untraceable the moment one survives, and this suite runs under xdist -n 4 on
+# is untraceable the moment one survives, and this suite runs under xdist on
 # machines that also run the rest of the fleet's tests.
 #
 #   dfe-engine-test-integration-<test>-clickhouse   throwaway, one per test

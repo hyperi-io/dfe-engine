@@ -18,7 +18,12 @@ import pytest
 
 from dfe_engine.appmgmt import catalogue
 from dfe_engine.settings import DFESettings
-from dfe_engine.source.flow import FlowError, archiver_offer_gap, resolve_flow
+from dfe_engine.source.flow import (
+    FlowError,
+    archiver_offer_gap,
+    resolve_flow,
+    runs_per_source_apps,
+)
 from dfe_engine.source.models import Source
 
 
@@ -97,25 +102,6 @@ class TestDirectTransport:
         assert flow.transform is None
         assert flow.outputs.loader == "http://dfe-loader:6000"
 
-    def test_transform_answers_on_its_own_instance_service(self):
-        flow = resolve_flow(
-            _source(transport="direct", transform={"engine": "vrl"}),
-            _settings(default="direct"),
-        )
-
-        assert flow.transform is not None
-        assert flow.transform.instance == "dfe-transform-vrl-auth"
-        assert flow.transform.endpoint == "http://dfe-transform-vrl-auth:6000"
-        assert flow.transform.topics is None
-        assert flow.outputs.loader == "http://dfe-loader:6000"
-
-    def test_fetcher_source_keeps_its_instance_input(self):
-        flow = resolve_flow(_fetched(transport="direct"), _settings(default="direct"))
-
-        assert flow.origin == "fetcher"
-        assert flow.input == "dfe-fetcher-okta"
-        assert flow.outputs.loader == "http://dfe-loader:6000"
-
     def test_archive_is_allowed_on_direct_since_the_archiver_declares_it(self):
         # The sender fans the record out to the archiver's Push listener beside
         # the loader, so a brokerless deployment can still keep the raw record.
@@ -139,27 +125,11 @@ class TestMesh:
             f"http://dfe-loader-mesh.{self.NAMESPACE}.svc.cluster.local:6000"
         )
 
-    def test_a_transform_pool_is_addressed_at_its_own_alias(self):
-        flow = resolve_flow(_source(transform={"engine": "vrl"}), self._mesh())
-
-        assert flow.transform is not None
-        assert flow.transform.endpoint == (
-            f"http://dfe-transform-vrl-auth-mesh.{self.NAMESPACE}.svc.cluster.local:6000"
-        )
-        assert flow.outputs.loader == (
-            f"http://dfe-loader-mesh.{self.NAMESPACE}.svc.cluster.local:6000"
-        )
-
     def test_a_namespace_alone_changes_no_address(self):
         # The namespace reaches the engine on every profile; the switch is what
         # decides whether a sender uses it.
-        flow = resolve_flow(
-            _source(transform={"engine": "vrl"}),
-            _settings(default="direct", mesh_namespace=self.NAMESPACE),
-        )
+        flow = resolve_flow(_source(), _settings(default="direct", mesh_namespace=self.NAMESPACE))
 
-        assert flow.transform is not None
-        assert flow.transform.endpoint == "http://dfe-transform-vrl-auth:6000"
         assert flow.outputs.loader == "http://dfe-loader:6000"
 
     def test_the_bus_is_unaffected(self):
@@ -206,33 +176,6 @@ class TestRefusals:
                 _source(transport="direct", archive=True), _settings(default="direct"), bus_only
             )
 
-    def test_transform_that_does_not_carry_the_transport(self):
-        bus_only = dict(catalogue.APP_CATALOGUE)
-        bus_only["dfe-transform-elastic"] = replace(
-            catalogue.descriptor("dfe-transform-elastic"), transports=frozenset({"bus"})
-        )
-
-        with pytest.raises(FlowError, match="dfe-transform-elastic carries only bus"):
-            resolve_flow(
-                _source(transport="direct", transform={"engine": "elastic"}),
-                _settings(default="direct"),
-                bus_only,
-            )
-
-    @pytest.mark.parametrize("engine", TRANSFORM_ENGINES)
-    def test_direct_follows_the_transform_listener_the_manifest_declares(self, engine):
-        # Shipping the listener and declaring it is the whole change; nothing
-        # here names an app.
-        source = _source(transport="direct", transform={"engine": engine})
-        service = catalogue.transform_service(engine)
-        if catalogue.descriptor(service).carries("direct"):
-            flow = resolve_flow(source, _settings(default="direct"))
-            assert flow.transport == "direct"
-            assert flow.transform is not None
-        else:
-            with pytest.raises(FlowError, match="carries only bus"):
-                resolve_flow(source, _settings(default="direct"))
-
     def test_transform_app_missing_from_the_catalogue(self):
         stripped = {
             name: app
@@ -250,22 +193,6 @@ class TestRefusals:
         with pytest.raises(FlowError, match="dfe-loader carries only bus"):
             resolve_flow(_source(transport="direct"), _settings(default="direct"), bus_only)
 
-    def test_a_transform_on_direct_takes_any_match(self):
-        # The receiver keys a destination on the label the source's row sets, so
-        # an `exists` match reaches the transform as an `equals` one does.
-        flow = resolve_flow(
-            Source.model_validate(
-                {
-                    "source": "auth",
-                    "match": {"field": "_json.app", "operator": "exists"},
-                    "transport": "direct",
-                    "transform": {"engine": "vrl"},
-                }
-            ),
-            _settings(default="direct"),
-        )
-        assert flow.transform is not None
-
     def test_the_same_match_is_fine_without_a_transform(self):
         flow = resolve_flow(
             Source.model_validate(
@@ -280,12 +207,67 @@ class TestRefusals:
 
         assert flow.outputs.loader == "http://dfe-loader:6000"
 
-    def test_a_bus_only_fetcher_refuses_a_direct_source(self):
-        bus_only = dict(catalogue.APP_CATALOGUE)
-        bus_only["dfe-fetcher"] = replace(bus_only["dfe-fetcher"], transports=frozenset({"bus"}))
 
-        with pytest.raises(FlowError, match="dfe-fetcher carries only bus"):
-            resolve_flow(_fetched(transport="direct"), _settings(default="direct"), bus_only)
+class TestPerSourceAppsNeedTheBus:
+    """A direct deployment runs the receiver to loader path alone.
+
+    A fetcher or a transform is one deployment per source, and addressing a pool
+    of those over gRPC needs the mesh, which is not GA. The refusal reads the
+    manifest's multiplicity, so no app is named here.
+    """
+
+    PER_SOURCE = [
+        pytest.param(lambda: _fetched(), id="fetcher"),
+        *[
+            pytest.param(
+                lambda e=engine: _source(transform={"engine": e}), id=f"transform-{engine}"
+            )
+            for engine in TRANSFORM_ENGINES
+        ],
+    ]
+
+    @pytest.mark.parametrize("make", PER_SOURCE)
+    @pytest.mark.parametrize("mesh", [False, True], ids=["no-mesh", "mesh"])
+    def test_a_source_needing_its_own_app_is_refused_on_direct(self, make, mesh):
+        settings = _settings(default="direct", mesh_enabled=mesh, mesh_namespace="gw" * mesh)
+
+        with pytest.raises(FlowError, match="Sources that need a per-source app"):
+            resolve_flow(make(), settings)
+
+    @pytest.mark.parametrize("make", PER_SOURCE)
+    def test_the_same_source_resolves_on_the_bus(self, make):
+        assert resolve_flow(make(), _settings(default="bus")).transport == "bus"
+
+    def test_the_refusal_names_the_source_the_stage_and_both_transports(self):
+        with pytest.raises(FlowError) as refused:
+            resolve_flow(_fetched(), _settings(default="direct"))
+
+        said = str(refused.value)
+        assert "source 'okta' needs its own dfe-fetcher to fetch it" in said
+        assert "runs on grpc" in said
+        assert "need a kafka deployment" in said
+
+    def test_a_receiver_only_source_still_resolves_on_direct(self):
+        flow = resolve_flow(_source(), _settings(default="direct"))
+
+        assert flow.transport == "direct"
+        assert flow.outputs.loader == "http://dfe-loader:6000"
+
+    def test_an_app_declared_single_is_not_refused_on_direct(self):
+        single = dict(catalogue.APP_CATALOGUE)
+        single["dfe-transform-vrl"] = replace(
+            catalogue.descriptor("dfe-transform-vrl"), multiplicity=catalogue.Multiplicity.SINGLE
+        )
+
+        flow = resolve_flow(
+            _source(transform={"engine": "vrl"}), _settings(default="direct"), single
+        )
+
+        assert flow.transform is not None
+
+    @pytest.mark.parametrize(("transport", "allowed"), [("bus", True), ("direct", False)])
+    def test_the_deployment_fact_follows_the_transport(self, transport, allowed):
+        assert runs_per_source_apps(transport) is allowed
 
 
 class TestAProfileThatDeploysNoSuchApp:

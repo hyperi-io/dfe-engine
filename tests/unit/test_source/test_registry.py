@@ -504,24 +504,65 @@ class TestList:
 
         assert registry.get_source("auth").archive is True
 
-    def test_a_fetched_source_archived_on_direct_is_refused(
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            pytest.param(
+                {"schema": OWN_TABLE, "fetcher": {"source_type": "okta", "config": {}}},
+                id="fetcher",
+            ),
+            pytest.param(
+                {
+                    "schema": OWN_TABLE,
+                    "fetcher": {"source_type": "okta", "config": {}},
+                    "archive": True,
+                },
+                id="fetcher-archived",
+            ),
+            pytest.param(
+                {
+                    "match": {"field": "_source", "value": "auth"},
+                    "transform": {"engine": "elastic"},
+                },
+                id="elastic-transform",
+            ),
+            pytest.param(
+                {"match": {"field": "_source", "value": "auth"}, "transform": {"engine": "vrl"}},
+                id="vrl-transform",
+            ),
+        ],
+    )
+    def test_a_source_needing_its_own_app_is_refused_on_direct_and_saves_on_the_bus(
+        self, registry: SourceRegistry, direct_deployment, monkeypatch, fields
+    ):
+        body = {"source": "auth", **fields}
+        with pytest.raises(SourceValidationError, match="Sources that need a per-source app"):
+            registry.save_source(Source.model_validate({**body, "transport": "direct"}))
+
+        assert not registry.source_exists("auth")
+
+        from dfe_engine.settings import DFESettings
+
+        bus = DFESettings(env="dev", transport={"default": "bus"})
+        monkeypatch.setattr("dfe_engine.settings.get_settings", lambda: bus)
+        registry.save_source(Source.model_validate(body))
+
+        assert registry.source_exists("auth")
+
+    def test_a_receiver_only_source_saves_on_direct(
         self, registry: SourceRegistry, direct_deployment
     ):
-        # On direct only the receiver copies a record to the archiver, and a
-        # fetched record never passes the receiver.
-        fetched = Source.model_validate(
-            {
-                "source": "okta-audit",
-                "schema": OWN_TABLE,
-                "fetcher": {"source_type": "okta", "config": {}},
-                "transport": "direct",
-                "archive": True,
-            }
+        registry.save_source(
+            Source.model_validate(
+                {
+                    "source": "auth",
+                    "match": {"field": "_source", "value": "auth"},
+                    "transport": "direct",
+                }
+            )
         )
-        with pytest.raises(SourceValidationError, match="archived on the bus transport"):
-            registry.save_source(fetched)
 
-        assert not registry.source_exists("okta-audit")
+        assert registry.get_source("auth").transport == "direct"
 
     def test_a_fetched_source_archived_on_the_bus_is_accepted(self, registry: SourceRegistry):
         registry.save_source(
@@ -538,35 +579,6 @@ class TestList:
 
         assert registry.get_source("okta-audit").archive is True
 
-    def test_a_direct_fetcher_route_into_an_archived_source_is_refused(
-        self, registry: SourceRegistry, direct_deployment
-    ):
-        # A routed record goes straight to the target's transform or loader, and on
-        # direct only the receiver copies a record to the archiver.
-        registry.save_source(_make_source("okta-alerts", match_value="okta-alerts", archive=True))
-
-        with pytest.raises(SourceValidationError, match="archived source on the bus") as refusal:
-            registry.save_source(_routing_fetcher())
-
-        assert "'okta-alerts'" in str(refusal.value)
-        assert not registry.source_exists("okta-audit")
-
-    def test_a_direct_fetcher_route_into_a_source_that_is_not_archived_saves(
-        self, registry: SourceRegistry, direct_deployment
-    ):
-        registry.save_source(_make_source("okta-alerts", match_value="okta-alerts"))
-
-        registry.save_source(_routing_fetcher())
-
-        assert present(registry.get_source("okta-audit").fetcher).routes[0].source == "okta-alerts"
-
-    def test_a_direct_fetcher_route_saves_before_its_target_exists(
-        self, registry: SourceRegistry, direct_deployment
-    ):
-        registry.save_source(_routing_fetcher())
-
-        assert registry.source_exists("okta-audit")
-
     def test_a_fetcher_route_into_an_archived_source_saves_on_the_bus(
         self, registry: SourceRegistry
     ):
@@ -575,21 +587,6 @@ class TestList:
         registry.save_source(_routing_fetcher())
 
         assert present(registry.get_source("okta-audit").fetcher).routes[0].source == "okta-alerts"
-
-    def test_a_direct_source_may_name_the_elastic_transform(
-        self, registry: SourceRegistry, direct_deployment
-    ):
-        direct = Source.model_validate(
-            {
-                "source": "auth",
-                "match": {"field": "_source", "value": "auth"},
-                "transport": "direct",
-                "transform": {"engine": "elastic"},
-            }
-        )
-        registry.save_source(direct)
-
-        assert registry.get_source("auth").transport == "direct"
 
     def test_disabling_is_the_exit_from_a_flow_the_deployment_cannot_run(
         self, registry: SourceRegistry
