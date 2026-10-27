@@ -287,4 +287,3 @@ emulation rig for the headless token_claim backbone.
 
 Open: confirm "membership" means the user's own memberships in the token, full
 rosters via sync; and the dex groups mechanism (glauth config-file LDAP).
-Tracked in the workstream plan.
