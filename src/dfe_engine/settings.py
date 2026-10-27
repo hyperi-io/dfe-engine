@@ -176,6 +176,14 @@ def _get_env(primary: str, *fallbacks: str) -> str | None:
     return None
 
 
+def _get_env_if_set(primary: str, *fallbacks: str) -> str | None:
+    """Like ``_get_env``, but a variable set to the empty string counts as set."""
+    for name in (primary, *fallbacks):
+        if name in os.environ:
+            return os.environ[name]
+    return None
+
+
 class ClickHouseCloudSettings(BaseModel):
     """ClickHouse Cloud service-lifecycle config (CONTROL PLANE; opt-in).
 
@@ -2308,6 +2316,17 @@ class DFESettings(BaseModel):
     )
 
     @model_validator(mode="after")
+    def _a_bus_needs_a_broker(self) -> DFESettings:
+        # Otherwise the schema phase waits out the dead-letter window on a broker nobody listed.
+        if self.transport.bus_present and not self.kafka.bootstrap_servers:
+            raise ValueError(
+                "transport.bus_present is true but kafka.bootstrap_servers is empty: set "
+                "DFE_KAFKA_BOOTSTRAP_SERVERS, or DFE_TRANSPORT_BUS_PRESENT=false and "
+                "DFE_TRANSPORT_DEFAULT=direct for a deployment with no broker"
+            )
+        return self
+
+    @model_validator(mode="after")
     def _data_database_is_no_lookup(self) -> DFESettings:
         # Every org's rows are in the data database, so a lookup there reads them all.
         data = self.clickhouse.effective_data_database
@@ -2584,7 +2603,10 @@ def _get_env_overrides() -> dict:
     # are the transition/manual path (empty provider) - see KafkaSettings.
     if val := _get_env("DFE_KAFKA_PROVIDER"):
         overrides["kafka"]["provider"] = val
-    if val := _get_env("DFE_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS"):
+    # An empty list is the operator saying there is no broker, so it overrides the dev default.
+    if (
+        val := _get_env_if_set("DFE_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS")
+    ) is not None:
         overrides["kafka"]["bootstrap_servers"] = val
     if val := _get_env("DFE_KAFKA_SECURITY_PROTOCOL", "KAFKA_SECURITY_PROTOCOL"):
         overrides["kafka"]["security_protocol"] = val
