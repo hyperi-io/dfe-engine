@@ -19,6 +19,7 @@ fails when the checker itself is the thing that is missing.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -48,11 +49,85 @@ class ValidationResult:
     backend: str = ""
     message: str = ""
     errors: tuple[str, ...] = field(default_factory=tuple)
+    refused: bool = False
+    """The content was refused on policy, so the write stops whether or not syntax checks block."""
 
     @property
     def blocks_write(self) -> bool:
         """Whether this outcome should stop the file being committed."""
         return self.status is ValidationStatus.INVALID
+
+
+# VRL functions that reach outside the event: the pod's environment (which holds the
+# Kafka credential) and the network. dfe-transform-vrl ships them switched on.
+_HOST_FUNCTIONS = {
+    "get_env_var": "reads the pod environment",
+    "get_secret": "reads a secret the host holds",
+    "http_request": "sends requests to another host",
+    "dns_lookup": "queries DNS",
+    "reverse_dns": "queries DNS",
+}
+_HOST_CALL_RE = re.compile(rf"\b({'|'.join(_HOST_FUNCTIONS)})\s*!?\s*\(")
+_VRL_LITERAL_OPENERS = "\"'"
+
+
+def _mask_vrl_literals(content: str) -> str:
+    """The program with comments and the inside of string literals blanked, line breaks kept.
+
+    A function name in a string or a comment is data, so it is not a call.
+    """
+    out: list[str] = []
+    i, size = 0, len(content)
+    while i < size:
+        ch = content[i]
+        if ch == "#":
+            while i < size and content[i] != "\n":
+                out.append(" ")
+                i += 1
+            continue
+        if ch in _VRL_LITERAL_OPENERS:
+            # A raw string (s'..', r'..', t'..') has no escapes, a plain double-quoted one has.
+            raw = ch == "'"
+            out.append(ch)
+            i += 1
+            while i < size and content[i] != ch:
+                if content[i] == "\\" and not raw and i + 1 < size:
+                    out.append("  ")
+                    i += 2
+                    continue
+                out.append("\n" if content[i] == "\n" else " ")
+                i += 1
+            if i < size:
+                out.append(ch)
+                i += 1
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def vrl_host_function_calls(content: str) -> tuple[str, ...]:
+    """Each call to a VRL function that reaches the pod environment or the network, with its line."""
+    masked = _mask_vrl_literals(content)
+    return tuple(
+        f"line {masked.count(chr(10), 0, found.start()) + 1}: {found.group(1)}() "
+        f"{_HOST_FUNCTIONS[found.group(1)]}"
+        for found in _HOST_CALL_RE.finditer(masked)
+    )
+
+
+def _refuse_host_functions(content: str) -> ValidationResult | None:
+    """A refusal naming each host-reaching call in the program, or None when it has none."""
+    calls = vrl_host_function_calls(content)
+    if not calls:
+        return None
+    return ValidationResult(
+        status=ValidationStatus.INVALID,
+        backend="vrl-functions",
+        message="a VRL transform may not call functions that reach the host: " + "; ".join(calls),
+        errors=calls,
+        refused=True,
+    )
 
 
 def _validate_vrl(content: str) -> ValidationResult:
@@ -180,13 +255,22 @@ _BACKENDS = {
 }
 
 
-def validate_language(language: str, content: str, *, enabled: bool) -> ValidationResult:
+def validate_language(
+    language: str, content: str, *, enabled: bool, allow_host_functions: bool = False
+) -> ValidationResult:
     """Validate content written in a language.
 
     ``enabled`` is the deployment's switch. Off returns ``disabled`` rather than
     silently passing, so a caller can tell "checked and fine" from "not checked".
     A language with no registered backend reports ``unavailable``.
+
+    A VRL program calling a function that reaches the host is refused whether or not
+    syntax checking is enabled, unless ``allow_host_functions`` lifts it.
     """
+    if language == "vrl" and not allow_host_functions:
+        refusal = _refuse_host_functions(content)
+        if refusal is not None:
+            return refusal
     if not enabled:
         return ValidationResult(status=ValidationStatus.DISABLED)
     backend = _BACKENDS.get(language)
@@ -198,6 +282,10 @@ def validate_language(language: str, content: str, *, enabled: bool) -> Validati
     return backend(content)
 
 
-def validate(file_set: ConsumedFileSet, content: str, *, enabled: bool) -> ValidationResult:
+def validate(
+    file_set: ConsumedFileSet, content: str, *, enabled: bool, allow_host_functions: bool = False
+) -> ValidationResult:
     """Validate content for the app that will consume it."""
-    return validate_language(file_set.language, content, enabled=enabled)
+    return validate_language(
+        file_set.language, content, enabled=enabled, allow_host_functions=allow_host_functions
+    )

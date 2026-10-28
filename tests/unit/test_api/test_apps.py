@@ -561,6 +561,28 @@ class TestFiles:
         assert client.delete(path, headers=admin_headers).status_code == 200
         assert client.get(f"{BASE}/files/transforms", headers=admin_headers).json() == []
 
+    @pytest.mark.parametrize(
+        ("allow", "status"), [(False, 400), (True, 200)], ids=["refused_by_default", "allowed"]
+    )
+    def test_a_transform_calling_get_env_var_is_refused_unless_allowed(
+        self, client, app, admin_headers, tmp_path, allow, status
+    ):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        app.state.settings.transform_validation.allow_host_functions = allow
+        path = f"{BASE}/files/transforms/000_parse.vrl"
+
+        resp = client.put(
+            path, json={"content": '.k = get_env_var!("KAFKA_PASSWORD")'}, headers=admin_headers
+        )
+
+        assert resp.status_code == status, resp.text
+        if status == 400:
+            detail = resp.json()
+            assert detail["code"] == "invalid_transform"
+            assert "line 1: get_env_var()" in detail["message"]
+            assert client.get(f"{BASE}/files/transforms", headers=admin_headers).json() == []
+
     def test_rewriting_identical_content_is_not_a_change(
         self, client, app, admin_headers, tmp_path
     ):

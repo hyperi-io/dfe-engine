@@ -322,10 +322,14 @@ def _version_summary(found: library.ArtifactVersion) -> VersionSummary:
 
 def _validate(request: Request, language: str, content: str) -> ValidationModel:
     """Check authored content against this deployment's validation posture."""
+    posture = request.app.state.settings.transform_validation
     result = validate_language(
-        language, content, enabled=request.app.state.settings.transform_validation.enabled
+        language,
+        content,
+        enabled=posture.enabled,
+        allow_host_functions=posture.allow_host_functions,
     )
-    if result.blocks_write and request.app.state.settings.transform_validation.blocking:
+    if result.refused or (result.blocks_write and posture.blocking):
         raise HTTPException(
             400,
             detail={

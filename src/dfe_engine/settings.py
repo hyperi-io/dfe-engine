@@ -1292,6 +1292,7 @@ class TransformValidationSettings(BaseModel):
     - DFE_TRANSFORM_VALIDATION_ENABLED -> transform_validation.enabled
     - DFE_TRANSFORM_VALIDATION_BLOCKING -> transform_validation.blocking
     - DFE_TRANSFORM_DRY_RUN_ENABLED -> transform_validation.dry_run
+    - DFE_TRANSFORM_ALLOW_HOST_FUNCTIONS -> transform_validation.allow_host_functions
     """
 
     enabled: bool = Field(
@@ -1316,6 +1317,15 @@ class TransformValidationSettings(BaseModel):
             "Allow running an authored transform over sampled events. Off by default: "
             "it executes caller-supplied code, so a deployment opts in rather than "
             "inherits it from the validation switch."
+        ),
+    )
+    allow_host_functions: bool = Field(
+        default=False,
+        description=(
+            "Allow a VRL transform to call get_env_var, get_secret, http_request, "
+            "dns_lookup and reverse_dns. Off by default, so a save that calls one is "
+            "refused: they read the pod environment, which holds the Kafka credential, "
+            "and reach other hosts. Applies whether or not validation is enabled."
         ),
     )
 
@@ -2812,6 +2822,12 @@ def _get_env_overrides() -> dict:
         overrides["transform_validation"]["blocking"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_TRANSFORM_DRY_RUN_ENABLED"):
         overrides["transform_validation"]["dry_run"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_TRANSFORM_ALLOW_HOST_FUNCTIONS"):
+        overrides["transform_validation"]["allow_host_functions"] = val.lower() in (
+            "true",
+            "1",
+            "yes",
+        )
 
     # Helm settings
     if val := _get_env("DFE_HELM_OUTPUT_DIR"):
