@@ -30,7 +30,12 @@ from dfe_engine.api.deps import (
     require_own_org_action,
     ttl_settings,
 )
-from dfe_engine.api.errors import ErrorResponse, engine_message, raise_exchange_http
+from dfe_engine.api.errors import (
+    ErrorResponse,
+    engine_message,
+    no_schema_error,
+    raise_exchange_http,
+)
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -874,7 +879,11 @@ async def create_meta_schema(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "validation_error",
-                "message": f"A meta-schema already exists at {canonical_path!r}",
+                "message": (
+                    f"A meta-schema already exists at {canonical_path!r}. "
+                    f"Change it with PATCH /api/v1/schemas/definitions/{canonical_path}, "
+                    "which adds a version, or DELETE it first"
+                ),
             },
         )
     to_save = meta_schema_from_create(body, path=canonical_path)
@@ -1234,13 +1243,7 @@ async def get_schema_columns(
 
     snap = source.versions[version_id]
     if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source {source_name!r} version '{version_id}' has no schema configured",
-            },
-        )
+        raise no_schema_error(source_name, version_id)
 
     settings = ttl_settings(request, request.app.state.settings)
     builder = SchemaBuilderV2(
@@ -1317,13 +1320,7 @@ def build_schema(
 
     snap = source.versions[version_id]
     if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{source_name}' version '{version_id}' has no schema configured",
-            },
-        )
+        raise no_schema_error(source_name, version_id)
 
     settings = ttl_settings(request, request.app.state.settings)
     builder = SchemaBuilderV2(

@@ -137,7 +137,11 @@ def apply_meta_schema_export(
             raise ExchangeConflictError(
                 f"{canonical!r} holds a core meta schema here, which no import may overwrite"
             )
-        raise ExchangeConflictError(f"A meta schema already exists at {canonical!r}")
+        raise ExchangeConflictError(
+            f"A meta schema already exists at {canonical!r}. "
+            f"Change it with PATCH /api/v1/schemas/definitions/{canonical}, which adds a "
+            "version, or DELETE it first"
+        )
 
     # resource_type is set here, never taken from the document: an import writes
     # an operator's schema, and only dfe-schemas declares a core one.
