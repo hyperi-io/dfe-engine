@@ -4,6 +4,7 @@ import pytest
 
 from dfe_engine.hunts.hunt_output import (
     HuntResultSchema,
+    hunt_detection_columns,
 )
 
 
@@ -303,3 +304,35 @@ class TestResultTableColumns:
         names = [c["name"] for c in cols]
         assert "_raw" not in names
         assert "_tags" not in names
+
+
+class TestDetectionColumnsComeFromTheSchemas:
+    """The INSERT names the columns dfe-schemas builds the detection table from."""
+
+    def test_every_insert_column_is_a_column_of_the_detection_table(self):
+        from dfe_engine.schema.ddl_writer import DDLFileWriter
+
+        table = {col.name for col in DDLFileWriter().detection_table_spec().columns}
+
+        assert set(HuntResultSchema().insert_columns()) <= table
+
+    def test_the_detection_columns_are_the_ones_results_yaml_declares(self):
+        from dfe_engine.schema.ddl_writer import DDLFileWriter
+        from dfe_engine.schema.schema_loader import SchemaLoader
+
+        declared = SchemaLoader.load_columns(DDLFileWriter._resolve_hunt_results_path())
+
+        assert [dc.name for dc in hunt_detection_columns()] == [col.name for col in declared]
+
+    @pytest.mark.parametrize(
+        ("name", "select_expr"),
+        [
+            pytest.param("matched_uuid", "_uuid", id="copied_from_the_source_row"),
+            pytest.param("rule_id", None, id="literal_injected_at_query_time"),
+            pytest.param("severity", None, id="literal_injected_at_query_time_too"),
+        ],
+    )
+    def test_only_the_matched_uuid_is_copied_from_the_source(self, name, select_expr):
+        by_name = {dc.name: dc for dc in hunt_detection_columns()}
+
+        assert by_name[name].select_expr == select_expr
