@@ -132,6 +132,28 @@ EXTRACT_IDENTITY_CASES: list[ExtractIdentityCase] = [
         "provider": make_oidc_provider(),
     },
     {
+        "id": "single_string_group_with_spaces_is_one_group",
+        "claims": {"sub": "x", "email": "x@y.z", "groups": "SOC Analysts"},
+        "expected_identity": make_normalized_identity(
+            email="x@y.z", groups=["SOC Analysts"], subject="x"
+        ),
+        "provider": make_oidc_provider(),
+    },
+    {
+        "id": "comma_separated_groups_keep_inner_spaces",
+        "claims": {"sub": "x", "email": "x@y.z", "groups": "SOC Analysts, Domain Admins,,"},
+        "expected_identity": make_normalized_identity(
+            email="x@y.z", groups=["SOC Analysts", "Domain Admins"], subject="x"
+        ),
+        "provider": make_oidc_provider(),
+    },
+    {
+        "id": "non_string_non_list_groups_claim_is_empty",
+        "claims": {"sub": "x", "email": "x@y.z", "groups": 7},
+        "expected_identity": make_normalized_identity(email="x@y.z", subject="x"),
+        "provider": make_oidc_provider(),
+    },
+    {
         "id": "only_sub_yields_defaults",
         "claims": {"sub": "only-sub"},
         "expected_identity": make_normalized_identity(subject="only-sub"),

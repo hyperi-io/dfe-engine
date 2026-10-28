@@ -154,14 +154,13 @@ def _coerce_groups(raw: Any) -> list[str]:
     """Normalize a raw groups claim into a list of non-empty strings.
 
     IdPs deliver groups as a JSON array (the common case), or occasionally as a
-    single comma/space separated string. Anything else yields an empty list.
+    single comma separated string. A group name may hold spaces ("SOC Analysts"),
+    so a string is never split on whitespace. Anything else yields an empty list.
     """
     if raw is None:
         return []
     if isinstance(raw, str):
-        # Split on comma first (Envoy-style), fall back to whitespace.
-        parts = raw.split(",") if "," in raw else raw.split()
-        return [p.strip() for p in parts if p.strip()]
+        return [p.strip() for p in raw.split(",") if p.strip()]
     if isinstance(raw, (list, tuple)):
         return [str(g).strip() for g in raw if str(g).strip()]
     return []

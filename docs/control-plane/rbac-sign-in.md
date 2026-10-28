@@ -61,7 +61,7 @@ The linked groups are also the sign-in allowlist. An IdP sign-in, through the OI
 
 An admin sets `source_id` and `source_provider` together through the groups API or dfe-ui's group form ([section 4.4](rbac-groups.md#44-group-sync-process)). `source_provider` names the provider whose logins the link answers. Where a `token_claim` provider's claim carries names (Okta's default, dex, Keycloak), `source_id` is the name the IdP sends. For Entra it is the object ID.
 
-A groups claim sent as one string is split on commas (on whitespace when it has none, `auth/oidc/rp.py`) and `X-Oidc-Groups` is split on commas. So a group name containing a space needs an array claim. A `source_id` containing a comma matches only an array claim on the relying-party path.
+A groups claim sent as one string is split on commas, never on whitespace (`auth/oidc/rp.py`), and `X-Oidc-Groups` is split on commas. So a string claim of `SOC Analysts` is the one group `SOC Analysts`. A `source_id` containing a comma matches only an array claim on the relying-party path.
 
 ---
 
