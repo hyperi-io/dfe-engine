@@ -61,7 +61,8 @@ The alerts table is itself a source (`_source = "alerts"`, `header.type:
 timeseries`), so it gets the same schema management, retention and query
 surface as any other -- including rules written against alerts, which is how
 correlation is expressed. How the runner scales is
-[hunt-runner-scaling.md](hunt-runner-scaling.md).
+[hunt-runner-scaling.md](hunt-runner-scaling.md), and how a person finds a
+match is [hunt-match-delivery.md](hunt-match-delivery.md).
 
 ## Hunt customers
 

@@ -31,4 +31,5 @@ flowchart LR
 | [expressions-cel.md](expressions-cel.md) | CEL profile, classifier tiers, SQL transpile |
 | [query-api.md](query-api.md) | query API surface + [python](query-api-python.md) / [rust](query-api-rust.md) / [typescript](query-api-typescript.md) consumption |
 | [hunt-runner-scaling.md](hunt-runner-scaling.md) | pull-based runner, deterministic-due scaling, keda-shim fail-safe |
+| [hunt-match-delivery.md](hunt-match-delivery.md) | where a hunt match is written, who sees it, alert destinations and what is not wired |
 | [hunt-schedule-smoothing.md](hunt-schedule-smoothing.md) | phase-drift load smoothing (incl. the reference derivation) |
