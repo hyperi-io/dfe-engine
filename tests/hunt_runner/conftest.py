@@ -18,6 +18,7 @@ are the bare ones this package asks for.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -66,6 +67,7 @@ class RecordingManager:
     def __init__(self) -> None:
         self.registered: list[tuple[str, str]] = []
         self.observations: list[Observation] = []
+        self.metric_prefix = ""
 
     def counter(self, name: str, description: str, labels: list[str] | None = None) -> _Instrument:
         return self._register("counter", name)
@@ -81,6 +83,13 @@ class RecordingManager:
         buckets: tuple[float, ...] | None = None,
     ) -> _Instrument:
         return self._register("histogram", name)
+
+    def observable_gauge(
+        self, name: str, description: str, callback: Callable[[], float | None]
+    ) -> bool:
+        prefixed = f"{self.metric_prefix}_{name}" if self.metric_prefix else name
+        self.registered.append(("observable_gauge", prefixed))
+        return True
 
     def _register(self, kind: str, name: str) -> _Instrument:
         self.registered.append((kind, name))

@@ -1601,7 +1601,7 @@ def get_source_schema_columns(
         inherited_builder_kwargs,
     )
     from dfe_engine.schema.schema_loader import SchemaLoadError
-    from dfe_engine.source.type_registry import TypeRegistry
+    from dfe_engine.source.type_registry import TypeRegistry, TypeRegistryError
 
     try:
         source = registry.get_source(name)
@@ -1636,8 +1636,9 @@ def get_source_schema_columns(
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
     # Both, and neither is redundant: the builder re-raises a profile or meta_schema
     # SchemaLoadError as SchemaBuildError, so which one arrives depends on where
-    # the load failed. Narrowing to one answers 500 for the other.
-    except (SchemaBuildError, SchemaLoadError) as exc:
+    # the load failed. TypeRegistryError is a profile type the registry does not know.
+    # Narrowing to fewer answers 500 for the rest.
+    except (SchemaBuildError, SchemaLoadError, TypeRegistryError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "schema_error", "message": str(exc)},
@@ -1673,6 +1674,7 @@ def build_source_schema(
     """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.schema.schema_loader import SchemaLoadError
+    from dfe_engine.source.type_registry import TypeRegistryError
 
     try:
         source = registry.get_source(name)
@@ -1708,7 +1710,7 @@ def build_source_schema(
             settings=settings,
             field_map_registry=get_field_map_registry_optional(),
         )
-    except (SchemaBuildError, SchemaLoadError) as exc:
+    except (SchemaBuildError, SchemaLoadError, TypeRegistryError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "build_error", "message": str(exc)},
@@ -1758,7 +1760,7 @@ def plan_source_deploy(
         inherited_builder_kwargs,
     )
     from dfe_engine.schema.schema_loader import SchemaLoadError
-    from dfe_engine.source.type_registry import TypeRegistry
+    from dfe_engine.source.type_registry import TypeRegistry, TypeRegistryError
 
     source, version_id = _resolve_source_version(registry, name, version, default_current=True)
     snap = source.versions[version_id]
@@ -1780,7 +1782,7 @@ def plan_source_deploy(
             settings=settings,
             field_map_registry=get_field_map_registry_optional(),
         )
-    except (SchemaBuildError, SchemaLoadError) as exc:
+    except (SchemaBuildError, SchemaLoadError, TypeRegistryError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "build_error", "message": str(exc)},
@@ -2503,7 +2505,7 @@ def _apply_source_schema(
         inherited_builder_kwargs,
     )
     from dfe_engine.schema.schema_loader import SchemaLoadError
-    from dfe_engine.source.type_registry import TypeRegistry
+    from dfe_engine.source.type_registry import TypeRegistry, TypeRegistryError
 
     # Targets current: defaulting to the deployed version makes an unparameterised
     # deploy a no-op that can never advance.
@@ -2549,8 +2551,9 @@ def _apply_source_schema(
         result = builder.build_for_source_version(source, source_version=version_id)
     # Both, and neither is redundant: the builder re-raises a profile or meta_schema
     # SchemaLoadError as SchemaBuildError, so which one arrives depends on where
-    # the load failed. Narrowing to one answers 500 for the other.
-    except (SchemaBuildError, SchemaLoadError) as exc:
+    # the load failed. TypeRegistryError is a profile type the registry does not know.
+    # Narrowing to fewer answers 500 for the rest.
+    except (SchemaBuildError, SchemaLoadError, TypeRegistryError) as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "build_error", "message": str(exc)},

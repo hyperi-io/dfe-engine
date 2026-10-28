@@ -35,19 +35,19 @@
         "session_timeout_ms": 30000,
         "acknowledgements": {
           "enabled": true
-        }
+        },
+        "librdkafka_overrides": {}
       }
     },
     "grpc": {
       "description": "Push listener configuration, read when `transport` is `grpc`.",
       "$ref": "#/$defs/GrpcConfig",
       "default": {
-        "listen": null,
+        "listen": "0.0.0.0:6000",
         "recv_buffer_size": 10000,
         "recv_timeout_ms": 100,
         "max_message_size": 16777216,
         "compression": false,
-        "default_topic": "default_land",
         "acknowledgements": {
           "enabled": true
         }
@@ -86,10 +86,8 @@
       "$ref": "#/$defs/RoutingConfig",
       "default": {
         "mode": "expression",
-        "expression_fields": [
-          "org_id"
-        ],
-        "default_segment": "unknown"
+        "expression_fields": null,
+        "default_segment": "default"
       }
     },
     "compression": {
@@ -208,7 +206,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true,
           "default": null
         },
@@ -252,6 +250,14 @@
           "default": {
             "enabled": true
           }
+        },
+        "librdkafka_overrides": {
+          "description": "Raw librdkafka properties for the consumer and the DLQ producer,\nwinning over every setting scalo derives. `message.max.bytes` here sets\nthe DLQ producer's record ceiling, and a dead letter over it is screened\nout before the write. `statistics.interval.ms` stays 5000 unless this\nmap names it.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {}
         }
       }
     },
@@ -271,12 +277,12 @@
       "type": "object",
       "properties": {
         "listen": {
-          "description": "Listen address, e.g. `0.0.0.0:6000`. Required when `transport` is `grpc`.",
+          "description": "Listen address. Defaults to `0.0.0.0:6000`, the push port the deployment contract declares, so the Service and the listener agree.",
           "type": [
             "string",
             "null"
           ],
-          "default": null
+          "default": "0.0.0.0:6000"
         },
         "recv_buffer_size": {
           "description": "Records buffered from incoming RPCs before the sender is held.",
@@ -303,11 +309,6 @@
           "description": "Enable gzip compression for gRPC messages.",
           "type": "boolean",
           "default": false
-        },
-        "default_topic": {
-          "description": "Archive destination key for a record whose sender set no routing key.",
-          "type": "string",
-          "default": "default_land"
         },
         "acknowledgements": {
           "description": "The listener answers each push once its records are queued, with this\non or off: a record is released only when its archive file completes, at\nthe roll interval, long after any sender's deadline. So the archive copy\non this transport is at-most-once, and `enabled: false` only changes the\nreason `pipeline_delivery_guarantee` reports, from `sink_cannot_confirm`\nto `acks_disabled`.",
@@ -345,7 +346,7 @@
           "default": 1073741824
         },
         "roll_interval_secs": {
-          "description": "Rolling trigger: interval in seconds. Unset, it is 300 while the Kafka\nconsumer holds offsets (`transport: kafka` with\n`kafka.acknowledgements.enabled`, the default) and 3600 otherwise,\nbecause every record in an open file keeps about 32 bytes of held\noffset in memory until the file completes. A configured value always\nwins, and one above 900 with offsets held logs a warning at startup.",
+          "description": "Rolling trigger: interval in seconds. Unset, it is 300 while the Kafka\nconsumer holds offsets (`transport: kafka` with\n`kafka.acknowledgements.enabled`, the default) or on `transport: grpc`,\nand 3600 otherwise. Every record in an open file keeps about 32 bytes\nof held offset in memory until the file completes, and on `grpc` a kill\nloses what the open files hold. A configured value always wins, and\none above 900 with offsets held logs a warning at startup.",
           "type": [
             "integer",
             "null"
@@ -445,7 +446,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "bucket": {
@@ -476,7 +477,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "credentials_path": {
@@ -505,7 +506,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "sas_token": {
@@ -513,7 +514,7 @@
             "string",
             "null"
           ],
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "container": {
@@ -547,7 +548,7 @@
         },
         "secret_key": {
           "type": "string",
-          "x-dfe-secret": true,
+          "x-scalo-secret": true,
           "writeOnly": true
         },
         "bucket": {
@@ -614,19 +615,20 @@
           "default": "expression"
         },
         "expression_fields": {
-          "description": "Field paths for expression-based routing (dot notation)\ne.g., [`org_id`, `tags.event_type`]",
-          "type": "array",
+          "description": "Field paths for expression-based routing (dot notation)\ne.g., [`_org_id`, `tags.event_type`]. Unset, they are `[_org_id]` on\n`transport: kafka` and `[_source, _org_id]` on `transport: grpc`.",
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
             "type": "string"
           },
-          "default": [
-            "org_id"
-          ]
+          "default": null
         },
         "default_segment": {
-          "description": "Default path segment when field not found",
+          "description": "Path segment for a field the record does not carry or carries blank, and\nthe destination of a record with no topic under `mode: topic`. `default`\nis the deployment default org that `_org_id` takes when no sender set one.",
           "type": "string",
-          "default": "unknown"
+          "default": "default"
         }
       }
     },
@@ -692,7 +694,7 @@
           "$ref": "#/$defs/FileDlqConfig",
           "default": {
             "enabled": true,
-            "path": "/var/spool/dfe/dlq",
+            "path": "/var/spool/scalo/dlq",
             "rotation": "hourly",
             "max_age_days": 30,
             "compress_rotated": true
@@ -705,7 +707,7 @@
             "enabled": true,
             "routing": "per_table",
             "topic_suffix": ".dlq",
-            "common_topic": "dfe.dlq",
+            "common_topic": null,
             "send_timeout_ms": 5000
           }
         }
@@ -730,7 +732,7 @@
           "const": "file_only"
         },
         {
-          "description": "Kafka backend only (current dfe-loader behaviour).",
+          "description": "Kafka backend only (matches a typical consumer's current behaviour).",
           "type": "string",
           "const": "kafka_only"
         }
@@ -746,9 +748,9 @@
           "default": true
         },
         "path": {
-          "description": "Base directory for DLQ files.\nService name is appended as a subdirectory.",
+          "description": "Base directory for DLQ files.\nService name is appended as a subdirectory. Default `/var/spool/scalo/dlq`.",
           "type": "string",
-          "default": "/var/spool/dfe/dlq"
+          "default": "/var/spool/scalo/dlq"
         },
         "rotation": {
           "description": "File rotation period.",
@@ -804,9 +806,12 @@
           "default": ".dlq"
         },
         "common_topic": {
-          "description": "Common topic when routing is `Common` or destination is unknown.",
-          "type": "string",
-          "default": "dfe.dlq"
+          "description": "Common topic when routing is `Common` or destination is unknown. Unset\nby default, which names it after the service the DLQ is spawned for:\n`<service>.dlq`, like the per-table `<destination>.dlq`, or `dlq` when\nthe service has no name. A value that is set is used as it is.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         },
         "send_timeout_ms": {
           "description": "How long a `flush` or the shutdown waits for the broker to ack the\nentries queued to Kafka, in milliseconds. Entries still unacked then\nare purged and counted as dropped. The purge adds a wait of up to 5 s\nfor the purged entries' delivery reports, so `0` skips the ack wait\nbut not that one. Default 5000.",
