@@ -1595,3 +1595,51 @@ class TestDeployReportsWhyItCouldNotBuild:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "build_error"
+
+    @pytest.mark.parametrize(
+        ("method", "path", "target", "code"),
+        [
+            (
+                "get",
+                "columns",
+                "dfe_engine.schema.schema_builder_v2.SchemaBuilderV2.load_columns_for_source_version",
+                "schema_error",
+            ),
+            ("post", "build", "dfe_engine.api.v1.sources.ensure_build_artifact", "build_error"),
+            ("post", "plan", "dfe_engine.api.v1.sources.ensure_build_artifact", "build_error"),
+            (
+                "post",
+                "deploy",
+                "dfe_engine.schema.schema_builder_v2.SchemaBuilderV2.build_for_source_version",
+                "build_error",
+            ),
+            (
+                "post",
+                "deploy?dry_run=true",
+                "dfe_engine.schema.schema_builder_v2.SchemaBuilderV2.build_for_source_version",
+                "build_error",
+            ),
+        ],
+    )
+    def test_a_profile_type_the_registry_does_not_know_answers_400(
+        self, client, admin_headers, sample_source, monkeypatch, method, path, target, code
+    ):
+        from dfe_engine.source.type_registry import UnknownPrimitiveError
+
+        client.post(
+            "/api/v1/sources",
+            json={**sample_source, "schema": {"meta_schema": "meta/beats/filebeat"}},
+            headers=admin_headers,
+        )
+
+        def _raise(*args, **kwargs):
+            raise UnknownPrimitiveError("Unknown primitive 'nosuchtype'")
+
+        monkeypatch.setattr(target, _raise)
+        resp = getattr(client, method)(
+            f"/api/v1/sources/{sample_source['source']}/{path}", headers=admin_headers
+        )
+
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == code
+        assert "nosuchtype" in resp.json()["message"]
