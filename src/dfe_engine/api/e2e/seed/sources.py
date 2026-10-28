@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from scalo.logger import logger
+
 from dfe_engine.api.e2e.seed.base import Seed
 from dfe_engine.source.models import (
     SourceFetcher,
@@ -51,9 +53,12 @@ class Sources(Seed):
     def seed_source(self, name: str = SEED_SOURCE_NAME) -> bool:
         """Seed a deployed receiver-based source with the match rule the routing compiles from.
 
+        It names the vrl transform, so the vrl instance :meth:`Apps.seed_source_apps`
+        writes for it is the one the engine itself derives for a deployed source.
+
         Returns True when created, False when it was already defined.
         """
-        return self._ensure_deployed_source(name)
+        return self._ensure_deployed_source(name, transform=SourceTransform(engine="vrl"))
 
     def seed_fetcher_source(self, name: str = SEED_FETCHER_SOURCE_NAME) -> bool:
         """Seed a deployed fetcher-based source, so its fetcher instance is due.
@@ -62,15 +67,30 @@ class Sources(Seed):
         """
         return self._ensure_deployed_source(name, fetched=True)
 
-    def _ensure_deployed_source(self, name: str, *, fetched: bool = False) -> bool:
+    def _ensure_deployed_source(
+        self,
+        name: str,
+        *,
+        fetched: bool = False,
+        transform: SourceTransform | None = None,
+        display_name: str = "Seed Source",
+    ) -> bool:
         """Create the source on its own table and mark its first version deployed.
 
         The deploy route marks the version once its DDL has applied, and no seed
         reaches ClickHouse, so the seed marks it through the same registry call.
+        It also creates the source's topics where the deployment manages them, as
+        the route does, so a transform instance seeded for it has a topic to read.
 
         Returns True when created.
         """
-        created = self._ensure_source(name, fetched=fetched, meta_schema=_META_SCHEMA)
+        created = self._ensure_source(
+            name,
+            fetched=fetched,
+            meta_schema=_META_SCHEMA,
+            transform=transform,
+            display_name=display_name,
+        )
         if created:
             registry = self._require_source_registry()
             registry.set_deployed_version(
@@ -79,15 +99,54 @@ class Sources(Seed):
                 created_by=SEED_ACTOR,
                 description=f"e2e: deploy {name}",
             )
+            self._ensure_topics(name)
         return created
 
+    def _ensure_topics(self, name: str) -> None:
+        """Create the deployed source's topics when the deployment manages them.
+
+        A broker that cannot be reached is logged and left: the seed runs on stacks
+        whose broker comes up after the engine, and the next real deploy of the
+        source ensures them again.
+        """
+        settings = self._settings
+        if settings is None:
+            return
+        from dfe_engine.kafka.topics import (
+            build_admin,
+            deployment_topic_config,
+            ensure_topics,
+            source_replication_factor,
+            source_topic_specs,
+            topics_managed,
+        )
+
+        if not topics_managed(settings):
+            return
+        source = self._require_source_registry().get_source(name)
+        try:
+            admin = build_admin(settings=settings)
+            specs = source_topic_specs(
+                source,
+                partitions=settings.kafka.topic_partitions,
+                replication_factor=source_replication_factor(settings, admin=admin),
+                config=deployment_topic_config(settings),
+                version_id=source.deployed_version,
+            )
+            outcome = ensure_topics(specs, admin=admin, settings=settings)
+        except Exception as exc:
+            logger.warning("e2e seed: topics not ensured", source=name, error=str(exc))
+            return
+        if outcome.failed:
+            logger.warning("e2e seed: topics not created", source=name, failed=outcome.failed)
+
     def seed_transform_source(self, name: str, engine: str, variant: str | None = None) -> bool:
-        """Seed a receiver-based source whose processing step is *engine*.
+        """Seed a deployed receiver-based source whose processing step is *engine*.
 
         One per transform app, so a spec can assert the three side by side rather
         than the single vrl instance the other seeds share.
         """
-        return self._ensure_source(
+        return self._ensure_deployed_source(
             name,
             display_name=f"Filebeat {engine}",
             transform=SourceTransform(engine=engine, variant=variant),

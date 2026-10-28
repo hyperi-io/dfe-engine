@@ -941,8 +941,11 @@ class SourceRegistry:
             self._validate_fetcher_types(source, candidate_version)
             self._validate_fetcher_schema(source, candidate_version)
             self._validate_engine_arguments(source, candidate_version)
-            self._validate_flow(source)
-            self._validate_instance_room(source)
+            # The version being written is the one a deploy would run, so the flow
+            # and the room are judged on it and not on the version already deployed.
+            candidate = source.model_copy(update={"deployed_version": source.current})
+            self._validate_flow(candidate)
+            self._validate_instance_room(candidate)
 
         others: list[Source] = []
         for table in self._names():
