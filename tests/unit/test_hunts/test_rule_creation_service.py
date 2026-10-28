@@ -3,6 +3,7 @@
 import random
 import re
 import time
+import types
 
 import pytest
 
@@ -732,3 +733,72 @@ class TestMaskQuoted:
         started = time.perf_counter()
         _mask_quoted(sql)
         assert time.perf_counter() - started < 2.0
+
+
+# ── EXPLAIN PLAN against the source ──────────────────────────
+
+
+class _PlanClient:
+    """Accepts EXPLAIN AST and answers EXPLAIN PLAN with the given error, keeping what it was sent."""
+
+    def __init__(self, plan_error: Exception | None = None) -> None:
+        self.plan_error = plan_error
+        self.sent: list[str] = []
+
+    def command(self, cmd: str, *args, **kwargs) -> str:
+        self.sent.append(cmd)
+        if cmd.startswith("EXPLAIN PLAN") and self.plan_error is not None:
+            raise self.plan_error
+        return ""
+
+    def query(self, *args, **kwargs):
+        return types.SimpleNamespace(result_rows=[(2000, 5)])
+
+
+_UNKNOWN_COLUMN = Exception(
+    "Code: 47. DB::Exception: Unknown expression identifier `NotARealColumn` in scope "
+    "SELECT 1 FROM dfe.events WHERE NotARealColumn = 'x'. (UNKNOWN_IDENTIFIER)"
+)
+_NO_TABLE = Exception("Code: 60. DB::Exception: Table dfe.events does not exist. (UNKNOWN_TABLE)")
+_DOWN = Exception("Code: 210. DB::Exception: Connection refused. (NETWORK_ERROR)")
+
+
+class TestPlanCheck:
+    @pytest.mark.parametrize(
+        ("plan_error", "blocks"),
+        [
+            (None, False),
+            (_UNKNOWN_COLUMN, True),
+            (_NO_TABLE, False),
+            (_DOWN, False),
+        ],
+        ids=["plans", "unknown_column_blocks", "undeployed_table_does_not", "server_down_does_not"],
+    )
+    def test_only_a_refusal_of_the_sql_blocks(self, plan_error, blocks):
+        client = _PlanClient(plan_error)
+        service = RuleCreationService(
+            hunts=HuntsSettings(detection_guard=DetectionGuardSettings(enabled=False)),
+            ch_client=client,
+        )
+
+        result = service.create_rule(
+            RuleCreateRequest(
+                name="Odd", user_sql="SELECT * FROM dfe.events WHERE NotARealColumn = 'x'"
+            ),
+            "odd",
+        )
+
+        assert any(c.startswith("EXPLAIN PLAN") for c in client.sent)
+        assert bool(result.sql_errors) is blocks
+        if blocks:
+            assert "UNKNOWN_IDENTIFIER" in result.sql_errors[0].message
+
+    def test_the_plan_is_asked_over_the_quoted_source_and_the_condition(self):
+        client = _PlanClient()
+
+        RuleCreationService(ch_client=client).validate_sql(
+            "SELECT * FROM dfe.events WHERE host = 'a'"
+        )
+
+        [plan] = [c for c in client.sent if c.startswith("EXPLAIN PLAN")]
+        assert plan == "EXPLAIN PLAN SELECT 1 FROM `dfe`.`events` WHERE host = 'a'"
