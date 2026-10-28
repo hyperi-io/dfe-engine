@@ -6292,7 +6292,7 @@
           "Sources"
         ],
         "summary": "List Catalogue Tags",
-        "description": "List the directories under the catalogue that hold source files.\n\nA tag is one directory directly under ``catalogue/``. Files that sit in the\ncatalogue root, rather than in one of those directories, are the tag\n``untagged``. ``name`` keeps a tag whose name starts with it, so ``act``\nmatches ``active-mq`` and does not match a name that only contains those\nletters later.",
+        "description": "List the directories under the catalogue that hold source files.\n\nA tag is one directory directly under ``catalogue/``. Files that sit in the\ncatalogue root, rather than in one of those directories, are the tag\n``untagged``. ``id`` is the directory key. ``name`` and ``description`` come\nfrom ``registries/catalogue-tags.yaml`` beside that catalogue. ``name`` keeps\na tag whose key or display name starts with it, so ``act`` matches\n``active-mq`` and does not match a name that only contains those letters later.",
         "operationId": "sources.catalogue-tags",
         "parameters": [
           {
@@ -6308,10 +6308,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Keep tags whose name starts with this. The match ignores case",
+              "description": "Keep tags whose directory key or display name starts with this. The match ignores case",
               "title": "Name"
             },
-            "description": "Keep tags whose name starts with this. The match ignores case"
+            "description": "Keep tags whose directory key or display name starts with this. The match ignores case"
           },
           {
             "name": "page",
@@ -32260,15 +32260,27 @@
       },
       "CatalogueTagObject": {
         "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The directory name, which is the tag key. untagged is the files that sit in the catalogue root rather than in a directory"
+          },
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "The directory name. untagged is the files that sit in the catalogue root rather than in a directory"
+            "description": "The name the console shows, from the tag dictionary"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "What this tag groups, from the tag dictionary"
           }
         },
         "type": "object",
         "required": [
-          "name"
+          "id",
+          "name",
+          "description"
         ],
         "title": "CatalogueTagObject",
         "description": "One directory under the catalogue that holds source files."

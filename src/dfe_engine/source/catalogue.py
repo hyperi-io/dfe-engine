@@ -150,6 +150,20 @@ class SourceCatalogue:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogueTag:
+    """One holding directory as the console lists it."""
+
+    id: str
+    """The directory name, which is the tag key."""
+
+    name: str
+    """The name the console shows."""
+
+    description: str
+    """What the tag groups."""
+
+
+@dataclass(frozen=True, slots=True)
 class VariantAvailability:
     """Whether the deployed transform ships a variant, and the reason for the answer."""
 
@@ -344,6 +358,63 @@ def catalogue_tags(*, directory: Path, name: str | None = None) -> list[str]:
     if loose and UNTAGGED not in names:
         names.append(UNTAGGED)
     return sorted(tag for tag in names if tag.casefold().startswith(prefix))
+
+
+def catalogue_tag_dictionary(*, directory: Path) -> dict[str, CatalogueTag]:
+    """Pretty names for the holding directories, keyed by directory.
+
+    The file is ``registries/catalogue-tags.yaml`` beside the catalogue. A
+    missing or unreadable file leaves the dictionary empty, and a tag it does
+    not name keeps the directory key as its name.
+    """
+    path = directory.parent / "registries" / "catalogue-tags.yaml"
+    if not path.is_file():
+        return {}
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        logger.warning("Catalogue tag dictionary skipped", file=str(path), reason=str(exc))
+        return {}
+    if not isinstance(loaded, dict):
+        logger.warning(
+            "Catalogue tag dictionary skipped",
+            file=str(path),
+            reason="it is not a mapping",
+        )
+        return {}
+    found: dict[str, CatalogueTag] = {}
+    for key, value in loaded.items():
+        tag_id = str(key)
+        if not isinstance(value, dict):
+            continue
+        pretty = value.get("name")
+        description = value.get("description")
+        found[tag_id] = CatalogueTag(
+            description=str(description) if description else "",
+            id=tag_id,
+            name=str(pretty) if pretty else tag_id,
+        )
+    return found
+
+
+def catalogue_tag_list(*, directory: Path, name: str | None = None) -> list[CatalogueTag]:
+    """The holding directories under *directory*, with the names the console shows.
+
+    *name* keeps a tag whose directory key or display name starts with it. The
+    comparison ignores case.
+    """
+    prefix = (name or "").casefold()
+    dictionary = catalogue_tag_dictionary(directory=directory)
+    listed = []
+    for tag_id in catalogue_tags(directory=directory):
+        known = dictionary.get(tag_id)
+        tag = known if known is not None else CatalogueTag(description="", id=tag_id, name=tag_id)
+        if prefix and not (
+            tag.id.casefold().startswith(prefix) or tag.name.casefold().startswith(prefix)
+        ):
+            continue
+        listed.append(tag)
+    return listed
 
 
 def source_catalogue() -> SourceCatalogue:

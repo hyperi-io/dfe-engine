@@ -766,10 +766,12 @@ class TableEngineObject(BaseModel):
 class CatalogueTagObject(BaseModel):
     """One directory under the catalogue that holds source files."""
 
-    name: str = Field(
-        description="The directory name. untagged is the files that sit in the catalogue root "
-        "rather than in a directory"
+    id: str = Field(
+        description="The directory name, which is the tag key. untagged is the files that sit "
+        "in the catalogue root rather than in a directory"
     )
+    name: str = Field(description="The name the console shows, from the tag dictionary")
+    description: str = Field(description="What this tag groups, from the tag dictionary")
 
 
 class CatalogueEntryObject(BaseModel):
@@ -1315,16 +1317,19 @@ def list_catalogue_tags(
     pagination: PaginationParams = Depends(),
     name: str | None = Query(
         None,
-        description="Keep tags whose name starts with this. The match ignores case",
+        description=(
+            "Keep tags whose directory key or display name starts with this. The match ignores case"
+        ),
     ),
 ) -> PaginatedResponse[CatalogueTagObject]:
     """List the directories under the catalogue that hold source files.
 
     A tag is one directory directly under ``catalogue/``. Files that sit in the
     catalogue root, rather than in one of those directories, are the tag
-    ``untagged``. ``name`` keeps a tag whose name starts with it, so ``act``
-    matches ``active-mq`` and does not match a name that only contains those
-    letters later.
+    ``untagged``. ``id`` is the directory key. ``name`` and ``description`` come
+    from ``registries/catalogue-tags.yaml`` beside that catalogue. ``name`` keeps
+    a tag whose key or display name starts with it, so ``act`` matches
+    ``active-mq`` and does not match a name that only contains those letters later.
     """
     try:
         directory = source_catalogue_module.catalogue_tags_directory()
@@ -1337,9 +1342,9 @@ def list_catalogue_tags(
                 "message": "the source catalogue could not be read; the engine log has the reason",
             },
         ) from exc
-    tags = source_catalogue_module.catalogue_tags(directory=directory, name=name)
+    tags = source_catalogue_module.catalogue_tag_list(directory=directory, name=name)
     return PaginatedResponse[CatalogueTagObject].from_list(
-        [CatalogueTagObject(name=tag) for tag in tags],
+        [CatalogueTagObject(description=tag.description, id=tag.id, name=tag.name) for tag in tags],
         pagination.page,
         pagination.per_page,
     )

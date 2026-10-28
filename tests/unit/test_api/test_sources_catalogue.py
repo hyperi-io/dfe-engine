@@ -237,11 +237,11 @@ class TestListCatalogueTags:
 
         listed = client.get(CATALOGUE_TAGS, headers=admin_headers, params={"per_page": -1}).json()
 
-        assert [row["name"] for row in listed["items"]] == [
-            "abnormal",
-            "active-mq",
-            "aws",
-            "untagged",
+        assert [(row["id"], row["name"], row["description"]) for row in listed["items"]] == [
+            ("abnormal", "abnormal", ""),
+            ("active-mq", "active-mq", ""),
+            ("aws", "aws", ""),
+            ("untagged", "untagged", ""),
         ]
 
     def test_name_keeps_a_tag_that_starts_with_it(
@@ -264,9 +264,36 @@ class TestListCatalogueTags:
             CATALOGUE_TAGS, headers=admin_headers, params={"name": "un", "per_page": -1}
         ).json()
 
-        assert [row["name"] for row in listed["items"]] == ["active-mq"]
+        assert [row["id"] for row in listed["items"]] == ["active-mq"]
         assert middle["items"] == []
-        assert [row["name"] for row in loose["items"]] == ["untagged"]
+        assert [row["id"] for row in loose["items"]] == ["untagged"]
+
+    def test_the_dictionary_supplies_the_display_name(
+        self, admin_headers: dict[str, str], client: TestClient, tmp_path: Path, monkeypatch
+    ):
+        holding = tmp_path / "catalogue"
+        (holding / "aws").mkdir(parents=True)
+        registry = tmp_path / "registries"
+        registry.mkdir()
+        (registry / "catalogue-tags.yaml").write_text(
+            "aws:\n  name: Amazon Web Services\n  description: Logs and metrics from AWS services.\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(sc, "catalogue_tags_directory", lambda: holding)
+
+        listed = client.get(CATALOGUE_TAGS, headers=admin_headers, params={"per_page": -1}).json()
+        by_name = client.get(
+            CATALOGUE_TAGS, headers=admin_headers, params={"name": "Amazon", "per_page": -1}
+        ).json()
+
+        assert listed["items"] == [
+            {
+                "id": "aws",
+                "name": "Amazon Web Services",
+                "description": "Logs and metrics from AWS services.",
+            }
+        ]
+        assert [row["id"] for row in by_name["items"]] == ["aws"]
 
     def test_needs_source_read(self, client: TestClient):
         assert client.get(CATALOGUE_TAGS).status_code == 401
