@@ -35,7 +35,7 @@ import secrets
 import threading
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import clickhouse_connect
@@ -535,6 +535,48 @@ def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, 
     # Releasing it could free a rival that stood while it waited, so it holds until it lapses.
     assert (latest.holder, latest.released) == ("pod-slow", False), latest
     assert lease.lock(two_replicas.second, "pod-next").acquire(wait_seconds=0.0) is False
+
+
+def test_a_slow_claim_is_recognised_as_its_own_and_stands_within_a_settle(
+    two_replicas, replicated_lease
+):
+    """No rival holds a live claim, so the lock's next attempt claims afresh instead of waiting out its own."""
+    lease = replicated_lease
+    lease.fetches("STOP", two_replicas.second)
+    resume = threading.Timer(
+        lock_module._SETTLE_SECONDS + 1.0, lease.fetches, args=("START", two_replicas.second)
+    )
+    slow = lease.lock(two_replicas.first, "pod-slow")
+    resume.start()
+    try:
+        assert slow.acquire(wait_seconds=0.0) is False
+    finally:
+        resume.join()
+        lease.fetches("START", two_replicas.second)
+
+    started = time.monotonic()
+    taken = slow.acquire(wait_seconds=lock_module.lease_seconds(0.0))
+    elapsed = time.monotonic() - started
+
+    assert taken is True, "the lock waited on its own claim"
+    assert elapsed < 2 * lock_module._SETTLE_SECONDS + 1.0, f"stood after {elapsed:.1f}s"
+    slow.release()
+
+
+def test_a_rival_live_claim_beside_a_slow_one_is_still_waited_on(two_replicas, replicated_lease):
+    """A rival that stood while the slow claim was in flight keeps the lease: the slow claim is not re-taken."""
+    lease = replicated_lease
+    slow = lease.lock(two_replicas.first, "pod-slow")
+    rival = lease.lock(two_replicas.first, "pod-rival")
+    now = datetime.now(UTC)
+    # The rival's claim sits beside the slow one, as before a merge collapses them.
+    rival._write(now - timedelta(seconds=3), expires=now + timedelta(seconds=300), released=0)
+    slow._slow_claimed_at = slow._claim(now)
+    state = slow.read()
+    assert state is not None
+    assert state.holder == "pod-slow"
+
+    assert slow._own_slow_claim(state, now) is False
 
 
 def test_a_slow_claim_never_frees_a_rival_that_stood(two_replicas, replicated_lease):
