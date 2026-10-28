@@ -40,6 +40,7 @@ from dfe_engine.clickhouse.attribution import DfeQueryTags
 
 from .ch_coordinator import ChCoordinator
 from .checkpoint import predicate, window
+from .delivery import MatchNotifier
 from .metrics import HuntRunnerMetrics
 from .models import HuntSpec, HuntStatement
 from .rule_compiler import MATCHED, SUMMARY
@@ -99,8 +100,11 @@ class HuntWorker:
         coordinator: ChCoordinator,
         workload: str = "",
         metrics: HuntRunnerMetrics | None = None,
+        notifier: MatchNotifier | None = None,
     ) -> None:
         self._ch = ch
+        # None sends nothing: the unit suite and a runner with no destinations configured.
+        self._notifier = notifier
         self._coord = coordinator
         # Optional CH WORKLOAD name for server-side fair-share; empty = do not set it
         # (an undefined workload errors). Provisioned later (the v2 smoothing backstop).
@@ -166,6 +170,8 @@ class HuntWorker:
             duration_seconds=round(time.monotonic() - began, 3),
         )
         self._metrics.rows_written(spec.hunt_id, written)
+        if self._notifier is not None:
+            self._notifier.notify(spec, written)
         return end
 
     def _summarise_cap(
