@@ -21,7 +21,7 @@ protected-var policy, optimistic concurrency, review routing and audit apply her
 without being reimplemented.
 """
 
-from . import appconfig, contract
+from . import appconfig, argo_refresh, contract
 from .appconfig import RenderedApp
 from .catalogue import (
     APP_CATALOGUE,
@@ -94,6 +94,7 @@ __all__ = [
     "DeployTarget",
     "RenderedApp",
     "appconfig",
+    "argo_refresh",
     "contract",
     "DryRunResult",
     "DryRunStatus",
