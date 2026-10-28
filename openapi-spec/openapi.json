@@ -48810,6 +48810,18 @@
             "title": "Display Name",
             "description": "Human-readable label"
           },
+          "issuer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer",
+            "description": "OIDC issuer URL. An empty one is refused, since a login needs it"
+          },
           "client_id": {
             "anyOf": [
               {
