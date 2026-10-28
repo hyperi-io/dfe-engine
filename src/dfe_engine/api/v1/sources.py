@@ -73,6 +73,7 @@ from dfe_engine.api.errors import (
     TopicsNotCreatedErrorResponse,
     backend_failure,
     hide_backend_text,
+    no_schema_error,
     raise_exchange_http,
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
@@ -1622,13 +1623,7 @@ def get_source_schema_columns(
 
     snap = source.versions[version_id]
     if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{name}' version '{version_id}' has no schema configured",
-            },
-        )
+        raise no_schema_error(name, version_id)
 
     settings = ttl_settings(request, get_settings())
     builder = SchemaBuilderV2(
@@ -1699,13 +1694,7 @@ def build_source_schema(
 
     snap = source.versions[version_id]
     if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{name}' version '{version_id}' has no schema configured",
-            },
-        )
+        raise no_schema_error(name, version_id)
 
     settings = ttl_settings(request, get_settings())
     store = SourceDeploymentStore.from_settings(settings)
@@ -1774,13 +1763,7 @@ def plan_source_deploy(
     source, version_id = _resolve_source_version(registry, name, version, default_current=True)
     snap = source.versions[version_id]
     if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{name}' version '{version_id}' has no schema configured",
-            },
-        )
+        raise no_schema_error(name, version_id)
 
     settings = ttl_settings(request, get_settings())
     store = SourceDeploymentStore.from_settings(settings)
@@ -2528,13 +2511,7 @@ def _apply_source_schema(
 
     snap = source.versions[version_id]
     if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{name}' version '{version_id}' has no schema configured",
-            },
-        )
+        raise no_schema_error(name, version_id)
 
     # A deploy ends by recording the version, which a core source refuses, so refuse
     # it before any DDL or topic lands for a deploy that could never be recorded.

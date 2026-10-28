@@ -316,6 +316,22 @@ def engine_message(exc: BaseException, fallback: str, *, event: str, **fields: A
     return hide_backend_text(fallback, exc, event=event, **fields)
 
 
+def no_schema_error(source: str, version_id: str) -> HTTPException:
+    """Build the 404 for a source version that names no schema, saying how to give it one."""
+    return HTTPException(
+        status_code=404,
+        detail={
+            "code": "no_schema",
+            "message": (
+                f"Source {source!r} version {version_id!r} has no schema configured. "
+                "Set schema.meta_schema, schema.derived_schema or schema.additional_fields "
+                "on the source, importing a meta schema with POST /api/v1/schemas/import "
+                "first if none fits"
+            ),
+        },
+    )
+
+
 def raise_exchange_http(exc: Exception) -> NoReturn:
     """Map an import/export failure to its HTTP answer.
 
