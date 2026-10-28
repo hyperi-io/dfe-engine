@@ -137,3 +137,53 @@ class TestVrl:
         monkeypatch.setitem(sys.modules, "vectordotdev", module)
         result = validation.validate_language("vrl", ".a = 1", enabled=True)
         assert result.status is validation.ValidationStatus.UNAVAILABLE
+
+
+class TestHostFunctions:
+    """A VRL program may not call a function that reaches the pod environment or the network."""
+
+    @pytest.mark.parametrize(
+        ("program", "lines"),
+        [
+            ('.k = get_env_var!("KAFKA_SASL_PASSWORD")', [1]),
+            ('x = 1\n.r = http_request("https://example.org")', [2]),
+            ('.k = get_env_var ! ("X")\n.h = dns_lookup!(.host)', [1, 2]),
+            ('.s = get_secret("kafka")', [1]),
+        ],
+        ids=["env", "http_on_line_two", "spaced_bang_and_two_calls", "secret"],
+    )
+    def test_a_call_is_refused_with_its_line(self, program, lines):
+        result = validation.validate_language("vrl", program, enabled=False)
+
+        assert result.status is validation.ValidationStatus.INVALID
+        assert result.refused is True
+        assert [int(e.split(":")[0].removeprefix("line ")) for e in result.errors] == lines
+
+    @pytest.mark.parametrize(
+        "program",
+        [
+            '.note = "call get_env_var(x) to read it"',
+            '# get_env_var("X") is not allowed here\n.a = 1',
+            ".a = my_get_env_var(.b)",
+            ".a = parse_json!(.message)",
+            "s = s'http_request(x)'",
+        ],
+        ids=["in_string", "in_comment", "longer_name", "ordinary_call", "in_raw_string"],
+    )
+    def test_a_name_that_is_not_a_call_passes(self, program):
+        result = validation.validate_language("vrl", program, enabled=False)
+
+        assert result.status is validation.ValidationStatus.DISABLED
+        assert result.refused is False
+
+    def test_the_operator_setting_lifts_the_refusal(self):
+        result = validation.validate_language(
+            "vrl", '.k = get_env_var!("X")', enabled=False, allow_host_functions=True
+        )
+
+        assert result.refused is False
+
+    def test_yaml_is_not_scanned(self):
+        result = validation.validate_language("yaml", "a: get_env_var(x)", enabled=False)
+
+        assert result.refused is False

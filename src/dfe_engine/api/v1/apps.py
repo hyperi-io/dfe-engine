@@ -769,7 +769,13 @@ def _require_source(request: Request, app: AppInstance) -> None:
 
 def _validate(request: Request, fs, content: str) -> ValidationResult:
     """Check authored content against this deployment's validation posture."""
-    return validate(fs, content, enabled=request.app.state.settings.transform_validation.enabled)
+    posture = request.app.state.settings.transform_validation
+    return validate(
+        fs,
+        content,
+        enabled=posture.enabled,
+        allow_host_functions=posture.allow_host_functions,
+    )
 
 
 def _validation_model(result: ValidationResult) -> ValidationModel:
@@ -1999,7 +2005,9 @@ def _write_app_file(
     doc = _overlay(_gitcrud(request), app)
 
     checked = _validate(request, fs, body.content)
-    if checked.blocks_write and request.app.state.settings.transform_validation.blocking:
+    if checked.refused or (
+        checked.blocks_write and request.app.state.settings.transform_validation.blocking
+    ):
         raise HTTPException(
             400,
             detail={
