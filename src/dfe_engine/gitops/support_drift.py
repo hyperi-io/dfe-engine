@@ -9,7 +9,7 @@
 
 The deploy repo's ``pins.yaml`` selects ONE certified stack version; its
 ``overrides`` block moves individual components off that set at the operator's
-own risk (dfe-docs/deployment/stack-versioning.md). The engine cannot know the
+own risk (dfe-infra docs/deployment/stack-versioning.md). The engine cannot know the
 certified values at runtime (they live in dfe-infra at the pinned tag), but it
 CAN make the deviation loud: every component listed under ``overrides`` is an
 untested combination, so name each one at startup, every startup.

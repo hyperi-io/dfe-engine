@@ -8,7 +8,7 @@
 """pins.yaml: what version of DFE this environment is pinned to.
 
 ``base`` selects ONE certified stack; ``overrides`` moves individual components
-off that set at the operator's own risk (dfe-docs/deployment/stack-versioning.md).
+off that set at the operator's own risk (dfe-infra docs/deployment/stack-versioning.md).
 Two surfaces read it - the SUPPORT-DRIFT startup notice and the console's version
 footer - so the load, the shape checks and the never-raise policy live here and
 nowhere else. Callers load once and pass the mapping to the accessors.

@@ -8,7 +8,7 @@
 
 # How a hunt match reaches a person
 
-A match is a row in a ClickHouse table. Nothing sends it anywhere yet, so a person finds it by searching that table.
+A match is a row in a ClickHouse table. When the hunt names an alert destination, the runner also sends one message for each fire that matched.
 
 ## Where a match goes
 
@@ -33,20 +33,26 @@ Create destinations one of three ways:
 - A directory of YAML files, one per destination, named by `hunts.alert_destinations_dir` (`DFE_HUNTS_ALERT_DESTINATIONS_DIR`).
 - A JSON map of `{name: apprise_url}` in `hunts.alert_destinations` (`DFE_HUNTS_ALERT_DESTINATIONS`), for a first boot only.
 
-A hunt lists the destinations it wants under `alerts.destinations`, with CEL triggers over `result_count` and the matched row's fields:
+A hunt lists the destinations it wants under `alerts.destinations`, with CEL triggers over `result_count`, the rows the fire wrote:
 
 ```yaml
 alerts:
   destinations:
     - slack-dfe-alerts
   triggers:
-    - when: 'severity == "critical" && result_count > 0'
+    - when: "result_count >= 10"
 ```
 
-With no trigger the default is `result_count > 0`. Creating a destination with a `hunt_name` adds it to that hunt's list.
+With no trigger the default is `result_count > 0`. Creating a destination with a `hunt_name` adds it to that hunt's list. Apprise URLs in `hunts.alert_channels` (`DFE_HUNTS_ALERT_CHANNELS`) go to every hunt.
 
-## What is not wired
+## What the runner sends
 
-The engine holds the destinations, the hunt links and the trigger syntax, and validates them on save. The code that evaluates a trigger and sends through Apprise has no caller in the hunt runner, and neither has the grouping and cooldown that would stop 10,000 matches becoming 10,000 messages. So a destination linked to a hunt receives nothing today.
+After a fire commits its rows and its watermark, the runner checks the hunt's `alerts` block and sends one message through Apprise if a trigger holds. The message carries the hunt, the customers, the rules and `result_count`, the rows the fire wrote.
 
-Until that is wired, the way to be told of a match is to watch the detection table, for example with a saved search in HyperDX. A match arriving as a message needs a build, not a setting.
+- One message per fire, however many rows it wrote. 10,000 matches in a window is one message.
+- Triggers see `result_count` only. The runner does not read the matched rows back, so a trigger over a row field such as `severity` never fires.
+- Destinations are looked up on every fire. A directory change reaches the runner within 30 seconds, with no restart.
+- A destination that is down is logged and the fire stands. The rows are already written, and re-running the window would write them twice.
+- The runner reads the destinations from `hunts.alert_destinations_dir`, falling back to `hunts.alert_destinations`. The directory the API writes to has to be mounted into the runner pod.
+
+There is no cooldown yet: a hunt that matches on every fire sends a message on every fire.

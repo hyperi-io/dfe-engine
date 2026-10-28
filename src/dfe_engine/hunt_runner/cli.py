@@ -45,6 +45,7 @@ import typer
 
 from dfe_engine.api import init_scalo_logger
 from dfe_engine.clickhouse.tls import resolve_clickhouse_tls
+from dfe_engine.hunts.alert import AlertDestinationRegistry
 from dfe_engine.hunts.lookups import refuse_tenant_lookups
 from dfe_engine.settings import DFESettings, load_settings
 
@@ -52,6 +53,7 @@ from . import metrics as runner_metrics
 from .ch_coordinator import ChCoordinator
 from .connect import TickGuard, connect_when_available
 from .daemon import run_loop
+from .delivery import MatchNotifier
 from .rule_compiler import detection_cap
 from .runner import HuntFailures, HuntRunner
 from .schedule import publish_schedule
@@ -170,6 +172,21 @@ class _ReloadingRunner:
         self._unchecked = True
 
 
+def _match_notifier(settings: DFESettings) -> MatchNotifier:
+    """The notifier over the destinations the settings name.
+
+    The directory wins when set, since the API writes there. The inline map is the
+    fallback for a deployment with no directory. The runner only reads either.
+    """
+    hunts = settings.hunts
+    if hunts.alert_destinations_dir:
+        registry = AlertDestinationRegistry(directory=hunts.alert_destinations_dir)
+    else:
+        registry = AlertDestinationRegistry()
+        registry.load_from_dict(hunts.alert_destinations)
+    return MatchNotifier(registry, global_channels=hunts.alert_channels)
+
+
 @app.command("materialise")
 def materialise() -> None:
     """Publish the deterministic ``hunt_schedule`` table KEDA scales on (one-shot).
@@ -221,7 +238,7 @@ def run(
         user=settings.clickhouse.username,
     )
     db = settings.clickhouse.effective_data_database
-    worker = HuntWorker(ch, coord, metrics=obs)
+    worker = HuntWorker(ch, coord, metrics=obs, notifier=_match_notifier(settings))
     hunt_dir = settings.hunts.hunt_dir
     sources = _spec_sources(settings, db)
     # Outlives each rebuild below, so a reload does not restart a failing hunt's back-off.
