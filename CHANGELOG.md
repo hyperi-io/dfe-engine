@@ -3,6 +3,23 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.78](https://github.com/hyperi-io/dfe-engine/compare/v1.22.77...v1.22.78) (2026-10-28)
+
+### Bug Fixes
+
+* an empty DFE_KAFKA_BOOTSTRAP_SERVERS means no broker, and a bus without one is refused ([#1001](https://github.com/hyperi-io/dfe-engine/issues/1001)) ([aea4d4c](https://github.com/hyperi-io/dfe-engine/commit/aea4d4c2a04222e9f3c86a403f0cdd19054e994a))
+* archiver contract fixture, unknown profile type answers 400, hunt-runner process gauges ([#1013](https://github.com/hyperi-io/dfe-engine/issues/1013)) ([073da33](https://github.com/hyperi-io/dfe-engine/commit/073da33d5fbf69c2843f053ac9437cb350143c8c))
+* declare the repo classification as product ([#1007](https://github.com/hyperi-io/dfe-engine/issues/1007)) ([f556575](https://github.com/hyperi-io/dfe-engine/commit/f556575aa49384e200cf7416810fc1619fb386c1))
+* read the hunt detection columns from dfe-schemas ([#1016](https://github.com/hyperi-io/dfe-engine/issues/1016)) ([8d3face](https://github.com/hyperi-io/dfe-engine/commit/8d3face1cbda531793271c834d17ca8b53981792))
+* refuse a dfe database that predates Replicated with one reason ([#1002](https://github.com/hyperi-io/dfe-engine/issues/1002)) ([95a7b47](https://github.com/hyperi-io/dfe-engine/commit/95a7b478a71a9b17bfb06771eddde068cfb9d0e0))
+* refuse archive on a profile that runs no archiver unasked and has none deployed ([#1003](https://github.com/hyperi-io/dfe-engine/issues/1003)) ([830df6f](https://github.com/hyperi-io/dfe-engine/commit/830df6fd2534d311a031231ff0e1c78bc1c97bd5))
+* refuse sources that need a per-source app on a gRPC deployment ([#999](https://github.com/hyperi-io/dfe-engine/issues/999)) ([3c824d2](https://github.com/hyperi-io/dfe-engine/commit/3c824d2a76619112d88b3757b4b997e5beb4c410))
+* run the ClickHouse function-drift tests in CI against a pinned clickhouse-local ([#1004](https://github.com/hyperi-io/dfe-engine/issues/1004)) ([f11fe21](https://github.com/hyperi-io/dfe-engine/commit/f11fe21fdeff750321deac1dee10e4cc40d41855))
+* say how to fix a missing schema or a meta schema import conflict ([#1008](https://github.com/hyperi-io/dfe-engine/issues/1008)) ([f0c90a8](https://github.com/hyperi-io/dfe-engine/commit/f0c90a8fc658a17c167cf2e5bb5b383a3987cd7d))
+* send CLI array options as the JSON arrays the API schema declares ([#1006](https://github.com/hyperi-io/dfe-engine/issues/1006)) ([6724ec6](https://github.com/hyperi-io/dfe-engine/commit/6724ec6d9ed0446b439bc4a1ebe8657894c76940)), closes [#1005](https://github.com/hyperi-io/dfe-engine/issues/1005)
+* take dfe-schemas 0.2.19 ([#1012](https://github.com/hyperi-io/dfe-engine/issues/1012)) ([67a3c61](https://github.com/hyperi-io/dfe-engine/commit/67a3c61f27cde676c4344ec79e49e483f236eeb6))
+* take the dependencies to their latest locked releases ([#1014](https://github.com/hyperi-io/dfe-engine/issues/1014)) ([1072087](https://github.com/hyperi-io/dfe-engine/commit/1072087b0ffb41d68df054586cbef92f1c27ff23))
+
 ## [1.22.77](https://github.com/hyperi-io/dfe-engine/compare/v1.22.76...v1.22.77) (2026-10-26)
 
 ### Bug Fixes
