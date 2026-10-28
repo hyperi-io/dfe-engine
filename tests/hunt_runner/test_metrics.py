@@ -160,10 +160,13 @@ def test_create_asks_scalo_for_the_products_own_metric_namespace(monkeypatch):
     """The runner's metrics carry the same dfe_ prefix as the rest of the product."""
     asked: dict[str, object] = {}
 
-    def _fake_create_metrics(app_name, metric_prefix=None):
+    fake = RecordingManager()
+
+    def _fake_create_metrics(app_name, metric_prefix=""):
         asked["app_name"] = app_name
         asked["metric_prefix"] = metric_prefix
-        return RecordingManager()
+        fake.metric_prefix = metric_prefix
+        return fake
 
     monkeypatch.setattr("scalo.metrics.create_metrics", _fake_create_metrics)
 
@@ -171,3 +174,21 @@ def test_create_asks_scalo_for_the_products_own_metric_namespace(monkeypatch):
 
     assert asked == {"app_name": "dfe-hunt-runner", "metric_prefix": "dfe"}
     assert metrics.enabled is True
+
+
+def test_create_registers_the_process_gauges_without_the_products_prefix(monkeypatch):
+    """The dashboard reads process_resident_memory_bytes bare, and the runner's own metrics keep dfe_."""
+    fake = RecordingManager()
+
+    def _fake_create_metrics(app_name, metric_prefix=""):
+        fake.metric_prefix = metric_prefix
+        return fake
+
+    monkeypatch.setattr("scalo.metrics.create_metrics", _fake_create_metrics)
+
+    hunt_metrics.create()
+
+    gauges = {name for kind, name in fake.registered if kind == "observable_gauge"}
+    assert "process_resident_memory_bytes" in gauges
+    assert [name for name in gauges if name.startswith("dfe_")] == []
+    assert fake.metric_prefix == "dfe"

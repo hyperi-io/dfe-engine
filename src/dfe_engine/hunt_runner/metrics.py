@@ -202,9 +202,24 @@ def create(app_name: str = "dfe-hunt-runner") -> HuntRunnerMetrics:
 
     from dfe_engine.deployment_contract import engine_deployment_contract
 
-    return HuntRunnerMetrics(
-        create_metrics(app_name, metric_prefix=engine_deployment_contract().metric_prefix)
-    )
+    manager = create_metrics(app_name, metric_prefix=engine_deployment_contract().metric_prefix)
+    _register_process_gauges(manager)
+    return HuntRunnerMetrics(manager)
+
+
+def _register_process_gauges(manager: Any) -> None:
+    """Register scalo's process and container gauges on *manager* with no prefix.
+
+    The dfe-services dashboard reads ``process_resident_memory_bytes`` unprefixed, as
+    the other apps emit it, and the manager would otherwise register ``dfe_process_*``.
+    """
+    from scalo.metrics.groups import ResourceMetrics
+
+    prefix, manager.metric_prefix = manager.metric_prefix, ""
+    try:
+        ResourceMetrics(mgr=manager)
+    finally:
+        manager.metric_prefix = prefix
 
 
 __all__ = [
