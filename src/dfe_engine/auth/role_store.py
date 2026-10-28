@@ -140,6 +140,23 @@ class RoleStore:
         del roles[name]
         self._write_roles(roles)
 
+    def reapply_builtins(self) -> builtins.list[str]:
+        """Bring every built-in role in the file to the package's definition and leave custom roles alone.
+
+        Returns:
+            The built-in roles that differed and were rewritten, in name order.
+        """
+        config = self.load_config()
+        packaged = RoleConfig.load_builtin().roles
+        roles = dict(config.roles)
+        changed = sorted(
+            name for name, definition in packaged.items() if roles.get(name) != definition
+        )
+        if changed:
+            roles.update({name: packaged[name] for name in changed})
+            self._write_roles(roles)
+        return changed
+
     def _write_roles(self, roles: dict[str, RoleDefinition]) -> RoleConfig:
         for role_name, definition in roles.items():
             refusal = definition.scoped and scoped_role_refusal(role_name, definition.permissions)
