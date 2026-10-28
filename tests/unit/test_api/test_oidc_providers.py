@@ -1317,6 +1317,26 @@ class TestScopes:
         registered = app.state.oidc_rp._oauth.create_client("upd-scopes")
         assert registered.client_kwargs["scope"] == "openid email"
 
+    @pytest.mark.parametrize(
+        ("issuer", "status", "stored"),
+        [
+            ("https://sso.example.org", 200, "https://sso.example.org"),
+            ("", 422, "https://accounts.google.com"),
+        ],
+        ids=["a_typo_is_corrected_in_place", "a_blank_issuer_is_refused"],
+    )
+    def test_update_changes_the_issuer(self, client, app, admin_headers, issuer, status, stored):
+        _create_provider(client, admin_headers, name="upd-issuer", **_GOOGLE)
+        resp = client.put(
+            "/api/v1/auth/oidc-providers/upd-issuer",
+            json={"issuer": issuer},
+            headers=admin_headers,
+        )
+        assert resp.status_code == status, resp.text
+        assert app.state.oidc_provider_registry.get("upd-issuer").issuer == stored
+        if status == 200:
+            assert resp.json()["issuer"] == stored
+
     def test_an_update_without_scopes_keeps_them(self, client, app, admin_headers):
         _create_provider(client, admin_headers, name="keep-scopes", scopes=["openid", "email"])
         client.put(

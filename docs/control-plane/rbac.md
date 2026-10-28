@@ -223,7 +223,7 @@ boot the engine copies that file to `rbac/roles.yaml` beside the auth directory
 and loads roles from the copy. Custom roles are added to it through
 `/api/v1/auth/roles`.
 
-The copy is never rewritten once it exists, and the API refuses edits to a built-in role. A built-in grant changed in a later engine release therefore reaches an existing deployment only when `rbac/roles.yaml` is edited by hand.
+The API refuses edits to a built-in role, and every boot rewrites each built-in role in the copy to the package's definition. A built-in grant changed in a later engine release therefore reaches an existing deployment with its next restart. Custom roles are left as they are, and a hand edit to a built-in role does not survive a boot.
 
 8 built-in roles, flat hierarchy (no inheritance):
 

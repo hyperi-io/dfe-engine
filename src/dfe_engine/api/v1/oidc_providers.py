@@ -265,6 +265,9 @@ class UpdateProviderRequest(BaseModel):
 
     enabled: bool | None = Field(None, description="Enable or disable the provider")
     display_name: str | None = Field(None, description="Human-readable label")
+    issuer: str | None = Field(
+        None, description="OIDC issuer URL. An empty one is refused, since a login needs it"
+    )
     client_id: str | None = Field(None, description="OIDC client ID (not a secret)")
     client_id_env: str | None = Field(None, description="Env var name for OIDC client ID")
     client_secret: str | None = Field(
@@ -812,6 +815,8 @@ async def update_provider(
         update_fields["enabled"] = body.enabled
     if body.display_name is not None:
         update_fields["display_name"] = body.display_name
+    if body.issuer is not None:
+        update_fields["issuer"] = body.issuer
     if body.client_id is not None:
         update_fields["client_id"] = body.client_id
     if body.client_id_env is not None:
@@ -869,8 +874,10 @@ async def update_provider(
         problems = field_problems(
             provider=candidate, sent_group_fields=_sent_group_fields(groups=body.groups)
         )
-        # An update cannot change the issuer, so a missing one is not the caller's to fix here.
-        rule_problems = [problem for problem in problems if problem.field != "issuer"]
+        # A stored provider with no issuer is not the caller's to fix unless the update sets one.
+        rule_problems = [
+            problem for problem in problems if problem.field != "issuer" or body.issuer is not None
+        ]
     _refuse_field_problems(problems=[*rule_problems, *env_problems])
 
     if body.client_secret:
