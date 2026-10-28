@@ -15,7 +15,7 @@ from dfe_engine.hunts.alert_grouping import (
     build_group_key,
     build_grouping_query,
 )
-from dfe_engine.hunts.hunt_output import RESULTS_TABLE_COLUMNS
+from dfe_engine.hunts.hunt_output import results_table_columns
 from dfe_engine.schema.plan import render_one
 
 pytestmark = pytest.mark.integration
@@ -86,7 +86,7 @@ class TestGroupingQuery:
             group_by=["severity"],
             time_start="2026-03-03 10:00:00",
             time_end="2026-03-03 11:00:00",
-            results_table_columns=RESULTS_TABLE_COLUMNS,
+            results_table_columns=results_table_columns(),
         )
         rows = manager_client.execute(sql)
 
@@ -106,7 +106,7 @@ class TestGroupingQuery:
             group_by=["source_ip"],
             time_start="2026-03-03 10:00:00",
             time_end="2026-03-03 11:00:00",
-            results_table_columns=RESULTS_TABLE_COLUMNS,
+            results_table_columns=results_table_columns(),
         )
         rows = manager_client.execute(sql)
 
@@ -127,7 +127,7 @@ class TestGroupingQuery:
             group_by=["severity", "source_ip"],
             time_start="2026-03-03 10:00:00",
             time_end="2026-03-03 11:00:00",
-            results_table_columns=RESULTS_TABLE_COLUMNS,
+            results_table_columns=results_table_columns(),
         )
         rows = manager_client.execute(sql)
 
@@ -148,7 +148,7 @@ class TestGroupingQuery:
             group_by=["severity"],
             time_start="2026-03-03 10:00:00",
             time_end="2026-03-03 11:00:00",
-            results_table_columns=RESULTS_TABLE_COLUMNS,
+            results_table_columns=results_table_columns(),
         )
         rows = manager_client.execute(sql)
 
@@ -170,7 +170,7 @@ class TestGroupingQuery:
             group_by=["severity"],
             time_start="2026-03-03 10:00:00",
             time_end="2026-03-03 11:00:00",
-            results_table_columns=RESULTS_TABLE_COLUMNS,
+            results_table_columns=results_table_columns(),
             max_sample_events=3,
         )
         rows = manager_client.execute(sql)

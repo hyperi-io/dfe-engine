@@ -611,7 +611,7 @@ hunts_alert_grouping.AlertStateManager.get_ddl
 hunts_alert_grouping.AlertStateManager.record_fire
 hunts_hunt_output.HuntResultSchema.detection_columns
 hunts_hunt_output.HuntResultSchema.result_table_columns
-hunts_hunt_output.RESULTS_TABLE_COLUMNS
+hunts_hunt_output.results_table_columns
 hunts_rule_model.Rule.to_rule_info
 hyperdx_client.HyperDXClient.create_source
 hyperdx_client.HyperDXClient.get_team_api_key
