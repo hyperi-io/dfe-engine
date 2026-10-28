@@ -20,7 +20,7 @@ the next.
 > renaming anything starts here and in them, never in a consumer.
 
 Related: [oidc-rbac-architecture.md](oidc-rbac-architecture.md) for how external
-identities reach these roles; [rbac.md](rbac.md) for enforcement and the
+identities reach these roles, and [rbac.md](rbac.md) for enforcement and the
 ClickHouse tenant model.
 
 ## The two planes
@@ -35,7 +35,7 @@ modelling mistake:
   analyst on the control plane and see exactly one org's rows.
 
 A role is not "more senior" than another across planes. `org_viewer` is not
-a junior `admin`; it is a different axis.
+a junior `admin`. It is a different axis.
 
 ## Canonical roles
 
@@ -70,7 +70,7 @@ on them existing.
 | `dfe-<org>-viewers` | `org_viewer` | no | Per-org data plane, `scope: org:<org>` |
 
 Note `dfe-infra`, not `dfe-infra-admins`. The engine seeded that name first and
-it stands; a parallel name would mean two groups granting one role.
+it stands, because a parallel name would mean two groups granting one role.
 
 ## org_viewer -- the org-tied exception role
 
@@ -91,9 +91,9 @@ it stands; a parallel name would mean two groups granting one role.
 
 | Repo | Consumes | How |
 |---|---|---|
-| dfe-engine | roles + groups | Defines them; enforces via `_resolve_group_grants` and `RoleConfig` |
-| dfe-ui | roles | Shows/hides UI by resolved role from `GET /auth/me`; must not hardcode its own names |
-| dfe-infra | groups | ArgoCD RBAC group mappings; ESO secret wiring for providers |
+| dfe-engine | roles + groups | Defines them, enforces via `_resolve_group_grants` and `RoleConfig` |
+| dfe-ui | roles | Shows/hides UI by resolved role from `GET /auth/me`, and must not hardcode its own names |
+| dfe-infra | groups | ArgoCD RBAC group mappings, ESO secret wiring for providers |
 | dfe-deploy | groups | Deployment-time group seeding |
 | dfe-schemas | orgs | `org_id` column semantics for tenant row policies |
 | Test environments | both | The OIDC test fixture renders these names into dex, Entra and Okta |
@@ -109,15 +109,4 @@ it stands; a parallel name would mean two groups granting one role.
    Okta and Workspace directories. Renaming one is a customer-facing migration,
    not a refactor.
 4. **Map roles on stable ids where the provider has them**, and display names.
-   Entra emits group GUIDs, not names; see the OIDC architecture doc.
-
-## Known divergence
-
-`dfe-control-plane` uses a different role vocabulary - `ADMIN`, `ANALYST_USER`,
-`DATA_OWNER`, `HUNT_OWNER`, `INGEST_OWNER`, `INFRASTRUCTURE_OWNER`, plus
-ClickHouse-side roles like `analyst_tier2`. Its group names (`dfe-admins`,
-`dfe-analysts`) do agree with this document; only the roles diverge.
-
-It is not deployed by dfe-infra, so nothing in the current deployment path
-depends on that vocabulary. Reconciling it is a product decision - which of the
-two role models survives - and is deliberately NOT resolved here.
+   Entra emits group GUIDs, not names. See the OIDC architecture doc.

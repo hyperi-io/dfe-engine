@@ -8,11 +8,10 @@
 
 # Hunt-runner scaling: deterministic-due, no engine dependency
 
-The hunt runner is pull-based and multi-pod (see auto-memory
-`project_hunt_runner_architecture`). **Default deployment is ONE steady pod**
+The hunt runner is pull-based and multi-pod. **Default deployment is ONE steady pod**
 (no ScaledObject at all) - the runner is a thin orchestrator (all hunt load
 runs in ClickHouse), so one pod covers the large majority of deployments.
-Autoscaling is **BETA and opt-in** (`huntRunner.autoscaling.enabled`); when
+Autoscaling is **BETA and opt-in** (`huntRunner.autoscaling.enabled`). When
 turned on, KEDA scales the pod count on the deterministic-due backlog this doc
 explains, via the fail-safe `dfe-keda-shim` - never the engine, and no longer
 a MySQL-on-ClickHouse scaler (retired, see "KEDA ScaledObject" below).
@@ -24,7 +23,7 @@ dependency on dfe-engine.
 
 ## The one hard requirement: due-detection with zero workers
 
-This is the contract the BETA autoscaling relies on (see "Default posture,
+This is the contract the BETA autoscaling relies on (see "Default deployment,
 beta autoscaling, and disable" below for when it applies - it also governs
 correctness if you opt into `minReplicaCount: 0`, i.e. scale-to-zero). KEDA
 can only wake the first worker if "is any hunt due right now?" is answerable
@@ -63,7 +62,7 @@ due      = watermark < fire                          -- that fire not already co
            AND lease_until <= now()                  -- not currently running
 ```
 
-`due_count > 0` -> scale up; `== 0` -> scale down (to zero only where
+`due_count > 0` -> scale up, and `== 0` -> scale down (to zero only where
 `minReplicaCount: 0` has been opted in - the default floor is 1 pod). The
 `enabled=1` filter is applied in an inner subquery so a tombstone
 (interval=0) can never reach the `intDiv` (no divide-by-zero).
@@ -95,13 +94,13 @@ thing from the same inputs:
 3. **Gate on the signal, not a timer.** KEDA polls the backlog query (via the
    shim - a real readiness signal), it does not race a clock. Worst-case wake
    latency is
-   `pollingInterval + pod-start`; for hunts (minute-plus intervals) that is
+   `pollingInterval + pod-start`. For hunts (minute-plus intervals) that is
    immaterial. This is the "gate on the real condition" rule from the testing
    standard applied to autoscaling.
 4. **Self-healing.** If a worker claims a hunt then dies before writing the
    watermark, its lease expires (`lease_seconds`, default 300) and the fire is
    still owed (`watermark < fire`), so the scaler keeps >=1 worker and the hunt is
-   reclaimed. Nothing is lost; nothing double-runs (the lease gives mutual
+   reclaimed. Nothing is lost and nothing double-runs (the lease gives mutual
    exclusion, and a rare settle-window race is absorbed by the idempotent windowed
    INSERT).
 5. **No thundering herd.** The phase offset spreads same-interval hunts across the
@@ -135,7 +134,7 @@ only ClickHouse:
 
 So if the engine pod is down, hunts keep firing and KEDA keeps scaling. The only
 thing you lose while the engine is down is the ability to CHANGE configs - which
-needs the engine anyway. ClickHouse is DFE's single operational store; the runner
+needs the engine anyway. ClickHouse is DFE's single operational store, and the runner
 holds to that (no Postgres, no engine, no convenience store on the hot path), which
 is also what lets the same runner work on a non-k8s single deploy (dfe-docker) where
 only ClickHouse is guaranteed present.
@@ -173,9 +172,9 @@ has been **RETIRED**: KEDA's only failure knob for a DB scaler is a fixed
 the wrong way and blow cloud spend. It is replaced by a small OWNED, fail-safe
 adapter: the **`dfe-keda-shim`**, its own pod on the engine image (`dfe-keda-shim
 run`), labelled so the engine Service never routes to it. The published engine
-chart (`oci://ghcr.io/hyperi-io/charts/dfe-engine`) renders only the engine pod; the
+chart (`oci://ghcr.io/hyperi-io/charts/dfe-engine`) renders only the engine pod. The
 shim comes from `dfe-infra helm/charts/dfe-extras/templates/engine-keda-shim.yaml`,
-on the same values. KEDA's `metrics-api` scaler polls the shim over HTTP; the
+on the same values. KEDA's `metrics-api` scaler polls the shim over HTTP, and the
 shim runs `schedule.due_query(db)` against ClickHouse - the SAME SQL the worker
 gate uses (see "The scaler query" above, imported directly from
 `dfe_engine.hunt_runner.schedule.due_query`, so it cannot drift) - and hands
@@ -226,7 +225,7 @@ spec:
 **The fail-safe** (`dfe_engine/keda_shim/shim.py`, `QueryShim.run`): every query
 caches its last-good integer per (query, params). On ANY failure - CH
 unreachable, timeout, a bad query - the shim returns the CACHED value, so KEDA
-sees no change and the pod count FREEZES at current; it can never run
+sees no change and the pod count FREEZES at current, so it can never run
 replicas up on a broken metric. A cold start with no cache yet, plus a
 failure, falls back to a conservative `cold_hold` (0 for the backlog query -
 hold at `minReplicaCount`). This cache-or-cold-hold behaviour is exactly why
@@ -258,7 +257,7 @@ SAME shim endpoint and metrics-api mechanism the hunt-runner's
 hunt-runner beta relies on, not a mock. Wired into
 `bootstrap/run-all-smoke-tests.sh` (gated `DFE_KEDA_SCALE_TEST`, default on).
 
-## Default posture, beta autoscaling, and disable
+## Default deployment, beta autoscaling, and disable
 
 The hunt runner is a thin orchestrator - virtually all hunt load runs IN
 ClickHouse (the queries + coordination), so the pod itself is rarely
@@ -280,7 +279,7 @@ deliberately simple:
   N pods via the existing `hunt_lease` mutual exclusion - KEDA picks the pod
   count, the leases decide who does what, so nothing double-runs.
 - **Disabled (operator choice):** set `huntRunner.enabled: false` in the
-  deploy overlay. No pod and no ScaledObject are rendered; hunts do not fire.
+  deploy overlay. No pod and no ScaledObject are rendered, so hunts do not fire.
   Re-enable by restoring the dial - the schedule + watermarks are still in
   ClickHouse, so the runner resumes cleanly from the last committed window.
 
