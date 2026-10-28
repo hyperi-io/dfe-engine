@@ -82,9 +82,11 @@ from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import (
     LOADER_COMPILER,
     TRANSFORM_COMPILER,
+    DeployTarget,
     MetricsUnavailableError,
     OperationalReader,
     appconfig,
+    argo_refresh,
     derived,
     instances,
 )
@@ -476,6 +478,7 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
     settings = request.app.state.settings
     done: list[str] = []
     hints: list[str] = []
+    pushed: list[str] = []
     try:
         changes = derived.plan(gc, registry, settings, tenancy=request_tenancy(request))
         transforms = transform_instances(gc)
@@ -495,6 +498,8 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
                 # A restore held for review keeps its parked copy until the overlay lands.
                 if change.unpark and not written.review_required:
                     derived.drop_parked(gc, change.app, user.user_id)
+                if written.changed and not written.review_required:
+                    pushed.append(f"{change.app.service}-{change.app.instance}")
             # Each write renders the app config itself, so its hint is the only
             # report of that change: the render below finds the file current.
             hints += written.restart_required
@@ -515,6 +520,7 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
             event="apps not reconciled with the sources",
         )
         return AppsSync(changes=done, error=error, restart_required=_one_per_app(hints))
+    _hard_refresh_pushed(settings, pushed)
     # Re-rendered even when the reconcile wrote nothing: a source deploy changes
     # the loader's table map through the same overlay the plan found in step.
     hints += appconfig.render_and_report(gc, settings)
@@ -525,6 +531,20 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
         topics_removed=removed,
         topics_pending_removal=pending,
     )
+
+
+def _hard_refresh_pushed(settings: Any, applications: list[str]) -> None:
+    """Have Argo CD re-read the repository for each Application the pass pushed to.
+
+    Only on Kubernetes, where Argo applies the overlays. A webhook refresh that lands
+    while a compare is running can be folded into it, so the push is not seen until
+    the next one. Never raises: the push has landed either way.
+    """
+    if not applications or settings.deployment.target != DeployTarget.KUBERNETES:
+        return
+    failed = argo_refresh.refresh_applications(applications)
+    if failed:
+        logger.warning(f"Argo CD not asked to refresh: {', '.join(failed)}")
 
 
 async def _sync_hyperdx_source(
