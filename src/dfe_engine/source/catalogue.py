@@ -7,9 +7,10 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The source catalogue, and the write body an entry compiles to on the intake chosen.
 
-Each ``catalogue/<source>.yaml`` in dfe-schemas is the ``POST /sources`` body for the source, whose match rule the intake chosen replaces, plus a ``catalogue`` block the write model ignores. It is read from the installed wheel, never the seeded schemas volume, because the seed never deletes and an entry dropped from the catalogue would survive there.
+Each ``catalogue/<source>.yaml`` in dfe-schemas is the ``POST /sources`` body for the source, whose match rule the intake chosen replaces, plus a ``catalogue`` block the write model ignores. A directory directly under ``catalogue/`` is a tag. It is read from the installed wheel, never the seeded schemas volume, because the seed never deletes and an entry dropped from the catalogue would survive there.
 """
 
+import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,9 @@ from dfe_engine.transport import SourceTransport
 
 CATALOGUE_DIR = "catalogue"
 """The catalogue's directory under the dfe-schemas trees."""
+
+UNTAGGED = "untagged"
+"""The tag for catalogue files that sit in the catalogue root, not in a holding directory."""
 
 CatalogueIntake = Literal["beats", "receiver", "fetcher"]
 """How an entry's data reaches the platform, and so which origin its source has."""
@@ -252,6 +256,61 @@ def load_source_catalogue(*, directory: Path | None = None) -> SourceCatalogue:
             continue
         entries[entry.name] = entry
     return SourceCatalogue(directory=root, entries=entries)
+
+
+def catalogue_tags_directory() -> Path:
+    """The catalogue tree whose holding directories the tags route lists.
+
+    ``DFE_SCHEMAS_DIR/catalogue`` wins when that directory exists. Otherwise a
+    ``dfe-schemas`` checkout beside this repository does, which is where holding
+    directories appear before a release ships them. The installed package is the
+    fallback.
+    """
+    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    if env_dir:
+        configured = Path(env_dir) / CATALOGUE_DIR
+        if configured.is_dir():
+            return configured
+    checkout = _checkout_catalogue()
+    if checkout is not None:
+        return checkout
+    root = dfe_schemas.schemas_root() / CATALOGUE_DIR
+    if not root.is_dir():
+        raise SourceCatalogueError(
+            f"the installed dfe-schemas {dfe_schemas.__version__!r} ships no catalogue at {str(root)!r}"
+        )
+    return root
+
+
+def _checkout_catalogue() -> Path | None:
+    """``dfe-schemas/catalogue`` beside this repository, when that checkout is present."""
+    here = Path(__file__).resolve()
+    for parent in here.parents:
+        if (parent / "pyproject.toml").is_file() and (parent / "src" / "dfe_engine").is_dir():
+            candidate = parent.parent / "dfe-schemas" / CATALOGUE_DIR
+            return candidate if candidate.is_dir() else None
+    return None
+
+
+def catalogue_tags(*, directory: Path, name: str | None = None) -> list[str]:
+    """The holding directories under *directory*, in name order.
+
+    *name* keeps a tag whose name starts with it. The comparison ignores case.
+    Catalogue files that sit in *directory* itself, rather than in a holding
+    directory, are one tag, ``untagged``.
+    """
+    prefix = (name or "").casefold()
+    names = [
+        path.name for path in directory.iterdir() if path.is_dir() and not path.name.startswith(".")
+    ]
+    loose = [
+        path
+        for path in directory.glob("*.yaml")
+        if path.is_file() and not path.name.startswith(".")
+    ]
+    if loose and UNTAGGED not in names:
+        names.append(UNTAGGED)
+    return sorted(tag for tag in names if tag.casefold().startswith(prefix))
 
 
 def source_catalogue() -> SourceCatalogue:

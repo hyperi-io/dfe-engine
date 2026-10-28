@@ -3,6 +3,7 @@
 GET    /api/v1/sources                  -> Paginated source list
 POST   /api/v1/sources                  -> Create source
 GET    /api/v1/sources/catalogue        -> The sources DFE ships ready to create, omitting ones already stored
+GET    /api/v1/sources/catalogue-tags   -> The directories under catalogue/ that hold those sources
 POST   /api/v1/sources/from-catalogue   -> Create sources from catalogue entries
 GET    /api/v1/sources/{name}           -> Get source details
 GET    /api/v1/sources/{name}/flow      -> The stages its records travel, resolved
@@ -762,6 +763,15 @@ class TableEngineObject(BaseModel):
     )
 
 
+class CatalogueTagObject(BaseModel):
+    """One directory under the catalogue that holds source files."""
+
+    name: str = Field(
+        description="The directory name. untagged is the files that sit in the catalogue root "
+        "rather than in a directory"
+    )
+
+
 class CatalogueEntryObject(BaseModel):
     """One source DFE ships ready to create, as the console lists it."""
 
@@ -1278,6 +1288,46 @@ def list_catalogue(
     ]
     return PaginatedResponse[CatalogueEntryObject](
         items=rows, total=page.total, page=page.page, per_page=page.per_page
+    )
+
+
+@router.get(
+    "/catalogue-tags",
+    response_model=PaginatedResponse[CatalogueTagObject],
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+)
+def list_catalogue_tags(
+    user: CurrentUser,
+    pagination: PaginationParams = Depends(),
+    name: str | None = Query(
+        None,
+        description="Keep tags whose name starts with this. The match ignores case",
+    ),
+) -> PaginatedResponse[CatalogueTagObject]:
+    """List the directories under the catalogue that hold source files.
+
+    A tag is one directory directly under ``catalogue/``. Files that sit in the
+    catalogue root, rather than in one of those directories, are the tag
+    ``untagged``. ``name`` keeps a tag whose name starts with it, so ``act``
+    matches ``active-mq`` and does not match a name that only contains those
+    letters later.
+    """
+    try:
+        directory = source_catalogue_module.catalogue_tags_directory()
+    except source_catalogue_module.SourceCatalogueError as exc:
+        logger.error("Source catalogue unreadable", error=str(exc))
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "catalogue_error",
+                "message": "the source catalogue could not be read; the engine log has the reason",
+            },
+        ) from exc
+    tags = source_catalogue_module.catalogue_tags(directory=directory, name=name)
+    return PaginatedResponse[CatalogueTagObject].from_list(
+        [CatalogueTagObject(name=tag) for tag in tags],
+        pagination.page,
+        pagination.per_page,
     )
 
 
