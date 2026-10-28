@@ -40899,6 +40899,12 @@
             "type": "array",
             "title": "Warnings"
           },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "Set when a write failed and the run stopped there: the report is what landed before it, with every review branch and PR already opened",
+            "default": ""
+          },
           "review_required": {
             "type": "boolean",
             "title": "Review Required",

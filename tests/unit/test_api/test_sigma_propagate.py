@@ -276,6 +276,30 @@ def test_propagate_sets_the_review_header_and_reports_every_pr(
     assert not (crud.repo_path / "config" / "rules" / f"{_BINDING}.yaml").exists()
 
 
+def test_a_propagate_stopped_by_a_failed_write_still_reports_its_pr(
+    client, app, admin_headers, tmp_path, monkeypatch
+):
+    """The hunt write fails after the binding rule opened its PR, and the response names that PR."""
+    crud = _wire_gitcrud(app, tmp_path)
+    _add_windows_source()
+    _seed_selected(client, admin_headers, tmp_path)
+    _rebind(crud, environment="production", mode="team", forge=_RecordingForge())
+
+    def refuse(*_args, **_kwargs):
+        raise RuntimeError("forge unavailable")
+
+    monkeypatch.setattr(HuntConfigRegistry, "save", refuse)
+
+    resp = client.post("/api/v1/sigma/propagate", headers=admin_headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["X-DFE-Review-Required"] == "true"
+    report = resp.json()["report"]
+    assert report["error"] == "forge unavailable"
+    assert report["created"] == [_BINDING]
+    assert report["pr_urls"] == ["http://forge/pr/1"]
+
+
 def test_propagate_in_dev_carries_no_review_header(client, app, admin_headers, tmp_path):
     crud = _wire_gitcrud(app, tmp_path)
     _add_windows_source()
