@@ -116,6 +116,9 @@ Auth (local):
 E2E server (Playwright host-run helpers; refused in production):
 - DFE_E2E_SERVER -> e2e_server
 
+Replicas (how many engines the deploy runs, guarded by dfe_engine.replicas):
+- DFE_ENGINE_REPLICAS -> engine_replicas
+
 Stack identity (what the deploy says this pod came from):
 - DFE_STACK_VERSION -> stack_version
 - DFE_UI_VERSION -> ui_version (the dfe-ui pin the deploy rendered)
@@ -1518,6 +1521,10 @@ class AccountStoreSettings(BaseModel):
     - DFE_AUTH_ACCOUNTS_STORE_URI -> auth.accounts_store.uri
     - DFE_AUTH_ACCOUNTS_STORE_DATABASE -> auth.accounts_store.database
     - DFE_AUTH_ACCOUNTS_STORE_COLLECTION -> auth.accounts_store.collection
+    - DFE_AUTH_ACCOUNTS_STORE_SERVER_SELECTION_TIMEOUT_SECONDS ->
+      auth.accounts_store.server_selection_timeout_seconds
+    - DFE_AUTH_ACCOUNTS_STORE_SOCKET_TIMEOUT_SECONDS ->
+      auth.accounts_store.socket_timeout_seconds
     """
 
     uri: str = Field(
@@ -1529,6 +1536,27 @@ class AccountStoreSettings(BaseModel):
         description="Document database name (separate from HyperDX's)",
     )
     collection: str = Field(default="accounts", description="Accounts collection name")
+    server_selection_timeout_seconds: float = Field(
+        default=5.0,
+        gt=0,
+        description=(
+            "How long a document-store call waits for a store it cannot reach before it "
+            "fails, in seconds. pymongo's own default is 30. "
+            "DFE_AUTH_ACCOUNTS_STORE_SERVER_SELECTION_TIMEOUT_SECONDS."
+        ),
+    )
+    socket_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description=(
+            "How long a document-store call waits for an answer from a store it reached "
+            "before it fails, in seconds. The engine's slowest calls, index builds at boot "
+            "and writes racing other replicas, take a few seconds at most, so this only "
+            "ends calls to a store that has stopped answering, which otherwise hold their "
+            "worker thread for ever. "
+            "DFE_AUTH_ACCOUNTS_STORE_SOCKET_TIMEOUT_SECONDS."
+        ),
+    )
 
 
 class LoginThrottleSettings(BaseModel):
@@ -2282,6 +2310,16 @@ class DFESettings(BaseModel):
     gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
     secrets: SecretsSettings = Field(default_factory=SecretsSettings)
+    engine_replicas: int = Field(
+        default=1,
+        ge=1,
+        description=(
+            "How many engines the deploy runs, passed by the chart from its replica "
+            "count. Above 1 the engine refuses to boot unless every replica reaches the "
+            "same users, secrets and deploy repo (dfe_engine.replicas). "
+            "DFE_ENGINE_REPLICAS."
+        ),
+    )
     stack_version: str = Field(
         default="",
         description=(
@@ -2914,6 +2952,12 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("accounts_store", {})["database"] = val
     if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_COLLECTION"):
         overrides["auth"].setdefault("accounts_store", {})["collection"] = val
+    if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_SERVER_SELECTION_TIMEOUT_SECONDS"):
+        overrides["auth"].setdefault("accounts_store", {})["server_selection_timeout_seconds"] = (
+            float(val)
+        )
+    if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_SOCKET_TIMEOUT_SECONDS"):
+        overrides["auth"].setdefault("accounts_store", {})["socket_timeout_seconds"] = float(val)
 
     # HyperDX settings
     if val := _get_env("DFE_HYPERDX_BASE_URL"):
@@ -3015,6 +3059,9 @@ def _get_env_overrides() -> dict:
         overrides["secrets"]["recovery_window_days"] = val
     if val := _get_env("DFE_SECRETS_TAGS"):
         overrides["secrets"]["tags"] = val
+
+    if val := _get_env("DFE_ENGINE_REPLICAS"):
+        overrides["engine_replicas"] = int(val)
 
     # The stack this pod was deployed from, when the deploy passed it in
     if val := _get_env("DFE_STACK_VERSION"):

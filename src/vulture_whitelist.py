@@ -116,6 +116,7 @@ from dfe_engine.source import models as source_models
 from dfe_engine.source import registry as source_registry
 from dfe_engine.source import type_registry as source_type_registry
 from dfe_engine.state_machines import setup as state_machines_setup
+from dfe_engine.store import documents as store_documents
 from dfe_engine.synthetic_data import models as synthetic_data_models
 from dfe_engine.transport_filter import validate as transport_filter_validate
 
@@ -650,4 +651,5 @@ source_expression.ExprValidationResult.candidate_fields
 source_models.materialisation_action
 source_type_registry.TypeRegistry.attribute_names
 source_type_registry.TypeRegistry.valid_primitives_for_attribute
+store_documents.DocumentCollection.mutate
 transport_filter_validate.warn_suboptimal_ordering

@@ -149,6 +149,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     settings: DFESettings = app.state.settings
     health: HealthManager = app.state.health_manager
 
+    from dfe_engine.replicas import instance_id, require_shared_state
+
+    # First, so a replica that cannot share state stops before it writes any.
+    require_shared_state(settings)
+    logger.info(
+        "DFE Engine instance starting",
+        instance_id=instance_id(),
+        replicas=settings.engine_replicas,
+    )
+
     from dfe_engine.bootstrap import ensure_storage
 
     ensure_storage(settings=settings)
@@ -380,6 +390,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         settings.auth.store_backend,
         settings.auth.accounts_store.uri,
         settings.auth.accounts_store.database,
+        server_selection_timeout=settings.auth.accounts_store.server_selection_timeout_seconds,
+        socket_timeout=settings.auth.accounts_store.socket_timeout_seconds,
     )
     app.state.document_store = doc_store
     from dfe_engine.auth.groups import GroupMetrics
