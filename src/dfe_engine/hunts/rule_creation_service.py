@@ -617,7 +617,7 @@ class RuleCreationService:
         try:
             # command(), not query(), as in _parse_error. EXPLAIN PLAN analyses the SELECT and never reads rows.
             # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
-            client.command(f"EXPLAIN PLAN SELECT 1 FROM {target}{condition}")
+            client.command(f"EXPLAIN PLAN SELECT 1 FROM {target}{condition}")  # noqa: S608 - quoted source; the condition has passed the sanitiser and EXPLAIN never runs it
         except Exception as exc:
             if parse_code(exc) not in _SQL_REFUSALS:
                 logger.warning(f"EXPLAIN PLAN unavailable, rule not checked against {db}.{table}")
