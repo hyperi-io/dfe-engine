@@ -6,6 +6,7 @@
 # Copyright: (c) 2026 HYPERI PTY LIMITED
 #
 # Override defaults with HYPERCI_* env vars.
+classification: product
 
 release:
   enabled: true
