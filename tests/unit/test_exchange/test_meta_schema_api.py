@@ -137,3 +137,4 @@ class TestImportRoute:
         assert first.status_code == 201
         assert again.status_code == 409
         assert again.json()["code"] == "conflict"
+        assert "PATCH /api/v1/schemas/definitions/" in again.json()["message"]

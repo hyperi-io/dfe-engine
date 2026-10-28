@@ -113,6 +113,7 @@ class TestSchemasRouter:
         )
         assert resp.status_code == 404
         assert resp.json()["code"] == "no_schema"
+        assert "schema.meta_schema" in resp.json()["message"]
 
     def test_deploy_dry_run_plans_ddl_without_touching_clickhouse(self, tmp_path, monkeypatch):
         # A source WITH a real schema; dry_run must return the DDL and apply nothing
