@@ -21,6 +21,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
+from scalo.logger import logger
 
 from dfe_engine.api.deps import (
     CurrentUser,
@@ -46,7 +47,7 @@ from dfe_engine.sigma.catalog import (
     SigmaSelectionStore,
     sync_provider,
 )
-from dfe_engine.sigma.propagation import SigmaPropagator
+from dfe_engine.sigma.propagation import PropagationError, SigmaPropagator
 from dfe_engine.sigma.providers import ProviderConfig, ProviderKind, build_provider
 from dfe_engine.sigma.views import (
     SigmaViewColumn,
@@ -992,6 +993,11 @@ class PropagationReportModel(BaseModel):
         description="Bindings left behind by a deselect (still firing until deleted)",
     )
     warnings: list[str] = Field(default_factory=list)
+    error: str = Field(
+        default="",
+        description="Set when a write failed and the run stopped there: the report is what "
+        "landed before it, with every review branch and PR already opened",
+    )
     review_required: bool = Field(
         default=False,
         description="A generated rule or hunt was routed to a review branch, not to the "
@@ -1063,14 +1069,19 @@ def _propagator(
 
 async def _run_propagate(propagator: SigmaPropagator, options: PropagateRequest, *, task) -> dict:
     """TaskManager coroutine: run propagation off the event loop (blocking git I/O)."""
-    report = await asyncio.to_thread(
-        propagator.propagate,
-        force=options.force,
-        create_hunts=options.create_hunts,
-        hunt_cron=options.hunt_cron,
-        hunt_target_table=options.hunt_target_table,
-        hunt_customers=options.hunt_customers,
-    )
+    try:
+        report = await asyncio.to_thread(
+            propagator.propagate,
+            force=options.force,
+            create_hunts=options.create_hunts,
+            hunt_cron=options.hunt_cron,
+            hunt_target_table=options.hunt_target_table,
+            hunt_customers=options.hunt_customers,
+        )
+    except PropagationError as stopped:
+        # The earlier writes already opened branches and PRs, so the report names them rather than the task failing blind.
+        logger.error("sigma propagate stopped part way", error=stopped.report.error)
+        return stopped.report.as_dict()
     return report.as_dict()
 
 
