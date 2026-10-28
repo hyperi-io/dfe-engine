@@ -44,8 +44,8 @@ from scalo.logger import logger
 from scalo.resilience import ServiceUnavailable
 from sqlglot.errors import ParseError
 
-from ..clickhouse.errors import ErrorCategory, wrap_ch_error
-from ..clickhouse.quoting import plain_source_name
+from ..clickhouse.errors import ErrorCategory, parse_code, wrap_ch_error
+from ..clickhouse.quoting import plain_source_name, quote_identifier
 from ..settings import DetectionGuardSettings, HuntsSettings
 from .hdx_sanitizer import REFUSED_CLAUSES, HdxSanitizeError, HdxSanitizer, HdxSanitizeResult
 from .rule_guard import (
@@ -285,6 +285,12 @@ def _source_error(source_db: str, source_table: str) -> SqlValidationError | Non
         )
     return None
 
+
+# ClickHouse refusing the SQL itself: BAD_ARGUMENTS, NUMBER_OF_ARGUMENTS_DOESNT_MATCH,
+# ILLEGAL_TYPE_OF_ARGUMENT, ILLEGAL_COLUMN, UNKNOWN_FUNCTION, UNKNOWN_IDENTIFIER,
+# TYPE_MISMATCH, NO_COMMON_TYPE. A table not deployed yet (UNKNOWN_TABLE) does not block,
+# since a rule may be saved ahead of its source.
+_SQL_REFUSALS = frozenset({36, 42, 43, 44, 46, 47, 53, 386})
 
 # ClickHouse error codes the preview names in its own words.
 _TOO_MANY_ROWS = 158
@@ -586,8 +592,42 @@ class RuleCreationService:
             )
             if escape is not None:
                 errors.append(SqlValidationError(message=escape, suggestion=_ESCAPE_FIX))
+            if not errors:
+                plan_error = self._plan_error(
+                    parsed.source_db or "", parsed.source_table or "", parsed.where_clause
+                )
+                if plan_error is not None:
+                    errors.append(plan_error)
 
         return errors
+
+    def _plan_error(self, db: str, table: str, where_clause: str) -> SqlValidationError | None:
+        """ClickHouse's refusal of the condition against the source table, or None.
+
+        ``EXPLAIN PLAN`` resolves every identifier against the table, which the parse
+        check does not, so a misspelt column or function fails here and not at the
+        first hunt run. Only a refusal about the SQL blocks: an unreachable or busy
+        ClickHouse leaves the rule to the parse check alone.
+        """
+        client = self._query_client()
+        if client is None:
+            return None
+        target = f"{quote_identifier(db)}.{quote_identifier(table)}"
+        condition = f" WHERE {where_clause}" if where_clause.strip() else ""
+        try:
+            # command(), not query(), as in _parse_error. EXPLAIN PLAN analyses the SELECT and never reads rows.
+            # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+            client.command(f"EXPLAIN PLAN SELECT 1 FROM {target}{condition}")  # noqa: S608 - quoted source; the condition has passed the sanitiser and EXPLAIN never runs it
+        except Exception as exc:
+            if parse_code(exc) not in _SQL_REFUSALS:
+                logger.warning(f"EXPLAIN PLAN unavailable, rule not checked against {db}.{table}")
+                return None
+            detail = str(exc).splitlines()[0]
+            return SqlValidationError(
+                message=f"ClickHouse cannot plan this rule against {db}.{table}: {detail}",
+                suggestion="Check the column, function and table names against the source.",
+            )
+        return None
 
     def _parse_error(self, sql: str) -> SqlValidationError | None:
         """Parse the SQL as ClickHouse and return the first syntax error, if any.
