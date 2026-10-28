@@ -27,6 +27,7 @@ from tests.unit.test_api.sources_catalogue_cases import (
     CreateFromCatalogueRejectCase,
     ListAgainstTheContractCase,
 )
+from tests.unit.test_source.factories import CATALOGUE_FIXTURES
 from tests.unit.test_source.source_catalogue_cases import ELASTIC_CONTRACT, NO_CONTRACT
 
 CATALOGUE = "/api/v1/sources/catalogue"
@@ -146,6 +147,34 @@ class TestListCatalogue:
         entries = sc.source_catalogue().entries
         receivers = [name for name, entry in entries.items() if "receiver" in entry.intakes]
         assert [row["name"] for row in listed] == receivers
+
+    def test_tags_keep_entries_in_those_directories(
+        self, admin_headers: dict[str, str], client: TestClient, tmp_path: Path, monkeypatch
+    ):
+        holding = tmp_path / "holding"
+        (holding / "aws").mkdir(parents=True)
+        entries = CATALOGUE_FIXTURES / "entries"
+        (holding / "okta.yaml").write_bytes((entries / "okta.yaml").read_bytes())
+        (holding / "aws" / "aws-cloudtrail.yaml").write_bytes(
+            (entries / "aws-cloudtrail.yaml").read_bytes()
+        )
+        monkeypatch.setattr(
+            sc, "source_catalogue", lambda: sc.load_source_catalogue(directory=holding)
+        )
+
+        def listed(tags: list[str] | None = None) -> list[str]:
+            params: dict[str, Any] = {"per_page": -1}
+            if tags is not None:
+                params["tags"] = tags
+            resp = client.get(CATALOGUE, headers=admin_headers, params=params)
+            assert resp.status_code == 200, resp.text
+            return [row["name"] for row in resp.json()["items"]]
+
+        assert listed() == ["aws-cloudtrail", "okta"]
+        assert listed(["aws"]) == ["aws-cloudtrail"]
+        assert listed(["UNTAGGED"]) == ["okta"]
+        assert listed(["aws", "untagged"]) == ["aws-cloudtrail", "okta"]
+        assert listed(["nope"]) == []
 
     def test_unknown_intake(self, admin_headers: dict[str, str], client: TestClient):
         resp = client.get(CATALOGUE, headers=admin_headers, params={"intake": "carrier"})

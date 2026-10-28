@@ -1235,12 +1235,23 @@ def list_catalogue(
         None, description="Only entries that arrive this way (beats, receiver, fetcher)"
     ),
     search: str | None = Query(None, description="Search the entry name, package and data stream"),
+    tags: list[str] | None = Query(
+        None,
+        description=(
+            "Only entries in one of these holding directories. Repeat the param for more "
+            "than one. untagged is the files that sit in the catalogue root. Omit it to "
+            "list the whole catalogue"
+        ),
+    ),
 ) -> PaginatedResponse[CatalogueEntryObject]:
     """List the sources the installed dfe-schemas catalogue ships ready to create.
 
-    An entry already stored as a source is left out, matched on the catalogue entry
-    name even when the source was given a different one. A source written by hand
-    does not hide an entry. Each entry says whether the deployed transform ships
+    ``tags`` keeps an entry whose holding directory is one of the names given.
+    ``untagged`` is a file that sits in the catalogue root, and omitting ``tags``
+    lists every entry. An entry already stored as a source is left out, matched
+    on the catalogue entry name even when the source was given a different one. A
+    source written by hand does not hide an entry. Each entry says whether the
+    deployed transform ships
     its default variant, read off that app's mounted contract, so a console can
     hold back an entry the create would refuse. It also says whether this
     deployment can run the entry at all: a source that needs a per-source app
@@ -1269,6 +1280,9 @@ def list_catalogue(
         for entry in catalogue.entries.values()
         if entry.name not in taken and (intake is None or intake in entry.intakes)
     ]
+    wanted = {tag.casefold() for tag in tags or [] if tag}
+    if wanted:
+        entries = [entry for entry in entries if entry.tag.casefold() in wanted]
     if search:
         needle = search.lower()
         entries = [

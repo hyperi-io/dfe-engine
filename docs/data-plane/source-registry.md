@@ -102,7 +102,7 @@ Sources are the primary API entity (see
 ```text
 GET    /api/v1/sources                  # List sources (paginated)
 POST   /api/v1/sources                  # Create source (flat write body; views/transform/fetcher inline)
-GET    /api/v1/sources/catalogue        # Sources DFE ships ready to create, each saying whether the deployed transform ships its variant, omitting entries already stored (filter: intake, search)
+GET    /api/v1/sources/catalogue        # Sources DFE ships ready to create, each saying whether the deployed transform ships its variant, omitting entries already stored (filter: intake, search, tags)
 GET    /api/v1/sources/catalogue-tags   # Directories under catalogue/ that hold source files, plus untagged for files in the catalogue root (filter: name prefix)
 POST   /api/v1/sources/from-catalogue   # Create sources from catalogue entries, at most 50 in one request
 GET    /api/v1/sources/{name}           # Get source (deployed-version accessors + state + enabled)

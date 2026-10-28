@@ -102,6 +102,9 @@ class CatalogueEntry:
     name: str
     """The source name the entry creates, which is also its file name."""
 
+    tag: str
+    """The holding directory this file lives in. ``untagged`` when it sits in the catalogue root."""
+
     request: SourceWriteRequest
     """The body as the file carries it, on the default intake."""
 
@@ -154,7 +157,7 @@ class VariantAvailability:
     reason: str
 
 
-def _entry_from(*, path: Path) -> CatalogueEntry:
+def _entry_from(*, path: Path, tag: str) -> CatalogueEntry:
     """Read one catalogue file, refusing one that breaks the rules the compiler depends on."""
     try:
         doc = _parse(libyaml=yaml.__with_libyaml__, text=path.read_text(encoding="utf-8"))
@@ -197,6 +200,7 @@ def _entry_from(*, path: Path) -> CatalogueEntry:
         name=path.stem,
         package=catalogue.package,
         request=request,
+        tag=tag,
         variants=tuple(catalogue.variants) if request.transform is not None else (),
     )
 
@@ -237,22 +241,51 @@ def _validation_text(*, exc: ValidationError) -> str:
     return ", ".join(parts)
 
 
+def _catalogue_paths(root: Path) -> list[tuple[str, Path]]:
+    """Each catalogue file under *root*, with the holding directory it belongs to.
+
+    A file in *root* itself is ``untagged``. A file in a directory directly under
+    *root* takes that directory's name. Nothing deeper is a catalogue file.
+    """
+    found: list[tuple[str, Path]] = []
+    for path in root.glob("*.yaml"):
+        if path.is_file() and not path.name.startswith("."):
+            found.append((UNTAGGED, path))
+    for child in root.iterdir():
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        for path in child.glob("*.yaml"):
+            if path.is_file() and not path.name.startswith("."):
+                found.append((child.name, path))
+    return found
+
+
 def load_source_catalogue(*, directory: Path | None = None) -> SourceCatalogue:
     """Read every catalogue file, from the installed dfe-schemas package unless *directory* names another.
 
-    A file that does not read as a catalogue entry is left out with one warning naming it, so one bad file never takes the rest with it.
+    A file in a directory directly under the catalogue root is read too, and
+    carries that directory as its tag. A file that does not read as a catalogue
+    entry is left out with one warning naming it, so one bad file never takes
+    the rest with it.
     """
     root = directory if directory is not None else dfe_schemas.schemas_root() / CATALOGUE_DIR
     if not (root.is_dir()):
         raise SourceCatalogueError(
             f"the installed dfe-schemas {dfe_schemas.__version__!r} ships no catalogue at {str(root)!r}"
         )
-    entries = {}
-    for path in sorted(root.glob("*.yaml")):
+    entries: dict[str, CatalogueEntry] = {}
+    for tag, path in sorted(_catalogue_paths(root), key=lambda item: item[1].stem):
         try:
-            entry = _entry_from(path=path)
+            entry = _entry_from(path=path, tag=tag)
         except SourceCatalogueError as exc:
             logger.warning("Catalogue file skipped", file=path.name, reason=str(exc))
+            continue
+        if entry.name in entries:
+            logger.warning(
+                "Catalogue file skipped",
+                file=str(path.relative_to(root)),
+                reason=f"an entry named {entry.name!r} is already loaded",
+            )
             continue
         entries[entry.name] = entry
     return SourceCatalogue(directory=root, entries=entries)
@@ -314,12 +347,17 @@ def catalogue_tags(*, directory: Path, name: str | None = None) -> list[str]:
 
 
 def source_catalogue() -> SourceCatalogue:
-    """The installed catalogue, read on first use and held, because the wheel does not change under a running process."""
+    """The catalogue the routes serve, read on first use and held.
+
+    That is the same tree :func:`catalogue_tags_directory` names: a checkout of
+    dfe-schemas beside this repository when it carries a catalogue, and
+    otherwise the installed package.
+    """
     global _held
     # Concurrent first callers wait for one read rather than each doing it.
     with _HOLD_LOCK:
         if _held is None:
-            _held = load_source_catalogue()
+            _held = load_source_catalogue(directory=catalogue_tags_directory())
         return _held
 
 
