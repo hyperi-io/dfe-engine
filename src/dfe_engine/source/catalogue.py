@@ -10,7 +10,6 @@
 Each ``catalogue/<source>.yaml`` in dfe-schemas is the ``POST /sources`` body for the source, whose match rule the intake chosen replaces, plus a ``catalogue`` block the write model ignores. A directory directly under ``catalogue/`` is a tag. It is read from the installed wheel, never the seeded schemas volume, because the seed never deletes and an entry dropped from the catalogue would survive there.
 """
 
-import os
 import threading
 from dataclasses import dataclass
 from pathlib import Path
@@ -306,37 +305,13 @@ def load_source_catalogue(*, directory: Path | None = None) -> SourceCatalogue:
 
 
 def catalogue_tags_directory() -> Path:
-    """The catalogue tree whose holding directories the tags route lists.
-
-    ``DFE_SCHEMAS_DIR/catalogue`` wins when that directory exists. Otherwise a
-    ``dfe-schemas`` checkout beside this repository does, which is where holding
-    directories appear before a release ships them. The installed package is the
-    fallback.
-    """
-    env_dir = os.getenv("DFE_SCHEMAS_DIR")
-    if env_dir:
-        configured = Path(env_dir) / CATALOGUE_DIR
-        if configured.is_dir():
-            return configured
-    checkout = _checkout_catalogue()
-    if checkout is not None:
-        return checkout
+    """The installed dfe-schemas catalogue, never the seeded schemas volume, whose copy the seed never refreshes."""
     root = dfe_schemas.schemas_root() / CATALOGUE_DIR
     if not root.is_dir():
         raise SourceCatalogueError(
             f"the installed dfe-schemas {dfe_schemas.__version__!r} ships no catalogue at {str(root)!r}"
         )
     return root
-
-
-def _checkout_catalogue() -> Path | None:
-    """``dfe-schemas/catalogue`` beside this repository, when that checkout is present."""
-    here = Path(__file__).resolve()
-    for parent in here.parents:
-        if (parent / "pyproject.toml").is_file() and (parent / "src" / "dfe_engine").is_dir():
-            candidate = parent.parent / "dfe-schemas" / CATALOGUE_DIR
-            return candidate if candidate.is_dir() else None
-    return None
 
 
 def catalogue_tags(*, directory: Path, name: str | None = None) -> list[str]:
@@ -418,12 +393,7 @@ def catalogue_tag_list(*, directory: Path, name: str | None = None) -> list[Cata
 
 
 def source_catalogue() -> SourceCatalogue:
-    """The catalogue the routes serve, read on first use and held.
-
-    That is the same tree :func:`catalogue_tags_directory` names: a checkout of
-    dfe-schemas beside this repository when it carries a catalogue, and
-    otherwise the installed package.
-    """
+    """The installed catalogue, read on first use and held, because the wheel does not change under a running process."""
     global _held
     # Concurrent first callers wait for one read rather than each doing it.
     with _HOLD_LOCK:
