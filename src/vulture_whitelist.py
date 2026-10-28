@@ -70,7 +70,6 @@ from dfe_engine.governance import lifecycle as governance_lifecycle
 from dfe_engine.hunt_runner import ch_coordinator as hunt_runner_ch_coordinator
 from dfe_engine.hunt_runner import models as hunt_runner_models
 from dfe_engine.hunt_runner import scheduler as hunt_runner_scheduler
-from dfe_engine.hunts import alert as hunts_alert
 from dfe_engine.hunts import alert_grouping as hunts_alert_grouping
 from dfe_engine.hunts import hunt_output as hunts_hunt_output
 from dfe_engine.hunts import rule_creation_service as hunts_rule_creation_service
@@ -601,8 +600,6 @@ gitcrud_versioned.VersionedDoc.save_draft
 gitcrud_versioned.VersionedDoc.set_deployed
 hunt_runner_ch_coordinator.ChCoordinator.renew
 hunt_runner_scheduler.mark_deferred
-hunts_alert.AlertDestinationRegistry.load_from_dict
-hunts_alert.AlertDispatcher.evaluate_and_send
 hunts_alert_grouping.AlertGroupingConfig.cooldown_td
 hunts_alert_grouping.AlertGroupingConfig.has_group_by
 hunts_alert_grouping.AlertStateManager.check_cooldown

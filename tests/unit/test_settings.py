@@ -1281,7 +1281,6 @@ class TestEverySettingIsRead:
         ("HuntsSettings", "resource_limit_read_bytes"),
         ("HuntsSettings", "resource_limit_memory_bytes"),
         ("HuntsSettings", "resource_limit_execution_ms"),
-        ("HuntsSettings", "alert_channels"),
         ("HuntsSettings", "default_alert_cooldown"),
         ("HuntsSettings", "default_max_sample_events"),
         ("QuerySettings", "yaml_dir"),
