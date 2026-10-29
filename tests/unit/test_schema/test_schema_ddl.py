@@ -766,6 +766,7 @@ class TestCommonHeaderIndexFidelity:
         columns = SchemaLoader.load_profile(profile_name="timeseries")
         raw = next(c for c in columns if c.name == "_raw")
         assert raw.index is None, "the common header declares a _raw index of its own"
+        assert raw.use_case, "the common header declares no _raw use_case"
 
         ddl = gen.generate_create_table("t", columns)
         assert _INDEX_TEMPLATES[raw.use_case].format(col="`_raw`", name="idx__raw") in ddl
