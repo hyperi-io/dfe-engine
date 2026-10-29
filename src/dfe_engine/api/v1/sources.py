@@ -1173,7 +1173,7 @@ def list_sources(
     )
 
 
-def _held_source_orgs(request: Request, user: AuthContext) -> set[str] | None:
+def held_source_orgs(request: Request, user: AuthContext) -> set[str] | None:
     """The org names ``user`` may read fetcher sources of, or None when it may read every org.
 
     A caller that reads every org with ``source:read`` (:func:`reads_every_org`) is
@@ -1185,7 +1185,7 @@ def _held_source_orgs(request: Request, user: AuthContext) -> set[str] | None:
     return {org.name for org in held_orgs(request, user, action)}
 
 
-def _source_is_readable(fetcher_org: str | None, has_fetcher: bool, held: set[str] | None) -> bool:
+def source_is_readable(fetcher_org: str | None, has_fetcher: bool, held: set[str] | None) -> bool:
     """Whether a source is readable by a caller held to ``held`` (None reads every org).
 
     A source definition is shared by every org, so only a fetcher source, which is
@@ -1194,6 +1194,12 @@ def _source_is_readable(fetcher_org: str | None, has_fetcher: bool, held: set[st
     if held is None or not has_fetcher:
         return True
     return (fetcher_org or DEFAULT_ORG_NAME) in held
+
+
+def source_model_is_readable(source: Source, held: set[str] | None) -> bool:
+    """:func:`source_is_readable` for a stored source."""
+    fetcher = source.fetcher
+    return source_is_readable(fetcher.org if fetcher else None, fetcher is not None, held)
 
 
 def _readable_by_caller(
@@ -1209,16 +1215,16 @@ def _readable_by_caller(
     Returns:
         The rows the caller may list, in their order.
     """
-    held = _held_source_orgs(request, user)
+    held = held_source_orgs(request, user)
     return [
         row
         for row in rows
-        if _source_is_readable(row.get("fetcher_org"), bool(row.get("has_fetcher")), held)
+        if source_is_readable(row.get("fetcher_org"), bool(row.get("has_fetcher")), held)
     ]
 
 
-def require_source_in_held_orgs(
-    name: str, request: Request, user: CurrentUser, registry: SourceReg
+def require_source_readable(
+    request: Request, user: AuthContext, registry: SourceReg, name: str
 ) -> None:
     """Refuse a read of the fetcher source ``name`` when it is bound to an org the caller lacks.
 
@@ -1229,15 +1235,14 @@ def require_source_in_held_orgs(
         HTTPException: 403 ``org_not_granted`` for a fetcher source bound to an org the
             caller is not held to.
     """
-    held = _held_source_orgs(request, user)
+    held = held_source_orgs(request, user)
     if held is None:
         return
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
         return
-    fetcher_org = source.fetcher.org if source.fetcher else None
-    if not _source_is_readable(fetcher_org, source.fetcher is not None, held):
+    if not source_model_is_readable(source, held):
         raise HTTPException(
             status_code=403,
             detail={
@@ -1245,6 +1250,13 @@ def require_source_in_held_orgs(
                 "message": f"Source {name!r} is bound to an org the caller does not hold",
             },
         )
+
+
+def require_source_in_held_orgs(
+    name: str, request: Request, user: CurrentUser, registry: SourceReg
+) -> None:
+    """Dependency form of :func:`require_source_readable` for a route with a ``{name}`` path."""
+    require_source_readable(request, user, registry, name)
 
 
 _CREATED_APPS_NOT_SYNCED = {
