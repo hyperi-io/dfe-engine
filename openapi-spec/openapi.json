@@ -6140,7 +6140,7 @@
           "Sources"
         ],
         "summary": "List Catalogue",
-        "description": "List the sources the installed dfe-schemas catalogue ships ready to create.\n\n``tags`` keeps an entry whose holding directory is one of the names given.\n``untagged`` is a file that sits in the catalogue root, and omitting ``tags``\nlists every entry. An entry already stored as a source is left out, matched\non the catalogue entry name even when the source was given a different one. A\nsource written by hand does not hide an entry. Each entry says whether the\ndeployed transform ships\nits default variant, read off that app's mounted contract, so a console can\nhold back an entry the create would refuse. It also says whether this\ndeployment can run the entry at all: a source that needs a per-source app\n(a fetcher or a transform) is refused on a gRPC deployment.",
+        "description": "List the sources the installed dfe-schemas catalogue ships ready to create.\n\n``tags`` keeps an entry whose holding directory is one of the names given.\n``untagged`` is a file that sits in the catalogue root, and omitting ``tags``\nlists every entry. ``engine`` keeps an entry whose transform engine is that\none, without regard to case, and an engine no entry uses lists nothing. An\nentry already stored as a source is left out unless ``include_stored`` is set,\nmatched on the catalogue entry name even when the source was given a different\none. A source written by hand does not hide an entry. Each entry says whether\nthe deployed transform ships its default variant, read off that app's mounted\ncontract, so a console can hold back an entry the create would refuse. It also\nsays whether this deployment can run the entry at all: a source that needs a\nper-source app (a fetcher or a transform) is refused on a gRPC deployment.",
         "operationId": "sources.catalogue",
         "parameters": [
           {
@@ -6199,6 +6199,36 @@
               "title": "Tags"
             },
             "description": "Only entries in one of these holding directories. Repeat the param for more than one. untagged is the files that sit in the catalogue root. Omit it to list the whole catalogue"
+          },
+          {
+            "name": "engine",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries whose transform engine is this one, matched without regard to case. An engine no entry uses lists nothing. Omit it to list every engine",
+              "title": "Engine"
+            },
+            "description": "Only entries whose transform engine is this one, matched without regard to case. An engine no entry uses lists nothing. Omit it to list every engine"
+          },
+          {
+            "name": "include_stored",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "List entries already stored as a source too. Off by default, so the create-from-catalogue page offers only what is left to create",
+              "default": false,
+              "title": "Include Stored"
+            },
+            "description": "List entries already stored as a source too. Off by default, so the create-from-catalogue page offers only what is left to create"
           },
           {
             "name": "page",

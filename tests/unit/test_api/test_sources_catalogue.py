@@ -176,6 +176,62 @@ class TestListCatalogue:
         assert listed(["aws", "untagged"]) == ["aws-cloudtrail", "okta"]
         assert listed(["nope"]) == []
 
+    @pytest.mark.parametrize(
+        ("params", "expected"),
+        [
+            ({}, ["cisco-asa"]),
+            ({"engine": "elastic"}, []),
+            ({"engine": "vector"}, ["cisco-asa"]),
+            ({"engine": "VECTOR"}, ["cisco-asa"]),
+            ({"engine": "nobody"}, []),
+            ({"include_stored": True}, ["cisco-asa", "okta"]),
+            ({"engine": "elastic", "include_stored": True}, ["okta"]),
+            ({"engine": "Elastic", "include_stored": True}, ["okta"]),
+            ({"engine": "vector", "include_stored": True}, ["cisco-asa"]),
+            ({"engine": "nobody", "include_stored": True}, []),
+        ],
+        ids=[
+            "default-drops-stored",
+            "engine-drops-stored-by-default",
+            "engine-keeps-that-engine",
+            "engine-ignores-case",
+            "unknown-engine-lists-nothing",
+            "include-stored-keeps-stored",
+            "engine-with-include-stored",
+            "engine-case-with-include-stored",
+            "other-engine-with-include-stored",
+            "unknown-engine-with-include-stored",
+        ],
+    )
+    def test_engine_and_include_stored(
+        self,
+        admin_headers: dict[str, str],
+        client: TestClient,
+        tmp_path: Path,
+        monkeypatch,
+        params: dict[str, Any],
+        expected: list[str],
+    ):
+        holding = tmp_path / "holding"
+        holding.mkdir()
+        entries = CATALOGUE_FIXTURES / "entries"
+        (holding / "okta.yaml").write_bytes((entries / "okta.yaml").read_bytes())
+        other = (entries / "cisco-asa.yaml").read_text(encoding="utf-8")
+        (holding / "cisco-asa.yaml").write_text(
+            other.replace("engine: elastic", "engine: vector"), encoding="utf-8"
+        )
+        monkeypatch.setattr(
+            sc, "source_catalogue", lambda: sc.load_source_catalogue(directory=holding)
+        )
+        created = _create(client, admin_headers, "okta", {"intake": "beats"})
+        assert created.status_code == 201, created.text
+
+        resp = client.get(CATALOGUE, headers=admin_headers, params={**params, "per_page": -1})
+
+        assert resp.status_code == 200, resp.text
+        assert [row["name"] for row in resp.json()["items"]] == expected
+        assert resp.json()["total"] == len(expected)
+
     def test_unknown_intake(self, admin_headers: dict[str, str], client: TestClient):
         resp = client.get(CATALOGUE, headers=admin_headers, params={"intake": "carrier"})
         assert (resp.status_code, resp.json()["message"]) == (
