@@ -56,9 +56,12 @@ from dfe_engine.api.deps import (
     SourceReg,
     get_field_map_registry_optional,
     get_interactive_clickhouse_client,
+    held_orgs,
+    reads_every_org,
     refuse_unknown_orgs,
     request_tenancy,
     require_action,
+    require_own_org_action,
     ttl_settings,
 )
 from dfe_engine.api.errors import (
@@ -99,6 +102,7 @@ from dfe_engine.exchange.sources import apply_source_bundle, build_source_bundle
 from dfe_engine.git_identity import git_author
 from dfe_engine.manifest import ManifestError
 from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError, resync_bearer_tokens
+from dfe_engine.orgs.models import DEFAULT_ORG_NAME
 from dfe_engine.schema.applier import SchemaApplyError, live_tables
 from dfe_engine.schema.derived_registry import derived_reference_root
 from dfe_engine.schema.lock import SchemaLockBusyError, SchemaLockError, ddl_lease
@@ -1118,9 +1122,10 @@ class SourceVersionGetDetailResponse(SourceVersionGetResponse):
 @router.get(
     "",
     response_model=PaginatedSourceSummaryResponse,
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["source_read"]))],
 )
 def list_sources(
+    request: Request,
     user: CurrentUser,
     registry: SourceReg,
     pagination: PaginationParams = Depends(),
@@ -1135,9 +1140,12 @@ def list_sources(
     """List sources with pagination, search, filtering, and a full object tree.
 
     The landing source (``main``) is always the first item when it is in the
-    result set; remaining sources keep the requested sort.
+    result set; remaining sources keep the requested sort. A caller held to its
+    orgs does not see a fetcher source bound to another org.
     """
-    raw_sources = registry.list_sources(enabled_only=bool(enabled))
+    raw_sources = _readable_by_caller(
+        request, user, registry.list_sources(enabled_only=bool(enabled))
+    )
 
     if enabled is False:
         raw_sources = [s for s in raw_sources if not s.get("enabled", True)]
@@ -1150,6 +1158,36 @@ def list_sources(
     return PaginatedSourceSummaryResponse.from_summaries(
         summaries, pagination.page, pagination.per_page
     )
+
+
+def _readable_by_caller(
+    request: Request, user: CurrentUser, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The source rows ``user`` may list: all of them, or those of the orgs it is held to.
+
+    A source definition is shared by every org, so only a fetcher source, which is
+    bound to one org (the default org when it names none), belongs to an org. A caller
+    that reads every org with ``source:read`` sees every row. Any other caller sees
+    the shared sources and the fetcher sources of the orgs its grants hold
+    (:func:`~dfe_engine.api.deps.held_orgs`).
+
+    Args:
+        request: The request, for the settings, role definitions and org registry.
+        user: The caller's auth context.
+        rows: The registry's list rows.
+
+    Returns:
+        The rows the caller may list, in their order.
+    """
+    action = scopes_dict["source_read"]
+    if not request.app.state.settings.auth.enabled or reads_every_org(request, user, action):
+        return rows
+    held = {org.name for org in held_orgs(request, user, action)}
+    return [
+        row
+        for row in rows
+        if not row.get("has_fetcher") or (row.get("fetcher_org") or DEFAULT_ORG_NAME) in held
+    ]
 
 
 _CREATED_APPS_NOT_SYNCED = {
