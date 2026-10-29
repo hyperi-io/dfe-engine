@@ -279,6 +279,7 @@ routes = [
   { old = "POST /api/v1/sources", new = "PUT /api/v1/sources/{source}", status = "merged", note = "apply-creates" },
   { old = "POST /api/v1/sources/bulk", status = "unchanged" },
   { old = "GET /api/v1/sources/catalogue", status = "unchanged" },
+  { old = "GET /api/v1/sources/catalogue-tags", status = "unchanged" },
   { old = "GET /api/v1/sources/engines", status = "unchanged" },
   { old = "POST /api/v1/sources/from-catalogue", status = "unchanged" },
   { old = "POST /api/v1/sources/import", status = "unchanged" },

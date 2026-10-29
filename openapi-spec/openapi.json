@@ -6140,7 +6140,7 @@
           "Sources"
         ],
         "summary": "List Catalogue",
-        "description": "List the sources the installed dfe-schemas catalogue ships ready to create.\n\nAn entry already stored as a source is left out, matched on the catalogue entry\nname even when the source was given a different one. A source written by hand\ndoes not hide an entry. Each entry says whether the deployed transform ships\nits default variant, read off that app's mounted contract, so a console can\nhold back an entry the create would refuse. It also says whether this\ndeployment can run the entry at all: a source that needs a per-source app\n(a fetcher or a transform) is refused on a gRPC deployment.",
+        "description": "List the sources the installed dfe-schemas catalogue ships ready to create.\n\n``tags`` keeps an entry whose holding directory is one of the names given.\n``untagged`` is a file that sits in the catalogue root, and omitting ``tags``\nlists every entry. An entry already stored as a source is left out, matched\non the catalogue entry name even when the source was given a different one. A\nsource written by hand does not hide an entry. Each entry says whether the\ndeployed transform ships\nits default variant, read off that app's mounted contract, so a console can\nhold back an entry the create would refuse. It also says whether this\ndeployment can run the entry at all: a source that needs a per-source app\n(a fetcher or a transform) is refused on a gRPC deployment.",
         "operationId": "sources.catalogue",
         "parameters": [
           {
@@ -6178,6 +6178,27 @@
               "title": "Search"
             },
             "description": "Search the entry name, package and data stream"
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only entries in one of these holding directories. Repeat the param for more than one. untagged is the files that sit in the catalogue root. Omit it to list the whole catalogue",
+              "title": "Tags"
+            },
+            "description": "Only entries in one of these holding directories. Repeat the param for more than one. untagged is the files that sit in the catalogue root. Omit it to list the whole catalogue"
           },
           {
             "name": "page",
@@ -6255,6 +6276,119 @@
             "sources"
           ],
           "verb": "catalogue",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "source:read"
+        }
+      }
+    },
+    "/api/v1/sources/catalogue-tags": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "List Catalogue Tags",
+        "description": "List the directories under the catalogue that hold source files.\n\nA tag is one directory directly under ``catalogue/``. Files that sit in the\ncatalogue root, rather than in one of those directories, are the tag\n``untagged``. ``id`` is the directory key. ``name`` and ``description`` come\nfrom ``registries/catalogue-tags.yaml`` beside that catalogue. ``name`` keeps\na tag whose key or display name starts with it, so ``act`` matches\n``active-mq`` and does not match a name that only contains those letters later.",
+        "operationId": "sources.catalogue-tags",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Keep tags whose directory key or display name starts with this. The match ignores case",
+              "title": "Name"
+            },
+            "description": "Keep tags whose directory key or display name starts with this. The match ignores case"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_CatalogueTagObject_"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "sources",
+          "resource": "sources",
+          "hierarchy": [
+            "sources"
+          ],
+          "verb": "catalogue-tags",
           "read_only": true,
           "cli": {
             "hidden": false,
@@ -32124,6 +32258,33 @@
         "title": "CatalogueSourcesResponse",
         "description": "What creating the requested catalogue entries did.\n\n``created`` is what was stored. ``failed`` is what was left unstored. A later\nentry failing does not remove an earlier one. The apps are reconciled once,\nfor everything that was stored."
       },
+      "CatalogueTagObject": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "The directory name, which is the tag key. untagged is the files that sit in the catalogue root rather than in a directory"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The name the console shows, from the tag dictionary"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "What this tag groups, from the tag dictionary"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "description"
+        ],
+        "title": "CatalogueTagObject",
+        "description": "One directory under the catalogue that holds source files."
+      },
       "CelCheckBatchRequest": {
         "properties": {
           "expressions": {
@@ -39264,6 +39425,75 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[CatalogueEntryObject]"
+      },
+      "PaginatedResponse_CatalogueTagObject_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogueTagObject"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "description": "Number of pages, 1 when ``per_page`` is -1 and every item is on one page.",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "description": "The next page number, or None on the last page or when every item is on one.",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "description": "The previous page number, or None on the first page.",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[CatalogueTagObject]"
       },
       "PaginatedResponse_DerivedSchemaSummary_": {
         "properties": {

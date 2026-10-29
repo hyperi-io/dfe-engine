@@ -755,22 +755,21 @@ class TestCommonHeaderIndexFidelity:
     """The rendered header has to match the dfe-schemas YAML it is rendered from."""
 
     def test_the_raw_index_is_the_one_the_common_header_declares(self, gen: DDLGenerator):
-        """Whatever the header declares is what gets rendered, character for character.
+        """The header gives `_raw` a use_case and no index, so its use_case template is rendered.
 
-        The declared string is read from the header rather than restated here: a
-        tokenizer named in this file is one that goes stale the next time
-        ClickHouse retires one, and a stale literal here tests nothing.
+        Both are read rather than restated here: a tokenizer named in this file is
+        one that goes stale the next time ClickHouse retires one.
         """
+        from dfe_engine.schema.schema_ddl import _INDEX_TEMPLATES
         from dfe_engine.schema.schema_loader import SchemaLoader
 
         columns = SchemaLoader.load_profile(profile_name="timeseries")
         raw = next(c for c in columns if c.name == "_raw")
-        assert raw.index, "the common header declares no _raw index"
+        assert raw.index is None, "the common header declares a _raw index of its own"
+        assert raw.use_case, "the common header declares no _raw use_case"
 
         ddl = gen.generate_create_table("t", columns)
-        assert f"INDEX idx__raw `_raw` TYPE {raw.index}" in ddl
-        # The use_case template, which must NOT replace a declared index.
-        assert "ngrams(3)" not in ddl
+        assert _INDEX_TEMPLATES[raw.use_case].format(col="`_raw`", name="idx__raw") in ddl
 
 
 # ── ALTER TABLE ─────────────────────────────────────────────────────

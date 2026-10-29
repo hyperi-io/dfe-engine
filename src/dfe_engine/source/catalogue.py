@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The source catalogue, and the write body an entry compiles to on the intake chosen.
 
-Each ``catalogue/<source>.yaml`` in dfe-schemas is the ``POST /sources`` body for the source, whose match rule the intake chosen replaces, plus a ``catalogue`` block the write model ignores. It is read from the installed wheel, never the seeded schemas volume, because the seed never deletes and an entry dropped from the catalogue would survive there.
+Each ``catalogue/<source>.yaml`` in dfe-schemas is the ``POST /sources`` body for the source, whose match rule the intake chosen replaces, plus a ``catalogue`` block the write model ignores. A directory directly under ``catalogue/`` is a tag. It is read from the installed wheel, never the seeded schemas volume, because the seed never deletes and an entry dropped from the catalogue would survive there.
 """
 
 import threading
@@ -35,6 +35,9 @@ from dfe_engine.transport import SourceTransport
 
 CATALOGUE_DIR = "catalogue"
 """The catalogue's directory under the dfe-schemas trees."""
+
+UNTAGGED = "untagged"
+"""The tag for catalogue files that sit in the catalogue root, not in a holding directory."""
 
 CatalogueIntake = Literal["beats", "receiver", "fetcher"]
 """How an entry's data reaches the platform, and so which origin its source has."""
@@ -98,6 +101,9 @@ class CatalogueEntry:
     name: str
     """The source name the entry creates, which is also its file name."""
 
+    tag: str
+    """The holding directory this file lives in. ``untagged`` when it sits in the catalogue root."""
+
     request: SourceWriteRequest
     """The body as the file carries it, on the default intake."""
 
@@ -143,6 +149,20 @@ class SourceCatalogue:
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogueTag:
+    """One holding directory as the console lists it."""
+
+    id: str
+    """The directory name, which is the tag key."""
+
+    name: str
+    """The name the console shows."""
+
+    description: str
+    """What the tag groups."""
+
+
+@dataclass(frozen=True, slots=True)
 class VariantAvailability:
     """Whether the deployed transform ships a variant, and the reason for the answer."""
 
@@ -150,7 +170,7 @@ class VariantAvailability:
     reason: str
 
 
-def _entry_from(*, path: Path) -> CatalogueEntry:
+def _entry_from(*, path: Path, tag: str) -> CatalogueEntry:
     """Read one catalogue file, refusing one that breaks the rules the compiler depends on."""
     try:
         doc = _parse(libyaml=yaml.__with_libyaml__, text=path.read_text(encoding="utf-8"))
@@ -193,6 +213,7 @@ def _entry_from(*, path: Path) -> CatalogueEntry:
         name=path.stem,
         package=catalogue.package,
         request=request,
+        tag=tag,
         variants=tuple(catalogue.variants) if request.transform is not None else (),
     )
 
@@ -233,25 +254,142 @@ def _validation_text(*, exc: ValidationError) -> str:
     return ", ".join(parts)
 
 
+def _catalogue_paths(root: Path) -> list[tuple[str, Path]]:
+    """Each catalogue file under *root*, with the holding directory it belongs to.
+
+    A file in *root* itself is ``untagged``. A file in a directory directly under
+    *root* takes that directory's name. Nothing deeper is a catalogue file.
+    """
+    found: list[tuple[str, Path]] = []
+    for path in root.glob("*.yaml"):
+        if path.is_file() and not path.name.startswith("."):
+            found.append((UNTAGGED, path))
+    for child in root.iterdir():
+        if not child.is_dir() or child.name.startswith("."):
+            continue
+        for path in child.glob("*.yaml"):
+            if path.is_file() and not path.name.startswith("."):
+                found.append((child.name, path))
+    return found
+
+
 def load_source_catalogue(*, directory: Path | None = None) -> SourceCatalogue:
     """Read every catalogue file, from the installed dfe-schemas package unless *directory* names another.
 
-    A file that does not read as a catalogue entry is left out with one warning naming it, so one bad file never takes the rest with it.
+    A file in a directory directly under the catalogue root is read too, and
+    carries that directory as its tag. A file that does not read as a catalogue
+    entry is left out with one warning naming it, so one bad file never takes
+    the rest with it.
     """
     root = directory if directory is not None else dfe_schemas.schemas_root() / CATALOGUE_DIR
     if not (root.is_dir()):
         raise SourceCatalogueError(
             f"the installed dfe-schemas {dfe_schemas.__version__!r} ships no catalogue at {str(root)!r}"
         )
-    entries = {}
-    for path in sorted(root.glob("*.yaml")):
+    entries: dict[str, CatalogueEntry] = {}
+    for tag, path in sorted(_catalogue_paths(root), key=lambda item: item[1].stem):
         try:
-            entry = _entry_from(path=path)
+            entry = _entry_from(path=path, tag=tag)
         except SourceCatalogueError as exc:
             logger.warning("Catalogue file skipped", file=path.name, reason=str(exc))
             continue
+        if entry.name in entries:
+            logger.warning(
+                "Catalogue file skipped",
+                file=str(path.relative_to(root)),
+                reason=f"an entry named {entry.name!r} is already loaded",
+            )
+            continue
         entries[entry.name] = entry
     return SourceCatalogue(directory=root, entries=entries)
+
+
+def catalogue_tags_directory() -> Path:
+    """The installed dfe-schemas catalogue, never the seeded schemas volume, whose copy the seed never refreshes."""
+    root = dfe_schemas.schemas_root() / CATALOGUE_DIR
+    if not root.is_dir():
+        raise SourceCatalogueError(
+            f"the installed dfe-schemas {dfe_schemas.__version__!r} ships no catalogue at {str(root)!r}"
+        )
+    return root
+
+
+def catalogue_tags(*, directory: Path, name: str | None = None) -> list[str]:
+    """The holding directories under *directory*, in name order.
+
+    *name* keeps a tag whose name starts with it. The comparison ignores case.
+    Catalogue files that sit in *directory* itself, rather than in a holding
+    directory, are one tag, ``untagged``.
+    """
+    prefix = (name or "").casefold()
+    names = [
+        path.name for path in directory.iterdir() if path.is_dir() and not path.name.startswith(".")
+    ]
+    loose = [
+        path
+        for path in directory.glob("*.yaml")
+        if path.is_file() and not path.name.startswith(".")
+    ]
+    if loose and UNTAGGED not in names:
+        names.append(UNTAGGED)
+    return sorted(tag for tag in names if tag.casefold().startswith(prefix))
+
+
+def catalogue_tag_dictionary(*, directory: Path) -> dict[str, CatalogueTag]:
+    """Pretty names for the holding directories, keyed by directory.
+
+    The file is ``registries/catalogue-tags.yaml`` beside the catalogue. A
+    missing or unreadable file leaves the dictionary empty, and a tag it does
+    not name keeps the directory key as its name.
+    """
+    path = directory.parent / "registries" / "catalogue-tags.yaml"
+    if not path.is_file():
+        return {}
+    try:
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        logger.warning("Catalogue tag dictionary skipped", file=str(path), reason=str(exc))
+        return {}
+    if not isinstance(loaded, dict):
+        logger.warning(
+            "Catalogue tag dictionary skipped",
+            file=str(path),
+            reason="it is not a mapping",
+        )
+        return {}
+    found: dict[str, CatalogueTag] = {}
+    for key, value in loaded.items():
+        tag_id = str(key)
+        if not isinstance(value, dict):
+            continue
+        pretty = value.get("name")
+        description = value.get("description")
+        found[tag_id] = CatalogueTag(
+            description=str(description) if description else "",
+            id=tag_id,
+            name=str(pretty) if pretty else tag_id,
+        )
+    return found
+
+
+def catalogue_tag_list(*, directory: Path, name: str | None = None) -> list[CatalogueTag]:
+    """The holding directories under *directory*, with the names the console shows.
+
+    *name* keeps a tag whose directory key or display name starts with it. The
+    comparison ignores case.
+    """
+    prefix = (name or "").casefold()
+    dictionary = catalogue_tag_dictionary(directory=directory)
+    listed = []
+    for tag_id in catalogue_tags(directory=directory):
+        known = dictionary.get(tag_id)
+        tag = known if known is not None else CatalogueTag(description="", id=tag_id, name=tag_id)
+        if prefix and not (
+            tag.id.casefold().startswith(prefix) or tag.name.casefold().startswith(prefix)
+        ):
+            continue
+        listed.append(tag)
+    return listed
 
 
 def source_catalogue() -> SourceCatalogue:
@@ -260,7 +398,7 @@ def source_catalogue() -> SourceCatalogue:
     # Concurrent first callers wait for one read rather than each doing it.
     with _HOLD_LOCK:
         if _held is None:
-            _held = load_source_catalogue()
+            _held = load_source_catalogue(directory=catalogue_tags_directory())
         return _held
 
 

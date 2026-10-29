@@ -9,6 +9,7 @@
 """The catalogue routes, over the installed dfe-schemas catalogue and a mounted elastic contract."""
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -26,9 +27,11 @@ from tests.unit.test_api.sources_catalogue_cases import (
     CreateFromCatalogueRejectCase,
     ListAgainstTheContractCase,
 )
+from tests.unit.test_source.factories import CATALOGUE_FIXTURES
 from tests.unit.test_source.source_catalogue_cases import ELASTIC_CONTRACT, NO_CONTRACT
 
 CATALOGUE = "/api/v1/sources/catalogue"
+CATALOGUE_TAGS = "/api/v1/sources/catalogue-tags"
 FROM_CATALOGUE = "/api/v1/sources/from-catalogue"
 
 
@@ -145,6 +148,34 @@ class TestListCatalogue:
         receivers = [name for name, entry in entries.items() if "receiver" in entry.intakes]
         assert [row["name"] for row in listed] == receivers
 
+    def test_tags_keep_entries_in_those_directories(
+        self, admin_headers: dict[str, str], client: TestClient, tmp_path: Path, monkeypatch
+    ):
+        holding = tmp_path / "holding"
+        (holding / "aws").mkdir(parents=True)
+        entries = CATALOGUE_FIXTURES / "entries"
+        (holding / "okta.yaml").write_bytes((entries / "okta.yaml").read_bytes())
+        (holding / "aws" / "aws-cloudtrail.yaml").write_bytes(
+            (entries / "aws-cloudtrail.yaml").read_bytes()
+        )
+        monkeypatch.setattr(
+            sc, "source_catalogue", lambda: sc.load_source_catalogue(directory=holding)
+        )
+
+        def listed(tags: list[str] | None = None) -> list[str]:
+            params: dict[str, Any] = {"per_page": -1}
+            if tags is not None:
+                params["tags"] = tags
+            resp = client.get(CATALOGUE, headers=admin_headers, params=params)
+            assert resp.status_code == 200, resp.text
+            return [row["name"] for row in resp.json()["items"]]
+
+        assert listed() == ["aws-cloudtrail", "okta"]
+        assert listed(["aws"]) == ["aws-cloudtrail"]
+        assert listed(["UNTAGGED"]) == ["okta"]
+        assert listed(["aws", "untagged"]) == ["aws-cloudtrail", "okta"]
+        assert listed(["nope"]) == []
+
     def test_unknown_intake(self, admin_headers: dict[str, str], client: TestClient):
         resp = client.get(CATALOGUE, headers=admin_headers, params={"intake": "carrier"})
         assert (resp.status_code, resp.json()["message"]) == (
@@ -190,6 +221,85 @@ class TestListCatalogue:
         assert written.status_code == 201, written.text
         listed = client.get(CATALOGUE, headers=admin_headers, params={"search": "okta"})
         assert "okta" in {row["name"] for row in listed.json()["items"]}
+
+
+class TestListCatalogueTags:
+    def test_a_tag_is_a_holding_directory(
+        self, admin_headers: dict[str, str], client: TestClient, tmp_path: Path, monkeypatch
+    ):
+        holding = tmp_path / "holding"
+        holding.mkdir()
+        for tag in ("aws", "abnormal", "active-mq"):
+            (holding / tag).mkdir()
+        (holding / "okta.yaml").write_text("not a tag\n", encoding="utf-8")
+        (holding / ".hidden").mkdir()
+        monkeypatch.setattr(sc, "catalogue_tags_directory", lambda: holding)
+
+        listed = client.get(CATALOGUE_TAGS, headers=admin_headers, params={"per_page": -1}).json()
+
+        assert [(row["id"], row["name"], row["description"]) for row in listed["items"]] == [
+            ("abnormal", "abnormal", ""),
+            ("active-mq", "active-mq", ""),
+            ("aws", "aws", ""),
+            ("untagged", "untagged", ""),
+        ]
+
+    def test_name_keeps_a_tag_that_starts_with_it(
+        self, admin_headers: dict[str, str], client: TestClient, tmp_path: Path, monkeypatch
+    ):
+        holding = tmp_path / "holding"
+        holding.mkdir()
+        for tag in ("aws", "abnormal", "active-mq"):
+            (holding / tag).mkdir()
+        (holding / "okta.yaml").write_text("not a tag\n", encoding="utf-8")
+        monkeypatch.setattr(sc, "catalogue_tags_directory", lambda: holding)
+
+        listed = client.get(
+            CATALOGUE_TAGS, headers=admin_headers, params={"name": "ACT", "per_page": -1}
+        ).json()
+        middle = client.get(
+            CATALOGUE_TAGS, headers=admin_headers, params={"name": "mq", "per_page": -1}
+        ).json()
+        loose = client.get(
+            CATALOGUE_TAGS, headers=admin_headers, params={"name": "un", "per_page": -1}
+        ).json()
+
+        assert [row["id"] for row in listed["items"]] == ["active-mq"]
+        assert middle["items"] == []
+        assert [row["id"] for row in loose["items"]] == ["untagged"]
+
+    def test_the_dictionary_supplies_the_display_name(
+        self, admin_headers: dict[str, str], client: TestClient, tmp_path: Path, monkeypatch
+    ):
+        holding = tmp_path / "catalogue"
+        (holding / "aws").mkdir(parents=True)
+        registry = tmp_path / "registries"
+        registry.mkdir()
+        (registry / "catalogue-tags.yaml").write_text(
+            "aws:\n  name: Amazon Web Services\n  description: Logs and metrics from AWS services.\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(sc, "catalogue_tags_directory", lambda: holding)
+
+        listed = client.get(CATALOGUE_TAGS, headers=admin_headers, params={"per_page": -1}).json()
+        by_name = client.get(
+            CATALOGUE_TAGS, headers=admin_headers, params={"name": "Amazon", "per_page": -1}
+        ).json()
+
+        assert listed["items"] == [
+            {
+                "id": "aws",
+                "name": "Amazon Web Services",
+                "description": "Logs and metrics from AWS services.",
+            }
+        ]
+        assert [row["id"] for row in by_name["items"]] == ["aws"]
+
+    def test_needs_source_read(self, client: TestClient):
+        assert client.get(CATALOGUE_TAGS).status_code == 401
+
+    def test_a_viewer_may_list(self, client: TestClient, viewer_headers: dict[str, str]):
+        assert client.get(CATALOGUE_TAGS, headers=viewer_headers).status_code == 200
 
 
 class TestCreateSourceFromCatalogue:

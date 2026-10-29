@@ -10,11 +10,11 @@ One row per operation the engine serves today. **New** is where it goes, and its
 |---|---|---|
 | moved | 89 | A new path, method or both |
 | merged into | 9 | Folded into the operation **New** names |
-| unchanged | 37 | Same method and path |
+| unchanged | 38 | Same method and path |
 | frozen | 54 | Kept as it is |
 | decide | 129 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 318 | |
+| total | 319 | |
 
 ## Questions
 
@@ -186,6 +186,7 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | `POST /api/v1/sources` | `PUT /api/v1/sources/{source}` | `sources.apply` | `dfe sources apply` | `dfe_sources_apply` | merged into | ui 5, infra 4, docker 1 | One PUT creates (`If-None-Match: *`) and replaces (`If-Match`). |
 | `POST /api/v1/sources/bulk` | `POST /api/v1/sources/bulk` | `sources.bulk` | `dfe sources bulk` | `dfe_sources_bulk` | unchanged | ui 2 |  |
 | `GET /api/v1/sources/catalogue` | `GET /api/v1/sources/catalogue` | `sources.catalogue` | `dfe sources catalogue` | `dfe_sources_catalogue` | unchanged | ui 2 |  |
+| `GET /api/v1/sources/catalogue-tags` | `GET /api/v1/sources/catalogue-tags` | `sources.catalogue-tags` | `dfe sources catalogue-tags` | `dfe_sources_catalogue_tags` | unchanged | 0 |  |
 | `GET /api/v1/sources/engines` | `GET /api/v1/sources/engines` | `sources.engines` | `dfe sources engines` | `dfe_sources_engines` | unchanged | ui 2 |  |
 | `POST /api/v1/sources/from-catalogue` | `POST /api/v1/sources/from-catalogue` | `sources.from-catalogue` | `dfe sources from-catalogue` | `dfe_sources_from_catalogue` | unchanged | ui 2 |  |
 | `POST /api/v1/sources/import` | `POST /api/v1/sources/import` | `sources.import` | `dfe sources import` | `dfe_sources_import` | unchanged | 0 |  |
