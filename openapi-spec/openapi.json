@@ -8887,7 +8887,7 @@
           "Kafka Topics"
         ],
         "summary": "List Topic Status",
-        "description": "Report each source topic's existence, shape, config and drift.\n\nRead-only: it creates nothing, so a status call against a broker mid-restart\nreports that it could not be read rather than reporting every topic missing.",
+        "description": "Report each source topic's existence, shape, config and drift.\n\nRead-only: it creates nothing, so a status call against a broker mid-restart\nreports that it could not be read rather than reporting every topic missing.\nA caller held to its orgs sees the topics of the sources it may read.",
         "operationId": "kafka.topics",
         "parameters": [
           {

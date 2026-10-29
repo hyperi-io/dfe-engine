@@ -23,7 +23,10 @@ list was read with. A list naming other blocks than the ones there now answers
 Both writes take ``dry_run`` and end by bringing the apps into step, and
 ``reload`` says whether the change reached them without a restart.
 
-Reads need ``source:read``, writes ``source:write``.
+Reads need ``source:read`` at system scope or in one of the caller's orgs, writes
+``source:write``. The rule blocks of a fetcher source bound to an org the caller does
+not hold are left out of the list. The bindings and profiles are the deployment's
+own and shared by every source, so any reader sees them.
 """
 
 from collections.abc import Callable
@@ -41,9 +44,14 @@ from scalo.api import (
     paginate,
 )
 
-from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
+from dfe_engine.api.deps import CurrentUser, SourceReg, require_action, require_own_org_action
 from dfe_engine.api.errors import ErrorCode, ErrorResponse
-from dfe_engine.api.v1.sources import AppsSync, reconcile_derived_apps
+from dfe_engine.api.v1.sources import (
+    AppsSync,
+    held_source_orgs,
+    reconcile_derived_apps,
+    source_model_is_readable,
+)
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -81,7 +89,7 @@ from dfe_engine.source.registry import (
 
 router = APIRouter(prefix="/ingest", tags=["Ingest rules"], dependencies=[WRITE_TURN])
 
-_READ = Depends(require_action(scopes_dict["source_read"]))
+_READ = Depends(require_own_org_action(scopes_dict["source_read"]))
 _WRITE = Depends(require_action(scopes_dict["source_write"]))
 
 RuleTarget = Literal["_source", "_org_id"]
@@ -308,9 +316,24 @@ def _conditional_write[T](
 # -- Rules -------------------------------------------------------------------
 
 
+def _readable_blocks(
+    request: Request, user: CurrentUser, registry: SourceReg, blocks: list[RuleBlockResponse]
+) -> list[RuleBlockResponse]:
+    """The blocks ``user`` may read: a source's block only where the caller may read the source."""
+    held = held_source_orgs(request, user)
+    if held is None:
+        return blocks
+    readable = {
+        source.source
+        for source in registry.get_all_sources()
+        if source_model_is_readable(source, held)
+    }
+    return [block for block in blocks if block.kind != "source" or block.name in readable]
+
+
 @router.get("/rules", response_model=Page[RuleBlockResponse], dependencies=[_READ])
 def list_rule_blocks(
-    registry: SourceReg, response: Response, query: ListParams
+    request: Request, user: CurrentUser, registry: SourceReg, response: Response, query: ListParams
 ) -> Page[RuleBlockResponse]:
     """List every rule block, ``_source`` first, each field's in the order it runs.
 
@@ -327,7 +350,7 @@ def list_rule_blocks(
     compiled = _compiled(registry, ingest)
     response.headers["ETag"] = order_etag(ingest.order)
     blocks = [*_blocks(compiled, "_source"), *_blocks(compiled, "_org_id")]
-    return paginate(blocks, query)
+    return paginate(_readable_blocks(request, user, registry, blocks), query)
 
 
 @router.post(
