@@ -289,14 +289,15 @@ def bootstrap_auth(
     for d in (accounts_dir, groups_dir, api_keys_dir, rbac_dir):
         d.mkdir(parents=True, exist_ok=True)
 
-    # Seed roles.yaml from built-in resource if missing
+    # Seed roles.yaml from the package when missing, and on every boot bring the built-in roles back to the package's grants
     roles_path = rbac_dir / "roles.yaml"
     if not roles_path.exists():
         _seed_roles(roles_path)
         logger.info(f"Seeded built-in roles.yaml to {roles_path}")
-
-    # Load role config
     role_store = RoleStore(roles_path)
+    reapplied = role_store.reapply_builtins()
+    if reapplied:
+        logger.info(f"Re-applied built-in roles from the package: {', '.join(reapplied)}")
     role_config = role_store.load_config()
 
     # Instantiate stores. A caller may inject a backend (e.g. a document store); the

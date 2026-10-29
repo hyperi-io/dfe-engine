@@ -740,6 +740,44 @@ class TestRoundTrip:
         assert registry.list_sources()[0]["origin"] == "fetcher"
         assert registry.list_sources()[0]["current_table_topic_type"] == "own"
 
+    def test_a_save_judges_the_flow_of_the_version_it_writes(
+        self, registry: SourceRegistry, monkeypatch
+    ):
+        """A deployed source switching transform is checked on the new one, as an undeployed source is."""
+        from dfe_engine.source import flow
+
+        seen: list[str | None] = []
+        real = flow.resolve_flow
+
+        def spy(source, settings, *args, **kwargs):
+            seen.append(source.transform.engine if source.transform else None)
+            return real(source, settings, *args, **kwargs)
+
+        monkeypatch.setattr(flow, "resolve_flow", spy)
+        match = {"field": "f", "value": "v"}
+        schema = {"meta_schema": "meta/a", "meta_schema_version": "1.0.0"}
+
+        registry.save_source(
+            {
+                "source": "switching",
+                "match": match,
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {"date_time": "2026-01-01", "match": match, "schema": schema},
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": match,
+                        "schema": schema,
+                        "transform": {"engine": "vrl"},
+                    },
+                },
+            }
+        )
+
+        assert seen
+        assert set(seen) == {"vrl"}
+
     def test_update_draft_drops_stale_source_build(self, registry: SourceRegistry, tmp_path):
         store = SourceDeploymentStore(
             builds_dir=tmp_path / "builds",

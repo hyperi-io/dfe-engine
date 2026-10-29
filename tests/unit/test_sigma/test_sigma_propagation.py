@@ -30,6 +30,7 @@ from dfe_engine.sigma.catalog import (
     sigma_registry,
 )
 from dfe_engine.sigma.propagation import (
+    PropagationError,
     SigmaPropagator,
     binding_rule_id,
     convert_detection_to_where,
@@ -519,6 +520,28 @@ def test_propagate_says_review_required_and_names_every_branch(review_env):
     assert not (
         review_env.gc.repo_path / "config" / "hunts" / f"{sigma_hunt_name('windows-audit')}.yaml"
     ).exists()
+
+
+def test_a_write_that_fails_part_way_reports_the_branches_already_opened(review_env, monkeypatch):
+    """The binding rule's branch and PR exist when the hunt write fails, so the error names them."""
+    _add_windows_source(review_env)
+    _import_and_select(review_env, _rule_yaml(), _ID)
+
+    def refuse(*_args, **_kwargs):
+        raise RuntimeError("forge unavailable")
+
+    monkeypatch.setattr(review_env.hunts, "save", refuse)
+
+    with pytest.raises(PropagationError) as stopped:
+        _propagator(review_env).propagate()
+
+    report = stopped.value.report
+    assert report.error == "forge unavailable"
+    assert report.created == [binding_rule_id(_ID, "windows-audit")]
+    assert report.review_required is True
+    assert len(report.review_branches) == 1
+    assert report.pr_urls == ["http://forge/pr/1"]
+    assert report.as_dict()["error"] == "forge unavailable"
 
 
 def test_delete_binding_says_review_required(env):

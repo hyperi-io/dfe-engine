@@ -7,6 +7,8 @@
 
 """The rule parse check asks ClickHouse ``EXPLAIN AST`` and never falls back to sqlglot."""
 
+import uuid
+
 import pytest
 
 from dfe_engine.hunts import rule_creation_service
@@ -82,3 +84,39 @@ def test_syntax_error_comes_from_clickhouse(request, client_fixture, no_sqlglot)
     # The position is the rule's own, not shifted by the EXPLAIN AST prefix.
     assert errors[0].position == sql.index("= 'a'")
     assert f"failed at position {sql.index("= 'a'") + 1}" in errors[0].message
+
+
+@pytest.fixture
+def events_table(ch_client):
+    """A source table with a JSON column and one scalar column, dropped afterwards."""
+    database = f"dfe_rule_plan_{uuid.uuid4().hex[:8]}"
+    ch_client.command(f"CREATE DATABASE `{database}`")
+    ch_client.command(
+        f"CREATE TABLE `{database}`.`events` (host String, _json JSON) ENGINE = MergeTree ORDER BY host"
+    )
+    yield database
+    ch_client.command(f"DROP DATABASE IF EXISTS `{database}` SYNC")
+
+
+@pytest.mark.parametrize(
+    ("condition", "refused"),
+    [
+        ("host = 'a'", False),
+        ("toString(_json.not.a.real.path) = 'alice'", False),
+        ("NotARealColumn = 'x'", True),
+        ("lower(host, host) = 'x'", True),
+    ],
+    ids=["known_column", "json_path_is_not_checked", "unknown_column", "bad_function_call"],
+)
+def test_a_condition_clickhouse_cannot_plan_is_refused(
+    ch_client, no_sqlglot, events_table, condition, refused
+):
+    errors = RuleCreationService(ch_client=ch_client).validate_sql(
+        f"SELECT * FROM {events_table}.events WHERE {condition}"
+    )
+
+    assert bool(errors) is refused, errors
+    if refused:
+        assert errors[0].message.startswith(
+            f"ClickHouse cannot plan this rule against {events_table}.events"
+        )

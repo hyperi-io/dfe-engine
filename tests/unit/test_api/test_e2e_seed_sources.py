@@ -61,3 +61,81 @@ def test_reconciling_the_display_name_bumps_no_version(seeder, registry):
     after = registry.get_source("stable")
     assert list(after.versions) == list(before)
     assert after.display_name == "A different label"
+
+
+@pytest.mark.parametrize(
+    ("script", "name", "engine"),
+    [
+        ("seed_source", "firstrun", "vrl"),
+        ("seed_transform_source", "filebeatvector", "vector"),
+        ("seed_transform_source", "filebeatelastic", "elastic"),
+    ],
+)
+def test_a_seeded_source_is_deployed_and_names_its_transform(
+    seeder, registry, script, name, engine
+):
+    """A transform instance exists only for a deployed source that names one, so the seed does both."""
+    if script == "seed_source":
+        seeder.seed_source(name)
+    else:
+        seeder.seed_transform_source(name, engine)
+
+    source = registry.get_source(name)
+    assert source.deployed_version == source.current
+    assert source.transform is not None
+    assert source.transform.engine == engine
+
+
+def test_a_seeded_source_gets_its_topics_where_the_deployment_manages_them(registry, monkeypatch):
+    """The seeded transform reads the source's land topic, so the seed creates it as a deploy does."""
+    from dfe_engine.kafka import topics
+
+    asked: list[tuple[str, list]] = []
+    monkeypatch.setattr(topics, "topics_managed", lambda _settings: True)
+    monkeypatch.setattr(topics, "build_admin", lambda **_kw: "admin")
+    monkeypatch.setattr(topics, "source_replication_factor", lambda *_a, **_kw: 1)
+    monkeypatch.setattr(topics, "deployment_topic_config", lambda _settings: {})
+    monkeypatch.setattr(
+        topics,
+        "source_topic_specs",
+        lambda source, **_kw: [f"{source.source}_land", f"{source.source}_load"],
+    )
+    monkeypatch.setattr(
+        topics,
+        "ensure_topics",
+        lambda specs, **_kw: asked.append(("ensure", list(specs))) or Mock(failed=[]),
+    )
+    settings = Mock()
+    settings.kafka.topic_partitions = 1
+    seeder = Sources(
+        account_store=Mock(),
+        group_store=Mock(),
+        org_registry=Mock(),
+        env="test",
+        source_registry=registry,
+        settings=settings,
+    )
+
+    seeder.seed_source("busrun")
+
+    assert asked == [("ensure", ["busrun_land", "busrun_load"])]
+
+
+def test_an_unreachable_broker_does_not_fail_the_seed(registry, monkeypatch):
+    from dfe_engine.kafka import topics
+
+    def unreachable(**_kw):
+        raise RuntimeError("no broker")
+
+    monkeypatch.setattr(topics, "topics_managed", lambda _settings: True)
+    monkeypatch.setattr(topics, "build_admin", unreachable)
+    seeder = Sources(
+        account_store=Mock(),
+        group_store=Mock(),
+        org_registry=Mock(),
+        env="test",
+        source_registry=registry,
+        settings=Mock(),
+    )
+
+    assert seeder.seed_source("nobroker") is True

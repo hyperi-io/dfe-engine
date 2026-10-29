@@ -30,8 +30,11 @@ it, and every read answers only from a replica holding all of them, so a re-read
 lands on a lagging replica still sees the claim that beat it. A claim that cannot
 reach its majority, with a replica down, is a missed attempt retried within the wait.
 So is one acknowledged a settle or more after its free read: a rival's re-read may
-have missed it, so it is not kept. It lapses at its expiry unreleased, because a
-release at its version could free a rival that stood while it waited.
+have missed it, so it is not kept. It is never released, because a release at its
+version could free a rival that stood while it waited. The next attempt by the same
+lock finds that claim under its own holder name. It claims afresh when no other
+holder has a live claim in the table, so a slow claim costs seconds. Otherwise the
+claim is read as a rival's and waited on.
 
 The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 """
@@ -182,6 +185,7 @@ class SchemaLock:
         self._holder = holder or f"{holder_name()}/{secrets.token_hex(4)}"
         self._lease_seconds = max(lease_seconds, 1)
         self._claimed_at: datetime | None = None
+        self._slow_claimed_at: datetime | None = None
         self.acquired = False
 
     @property
@@ -249,7 +253,7 @@ class SchemaLock:
                 started = time.monotonic()
                 state = self.read()
                 now = datetime.now(UTC)
-                if state is None or not state.held_at(now):
+                if state is None or not state.held_at(now) or self._own_slow_claim(state, now):
                     if self._try_claim(now, started=started):
                         return True
                     if time.monotonic() >= deadline:
@@ -305,6 +309,7 @@ class SchemaLock:
         claimed_at = self._claim(now)
         landed = time.monotonic() - started
         if landed >= _SETTLE_SECONDS:
+            self._slow_claimed_at = claimed_at
             raise _SlowClaim(f"the claim landed {landed:.2f}s after its free read")
         time.sleep(_SETTLE_SECONDS)
         if not self._claim_stands(claimed_at):
@@ -312,6 +317,34 @@ class SchemaLock:
         self._claimed_at = claimed_at
         self.acquired = True
         return True
+
+    def _own_slow_claim(self, state: LockState, now: datetime) -> bool:
+        """Whether *state* is this lock's own slow claim and no other holder has a live one.
+
+        A rival that stood while the slow claim was in flight wrote its claim before
+        ours became visible. The table keeps the latest write per lock name, so that
+        claim is only found among rows a merge has not yet collapsed, and any
+        holder's live row there makes this a rival's lease to wait on.
+        """
+        if self._slow_claimed_at is None or state.holder != self._holder:
+            return False
+        if state.acquired_at != self._slow_claimed_at:
+            return False
+        target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
+        sql = (
+            f"SELECT holder FROM {target} "  # noqa: S608 - quoted database and manifest table; values bound
+            "WHERE lock_name = {lock:String} AND holder != {me:String} "
+            "GROUP BY holder HAVING max(released) = 0 AND max(expires_at) > {now:DateTime}"
+        )
+        try:
+            result = self._client.query(
+                sql,
+                parameters={"lock": LOCK_NAME, "me": self._holder, "now": now.replace(tzinfo=None)},
+                settings=_READ_SETTINGS,
+            )
+            return not list(result.result_rows)
+        except Exception as exc:
+            raise _lock_error("could not read the schema lock", exc) from exc
 
     def _claim(self, now: datetime) -> datetime:
         """Write a claim and return its acquired_at as the table stores it (milliseconds)."""

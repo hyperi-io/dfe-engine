@@ -29,12 +29,15 @@ Usage:
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import cache
 
 from scalo.logger import logger
 
 from ..clickhouse.quoting import quote_identifier, quote_literal
 from ..orgs.available_ids import ORG_ID_COLUMN
+from ..schema.ddl_writer import DDLFileWriter
 from ..schema.schema_loader import SchemaLoader
+from ..source.type_registry import TypeRegistry
 
 # Common header columns to copy from source -> hunt results.
 # These are the columns we SELECT from the source table.
@@ -65,50 +68,50 @@ class HuntDetectionColumn:
     name: str
     select_expr: str | None = None  # source column copied; None = literal injected at query time
     ch_type: str = "LowCardinality(String)"
-    codec: str = "ZSTD(1)"
+    codec: str | None = None
     comment: str = ""
 
 
-# Hunt-specific columns appended after common header.
-HUNT_DETECTION_COLUMNS: tuple[HuntDetectionColumn, ...] = (
-    HuntDetectionColumn(
-        name="matched_uuid",
-        select_expr="_uuid",
-        ch_type="UUID",
-        codec="ZSTD(1)",
-        comment="UUID of the matching source record",
-    ),
-    HuntDetectionColumn(
-        name="rule_id",
-        comment="Rule identifier",
-    ),
-    HuntDetectionColumn(
-        name="rule_name",
-        comment="Human-readable rule name",
-    ),
-    HuntDetectionColumn(
-        name="source_table",
-        comment="Source table that was scanned",
-    ),
-    HuntDetectionColumn(
-        name="hunt_name",
-        comment="Parent hunt name",
-    ),
-    HuntDetectionColumn(
-        name="severity",
-        comment="Detection severity",
-    ),
-)
+# The detection column the hunt engine fills from a column of the matched source row.
+_COPIED_FROM_SOURCE = {"matched_uuid": "_uuid"}
 
 
-# Column names present on the hunt results table -- used by alert grouping
-# to distinguish direct column references from _json field extraction.
-RESULTS_TABLE_COLUMNS: frozenset[str] = (
-    _HEADER_COLUMNS_TO_COPY
-    | _HEADER_COLUMNS_GENERATED
-    | frozenset(dc.name for dc in HUNT_DETECTION_COLUMNS)
-    | frozenset({"_json"})
-)
+@cache
+def hunt_detection_columns() -> tuple[HuntDetectionColumn, ...]:
+    """The hunt-specific columns appended after the common header, as dfe-schemas declares them.
+
+    Read from ``hunts/results.yaml``, the file the ``detection`` table is built from, so the
+    INSERT can never name a column the table lacks.
+    """
+    registry = TypeRegistry.default()
+    declared = SchemaLoader.load_columns(DDLFileWriter._resolve_hunt_results_path())
+    columns = []
+    for column in declared:
+        resolved = registry.resolve(column.type, attributes=list(column.attribute or []))
+        columns.append(
+            HuntDetectionColumn(
+                name=column.name,
+                select_expr=_COPIED_FROM_SOURCE.get(column.name),
+                ch_type=resolved.ch_type,
+                codec=resolved.codec,
+                comment=column.comment or "",
+            )
+        )
+    return tuple(columns)
+
+
+def results_table_columns() -> frozenset[str]:
+    """Column names present on the hunt results table.
+
+    Used by alert grouping to tell a direct column reference from a ``_json`` field
+    extraction.
+    """
+    return (
+        _HEADER_COLUMNS_TO_COPY
+        | _HEADER_COLUMNS_GENERATED
+        | frozenset(dc.name for dc in hunt_detection_columns())
+        | frozenset({"_json"})
+    )
 
 
 def tenant_condition(tenant_ids: Sequence[str]) -> str:
@@ -210,7 +213,7 @@ class HuntResultSchema:
     @property
     def detection_columns(self) -> tuple[HuntDetectionColumn, ...]:
         """The detection columns every hunt result carries."""
-        return HUNT_DETECTION_COLUMNS
+        return hunt_detection_columns()
 
     def insert_columns(self) -> list[str]:
         """Column names for the INSERT INTO clause.
@@ -220,7 +223,7 @@ class HuntResultSchema:
         since ClickHouse fills those via DEFAULT.
         """
         cols = [col.name for col in self._header_copy_columns]
-        cols.extend(dc.name for dc in HUNT_DETECTION_COLUMNS)
+        cols.extend(dc.name for dc in hunt_detection_columns())
         if self._include_json_copy and self._has_json:
             cols.append("_json")
         return cols
@@ -228,7 +231,7 @@ class HuntResultSchema:
     def _source_columns(self) -> list[str]:
         """Source columns the SELECT expression reads, in the order it reads them."""
         cols = [col.name for col in self._header_copy_columns]
-        cols.extend(dc.select_expr for dc in HUNT_DETECTION_COLUMNS if dc.select_expr)
+        cols.extend(dc.select_expr for dc in hunt_detection_columns() if dc.select_expr)
         if self._include_json_copy and self._has_json:
             cols.append("_json")
         return cols
@@ -272,7 +275,7 @@ class HuntResultSchema:
             "hunt_name": hunt_name,
             "severity": severity,
         }
-        for dc in HUNT_DETECTION_COLUMNS:
+        for dc in hunt_detection_columns():
             if dc.select_expr:
                 parts.append(f"{dc.select_expr} AS {dc.name}")
             else:
@@ -373,7 +376,7 @@ class HuntResultSchema:
             )
 
         # Hunt detection columns
-        for dc in HUNT_DETECTION_COLUMNS:
+        for dc in hunt_detection_columns():
             columns.append(
                 {
                     "name": dc.name,

@@ -235,6 +235,9 @@ class PropagationReport:
     review_required: bool = False
     review_branches: list[str] = field(default_factory=list)
     pr_urls: list[str] = field(default_factory=list)
+    # Set when a write failed and the run stopped there. The rest of the report is what
+    # landed before it, with every review branch and PR already opened.
+    error: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         """The propagation report as a plain dict."""
@@ -251,6 +254,7 @@ class PropagationReport:
             "review_required": self.review_required,
             "review_branches": list(self.review_branches),
             "pr_urls": list(self.pr_urls),
+            "error": self.error,
         }
 
     def apply_routing(self, routing: ReviewRouting) -> None:
@@ -258,6 +262,19 @@ class PropagationReport:
         self.review_required = routing.review_required
         self.review_branches = list(routing.branches)
         self.pr_urls = list(routing.pr_urls)
+
+
+class PropagationError(Exception):
+    """A write failed part way through a propagate run.
+
+    Attributes:
+        report: What the run did before it stopped, including every review branch and
+            PR its earlier writes opened.
+    """
+
+    def __init__(self, report: PropagationReport, cause: Exception) -> None:
+        super().__init__(f"propagation stopped: {cause}")
+        self.report = report
 
 
 # -- Propagator ----------------------------------------------
@@ -408,12 +425,42 @@ class SigmaPropagator:
         A new hunt reads the orgs ``hunt_customers`` names. Naming none, it reads
         no org and every fire fails until its customers are set through PUT /hunts.
         """
-        customers = list(hunt_customers or [])
         selected = self._selection.list_selected()
         report = PropagationReport(total_selected=len(selected))
         # Each generated rule and hunt is its own routed write, so the run's review
         # state is the fold of every one of them.
         routing = ReviewRouting()
+        try:
+            self._propagate_into(
+                report,
+                routing,
+                selected=selected,
+                force=force,
+                create_hunts=create_hunts,
+                hunt_cron=hunt_cron,
+                hunt_target_table=hunt_target_table,
+                customers=list(hunt_customers or []),
+            )
+        except Exception as exc:
+            # The branches and PRs the earlier writes opened exist on the forge, so the caller needs them named.
+            report.error = str(exc)
+            report.apply_routing(routing)
+            raise PropagationError(report, exc) from exc
+        return report
+
+    def _propagate_into(
+        self,
+        report: PropagationReport,
+        routing: ReviewRouting,
+        *,
+        selected: list[str],
+        force: bool,
+        create_hunts: bool,
+        hunt_cron: str,
+        hunt_target_table: str,
+        customers: list[str],
+    ) -> None:
+        """Run the writes, filling *report* and *routing* as each one completes."""
         # rule ids to (re)bind into each source's hunt (created/updated/still-present).
         bindings_by_source: dict[str, list[str]] = {}
 
@@ -480,7 +527,6 @@ class SigmaPropagator:
                 )
 
         report.apply_routing(routing)
-        return report
 
     # -- binding queries (for the API list/get/delete) --
 

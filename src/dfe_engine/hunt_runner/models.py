@@ -57,6 +57,8 @@ class HuntSpec(BaseModel):
     # Optional target metadata. Empty by default - the query carries its own target,
     # resolved against effective_data_database by config; never hardcode 'dfe' here.
     target_table: str = ""
+    # The hunt YAML's `alerts` block: destinations, raw channels and CEL triggers.
+    alerts: dict[str, Any] = {}
     # FIXED watermark field - the always-present common-header column.
     timestamp_field: str = TIMESTAMP_FIELD
 

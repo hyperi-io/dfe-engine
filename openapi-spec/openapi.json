@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine -- configuration, scheduling, and query API",
-    "version": "1.22.77"
+    "version": "1.22.78"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -41129,6 +41129,12 @@
             "type": "array",
             "title": "Warnings"
           },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "description": "Set when a write failed and the run stopped there: the report is what landed before it, with every review branch and PR already opened",
+            "default": ""
+          },
           "review_required": {
             "type": "boolean",
             "title": "Review Required",
@@ -49039,6 +49045,18 @@
             ],
             "title": "Display Name",
             "description": "Human-readable label"
+          },
+          "issuer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer",
+            "description": "OIDC issuer URL. An empty one is refused, since a login needs it"
           },
           "client_id": {
             "anyOf": [

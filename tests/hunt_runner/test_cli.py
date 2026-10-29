@@ -24,6 +24,8 @@ The logger tests replace scalo's ``setup`` with a recorder and stop the command 
 its settings load, so they prove the init order without installing a sink.
 """
 
+from types import SimpleNamespace
+
 import pytest
 import scalo._env_compat
 from scalo.cli.error import LoggerError
@@ -258,3 +260,29 @@ def test_a_reload_check_clickhouse_cannot_answer_fires_nothing_until_it_passes(
 
     assert isinstance(result.exception, _Ran)
     assert run_events == ["tick", "check down", "check", "tick", "check", "tick", "check", "tick"]
+
+
+def test_the_notifier_reads_the_destination_directory_when_set(tmp_path):
+    from dfe_engine.hunts.alert import AlertDestination, AlertDestinationRegistry
+
+    seed = AlertDestinationRegistry(directory=str(tmp_path))
+    seed.add(AlertDestination(name="ops", url="json://127.0.0.1:1/x"))
+    seed.close()
+    hunts = HuntsSettings(alert_destinations_dir=str(tmp_path), alert_channels=["json://g/x"])
+
+    notifier = cli._match_notifier(SimpleNamespace(hunts=hunts))  # ty: ignore[invalid-argument-type]  # only .hunts is read
+
+    registry = notifier._registry
+    assert registry is not None
+    assert registry.resolve("ops") == "json://127.0.0.1:1/x"
+    assert notifier._global_channels == ["json://g/x"]
+    registry.close()
+
+
+def test_the_notifier_falls_back_to_the_inline_destinations():
+    hunts = HuntsSettings(alert_destinations={"ops": "json://127.0.0.1:1/x"})
+
+    notifier = cli._match_notifier(SimpleNamespace(hunts=hunts))  # ty: ignore[invalid-argument-type]  # only .hunts is read
+
+    assert notifier._registry is not None
+    assert notifier._registry.resolve("ops") == "json://127.0.0.1:1/x"

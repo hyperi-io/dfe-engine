@@ -48,6 +48,7 @@ from dfe_engine.settings import MAX_DETECTIONS_PER_RUN
 from dfe_engine.yaml_utils import yaml_load
 
 from .checkpoint import TIMESTAMP_FIELD
+from .delivery import alerts_block
 from .interval import parse_interval
 from .models import HuntSpec, HuntStatement
 from .rule_compiler import compile_hunt_queries
@@ -166,6 +167,7 @@ def _build_spec(
         unresolved_customers=unresolved,
         target_table=str(definition.get("global_target_table_name", definition.get("target", ""))),
         timestamp_field=_timestamp_field(definition),
+        alerts=alerts_block(definition),
     )
 
 
