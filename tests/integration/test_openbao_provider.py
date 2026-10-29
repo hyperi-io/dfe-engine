@@ -24,8 +24,9 @@ import pytest
 
 from dfe_engine.secrets import DfeSecrets
 from tests.integration.conftest import _remove_container
+from tests.support.dockerhub import dockerhub_image
 
-_IMAGE = os.environ.get("DFE_TEST_OPENBAO_IMAGE", "openbao/openbao:2.5.4")
+_IMAGE = dockerhub_image(os.environ.get("DFE_TEST_OPENBAO_IMAGE", "openbao/openbao:2.5.4"))
 _PORT = int(os.environ.get("DFE_TEST_OPENBAO_PORT", "18200"))
 
 

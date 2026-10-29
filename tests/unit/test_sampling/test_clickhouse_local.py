@@ -11,6 +11,7 @@ import pytest
 from _pytest.outcomes import Failed, Skipped
 
 from tests.support import clickhouse_local as support
+from tests.support.dockerhub import MIRROR_ENV
 
 
 @pytest.mark.parametrize(
@@ -28,6 +29,7 @@ def test_the_command_follows_what_the_host_has(monkeypatch, docker, on_path, ci,
     monkeypatch.setattr(support.shutil, "which", lambda name: on_path)
     monkeypatch.setenv("CI", ci)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.delenv(MIRROR_ENV, raising=False)
 
     if isinstance(outcome, type):
         with pytest.raises(outcome):
@@ -36,3 +38,12 @@ def test_the_command_follows_what_the_host_has(monkeypatch, docker, on_path, ci,
     command = support.clickhouse_local()
     assert (command[0] == "docker") == (outcome == "docker")
     assert (support.IMAGE in command) == (outcome == "docker")
+
+
+def test_the_pinned_image_is_pulled_through_the_mirror(monkeypatch):
+    monkeypatch.setattr(support, "_docker_usable", lambda: True)
+    monkeypatch.setenv(MIRROR_ENV, "harbor.example:8443/dockerhub")
+
+    command = support.clickhouse_local()
+
+    assert command[-1] == f"harbor.example:8443/dockerhub/{support.IMAGE}"
