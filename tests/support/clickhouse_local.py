@@ -19,6 +19,7 @@ import subprocess
 
 import pytest
 
+from tests.support.dockerhub import dockerhub_image
 from tests.support.producer_contract import in_ci
 
 # renovate: datasource=docker depName=clickhouse/clickhouse-server
@@ -45,14 +46,15 @@ def _docker_usable() -> bool:
 def clickhouse_local() -> list[str]:
     """The command prefix that runs clickhouse-local at the pinned version.
 
-    Docker runs the pinned image. A clickhouse-local on PATH is the fallback for a
+    Docker runs the pinned image, through the Docker Hub mirror where CI sets one. A clickhouse-local on PATH is the fallback for a
     host without Docker, at whatever version it carries.
 
     Returns:
         The argv prefix, to which the caller appends ``--query`` and its arguments.
     """
     if _docker_usable():
-        return ["docker", "run", "--rm", "-i", "--entrypoint", "clickhouse-local", IMAGE]
+        image = dockerhub_image(IMAGE)
+        return ["docker", "run", "--rm", "-i", "--entrypoint", "clickhouse-local", image]
     on_path = shutil.which("clickhouse-local")
     if on_path is not None:
         return [on_path]

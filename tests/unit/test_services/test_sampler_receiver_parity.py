@@ -20,7 +20,6 @@ without the field.
 """
 
 import json
-import shutil
 import subprocess
 from typing import Any
 
@@ -32,13 +31,7 @@ from dfe_engine.services.models.receiver import RULE_TARGETS, RuleSet
 from dfe_engine.services.schema.json_promotion_service import match_condition
 from dfe_engine.services.source_routing import RECEIVER_RULES_PROFILE, source_rules
 from dfe_engine.source.models import Source
-from tests.support.present import present
-
-CLICKHOUSE_LOCAL = shutil.which("clickhouse-local")
-# The reason is matched by test.full.python.allow_skip in .hyperi-ci.yaml.
-needs_clickhouse_local = pytest.mark.skipif(
-    CLICKHOUSE_LOCAL is None, reason="clickhouse-local is not on PATH"
-)
+from tests.support.clickhouse_local import clickhouse_local
 
 FIELD = "data_stream.dataset"
 
@@ -90,7 +83,7 @@ def _sampled(operator: str, value: str) -> set[int]:
     )
     result = subprocess.run(
         [
-            present(CLICKHOUSE_LOCAL),
+            *clickhouse_local(),
             "--query",
             query,
             *(f"--param_{name}={bound}" for name, bound in params.items()),
@@ -121,7 +114,6 @@ def _routed(operator: str, value: str) -> set[int]:
     }
 
 
-@needs_clickhouse_local
 @pytest.mark.parametrize(
     "operator", ["equals", "not_equals", "includes", "starts_with", "ends_with"]
 )
@@ -136,12 +128,10 @@ def test_a_text_test_samples_the_records_the_receiver_routes(operator):
     assert not disagreeing, f"{operator}: the preview and the receiver disagree on {disagreeing}"
 
 
-@needs_clickhouse_local
 def test_exists_samples_the_records_the_receiver_routes():
     assert _sampled("exists", "") == _routed("exists", "")
 
 
-@needs_clickhouse_local
 def test_the_records_tell_the_operators_apart():
     # Guards the parity above against a record set every filter treats alike.
     assert _routed("includes", "ios") == {1, 3, 4}

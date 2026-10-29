@@ -46,8 +46,6 @@ test:
         - "^this filesystem tells names apart by case$"
         # The HyperDX client tests need a running HyperDX, which CI does not stand up.
         - "^Requires running HyperDX instance$"
-        # The sampler/receiver parity tests run their SQL in a clickhouse-local on PATH, which the runner image does not carry. The function-drift tests run a pinned image and fail rather than skip in CI.
-        - "^clickhouse-local is not on PATH$"
 
 quality:
   python:

@@ -29,6 +29,7 @@ from tests.integration.conftest import (
     _resolve_tier,
     _spin_ch_on_docker,
 )
+from tests.support.dockerhub import dockerhub_image
 
 
 def test_per_test_container_name_includes_the_test():
@@ -196,7 +197,7 @@ def test_reap_stale_removes_a_dead_container_but_not_a_live_one():
                 *_container_labels("busybox"),
                 "--volume",
                 "/probe",
-                "busybox:stable",
+                dockerhub_image("busybox:stable"),
                 "sleep",
                 "120",
             ],
