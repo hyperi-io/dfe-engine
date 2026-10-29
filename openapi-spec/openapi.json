@@ -5857,7 +5857,7 @@
           "Sources"
         ],
         "summary": "List Sources",
-        "description": "List sources with pagination, search, filtering, and a full object tree.\n\nThe landing source (``main``) is always the first item when it is in the\nresult set; remaining sources keep the requested sort.",
+        "description": "List sources with pagination, search, filtering, and a full object tree.\n\nThe landing source (``main``) is always the first item when it is in the\nresult set; remaining sources keep the requested sort. A caller held to its\norgs does not see a fetcher source bound to another org.",
         "operationId": "sources.list",
         "parameters": [
           {
