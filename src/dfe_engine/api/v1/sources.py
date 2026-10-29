@@ -96,6 +96,7 @@ from dfe_engine.appmgmt import (
 )
 from dfe_engine.appmgmt import catalogue as app_catalogue
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.models import AuthContext
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.exchange.models import SourceBundle, SourceImportResult
 from dfe_engine.exchange.schemas import ExchangeError
@@ -1172,16 +1173,33 @@ def list_sources(
     )
 
 
-def _readable_by_caller(
-    request: Request, user: CurrentUser, rows: list[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """The source rows ``user`` may list: all of them, or those of the orgs it is held to.
+def _held_source_orgs(request: Request, user: AuthContext) -> set[str] | None:
+    """The org names ``user`` may read fetcher sources of, or None when it may read every org.
+
+    A caller that reads every org with ``source:read`` (:func:`reads_every_org`) is
+    not held. Any other caller is held to its :func:`~dfe_engine.api.deps.held_orgs`.
+    """
+    action = scopes_dict["source_read"]
+    if not request.app.state.settings.auth.enabled or reads_every_org(request, user, action):
+        return None
+    return {org.name for org in held_orgs(request, user, action)}
+
+
+def _source_is_readable(fetcher_org: str | None, has_fetcher: bool, held: set[str] | None) -> bool:
+    """Whether a source is readable by a caller held to ``held`` (None reads every org).
 
     A source definition is shared by every org, so only a fetcher source, which is
-    bound to one org (the default org when it names none), belongs to an org. A caller
-    that reads every org with ``source:read`` sees every row. Any other caller sees
-    the shared sources and the fetcher sources of the orgs its grants hold
-    (:func:`~dfe_engine.api.deps.held_orgs`).
+    bound to one org (the default org when it names none), belongs to an org.
+    """
+    if held is None or not has_fetcher:
+        return True
+    return (fetcher_org or DEFAULT_ORG_NAME) in held
+
+
+def _readable_by_caller(
+    request: Request, user: AuthContext, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The source rows ``user`` may list: all of them, or those of the orgs it is held to.
 
     Args:
         request: The request, for the settings, role definitions and org registry.
@@ -1191,15 +1209,42 @@ def _readable_by_caller(
     Returns:
         The rows the caller may list, in their order.
     """
-    action = scopes_dict["source_read"]
-    if not request.app.state.settings.auth.enabled or reads_every_org(request, user, action):
-        return rows
-    held = {org.name for org in held_orgs(request, user, action)}
+    held = _held_source_orgs(request, user)
     return [
         row
         for row in rows
-        if not row.get("has_fetcher") or (row.get("fetcher_org") or DEFAULT_ORG_NAME) in held
+        if _source_is_readable(row.get("fetcher_org"), bool(row.get("has_fetcher")), held)
     ]
+
+
+def require_source_in_held_orgs(
+    name: str, request: Request, user: CurrentUser, registry: SourceReg
+) -> None:
+    """Refuse a read of the fetcher source ``name`` when it is bound to an org the caller lacks.
+
+    The rule :func:`_readable_by_caller` lists by. A name no source holds passes, so
+    the handler answers it with its own 404.
+
+    Raises:
+        HTTPException: 403 ``org_not_granted`` for a fetcher source bound to an org the
+            caller is not held to.
+    """
+    held = _held_source_orgs(request, user)
+    if held is None:
+        return
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        return
+    fetcher_org = source.fetcher.org if source.fetcher else None
+    if not _source_is_readable(fetcher_org, source.fetcher is not None, held):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "org_not_granted",
+                "message": f"Source {name!r} is bound to an org the caller does not hold",
+            },
+        )
 
 
 _CREATED_APPS_NOT_SYNCED = {
@@ -1284,7 +1329,7 @@ def create_source(
 @router.get(
     "/catalogue",
     response_model=PaginatedResponse[CatalogueEntryObject],
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["source_read"]))],
 )
 def list_catalogue(
     user: CurrentUser,
@@ -1368,7 +1413,7 @@ def list_catalogue(
 @router.get(
     "/catalogue-tags",
     response_model=PaginatedResponse[CatalogueTagObject],
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["source_read"]))],
 )
 def list_catalogue_tags(
     user: CurrentUser,
@@ -1411,7 +1456,7 @@ def list_catalogue_tags(
 @router.get(
     "/engines",
     response_model=PaginatedResponse[TableEngineObject],
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["source_read"]))],
 )
 def list_table_engines(
     user: CurrentUser,
@@ -1651,7 +1696,10 @@ def create_sources_from_catalogue(
 @router.get(
     "/{name}/versions/{version}",
     response_model=SourceVersionGetDetailResponse,
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["source_read"])),
+        Depends(require_source_in_held_orgs),
+    ],
 )
 def get_source_version(
     name: str,
@@ -1705,7 +1753,10 @@ def get_source_version(
 @router.get(
     "/{name}/columns",
     response_model=PaginatedResponse[SchemaColumn],
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["source_read"])),
+        Depends(require_source_in_held_orgs),
+    ],
 )
 def get_source_schema_columns(
     name: str,
@@ -2767,7 +2818,10 @@ def _apply_source_schema(
 @router.get(
     "/{name}",
     response_model=SourceDetailResponse,
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["source_read"])),
+        Depends(require_source_in_held_orgs),
+    ],
 )
 def get_source(name: str, user: CurrentUser, registry: SourceReg):
     """Get a full source definition by name, including build/deploy per version."""
@@ -2796,7 +2850,10 @@ def get_source(name: str, user: CurrentUser, registry: SourceReg):
             )
         },
     },
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["source_read"])),
+        Depends(require_source_in_held_orgs),
+    ],
 )
 def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, settings: Settings):
     """The stages this source's records travel, resolved against this deployment.
@@ -2820,7 +2877,10 @@ def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, settings:
 @router.get(
     "/{name}/signals",
     response_model=SourceSignalsResponse,
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["source_read"])),
+        Depends(require_source_in_held_orgs),
+    ],
 )
 def get_source_signals(
     name: str,
@@ -2865,7 +2925,10 @@ def get_source_signals(
     "/{name}/export",
     response_model=SourceBundle,
     response_model_exclude_none=True,
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["source_read"])),
+        Depends(require_source_in_held_orgs),
+    ],
 )
 def export_source(
     name: str,
