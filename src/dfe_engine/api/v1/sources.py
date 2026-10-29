@@ -2,7 +2,7 @@
 
 GET    /api/v1/sources                  -> Paginated source list
 POST   /api/v1/sources                  -> Create source
-GET    /api/v1/sources/catalogue        -> The sources DFE ships ready to create, omitting ones already stored
+GET    /api/v1/sources/catalogue        -> The sources DFE ships ready to create, omitting stored ones unless asked
 GET    /api/v1/sources/catalogue-tags   -> The directories under catalogue/ that hold those sources
 POST   /api/v1/sources/from-catalogue   -> Create sources from catalogue entries
 GET    /api/v1/sources/{name}           -> Get source details
@@ -1360,19 +1360,34 @@ def list_catalogue(
             "list the whole catalogue"
         ),
     ),
+    engine: str | None = Query(
+        None,
+        description=(
+            "Only entries whose transform engine is this one, matched without regard to "
+            "case. An engine no entry uses lists nothing. Omit it to list every engine"
+        ),
+    ),
+    include_stored: bool = Query(
+        False,
+        description=(
+            "List entries already stored as a source too. Off by default, so the "
+            "create-from-catalogue page offers only what is left to create"
+        ),
+    ),
 ) -> PaginatedResponse[CatalogueEntryObject]:
     """List the sources the installed dfe-schemas catalogue ships ready to create.
 
     ``tags`` keeps an entry whose holding directory is one of the names given.
     ``untagged`` is a file that sits in the catalogue root, and omitting ``tags``
-    lists every entry. An entry already stored as a source is left out, matched
-    on the catalogue entry name even when the source was given a different one. A
-    source written by hand does not hide an entry. Each entry says whether the
-    deployed transform ships
-    its default variant, read off that app's mounted contract, so a console can
-    hold back an entry the create would refuse. It also says whether this
-    deployment can run the entry at all: a source that needs a per-source app
-    (a fetcher or a transform) is refused on a gRPC deployment.
+    lists every entry. ``engine`` keeps an entry whose transform engine is that
+    one, without regard to case, and an engine no entry uses lists nothing. An
+    entry already stored as a source is left out unless ``include_stored`` is set,
+    matched on the catalogue entry name even when the source was given a different
+    one. A source written by hand does not hide an entry. Each entry says whether
+    the deployed transform ships its default variant, read off that app's mounted
+    contract, so a console can hold back an entry the create would refuse. It also
+    says whether this deployment can run the entry at all: a source that needs a
+    per-source app (a fetcher or a transform) is refused on a gRPC deployment.
     """
     catalogue = _source_catalogue()
     if intake is not None and intake not in source_catalogue_module.INTAKES:
@@ -1387,16 +1402,28 @@ def list_catalogue(
             },
         )
 
-    taken = {
-        source.from_catalogue_item
-        for source in registry.get_all_sources()
-        if source.from_catalogue_item is not None
-    }
+    taken = (
+        set()
+        if include_stored
+        else {
+            source.from_catalogue_item
+            for source in registry.get_all_sources()
+            if source.from_catalogue_item is not None
+        }
+    )
     entries = [
         entry
         for entry in catalogue.entries.values()
         if entry.name not in taken and (intake is None or intake in entry.intakes)
     ]
+    if engine:
+        wanted_engine = engine.casefold()
+        entries = [
+            entry
+            for entry in entries
+            if entry.request.transform is not None
+            and entry.request.transform.engine.casefold() == wanted_engine
+        ]
     wanted = {tag.casefold() for tag in tags or [] if tag}
     if wanted:
         entries = [entry for entry in entries if entry.tag.casefold() in wanted]
