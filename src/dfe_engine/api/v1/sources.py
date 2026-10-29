@@ -3,6 +3,7 @@
 GET    /api/v1/sources                  -> Paginated source list
 POST   /api/v1/sources                  -> Create source
 GET    /api/v1/sources/catalogue        -> The sources DFE ships ready to create, omitting ones already stored
+GET    /api/v1/sources/catalogue-tags   -> The directories under catalogue/ that hold those sources
 POST   /api/v1/sources/from-catalogue   -> Create sources from catalogue entries
 GET    /api/v1/sources/{name}           -> Get source details
 GET    /api/v1/sources/{name}/flow      -> The stages its records travel, resolved
@@ -782,6 +783,17 @@ class TableEngineObject(BaseModel):
     )
 
 
+class CatalogueTagObject(BaseModel):
+    """One directory under the catalogue that holds source files."""
+
+    id: str = Field(
+        description="The directory name, which is the tag key. untagged is the files that sit "
+        "in the catalogue root rather than in a directory"
+    )
+    name: str = Field(description="The name the console shows, from the tag dictionary")
+    description: str = Field(description="What this tag groups, from the tag dictionary")
+
+
 class CatalogueEntryObject(BaseModel):
     """One source DFE ships ready to create, as the console lists it."""
 
@@ -1245,12 +1257,23 @@ def list_catalogue(
         None, description="Only entries that arrive this way (beats, receiver, fetcher)"
     ),
     search: str | None = Query(None, description="Search the entry name, package and data stream"),
+    tags: list[str] | None = Query(
+        None,
+        description=(
+            "Only entries in one of these holding directories. Repeat the param for more "
+            "than one. untagged is the files that sit in the catalogue root. Omit it to "
+            "list the whole catalogue"
+        ),
+    ),
 ) -> PaginatedResponse[CatalogueEntryObject]:
     """List the sources the installed dfe-schemas catalogue ships ready to create.
 
-    An entry already stored as a source is left out, matched on the catalogue entry
-    name even when the source was given a different one. A source written by hand
-    does not hide an entry. Each entry says whether the deployed transform ships
+    ``tags`` keeps an entry whose holding directory is one of the names given.
+    ``untagged`` is a file that sits in the catalogue root, and omitting ``tags``
+    lists every entry. An entry already stored as a source is left out, matched
+    on the catalogue entry name even when the source was given a different one. A
+    source written by hand does not hide an entry. Each entry says whether the
+    deployed transform ships
     its default variant, read off that app's mounted contract, so a console can
     hold back an entry the create would refuse. It also says whether this
     deployment can run the entry at all: a source that needs a per-source app
@@ -1279,6 +1302,9 @@ def list_catalogue(
         for entry in catalogue.entries.values()
         if entry.name not in taken and (intake is None or intake in entry.intakes)
     ]
+    wanted = {tag.casefold() for tag in tags or [] if tag}
+    if wanted:
+        entries = [entry for entry in entries if entry.tag.casefold() in wanted]
     if search:
         needle = search.lower()
         entries = [
@@ -1298,6 +1324,49 @@ def list_catalogue(
     ]
     return PaginatedResponse[CatalogueEntryObject](
         items=rows, total=page.total, page=page.page, per_page=page.per_page
+    )
+
+
+@router.get(
+    "/catalogue-tags",
+    response_model=PaginatedResponse[CatalogueTagObject],
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+)
+def list_catalogue_tags(
+    user: CurrentUser,
+    pagination: PaginationParams = Depends(),
+    name: str | None = Query(
+        None,
+        description=(
+            "Keep tags whose directory key or display name starts with this. The match ignores case"
+        ),
+    ),
+) -> PaginatedResponse[CatalogueTagObject]:
+    """List the directories under the catalogue that hold source files.
+
+    A tag is one directory directly under ``catalogue/``. Files that sit in the
+    catalogue root, rather than in one of those directories, are the tag
+    ``untagged``. ``id`` is the directory key. ``name`` and ``description`` come
+    from ``registries/catalogue-tags.yaml`` beside that catalogue. ``name`` keeps
+    a tag whose key or display name starts with it, so ``act`` matches
+    ``active-mq`` and does not match a name that only contains those letters later.
+    """
+    try:
+        directory = source_catalogue_module.catalogue_tags_directory()
+    except source_catalogue_module.SourceCatalogueError as exc:
+        logger.error("Source catalogue unreadable", error=str(exc))
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "catalogue_error",
+                "message": "the source catalogue could not be read; the engine log has the reason",
+            },
+        ) from exc
+    tags = source_catalogue_module.catalogue_tag_list(directory=directory, name=name)
+    return PaginatedResponse[CatalogueTagObject].from_list(
+        [CatalogueTagObject(description=tag.description, id=tag.id, name=tag.name) for tag in tags],
+        pagination.page,
+        pagination.per_page,
     )
 
 
