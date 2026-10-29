@@ -849,6 +849,7 @@ class SourceRegistry:
                     "header_type": source.header.type if source.header else None,
                     "has_transform": source.transform is not None,
                     "has_fetcher": source.fetcher is not None,
+                    "fetcher_org": source.fetcher.org if source.fetcher else None,
                     "origin": source.origin,
                     "current_table_topic_type": source.table_topic_type,
                     "views": [v.standard for v in source.views],
