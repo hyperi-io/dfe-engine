@@ -43,6 +43,7 @@ from dfe_engine.api.pagination import (
     apply_search,
     apply_sort,
 )
+from dfe_engine.api.v1.sources import require_source_readable
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.core_resources.yaml_resource_type import (
@@ -1209,7 +1210,7 @@ async def get_schema_columns(
         description="Source version id (defaults to deployed_version)",
     ),
     pagination: PaginationParams = Depends(),
-    _auth: None = Depends(require_action(scopes_dict["source_read"])),
+    _auth: None = Depends(require_own_org_action(scopes_dict["source_read"])),
 ) -> SourceSchemaColumnsResponse:
     """Get composed schema columns for a source version (profile + meta/derived/additional).
 
@@ -1223,6 +1224,7 @@ async def get_schema_columns(
     from dfe_engine.schema.schema_loader import SchemaLoadError
     from dfe_engine.source.type_registry import TypeRegistry
 
+    require_source_readable(request, user, registry, source_name)
     try:
         source = registry.get_source(source_name)
     except SourceNotFoundError:

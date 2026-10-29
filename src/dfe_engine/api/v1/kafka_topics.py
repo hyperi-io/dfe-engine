@@ -29,11 +29,22 @@ import asyncio
 import functools
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from scalo.concurrency import run_blocking
 
-from dfe_engine.api.deps import CurrentUser, Settings, SourceReg, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    Settings,
+    SourceReg,
+    require_action,
+    require_own_org_action,
+)
+from dfe_engine.api.v1.sources import (
+    held_source_orgs,
+    require_source_readable,
+    source_model_is_readable,
+)
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.kafka.topics import (
@@ -142,15 +153,18 @@ def _require_managed(settings: DFESettings) -> None:
 
 
 def _specs_in_scope(
-    registry: Any, settings: DFESettings, source: str | None
+    registry: Any, settings: DFESettings, source: str | None, held: set[str] | None = None
 ) -> tuple[list[TopicSpec], dict[str, str]]:
-    """The specs and their owners for one source, or for every source.
+    """The specs and their owners for one source, or for every source the caller may read.
+
+    ``held`` is the orgs a held reader's fetcher sources are limited to, None for no limit.
 
     Blocking, because an unset replication factor asks the bus its size, so a
     route hands it to a thread.
     """
     if source is None:
-        return specs_for_sources(registry.get_all_sources(), settings)
+        readable = [s for s in registry.get_all_sources() if source_model_is_readable(s, held)]
+        return specs_for_sources(readable, settings)
     try:
         one = registry.get_source(source)
     except SourceNotFoundError as exc:
@@ -168,9 +182,10 @@ _DRY_RUN_QUERY = Query(False, description="Report what would change without chan
 @router.get(
     "",
     response_model=TopicStatusResponse,
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[Depends(require_own_org_action(scopes_dict["source_read"]))],
 )
 async def list_topic_status(
+    request: Request,
     user: CurrentUser,
     registry: SourceReg,
     settings: Settings,
@@ -180,10 +195,15 @@ async def list_topic_status(
 
     Read-only: it creates nothing, so a status call against a broker mid-restart
     reports that it could not be read rather than reporting every topic missing.
+    A caller held to its orgs sees the topics of the sources it may read.
     """
     _require_managed(settings)
+    if source is not None:
+        require_source_readable(request, user, registry, source)
     specs, owners = await run_blocking(
-        functools.partial(_specs_in_scope, registry, settings, source)
+        functools.partial(
+            _specs_in_scope, registry, settings, source, held_source_orgs(request, user)
+        )
     )
     outcome = await asyncio.to_thread(topic_status, specs, sources=owners, settings=settings)
     return TopicStatusResponse(

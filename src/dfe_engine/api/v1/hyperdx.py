@@ -50,6 +50,7 @@ from dfe_engine.api.deps import (
     require_action,
     secrets_store,
 )
+from dfe_engine.api.v1.sources import held_source_orgs
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch.models import org_user_name
 
@@ -213,10 +214,26 @@ class HyperDXSourcesResponse(BaseModel):
     teams: list[HyperDXTeamSources] = Field(default_factory=list)
 
 
+def _require_every_org_reader(request: Request, user: CurrentUser) -> None:
+    """Refuse a caller held to its orgs: a team is an org's ClickHouse user, so the listing spans them all."""
+    if held_source_orgs(request, user) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "org_not_granted",
+                "message": "This listing spans every org, and the caller is held to its own",
+            },
+        )
+
+
+# Platform-wide: it lists every org's team, so it stays at system scope and refuses a held caller.
 @router.get(
     "/sources",
     response_model=HyperDXSourcesResponse,
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["source_read"])),
+        Depends(_require_every_org_reader),
+    ],
 )
 async def hyperdx_sources(request: Request) -> HyperDXSourcesResponse:
     """List every HyperDX team and the DFE sources on it.
