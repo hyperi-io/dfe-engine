@@ -83,7 +83,7 @@ The watermark still advances and the run still records as `completed`, so the sa
 
 dfe-ui registers OpenTelemetry through `@vercel/otel` once per server process when `OTEL_EXPORTER_OTLP_ENDPOINT` is set, with `OTEL_SERVICE_NAME` defaulting to `dfe-ui` (dfe-ui `apps/dfe-core-ui/src/instrumentation.ts`). An empty endpoint registers nothing, so `prometheus` mode starts no exporter. Its server output reaches `otel_logs` from stdout like any other pod.
 
-It does not yet meet the log contract above. `packages/dev-logger` writes plain text, and only when `NODE_ENV=development`, so its lines are absent in production. Required: structured JSON to stdout in production, in the scalo log schema with masking and levels.
+Its server logger (dfe-ui `apps/dfe-core-ui/src/core/server/logger/`) writes one scalo-py-shaped JSON record per line to stdout (`timestamp`, `level`, `target`, `message`, `fields`), with scalo's field-name masking. `LOG_LEVEL` sets the threshold (default INFO), and `LOG_FORMAT` is `json` or `text`. Unset, it picks JSON in production or whenever an OTLP endpoint is set, and text on a dev terminal. NextAuth's logger and Next's `onRequestError` hook write through it, and request headers are never logged.
 
 ## Acceptance tests
 
