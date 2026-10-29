@@ -75,6 +75,7 @@ from typing import Any, NoReturn
 import pytest
 
 from tests.support.clickhouse_cleanup import drop_database_and_policies
+from tests.support.dockerhub import dockerhub_image
 from tests.support.producer_contract import in_ci
 
 # Current ClickHouse LTS line, and the version dfe-infra actually deploys
@@ -437,7 +438,7 @@ def _spin_ch_on_docker(spec: str, *, keep: bool, test: str, keeper: bool = True)
     Keeper, the server the engine refuses.
     """
     docker = _docker_prefix(spec)
-    image = os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE)
+    image = dockerhub_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))
     # keep=True shares ONE container, so it takes the suite-scoped name. A
     # throwaway is owned by the test that asked for it: the fixture is
     # function-scoped and the suite runs under xdist, so tests do not share one
@@ -673,7 +674,7 @@ def two_replicas(request):
     replicated_access = getattr(request, "param", True)
     spec = _docker_spec("a two-replica cluster")
     docker = _docker_prefix(spec)
-    image = os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE)
+    image = dockerhub_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))
     test = request.node.nodeid
     network = _container_name(test, "net")
     aliases = ("chr1", "chr2")
@@ -784,7 +785,9 @@ def late_clickhouse(request):
         f"127.0.0.1:{port}:8123",
         "-e",
         "CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1",
-        *_single_node_run_args(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE)),
+        *_single_node_run_args(
+            dockerhub_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))
+        ),
     ]
 
     def start() -> dict:
@@ -1142,7 +1145,7 @@ def mongo_uri():
         f"POSTGRES_USER={_FERRETDB_USER}",
         "-e",
         f"POSTGRES_PASSWORD={password}",
-        _FERRETDB_IMAGE,
+        dockerhub_image(_FERRETDB_IMAGE),
     ]
     try:
         _run(run_cmd, timeout=240)  # first image pull can be slow
@@ -1244,7 +1247,7 @@ def kafka_bootstrap() -> Iterator[str]:
         "-p",
         f"127.0.0.1:{port}:{port}",
         *_kafka_env(port),
-        _KAFKA_IMAGE,
+        dockerhub_image(_KAFKA_IMAGE),
     ]
 
     def teardown() -> None:
