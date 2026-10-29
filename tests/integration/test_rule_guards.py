@@ -226,13 +226,16 @@ def test_a_preview_over_its_row_budget_says_it_could_not_finish(seeded, manager)
 
 
 def test_a_query_clickhouse_refuses_is_named_not_passed(seeded, manager):
-    result = _create(_service(manager), seeded, "no_such_column = 1")
+    # Plans at save, so it reaches the preview, and fails only when it reads a row.
+    result = _create(_service(manager), seeded, "toInt32(toString(_json.kind)) = 1")
 
+    assert result.sql_errors == []
     assert result.cost_estimate is not None
     assert result.cost_estimate.band is VolumeBand.UNMEASURED
-    [warning] = result.rule.warnings
-    assert warning.startswith("The alert-volume preview could not finish: ClickHouse refused it (")
-    assert "no_such_column" in warning
+    assert result.rule.warnings == [
+        "The alert-volume preview could not finish: ClickHouse refused it. "
+        "This rule's alert volume is unknown until it runs."
+    ]
 
 
 def test_an_empty_window_is_unmeasured(dfe_db, manager):
