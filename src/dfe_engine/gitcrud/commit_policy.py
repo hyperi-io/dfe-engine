@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Build + validate Governed Ops commit messages, and resolve direct-vs-PR mode.
 
-Callers never hand-write commit messages; they pass a CommitContext and this module
+Callers never hand-write commit messages. They pass a CommitContext and this module
 produces a conforming message (type(scope): summary <=50, ASCII, [skip ci], audit
 trailers). See docs/control-plane/gitops-commit-standard.md.
 """
@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from scalo.logger import logger
 
+from dfe_engine.names import InvalidNameError
 from dfe_engine.settings import is_dev_posture
 
 # Gitops-operational commit types (NOT release fix/feat - deploy repo has no
@@ -40,8 +41,11 @@ SUBJECT_MAX = 50
 # ``fullmatch`` (not ``match``) anchors the whole string, so a trailing newline is
 # rejected -- ``$`` would otherwise match just before it and let a name smuggle a
 # ``DFE-Role:``/``DFE-Action:`` trailer line into the commit body.
-# Not names.VALID_NAME: a deploy-repo name has no length cap or leading-character rule.
+# Not names.VALID_NAME: a deploy-repo name has no leading-character rule.
 _NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+# The longest name yaml_dump can write: its temporary file ".<name>.yaml.XXXXXXXX.tmp" adds 19 bytes to a 255-byte filename limit.
+NAME_MAX = 236
 
 # A digest-pinned image reference ends in ``@sha256:`` and the full 64-hex digest.
 _DIGEST_RE = re.compile(r"@sha256:[0-9a-f]{64}$")
@@ -63,8 +67,8 @@ class CommitPolicyError(ValueError):
     """Raised when a commit message or change violates the standard.
 
     Attributes:
-        path: The dot-path of the leaf a value rule refused; empty for any other refusal.
-        rule: The value rule that refused it; empty for any other refusal.
+        path: The dot-path of the leaf a value rule refused, empty for any other refusal.
+        rule: The value rule that refused it, empty for any other refusal.
     """
 
     def __init__(self, message: str, *, path: str = "", rule: str = "") -> None:
@@ -73,26 +77,34 @@ class CommitPolicyError(ValueError):
         self.rule = rule
 
 
+class ResourceNameError(CommitPolicyError, InvalidNameError):
+    """A resource name no file in the deploy repo can carry."""
+
+
 def validate_name(name: str) -> None:
     """Reject a resource name that could traverse the tree or inject a trailer.
 
     Defence in depth for the gitcrud write path: a ``/`` would escape the class
     ``values/`` directory, ``..`` would climb out of it, and a newline could forge
     ``DFE-Role``/``DFE-Action`` audit trailers in the commit message. Anything
-    outside ``[A-Za-z0-9._-]`` -- or containing ``..`` -- is refused.
+    outside ``[A-Za-z0-9._-]``, containing ``..``, or longer than :data:`NAME_MAX`
+    is refused.
+
+    Raises:
+        ResourceNameError: The name breaks any of those rules.
     """
-    if not name or ".." in name or not _NAME_RE.fullmatch(name):
-        raise CommitPolicyError(f"invalid resource name: {name!r}")
+    if not name or len(name) > NAME_MAX or ".." in name or not _NAME_RE.fullmatch(name):
+        raise ResourceNameError(f"invalid resource name: {name!r}")
 
 
 def validate_resource_path(name: str) -> None:
     """The same rule for a class whose names carry directory segments.
 
     Every segment goes through :func:`validate_name`, so the one chokepoint still
-    decides what a name may contain; only the separator is permitted extra.
+    decides what a name may contain, and only the separator is permitted extra.
     """
     if not name or name.startswith("/") or name.endswith("/") or "//" in name:
-        raise CommitPolicyError(f"invalid resource name: {name!r}")
+        raise ResourceNameError(f"invalid resource name: {name!r}")
     for segment in name.split("/"):
         validate_name(segment)
 
@@ -126,7 +138,7 @@ def fit_subject(ctype: str, scope: str, summary: str) -> str:
     """A ``type(scope): summary`` subject trimmed to fit ``SUBJECT_MAX``.
 
     The scope names the resource being changed and the summary only describes
-    the edit, so the summary gives way first and the scope survives whole; the
+    the edit, so the summary gives way first and the scope survives whole, and the
     commit's file list records the change exactly either way. Only a scope that
     would overrun the budget on its own is elided.
 
@@ -264,7 +276,7 @@ def validate_result(
     write breaks it: setting ``keda.enabled`` over a stored ``replicaCount`` names no
     refused path, and setting both in one write is allowed. A document that already
     breaks a rule stays writable, because refusing every write to it would refuse
-    the writes that repair it too; what it already carries is logged and returned.
+    the writes that repair it too, and what it already carries is logged and returned.
 
     Args:
         stored: The document as stored, empty when the resource is new.
@@ -376,7 +388,7 @@ def resolve_mode(
     require_pr: bool = False,
     auto_merge: bool = False,
 ) -> str:
-    """'pr' for production posture / protected / governance / explicit; else 'direct'.
+    """'pr' for production posture / protected / governance / explicit, else 'direct'.
 
     PRs for production-controlling changes, direct-commit for low-risk - enforced at
     the git level (the standard). Production posture is anything DFE_ENV does not
