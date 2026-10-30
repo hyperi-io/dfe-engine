@@ -101,7 +101,9 @@ def test_newline_subject_rejected():
         validate_subject("cfg(x): ok\rDFE-Action: wipe")
 
 
-@pytest.mark.parametrize("name", ["receiver-default", "a.b_c-1", "gitops", "X", "v1.2.3"])
+@pytest.mark.parametrize(
+    "name", ["receiver-default", "a.b_c-1", "gitops", "X", "v1.2.3", "a" * commit_policy.NAME_MAX]
+)
 def test_validate_name_accepts_plain(name):
     validate_name(name)  # no raise
 
@@ -120,10 +122,12 @@ def test_validate_name_accepts_plain(name):
         "a..b",  # any '..' is refused, defence in depth
         "name:with:colon",
         "star*",
+        "nul\x00byte",
+        "a" * (commit_policy.NAME_MAX + 1),  # past the longest file name the repo can hold
     ],
 )
 def test_validate_name_rejects_dangerous(name):
-    with pytest.raises(CommitPolicyError):
+    with pytest.raises(commit_policy.ResourceNameError):
         validate_name(name)
 
 
@@ -363,7 +367,7 @@ class TestKedaDefault:
 
 
 class TestOnlyAddedViolationsRefuse:
-    """A document already breaking a rule stays writable; the write may not add one."""
+    """A document already breaking a rule stays writable, but the write may not add one."""
 
     STORED = {"replicaCount": 2, "resources": {"limits": {"cpu": "1"}}, "image": {"tag": "v1"}}
 

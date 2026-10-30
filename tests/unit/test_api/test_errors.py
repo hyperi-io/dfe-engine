@@ -1,8 +1,13 @@
-"""Tests for error handling — error format, exception handlers."""
+"""Tests for error handling -- error format, exception handlers."""
 
+from pathlib import Path
+
+import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.errors import ErrorCode, ErrorResponse, FieldError
+from dfe_engine.gitcrud.commit_policy import NAME_MAX
+from dfe_engine.settings import DFESettings, GitopsSettings
 
 
 class TestErrorModels:
@@ -38,7 +43,7 @@ class TestErrorModels:
 
 
 class TestExceptionHandlers:
-    """Exception → HTTP response mapping."""
+    """Exception -> HTTP response mapping."""
 
     def test_401_no_auth_header(self, client: TestClient):
         resp = client.get("/api/v1/auth/me")
@@ -84,7 +89,7 @@ class TestExceptionHandlers:
 
     def test_health_no_auth(self, client: TestClient):
         """Health endpoints need no auth. Liveness is dependency-free (always
-        200); readiness is fail-closed on ClickHouse, so it is 200 when CH is
+        200), and readiness is fail-closed on ClickHouse, so it is 200 when CH is
         reachable and 503 when not - both valid, neither an auth 401."""
         resp = client.get("/livez")
         assert resp.status_code == 200, f"/livez returned {resp.status_code}"
@@ -282,3 +287,132 @@ class TestScaloApiHelpersAnswerInTheEnvelope:
         assert resp.json()["errors"] == [
             {"field": "spec.size", "message": "too big", "code": ErrorCode.VALIDATION_ERROR}
         ]
+
+
+@pytest.fixture
+def on_a_deploy_repo(api_settings: DFESettings) -> DFESettings:
+    """The API fixtures' settings on a local deploy repo. Request it ahead of ``client``."""
+    api_settings.gitops = GitopsSettings(
+        enabled=True, local_path=str(Path(api_settings.config_dir) / "deploy"), push=False
+    )
+    return api_settings
+
+
+_RULE = {"name": "r1", "user_sql": "SELECT * FROM dfe.main WHERE 1 = 1"}
+
+
+class TestABadRequestNeverAnswers500:
+    """Malformed bodies and names a store cannot hold answer 4xx in the envelope, never 500."""
+
+    @pytest.mark.parametrize(
+        ("authed", "method", "path", "body", "status", "code"),
+        [
+            # The core-resource guard reads the body before auth runs.
+            pytest.param(
+                False,
+                "POST",
+                "/api/v1/field-maps",
+                b"[]",
+                401,
+                "unauthorized",
+                id="guard-json-array",
+            ),
+            pytest.param(
+                False,
+                "POST",
+                "/api/v1/field-maps",
+                b"null",
+                401,
+                "unauthorized",
+                id="guard-json-null",
+            ),
+            pytest.param(
+                False,
+                "POST",
+                "/api/v1/field-maps",
+                b'"x"',
+                401,
+                "unauthorized",
+                id="guard-json-string",
+            ),
+            pytest.param(
+                False,
+                "DELETE",
+                "/api/v1/schemas/definitions/%2e%2e",
+                b"",
+                401,
+                "unauthorized",
+                id="guard-dotdot-schema",
+            ),
+            pytest.param(
+                True,
+                "GET",
+                "/api/v1/schemas/definitions/%2e%2e/export",
+                b"",
+                422,
+                "validation_error",
+                id="schema-dotdot",
+            ),
+            pytest.param(
+                True, "GET", "/api/v1/sources/a%20b", b"", 400, "invalid_name", id="source-space"
+            ),
+            pytest.param(
+                True, "GET", "/api/v1/sources/x%00y", b"", 400, "invalid_name", id="source-nul"
+            ),
+            pytest.param(
+                True,
+                "GET",
+                "/api/v1/sources/" + "a" * (NAME_MAX + 1),
+                b"",
+                400,
+                "invalid_name",
+                id="source-too-long",
+            ),
+            pytest.param(
+                True,
+                "PUT",
+                "/api/v1/helm/files/" + "a" * 300 + "/vars/x",
+                b'{"value": 1}',
+                400,
+                "invalid_name",
+                id="helm-file-too-long",
+            ),
+            pytest.param(
+                True,
+                "GET",
+                "/api/v1/helm/files/no-such-file/vars",
+                b"",
+                404,
+                "not_found",
+                id="helm-file-missing",
+            ),
+            pytest.param(
+                True,
+                "POST",
+                "/api/v1/rules",
+                {**_RULE, "severity": "x"},
+                422,
+                "validation_error",
+                id="rule-severity",
+            ),
+        ],
+    )
+    def test_refused_in_the_envelope(
+        self,
+        on_a_deploy_repo: DFESettings,
+        client: TestClient,
+        admin_headers: dict,
+        authed: bool,
+        method: str,
+        path: str,
+        body: bytes | dict,
+        status: int,
+        code: str,
+    ):
+        headers = {"Content-Type": "application/json", **(admin_headers if authed else {})}
+        if isinstance(body, dict):
+            resp = client.request(method, path, json=body, headers=headers)
+        else:
+            resp = client.request(method, path, content=body, headers=headers)
+
+        assert (resp.status_code, resp.json()["code"]) == (status, code), resp.text

@@ -11263,7 +11263,7 @@
           "Rules"
         ],
         "summary": "Delete Rule",
-        "description": "Delete a detection rule.\n\nA production+team delete is routed to a review branch, so the runner keeps\ncompiling the rule until that branch is merged; ``X-DFE-Review-Required`` says so.",
+        "description": "Delete a detection rule.\n\nA production+team delete is routed to a review branch, so the runner keeps\ncompiling the rule until that branch is merged, which ``X-DFE-Review-Required`` says.",
         "operationId": "rules.delete",
         "parameters": [
           {
@@ -43061,7 +43061,7 @@
           "user_sql"
         ],
         "title": "RuleUpdateRequest",
-        "description": "Update an existing hunt rule (re-runs creation pipeline; ``source_type`` is not accepted)."
+        "description": "Update an existing hunt rule (re-runs creation pipeline, and ``source_type`` is not accepted)."
       },
       "SampleBackend": {
         "type": "string",
