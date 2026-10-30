@@ -39,14 +39,32 @@ Usage:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import AfterValidator, BaseModel, Field, field_validator, model_validator
 
 from .rule_rewriter import ParsedRule, RuleRewriter
 
 if TYPE_CHECKING:
     from scalo.expression import ProfileConfig
+
+SEVERITIES = frozenset({"low", "medium", "high", "critical"})
+
+
+def validate_severity(value: str) -> str:
+    """Return *value* lower-cased when it names a severity.
+
+    Raises:
+        ValueError: *value* is not one of :data:`SEVERITIES`.
+    """
+    lowered = value.lower()
+    if lowered not in SEVERITIES:
+        raise ValueError(f"Invalid severity '{lowered}'. Valid: {', '.join(sorted(SEVERITIES))}")
+    return lowered
+
+
+Severity = Annotated[str, AfterValidator(validate_severity)]
+"""A severity on a request model, so a bad one is a 422 on the field and not a failure deeper in."""
 
 
 def _hunt_profile() -> ProfileConfig:
@@ -94,11 +112,7 @@ class RuleCreate(BaseModel):
     @field_validator("severity")
     @classmethod
     def _validate_severity(cls, v: str) -> str:
-        valid = {"low", "medium", "high", "critical"}
-        v = v.lower()
-        if v not in valid:
-            raise ValueError(f"Invalid severity '{v}'. Valid: {', '.join(sorted(valid))}")
-        return v
+        return validate_severity(v)
 
     @model_validator(mode="after")
     def _require_sql_or_cel(self) -> RuleCreate:

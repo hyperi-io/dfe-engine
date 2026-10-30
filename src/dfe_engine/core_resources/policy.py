@@ -72,13 +72,21 @@ def fieldmap_target_is_core(
     return config_is_core(config)
 
 
+def _json_object(body: bytes) -> dict[str, Any] | None:
+    """The body as a JSON object, or None for any other body, which the route itself refuses."""
+    if not body:
+        return None
+    try:
+        data = json.loads(body)
+    except ValueError:  # malformed JSON, or bytes that are not UTF-8
+        return None
+    return data if isinstance(data, dict) else None
+
+
 def parse_fieldmap_post_body(body: bytes) -> tuple[str | None, str | None]:
     """The standard and source a field map POST body names, lower-cased."""
-    if not body:
-        return None, None
-    try:
-        data: dict[str, Any] = json.loads(body)
-    except json.JSONDecodeError:
+    data = _json_object(body)
+    if data is None:
         return None, None
     standard = data.get("standard")
     source = data.get("source")
@@ -95,13 +103,8 @@ def parse_fieldmap_post_body(body: bytes) -> tuple[str | None, str | None]:
 
 def core_schema_current_only_patch(body: bytes) -> bool:
     """True when a PATCH body only moves the schema ``current`` pointer."""
-    if not body:
-        return False
-    try:
-        data: dict[str, Any] = json.loads(body)
-    except json.JSONDecodeError:
-        return False
-    if not isinstance(data, dict):
+    data = _json_object(body)
+    if data is None:
         return False
     if data.get("current") is None or data.get("summary") is not None:
         return False

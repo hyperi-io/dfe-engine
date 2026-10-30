@@ -57,6 +57,9 @@ def _schema_location(schema_path: str) -> tuple[str, str]:
     parts = [p for p in schema_path.replace("\\", "/").split("/") if p]
     if not (parts):
         raise SchemaValidationError("Invalid empty schema path")
+    for segment in parts:
+        if segment in (".", ".."):
+            raise SchemaValidationError(f"Invalid schema path segment: {segment!r}")
     if len(parts) == 1:
         return "", parts[0]
     return "/".join(parts[:-1]), parts[-1]

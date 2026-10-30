@@ -36,6 +36,7 @@ from dfe_engine.hunts.customers import hunt_tenant_ids
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError, default_display_name
 from dfe_engine.hunts.rule_creation_service import CostEstimate
 from dfe_engine.hunts.rule_guard import source_label
+from dfe_engine.hunts.rule_model import Severity
 from dfe_engine.hunts.rule_registry import RuleNotFoundError
 from dfe_engine.names import MAX_NAME_LENGTH, RuleName
 
@@ -67,7 +68,7 @@ class _RuleWriteFields(BaseModel):
         default=None,
         description="Human-readable label (defaults from ``name`` when omitted on create)",
     )
-    severity: str = Field(default="medium", description="low|medium|high|critical")
+    severity: Severity = Field(default="medium", description="low|medium|high|critical")
     user_sql: str = Field(
         min_length=1,
         description=(
@@ -106,7 +107,7 @@ class RuleCreateRequest(_RuleWriteFields):
 
 
 class RuleUpdateRequest(_RuleWriteFields):
-    """Update an existing hunt rule (re-runs creation pipeline; ``source_type`` is not accepted)."""
+    """Update an existing hunt rule (re-runs creation pipeline, and ``source_type`` is not accepted)."""
 
     model_config = {"extra": "ignore"}
 
@@ -191,7 +192,7 @@ class RuleFromHyperdxRequest(BaseModel):
     saved_search_name: str | None = Field(
         default=None, description="HyperDX saved-search name; seeds the rule id and label"
     )
-    severity: str = Field(default="medium", description="low|medium|high|critical")
+    severity: Severity = Field(default="medium", description="low|medium|high|critical")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
 
@@ -533,7 +534,7 @@ def delete_rule(
     """Delete a detection rule.
 
     A production+team delete is routed to a review branch, so the runner keeps
-    compiling the rule until that branch is merged; ``X-DFE-Review-Required`` says so.
+    compiling the rule until that branch is merged, which ``X-DFE-Review-Required`` says.
     """
     used_by = hunt_registry.hunt_names_referencing_rule(name)
     if used_by:

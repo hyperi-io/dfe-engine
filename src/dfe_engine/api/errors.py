@@ -210,6 +210,7 @@ class ErrorCode:
     FORBIDDEN = "forbidden"
     VALIDATION_ERROR = "validation_error"
     NOT_FOUND = "not_found"
+    INVALID_NAME = "invalid_name"
     CONFLICT = "conflict"
     PROTECTED_ACCOUNT = "protected_account"
     PASSWORD_CHANGE_REQUIRED = "password_change_required"  # noqa: S105, RUF100 - an error code, not a password
@@ -519,6 +520,20 @@ def install_exception_handlers(app: FastAPI) -> None:
     async def secret_name_held_handler(_request: Request, exc: SecretNameHeldError):
         body = ErrorResponse(code=ErrorCode.CONFLICT, message=exc.message)
         return JSONResponse(status_code=409, content=_error_response_json(body))
+
+    # A path parameter names a file on every read as well as every write, so a route need not catch these itself.
+    from dfe_engine.gitcrud.engine import ResourceNotFoundError
+    from dfe_engine.names import InvalidNameError
+
+    @app.exception_handler(InvalidNameError)
+    async def invalid_name_handler(_request: Request, exc: InvalidNameError):
+        body = ErrorResponse(code=ErrorCode.INVALID_NAME, message=str(exc))
+        return JSONResponse(status_code=400, content=_error_response_json(body))
+
+    @app.exception_handler(ResourceNotFoundError)
+    async def resource_not_found_handler(_request: Request, _exc: ResourceNotFoundError):
+        body = ErrorResponse(code=ErrorCode.NOT_FOUND, message="The resource does not exist")
+        return JSONResponse(status_code=404, content=_error_response_json(body))
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
