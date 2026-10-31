@@ -216,6 +216,7 @@ tmp_path_retention_count = 1
 addopts = "-vv --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live and not upstream'"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 # Permanent hang guard (pytest-timeout): fail ANY test running longer than
 # `timeout` seconds and dump every thread's stack, so a wedged test (blocked
 # socket / gRPC / ClickHouse connect, OTLP exporter shutdown-block) fails fast
