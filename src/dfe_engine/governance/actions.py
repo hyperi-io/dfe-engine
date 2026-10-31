@@ -30,7 +30,7 @@ from typing import Any
 from pydantic import ValidationError
 from scalo.logger import logger
 
-from dfe_engine.appmgmt import contract
+from dfe_engine.appmgmt import contract, instances
 from dfe_engine.appmgmt.scaling import keda_by_default
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
 from dfe_engine.gitcrud.commit_policy import added_violations
@@ -236,11 +236,23 @@ class ActionStore:
         """The stored definition for a reader, any credential it carries masked."""
         return ActionDef.model_validate(self.shown_doc(name, self._crud.get(ACTION_CLASS, name)))
 
+    @staticmethod
+    def _new_document(cls: str, name: str) -> dict:
+        """The document a change creates where there is none yet.
+
+        A catalogued app's overlay starts with the ``deploy`` block, because a values
+        file without one yields no Argo Application and the change would land nowhere.
+        """
+        app = instances.parse_overlay_name(name) if cls == instances.HELMVARS_CLASS else None
+        return instances.initial_overlay(app) if app else {}
+
     def _target(self, change: VarChange) -> dict:
-        """The document a change writes into, or nothing where there is none yet."""
+        """The document a change writes into, or the one it would create."""
         try:
             return self._crud.get(change.cls, change.name)
-        except ResourceNotFoundError, UnknownResourceClassError:
+        except ResourceNotFoundError:
+            return self._new_document(change.cls, change.name)
+        except UnknownResourceClassError:
             return {}
 
     def _credential_change(self, change: VarChange) -> bool:
@@ -388,7 +400,7 @@ class ActionStore:
                 try:
                     docs[key] = self._crud.get(ch.cls, ch.name)
                 except ResourceNotFoundError:
-                    docs[key] = {}
+                    docs[key] = self._new_document(ch.cls, ch.name)
                 stored[key] = copy.deepcopy(docs[key])
             doc = docs[key]
             # A value copied from a masked listing keeps the credential stored there.

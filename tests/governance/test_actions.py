@@ -129,6 +129,43 @@ def test_action_cannot_change_governance_class(store, crud):
         crud.get("roles", "admin")
 
 
+ENGINE_OVERLAY = "dfe-engine-default-values"
+ENGINE_DEPLOY = {"service": "dfe-engine", "instance": "default"}
+
+
+def _hunt_runner_action(**changes):
+    return ActionDef(
+        name="hunts-dial",
+        description="x",
+        required_action="action:invoke:hunts-dial",
+        changes=[
+            VarChange(cls="helmvars", name=ENGINE_OVERLAY, path=path, value=value)
+            for path, value in changes.items()
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (None, {"deploy": ENGINE_DEPLOY, "huntRunner": {"enabled": False}}),
+        (
+            {"deploy": ENGINE_DEPLOY, "replicaCount": 2},
+            {"deploy": ENGINE_DEPLOY, "replicaCount": 2, "huntRunner": {"enabled": False}},
+        ),
+    ],
+    ids=["new-overlay-gets-its-deploy-block", "existing-overlay-is-left-as-it-is"],
+)
+def test_an_action_on_an_app_overlay_leaves_the_instance_deployable(store, crud, stored, expected):
+    """A values file without ``deploy`` yields no Application, so the dial would change nothing."""
+    if stored is not None:
+        crud.put("helmvars", ENGINE_OVERLAY, stored, actor="admin")
+    action = _hunt_runner_action(**{"huntRunner.enabled": False})
+    store.save(action, actor="admin")
+    store.invoke("hunts-dial", actor="bob")
+    assert crud.get("helmvars", ENGINE_OVERLAY) == expected
+
+
 def test_action_change_rejected_by_commit_validators(store, crud):
     # an action cannot smuggle in a controller-owned field or a floating image
     from dfe_engine.gitcrud.commit_policy import CommitPolicyError
