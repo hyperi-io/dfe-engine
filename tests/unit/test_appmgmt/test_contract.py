@@ -2041,6 +2041,35 @@ class TestCredentialsNamedByWhatHoldsThem:
             "pair_a": "pa-4434",
         }
 
+    def test_a_chart_s_secret_group_toggles_are_shown_and_anything_else_under_it_is_not(self):
+        overlay = {
+            "secrets": {
+                "hunt-runner": {"enabled": False},
+                "kafka": {"enabled": True, "existingSecret": "kafka-creds", "token": "kt-4601"},
+                "loose": "lp-4602",
+                "tags": ["lt-4603"],
+            }
+        }
+        assert contract.redact_overlay(ABSENT, overlay) == {
+            "secrets": {
+                "hunt-runner": {"enabled": False},
+                "kafka": {
+                    "enabled": True,
+                    "existingSecret": contract.REDACTED,
+                    "token": contract.REDACTED,
+                },
+                "loose": contract.REDACTED,
+                "tags": [contract.REDACTED],
+            }
+        }
+
+    @pytest.mark.parametrize("value", [False, True])
+    def test_a_secret_group_toggle_is_not_a_credential_to_write(self, value):
+        path = "secrets.hunt-runner.enabled"
+        assert contract.shown_var({}, path, value) is value
+        assert contract.credential_var({}, path, value) is False
+        assert contract.credential_var({}, "secrets.hunt-runner.password", "hp-4604") is True
+
     def test_a_chart_s_secret_key_names_are_shown(self):
         overlay = {
             "kafka": {

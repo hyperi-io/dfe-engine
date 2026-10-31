@@ -83,7 +83,7 @@ Adding a service instance is a git write of one
 generator fans out one Argo Application per values file. Removing the file
 removes the app. The engine declares instances; the appset deploys them.
 An instance removed while its source still exists leaves the files authored into it in `values/<service>-<instance>-parked.yaml`, which the glob does not match, and its next deploy restores them.
-Depth: [deployment/index.md](deployment/index.md) and
+Depth: [deployment/README.md](deployment/README.md) and
 [control-plane/governed-ops-design.md](control-plane/governed-ops-design.md).
 
 ### 2. Close-coupled source - ingest - schema - transform (not separate ETL)
@@ -109,7 +109,7 @@ One definition, enforced end to end: the receiver routes an event by its
 source's schema, and the field-mapping layer projects the same columns back
 out as standard vocabularies (Sigma, ECS, CIM) for detection and query. There
 is no separate ETL config to fall out of sync. Depth:
-[data-plane/index.md](data-plane/index.md).
+[data-plane/README.md](data-plane/README.md).
 
 ## The control pyramid
 
@@ -176,7 +176,7 @@ flowchart TB
   repo. The hunt runner git-syncs those last two directories, so on Kubernetes
   they are how a hunt reaches the pod that runs it. Provider-agnostic:
   GitHub / GitLab external git, or the in-cluster Forgejo fallback (see
-  [deployment/index.md](deployment/index.md)).
+  [deployment/README.md](deployment/README.md)).
 - **dfe-infra** - the pinned deployment vehicle. Never written by the engine.
 
 In small deployments the config repo and deploy repo can be one repo with
@@ -220,7 +220,7 @@ overlays). Four tiers select defaults: **dfe-docker** (Compose), **slim**
 clustered). HyperDX ships in EVERY tier - it is the explore UI over all DFE
 data and the self-monitoring sink, not an add-on. Full detail including the
 per-tier composition table, deploy-repo providers, backing-service modes, and
-the network model: [deployment/index.md](deployment/index.md).
+the network model: [deployment/README.md](deployment/README.md).
 
 ## Runtime data flow
 
@@ -265,10 +265,10 @@ ReplacingMergeTree state table, fail-open.
 
 | Area | Start at | Covers |
 |------|----------|--------|
-| Control-plane surface | [control-plane/index.md](control-plane/index.md) | governed ops, gitops commit standard, RBAC, OIDC, CLI, UI API, type-safety sync |
-| Data plane | [data-plane/index.md](data-plane/index.md) | sources, schemas, field mapping, CEL, query API, hunts |
-| Deployment seam | [deployment/index.md](deployment/index.md) | tiers + composition, backing services, KEDA, observability, supply-chain pinning, e2e acceptance |
-| Integrations | [integrations/index.md](integrations/index.md) | dfe-ui guide, HyperDX fork maintenance |
-| Archive | [archive/index.md](archive/index.md) | superseded research + snapshots, kept for the decision trail |
+| Control-plane surface | [control-plane/README.md](control-plane/README.md) | governed ops, gitops commit standard, RBAC, OIDC, CLI, UI API, type-safety sync |
+| Data plane | [data-plane/README.md](data-plane/README.md) | sources, schemas, field mapping, CEL, query API, hunts |
+| Deployment seam | [deployment/README.md](deployment/README.md) | tiers + composition, backing services, KEDA, observability, supply-chain pinning, e2e acceptance |
+| Integrations | [integrations/README.md](integrations/README.md) | dfe-ui guide, HyperDX fork maintenance |
+| Archive | [archive/README.md](archive/README.md) | superseded research + snapshots, kept for the decision trail |
 
-Edge auth topology notes live in [AUTH-ENVOY-TOPOLOGY.md](AUTH-ENVOY-TOPOLOGY.md).
+Edge auth topology notes live in [auth-envoy-topology.md](auth-envoy-topology.md).

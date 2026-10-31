@@ -21,7 +21,7 @@ from .actions import (
     InvalidParamsError,
     resolve_params,
 )
-from .models import ActionDef, ParamSpec, ProtectedPolicy, VarChange, param_ref
+from .models import ActionDef, ParamSpec, ProtectedPolicy, VarChange, is_unset, param_ref
 from .policies import PolicyStore, ProtectedVarError
 
 __all__ = [
@@ -37,6 +37,7 @@ __all__ = [
     "ProtectedPolicy",
     "ProtectedVarError",
     "VarChange",
+    "is_unset",
     "param_ref",
     "resolve_params",
 ]

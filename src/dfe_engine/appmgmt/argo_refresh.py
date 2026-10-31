@@ -24,6 +24,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import httpx
+from scalo.crypto import ssl_context
 from scalo.logger import logger
 
 ARGO_NAMESPACE = "argocd"
@@ -76,7 +77,7 @@ def refresh_applications(
     ca = service_account / "ca.crt"
     with httpx.Client(
         transport=transport,
-        verify=str(ca) if ca.is_file() else True,
+        verify=ssl_context(cafile=str(ca) if ca.is_file() else None),
         timeout=_TIMEOUT_SECONDS,
         headers={
             "Authorization": f"Bearer {token}",

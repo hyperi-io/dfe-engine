@@ -30,9 +30,10 @@ from typing import Any
 from pydantic import ValidationError
 from scalo.logger import logger
 
-from dfe_engine.appmgmt import contract
+from dfe_engine.appmgmt import contract, instances
+from dfe_engine.appmgmt.catalogue import AppDescriptor
 from dfe_engine.appmgmt.scaling import keda_by_default
-from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
+from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, del_path, get_path, set_path
 from dfe_engine.gitcrud.commit_policy import added_violations
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 from dfe_engine.gitops.repo import PublishResult
@@ -40,7 +41,7 @@ from dfe_engine.hunt_runner.checkpoint import TIMESTAMP_FIELD
 from dfe_engine.hunts.rule_guard import refuse_rule_condition
 from dfe_engine.hunts.validator import HuntValidator
 
-from .models import ActionDef, VarChange, param_ref
+from .models import UNSET, ActionDef, VarChange, is_unset, param_ref
 from .policies import PolicyStore, ProtectedVarError
 
 ACTION_CLASS = "actions"
@@ -157,6 +158,24 @@ def _branches(action: ActionDef, value: Any) -> list[tuple[str, Any]]:
     return [(f"param {pname!r} = {end!r}", end) for end in ends]
 
 
+def _apply(doc: dict, path: str, value: Any) -> None:
+    """Set ``path`` to ``value``, or remove it for an unset marker.
+
+    Removing a key leaves no empty map behind, so ``keda: {}`` does not outlive the
+    only key it held. An absent path is a no-op.
+    """
+    if not is_unset(value):
+        set_path(doc, path, value)
+        return
+    del_path(doc, path)
+    parents = path.split(".")[:-1]
+    for depth in range(len(parents), 0, -1):
+        parent = get_path(doc, ".".join(parents[:depth]))
+        if parent != {}:
+            break
+        del_path(doc, ".".join(parents[:depth]))
+
+
 def _hunt_as_written(doc: dict) -> dict:
     """A hunt document with each bare rule name as the mapping the hunts API writes."""
     rules = doc.get("rules")
@@ -219,10 +238,24 @@ class InvokeResult:
 class ActionStore:
     """CRUD defined actions (gitops ``actions`` class) and invoke them."""
 
-    def __init__(self, crud: GitCrud, *, lookup_databases: Collection[str] = ()) -> None:
-        """Keep the deploy-repo client and the databases a rule may look values up in."""
+    def __init__(
+        self,
+        crud: GitCrud,
+        *,
+        lookup_databases: Collection[str] = (),
+        instance_ceiling: Callable[[AppDescriptor], int | None] | None = None,
+    ) -> None:
+        """Keep the deploy-repo client and what its checks need.
+
+        Args:
+            crud: The deploy-repo client.
+            lookup_databases: The databases a rule may look values up in.
+            instance_ceiling: How many deployments of an app this deployment can run,
+                None meaning unbounded, as the instance API reads it.
+        """
         self._crud = crud
         self._lookup_databases = tuple(lookup_databases)
+        self._instance_ceiling = instance_ceiling or (lambda _app: None)
 
     def list(self) -> builtins.list[str]:
         """List the stored action definitions by name."""
@@ -236,18 +269,50 @@ class ActionStore:
         """The stored definition for a reader, any credential it carries masked."""
         return ActionDef.model_validate(self.shown_doc(name, self._crud.get(ACTION_CLASS, name)))
 
+    @staticmethod
+    def _new_document(cls: str, name: str) -> dict:
+        """The document a change creates where there is none yet.
+
+        A catalogued app's overlay starts with the ``deploy`` block, because a values
+        file without one yields no Argo Application and the change would land nowhere.
+        """
+        app = instances.parse_overlay_name(name) if cls == instances.HELMVARS_CLASS else None
+        return instances.initial_overlay(app) if app else {}
+
+    def _creation_refusal(self, cls: str, name: str) -> str | None:
+        """Why a change may not create the overlay it names, or None where it may.
+
+        A new app overlay deploys an instance, so it meets the checks the instance API
+        applies: the app's multiplicity and this deployment's ceiling. An instance that
+        follows a source is created by that source's deploy and by nothing else.
+        """
+        app = instances.parse_overlay_name(name) if cls == instances.HELMVARS_CLASS else None
+        if app is None:
+            return None
+        allowed, reason = instances.additional_instance_allowed(
+            self._crud, app, self._instance_ceiling(app.descriptor)
+        )
+        if not allowed:
+            return f"{cls}/{name} does not exist and may not be created: {reason}"
+        if app.descriptor.source_bound or app.descriptor.routing_is_per_instance:
+            return (
+                f"{cls}/{name} does not exist and may not be created by an action: "
+                f"{app.service} instances follow their source, and the source deploy creates them"
+            )
+        return None
+
     def _target(self, change: VarChange) -> dict:
-        """The document a change writes into, or nothing where there is none yet."""
+        """The document a change writes into, or the one it would create."""
         try:
             return self._crud.get(change.cls, change.name)
-        except ResourceNotFoundError, UnknownResourceClassError:
+        except ResourceNotFoundError:
+            return self._new_document(change.cls, change.name)
+        except UnknownResourceClassError:
             return {}
 
     def _credential_change(self, change: VarChange) -> bool:
         """Whether ``change`` would store a credential, by its path or by any value it can take."""
         target = self._target(change)
-        if contract.credential_var(target, change.path):
-            return True
         ref = param_ref(change.value)
         if ref is None:
             candidates = [change.value]
@@ -255,7 +320,16 @@ class ActionStore:
             candidates = list(ref[1].values())
         else:
             candidates = []
-        return any(contract.credential_var(target, change.path, v) for v in candidates)
+        # A toggle stores no credential wherever it sits, and an unset stores no value at all,
+        # so only the path of anything else is judged.
+        carries_no_value = [isinstance(v, bool) or is_unset(v) for v in candidates]
+        if not (candidates and all(carries_no_value)) and contract.credential_var(
+            target, change.path
+        ):
+            return True
+        return any(
+            contract.credential_var(target, change.path, v) for v in candidates if not is_unset(v)
+        )
 
     def credential_changes(self, action: ActionDef) -> builtins.list[str]:
         """Each change of ``action`` that would store a credential, as ``cls/name:path``."""
@@ -303,7 +377,10 @@ class ActionStore:
             elif ref[1] is not None:
                 shown["changes"][i]["value"] = {
                     "$param": ref[0],
-                    "map": {k: _masked(target, change.path, v) for k, v in ref[1].items()},
+                    "map": {
+                        k: v if is_unset(v) else _masked(target, change.path, v)
+                        for k, v in ref[1].items()
+                    },
                 }
             else:
                 masked_params.add(ref[0])
@@ -388,12 +465,31 @@ class ActionStore:
                 try:
                     docs[key] = self._crud.get(ch.cls, ch.name)
                 except ResourceNotFoundError:
-                    docs[key] = {}
+                    if is_unset(value):
+                        # Nothing is stored there to remove, and removing it must not create the file.
+                        diff.append(
+                            {
+                                "cls": ch.cls,
+                                "name": ch.name,
+                                "path": ch.path,
+                                "old": None,
+                                "new": UNSET,
+                            }
+                        )
+                        continue
+                    refusal = self._creation_refusal(ch.cls, ch.name)
+                    if refusal is not None:
+                        if not collect:
+                            raise ActionForbiddenError(refusal) from None
+                        errors.append(f"{ch.cls}/{ch.name}:{ch.path}: {refusal}")
+                        continue
+                    docs[key] = self._new_document(ch.cls, ch.name)
                 stored[key] = copy.deepcopy(docs[key])
             doc = docs[key]
             # A value copied from a masked listing keeps the credential stored there.
             try:
-                value = contract.restore_masked_at(doc, ch.path, value)
+                if not is_unset(value):
+                    value = contract.restore_masked_at(doc, ch.path, value)
             except contract.MaskedValueError as exc:
                 if not collect:
                     raise
@@ -406,10 +502,10 @@ class ActionStore:
                     "name": ch.name,
                     "path": ch.path,
                     "old": contract.shown_var(doc, ch.path, get_path(doc, ch.path)),
-                    "new": contract.shown_var(doc, ch.path, value),
+                    "new": UNSET if is_unset(value) else contract.shown_var(doc, ch.path, value),
                 }
             )
-            set_path(doc, ch.path, value)
+            _apply(doc, ch.path, value)
         for (cls, name), doc in docs.items():
             added = added_violations(
                 stored[(cls, name)], doc, keda_by_default=keda_by_default(cls, name)
@@ -506,7 +602,7 @@ class ActionStore:
             landed_document = self._document_refusal(ch.cls, landed)
             for label, branch_value in branches:
                 branch = copy.deepcopy(landed)
-                set_path(branch, ch.path, branch_value)
+                _apply(branch, ch.path, branch_value)
                 for violation in added_violations(stored, branch, keda_by_default=default):
                     if str(violation) not in shown:
                         errors.append(f"{where}: {label}: {violation}")

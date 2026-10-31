@@ -27,6 +27,7 @@ from dfe_engine.governance.seed import (
     pending_seed,
 )
 from dfe_engine.yaml_utils import yaml_load_string
+from tests.support.producer_contract import DFE_DEPLOY, producer_file
 
 
 class TestEmptyRepo:
@@ -113,6 +114,12 @@ class TestEmptyRepo:
             if not rel.startswith(ACTIONS_SUBDIR):
                 continue
             ActionDef.model_validate(yaml_load_string(content))
+
+    def test_the_packaged_library_is_the_one_dfe_deploy_ships(self, tmp_path: Path):
+        """An empty deploy repo is seeded from the packaged copy, so it must match the template."""
+        packaged = pending_seed(repo_root=tmp_path)
+        shipped = {rel: producer_file(DFE_DEPLOY, rel).text for rel in DFE_DEPLOY.files}
+        assert packaged == shipped
 
     def test_seeded_content_is_not_empty(self, tmp_path: Path):
         for content in pending_seed(repo_root=tmp_path).values():
