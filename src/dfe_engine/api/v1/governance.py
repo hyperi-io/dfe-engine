@@ -49,6 +49,7 @@ from dfe_engine.governance import (
     ProtectedPolicy,
     ProtectedVarError,
 )
+from dfe_engine.source.flow import stage_instance_ceiling
 
 router = APIRouter(prefix="/governance", tags=["Governed Ops: Actions"], dependencies=[WRITE_TURN])
 
@@ -87,8 +88,12 @@ def _gitcrud(request: Request) -> GitCrud:
 
 
 def _actions(request: Request) -> ActionStore:
-    lookups = request.app.state.settings.hunts.lookup_databases
-    return ActionStore(_gitcrud(request), lookup_databases=lookups)
+    settings = request.app.state.settings
+    return ActionStore(
+        _gitcrud(request),
+        lookup_databases=settings.hunts.lookup_databases,
+        instance_ceiling=functools.partial(stage_instance_ceiling, settings=settings),
+    )
 
 
 def _policies(request: Request) -> PolicyStore:

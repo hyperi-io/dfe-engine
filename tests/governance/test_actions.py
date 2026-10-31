@@ -13,6 +13,7 @@ from dfe_engine.gitcrud import GitCrud, ResourceClass, ResourceClassRegistry, ge
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import (
     ActionDef,
+    ActionForbiddenError,
     ActionStore,
     PolicyStore,
     ProtectedPolicy,
@@ -133,17 +134,15 @@ def test_action_cannot_change_governance_class(store, crud):
 
 ENGINE_OVERLAY = "dfe-engine-default-values"
 ENGINE_DEPLOY = {"service": "dfe-engine", "instance": "default"}
+FETCHER_OVERLAY = "dfe-fetcher-feed-values"
 
 
-def _hunt_runner_action(**changes):
+def _dial(name, path="huntRunner.enabled", value=False):
     return ActionDef(
-        name="hunts-dial",
+        name="dial",
         description="x",
-        required_action="action:invoke:hunts-dial",
-        changes=[
-            VarChange(cls="helmvars", name=ENGINE_OVERLAY, path=path, value=value)
-            for path, value in changes.items()
-        ],
+        required_action="action:invoke:dial",
+        changes=[VarChange(cls="helmvars", name=name, path=path, value=value)],
     )
 
 
@@ -162,10 +161,50 @@ def test_an_action_on_an_app_overlay_leaves_the_instance_deployable(store, crud,
     """A values file without ``deploy`` yields no Application, so the dial would change nothing."""
     if stored is not None:
         crud.put("helmvars", ENGINE_OVERLAY, stored, actor="admin")
-    action = _hunt_runner_action(**{"huntRunner.enabled": False})
-    store.save(action, actor="admin")
-    store.invoke("hunts-dial", actor="bob")
+    store.save(_dial(ENGINE_OVERLAY), actor="admin")
+    store.invoke("dial", actor="bob")
     assert crud.get("helmvars", ENGINE_OVERLAY) == expected
+
+
+@pytest.mark.parametrize(
+    ("name", "ceiling", "other", "refusal"),
+    [
+        (ENGINE_OVERLAY, None, None, None),
+        (ENGINE_OVERLAY, 1, None, None),
+        (ENGINE_OVERLAY, None, "dfe-engine-other-values", "already deployed: other"),
+        (FETCHER_OVERLAY, 0, None, "runs no dfe-fetcher at all"),
+        (FETCHER_OVERLAY, 1, "dfe-fetcher-first-values", "bound to first"),
+        (FETCHER_OVERLAY, None, None, "instances follow their source"),
+        ("dfe-ui-default-values", None, None, None),
+    ],
+    ids=[
+        "single-app-default-seeds",
+        "single-app-default-under-its-ceiling-seeds",
+        "single-app-second-instance-refused",
+        "per-config-app-over-a-zero-ceiling-refused",
+        "per-config-app-over-its-ceiling-refused",
+        "per-config-app-follows-its-source-refused",
+        "another-single-app-seeds",
+    ],
+)
+def test_a_dial_never_creates_an_instance_the_instance_api_would_refuse(
+    crud, name, ceiling, other, refusal
+):
+    store = ActionStore(crud, instance_ceiling=lambda _app: ceiling)
+    if other is not None:
+        crud.put("helmvars", other, {"deploy": {"service": "x", "instance": "y"}}, actor="admin")
+    store.save(_dial(name), actor="admin")
+    names_before = set(crud.list("helmvars"))
+    errors = store.preview(_dial(name))[1]
+    if refusal is None:
+        assert errors == []
+        assert store.invoke("dial", actor="bob").changed is True
+        assert "deploy" in crud.get("helmvars", name)
+        return
+    assert len(errors) == 1 and refusal in errors[0], errors
+    with pytest.raises(ActionForbiddenError, match=refusal):
+        store.invoke("dial", actor="bob")
+    assert set(crud.list("helmvars")) == names_before
 
 
 def test_the_shipped_pause_dial_previews_clean_and_its_diff_is_what_the_commit_writes(

@@ -31,6 +31,7 @@ from pydantic import ValidationError
 from scalo.logger import logger
 
 from dfe_engine.appmgmt import contract, instances
+from dfe_engine.appmgmt.catalogue import AppDescriptor
 from dfe_engine.appmgmt.scaling import keda_by_default
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
 from dfe_engine.gitcrud.commit_policy import added_violations
@@ -219,10 +220,24 @@ class InvokeResult:
 class ActionStore:
     """CRUD defined actions (gitops ``actions`` class) and invoke them."""
 
-    def __init__(self, crud: GitCrud, *, lookup_databases: Collection[str] = ()) -> None:
-        """Keep the deploy-repo client and the databases a rule may look values up in."""
+    def __init__(
+        self,
+        crud: GitCrud,
+        *,
+        lookup_databases: Collection[str] = (),
+        instance_ceiling: Callable[[AppDescriptor], int | None] | None = None,
+    ) -> None:
+        """Keep the deploy-repo client and what its checks need.
+
+        Args:
+            crud: The deploy-repo client.
+            lookup_databases: The databases a rule may look values up in.
+            instance_ceiling: How many deployments of an app this deployment can run,
+                None meaning unbounded, as the instance API reads it.
+        """
         self._crud = crud
         self._lookup_databases = tuple(lookup_databases)
+        self._instance_ceiling = instance_ceiling or (lambda _app: None)
 
     def list(self) -> builtins.list[str]:
         """List the stored action definitions by name."""
@@ -245,6 +260,28 @@ class ActionStore:
         """
         app = instances.parse_overlay_name(name) if cls == instances.HELMVARS_CLASS else None
         return instances.initial_overlay(app) if app else {}
+
+    def _creation_refusal(self, cls: str, name: str) -> str | None:
+        """Why a change may not create the overlay it names, or None where it may.
+
+        A new app overlay deploys an instance, so it meets the checks the instance API
+        applies: the app's multiplicity and this deployment's ceiling. An instance that
+        follows a source is created by that source's deploy and by nothing else.
+        """
+        app = instances.parse_overlay_name(name) if cls == instances.HELMVARS_CLASS else None
+        if app is None:
+            return None
+        allowed, reason = instances.additional_instance_allowed(
+            self._crud, app, self._instance_ceiling(app.descriptor)
+        )
+        if not allowed:
+            return f"{cls}/{name} does not exist and may not be created: {reason}"
+        if app.descriptor.source_bound or app.descriptor.routing_is_per_instance:
+            return (
+                f"{cls}/{name} does not exist and may not be created by an action: "
+                f"{app.service} instances follow their source, and the source deploy creates them"
+            )
+        return None
 
     def _target(self, change: VarChange) -> dict:
         """The document a change writes into, or the one it would create."""
@@ -402,6 +439,12 @@ class ActionStore:
                 try:
                     docs[key] = self._crud.get(ch.cls, ch.name)
                 except ResourceNotFoundError:
+                    refusal = self._creation_refusal(ch.cls, ch.name)
+                    if refusal is not None:
+                        if not collect:
+                            raise ActionForbiddenError(refusal) from None
+                        errors.append(f"{ch.cls}/{ch.name}:{ch.path}: {refusal}")
+                        continue
                     docs[key] = self._new_document(ch.cls, ch.name)
                 stored[key] = copy.deepcopy(docs[key])
             doc = docs[key]
