@@ -258,8 +258,6 @@ class ActionStore:
     def _credential_change(self, change: VarChange) -> bool:
         """Whether ``change`` would store a credential, by its path or by any value it can take."""
         target = self._target(change)
-        if contract.credential_var(target, change.path):
-            return True
         ref = param_ref(change.value)
         if ref is None:
             candidates = [change.value]
@@ -267,6 +265,10 @@ class ActionStore:
             candidates = list(ref[1].values())
         else:
             candidates = []
+        # A toggle stores no credential wherever it sits, so only the path of anything else is judged.
+        toggles = bool(candidates) and all(isinstance(v, bool) for v in candidates)
+        if not toggles and contract.credential_var(target, change.path):
+            return True
         return any(contract.credential_var(target, change.path, v) for v in candidates)
 
     def credential_changes(self, action: ActionDef) -> builtins.list[str]:

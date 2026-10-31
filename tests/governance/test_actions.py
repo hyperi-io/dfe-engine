@@ -9,7 +9,7 @@
 
 import pytest
 
-from dfe_engine.gitcrud import GitCrud, ResourceClass, ResourceClassRegistry
+from dfe_engine.gitcrud import GitCrud, ResourceClass, ResourceClassRegistry, get_path
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import (
     ActionDef,
@@ -20,6 +20,8 @@ from dfe_engine.governance import (
     VarChange,
 )
 from dfe_engine.governance.policies import _POLICY_CLASS
+from dfe_engine.governance.seed import ACTIONS_SUBDIR, pending_seed
+from dfe_engine.yaml_utils import yaml_load_string
 
 
 @pytest.fixture
@@ -164,6 +166,24 @@ def test_an_action_on_an_app_overlay_leaves_the_instance_deployable(store, crud,
     store.save(action, actor="admin")
     store.invoke("hunts-dial", actor="bob")
     assert crud.get("helmvars", ENGINE_OVERLAY) == expected
+
+
+def test_the_shipped_pause_dial_previews_clean_and_its_diff_is_what_the_commit_writes(
+    store, crud, tmp_path
+):
+    shipped = pending_seed(repo_root=tmp_path)[f"{ACTIONS_SUBDIR}/hunts-pause.yaml"]
+    action = ActionDef.model_validate(yaml_load_string(shipped))
+    assert store.preview(action)[1] == []
+    store.save(action, actor="admin")
+
+    dry = store.invoke("hunts-pause", actor="bob", dry_run=True)
+    store.invoke("hunts-pause", actor="bob")
+    landed = crud.get("helmvars", ENGINE_OVERLAY)
+    assert {d["path"]: d["new"] for d in dry.diff} == {
+        "huntRunner.enabled": get_path(landed, "huntRunner.enabled"),
+        "secrets.hunt-runner.enabled": get_path(landed, "secrets.hunt-runner.enabled"),
+    }
+    assert get_path(landed, "secrets.hunt-runner.enabled") is False
 
 
 def test_action_change_rejected_by_commit_validators(store, crud):
