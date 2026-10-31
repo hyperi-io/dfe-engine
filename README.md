@@ -1,9 +1,19 @@
-# DFE Engine
+# dfe-engine
 
-The config control plane of the Data Fusion Engine (DFE) product suite - a
-Python library plus FastAPI server that turns operator intent into governed
-git commits (YAML config, Helm overlay values, ClickHouse DDL) which Argo CD
-reconciles into the cluster.
+[![Build Status](https://github.com/hyperi-io/dfe-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/hyperi-io/dfe-engine/actions)
+[![License](https://img.shields.io/badge/license-BUSL--1.1-blue)](LICENSE)
+
+The control plane of a DFE deployment: a FastAPI server and Python library that turns what an operator asks for into git commits (YAML config, Helm values, ClickHouse DDL) that Argo CD then reconciles into the cluster. dfe-ui and the `dfe` CLI both drive it.
+
+## What it gives you
+
+- Sources defined once, with the receiver and loader routing compiled from them, so the apps never carry hand-written routing.
+- Every change a commit in the deployment's own git repo, so the audit log is the git history.
+- The dfe-schemas manifest applied at boot, creating the core ClickHouse objects and Kafka bootstrap topics, and each source's own table created or extended when that source is deployed.
+- Sampling of a source's ClickHouse table or Kafka topic, with logreducer's smart and anomaly samples for a representative view.
+- A hunt runner that spreads scheduled hunts across their interval and coordinates through ClickHouse alone. One worker runs each window once. With several, two claims landing at the same moment can run a window twice.
+- OIDC login and SCIM 2.0 provisioning for accounts and groups.
+- The `dfe` CLI, generated from the API's own OpenAPI spec.
 
 ## DFE is a data evolution platform, by design
 
@@ -242,4 +252,4 @@ wait on it. A one-line change here can land in five other repositories.
 
 ## Issues
 
-Open bugs: [this repo](https://github.com/hyperi-io/dfe-engine/issues?q=is%3Aopen+is%3Aissue+type%3ABug+-label%3Abacklog+-label%3Anext-minor) | [whole DFE suite](https://github.com/search?type=issues&q=is%3Aopen+is%3Aissue+type%3ABug+-label%3Abacklog+-label%3Anext-minor+repo%3Ahyperi-io%2Fdfe-infra+repo%3Ahyperi-io%2Fdfe-docker+repo%3Ahyperi-io%2Fdfe-deploy+repo%3Ahyperi-io%2Fdfe-engine+repo%3Ahyperi-io%2Fdfe-loader+repo%3Ahyperi-io%2Fdfe-receiver+repo%3Ahyperi-io%2Fdfe-fetcher+repo%3Ahyperi-io%2Fdfe-archiver+repo%3Ahyperi-io%2Fdfe-transform-vrl+repo%3Ahyperi-io%2Fdfe-transform-vector+repo%3Ahyperi-io%2Fdfe-transform-elastic+repo%3Ahyperi-io%2Fdfe-ui+repo%3Ahyperi-io%2Fdfe-hyperdx+repo%3Ahyperi-io%2Fscalo-rs+repo%3Ahyperi-io%2Fscalo-py+repo%3Ahyperi-io%2Flogreducer+repo%3Ahyperi-io%2Fdfe-schemas+repo%3Ahyperi-io%2Fvector-vrl+repo%3Ahyperi-io%2Fculvert+repo%3Ahyperi-io%2Fclickhouse-dfe+repo%3Ahyperi-io%2Ffactbook-rs)
+Open bugs: [this repo](https://github.com/hyperi-io/dfe-engine/issues?q=is%3Aopen+is%3Aissue+type%3ABug+-label%3Abacklog+-label%3Anext-minor) | [whole DFE suite](https://github.com/search?type=issues&q=is%3Aopen+is%3Aissue+type%3ABug+-label%3Abacklog+-label%3Anext-minor+repo%3Ahyperi-io%2Fdfe-infra+repo%3Ahyperi-io%2Fdfe-docker+repo%3Ahyperi-io%2Fdfe-deploy+repo%3Ahyperi-io%2Fdfe-engine+repo%3Ahyperi-io%2Fdfe-loader+repo%3Ahyperi-io%2Fdfe-receiver+repo%3Ahyperi-io%2Fdfe-fetcher+repo%3Ahyperi-io%2Fdfe-archiver+repo%3Ahyperi-io%2Fdfe-transform-vrl+repo%3Ahyperi-io%2Fdfe-transform-vector+repo%3Ahyperi-io%2Fdfe-transform-elastic+repo%3Ahyperi-io%2Fdfe-ui+repo%3Ahyperi-io%2Fdfe-hyperdx+repo%3Ahyperi-io%2Fscalo-rs+repo%3Ahyperi-io%2Fscalo-py+repo%3Ahyperi-io%2Flogreducer+repo%3Ahyperi-io%2Fdfe-schemas+repo%3Ahyperi-io%2Fvector-vrl+repo%3Ahyperi-io%2Fculvert+repo%3Ahyperi-io%2Fdfe-clickhouse-rs+repo%3Ahyperi-io%2Ffactbook-rs)
