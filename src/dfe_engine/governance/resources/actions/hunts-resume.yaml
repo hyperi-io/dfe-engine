@@ -1,10 +1,15 @@
 name: hunts-resume
 description: >-
-  Restart the hunt runner after a hunts-pause. Hunts resume from their last
-  committed checkpoint watermark - no window is lost.
+  Restart the hunt runner after a hunts-pause, and put the engine's hunt-runner
+  secret group back so the engine adopts the runner's password again. Hunts
+  resume from their last committed checkpoint watermark - no window is lost.
 required_action: action:invoke:hunts-resume
 changes:
   - cls: helmvars
     name: dfe-engine-default-values
     path: huntRunner.enabled
+    value: true
+  - cls: helmvars
+    name: dfe-engine-default-values
+    path: secrets.hunt-runner.enabled
     value: true
