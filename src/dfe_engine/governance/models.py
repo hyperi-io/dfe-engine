@@ -34,6 +34,26 @@ def param_ref(value: Any) -> tuple[str, dict[str, Any] | None] | None:
     return None
 
 
+UNSET: dict[str, bool] = {"$unset": True}
+"""The value of a change that removes its path instead of setting it."""
+
+
+def is_unset(value: Any) -> bool:
+    """Whether ``value`` is an unset marker, well-formed or not.
+
+    A marker is exactly ``{"$unset": true}``. Removing the key hands the var back to
+    the layer beneath it, such as a chart or a tier profile, so the action names no
+    number that layer owns. A dict carrying ``$unset`` is never an ordinary subtree
+    literal, so a malformed marker is refused at define time rather than written.
+    """
+    return isinstance(value, dict) and "$unset" in value
+
+
+def well_formed_unset(value: Any) -> bool:
+    """Whether an unset marker carries only ``$unset: true``."""
+    return len(value) == 1 and value["$unset"] is True
+
+
 class ParamSpec(BaseModel):
     """A constrained invoke-time parameter.
 
@@ -100,7 +120,11 @@ class ParamSpec(BaseModel):
 
 
 class VarChange(BaseModel):
-    """One var mutation in an action: set ``cls/name`` dot-``path`` to ``value``."""
+    """One var mutation in an action: set ``cls/name`` dot-``path`` to ``value``.
+
+    A ``value`` of ``{"$unset": true}`` removes the path instead, which returns the
+    var to the layer beneath the overlay (a chart default or a tier profile).
+    """
 
     cls: str = Field(
         json_schema_extra={
@@ -165,6 +189,13 @@ class ActionDef(BaseModel):
         """
         for ch in self.changes:
             ref = param_ref(ch.value)
+            mapped = ref[1] if ref is not None and isinstance(ref[1], dict) else {}
+            candidates = [ch.value] if ref is None else list(mapped.values())
+            if any(is_unset(v) and not well_formed_unset(v) for v in candidates):
+                raise ValueError(
+                    f"change {ch.cls}/{ch.name}:{ch.path}: an unset marker is "
+                    "exactly {'$unset': true}"
+                )
             if ref is None:
                 continue
             pname, mapping = ref
