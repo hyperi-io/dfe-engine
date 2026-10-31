@@ -135,7 +135,7 @@ anniversary of its release.
 
 To run the engine as a plain local process (a `uv` virtualenv, no containers or
 Kubernetes) -- including the no-dependencies auth spike and how it wires to
-dfe-hyperdx / dfe-ui / a local dfe-deploy clone -- see [docs/LOCAL-DEV.md](docs/LOCAL-DEV.md).
+dfe-hyperdx / dfe-ui / a local dfe-deploy clone -- see [docs/local-dev.md](docs/local-dev.md).
 
 ## How to Contribute
 

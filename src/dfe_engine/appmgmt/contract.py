@@ -36,7 +36,13 @@ from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
 from dfe_engine.appmgmt.catalogue import APP_CATALOGUE, DEPLOY_SERVICE_PATH
 from dfe_engine.gitcrud.engine import flatten, get_path, set_path
 from dfe_engine.manifest import ManifestError, manifest_path
-from dfe_engine.masking import CREDENTIAL_MAP, credential_name, hides_a_host, words
+from dfe_engine.masking import (
+    CREDENTIAL_MAP,
+    SECRET_GROUPS,
+    credential_name,
+    hides_a_host,
+    words,
+)
 
 CONTRACT_DIR_ENV = "DFE_APP_CONTRACT_DIR"
 """Where a deployment mounts the directory its apps emitted their contracts into."""
@@ -575,6 +581,15 @@ def _secret_key_names(name: str, value: Any, holder: dict) -> bool:
     )
 
 
+def _shown_toggles(value: Any) -> Any:
+    """``value`` with every boolean shown and everything else in it masked."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, dict):
+        return {key: _shown_toggles(item) for key, item in value.items()}
+    return _masked(value)
+
+
 def _redact(
     value: Any, node: Any, root: dict, name: str, section: str = "", *, entry: bool = False
 ) -> Any:
@@ -588,9 +603,13 @@ def _redact(
 
     A mapping named per :data:`CREDENTIAL_MAP` has each value masked, and a chart's
     ``secretKeys`` beside ``existingSecret`` is shown: it names keys, not credentials.
+    A mapping named per :data:`SECRET_GROUPS` shows its booleans, so the toggle of a
+    secret group reads as the toggle it is.
     """
     if isinstance(value, _Missing):
         return value
+    if not entry and isinstance(value, dict) and words(name) == SECRET_GROUPS:
+        return _shown_toggles(value)
     branches = _branches(node, root) if node is not None else []
     if any(_marked_secret(b) for b in branches) or secret_name(
         name, section, mapping=_has_fields(value)
@@ -710,10 +729,13 @@ def credential_var(doc: dict, path: str, value: Any = MISSING) -> bool:
 
     True where the path itself is one - its name, the schema's marker, a list of
     marked values - whatever the value, and where ``value`` carries a credential
-    field of its own.
+    field of its own. A boolean is judged as itself, since the stand-in text it would
+    otherwise be tried with is masked under a secret group's toggle.
     """
     probes: list[Any] = [_PROBE, [_PROBE]]
-    if not isinstance(value, _Missing):
+    if isinstance(value, bool):
+        probes = [value]
+    elif not isinstance(value, _Missing):
         probes.append(value)
     return any(shown_var(doc, path, probe) != probe for probe in probes)
 

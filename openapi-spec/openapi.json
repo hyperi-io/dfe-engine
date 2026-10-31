@@ -49772,7 +49772,7 @@
           "value"
         ],
         "title": "VarChange",
-        "description": "One var mutation in an action: set ``cls/name`` dot-``path`` to ``value``."
+        "description": "One var mutation in an action: set ``cls/name`` dot-``path`` to ``value``.\n\nA ``value`` of ``{\"$unset\": true}`` removes the path instead, which returns the\nvar to the layer beneath the overlay (a chart default or a tier profile)."
       },
       "VarEntry": {
         "properties": {

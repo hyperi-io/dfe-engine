@@ -73,7 +73,7 @@ env DFE_ENV=dev uv run dfe-engine
 
 With no ClickHouse reachable it retries for a minute, then serves with `/readyz`
 reporting `clickhouse: false`. The local ClickHouse settings, the observability
-port, and the other repos are in [docs/LOCAL-DEV.md](docs/LOCAL-DEV.md).
+port, and the other repos are in [docs/local-dev.md](docs/local-dev.md).
 
 Run the unit tests (no backing services needed):
 
@@ -101,12 +101,12 @@ Full system map, invariants, and the docs tree:
 
 | Area | Code | Docs |
 |------|------|------|
-| API + auth + RBAC | `src/dfe_engine/api/`, `auth/` | [control-plane/](docs/control-plane/index.md) |
+| API + auth + RBAC | `src/dfe_engine/api/`, `auth/` | [control-plane/](docs/control-plane/README.md) |
 | Governed gitops CRUD | `gitcrud/`, `gitops/`, `governance/` | [control-plane/governed-ops-design.md](docs/control-plane/governed-ops-design.md) |
-| Sources, schemas, DDL | `source/`, `schema/`, `fieldmap/`, `cel/`, `sigma/` | [data-plane/](docs/data-plane/index.md) |
+| Sources, schemas, DDL | `source/`, `schema/`, `fieldmap/`, `cel/`, `sigma/` | [data-plane/](docs/data-plane/README.md) |
 | Query API | `query/` | [data-plane/query-api.md](docs/data-plane/query-api.md) |
 | Hunts | `hunts/`, `hunt_runner/`, `keda_shim/` | [data-plane/hunt-runner-scaling.md](docs/data-plane/hunt-runner-scaling.md) |
-| Deployment seam (the published chart is assembled from the contract) | `deployment_contract.py` | [deployment/](docs/deployment/index.md) |
+| Deployment seam (the published chart is assembled from the contract) | `deployment_contract.py` | [deployment/](docs/deployment/README.md) |
 
 ## Configuration
 

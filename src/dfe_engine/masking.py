@@ -100,6 +100,13 @@ beside its secret. A list of that name holds placements instead, and each entry'
 fields are judged by name.
 """
 
+SECRET_GROUPS = ("secrets",)
+"""The words of the chart mapping that switches each secret group on or off.
+
+``secrets.hunt-runner.enabled`` is a toggle and is shown. Any other value under the
+mapping is masked.
+"""
+
 _AUTHORITY_ENDS = frozenset("/?#\\")
 """Characters that end a URL's authority, so a host a client reads can sit after one."""
 

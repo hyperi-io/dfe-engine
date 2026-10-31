@@ -131,7 +131,29 @@ DFE_TRANSFORM_VECTOR = Producer(
     dir_env="DFE_TRANSFORM_VECTOR_DIR",
     files=("docs/config-schema.json",),
 )
-PRODUCERS = (DFE_LOADER, DFE_RECEIVER, SCALO_RS, DFE_TRANSFORM_VRL, DFE_TRANSFORM_VECTOR)
+DFE_DEPLOY = Producer(
+    repo="dfe-deploy",
+    ref="v1.0.8",
+    dir_env="DFE_DEPLOY_DIR",
+    files=(
+        "governance/actions/hunts-pause.yaml",
+        "governance/actions/hunts-resume.yaml",
+        "governance/actions/hunts-throttle.yaml",
+        "governance/actions/receiver-normal.yaml",
+        "governance/actions/receiver-surge.yaml",
+        "governance/policies/baseline.yaml",
+        "governance/policies/sizing-locks.yaml",
+        "governance/policies/storage-layout.yaml",
+    ),
+)
+PRODUCERS = (
+    DFE_LOADER,
+    DFE_RECEIVER,
+    SCALO_RS,
+    DFE_TRANSFORM_VRL,
+    DFE_TRANSFORM_VECTOR,
+    DFE_DEPLOY,
+)
 
 # Read for the thin-chart digests its versions.yaml pins, a file every release moves, so
 # it stays out of PRODUCERS or check_pin warns on each one. Tagged with the suite

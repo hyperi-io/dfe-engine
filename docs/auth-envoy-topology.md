@@ -1,6 +1,6 @@
 <!--
 Project:   DFE (Data Forensics Engine) - product suite
-File:      docs/AUTH-ENVOY-TOPOLOGY.md
+File:      docs/auth-envoy-topology.md
 Purpose:   How the Envoy front auth layer works, and how it differs between
            the Kubernetes and Docker deploy modes.
 Language:  Markdown

@@ -196,6 +196,8 @@ interpolation, so params add zero injection surface. Wiring errors (dangling
 reference, map not covering the enum) are rejected at DEFINE time; only the
 caller's supplied values can fail an invoke (422 `invalid_params`).
 
+A `value` of `{"$unset": true}`, alone or as a map entry, removes the path instead of setting it, which returns the var to the layer beneath the overlay (a chart default or a tier profile). Removing an absent path is a no-op that creates no file, an emptied parent map is removed with it, and the diff shows `new` as `{"$unset": true}`. A marker with any other content is rejected at define time.
+
 `required_action` is optional: left empty it derives `action:invoke:<name>`,
 the convention the shipped roles grant on (`dfe_operator` and `infra_admin`
 carry `action:invoke:*`).

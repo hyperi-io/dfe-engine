@@ -174,7 +174,7 @@ both. A group file carries `roles`, `org_ids`, and `scope`
 
 Both axes already resolve end to end. The re-minted token carries
 `{sub, email, groups}` plus the `role` claim dfe-hyperdx reads (see
-AUTH-ENVOY-TOPOLOGY.md); roles AND org_ids still derive engine-side from the
+auth-envoy-topology.md); roles AND org_ids still derive engine-side from the
 group files, not the token. Full detail: rbac.md sections 2, 5, 6, 7.
 
 ## 5. The management API and CLI
