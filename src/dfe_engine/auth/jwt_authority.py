@@ -11,7 +11,7 @@ Signs the DFE identity token with ECDSA P-384 + SHA-384 (ES384, CNSA-aligned) an
 publishes the public key(s) as a JWKS, so every peer - Envoy ``jwt_authn``, dfe-ui,
 dfe-hyperdx - verifies by signature, not by trusting a header. Crypto-agile: the
 algorithm is config-driven so ML-DSA can replace ES384 once the JOSE + Envoy chain
-supports it (see docs/AUTH-ENVOY-TOPOLOGY.md).
+supports it (see docs/auth-envoy-topology.md).
 
 The signing private key lives in ``scalo.secrets`` (the file provider by default, or
 the store the deployment configures) via the engine's ``DfeSecrets`` seam - PyJWT does

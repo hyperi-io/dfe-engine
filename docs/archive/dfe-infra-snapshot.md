@@ -3,7 +3,7 @@
 > **ARCHIVED SNAPSHOT.** Last synced from `hyperi-io/dfe-infra` on
 > 2026-03-31; component versions and structures have moved on. Kept for
 > the 2.1 -> 2.2 decision trail. Current material lives in
-> [deployment/index.md](../deployment/index.md) and the dfe-infra repo's
+> [deployment/README.md](../deployment/README.md) and the dfe-infra repo's
 > own docs. The KEDA scaling patterns that used to live here moved to
 > [deployment/keda-scaling.md](../deployment/keda-scaling.md).
 
