@@ -18,10 +18,9 @@ if no forge is configured it HARD-FAILS (never main). Dev / solo / effective
 auto-merge keep committing straight to main -- the sanctioned fast path, unchanged.
 """
 
-from __future__ import annotations
-
 import re
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
@@ -31,7 +30,7 @@ from .auto_merge import apply_auto_merge, resolve_state
 from .commit_policy import resolve_mode
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from dfe_engine.settings import DFESettings
 
     from .engine import GitCrud
     from .forge import ForgeProvider
@@ -176,3 +175,83 @@ def route_write(
         pr_url=pr.url,
         branch=branch,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class WritePosture:
+    """The deployment's write posture, which decides where a governed write lands.
+
+    Attributes:
+        environment: ``DFE_ENV``.
+        mode: ``DFE_GITOPS_MODE``.
+        forge: Opens the review PR, None where no forge is configured.
+    """
+
+    environment: str
+    mode: str
+    forge: ForgeProvider | None = None
+
+    @classmethod
+    def from_settings(
+        cls, settings: DFESettings, forge: ForgeProvider | None = None
+    ) -> WritePosture:
+        """The posture the settings declare."""
+        return cls(environment=settings.env, mode=settings.gitops.mode, forge=forge)
+
+    @classmethod
+    def from_loaded_settings(cls) -> WritePosture:
+        """The loaded settings' posture with no forge, so production+team writes a branch."""
+        from dfe_engine.settings import get_settings
+
+        return cls.from_settings(get_settings())
+
+    def route(
+        self,
+        *,
+        gc: GitCrud,
+        cls_name: str,
+        name: str,
+        actor: str,
+        title: str,
+        write: Callable[[str], _Published],
+    ) -> WriteOutcome:
+        """Write one resource of *cls_name* to main, or to a review branch where main is refused.
+
+        Production with team mode refuses main. With no forge to open the PR, the change still goes to a branch and never to
+        main, and takes effect once someone merges it.
+        """
+        rc = gc.resource_class(cls_name)
+        rbac_class = rc.rbac_prefix or rc.name
+        resource = f"{cls_name}/{name}"
+        try:
+            return route_write(
+                gc=gc,
+                forge=self.forge,
+                environment=self.environment,
+                mode=self.mode,
+                rbac_class=rbac_class,
+                resource=resource,
+                actor=actor,
+                title=title,
+                body=(
+                    f"Governed change to {resource} by {actor}. Opened for review "
+                    "because production+team may not commit straight to main."
+                ),
+                write=write,
+            )
+        except ReviewRequiredError:
+            branch = pr_branch_name(rbac_class, resource, "")
+            res = write(branch)
+            logger.warning(
+                "REVIEW REQUIRED: change committed to a branch; no forge to open a PR, "
+                "so it takes effect only once the branch is merged",
+                actor=actor,
+                resource=resource,
+                branch=branch,
+            )
+            return WriteOutcome(
+                changed=res.changed,
+                commit_sha=res.commit_sha,
+                review_required=True,
+                branch=branch,
+            )

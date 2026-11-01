@@ -23,7 +23,7 @@ Usage:
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +38,7 @@ from dfe_engine.core_resources.yaml_resource_type import (
     config_is_core,
 )
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
+from dfe_engine.gitcrud.routing import WriteOutcome, WritePosture
 from dfe_engine.source.alignment import MixedConnectorTypesError, require_one_type
 from dfe_engine.source.engine_registry import InvalidEngineError
 from dfe_engine.source.models import (
@@ -321,6 +322,7 @@ class SourceRegistry:
         refresh_interval: int = 30,
         *,
         crud: GitCrud | None = None,
+        posture: WritePosture | None = None,
     ) -> None:
         """Initialize the registry.
 
@@ -334,8 +336,12 @@ class SourceRegistry:
             crud: Governed Ops engine over the deploy repo. When provided the
                 ``sources`` resource class (config/sources/) is the SSoT and
                 every mutation is one git commit.
+            posture: Where a gitcrud write lands. A production+team write goes to a
+                review branch. None reads the posture from the loaded settings, with
+                no forge.
         """
         self._crud = crud
+        self._posture = posture
         self._store: DirectoryConfigStore | None = None
 
         if crud is not None:
@@ -420,6 +426,16 @@ class SourceRegistry:
                 return None
         return self._require_store().get(source_name)
 
+    def _route_write(
+        self, crud: GitCrud, name: str, actor: str, message: str, write: Callable[[str], Any]
+    ) -> WriteOutcome:
+        """Run a gitcrud write on main or, where production+team refuses main, a review branch."""
+        if self._posture is None:
+            self._posture = WritePosture.from_loaded_settings()
+        return self._posture.route(
+            gc=crud, cls_name=_SOURCES_CLASS, name=name, actor=actor, title=message, write=write
+        )
+
     def _put_raw(
         self,
         name: str,
@@ -435,7 +451,7 @@ class SourceRegistry:
         in the deploy repo. Directory backend: plain YAML write, git commit when
         the directory is a repo, then a cache refresh.
         """
-        if self._crud is not None:
+        if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.metadata import ResourceMetadata, with_metadata
 
             stored = with_metadata(
@@ -445,13 +461,18 @@ class SourceRegistry:
                     display_name=doc.get("display_name"),
                 ),
             )
-            self._crud.put(
-                _SOURCES_CLASS,
+            actor = created_by or "engine"
+            outcome = self._route_write(
+                crud,
                 name,
-                stored,
-                actor=created_by or "engine",
-                message=message,
+                actor,
+                message,
+                lambda branch: crud.put(
+                    _SOURCES_CLASS, name, stored, actor=actor, message=message, branch=branch
+                ),
             )
+            if outcome.review_required:
+                return f"review branch {outcome.branch}"
             return "gitcrud config/sources"
 
         store = self._require_store()
@@ -471,16 +492,20 @@ class SourceRegistry:
         Directory backend: unlink + engine-identity commit when git - it never
         carried delete attribution, so ``created_by`` is deliberately unused there.
         """
-        if self._crud is not None:
+        if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.engine import ResourceNotFoundError
 
             commit_msg = f"{message} (by {created_by})" if created_by else message
+            actor = created_by or "engine"
             try:
-                self._crud.delete(
-                    _SOURCES_CLASS,
+                self._route_write(
+                    crud,
                     name,
-                    actor=created_by or "engine",
-                    message=commit_msg,
+                    actor,
+                    commit_msg,
+                    lambda branch: crud.delete(
+                        _SOURCES_CLASS, name, actor=actor, message=commit_msg, branch=branch
+                    ),
                 )
             except ResourceNotFoundError:
                 return False

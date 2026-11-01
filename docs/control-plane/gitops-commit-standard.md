@@ -88,6 +88,9 @@ We honour it via the RBAC + protected-var policy, not by blocking the engine:
   to `main`; protected-branch rules + approvals are configured at the GIT level.
 - Mode is resolved per change from: environment x class x protected-var-policy x a
   `require_pr` flag on the defined action. Recorded in the audit trail.
+- Sources, derived schemas, hunts, rules and app overlays all take this path. With
+  no forge configured, a production+team write still goes to the branch, never to
+  `main`, and takes effect once the branch is merged.
 - Short-lived branches are deleted on merge. NO permanent branches besides `main`.
 
 ## 5. Signing + verification (supply-chain)
