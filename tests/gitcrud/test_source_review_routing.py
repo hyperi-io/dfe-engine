@@ -172,3 +172,25 @@ def test_a_registry_given_no_posture_never_commits_to_main_in_production(wired, 
 
     assert _remote_main(bare) == before
     assert len(_review_branches(bare)) == 1
+
+
+@pytest.mark.parametrize("write", ["save", "delete"])
+def test_an_engine_owned_write_commits_to_main_in_production_team(wired, write):
+    """Core-source reconciles are the engine's, not an operator's edit, so they never wait on review.
+
+    Routed, every start would open another review branch for the landing source and
+    main would never carry it.
+    """
+    gc, bare = wired
+    team = SourceRegistry(crud=gc, posture=WritePosture(**TEAM, forge=_RecordingForge()))
+    if write == "delete":
+        team.save_source(_source(), created_by="engine", core_reconcile=True)
+    before = _remote_main(bare)
+
+    if write == "save":
+        team.save_source(_source(), created_by="engine", core_reconcile=True)
+    else:
+        team.delete_source("filebeat", created_by="engine", core_reconcile=True)
+
+    assert _remote_main(bare) != before
+    assert _review_branches(bare) == []

@@ -427,9 +427,23 @@ class SourceRegistry:
         return self._require_store().get(source_name)
 
     def _route_write(
-        self, crud: GitCrud, name: str, actor: str, message: str, write: Callable[[str], Any]
+        self,
+        crud: GitCrud,
+        name: str,
+        actor: str,
+        message: str,
+        write: Callable[[str], Any],
+        *,
+        engine_owned: bool = False,
     ) -> WriteOutcome:
-        """Run a gitcrud write on main or, where production+team refuses main, a review branch."""
+        """Run a gitcrud write on main or, where production+team refuses main, a review branch.
+
+        An engine-owned write keeps a core source in step and is no operator's edit, so it
+        commits to main in every posture.
+        """
+        if engine_owned:
+            done = write("")
+            return WriteOutcome(changed=done.changed, commit_sha=done.commit_sha)
         if self._posture is None:
             self._posture = WritePosture.from_loaded_settings()
         return self._posture.route(
@@ -444,6 +458,7 @@ class SourceRegistry:
         created_by: str | None,
         message: str,
         routing: ReviewRouting | None = None,
+        engine_owned: bool = False,
     ) -> str:
         """Write one stored source doc; returns the destination label for the save log.
 
@@ -471,6 +486,7 @@ class SourceRegistry:
                 lambda branch: crud.put(
                     _SOURCES_CLASS, name, stored, actor=actor, message=message, branch=branch
                 ),
+                engine_owned=engine_owned,
             )
             if routing is not None:
                 routing.record(outcome)
@@ -495,6 +511,7 @@ class SourceRegistry:
         created_by: str | None,
         message: str,
         routing: ReviewRouting | None = None,
+        engine_owned: bool = False,
     ) -> bool:
         """Remove one stored source doc; False when it did not exist.
 
@@ -516,6 +533,7 @@ class SourceRegistry:
                     lambda branch: crud.delete(
                         _SOURCES_CLASS, name, actor=actor, message=commit_msg, branch=branch
                     ),
+                    engine_owned=engine_owned,
                 )
             except ResourceNotFoundError:
                 return False
@@ -678,7 +696,12 @@ class SourceRegistry:
             commit_msg = f"{commit_msg} (by {created_by})"
 
         dest = self._put_raw(
-            source.source, config_data, created_by=created_by, message=commit_msg, routing=routing
+            source.source,
+            config_data,
+            created_by=created_by,
+            message=commit_msg,
+            routing=routing,
+            engine_owned=core_reconcile,
         )
         logger.info(f"Saved source {source.source!r} -> {dest}")
         return source
@@ -850,6 +873,7 @@ class SourceRegistry:
             created_by=created_by,
             message=f"source: delete {source_name}",
             routing=held,
+            engine_owned=core_reconcile,
         )
         if not deleted:
             logger.warning(f"Source does not exist: {source_name!r}")
