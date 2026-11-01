@@ -28,6 +28,7 @@ from dfe_engine.governance.ch.models import (
     TENANT_ROLE,
     ChServiceRole,
     ChTier,
+    GroupChBinding,
     group_user_name,
     org_user_name,
 )
@@ -295,6 +296,31 @@ class TestChangedGroups:
             [ops.model_copy(update={"roles": ["data_analyst"]})], service_roles=[otel_reader]
         )
         assert w.roles_held(user) == {w.tier.role()}
+
+    def test_a_demotion_naming_a_missing_role_still_revokes_the_old_one(
+        self, group_world, otel_reader
+    ):
+        """A replacing GRANT naming a role that does not exist fails whole, keeping the old set."""
+        w = group_world
+        group = f"ops-{w.uid}"
+        reconciler = ChRbacReconciler(w.client, secrets_store=w.store)
+
+        def reconcile(ch_roles: list[str], service_roles: list[ChServiceRole]) -> ReconcileResult:
+            return reconciler.reconcile(
+                tiers=[w.tier],
+                service_roles=service_roles,
+                orgs=w.orgs,
+                bindings=[GroupChBinding(group=group, ch_roles=ch_roles)],
+            )
+
+        first = reconcile(["otel_reader"], [otel_reader])
+        assert not first.errors, first.errors
+        user = group_user_name(group)
+        assert otel_reader.role() in w.roles_held(user)
+
+        demoted = reconcile(["ghost"], [])
+        assert w.roles_held(user) == {w.tier.role()}
+        assert any("dfe_ghost_role" in error for error in demoted.errors), demoted.errors
 
     def test_a_group_that_turns_platform_wide_loses_its_tenant_fence(self, group_world):
         """A group gaining a platform role reads unrestricted, so the pin's role has to go."""
