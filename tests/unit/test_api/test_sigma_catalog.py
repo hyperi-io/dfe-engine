@@ -29,6 +29,8 @@ def _wire_gitcrud(app, tmp_path):
     repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
     gc = GitCrud(repo, default_registry())
     app.state.gitcrud = gc
+    # A dev posture, so the sigma writes these tests make land on main, not a review branch.
+    app.state.settings.env = "dev"
     return gc
 
 

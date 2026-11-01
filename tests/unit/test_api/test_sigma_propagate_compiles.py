@@ -52,6 +52,8 @@ def _propagate(client, app, headers, tmp_path) -> None:
     app.state.gitcrud = GitCrud(
         GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry()
     )
+    # A dev posture, so the catalogue and selection writes land on main, not a review branch.
+    app.state.settings.env = "dev"
     _registries["source"].save_source(
         {
             "source": "windows-audit",

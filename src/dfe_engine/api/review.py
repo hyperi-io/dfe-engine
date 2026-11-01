@@ -39,6 +39,13 @@ def set_review_headers(response: Response, *, review_required: bool, pr_url: str
         response.headers["X-DFE-PR-Url"] = pr_url
 
 
+def apply_routing_headers(response: Response, routing: ReviewRouting) -> None:
+    """Mark a response whose writes, folded into *routing*, went to review."""
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
+
+
 def apply_review_headers(response: Response, outcome: WriteOutcome | None) -> None:
     """Mark a fixed-body 200/201/204 response whose write was routed to review."""
     if outcome is None:

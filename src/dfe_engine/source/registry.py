@@ -988,7 +988,7 @@ class SourceRegistry:
             return None
         from dfe_engine.ingest.store import IngestStore
 
-        return IngestStore(self._crud)
+        return IngestStore(self._crud, posture=self._posture)
 
     def ingest_rules(self) -> IngestRules:
         """The rule order, profiles and default bindings, empty without a deploy repo."""

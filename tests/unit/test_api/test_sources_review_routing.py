@@ -327,3 +327,53 @@ def test_a_deploy_record_held_for_review_leaves_the_apps_as_main_has_them(
     assert apps.changes == []
     assert reconciled == []
     assert registry.get_source("fw-logs").deployed_version is None
+
+
+@pytest.mark.parametrize("sigma_enabled", [True])
+def test_a_sigma_selection_held_for_review_carries_the_headers(
+    client, app, admin_headers, deploy_repo, monkeypatch
+):
+    from dfe_engine.sigma.catalog import RULES_CLASS, _sigma_crud
+
+    _sigma_crud(deploy_repo).put(
+        RULES_CLASS, "r1", {"id": "r1", "rule": {}, "provenance": {}}, "seed"
+    )
+    monkeypatch.setattr(app.state, "gitcrud", deploy_repo, raising=False)
+    monkeypatch.setattr(app.state, "forge", _RecordingForge(), raising=False)
+    monkeypatch.setattr(app.state.settings, "env", "production")
+    monkeypatch.setattr(app.state.settings.gitops, "mode", "team")
+
+    resp = client.post("/api/v1/sigma/catalogue/r1/select", headers=admin_headers)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["X-DFE-Review-Required"] == "true"
+    assert resp.headers["X-DFE-PR-Url"] == "http://forge/pr/7"
+    # main is unchanged, so the selection it serves is too
+    assert resp.json()["rules"] == []
+
+
+def test_an_ingest_compat_apply_held_for_review_skips_the_apps_and_says_so(
+    client, app, admin_headers, deploy_repo, monkeypatch
+):
+    from dfe_engine.ingest.store import IngestStore
+
+    IngestStore(deploy_repo).seed_core_profiles()
+    monkeypatch.setattr(app.state, "gitcrud", deploy_repo, raising=False)
+    _rebind(deploy_repo, environment="production", mode="team", forge=_RecordingForge())
+    reconciled: list[str] = []
+    monkeypatch.setattr(
+        "dfe_engine.api.v1.ingest.reconcile_derived_apps",
+        lambda *a, **k: reconciled.append("reconcile"),
+    )
+    etag = client.get("/api/v1/ingest/compat", headers=admin_headers).headers["ETag"]
+
+    resp = client.put(
+        "/api/v1/ingest/compat", json={"profiles": []}, headers={**admin_headers, "If-Match": etag}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["X-DFE-Review-Required"] == "true"
+    assert resp.json()["review_required"] is True
+    assert resp.json()["pr_url"] == "http://forge/pr/7"
+    assert reconciled == []
+    assert not (deploy_repo.repo_path / "config" / "settings" / "ingest-compat.yaml").exists()

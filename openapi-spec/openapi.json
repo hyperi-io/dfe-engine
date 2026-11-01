@@ -33070,6 +33070,36 @@
       },
       "CompatWriteResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "dry_run": {
             "type": "boolean",
             "title": "Dry Run",
@@ -42837,6 +42867,36 @@
       },
       "RuleOrderResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "dry_run": {
             "type": "boolean",
             "title": "Dry Run",
@@ -48121,6 +48181,36 @@
       },
       "SyncReportModel": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "source": {
             "type": "string",
             "title": "Source"
@@ -48179,7 +48269,7 @@
           "committed"
         ],
         "title": "SyncReportModel",
-        "description": "Counts from a provider sync into the catalogue."
+        "description": "Counts from a provider sync into the catalogue, and whether its import awaits review."
       },
       "SystemDefaults": {
         "properties": {

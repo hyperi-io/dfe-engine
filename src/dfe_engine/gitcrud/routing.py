@@ -263,3 +263,32 @@ class WritePosture:
                 review_required=True,
                 branch=branch,
             )
+
+
+class GovernedWrites:
+    """A store's gitcrud writes, each landing where :class:`WritePosture` puts it.
+
+    Every write held for review is folded into :attr:`routing`, which the API route
+    reads to answer with the review headers.
+
+    Args:
+        crud: The GitCrud the store writes through.
+        posture: Where writes land. None takes the loaded settings' posture, with no forge.
+    """
+
+    def __init__(self, crud: GitCrud, *, posture: WritePosture | None = None) -> None:
+        self._crud = crud
+        self._posture = posture
+        self.routing = ReviewRouting()
+
+    def __call__(
+        self, cls_name: str, name: str, actor: str, title: str, write: Callable[[str], _Published]
+    ) -> WriteOutcome:
+        """Run *write* on main, or on a review branch where production+team refuses main."""
+        if self._posture is None:
+            self._posture = WritePosture.from_loaded_settings()
+        outcome = self._posture.route(
+            gc=self._crud, cls_name=cls_name, name=name, actor=actor, title=title, write=write
+        )
+        self.routing.record(outcome)
+        return outcome
