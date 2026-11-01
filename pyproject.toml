@@ -73,7 +73,7 @@ dependencies = [
     # wheel. Floor is the first release that ships the source catalogue under
     # catalogue/. uv.lock pins the hash.
     # Upper bound: <1 is the API-stability boundary while dfe-schemas is 0.x.
-    "dfe-schemas>=0.2.20,<1",
+    "dfe-schemas>=0.2.22,<1",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.4",
