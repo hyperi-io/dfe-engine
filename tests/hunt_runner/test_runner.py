@@ -11,6 +11,7 @@ import itertools
 from collections.abc import Generator
 from contextlib import contextmanager
 
+import pytest
 from clickhouse_connect.driver.exceptions import DatabaseError
 from scalo.logger import logger
 
@@ -584,3 +585,33 @@ def test_a_hunt_that_leaves_the_specs_is_forgotten():
     HuntRunner(_RecordingCoordinator(), worker, {}, failures=failures)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
     assert failures.retry_at("h") is None
+
+
+class _NamingWorker:
+    """A worker that records which hunt each run was for, and can fail every run."""
+
+    def __init__(self, *, fails: bool = False) -> None:
+        self.ran: list[str] = []
+        self._fails = fails
+
+    def run(self, spec, fire: int) -> None:
+        self.ran.append(spec.hunt_id)
+        if self._fails:
+            raise RuntimeError("clickhouse refused the query")
+
+
+@pytest.mark.parametrize("fails", [False, True], ids=["runs-succeed", "runs-fail"])
+def test_hunts_past_the_cap_take_their_turn_on_the_next_ticks(fails):
+    """Three hunts always due under a cap of one: each runs once in three ticks, one a tick."""
+    from dfe_engine.hunt_runner.models import HuntSpec
+
+    ids = ["a", "b", "c"]
+    specs = {h: HuntSpec(hunt_id=h, interval_seconds=600, queries=["SELECT 1"]) for h in ids}
+    worker = _NamingWorker(fails=fails)
+    runner = HuntRunner(_RecordingCoordinator(), worker, specs, cap=1)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+
+    for tick in range(3):
+        runner.tick(600_000 + tick * 600)
+        assert len(worker.ran) == tick + 1, worker.ran
+
+    assert sorted(worker.ran) == ids

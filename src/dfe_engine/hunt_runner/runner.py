@@ -237,6 +237,8 @@ class HuntRunner:
         self._metrics = metrics or HuntRunnerMetrics()
         self._failures = failures if failures is not None else HuntFailures()
         self._failures.retain(specs)
+        # Where the next tick starts, so the hunts a full cap left out go first next time.
+        self._start = 0
 
     def _already_run(self, hunt_id: str, fire: int) -> bool:
         """Whether the watermark has reached *fire*, so that fire's window is committed."""
@@ -281,6 +283,8 @@ class HuntRunner:
         """One cycle: claim + run every due hunt (never double-run), up to the cap.
 
         The heartbeat goes first so a runner with nothing due still reads as alive.
+        Every run counts against the cap, failed or not, and a tick the cap cuts short
+        hands the next one the hunts it did not reach, so none is left out tick after tick.
 
         Returns the number of runs executed this tick.
         """
@@ -291,8 +295,12 @@ class HuntRunner:
         # Read every outstanding run-now once per tick, not once per hunt.
         requested = self._coord.pending_runs(now)
         executed = 0
-        for spec in self._specs.values():
-            if running + executed >= self._cap:
+        started = 0
+        specs = list(self._specs.values())
+        first = self._start % len(specs) if specs else 0
+        for reached, spec in enumerate(specs[first:] + specs[:first]):
+            if running + started >= self._cap:
+                self._start = first + reached
                 break  # global cap protects ClickHouse; lateness surfaces as overload
             fire = self._fire_for(spec, now, requested)
             if fire is None:
@@ -318,6 +326,7 @@ class HuntRunner:
             if not claimed:
                 continue  # lost the settle-window race -> another worker has it
             run_began = time.monotonic()
+            started += 1
             try:
                 with self._coord.held(spec.hunt_id, fire):
                     self._worker.run(spec, fire)
