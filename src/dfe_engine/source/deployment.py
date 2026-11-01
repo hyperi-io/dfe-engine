@@ -1,5 +1,6 @@
 """Source ClickHouse plan/deploy -- build artifacts, dry-run plans, and deploy execution."""
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
@@ -303,6 +304,44 @@ def qualify_ddl_statements(statements: list[str], db: str) -> list[str]:
     return [stmt.replace("{db}", db) for stmt in statements if stmt.strip()]
 
 
+def index_changes(
+    client: Any, ddl_gen: Any, db: str, table: str, columns: Sequence[Any], cfg: Any
+) -> list[str]:
+    """The index DDL that brings the existing *columns* of ``db.table`` to what they declare.
+
+    *db* is the database the server holds the table in. The DDL is rendered for ``cfg.db``,
+    which may be the ``{db}`` placeholder the planner fills in afterwards.
+
+    An index a column now asks for is added, one whose type or granularity moved is
+    dropped and added again, and one this generator named for the column that it no
+    longer asks for is dropped. A new index covers the parts written after it; the
+    parts already on disk gain it on their next merge.
+
+    Raises:
+        SchemaApplyError: ClickHouse could not be read.
+    """
+    try:
+        rows = client.query(
+            "SELECT name, type_full, granularity FROM system.data_skipping_indices "
+            "WHERE database = {db:String} AND table = {tbl:String}",
+            parameters={"db": db, "tbl": table},
+        ).result_rows
+    except Exception as exc:
+        raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
+    live = {str(name): (str(kind), int(granularity)) for name, kind, granularity in rows}
+    statements: list[str] = []
+    for col in columns:
+        wanted = {index.name: index for index in ddl_gen.index_definitions(col)}
+        for name in sorted(ddl_gen.managed_index_names(col) & live.keys()):
+            index = wanted.get(name)
+            if index is None or not index.matches(*live[name]):
+                statements.append(ddl_gen.generate_alter_drop_index(table, name, cfg).strip())
+        for name, index in wanted.items():
+            if name not in live or not index.matches(*live[name]):
+                statements.append(ddl_gen.generate_alter_add_index(table, index, cfg).strip())
+    return statements
+
+
 def _list_table_columns(client: Any, db: str, table: str) -> set[str]:
     """The column names of ``db.table``.
 
@@ -461,6 +500,9 @@ def plan_deploy_statements(
             statements.append(add_stmt.strip())
             for index_stmt in ddl_gen.generate_alter_add_indexes(table, col, cfg):
                 statements.append(index_stmt.strip())
+        kept = [col for col in result.columns if col.name in existing]
+        if ch_client is not None:
+            statements.extend(index_changes(ch_client, ddl_gen, db, table, kept, cfg))
         ttl_change = ttl_change_for_table(
             builder,
             source,
