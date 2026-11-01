@@ -999,8 +999,8 @@ class SamplerSettings(BaseModel):
         default=20_000, ge=1, description="Max Kafka messages read per sample pass"
     )
     timestamp_field: str = Field(
-        default="timestamp_load",
-        description="Column used to order 'recent' samples (DESC)",
+        default="_timestamp_load",
+        description="Column used to order 'recent' samples (DESC), the common header's load column",
     )
     wait_seconds: float = Field(
         default=8.0,

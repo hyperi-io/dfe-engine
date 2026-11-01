@@ -87,8 +87,8 @@ def test_recent_clickhouse_parses_rows_and_keys():
     assert out["count"] == 2
     assert out["rows"] == [{"a": 1, "b": "x"}, {"a": 2, "c": True}]
     assert out["keys"] == ["a", "b", "c"]
-    # Ordered by the configured timestamp field, DESC.
-    assert "ORDER BY timestamp_load DESC" in ch.calls[0][0]
+    # Ordered by the common header's load column, which every DFE table carries, DESC.
+    assert "ORDER BY _timestamp_load DESC" in ch.calls[0][0]
 
 
 def test_random_clickhouse_uses_rand_with_seed():
