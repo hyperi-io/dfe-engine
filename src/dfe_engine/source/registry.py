@@ -38,7 +38,7 @@ from dfe_engine.core_resources.yaml_resource_type import (
     config_is_core,
 )
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
-from dfe_engine.gitcrud.routing import WriteOutcome, WritePosture
+from dfe_engine.gitcrud.routing import ReviewRouting, WriteOutcome, WritePosture
 from dfe_engine.source.alignment import MixedConnectorTypesError, require_one_type
 from dfe_engine.source.engine_registry import InvalidEngineError
 from dfe_engine.source.models import (
@@ -443,6 +443,7 @@ class SourceRegistry:
         *,
         created_by: str | None,
         message: str,
+        routing: ReviewRouting | None = None,
     ) -> str:
         """Write one stored source doc; returns the destination label for the save log.
 
@@ -471,6 +472,8 @@ class SourceRegistry:
                     _SOURCES_CLASS, name, stored, actor=actor, message=message, branch=branch
                 ),
             )
+            if routing is not None:
+                routing.record(outcome)
             if outcome.review_required:
                 return f"review branch {outcome.branch}"
             return "gitcrud config/sources"
@@ -485,7 +488,14 @@ class SourceRegistry:
         store._refresh_all()
         return str(yaml_path)
 
-    def _delete_raw(self, name: str, *, created_by: str | None, message: str) -> bool:
+    def _delete_raw(
+        self,
+        name: str,
+        *,
+        created_by: str | None,
+        message: str,
+        routing: ReviewRouting | None = None,
+    ) -> bool:
         """Remove one stored source doc; False when it did not exist.
 
         gitcrud: one attributed commit ("(by <created_by>)" suffix, like save).
@@ -498,7 +508,7 @@ class SourceRegistry:
             commit_msg = f"{message} (by {created_by})" if created_by else message
             actor = created_by or "engine"
             try:
-                self._route_write(
+                outcome = self._route_write(
                     crud,
                     name,
                     actor,
@@ -509,6 +519,8 @@ class SourceRegistry:
                 )
             except ResourceNotFoundError:
                 return False
+            if routing is not None:
+                routing.record(outcome)
             return True
 
         store = self._require_store()
@@ -626,6 +638,7 @@ class SourceRegistry:
         description: str | None = None,
         *,
         core_reconcile: bool = False,
+        routing: ReviewRouting | None = None,
     ) -> Source:
         """Save a source definition to the YAML directory.
 
@@ -639,6 +652,7 @@ class SourceRegistry:
             description: Description of the change.
             core_reconcile: Engine-only. Permits the write that keeps a core source
                 in step with the deployment's settings. No request path sets it.
+            routing: Records the write when it went to a review branch instead of main.
 
         Returns:
             Validated Source model.
@@ -663,7 +677,9 @@ class SourceRegistry:
         if created_by:
             commit_msg = f"{commit_msg} (by {created_by})"
 
-        dest = self._put_raw(source.source, config_data, created_by=created_by, message=commit_msg)
+        dest = self._put_raw(
+            source.source, config_data, created_by=created_by, message=commit_msg, routing=routing
+        )
         logger.info(f"Saved source {source.source!r} -> {dest}")
         return source
 
@@ -673,6 +689,7 @@ class SourceRegistry:
         *,
         created_by: str | None = None,
         description: str | None = None,
+        routing: ReviewRouting | None = None,
     ) -> Source:
         """Create a source from a flat write body (initial version ``1.0.0``)."""
         if isinstance(write, dict):
@@ -691,7 +708,9 @@ class SourceRegistry:
             source = source_from_write(write, source_name=write.source)
         except ValidationError as e:
             raise SourceValidationError(_first_error_message(e)) from e
-        return self.save_source(source, created_by=created_by, description=description)
+        return self.save_source(
+            source, created_by=created_by, description=description, routing=routing
+        )
 
     def update_source_from_write(
         self,
@@ -701,6 +720,7 @@ class SourceRegistry:
         created_by: str | None = None,
         description: str | None = None,
         deployment_store: Any | None = None,
+        routing: ReviewRouting | None = None,
     ) -> Source:
         """Update a source; version bump only when the deployed version is edited."""
         if isinstance(write, dict):
@@ -725,7 +745,9 @@ class SourceRegistry:
             if store is not None and store.load_build(source_name, invalidate_version) is not None:
                 store.delete_build(source_name, invalidate_version, source=updated)
 
-        return self.save_source(updated, created_by=created_by, description=description)
+        return self.save_source(
+            updated, created_by=created_by, description=description, routing=routing
+        )
 
     def set_deployed_version(
         self,
@@ -797,6 +819,7 @@ class SourceRegistry:
         *,
         core_reconcile: bool = False,
         deployment_store: SourceDeploymentStore | None = None,
+        routing: ReviewRouting | None = None,
     ) -> None:
         """Delete a source definition and its build, plan and deploy records.
 
@@ -810,6 +833,8 @@ class SourceRegistry:
                 landing table no longer names. No request path sets it.
             deployment_store: Where the source's records live. Defaults to the store
                 the loaded settings name.
+            routing: Records the delete when it went to a review branch. A delete held
+                for review keeps the records, since main still carries the source.
 
         Raises:
             SourceCoreResourceError: The stored source is engine-owned.
@@ -818,13 +843,18 @@ class SourceRegistry:
         if not (core_reconcile) and self.is_core(source_name):
             raise SourceCoreResourceError(action="delete", source=source_name)
 
+        held = routing if routing is not None else ReviewRouting()
         deleted = self._delete_raw(
             source_name,
             created_by=created_by,
             message=f"source: delete {source_name}",
+            routing=held,
         )
         if not deleted:
             logger.warning(f"Source does not exist: {source_name!r}")
+            return
+        if held.review_required:
+            logger.info(f"Delete of source {source_name!r} is awaiting review")
             return
         self._forget_deployment_records(source_name, deployment_store)
         logger.info(f"Deleted source {source_name!r}")

@@ -1183,6 +1183,9 @@ class TestDeleteSource:
             "apps_synced": [],
             "apps_sync_error": None,
             "restart_required": [],
+            "review_required": False,
+            "pr_url": None,
+            "review_branch": None,
         }
 
         # Verify it's gone

@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from fastapi import Response
 
-    from dfe_engine.gitcrud.routing import WriteOutcome
+    from dfe_engine.gitcrud.routing import ReviewRouting, WriteOutcome
 
 
 def set_review_headers(response: Response, *, review_required: bool, pr_url: str | None) -> None:
@@ -58,3 +58,10 @@ def review_audit_detail(outcome: WriteOutcome | None) -> dict[str, Any] | None:
         detail["branch"] = outcome.branch
         detail["pr_url"] = outcome.pr_url
     return detail
+
+
+def routing_audit_detail(routing: ReviewRouting) -> dict[str, Any] | None:
+    """Audit detail for writes folded into *routing*, or None when every one reached main."""
+    if not routing.review_required:
+        return None
+    return {"review_required": True, "branches": routing.branches, "pr_urls": routing.pr_urls}

@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
 
-from dfe_engine.gitcrud.routing import WritePosture
+from dfe_engine.gitcrud.routing import ReviewRouting, WritePosture
 from dfe_engine.schema.derived import DERIVED_PREFIX, DerivedSchema
 from dfe_engine.schema.schema_loader import resolve_schema_yaml_path
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
@@ -309,6 +309,7 @@ class DerivedSchemaRegistry:
         created_by: str | None,
         message: str,
         summary: str = "",
+        routing: ReviewRouting | None = None,
     ):
         """Write one document; returns the destination label for the save log."""
         if (crud := self._crud) is not None:
@@ -325,6 +326,8 @@ class DerivedSchemaRegistry:
                     DERIVED_CLASS, key, stored, actor=actor, message=message, branch=branch
                 ),
             )
+            if routing is not None:
+                routing.record(outcome)
             if outcome.review_required:
                 return f"review branch {outcome.branch}"
             return f"gitcrud {crud.resource_class(DERIVED_CLASS).directory}"
@@ -334,14 +337,21 @@ class DerivedSchemaRegistry:
         yaml_dump(doc, path)
         return str(path)
 
-    def _delete_raw(self, key: str, *, created_by: str | None, message: str) -> bool:
+    def _delete_raw(
+        self,
+        key: str,
+        *,
+        created_by: str | None,
+        message: str,
+        routing: ReviewRouting | None = None,
+    ) -> bool:
         if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.engine import ResourceNotFoundError
 
             commit_msg = f"{message} (by {created_by})" if created_by else message
             actor = created_by or "engine"
             try:
-                self._route_write(
+                outcome = self._route_write(
                     crud,
                     key,
                     actor,
@@ -352,6 +362,8 @@ class DerivedSchemaRegistry:
                 )
             except ResourceNotFoundError:
                 return False
+            if routing is not None:
+                routing.record(outcome)
             return True
 
         path = self._yaml_path(key)
@@ -399,8 +411,12 @@ class DerivedSchemaRegistry:
         *,
         created_by: str | None = None,
         description: str | None = None,
+        routing: ReviewRouting | None = None,
     ) -> DerivedSchema:
-        """Write one derived schema, replacing whatever is stored at its path."""
+        """Write one derived schema, replacing whatever is stored at its path.
+
+        ``routing`` records the write when it went to a review branch instead of main.
+        """
         if not schema.path:
             raise DerivedSchemaValidationError("DerivedSchema.path is required when saving")
         key = canonical_derived_path(schema.path)
@@ -413,19 +429,22 @@ class DerivedSchemaRegistry:
             created_by=created_by,
             message=message,
             summary=schema.version().summary,
+            routing=routing,
         )
         logger.info(f"Saved derived schema {key!r} -> {dest}")
         return schema.model_copy(update={"path": derived_reference(key)})
 
-    def delete(self, path: str, *, created_by: str | None = None) -> None:
-        """Remove one derived schema.
+    def delete(
+        self, path: str, *, created_by: str | None = None, routing: ReviewRouting | None = None
+    ) -> None:
+        """Remove one derived schema, ``routing`` recording a delete sent to review.
 
         Raises:
             DerivedSchemaNotFoundError: Nothing stored at that path.
         """
         key = canonical_derived_path(path)
         if not self._delete_raw(
-            key, created_by=created_by, message=f"schema: delete derived/{key}"
+            key, created_by=created_by, message=f"schema: delete derived/{key}", routing=routing
         ):
             raise DerivedSchemaNotFoundError(f"Derived schema not found: {key!r}")
         logger.info(f"Deleted derived schema {key!r}")

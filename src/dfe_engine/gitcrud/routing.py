@@ -86,6 +86,14 @@ class ReviewRouting:
         if outcome.pr_url and outcome.pr_url not in self.pr_urls:
             self.pr_urls.append(outcome.pr_url)
 
+    def fold(self, other: ReviewRouting) -> None:
+        """Fold in every write another collection recorded."""
+        if not other.review_required:
+            return
+        self.review_required = True
+        self.branches.extend(b for b in other.branches if b not in self.branches)
+        self.pr_urls.extend(u for u in other.pr_urls if u not in self.pr_urls)
+
     @property
     def first_pr_url(self) -> str | None:
         """The PR to send an operator to first; the rest ride on the response body."""
