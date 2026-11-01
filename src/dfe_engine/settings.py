@@ -974,9 +974,9 @@ class SamplerSettings(BaseModel):
     - DFE_SAMPLER_MAX_EXECUTION_TIME -> sampler.max_execution_time
     """
 
-    default_mode: str = Field(
+    default_mode: Literal["recent", "random", "smart", "anomaly"] = Field(
         default="smart",
-        description="Default sample mode: recent | random | smart | anomaly",
+        description="Mode of a sample request that names none: recent | random | smart | anomaly",
     )
     default_limit: int = Field(default=100, ge=1, description="Default rows returned")
     max_limit: int = Field(default=10_000, ge=1, description="Hard cap on rows returned")

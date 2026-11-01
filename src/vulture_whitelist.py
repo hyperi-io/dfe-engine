@@ -570,7 +570,6 @@ settings.QuerySettings.yaml_dir
 settings.QueryViewSettings.auto_bootstrap
 settings.QueryViewSettings.max_memory_usage
 settings.QueryViewSettings.max_rows_to_read
-settings.SamplerSettings.default_mode
 settings.StorageSettings.s3_bucket
 
 # Only tests reach these.

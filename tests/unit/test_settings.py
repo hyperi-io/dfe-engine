@@ -1285,7 +1285,6 @@ class TestEverySettingIsRead:
         ("HuntsSettings", "default_max_sample_events"),
         ("QuerySettings", "yaml_dir"),
         ("QueryViewSettings", "auto_bootstrap"),
-        ("SamplerSettings", "default_mode"),
         ("HelmSettings", "environment_file"),
         ("HyperDXSettings", "api_key_env"),
         ("DFESettings", "e2e_server"),

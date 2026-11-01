@@ -43118,7 +43118,7 @@
         "properties": {
           "mode": {
             "$ref": "#/components/schemas/SampleMode",
-            "default": "smart"
+            "description": "Sample mode; absent takes sampler.default_mode"
           },
           "backend": {
             "$ref": "#/components/schemas/SampleBackend",

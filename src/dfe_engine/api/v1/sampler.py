@@ -51,6 +51,7 @@ from dfe_engine.sampling import (
     SampleResult,
     SampleScopeError,
 )
+from dfe_engine.sampling.models import configured_mode
 
 router = APIRouter(tags=["sampler"])
 
@@ -144,6 +145,9 @@ async def _submit(
     sampler = _sampler(request)
     manager = _task_manager(request)
     cfg = request.app.state.settings.sampler
+    if "mode" not in req.model_fields_set:
+        # The deployment's own default, not whatever the process loaded first.
+        req = req.model_copy(update={"mode": configured_mode(request.app.state.settings)})
 
     try:
         # Fail fast on a bad target (missing source, no table/topic) rather than
