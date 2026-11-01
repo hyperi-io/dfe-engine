@@ -426,13 +426,13 @@ def replicated_lease(two_replicas):
             pytest.fail("the lease table did not reach replica 2")
         time.sleep(0.5)
 
-    def lock(params: dict, holder: str) -> SchemaLock:
+    def lock(params: dict, holder: str, lease_seconds: int = 60) -> SchemaLock:
         return SchemaLock(
             clickhouse_connect.get_client(**params),
             database=database,
             table=table,
             holder=holder,
-            lease_seconds=60,
+            lease_seconds=lease_seconds,
         )
 
     def fetches(verb: str, *servers: dict) -> None:
@@ -625,10 +625,15 @@ def test_a_rival_live_claim_beside_a_slow_one_is_still_waited_on(
 
 
 def test_a_slow_claim_never_frees_a_rival_that_stood(two_replicas, replicated_lease):
-    """Y stands while X's later-versioned claim waits on its quorum, so X must not release it."""
+    """Y stands while X's later-versioned claim waits on its quorum, so X must not release it.
+
+    X's lease is shorter than Y's, as a caller with a shorter wait writes, so X's row
+    expires while Y still holds. Neither that nor a merge that folds Y's row away
+    may let a third applier in.
+    """
     lease = replicated_lease
-    y = lease.lock(two_replicas.first, "pod-y")
-    x = lease.lock(two_replicas.second, "pod-x")
+    y = lease.lock(two_replicas.first, "pod-y", lease_seconds=300)
+    x = lease.lock(two_replicas.second, "pod-x", lease_seconds=3)
     observer = lease.lock(two_replicas.first, "pod-observer")
     # Replica 1 stops fetching, so X's claim on replica 2 waits for its quorum.
     lease.fetches("STOP", two_replicas.first)
@@ -669,6 +674,23 @@ def test_a_slow_claim_never_frees_a_rival_that_stood(two_replicas, replicated_le
     taken = lease.lock(two_replicas.first, "pod-z").acquire(wait_seconds=0.0)
     holders = [name for name, held in (("pod-y", outcomes["y"]), ("pod-z", taken)) if held is True]
     assert holders == ["pod-y"], f"two holders: {holders}"
+
+    # X's later-versioned row is the latest and lapses first, while Y's lease runs on.
+    deadline = time.monotonic() + 30
+    while (latest := observer.read()) is None or latest.expires_at > datetime.now(UTC):
+        if time.monotonic() >= deadline:
+            pytest.fail(f"X's claim never lapsed: {latest}")
+        time.sleep(0.5)
+    assert latest.holder == "pod-x", latest
+    assert lease.lock(two_replicas.first, "pod-after-lapse").acquire(wait_seconds=0.0) is False, (
+        "a lapsed missed claim let a third applier in beside Y"
+    )
+
+    first = clickhouse_connect.get_client(**two_replicas.first)
+    first.command(f"OPTIMIZE TABLE `{lease.database}`.`{lease.table}` FINAL")
+    assert lease.lock(two_replicas.first, "pod-after-merge").acquire(wait_seconds=0.0) is False, (
+        "a merge that folded Y's row away let a third applier in beside Y"
+    )
 
 
 def test_an_unreadable_lease_table_fails_the_pass_rather_than_applying_unleased(

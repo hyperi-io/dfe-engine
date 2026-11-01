@@ -39,7 +39,8 @@ no merge collapses into another. The marker stays live while its claim holds and
 ended when the claim loses or misses. A live claim row whose marker is ended blocks
 nobody, so racers whose first claims all miss claim again rather than wait out a lease.
 A live marker always blocks, so a holder stays visible after a merge keeps only a
-later row.
+later row. Every attempt reads the claims and markers, never the latest row alone:
+a missed claim with a shorter lease can be the latest row and lapse first.
 
 The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 """
@@ -151,10 +152,6 @@ class LockState:
     released: bool
     acquired_at: datetime
 
-    def held_at(self, now: datetime) -> bool:
-        """Whether this row is a live claim rather than a finished or lapsed one."""
-        return not self.released and self.expires_at > now
-
 
 def _utc(value: datetime) -> datetime:
     """*value* as an aware UTC time, since the driver hands back naive UTC times."""
@@ -258,16 +255,18 @@ class SchemaLock:
         deadline = time.monotonic() + max(wait_seconds, 0.0)
         missed: set[type[Exception]] = set()
         while True:
+            state: LockState | None = None
             try:
                 started = time.monotonic()
-                state = self.read()
-                now = datetime.now(UTC)
-                if state is None or not state.held_at(now) or self._only_ended_claims(now):
-                    if self._try_claim(now, started=started):
+                # The free read is the claims and markers, never the latest row alone: a
+                # missed claim can be the latest row and lapse while an earlier holder holds.
+                if self._only_ended_claims(datetime.now(UTC)):
+                    if self._try_claim(datetime.now(UTC), started=started):
                         return True
                     if time.monotonic() >= deadline:
                         return False
                     continue
+                state = self.read()
             except (SchemaLockQuorumError, _SlowClaim) as exc:
                 # Once per wait and cause: a down replica stays down for every attempt in it.
                 if type(exc) not in missed:
@@ -365,8 +364,9 @@ class SchemaLock:
     def _only_ended_claims(self, now: datetime) -> bool:
         """Whether every live claim on the lease is one its claimer marked ended, with no live marker.
 
-        Reads rows a merge has not yet collapsed, so a claim kept only under a later
-        row is still caught by its marker, which sits under a lock name of its own.
+        True when nothing has ever claimed it. Reads rows a merge has not yet
+        collapsed, so a claim kept only under a later row is still caught by its
+        marker, which sits under a lock name of its own.
         """
         target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
         claims = (
