@@ -8,6 +8,8 @@
 """Deterministic spread + scheduling-decision tests, the tick's heartbeat, and back-off."""
 
 import itertools
+from collections.abc import Generator
+from contextlib import contextmanager
 
 from clickhouse_connect.driver.exceptions import DatabaseError
 from scalo.logger import logger
@@ -139,12 +141,24 @@ class _RecordingCoordinator:
     def current_lease(self, hunt_id: str):
         return None
 
-    def try_claim(self, hunt_id: str, fire: int, now: int) -> bool:
+    def now(self) -> int:
+        return 0
+
+    def try_claim(self, hunt_id: str, fire: int, now: int | None = None) -> bool:
         self.calls.append("try_claim")
         return True
 
     def release(self, hunt_id: str, fire: int) -> None:
         self.calls.append("release")
+
+    @contextmanager
+    def held(self, hunt_id: str, fire: int) -> Generator[None]:
+        """The real coordinator's shape: the run, then the release whatever it raised."""
+        self.calls.append("held")
+        try:
+            yield
+        finally:
+            self.release(hunt_id, fire)
 
 
 class _WatermarkCoordinator(_RecordingCoordinator):
@@ -168,7 +182,7 @@ class _WatermarkCoordinator(_RecordingCoordinator):
 class _PeerRanItCoordinator(_WatermarkCoordinator):
     """A peer runs the fire and releases it between this runner's watermark read and its claim."""
 
-    def try_claim(self, hunt_id: str, fire: int, now: int) -> bool:
+    def try_claim(self, hunt_id: str, fire: int, now: int | None = None) -> bool:
         self.calls.append("try_claim")
         self.watermarks[hunt_id] = fire
         return True
@@ -187,7 +201,7 @@ class _LeasedCoordinator(_RecordingCoordinator):
 class _LosingCoordinator(_RecordingCoordinator):
     """A coordinator that loses every settle-window race to another worker."""
 
-    def try_claim(self, hunt_id: str, fire: int, now: int) -> bool:
+    def try_claim(self, hunt_id: str, fire: int, now: int | None = None) -> bool:
         self.calls.append("try_claim")
         return False
 

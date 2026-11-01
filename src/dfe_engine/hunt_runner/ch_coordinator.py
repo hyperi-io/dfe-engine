@@ -30,6 +30,13 @@ both inserts commit inside it. A duplicate run is NOT absorbed: on 26.3 no INSER
 watermark gives crash-safe incremental resume, and
 hunt_state carries the too_aggressive / overrun signal for the UI.
 
+A claimed run is held under :meth:`ChCoordinator.held`, which renews the lease on its
+own thread every third of the lease, so a run longer than the lease is never
+claimable by a peer while it executes. A renewal and a release land only while this
+worker's row for that fire is still the newest, so an owner whose lease ran out
+cannot extend or free the lease a successor took. The renewals share the runner's
+client, which must therefore not use a ClickHouse session.
+
 Tables (all ReplacingMergeTree; the first three bounded to ~1 row/hunt after merge):
   hunt_lease     - who holds a hunt now, until when (mutual exclusion + cap input)
   hunt_watermark - last committed window end per hunt (incremental resume)
@@ -42,12 +49,14 @@ Tables (all ReplacingMergeTree; the first three bounded to ~1 row/hunt after mer
                    says an idle runner is alive.
 """
 
-from __future__ import annotations
-
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
+
+from scalo.logger import logger
 
 from dfe_engine.clickhouse.inserts import keep_identical_rows
 from dfe_engine.clickhouse.quoting import quote_identifier
@@ -184,12 +193,20 @@ class ChCoordinator:
             self._lease_settings = keep_identical_rows(self._ch)
         return self._lease_settings
 
-    def _insert_lease(self, hunt_id: str, fire: int, lease_until: int) -> None:
-        self._ch.insert(
-            "hunt_lease",
-            [[hunt_id, self._worker_id, fire, lease_until]],
-            column_names=["hunt_id", "owner", "fire", "lease_until"],
-            database=self._db,
+    def _insert_if_still_ours(self, hunt_id: str, fire: int, lease_until: int) -> None:
+        """Write a lease row for *fire* only while this worker's row for it is the newest.
+
+        The check and the insert are one statement, so an owner whose lease ran out
+        and was claimed by a peer writes nothing over the peer's lease.
+        """
+        self._ch.command(
+            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database; values bound
+            "SELECT {h:String}, {o:String}, {f:Int64}, {u:Int64} "
+            "WHERE (SELECT count() FROM ("
+            f"SELECT owner, fire FROM {self._qdb}.hunt_lease "
+            "WHERE hunt_id = {h:String} ORDER BY claimed DESC, owner ASC LIMIT 1"
+            ") WHERE owner = {o:String} AND fire = {f:Int64}) = 1",
+            parameters={"h": hunt_id, "o": self._worker_id, "f": fire, "u": lease_until},
             settings=self._keep_lease_rows(),
         )
 
@@ -231,14 +248,63 @@ class ChCoordinator:
         winner = self.current_lease(hunt_id)
         return winner is not None and winner.owner == self._worker_id
 
-    def renew(self, hunt_id: str, fire: int, now: int | None = None) -> None:
-        """Heartbeat a long-running claim so it is not reclaimed mid-run."""
+    def renew(self, hunt_id: str, fire: int, now: int | None = None) -> bool:
+        """Extend our claim on *fire* by a full lease. False once a peer holds the hunt."""
         now = self.now() if now is None else now
-        self._insert_lease(hunt_id, fire, now + self._lease_seconds)
+        self._insert_if_still_ours(hunt_id, fire, now + self._lease_seconds)
+        lease = self.current_lease(hunt_id)
+        return lease is not None and lease.owner == self._worker_id and lease.fire == fire
 
     def release(self, hunt_id: str, fire: int) -> None:
-        """Release our claim (lease_until=0) so the slot frees immediately."""
-        self._insert_lease(hunt_id, fire, 0)
+        """Release our claim (lease_until=0) so the slot frees immediately, if it is still ours."""
+        self._insert_if_still_ours(hunt_id, fire, 0)
+
+    @contextmanager
+    def held(self, hunt_id: str, fire: int) -> Generator[None]:
+        """Keep our claim on *fire* live while the body runs, then release it.
+
+        Renewals run on their own thread every third of the lease, so one statement
+        outlasting the lease does not leave the hunt claimable.
+        """
+        stop = threading.Event()
+        renewer = threading.Thread(
+            target=self._keep_renewing,
+            args=(hunt_id, fire, stop),
+            name=f"hunt-lease-{hunt_id}",
+            daemon=True,
+        )
+        renewer.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            renewer.join()
+            self.release(hunt_id, fire)
+
+    def _keep_renewing(self, hunt_id: str, fire: int, stop: threading.Event) -> None:
+        """Renew until *stop* is set or a peer holds the hunt, logging a failing streak once."""
+        failing = False
+        while not stop.wait(self._lease_seconds / 3):
+            try:
+                still_ours = self.renew(hunt_id, fire)
+            except Exception as exc:  # the run goes on, and the next renewal may land
+                if not failing:
+                    logger.warning(
+                        "hunt lease renewal failed", hunt_id=hunt_id, fire=fire, error=str(exc)
+                    )
+                failing = True
+                continue
+            if failing:
+                logger.info("hunt lease renewal recovered", hunt_id=hunt_id, fire=fire)
+            failing = False
+            if not still_ours:
+                logger.error(
+                    "hunt lease taken by another runner mid-run",
+                    hunt_id=hunt_id,
+                    fire=fire,
+                    owner=self._worker_id,
+                )
+                return
 
     def active_count(self, now: int | None = None) -> int:
         """Hunts with an active lease right now - the input to the global cap."""
