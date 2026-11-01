@@ -28,6 +28,7 @@ from tests.integration.conftest import (
     _remove_container,
     _resolve_tier,
     _spin_ch_on_docker,
+    _truthy,
 )
 from tests.support.dockerhub import dockerhub_image
 
@@ -241,6 +242,8 @@ def test_a_torn_down_clickhouse_leaves_no_volume(request):
     assert [v for v in volumes if _volume_exists(v)] == [], "teardown left the volume behind"
 
 
+# The per-test server is the container this suite names, so the test holds one.
+@pytest.mark.own_clickhouse
 def test_a_started_container_carries_the_name_and_labels(ch_params, request):
     """A REAL container from the fixture matches the convention.
 
@@ -287,3 +290,14 @@ def test_a_started_container_carries_the_name_and_labels(ch_params, request):
     )
     # ch_params is the fixture under test; touching it keeps the dependency honest.
     assert ch_params["port"] > 0
+
+
+def test_a_test_on_the_local_tier_shares_the_runs_clickhouse(ch_params, shared_clickhouse):
+    """No server of its own: the run starts one ClickHouse, whichever xdist worker asks first."""
+    if _resolve_tier() != "local" or _truthy("DFE_TEST_KEEP"):
+        pytest.skip("only the local tier shares the run's ClickHouse")
+
+    assert (ch_params["host"], ch_params["port"]) == (
+        shared_clickhouse.host,
+        shared_clickhouse.http_port,
+    )

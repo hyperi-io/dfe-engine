@@ -40,7 +40,7 @@ from dfe_engine.settings import (
 from tests.support.accounts import admin_on_its_own_password
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 ADMIN_PASSWORD = "test-admin-pw"
 VIEWER_ORGS = ["test_org", "test_org_2"]

@@ -19,10 +19,14 @@ import time
 import uuid
 from types import SimpleNamespace
 
+import pytest
 from confluent_kafka import Consumer, KafkaError, KafkaException, Producer, TopicPartition
 from confluent_kafka.admin import AdminClient, NewTopic
 
 from dfe_engine.appmgmt import instances
+
+# Each test starts the engine, whose startup reconcile sweeps server-wide roles and policies.
+pytestmark = pytest.mark.own_clickhouse
 
 LOADER_GROUP = "dfe-loader"
 RECORDS = 3

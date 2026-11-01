@@ -30,9 +30,11 @@ Controls (env):
       This is the ONLY way a container survives a run.
   DFE_TEST_CH_IMAGE              - override the CH image (default: current LTS).
 
-Containers this suite starts are named `dfe-engine-test-integration-<test>-
-clickhouse`, or `dfe-engine-test-integration-clickhouse` for the shared
-DFE_TEST_KEEP one, and carry `io.hyperi.test.*` labels naming the suite, the repo,
+On the local tier a test shares the run's one ClickHouse, which scalo's
+``shared_clickhouse`` fixture starts and removes, unless it is marked
+``own_clickhouse``. Containers this suite starts itself are named
+`dfe-engine-test-integration-<test>-clickhouse`, or
+`dfe-engine-test-integration-clickhouse` for the shared DFE_TEST_KEEP one, and carry `io.hyperi.test.*` labels naming the suite, the repo,
 the service and the owning pid. To sweep whatever a killed run left behind:
 
   docker rm -f -v $(docker ps -aq --filter label=io.hyperi.test.suite=dfe-engine-integration)
@@ -536,12 +538,29 @@ def local_tier_notice() -> None:
         )
 
 
+def _shared_params(request) -> dict:
+    """The run's shared ClickHouse, which scalo's plugin starts once for every xdist worker."""
+    service = request.getfixturevalue("shared_clickhouse")
+    return {
+        "host": service.host,
+        "port": service.http_port,
+        "username": service.user,
+        "password": service.password,
+        "secure": service.secure,
+    }
+
+
 @pytest.fixture
 def ch_params(request, local_tier_notice):
     """Resolved CH connection params by tier (cluster -> remote -> local docker).
 
+    On the local tier a test shares the run's one ClickHouse and isolates itself in a
+    database of its own. A test marked ``own_clickhouse`` changes server-wide state,
+    so it gets a server of its own, started and removed around it, as every test on
+    the remote tier does.
+
     Yields the params dict (so a test can open MANY clients - e.g. N synthetic
-    hunt-runner pods, one client each). Spins/tears down docker as needed.
+    hunt-runner pods, one client each).
 
     Takes ``request`` to name any container after the test that owns it -- pytest
     exposes the node name directly, so nothing has to be passed at the call site.
@@ -549,7 +568,11 @@ def ch_params(request, local_tier_notice):
     clickhouse_connect = pytest.importorskip("clickhouse_connect")
     tier = _resolve_tier()
     teardown = None
+    own = request.node.get_closest_marker("own_clickhouse") is not None
 
+    if tier == "local" and not own and not _truthy("DFE_TEST_KEEP"):
+        yield _shared_params(request)
+        return
     if tier == "cluster":
         params = _cluster_params()
         if params is None:

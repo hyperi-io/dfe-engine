@@ -40,7 +40,7 @@ from dfe_engine.settings import SecretsSettings
 
 from .conftest import count_as, drop_safely
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 # The manifest objects the reconcile's dfe_meta projection writes into.
 _META_IDS = ("db.meta", "meta.orgs", "meta.ch_tiers")

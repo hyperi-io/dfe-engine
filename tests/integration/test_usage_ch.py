@@ -34,7 +34,7 @@ from dfe_engine.schema.plan import build_plan
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 from tests.support.held_callers import caller_in_group
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 REFRESH_SECONDS = 90
 MINUTE_VIEWS = ("usage_minute_cores_mv", "usage_minute_ingest_mv", "usage_minute_events_mv")

@@ -12,7 +12,7 @@ from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.settings import get_clickhouse_config
 from tests.support.engine_stack import bootstrap_settings
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 # A Merge table stores no rows, so no replica can hold data another lacks.
 DATALESS_ENGINES = ("Merge",)

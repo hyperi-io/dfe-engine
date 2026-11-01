@@ -36,7 +36,7 @@ from dfe_engine.source.deployment import SettingsChange, deploy_statements_for_b
 from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 MERGE_CAP = "merge_max_dynamic_subcolumns_in_wide_part"
 CAPPED = f"{MERGE_CAP} = {JSON_TABLE_SETTINGS[MERGE_CAP]}"

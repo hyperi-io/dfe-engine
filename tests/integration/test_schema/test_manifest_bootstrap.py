@@ -49,7 +49,7 @@ from dfe_engine.schema.lock import SchemaLock, SchemaLockError, holder_name
 from dfe_engine.schema.phase import apply_plan
 from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, build_plan, render_one
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 # Kinds that land in the data or meta database and are visible in system.tables.
 _TABLE_KINDS = ("table", "materialized_view", "view")

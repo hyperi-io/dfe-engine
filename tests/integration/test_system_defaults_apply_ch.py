@@ -26,7 +26,7 @@ from dfe_engine.gitcrud.table_defaults import commit_patch
 from dfe_engine.schema.schema_loader import SchemaLoader
 from tests.support.engine_stack import default_header, deploy_source
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 DEFAULTS = "/api/v1/system/defaults"
 APPLY = "/api/v1/system/defaults/apply"
