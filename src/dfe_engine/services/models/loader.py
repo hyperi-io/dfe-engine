@@ -215,18 +215,9 @@ class TimestampDqConfig(BaseModel):
     enabled: bool = True
     max_future_seconds: int = Field(default=600, ge=0)
     max_past_seconds: int = Field(default=0, ge=0, description="0 = no limit")
-    invalid_action: str = "replace_with_now"
+    # The one action dfe-loader starts with. It refuses any other, so the engine does too.
+    invalid_action: Literal["replace_with_now"] = "replace_with_now"
     correct_known_bad: bool = True
-
-    @field_validator("invalid_action")
-    @classmethod
-    def validate_invalid_action(cls, v: str) -> str:
-        """Refuse an invalid-timestamp action other than replace_with_now, drop or dlq."""
-        allowed = {"replace_with_now", "drop", "dlq"}
-        if v.lower() not in allowed:
-            msg = f"Invalid action: {v}. Allowed: {', '.join(sorted(allowed))}"
-            raise ValueError(msg)
-        return v
 
 
 # ---------------------------------------------------------------------------
