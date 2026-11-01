@@ -643,14 +643,13 @@ class TestRenderAll:
         assert "CREATE USER IF NOT EXISTS `dfe_loader`" in s
         assert "GRANT `dfe_loader_role` TO `dfe_loader`" in s
         # the org's pinned user: tier + tenant role + READONLY pin
-        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in s
+        assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_org_acme`" in s
         assert "ALTER USER `dfe_org_acme` SETTINGS SQL_current_tenant_id = 'acme' READONLY" in s
         # org-scoped group user: same pinned shape
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_soc`" in s
+        assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_grp_soc`" in s
         assert "ALTER USER `dfe_grp_soc` SETTINGS SQL_current_tenant_id = 'acme' READONLY" in s
         # unrestricted user: tier only, no tenant role, no pin
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_admin`" in s
-        assert "GRANT `dfe_tenant_role` TO `dfe_grp_admin`" not in s
+        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_admin` WITH REPLACE OPTION" in s
         assert "ALTER USER `dfe_grp_admin` SETTINGS SQL_current_tenant_id" not in s
         # binding without a minted secret is skipped
         assert "dfe_grp_nohash" not in s
@@ -686,13 +685,12 @@ class TestRenderAll:
         assert "GRANT SELECT ON dfe.main TO `dfe_analyst_tier_2_role`" not in s
         # no per-user data grant: org and platform users alike only hold the tier
         # role, never a direct dfe.* grant on the user itself
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_org_acme`" in s
         assert "GRANT SELECT ON dfe.* TO `dfe_org_acme`" not in s
         assert "GRANT SELECT ON dfe.* TO `dfe_grp_ops`" not in s
         # only the org-scoped users are fenced by the tenant role + pin
-        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in s
-        assert "GRANT `dfe_tenant_role` TO `dfe_grp_soc`" in s
-        assert "GRANT `dfe_tenant_role` TO `dfe_grp_ops`" not in s
+        assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_org_acme`" in s
+        assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_grp_soc`" in s
+        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_ops` WITH REPLACE OPTION" in s
         # the deny backstop fences dfe.otel_logs for the tenant role - the sole
         # control keeping otel away from a fenced user now the grant is broad
         assert (

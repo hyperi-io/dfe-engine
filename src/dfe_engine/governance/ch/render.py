@@ -220,15 +220,13 @@ def render_pinned_user(
     a stale hash and every hyperdx connect fails CH auth (code 516) until it is
     realigned. The IDENTIFIED ALTER converges the user to the stored hash on
     every run; it is a no-op when they already match.
+
+    The role GRANT replaces the user's whole role set in one statement, so a
+    demoted tier, a dropped ``extra_roles`` entry or a lifted tenant pin is
+    revoked rather than left granted beside the new set.
     """
     qu = _bq(user)
-    stmts = [
-        f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
-        f"ALTER USER {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
-        f"GRANT {_bq(tier_role)} TO {qu}",
-    ]
-    for role in extra_roles or []:
-        stmts.append(f"GRANT {_bq(role)} TO {qu}")
+    roles = [tier_role, *(extra_roles or [])]
     if org_ids:
         # The pin is comma-joined, so a comma inside an id would silently split
         # into fragments that match nothing.
@@ -238,7 +236,14 @@ def render_pinned_user(
         # An empty id pins '' and matches every row whose _org_id defaulted to empty.
         if "" in org_ids:
             raise ValueError(f"org ids must not be empty: {org_ids!r}")
-        stmts.append(f"GRANT {_bq(TENANT_ROLE)} TO {qu}")
+        roles.append(TENANT_ROLE)
+    granted = ", ".join(_bq(role) for role in roles)
+    stmts = [
+        f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
+        f"ALTER USER {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
+        f"GRANT {granted} TO {qu} WITH REPLACE OPTION",
+    ]
+    if org_ids:
         pin = _sq(",".join(org_ids))
         stmts.append(f"ALTER USER {qu} SETTINGS {TENANT_SETTING} = {pin} READONLY")
     return stmts

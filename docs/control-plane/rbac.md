@@ -562,6 +562,8 @@ A tenant-reachable table with no `_org_id` column gets a `USING 0` policy, so a 
 
 Adding an org adds one pinned user. The policy set does not change.
 
+Each reconcile replaces a pinned or group user's whole role set, so a group that loses `admin` loses `otel_reader` with it, and one that turns platform-wide loses the tenant role.
+
 ### 5.2 Who Reads As Whom
 
 ```mermaid

@@ -236,8 +236,10 @@ class TestRenderPinnedUser:
         assert (
             "CREATE USER IF NOT EXISTS `dfe_org_acme` IDENTIFIED WITH sha256_hash BY 'abc123'" in s
         )
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_org_acme`" in s
-        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in s
+        assert (
+            "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_org_acme` "
+            "WITH REPLACE OPTION" in s
+        )
         # READONLY is the enforcement: an attacker SETTINGS override is a 452.
         assert "ALTER USER `dfe_org_acme` SETTINGS SQL_current_tenant_id = 'acme' READONLY" in s
 
@@ -251,8 +253,12 @@ class TestRenderPinnedUser:
                 extra_roles=["dfe_otel_reader_role"],
             )
         )
-        assert "GRANT `dfe_t_role` TO `dfe_grp_admins`" in s
-        assert "GRANT `dfe_otel_reader_role` TO `dfe_grp_admins`" in s
+        # One replacing grant, so a role dropped from the binding is revoked.
+        assert (
+            "GRANT `dfe_t_role`, `dfe_otel_reader_role` TO `dfe_grp_admins` WITH REPLACE OPTION"
+            in s
+        )
+        assert s.count("GRANT ") == 1
 
     def test_multi_org_ids_join_into_one_pin(self):
         s = _joined(
@@ -281,12 +287,11 @@ class TestRenderPinnedUser:
             render_pinned_user("dfe_grp_ops", "h", tier_role="dfe_analyst_tier_2_role", org_ids=[])
         )
         # both get the tier role; neither gets a direct whole-db data grant
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_org_acme`" in org
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_ops`" in platform
+        assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_org_acme`" in org
+        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_ops` WITH REPLACE OPTION" in platform
         assert "GRANT SELECT ON dfe.*" not in org
         assert "GRANT SELECT ON dfe.*" not in platform
         # only the org user is fenced by the tenant role + READONLY pin
-        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in org
         assert "SQL_current_tenant_id = 'acme' READONLY" in org
         assert "dfe_tenant_role" not in platform
         assert "SQL_current_tenant_id" not in platform
