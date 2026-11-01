@@ -246,12 +246,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     if schema_state.transient:
         from dfe_engine.clickhouse.bootstrap import SchemaRetry
-        from dfe_engine.governance.ch import request_ch_rbac_reconcile
+        from dfe_engine.governance.ch import TRIGGER_ATTRIBUTES
 
         def schema_converged() -> None:
             seed_core(tables_bootstrapped=True)
-            # A reconcile that got through before this pass found no projection tables to fill.
-            request_ch_rbac_reconcile(app.state)
+            # The pass re-applied the dfe-schemas roles over the engine's budgets, and a
+            # reconcile that got through before it found no projection tables to fill.
+            for name in TRIGGER_ATTRIBUTES:
+                trigger = getattr(app.state, name, None)
+                if trigger is not None:
+                    trigger.request()
 
         app.state.schema_retry = SchemaRetry(
             run_schema_pass,

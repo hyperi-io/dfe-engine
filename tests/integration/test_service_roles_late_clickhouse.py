@@ -13,9 +13,10 @@ short of a restart, so the hunt runner dialled a user that did not exist and
 crash-looped. Here the engine is never restarted: the user has to appear on its
 own once ClickHouse answers, with tenant isolation off (the service-role reconcile)
 and on (the full one). With the schema phase on as well, the projection tables its
-late pass creates are filled too.
+late pass creates are filled too, and the reconcile runs again after that pass.
 """
 
+import threading
 import time
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from dfe_engine.api.deps import _registries, create_access_token
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.governance.ch.bootstrap import TENANT_ISOLATION_ENV
 from dfe_engine.governance.ch.models import DEFAULT_SERVICE_ROLES, meta_projection
+from dfe_engine.schema.phase import current_state
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -36,6 +38,7 @@ from dfe_engine.settings import (
     DFESettings,
     KafkaSettings,
     LocalAuthSettings,
+    QueryViewSettings,
     SecretsSettings,
 )
 from tests.support.accounts import admin_on_its_own_password
@@ -178,5 +181,75 @@ def test_with_the_schema_phase_on_the_projection_fills_once_a_late_clickhouse_an
             )
             assert app.state.ch_rbac_reconcile.wait_idle(30.0), "the retry kept running"
     finally:
+        _registries.clear()
+        ClickHouseManager.reset_instance()
+
+
+# Not the catalogue's 30, so the profile shows which applier wrote it last.
+_READER_BUDGET = 17
+
+
+def _reader_budget(client) -> str | None:
+    rows = client.query(
+        "SELECT value FROM system.settings_profile_elements "
+        "WHERE profile_name = 'dfe_query_reader_profile' AND setting_name = 'max_execution_time'"
+    ).result_rows
+    return str(rows[0][0]) if rows else None
+
+
+@pytest.mark.parametrize(
+    ("isolation", "trigger"),
+    [("false", "ch_service_role_reconcile"), ("true", "ch_rbac_reconcile")],
+    ids=["isolation-off", "isolation-on"],
+)
+def test_a_schema_pass_converging_after_the_reconcile_keeps_the_readers_budget(
+    late_clickhouse, tmp_path, monkeypatch, isolation, trigger
+):
+    """The schema phase re-applies the reader role from dfe-schemas, so the reconcile runs after it.
+
+    The deferred pass is held until the reconcile has finished, which is the order where
+    the pass would leave the catalogue's budget on the view reader.
+    """
+    import dfe_engine.clickhouse.bootstrap as ch_bootstrap
+
+    params, start_clickhouse = late_clickhouse
+    monkeypatch.setenv(TENANT_ISOLATION_ENV, isolation)
+    for role in DEFAULT_SERVICE_ROLES:
+        monkeypatch.delenv(f"DFE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
+    gate = threading.Event()
+
+    class _HeldRetry(ch_bootstrap.SchemaRetry):
+        def __init__(self, run_pass, **kwargs):
+            def held():
+                gate.wait(USER_DEADLINE_SECONDS)
+                return run_pass()
+
+            super().__init__(held, **kwargs)
+
+    monkeypatch.setattr(ch_bootstrap, "SchemaRetry", _HeldRetry)
+    settings = _settings(tmp_path, params, bootstrap_tables=True).model_copy(
+        update={"query_views": QueryViewSettings(max_execution_time=_READER_BUDGET)}
+    )
+    ClickHouseManager.reset_instance()
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False):
+            start_clickhouse()
+            admin = clickhouse_connect.get_client(**params)
+            deadline = time.monotonic() + USER_DEADLINE_SECONDS
+            while _reader_budget(admin) != str(_READER_BUDGET) and time.monotonic() < deadline:
+                time.sleep(1.0)
+            assert _reader_budget(admin) == str(_READER_BUDGET), "the reconcile never ran"
+            assert getattr(app.state, trigger).wait_idle(30.0)
+
+            gate.set()
+            # Joins the retry's thread, so its request for a reconcile has been made.
+            app.state.schema_retry.close(USER_DEADLINE_SECONDS)
+            assert current_state().converged, current_state().error
+            assert getattr(app.state, trigger).wait_idle(30.0)
+
+            assert _reader_budget(admin) == str(_READER_BUDGET)
+    finally:
+        gate.set()
         _registries.clear()
         ClickHouseManager.reset_instance()
