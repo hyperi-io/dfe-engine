@@ -142,6 +142,7 @@ Storage:
 - DFE_S3_REGION -> storage.s3_region
 
 API request bodies:
+- DFE_API_MAX_ACTIVE_TASKS -> api.max_active_tasks
 - DFE_API_MAX_REQUEST_BODY_BYTES -> api.max_request_body_bytes
 
 API (Elasticsearch template elastic-converter upload limits):
@@ -1948,6 +1949,7 @@ class APISettings(BaseModel):
     - DFE_API_FORWARDED_ALLOW_IPS -> api.forwarded_allow_ips (comma-separated)
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
     - DFE_API_MAX_SESSION_MINUTES -> api.max_session_minutes
+    - DFE_API_MAX_ACTIVE_TASKS -> api.max_active_tasks
     - DFE_API_MAX_REQUEST_BODY_BYTES -> api.max_request_body_bytes
     - DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
     - DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
@@ -2027,6 +2029,15 @@ class APISettings(BaseModel):
             "scripts from a public CDN into the engine's own origin, so unset serves "
             "them in a dev posture only. /openapi.json is served either way. "
             "DFE_API_DOCS_ENABLED."
+        ),
+    )
+    max_active_tasks: int = Field(
+        default=64,
+        ge=1,
+        description=(
+            "Background tasks (samples, synthetic streams) one engine process holds "
+            "pending or running at once. A submission past it is refused with 429. "
+            "DFE_API_MAX_ACTIVE_TASKS."
         ),
     )
     max_request_body_bytes: int = Field(
@@ -2998,6 +3009,8 @@ def _get_env_overrides() -> dict:
         overrides["api"]["jwt_expire_minutes"] = int(val)
     if val := _get_env("DFE_API_MAX_SESSION_MINUTES"):
         overrides["api"]["max_session_minutes"] = int(val)
+    if val := _get_env("DFE_API_MAX_ACTIVE_TASKS"):
+        overrides["api"]["max_active_tasks"] = int(val)
     if val := _get_env("DFE_API_MAX_REQUEST_BODY_BYTES"):
         overrides["api"]["max_request_body_bytes"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"):

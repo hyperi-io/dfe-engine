@@ -280,3 +280,30 @@ class TestStream:
             headers=viewer_headers,
         )
         assert r.status_code == 403
+
+
+@needs_packs
+def test_a_submission_past_the_task_cap_is_429(client, admin_headers):
+    """The task manager's own cap, not the stream cap, refuses the second stream."""
+    from dfe_engine.api.task_manager import TaskManager
+
+    app = client.app
+    original = app.state.task_manager
+    app.state.task_manager = TaskManager(max_active=1)
+    slow = {
+        "schema": "meta/syslog",
+        "count": 1000,
+        "rate_eps": 1,
+        "receiver_url": "http://127.0.0.1:9/ingest",
+    }
+    try:
+        first = client.post("/api/v1/synthetic-data/stream", json=slow, headers=admin_headers)
+        assert first.status_code == 200, first.text
+        second = client.post("/api/v1/synthetic-data/stream", json=slow, headers=admin_headers)
+        assert second.status_code == 429, second.text
+        assert second.json()["code"] == "too_many_tasks"
+        client.delete(
+            f"/api/v1/synthetic-data/streams/{first.json()['task_id']}", headers=admin_headers
+        )
+    finally:
+        app.state.task_manager = original

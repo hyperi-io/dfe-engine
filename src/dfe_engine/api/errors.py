@@ -219,6 +219,7 @@ class ErrorCode:
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
     UNRESOLVED_REFERENCE = "unresolved_reference"
+    TOO_MANY_TASKS = "too_many_tasks"
 
 
 SERVICE_UNAVAILABLE_MESSAGE = "Backing service is unreachable, retry shortly"
@@ -464,6 +465,14 @@ def install_exception_handlers(app: FastAPI) -> None:
             return scim_error(403, str(exc), "mutability")
         body = ErrorResponse(code=ErrorCode.PROTECTED_ACCOUNT, message=str(exc))
         return JSONResponse(status_code=403, content=_error_response_json(body))
+
+    # One handler for every route that submits a background task.
+    from dfe_engine.api.task_manager import TaskCapacityError
+
+    @app.exception_handler(TaskCapacityError)
+    async def task_capacity_handler(_request: Request, exc: TaskCapacityError):
+        body = ErrorResponse(code=ErrorCode.TOO_MANY_TASKS, message=str(exc))
+        return JSONResponse(status_code=429, content=_error_response_json(body))
 
     # A backing service (today: ClickHouse) was unreachable after its
     # reconnect-and-retry budget was exhausted. Retryable -> 503, never a

@@ -613,7 +613,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Bootstrap task manager for async background tasks
     from dfe_engine.api.task_manager import TaskManager
 
-    app.state.task_manager = TaskManager()
+    app.state.task_manager = TaskManager(max_active=settings.api.max_active_tasks)
 
     # Sampler singleton (holds the shared logreducer concurrency gate)
     from dfe_engine.sampling import Sampler
