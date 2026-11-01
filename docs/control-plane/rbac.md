@@ -564,6 +564,8 @@ Adding an org adds one pinned user. The policy set does not change.
 
 Each reconcile replaces a pinned or group user's whole role set, so a group that loses `admin` loses `otel_reader` with it, and one that turns platform-wide loses the tenant role.
 
+It also replaces each tier, service and tenant role's privileges with the ones configured, so a grant dropped from a tier is revoked. Where ClickHouse refuses the list, the role is cleared and given each entry it accepts.
+
 ### 5.2 Who Reads As Whom
 
 ```mermaid

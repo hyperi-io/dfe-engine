@@ -24,6 +24,7 @@ from dfe_engine.governance.ch.models import (
 )
 from dfe_engine.governance.ch.reconciler import resolve_grant_databases
 from dfe_engine.governance.ch.render import (
+    ReplacingGrant,
     render_materialise,
     render_pinned_user,
     render_service_role,
@@ -76,7 +77,7 @@ class TestRenderTier:
         assert "errors = 100" in s
         assert "interval = " not in s  # interval is not a per-interval maximum
         assert "CREATE ROLE IF NOT EXISTS `dfe_analyst_tier_2_role`" in s
-        assert "GRANT SELECT ON dfe.* TO `dfe_analyst_tier_2_role`" in s
+        assert "GRANT SELECT ON dfe.* TO `dfe_analyst_tier_2_role` WITH REPLACE OPTION" in s
         assert (
             "ALTER ROLE `dfe_analyst_tier_2_role` SETTINGS PROFILE `dfe_analyst_tier_2_profile`"
             in s
@@ -104,6 +105,33 @@ class TestRenderTier:
         quota_at = next(i for i, s in enumerate(stmts) if s.startswith("CREATE QUOTA"))
         assert role_at < quota_at
 
+    @pytest.mark.parametrize(
+        ("grants", "expected"),
+        [
+            pytest.param(
+                ["SELECT ON dfe.*", "SELECT ON system.parts"],
+                "GRANT SELECT ON dfe.*, SELECT ON system.parts TO `dfe_t_role` WITH REPLACE OPTION",
+                id="every-grant-in-one-replacing-statement",
+            ),
+            pytest.param([], "REVOKE ALL ON *.* FROM `dfe_t_role`", id="no-grants-revokes-all"),
+        ],
+    )
+    def test_the_grants_replace_what_the_role_holds(self, grants, expected):
+        stmts = render_tier(ChTier(name="t", grants=grants))
+        assert [s for s in stmts if "GRANT" in s or "REVOKE" in s] == [expected]
+
+    def test_a_refused_replacing_grant_falls_back_to_revoke_then_each_grant(self):
+        grant = next(
+            s
+            for s in render_tier(ChTier(name="t", grants=["SELECT ON dfe.*", "BAD ON x"]))
+            if isinstance(s, ReplacingGrant)
+        )
+        assert grant.fallback() == [
+            "REVOKE ALL ON *.* FROM `dfe_t_role`",
+            "GRANT SELECT ON dfe.* TO `dfe_t_role`",
+            "GRANT BAD ON x TO `dfe_t_role`",
+        ]
+
     def test_quota_maxima_excludes_interval(self):
         t = ChTier(name="x", quota={"interval": "1 day", "queries": 5})
         assert t.quota_maxima() == {"queries": 5}
@@ -121,7 +149,7 @@ class TestRenderServiceRole:
         s = _joined(render_service_role(r))
         assert "CREATE SETTINGS PROFILE IF NOT EXISTS `dfe_loader_profile`" in s
         assert "CREATE ROLE IF NOT EXISTS `dfe_loader_role`" in s
-        assert "GRANT INSERT ON dfe.* TO `dfe_loader_role`" in s
+        assert "GRANT INSERT ON dfe.* TO `dfe_loader_role` WITH REPLACE OPTION" in s
         # the minted user is not rendered here (secret-bearing, reconciler's job)
         assert "CREATE USER" not in s
         assert r.user() == "dfe_loader"
@@ -162,10 +190,9 @@ class TestRenderTenantAxis:
     def test_no_tables_just_role_and_its_system_grants(self):
         assert render_tenant_axis([]) == [
             "CREATE ROLE IF NOT EXISTS `dfe_tenant_role`",
-            "GRANT SELECT ON system.columns TO `dfe_tenant_role`",
-            "GRANT SELECT ON system.settings TO `dfe_tenant_role`",
-            "GRANT SELECT ON system.table_engines TO `dfe_tenant_role`",
-            "GRANT SELECT ON system.tables TO `dfe_tenant_role`",
+            "GRANT SELECT ON system.columns, SELECT ON system.settings, "
+            "SELECT ON system.table_engines, SELECT ON system.tables "
+            "TO `dfe_tenant_role` WITH REPLACE OPTION",
         ]
 
     def test_tenant_gets_no_operational_system_tables(self):

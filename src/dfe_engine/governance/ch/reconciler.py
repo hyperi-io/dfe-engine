@@ -43,6 +43,7 @@ from .models import (
     tenant_policy_name,
 )
 from .render import (
+    ReplacingGrant,
     _bq,
     render_materialise,
     render_pinned_user,
@@ -355,6 +356,9 @@ class ChRbacReconciler:
         ClickHouse's error text goes to the log only. ``result.errors`` reaches API
         callers, so it names the statement up to any password hash and nothing more.
 
+        A refused :class:`ReplacingGrant` is followed by its fallback, so the role is
+        left holding only the entries ClickHouse accepts.
+
         Returns:
             The statements that failed.
         """
@@ -369,6 +373,8 @@ class ChRbacReconciler:
                 logger.warning("CH RBAC statement failed", statement=head, error=str(exc))
                 result.errors.append(f"{head} failed; the engine log has ClickHouse's reason")
                 failed.add(stmt)
+                if isinstance(stmt, ReplacingGrant):
+                    failed |= self._apply(stmt.fallback(), result)
         return failed
 
     def _forget_dropped_groups(
@@ -663,12 +669,16 @@ def fence_tables(
         deny_tables = [t for t in deny_tables if t in wanted]
 
     applied = 0
-    for stmt in render_tenant_axis(org_tables, deny_tables):
+    pending = render_tenant_axis(org_tables, deny_tables)
+    while pending:
+        stmt = pending.pop(0)
         try:
             admin_client.command(stmt)
             applied += 1
         except Exception as exc:
             logger.warning("tenant fence statement failed", statement=stmt[:60], error=str(exc))
+            if isinstance(stmt, ReplacingGrant):
+                pending[:0] = stmt.fallback()
     logger.info(
         "tenant fence applied",
         statements=applied,
