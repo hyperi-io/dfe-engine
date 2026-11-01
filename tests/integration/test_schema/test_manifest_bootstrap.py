@@ -214,10 +214,33 @@ def test_a_second_holder_waits_and_reports_rather_than_applying(ch_client, empty
     second.release()
 
 
+class _FirstClaimMisses(SchemaLock):
+    """A lock whose first claim lands too slowly to stand, or lands and then reports a missed quorum."""
+
+    def __init__(self, *args, miss: str, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._miss = miss
+
+    def _claim(self, now: datetime) -> datetime:
+        claimed = super()._claim(now)
+        miss, self._miss = self._miss, "none"
+        if miss == "slow":
+            time.sleep(lock_module._SETTLE_SECONDS)
+        elif miss == "quorum":
+            raise lock_module.SchemaLockQuorumError(
+                "Code: 319. DB::Exception: UNKNOWN_STATUS_OF_INSERT"
+            )
+        return claimed
+
+
+@pytest.mark.parametrize("miss", ["none", "slow", "quorum"])
 def test_appliers_that_find_the_lease_free_together_leave_one_holder(
-    ch_params, ch_client, empty_database, plan
+    ch_params, ch_client, empty_database, plan, miss
 ):
-    """Claims written in the same instant: the latest stands and every other caller reports."""
+    """Claims written in the same instant leave one holder, even when every racer's first claim misses.
+
+    A missed claim never stood, so it must not keep the others waiting out a lease.
+    """
     apply_plan(ch_client, plan)
     table = plan.by_id(LOCK_ID).name
     racers = 4
@@ -227,8 +250,13 @@ def test_appliers_that_find_the_lease_free_together_leave_one_holder(
     def race(holder: str) -> None:
         try:
             client = clickhouse_connect.get_client(**ch_params)
-            lock = SchemaLock(
-                client, database=empty_database, table=table, holder=holder, lease_seconds=60
+            lock = _FirstClaimMisses(
+                client,
+                database=empty_database,
+                table=table,
+                holder=holder,
+                lease_seconds=60,
+                miss=miss,
             )
             start.wait()
             outcomes.append(lock.acquire(wait_seconds=_RIDE_OUT))
@@ -281,7 +309,11 @@ def test_claims_in_the_same_millisecond_keep_one_holder_through_a_merge(
         return stands, [state.holder if state is not None else None for state in seen]
 
     def stored_rows() -> int:
-        return ch_client.query(f"SELECT count() FROM {target}").result_rows[0][0]
+        # The lease rows alone: each claim's marker sits under a lock name of its own.
+        return ch_client.query(
+            f"SELECT count() FROM {target} WHERE lock_name = {{lock:String}}",
+            parameters={"lock": lock_module.LOCK_NAME},
+        ).result_rows[0][0]
 
     assert stored_rows() == 2, "the tie merged before it could be read unmerged"
     stands, named = outcome()
@@ -512,7 +544,7 @@ def test_a_claim_short_of_its_quorum_is_not_taken_and_is_once_the_replica_return
 
 
 def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, replicated_lease):
-    """A rival's re-read may have missed a slow claim, so it is not kept, and it lapses unreleased."""
+    """A rival's re-read may have missed a slow claim, so it is not kept, and it holds nobody back."""
     lease = replicated_lease
     held_back = lock_module._SETTLE_SECONDS + 1.0
     lease.fetches("STOP", two_replicas.second)
@@ -532,9 +564,12 @@ def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, 
     assert taken is False, "a claim that landed after the settle stood"
     latest = slow.read()
     assert latest is not None
-    # Releasing it could free a rival that stood while it waited, so it holds until it lapses.
+    # Releasing it could free a rival that stood while it waited, so the row stays unreleased.
     assert (latest.holder, latest.released) == ("pod-slow", False), latest
-    assert lease.lock(two_replicas.second, "pod-next").acquire(wait_seconds=0.0) is False
+    # Its marker is ended, so the next applier takes the lease instead of waiting it out.
+    following = lease.lock(two_replicas.second, "pod-next")
+    assert following.acquire(wait_seconds=0.0) is True
+    following.release()
 
 
 def test_a_slow_claim_is_recognised_as_its_own_and_stands_within_a_settle(
@@ -563,20 +598,30 @@ def test_a_slow_claim_is_recognised_as_its_own_and_stands_within_a_settle(
     slow.release()
 
 
-def test_a_rival_live_claim_beside_a_slow_one_is_still_waited_on(two_replicas, replicated_lease):
-    """A rival that stood while the slow claim was in flight keeps the lease: the slow claim is not re-taken."""
+@pytest.mark.parametrize("evidence", ["claim row", "live marker"])
+def test_a_rival_live_claim_beside_a_slow_one_is_still_waited_on(
+    two_replicas, replicated_lease, evidence
+):
+    """A rival that may have stood keeps the lease, whether its row is unmerged or only its marker is left."""
     lease = replicated_lease
     slow = lease.lock(two_replicas.first, "pod-slow")
     rival = lease.lock(two_replicas.first, "pod-rival")
     now = datetime.now(UTC)
-    # The rival's claim sits beside the slow one, as before a merge collapses them.
-    rival._write(now - timedelta(seconds=3), expires=now + timedelta(seconds=300), released=0)
-    slow._slow_claimed_at = slow._claim(now)
+    earlier = lock_module._millis(now - timedelta(seconds=3))
+    expires = now + timedelta(seconds=300)
+    if evidence == "claim row":
+        # The rival's claim sits beside the slow one, as before a merge collapses them.
+        rival._write(earlier, expires=expires, released=0)
+    else:
+        # A merge has kept only the later row, and the rival's marker is what is left of it.
+        rival._write(earlier, expires=expires, released=0, lock_name=rival._marker(earlier))
+    claimed = slow._claim(now)
+    slow._end_marker(claimed, expires)
     state = slow.read()
     assert state is not None
     assert state.holder == "pod-slow"
 
-    assert slow._own_slow_claim(state, now) is False
+    assert slow._only_ended_claims(now) is False
 
 
 def test_a_slow_claim_never_frees_a_rival_that_stood(two_replicas, replicated_lease):
