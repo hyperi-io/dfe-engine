@@ -118,6 +118,15 @@ class SchemaDeployResult(BaseModel):
     version: str
     dry_run: bool = Field(description="True = plan only; the DDL was NOT applied")
     applied: bool = Field(description="Whether the DDL was executed against ClickHouse")
+    review_required: bool = Field(
+        default=False,
+        description=(
+            "True when production+team sent the deployed-version record to a review "
+            "branch: the table is live, and main records the version once it merges"
+        ),
+    )
+    pr_url: str | None = Field(default=None, description="The review PR for that record")
+    review_branch: str | None = Field(default=None, description="The branch carrying it")
     create_table: str = Field(description="CREATE TABLE DDL")
     views: dict[str, str] = Field(default_factory=dict, description="View name -> DDL")
     validation_errors: list[str] = Field(default_factory=list)

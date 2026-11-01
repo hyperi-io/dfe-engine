@@ -756,6 +756,7 @@ class SourceRegistry:
         *,
         created_by: str | None = None,
         description: str | None = None,
+        routing: ReviewRouting | None = None,
     ) -> Source:
         """Record which source version is deployed to ClickHouse runtime."""
         source = self.get_source(source_name)
@@ -765,7 +766,7 @@ class SourceRegistry:
             )
         updated = source.model_copy(update={"deployed_version": version_id})
         msg = description or f"source: deploy {source_name} version {version_id}"
-        return self.save_source(updated, created_by=created_by, description=msg)
+        return self.save_source(updated, created_by=created_by, description=msg, routing=routing)
 
     @staticmethod
     def _resolve_deployment_store(

@@ -248,3 +248,82 @@ def test_a_bulk_write_held_for_review_is_listed_apart_and_left_alone(
     assert resp.headers["X-DFE-Review-Required"] == "true"
     assert removed == []
     assert _on_main(deploy_repo, "fw-logs")
+
+
+def test_a_catalogue_create_held_for_review_is_listed_apart(client, admin_headers, deploy_repo):
+    _rebind(deploy_repo, environment="production", mode="team", forge=_RecordingForge())
+
+    resp = client.post(
+        f"{SOURCES}/from-catalogue",
+        json={"entries": [{"entry": "okta", "intake": "beats"}]},
+        headers=admin_headers,
+    )
+
+    assert resp.status_code in (200, 201, 202), resp.text
+    body = resp.json()
+    assert body["created"] == []
+    assert len(body["awaiting_review"]) == 1
+    assert body["review_required"] is True
+    assert resp.headers["X-DFE-Review-Required"] == "true"
+    assert not _on_main(deploy_repo, body["awaiting_review"][0])
+
+
+def test_an_import_held_for_review_says_so_and_leaves_main(client, admin_headers, deploy_repo):
+    _rebind(deploy_repo, environment="dev", mode="team")
+    assert _create(client, admin_headers).status_code == 201
+    exported = client.get(f"{SOURCES}/fw-logs/export", headers=admin_headers)
+    assert exported.status_code == 200, exported.text
+    assert client.delete(f"{SOURCES}/fw-logs", headers=admin_headers).status_code == 200
+    _rebind(deploy_repo, environment="production", mode="team", forge=_RecordingForge())
+
+    resp = client.post(f"{SOURCES}/import", json=exported.json(), headers=admin_headers)
+
+    assert resp.status_code in (200, 201), resp.text
+    assert resp.headers["X-DFE-Review-Required"] == "true"
+    assert resp.headers["X-DFE-PR-Url"] == "http://forge/pr/7"
+    assert not _on_main(deploy_repo, "fw-logs")
+
+
+def test_a_deploy_record_held_for_review_leaves_the_apps_as_main_has_them(
+    client, admin_headers, deploy_repo, monkeypatch
+):
+    from dfe_engine.auth.models import AuthContext
+    from dfe_engine.source.deployment import SchemaDeployResult
+
+    _rebind(deploy_repo, environment="dev", mode="team")
+    assert _create(client, admin_headers).status_code == 201
+    _rebind(deploy_repo, environment="production", mode="team", forge=_RecordingForge())
+    registry = _registries["source"]
+    source = registry.get_source("fw-logs")
+    reconciled: list[str] = []
+    monkeypatch.setattr(
+        sources_module, "reconcile_derived_apps", lambda *a, **k: reconciled.append("r")
+    )
+
+    class _Store:
+        def save_deploy(self, result, source) -> None:
+            return None
+
+    record = sources_module.ReviewRouting()
+    apps = sources_module._record_source_deploy(
+        _Store(),  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the call this path makes
+        SchemaDeployResult(
+            source_name="fw-logs",
+            version=source.current,
+            dry_run=False,
+            applied=True,
+            create_table="",
+        ),
+        source,
+        "fw-logs",
+        source.current,
+        AuthContext(user_id="admin"),
+        registry,
+        None,  # ty: ignore[invalid-argument-type]  # the held path never reads the request
+        record,
+    )
+
+    assert record.review_required is True
+    assert apps.changes == []
+    assert reconciled == []
+    assert registry.get_source("fw-logs").deployed_version is None

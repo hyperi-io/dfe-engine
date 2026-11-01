@@ -12471,7 +12471,7 @@
           "System"
         ],
         "summary": "Apply Defaults",
-        "description": "Pin the current TTL, common header and merge engine onto the named sources and their tables.\n\nSources that are not in the list are left alone. A source that already stores\nthese values is unchanged in the deploy repo. A missing or engine-owned name\nfails the request before any source is written.\n\nA draft takes the values in place. A deployed version is never rewritten: the\nvalues land on a new major version, which becomes ``current``. Either way the\ntable takes them when that version is deployed.\n\nA named source whose deployed version already carries the values has its table\nbrought to them in this request: the TTL moves and the header's missing\ncolumns are added. The engine of an existing table needs a rebuild, so it\nreaches new tables only, and existing columns keep their type. ``live``\nreports each source: what reached the table, what did not and why. A\nClickHouse failure is reported on that source, and the pin stays committed.",
+        "description": "Pin the current TTL, common header and merge engine onto the named sources and their tables.\n\nSources that are not in the list are left alone. A source that already stores\nthese values is unchanged in the deploy repo. A missing or engine-owned name\nfails the request before any source is written.\n\nA draft takes the values in place. A deployed version is never rewritten: the\nvalues land on a new major version, which becomes ``current``. Either way the\ntable takes them when that version is deployed.\n\nA named source whose deployed version already carries the values has its table\nbrought to them in this request: the TTL moves and the header's missing\ncolumns are added. The engine of an existing table needs a rebuild, so it\nreaches new tables only, and existing columns keep their type. ``live``\nreports each source: what reached the table, what did not and why. A\nClickHouse failure is reported on that source, and the pin stays committed.\n\nA pin production+team sends to review is listed in ``awaiting_review`` with\n``review_required`` and the review headers, and its table is left alone until\nthe branch merges, since main still carries the source as it was.",
         "operationId": "system.defaults.apply",
         "requestBody": {
           "content": {
@@ -30815,6 +30815,36 @@
       },
       "ApplyDefaultsResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "updated": {
             "items": {
               "$ref": "#/components/schemas/ApplyDefaultsPin"
@@ -30822,6 +30852,14 @@
             "type": "array",
             "title": "Updated",
             "description": "Sources whose current version was written with the defaults"
+          },
+          "awaiting_review": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Awaiting Review",
+            "description": "Sources whose pin went to a review branch: main still carries them as they were, so their tables are left alone and are not listed in live"
           },
           "unchanged": {
             "items": {
@@ -30837,7 +30875,7 @@
             },
             "type": "array",
             "title": "Live",
-            "description": "One entry per named source, in request order: what reached its table."
+            "description": "One entry per named source not awaiting review, in request order: what reached its table."
           }
         },
         "type": "object",
@@ -32275,6 +32313,36 @@
       },
       "CatalogueSourcesResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "created": {
             "items": {
               "$ref": "#/components/schemas/CatalogueCreatedSource"
@@ -32288,6 +32356,14 @@
             },
             "type": "array",
             "title": "Failed"
+          },
+          "awaiting_review": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Awaiting Review",
+            "description": "Sources whose create went to a review branch, so main does not carry them yet"
           },
           "apps_synced": {
             "items": {
@@ -44094,6 +44170,36 @@
             "type": "boolean",
             "title": "Applied",
             "description": "Whether the DDL was executed against ClickHouse"
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the deployed-version record to a review branch: the table is live, and main records the version once it merges",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR for that record"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying it"
           },
           "create_table": {
             "type": "string",
