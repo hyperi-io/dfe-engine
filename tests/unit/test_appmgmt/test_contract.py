@@ -56,7 +56,7 @@ LEAF_COUNTS = {
     "dfe-loader": 175,
     "dfe-archiver": 78,
     "dfe-fetcher": 314,
-    "dfe-transform-vrl": 45,
+    "dfe-transform-vrl": 56,
     "dfe-transform-vector": 70,
 }
 
