@@ -247,7 +247,7 @@ def execute_view(
     response_model=QueryResponse,
     dependencies=[Depends(require_action(scopes_dict["raw_query_execute"]))],
 )
-async def execute_raw_query(
+def execute_raw_query(
     request: RawQueryRequest,
     user: CurrentUser,
 ) -> QueryResponse:
@@ -318,7 +318,7 @@ class CostLeaderboardRow(BaseModel):
     response_model=list[CostLeaderboardRow],
     dependencies=[Depends(require_action(scopes_dict["query_read"]))],
 )
-async def query_cost_leaderboard(
+def query_cost_leaderboard(
     user: CurrentUser,
     feature: str = Query("hunts", description="Attribution feature to rank (e.g. 'hunts')"),
     days: int = Query(7, ge=1, le=365, description="Lookback window in days"),
