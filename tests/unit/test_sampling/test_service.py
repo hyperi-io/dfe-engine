@@ -446,3 +446,34 @@ def test_reservoir_is_seeded_and_deterministic():
 
 def test_reservoir_returns_all_when_small():
     assert _reservoir(["a", "b"], 10, None) == ["a", "b"]
+
+
+class TestTheGateOutlivesACancel:
+    """A cancelled gated sample keeps its permit until its worker thread has ended."""
+
+    @pytest.mark.asyncio
+    async def test_the_permit_is_held_until_the_thread_returns(self):
+        import asyncio
+        import threading
+
+        from dfe_engine.settings import ClickHouseSettings, KafkaSettings, SamplerSettings
+
+        sampler = Sampler(SamplerSettings(max_concurrent=1), KafkaSettings(), ClickHouseSettings())
+        started, release = threading.Event(), threading.Event()
+
+        def reduce() -> str:
+            started.set()
+            release.wait(timeout=10)
+            return "reduced"
+
+        run = asyncio.create_task(sampler._gated(reduce))
+        await asyncio.to_thread(started.wait, 10)
+        run.cancel()
+        done, _ = await asyncio.wait({run}, timeout=0.5)
+
+        assert not done, "the cancelled run let go before its thread ended"
+        assert sampler._semaphore().locked()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await run
+        assert not sampler._semaphore().locked()
