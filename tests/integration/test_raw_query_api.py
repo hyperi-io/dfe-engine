@@ -144,6 +144,23 @@ def test_a_slow_query_does_not_hold_the_event_loop(stack):
     assert finished == ["livez", "query"]
 
 
+@pytest.mark.parametrize(
+    ("options", "want"),
+    [
+        pytest.param({"limit": 10}, 10, id="limit"),
+        pytest.param({}, 1000, id="default"),
+    ],
+)
+def test_a_raw_query_returns_at_most_its_limit(stack, options, want):
+    resp = _raw(stack, stack.admin, "SELECT number FROM numbers(5000)", **options)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["row_count"] == want
+    assert len(body["rows"]) == want
+    assert body["has_more"] is True
+
+
 def test_a_data_viewer_is_refused_before_any_sql_runs(stack):
     resp = _raw(stack, stack.viewer, "SELECT currentUser() AS u")
 

@@ -38,8 +38,12 @@ class DatasourceAdapter(ABC):
         query: str,
         params: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
+        max_rows: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """Execute query and return (rows, column_names).
+
+        ``max_rows`` caps the rows returned, and an adapter stops reading once it
+        has them, so an unbounded query cannot fill the engine's memory.
 
         Returns:
             Tuple of (list of row dicts, list of column name strings)

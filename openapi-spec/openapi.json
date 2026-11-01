@@ -14009,7 +14009,7 @@
           "queries"
         ],
         "summary": "Execute Raw Query",
-        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path -- for ad-hoc queries against\ndatasource adapters rather than parameterized views. The SQL runs as the\nengine's own ClickHouse user, so it requires ``raw_query:execute``, which no\nbuilt-in role but ``admin`` holds, and ClickHouse runs it read-only.",
+        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path -- for ad-hoc queries against\ndatasource adapters rather than parameterized views. The SQL runs as the\nengine's own ClickHouse user, so it requires ``raw_query:execute``, which no\nbuilt-in role but ``admin`` holds, and ClickHouse runs it read-only.\n\nIt returns at most ``options.limit`` rows, or ``query_views.default_limit``,\ncapped at ``query_views.max_limit``, with ``has_more`` set when the query had\nmore. The datasource stops reading past the cap.",
         "operationId": "queries.raw",
         "requestBody": {
           "content": {
