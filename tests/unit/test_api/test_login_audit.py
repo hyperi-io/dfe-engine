@@ -24,6 +24,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.auth.oidc.rp import NormalizedIdentity
+from tests.support.oidc import serve_provider
 
 AUDIT_LOGGER = "dfe_engine.auth.audit.logger"
 
@@ -89,6 +90,7 @@ class TestCredentialExchangeWritesTheEvent:
         assert _login_successes(mock_logger) == []
 
     def test_oidc_callback_writes_one_event(self, client: TestClient, app):
+        serve_provider(app)
         app.state.oidc_rp = _CallbackRp()
         app.state.group_store.update("dfe-admins", source_provider="stub", source_id="dfe-admins")
 

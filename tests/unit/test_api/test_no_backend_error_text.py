@@ -65,6 +65,7 @@ from dfe_engine.schema.retention import CLICKHOUSE_REFUSED, apply_pinned_default
 from dfe_engine.services.schema.json_promotion_service import JsonPromotionError
 from dfe_engine.settings import SourceSettings
 from dfe_engine.source.registry import SourceNotFoundError
+from tests.support.oidc import serve_provider
 from tests.support.present import present
 from tests.unit.test_query.view_fakes import view_definition
 
@@ -482,6 +483,7 @@ class TestOidcCallback:
             async def handle_callback(self, provider, request):
                 raise RuntimeError(SENTINEL)
 
+        serve_provider(app, "acme")
         app.state.oidc_rp = _RefusingRp()
 
         resp = client.get("/api/v1/auth/oidc/acme/callback")
