@@ -27,7 +27,7 @@ from typing import Any
 from scalo.logger import logger
 
 from .bindings import derive_group_bindings
-from .models import DEFAULT_SERVICE_ROLES
+from .models import DEFAULT_SERVICE_ROLES, ChServiceRole, catalogue
 from .reconciler import ReconcileResult, reconcile_ch_rbac, reconcile_ch_service_roles
 
 _ENABLED_VALUES = ("true", "1", "yes")
@@ -99,6 +99,7 @@ def reconcile_from_stores(
             secrets_store=build_secrets(settings.secrets),
             orgs=orgs,
             bindings=derive_group_bindings(groups, orgs, role_config=role_config),
+            service_roles=service_roles_for(settings),
             provided_passwords=provided_service_passwords(),
         )
 
@@ -115,8 +116,29 @@ def reconcile_service_roles_from_settings(admin_client: Any, *, settings: Any) -
         return reconcile_ch_service_roles(
             admin_client,
             secrets_store=build_secrets(settings.secrets),
+            service_roles=service_roles_for(settings),
             provided_passwords=provided_service_passwords(),
         )
+
+
+def service_roles_for(settings: Any) -> list[ChServiceRole]:
+    """The seeded service roles, the view reader's profile carrying the ``query_views`` budgets.
+
+    The views run as that reader, so its profile is the consumption envelope
+    ``query_views.max_execution_time``, ``max_rows_to_read`` and
+    ``max_memory_usage`` configure.
+    """
+    qv = settings.query_views
+    budgets = {
+        "max_execution_time": qv.max_execution_time,
+        "max_rows_to_read": qv.max_rows_to_read,
+        "max_memory_usage": qv.max_memory_usage,
+    }
+    reader = str(catalogue()["view_reader_role"])
+    return [
+        r.model_copy(update={"settings": {**r.settings, **budgets}}) if r.role() == reader else r
+        for r in DEFAULT_SERVICE_ROLES
+    ]
 
 
 def provided_service_passwords() -> dict[str, str]:

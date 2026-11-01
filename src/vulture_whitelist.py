@@ -568,8 +568,6 @@ settings.LocalAuthSettings.operator_password
 settings.LocalAuthSettings.viewer_password
 settings.QuerySettings.yaml_dir
 settings.QueryViewSettings.auto_bootstrap
-settings.QueryViewSettings.max_memory_usage
-settings.QueryViewSettings.max_rows_to_read
 settings.StorageSettings.s3_bucket
 
 # Only tests reach these.

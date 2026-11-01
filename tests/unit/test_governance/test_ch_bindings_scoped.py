@@ -18,7 +18,7 @@ from dfe_engine.auth.roles import RoleConfig, RoleDefinition
 from dfe_engine.governance.ch.bindings import derive_group_bindings
 from dfe_engine.governance.ch.bootstrap import reconcile_from_stores
 from dfe_engine.governance.ch.models import TENANT_SETTING, group_user_name
-from dfe_engine.settings import SecretsSettings
+from dfe_engine.settings import QueryViewSettings, SecretsSettings
 
 TENANT = RoleDefinition(description="a tenant's viewer", permissions=["query:execute"], scoped=True)
 
@@ -109,7 +109,10 @@ def test_the_reconcile_pins_a_scoped_groups_user_to_its_orgs_tenant_ids(tmp_path
 
     reconcile_from_stores(
         client,
-        settings=SimpleNamespace(secrets=SecretsSettings(provider="file", path=str(tmp_path))),
+        settings=SimpleNamespace(
+            secrets=SecretsSettings(provider="file", path=str(tmp_path)),
+            query_views=QueryViewSettings(),
+        ),
         org_registry=SimpleNamespace(list=lambda: [_org("acme", ["t-acme-1", "t-acme-2"])]),
         group_store=SimpleNamespace(list=lambda: [group]),
         role_config=_definitions(tenant_viewer=TENANT),

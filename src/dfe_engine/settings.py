@@ -946,9 +946,10 @@ class QueryViewSettings(BaseModel):
         default=10_000_000,
         description="ClickHouse settings profile max_rows_to_read",
     )
-    max_memory_usage: str = Field(
-        default="2G",
-        description="ClickHouse settings profile max_memory_usage",
+    max_memory_usage: int = Field(
+        default=2_147_483_648,
+        ge=1,
+        description="ClickHouse settings profile max_memory_usage, in bytes",
     )
 
 
@@ -2696,7 +2697,7 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_QUERY_VIEWS_MAX_ROWS_TO_READ"):
         overrides["query_views"]["max_rows_to_read"] = int(val)
     if val := _get_env("DFE_QUERY_VIEWS_MAX_MEMORY_USAGE"):
-        overrides["query_views"]["max_memory_usage"] = val
+        overrides["query_views"]["max_memory_usage"] = int(val)
 
     # Sampler settings (source sampling: recent/random/smart/anomaly)
     if val := _get_env("DFE_SAMPLER_DEFAULT_MODE"):
