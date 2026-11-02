@@ -3,6 +3,30 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.79](https://github.com/hyperi-io/dfe-engine/compare/v1.22.78...v1.22.79) (2026-11-02)
+
+### Bug Fixes
+
+* a propagate that fails part way reports the branches it opened ([#1023](https://github.com/hyperi-io/dfe-engine/issues/1023)) ([1756f75](https://github.com/hyperi-io/dfe-engine/commit/1756f75da4466b538132415bd9598b531c9f1d5b))
+* a routing push has Argo CD hard-refresh the Applications it changed ([#1026](https://github.com/hyperi-io/dfe-engine/issues/1026)) ([91c22ea](https://github.com/hyperi-io/dfe-engine/commit/91c22ea49068d2ba2bcaa9dff985ec85c116a175))
+* a rule whose condition ClickHouse cannot plan is refused at save ([#1020](https://github.com/hyperi-io/dfe-engine/issues/1020)) ([398fd19](https://github.com/hyperi-io/dfe-engine/commit/398fd19c9cb68e85df9fe82e789683ab389fc5d5))
+* a slow schema-lease claim no longer blocks its own engine for the whole lease ([#1018](https://github.com/hyperi-io/dfe-engine/issues/1018)) ([0eed867](https://github.com/hyperi-io/dfe-engine/commit/0eed867394da2d52dc1e969b05b16d8549bde70d))
+* answer bad names and bodies 4xx instead of 500 ([#1043](https://github.com/hyperi-io/dfe-engine/issues/1043)) ([551ad75](https://github.com/hyperi-io/dfe-engine/commit/551ad7550bc14874b9c446912aa3cffbdbffee24))
+* built-in roles re-apply on boot and a provider issuer can be updated ([#1022](https://github.com/hyperi-io/dfe-engine/issues/1022)) ([a2d4c38](https://github.com/hyperi-io/dfe-engine/commit/a2d4c38a58dfdc4e2aa4fa347cc9de11241f00bf))
+* clear the CI warnings and close four holes in the governance dials ([#1044](https://github.com/hyperi-io/dfe-engine/issues/1044)) ([63f0fe2](https://github.com/hyperi-io/dfe-engine/commit/63f0fe2f8d3ec4bfa6885822bd6d3e5ba9628dc0))
+* **deps:** update 2.2.2 producers and contract fixtures ([#1047](https://github.com/hyperi-io/dfe-engine/issues/1047)) ([ccad0e6](https://github.com/hyperi-io/dfe-engine/commit/ccad0e6f26c0dcf054d72de83a889038954fadd7))
+* filter the source catalogue by tag ([#1030](https://github.com/hyperi-io/dfe-engine/issues/1030)) ([7947758](https://github.com/hyperi-io/dfe-engine/commit/7947758e99cc1fd98aba2bc878373c88786f0a96))
+* let the source catalogue answer per engine, including stored entries ([#1041](https://github.com/hyperi-io/dfe-engine/issues/1041)) ([163ba0d](https://github.com/hyperi-io/dfe-engine/commit/163ba0d26bed7543c64a693255d16c4d0ed3c821))
+* list sources for a caller whose source:read is bound to orgs ([#1032](https://github.com/hyperi-io/dfe-engine/issues/1032)) ([d06e8d5](https://github.com/hyperi-io/dfe-engine/commit/d06e8d5b5eea7444fa2c38020c97cfff9414c20a)), closes [#1031](https://github.com/hyperi-io/dfe-engine/issues/1031)
+* open a source read to a caller whose source:read is bound to orgs ([#1035](https://github.com/hyperi-io/dfe-engine/issues/1035)) ([39fab56](https://github.com/hyperi-io/dfe-engine/commit/39fab56d01783a850d3d14382b75add223284c35)), closes [#1033](https://github.com/hyperi-io/dfe-engine/issues/1033)
+* open the remaining source reads to a caller whose source:read is bound to orgs ([#1038](https://github.com/hyperi-io/dfe-engine/issues/1038)) ([22ac9f7](https://github.com/hyperi-io/dfe-engine/commit/22ac9f7cf9211c0c7d2b44f351e110157f403942)), closes [#1037](https://github.com/hyperi-io/dfe-engine/issues/1037)
+* pull test images through the Docker Hub mirror and run the parity tests in CI ([#1036](https://github.com/hyperi-io/dfe-engine/issues/1036)) ([3e4a31d](https://github.com/hyperi-io/dfe-engine/commit/3e4a31d840cbc72fc739c3245ca63a973831c504))
+* refuse VRL transforms that call get_env_var, http_request and the other host functions ([#1021](https://github.com/hyperi-io/dfe-engine/issues/1021)) ([2b2d6f2](https://github.com/hyperi-io/dfe-engine/commit/2b2d6f2d3bdffcd38211dd15645a7126d822ec27))
+* stop splitting a single-string groups claim on whitespace ([#1017](https://github.com/hyperi-io/dfe-engine/issues/1017)) ([6429475](https://github.com/hyperi-io/dfe-engine/commit/64294752ff8c0f09631e79fe8ec84113a592fcda))
+* **tests:** let the next lease applier wait out a lagging replica ([#1054](https://github.com/hyperi-io/dfe-engine/issues/1054)) ([6c4d0b6](https://github.com/hyperi-io/dfe-engine/commit/6c4d0b61e02d7175fb31db7b02f81ab47772012b))
+* the e2e seed names the transforms it deploys, and a save judges the version it writes ([#1025](https://github.com/hyperi-io/dfe-engine/issues/1025)) ([6e858db](https://github.com/hyperi-io/dfe-engine/commit/6e858db8601d87e326487d0edd364551be8d6e2f))
+* the hunt runner sends a matched fire to the hunt's alert destinations ([#1028](https://github.com/hyperi-io/dfe-engine/issues/1028)) ([5ad66b4](https://github.com/hyperi-io/dfe-engine/commit/5ad66b4117e95a3e80c1387930907e2b0c2cc2f8))
+
 ## [1.22.78](https://github.com/hyperi-io/dfe-engine/compare/v1.22.77...v1.22.78) (2026-10-28)
 
 ### Bug Fixes
