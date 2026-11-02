@@ -274,7 +274,8 @@ class MetadataConfig(BaseModel):
 
     # _raw capture
     capture_raw: bool = True
-    raw_source_fields: list[str] = Field(default_factory=lambda: ["logoriginal"])
+    # Empty: only a record's own _raw is kept, nothing is copied in by default.
+    raw_source_fields: list[str] = Field(default_factory=list)
     raw_output: str = "_raw"
 
     # Superseded by table_capture_modes: dfe-loader warns on these at start and
