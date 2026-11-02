@@ -1397,7 +1397,7 @@ def resolve_config(
 
     A chart-derived path is reported as such before the overlay is consulted: the
     deployment decides it, and telling the console an overlay key governs a broker
-    list the DFE_TRANSFORM_* env contract overrides is the answer this provenance
+    list a transform's env contract overrides is the answer this provenance
     exists to prevent. ``chart_deployed`` is as for :func:`chart_supplier`.
     """
     block = overlay.get(CONFIG_ROOT)
