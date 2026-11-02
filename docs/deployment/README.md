@@ -121,7 +121,7 @@ the overlay; `off` = not deployed.
 | dfe-hunt-runner (detection hunts) | on [1] | **off** | on [2] | on [2] |
 | dfe-fetcher | off | off | on | on |
 | dfe-archiver | off | off | opt | opt |
-| transform workers (vrl / vector; wasm / elastic / splunk) | off | off | opt [3] | opt [3] |
+| transform workers (elastic / vrl / vector) | off | off | opt [3] | opt [3] |
 | ClickHouse | single | single | single | cluster |
 | Postgres + FerretDB | on | on | on | on |
 | Kafka | off | off | single | cluster |
@@ -136,9 +136,8 @@ the overlay; `off` = not deployed.
   Disabling it entirely is one dial - set the app's replica dial off in the
   deploy overlay; the schedule + watermarks stay in ClickHouse so it resumes
   cleanly.
-- **[3]** `vrl` / `vector` are published and can be enabled per deploy; the
-  `wasm` / `elastic` / `splunk` transforms are not yet published - do not
-  deploy by default.
+- **[3]** `elastic`, `vrl` and `vector` are enabled per deploy. Each one idles
+  until a source names it.
 - **[4]** dfe-docker is Compose, not k8s - no Argo/operators layer; the
   container brings its own minimal wiring.
 
