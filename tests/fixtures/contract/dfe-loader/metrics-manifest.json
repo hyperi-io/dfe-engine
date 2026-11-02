@@ -2,7 +2,7 @@
   "schema_version": 1,
   "app": "dfe-loader",
   "namespace": "",
-  "version": "1.18.61",
+  "version": "1.18.62",
   "commit": "unknown",
   "registered_at": "",
   "metrics": [
@@ -1018,6 +1018,14 @@
       "name": "rows_inserted_total",
       "type": "counter",
       "description": "Total rows inserted to ClickHouse",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "clickhouse_connected",
+      "type": "gauge",
+      "description": "1 once ClickHouse answered the latest probe or insert, 0 once one went unanswered",
       "unit": "",
       "labels": [],
       "group": "custom"
