@@ -54,7 +54,7 @@ flowchart LR
   L2 --> CH
 ```
 
-The transform pool is drawn as the profile provides it. dfe-transform-vrl and dfe-transform-vector carry a Push listener; dfe-transform-elastic does not yet, so a direct source that names it is refused at save - see [../data-plane/source-flow.md](../data-plane/source-flow.md).
+The transform pool is drawn as the profile provides it. dfe-transform-vrl and dfe-transform-vector carry a Push listener; dfe-transform-elastic does not, so a direct source that names it is refused at save - see [../data-plane/source-flow.md](../data-plane/source-flow.md).
 
 ## Buffering without a bus
 

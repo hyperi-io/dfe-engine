@@ -153,9 +153,7 @@ and removed as a CRUD operation on both the definition and the deployed table.
 
 **Transforms, optional.** A source may carry one transform in 2.2. Chaining is
 a 2.3 question and only if there is demand for it. 2.2 ships transform-elastic,
-transform-vrl and transform-vector. Later versions add transform-wasm, which
-lets you write the transform in your preferred language, and transform-splack
-for Splunk CIM-compatible transforms.
+transform-vrl and transform-vector.
 
 ### What a transform is actually for
 

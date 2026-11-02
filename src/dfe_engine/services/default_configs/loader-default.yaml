@@ -93,8 +93,7 @@ metadata:
   capture_json: true
   json_output: _json
   capture_raw: true
-  raw_source_fields:
-    - logoriginal
+  raw_source_fields: []
   raw_output: _raw
   disable_json_tables: []
   disable_raw_tables: []
