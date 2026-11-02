@@ -869,7 +869,7 @@ class TestCustomEnvCannotShadowAChartSetName:
     ):
         _wire(app, tmp_path)
         _deploy_vrl(client, admin_headers, "edge")
-        name = "DFE_TRANSFORM_SOURCE_BROKERS"
+        name = "DFE_TRANSFORM_VRL_SOURCE_BROKERS"
         self._assert_refused(
             self._put(client, admin_headers, "dfe-transform-vrl", "edge", name), name
         )
@@ -877,11 +877,11 @@ class TestCustomEnvCannotShadowAChartSetName:
     def test_the_source_topics_are_the_chart_s_only_once_it_is_given_them(
         self, client, app, admin_headers, tmp_path
     ):
-        # The chart renders DFE_TRANSFORM_SOURCE_TOPICS inside a `with` on
+        # The chart renders DFE_TRANSFORM_VRL_SOURCE_TOPICS inside a `with` on
         # kafka.sourceTopic, empty by default, so until then nothing shadows a key here.
         _wire(app, tmp_path)
         _deploy_vrl(client, admin_headers, "edge")
-        name = "DFE_TRANSFORM_SOURCE_TOPICS"
+        name = "DFE_TRANSFORM_VRL_SOURCE_TOPICS"
         resp = self._put(client, admin_headers, "dfe-transform-vrl", "edge", name)
         assert resp.status_code == 200, resp.text
 

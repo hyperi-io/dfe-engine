@@ -24,6 +24,12 @@ from dfe_engine.gitcrud.engine import set_path
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "contract"
 
+
+def _env(service: str, name: str) -> str:
+    """The env name ``service`` reads for ``name``, under the app's own prefix."""
+    return f"{service.upper().replace('-', '_')}_{name}"
+
+
 # Schemas from the builds that hold each source acknowledgement until delivery,
 # copied byte for byte from each app's docs/config-schema.json: dfe-receiver
 # f61c903, dfe-loader edef368, dfe-transform-vrl da42bd2, dfe-archiver 29f201a,
@@ -620,7 +626,7 @@ class TestProvenance:
         # variable an operator could shadow.
         names = contract.chart_env_names("dfe-transform-vrl")
         assert "configOverrides.source.transport" not in names
-        assert names["DFE_TRANSFORM_SOURCE_BROKERS"] == "config.source.brokers"
+        assert names[_env("dfe-transform-vrl", "SOURCE_BROKERS")] == "config.source.brokers"
 
     def test_the_chart_wins_over_an_overlay_key_it_overrides(self):
         # The deployment decides it, so reporting the overlay would tell the
@@ -669,8 +675,8 @@ class TestProvenance:
         # The chart mounts the Kafka Secret's sasl.mechanism, so an overlay value
         # for either endpoint is one the deployment replaces.
         for path in ("config.source.sasl.mechanism", "config.sink.sasl.mechanism"):
-            assert (
-                contract.chart_supplier(service, path, {}) == "DFE_TRANSFORM_KAFKA_SASL_MECHANISM"
+            assert contract.chart_supplier(service, path, {}) == _env(
+                service, "KAFKA_SASL_MECHANISM"
             )
 
     @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
@@ -681,7 +687,7 @@ class TestProvenance:
         empty = {"fileSets": {"transforms": {"files": []}}}
         assert contract.chart_supplier(service, path, empty) is None
         written = {"fileSets": {"transforms": {"files": [{"name": "a", "content": ""}]}}}
-        assert contract.chart_supplier(service, path, written) == "DFE_TRANSFORM_TRANSFORMS_DIR"
+        assert contract.chart_supplier(service, path, written) == _env(service, "TRANSFORMS_DIR")
         by_path = {f.path: f for f in contract.resolve_config(_contract(service), written).fields}
         assert by_path[path].provenance == contract.Provenance.CHART
 
@@ -697,7 +703,7 @@ class TestProvenance:
         assert by_path["config.sink.topic"].value == "auth_load"
         assert by_path["config.source.topics"].provenance == contract.Provenance.OVERLAY
         assert contract.chart_supplier(service, "config.sink.topic", overlay) is None
-        assert "DFE_TRANSFORM_SINK_TOPIC" not in contract.chart_env_names(service, overlay)
+        assert _env(service, "SINK_TOPIC") not in contract.chart_env_names(service, overlay)
 
     @pytest.mark.parametrize("service", ["dfe-transform-vrl", "dfe-transform-vector"])
     def test_a_topic_the_chart_is_given_is_the_chart_s(self, service):
@@ -710,9 +716,9 @@ class TestProvenance:
         assert by_path["config.sink.topic"].provenance == contract.Provenance.CHART
         assert by_path["config.source.topics"].provenance == contract.Provenance.CHART
         assert contract.chart_supplier(service, "config.sink.topic", overlay) == (
-            "DFE_TRANSFORM_SINK_TOPIC"
+            _env(service, "SINK_TOPIC")
         )
-        assert contract.chart_env_names(service, overlay)["DFE_TRANSFORM_SINK_TOPIC"] == (
+        assert contract.chart_env_names(service, overlay)[_env(service, "SINK_TOPIC")] == (
             "config.sink.topic"
         )
 
