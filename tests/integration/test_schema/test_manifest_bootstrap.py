@@ -567,8 +567,12 @@ def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, 
     # Releasing it could free a rival that stood while it waited, so the row stays unreleased.
     assert (latest.holder, latest.released) == ("pod-slow", False), latest
     # Its marker is ended, so the next applier takes the lease instead of waiting it out.
+    # Replica 2 has only just resumed fetching, so its first read can still be refused
+    # until it catches up: the wait covers that, and stays well short of the lease.
     following = lease.lock(two_replicas.second, "pod-next")
-    assert following.acquire(wait_seconds=0.0) is True
+    started = time.monotonic()
+    assert following.acquire(wait_seconds=15.0) is True
+    assert time.monotonic() - started < 15.0
     following.release()
 
 
