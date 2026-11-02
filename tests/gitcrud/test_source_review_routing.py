@@ -157,10 +157,10 @@ def test_a_production_team_delete_lands_on_a_review_branch(wired):
 def test_a_registry_given_no_posture_never_commits_to_main_in_production(wired, monkeypatch):
     """With no posture passed, the loaded settings decide, and no forge means a branch."""
     gc, bare = wired
-    monkeypatch.setenv("DFE_ENV", "production")
-    monkeypatch.setenv("DFE_GITOPS_MODE", "team")
-    monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
-    monkeypatch.setenv("DFE_API_JWT_SECRET", "routing-test-" + "x" * 40)
+    monkeypatch.setenv("DFE_ENGINE_ENV", "production")
+    monkeypatch.setenv("DFE_ENGINE_GITOPS_MODE", "team")
+    monkeypatch.setenv("DFE_ENGINE_AUTH_ENABLED", "true")
+    monkeypatch.setenv("DFE_ENGINE_API_JWT_SECRET", "routing-test-" + "x" * 40)
     from dfe_engine.settings import reset_settings
 
     reset_settings()

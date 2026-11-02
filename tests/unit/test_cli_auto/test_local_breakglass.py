@@ -52,16 +52,16 @@ _TIER = (
 
 @pytest.fixture(autouse=True)
 def _hermetic_gitops(monkeypatch):
-    """Keep get_settings() offline + default: clear any DFE_GITOPS_* + reset cache.
+    """Keep get_settings() offline + default: clear any DFE_ENGINE_GITOPS_* + reset cache.
 
     ``load_settings`` re-reads ``.env`` with ``override=False``, so deleting
-    ``DFE_GITOPS_REPO_URL`` lets the local dotenv put it back and ``dfe local
+    ``DFE_ENGINE_GITOPS_REPO_URL`` lets the local dotenv put it back and ``dfe local
     push`` tries a real remote. An empty value stays empty.
     """
     for key in list(os.environ):
-        if key.startswith("DFE_GITOPS_"):
+        if key.startswith("DFE_ENGINE_GITOPS_"):
             monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("DFE_GITOPS_REPO_URL", "")
+    monkeypatch.setenv("DFE_ENGINE_GITOPS_REPO_URL", "")
     reset_settings()
     yield
     reset_settings()
@@ -488,8 +488,8 @@ def remote(repo: Path, tmp_path: Path, monkeypatch) -> tuple[Path, str]:
     porcelain.init(str(bare), bare=True)
     branch = porcelain.active_branch(str(repo)).decode()
     porcelain.push(str(repo), str(bare), f"refs/heads/{branch}".encode(), errstream=io.BytesIO())
-    monkeypatch.setenv("DFE_GITOPS_REPO_URL", str(bare))
-    monkeypatch.setenv("DFE_GITOPS_BRANCH", branch)
+    monkeypatch.setenv("DFE_ENGINE_GITOPS_REPO_URL", str(bare))
+    monkeypatch.setenv("DFE_ENGINE_GITOPS_BRANCH", branch)
     reset_settings()
     return bare, branch
 
@@ -556,7 +556,7 @@ def _pack_count(repo: Path) -> int:
 
 def test_a_write_consolidates_the_clones_packs_once_they_are_due(repo: Path, monkeypatch):
     """No daemon runs the background consolidation, so the write that commits does it."""
-    monkeypatch.setenv("DFE_GITOPS_PACK_PACKS", "3")
+    monkeypatch.setenv("DFE_ENGINE_GITOPS_PACK_PACKS", "3")
     reset_settings()
     for i in range(4):
         extra = repo / f"extra-{i}.yaml"

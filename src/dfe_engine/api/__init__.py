@@ -28,8 +28,8 @@ from scalo.config import get_config
 
 from dfe_engine.api.app import create_app
 
-# scalo reads its knobs and cascade keys as DFE_API_<KEY>, so every process on the image uses this.
-ENV_PREFIX = "DFE_API"
+# scalo reads its knobs and cascade keys as DFE_ENGINE_API_<KEY>, so every process on the image uses this.
+ENV_PREFIX = "DFE_ENGINE_API"
 
 # Each writes every request URL whole at INFO, and a directory lookup's URL carries the user's login.
 HTTP_CLIENT_LOGGERS = ("httpx", "httpcore", "httpx2", "httpcore2")

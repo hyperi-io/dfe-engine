@@ -69,7 +69,7 @@ class _Server:
 def broken_profile(tmp_path: Path, monkeypatch) -> None:
     (tmp_path / "common-header").mkdir()
     (tmp_path / "common-header" / "broken.yaml").write_text(_PROFILE, encoding="utf-8")
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(tmp_path))
 
 
 def _settings(tmp_path: Path) -> SimpleNamespace:

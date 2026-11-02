@@ -10,7 +10,7 @@
 The catalogue is DATA whose source of truth is dfe-infra's ``providers.yaml``, so a
 new provider, or a change to what one leaves the deploy repo to set, is an edit
 there rather than an engine release. It resolves the way the app manifest does:
-an explicit path, then ``DFE_PROVIDER_CATALOGUE_FILE``, then the snapshot bundled
+an explicit path, then ``DFE_ENGINE_PROVIDER_CATALOGUE_FILE``, then the snapshot bundled
 in the image.
 
 A service is ``dfe``-run unless the deployer states a provider. A key the catalogue
@@ -27,7 +27,7 @@ from pathlib import Path
 
 from dfe_engine.manifest import ManifestError, manifest_path, read_manifest
 
-CATALOGUE_FILE_ENV = "DFE_PROVIDER_CATALOGUE_FILE"
+CATALOGUE_FILE_ENV = "DFE_ENGINE_PROVIDER_CATALOGUE_FILE"
 """Where a deployment points the engine at its mounted copy of the catalogue."""
 
 BUNDLED_CATALOGUE = Path(__file__).parent / "providers.yaml"
@@ -195,7 +195,7 @@ def _service_from(service: str, raw: object) -> ServiceProviders:
 def load_providers(path: Path | str | None = None) -> dict[str, ServiceProviders]:
     """Read the provider catalogue into one block per service.
 
-    Resolution order: the given path, then ``DFE_PROVIDER_CATALOGUE_FILE``, then
+    Resolution order: the given path, then ``DFE_ENGINE_PROVIDER_CATALOGUE_FILE``, then
     the snapshot bundled in the image, which is always there.
 
     Args:

@@ -33,7 +33,7 @@ def _refusal(limit: int, setting: str, env: str) -> dict[str, object]:
     }
 
 
-API_REFUSAL = _refusal(LIMIT, "api.max_request_body_bytes", "DFE_API_MAX_REQUEST_BODY_BYTES")
+API_REFUSAL = _refusal(LIMIT, "api.max_request_body_bytes", "DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES")
 
 
 class TestTheServiceConfigWrite:
@@ -186,7 +186,7 @@ class TestTheCap:
 
         assert resp.status_code == 413
         assert resp.json() == _refusal(
-            4 * LIMIT, "repository.max_object_bytes", "DFE_REPOSITORY_MAX_OBJECT_BYTES"
+            4 * LIMIT, "repository.max_object_bytes", "DFE_ENGINE_REPOSITORY_MAX_OBJECT_BYTES"
         )
 
     def test_an_empty_body_passes(self, probe):

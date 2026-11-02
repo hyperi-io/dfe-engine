@@ -17,7 +17,7 @@ enrichment call) runs offline and reproducibly.
 
 It is selected by ``GroupResolutionConfig.directory_backend == "mock"``. The
 fixture path comes from the env var named in ``mock_directory_env`` (default
-``DFE_OIDC_MOCK_DIRECTORY``). A sign-in's lookup never raises: a missing or
+``DFE_ENGINE_OIDC_MOCK_DIRECTORY``). A sign-in's lookup never raises: a missing or
 malformed fixture is a refusal, as a live directory with no credential is.
 The listing does not, as the live adapters' does not, so group sync never
 records a fixture it could not read as a directory with no groups.
@@ -103,7 +103,7 @@ class MockDirectoryAdapter(OIDCGroupAdapter):
         Any problem leaves an empty directory and records the reason for
         ``test_connection`` and ``list_all_groups`` to surface, but never raises.
         """
-        env_name = self._provider.groups.mock_directory_env or "DFE_OIDC_MOCK_DIRECTORY"
+        env_name = self._provider.groups.mock_directory_env or "DFE_ENGINE_OIDC_MOCK_DIRECTORY"
         path_str = os.environ.get(env_name)
         if not path_str:
             self._load_error = f"env var {env_name} not set"

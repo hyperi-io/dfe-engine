@@ -521,7 +521,9 @@ def run_bootstrap(
 
     if not ch.bootstrap_tables:
         state.state = STATE_UNKNOWN
-        state.error = "DFE_CLICKHOUSE_BOOTSTRAP_TABLES is off; the schema state is not known here"
+        state.error = (
+            "DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES is off; the schema state is not known here"
+        )
         logger.warning(state.error)
         _finish(state, started, metrics)
         return state

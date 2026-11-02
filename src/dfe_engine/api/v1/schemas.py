@@ -1151,7 +1151,7 @@ async def import_meta_schema(
             "model": ErrorResponse,
             "description": (
                 "Upload or declared Content-Length exceeds api.elastic_converter_max_upload_bytes "
-                "(HTTP 413, code upload_too_large). Tune via DFE_API_ELASTIC_CONVERTER_* env vars."
+                "(HTTP 413, code upload_too_large). Tune via DFE_ENGINE_API_ELASTIC_CONVERTER_* env vars."
             ),
         },
     },
@@ -1176,7 +1176,7 @@ async def elastic_converter(
     (snake_case ``name``, ``@source:`` dotted ``expr``).
 
     Upload size is capped by ``api.elastic_converter_max_upload_bytes`` (reject with 413 and
-    ``upload_too_large`` when exceeded). Override with ``DFE_API_ELASTIC_CONVERTER_*``.
+    ``upload_too_large`` when exceeded). Override with ``DFE_ENGINE_API_ELASTIC_CONVERTER_*``.
     """
     api_s = request.app.state.settings.api
     max_bytes = api_s.elastic_converter_max_upload_bytes

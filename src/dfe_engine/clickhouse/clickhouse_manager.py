@@ -444,7 +444,7 @@ class ClickHouseManager:
             secure = self.target_config_data.get("ch_secure", True)
             # verify defaults to None -> scalo's SCALO_TLS_VERIFY escape valve
             # (cert verification ON unless the whole environment disables it). An
-            # explicit ch_verify (DFE_CLICKHOUSE_VERIFY) overrides per-CH.
+            # explicit ch_verify (DFE_ENGINE_CLICKHOUSE_VERIFY) overrides per-CH.
             verify = self.target_config_data.get("ch_verify")
             ca_cert = self.target_config_data.get("ch_ca_cert")
 

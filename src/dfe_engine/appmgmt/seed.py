@@ -16,8 +16,8 @@ everything a person authored and a link resolves against them like any other.
 The directory is laid out by kind, because the kind is what says how a file is
 stored and validated and the mount is the only place it can come from::
 
-    <DFE_LIBRARY_SEED_DIR>/vrl/filebeat.vrl        -> artefact `filebeat`
-    <DFE_LIBRARY_SEED_DIR>/vector-yaml/bus.yaml    -> artefact `bus`
+    <DFE_ENGINE_LIBRARY_SEED_DIR>/vrl/filebeat.vrl        -> artefact `filebeat`
+    <DFE_ENGINE_LIBRARY_SEED_DIR>/vector-yaml/bus.yaml    -> artefact `bus`
 
 Idempotent by construction, because it runs on every boot and a deployment
 restarts for reasons that have nothing to do with content: an artefact is created
@@ -46,7 +46,7 @@ from dfe_engine.manifest import manifest_path
 from . import library
 from .links import LIBRARY_CLASS
 
-SEED_DIR_ENV = "DFE_LIBRARY_SEED_DIR"
+SEED_DIR_ENV = "DFE_ENGINE_LIBRARY_SEED_DIR"
 """Where a deployment mounts the content it wants published. Unset seeds nothing.
 
 No conventional fallback, unlike the manifests: this directory is filled by an

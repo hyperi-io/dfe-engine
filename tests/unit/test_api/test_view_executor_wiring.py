@@ -19,8 +19,8 @@ EXECUTE = "/api/v1/queries/views/analytics/events/execute"
 
 @pytest.fixture(autouse=True)
 def _no_reader_password(monkeypatch):
-    monkeypatch.delenv("DFE_CLICKHOUSE_QUERY_READER_PASSWORD", raising=False)
-    monkeypatch.delenv("DFE_QUERY_VIEWS_RESTRICTED_PASSWORD", raising=False)
+    monkeypatch.delenv("DFE_ENGINE_CLICKHOUSE_QUERY_READER_PASSWORD", raising=False)
+    monkeypatch.delenv("DFE_ENGINE_QUERY_VIEWS_RESTRICTED_PASSWORD", raising=False)
 
 
 @pytest.mark.parametrize(

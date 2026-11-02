@@ -59,5 +59,5 @@ def test_secure_config_wires_verify_and_ca_cert_into_the_pool(tmp_path):
 def test_unreadable_ca_cert_refuses_at_connect(tmp_path):
     missing = tmp_path / "does-not-exist.pem"
     manager = ClickHouseManager({"ch_secure": True, "ch_ca_cert": str(missing)})
-    with pytest.raises(ClickHouseCaCertUnreadable, match="DFE_CLICKHOUSE_CA_CERT"):
+    with pytest.raises(ClickHouseCaCertUnreadable, match="DFE_ENGINE_CLICKHOUSE_CA_CERT"):
         manager._live_client()

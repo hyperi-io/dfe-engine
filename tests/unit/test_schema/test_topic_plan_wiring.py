@@ -63,7 +63,7 @@ def test_tiered_storage_is_off_unless_the_deployment_says_otherwise(settings):
 
 
 def test_the_env_var_sets_the_dial(monkeypatch):
-    monkeypatch.setenv("DFE_KAFKA_TIERED_STORAGE", "true")
+    monkeypatch.setenv("DFE_ENGINE_KAFKA_TIERED_STORAGE", "true")
     assert load_settings().kafka.tiered_storage is True
 
 

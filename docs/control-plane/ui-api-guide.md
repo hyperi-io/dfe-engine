@@ -69,7 +69,7 @@ interface FieldError {
 | 403 | `forbidden` | Insufficient permissions |
 | 404 | `not_found` | Resource doesn't exist |
 | 409 | `conflict` | Duplicate name or match conflict |
-| 413 | `payload_too_large` | Request body over `api.max_request_body_bytes` (4 MiB, `DFE_API_MAX_REQUEST_BODY_BYTES`), or over a file upload's own limit |
+| 413 | `payload_too_large` | Request body over `api.max_request_body_bytes` (4 MiB, `DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES`), or over a file upload's own limit |
 | 422 | `validation_error` | Request body validation failed |
 | 500 | `internal_error` | Unexpected server error |
 | 503 | `not_configured` | Required backend not available |
@@ -520,8 +520,8 @@ optimistic concurrency - a mismatch returns
 
 | What | Limit | Over-limit response |
 |------|-------|---------------------|
-| Preferences doc (PATCH) | 256 KiB (`DFE_REPOSITORY_MAX_PREFS_BYTES`) | `413 {"code": "payload_too_large"}` |
-| Object value (PUT) | 1 MiB (`DFE_REPOSITORY_MAX_OBJECT_BYTES`) | `413 {"code": "payload_too_large"}` |
+| Preferences doc (PATCH) | 256 KiB (`DFE_ENGINE_REPOSITORY_MAX_PREFS_BYTES`) | `413 {"code": "payload_too_large"}` |
+| Object value (PUT) | 1 MiB (`DFE_ENGINE_REPOSITORY_MAX_OBJECT_BYTES`) | `413 {"code": "payload_too_large"}` |
 
 ## TypeScript Type Generation
 

@@ -56,7 +56,7 @@ def _settings(tmp_path: Path) -> DFESettings:
 
 
 def _settings_auth_disabled(tmp_path: Path) -> DFESettings:
-    """The local dev posture: DFE_AUTH_ENABLED=false, local auth left unset."""
+    """The local dev posture: DFE_ENGINE_AUTH_ENABLED=false, local auth left unset."""
     settings = _settings(tmp_path)
     return settings.model_copy(update={"auth": settings.auth.model_copy(update={"enabled": False})})
 
@@ -240,7 +240,7 @@ def test_login_on_the_default_password_flags_the_session(tmp_path):
 
 
 def test_setup_status_reports_auth_steps_even_when_auth_is_disabled(tmp_path):
-    """DFE_AUTH_ENABLED=false does not stop bootstrap seeding a live admin/changeme.
+    """DFE_ENGINE_AUTH_ENABLED=false does not stop bootstrap seeding a live admin/changeme.
 
     ``bootstrap_auth`` runs unconditionally and ``POST /auth/login`` never
     checks the toggle, so the wizard must still call for the first real user.

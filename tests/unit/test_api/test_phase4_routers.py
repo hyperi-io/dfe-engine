@@ -144,7 +144,7 @@ class TestSchemasRouter:
             present(_resolve_package_schemas_root()) / "common-header" / "minimal.yaml",
             common_header / "minimal.yaml",
         )
-        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(schemas_root))
         yaml_dump(
             {
                 "current": "1.0.0",
@@ -243,7 +243,7 @@ class TestSchemasRouter:
             present(_resolve_package_schemas_root()) / "common-header" / "minimal.yaml",
             common_header / "minimal.yaml",
         )
-        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(schemas_root))
         yaml_dump(
             {
                 "current": "1.0.0",
@@ -405,7 +405,7 @@ class TestSchemasRouter:
         from dfe_engine.yaml_utils import yaml_dump
 
         # The columns route resolves schema files via the global settings
-        # singleton; reset it so this test's DFE_SCHEMAS_DIR is honoured even
+        # singleton; reset it so this test's DFE_ENGINE_SCHEMAS_DIR is honoured even
         # when an earlier test has already populated the cache.
         reset_settings()
 
@@ -417,7 +417,7 @@ class TestSchemasRouter:
             present(_resolve_package_schemas_root()) / "common-header" / "minimal.yaml",
             common_header / "minimal.yaml",
         )
-        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(schemas_root))
         yaml_dump(
             {
                 "current": "1.0.0",
@@ -559,11 +559,11 @@ class TestSchemasRouter:
             present(_resolve_package_schemas_root()) / "common-header" / "minimal.yaml",
             common_header / "minimal.yaml",
         )
-        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(schemas_root))
         monkeypatch.setenv("DFE_CONFIG_DIR", str(tmp_path))
         sources_dir = tmp_path / "sources"
         sources_dir.mkdir()
-        monkeypatch.setenv("DFE_SOURCES_DIR", str(sources_dir))
+        monkeypatch.setenv("DFE_ENGINE_SOURCES_DIR", str(sources_dir))
         reset_settings()
         yaml_dump(
             {

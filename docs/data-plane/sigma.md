@@ -9,7 +9,7 @@
 
 # Sigma detection pipeline
 
-Sigma is off by default in DFE 2.2.1: every path under `/api/v1/sigma` answers 404 until the engine runs with `sigma.enabled` set, which is `DFE_SIGMA_ENABLED=true` in its environment. A `sigma` entry in a source's `views` is a field-map view and deploys either way.
+Sigma is off by default in DFE 2.2.1: every path under `/api/v1/sigma` answers 404 until the engine runs with `sigma.enabled` set, which is `DFE_ENGINE_SIGMA_ENABLED=true` in its environment. A `sigma` entry in a source's `views` is a field-map view and deploys either way.
 
 DFE turns community + commercial Sigma rules into live DFE detections. External
 feeds are pulled into an operator-curated catalogue; the operator SELECTS the
@@ -47,7 +47,7 @@ A provider config holds only a secret PATH, never a value. Reach is confined at
 register time (`_validate_provider_reach`): a `local_files` directory must resolve
 under the config dir; a `git_repo` url / `valhalla` base_url must be http(s), must
 not target a loopback/link-local host (the `169.254.169.254` metadata endpoint is
-link-local), and - when `DFE_SIGMA_ALLOWED_HOSTS` is set - must be allow-listed.
+link-local), and - when `DFE_ENGINE_SIGMA_ALLOWED_HOSTS` is set - must be allow-listed.
 
 ## Catalogue + selection
 

@@ -9,7 +9,7 @@
 
 The deployer knows which consoles it stood up and where a browser reaches each
 one, so it hands the engine that list in ``deployment.admin_links``
-(``DFE_ADMIN_LINKS``) and the engine reports it; nothing here discovers a UI. An
+(``DFE_ENGINE_ADMIN_LINKS``) and the engine reports it; nothing here discovers a UI. An
 entry that does not validate is dropped, logged and counted on
 ``admin_links_dropped_total`` by reason, so a typo loses that entry and never
 the engine.

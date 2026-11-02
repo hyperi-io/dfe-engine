@@ -71,11 +71,11 @@ def posture(monkeypatch, request):
     from dfe_engine.settings import reset_settings
 
     environment = request.param
-    monkeypatch.setenv("DFE_ENV", environment)
-    monkeypatch.setenv("DFE_GITOPS_MODE", "team")
+    monkeypatch.setenv("DFE_ENGINE_ENV", environment)
+    monkeypatch.setenv("DFE_ENGINE_GITOPS_MODE", "team")
     if environment == "production":
-        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
-        monkeypatch.setenv("DFE_API_JWT_SECRET", "routing-test-" + "x" * 40)
+        monkeypatch.setenv("DFE_ENGINE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENGINE_API_JWT_SECRET", "routing-test-" + "x" * 40)
     reset_settings()
     yield environment
     reset_settings()

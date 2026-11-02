@@ -10,12 +10,12 @@
 ``DFESettings`` refuses a production posture that leaves auth off or keeps the
 dev jwt_secret. Those validators are right for the service and fatal for a
 one-shot process that connects to ClickHouse and applies DDL with no API surface
-to secure: loading the full model made an unset ``DFE_API_JWT_SECRET`` fail a
+to secure: loading the full model made an unset ``DFE_ENGINE_API_JWT_SECRET`` fail a
 deploy's schema step on a real cluster, with a pydantic ValidationError before it
 ever reached ClickHouse. The narrow loader is the answer, and the first two tests
 pin both halves of it.
 
-The rest pin where ``DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`` reaches: the time-series
+The rest pin where ``DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS`` reaches: the time-series
 tables that declare no retention of their own, and nothing else. A table that
 declares its own ``ttl_days`` keeps it whatever the deployment default says.
 """
@@ -40,8 +40,8 @@ from dfe_engine.settings import (
 # The posture a k8s Job inherits by default: env unset (so `production`), auth
 # on, and no jwt_secret supplied because the Job has no API to secure.
 _PRODUCTION_NO_SECRET = {
-    "DFE_ENV": "production",
-    "DFE_AUTH_ENABLED": "true",
+    "DFE_ENGINE_ENV": "production",
+    "DFE_ENGINE_AUTH_ENABLED": "true",
 }
 
 
@@ -49,7 +49,7 @@ _PRODUCTION_NO_SECRET = {
 def production_without_secret(monkeypatch):
     for key, value in _PRODUCTION_NO_SECRET.items():
         monkeypatch.setenv(key, value)
-    monkeypatch.delenv("DFE_API_JWT_SECRET", raising=False)
+    monkeypatch.delenv("DFE_ENGINE_API_JWT_SECRET", raising=False)
     # load_settings() re-reads cwd/.env; a developer secret must not sneak back in.
     monkeypatch.setattr("dfe_engine.env_files.load_env_files", lambda: None)
 
@@ -88,8 +88,8 @@ def test_the_full_model_still_rejects_that_posture(production_without_secret):
 
 def test_the_narrow_loader_honours_env_overrides(production_without_secret, monkeypatch):
     """It reads the same cascade, or the tooling would connect to the wrong cluster."""
-    monkeypatch.setenv("DFE_CLICKHOUSE_HOST", "ch.example.test")
-    monkeypatch.setenv("DFE_CLICKHOUSE_DATA_DATABASE", "not_the_default")
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", "ch.example.test")
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE", "not_the_default")
 
     ch = load_clickhouse_settings()
 
@@ -108,16 +108,16 @@ def test_targets_read_the_same_values_from_either_shape():
 
 
 def test_the_default_ttl_env_reaches_the_targets(monkeypatch):
-    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "30")
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "30")
     assert CoreSchemaTargets.from_clickhouse(load_clickhouse_settings()).default_ttl_days == 30
 
     # 0 is carried through, so the tables that follow it have their TTL removed.
-    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "0")
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "0")
     assert CoreSchemaTargets.from_clickhouse(load_clickhouse_settings()).default_ttl_days == 0
 
 
 def test_a_zero_default_declares_no_ttl_on_the_time_series_tables_only(monkeypatch):
-    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "0")
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "0")
 
     ttls = _ttls(monkeypatch)
 
@@ -129,7 +129,7 @@ def test_a_zero_default_declares_no_ttl_on_the_time_series_tables_only(monkeypat
 
 def test_the_default_ttl_reaches_the_time_series_tables_that_declare_none(monkeypatch):
     """The shipped landing, detection and OTel tables inherit it; the state tables never do."""
-    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "45")
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "45")
 
     ttls = _ttls(monkeypatch)
     otel = {name: days for name, days in ttls.items() if name.startswith("otel_")}
@@ -161,8 +161,8 @@ def _schemas_tree_with_declared_ttl(root: Path) -> Path:
 
 def test_a_declared_ttl_wins_over_the_deployment_default(tmp_path, monkeypatch):
     """A table that declares ttl_days keeps it, whatever the deployment default says."""
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(_schemas_tree_with_declared_ttl(tmp_path)))
-    monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "45")
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(_schemas_tree_with_declared_ttl(tmp_path)))
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "45")
 
     ttls = _ttls(monkeypatch)
 

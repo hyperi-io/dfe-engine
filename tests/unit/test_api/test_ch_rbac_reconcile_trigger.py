@@ -177,7 +177,7 @@ class TestGroups:
             '{"groups": [{"id": "g1", "name": "soc"}, {"id": "g2", "name": "noc"}]}',
             encoding="utf-8",
         )
-        monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(directory))
+        monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(directory))
         app.state.oidc_provider_registry.create(
             "idp",
             OIDCProvider(groups=GroupResolutionConfig(mode="api", directory_backend="mock")),

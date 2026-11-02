@@ -22,12 +22,12 @@ from dfe_engine.settings import (
 _AWS = {"provider": "aws", "region": "ap-southeast-2", "name_prefix": "acme/dfe/test/engine"}
 
 _AWS_ENV = {
-    "DFE_SECRETS_PROVIDER": "aws",
-    "DFE_SECRETS_REGION": "ap-southeast-2",
-    "DFE_SECRETS_NAME_PREFIX": "acme/dfe/test/engine",
-    "DFE_SECRETS_KMS_KEY_ID": "alias/acme-dfe",
-    "DFE_SECRETS_RECOVERY_WINDOW_DAYS": "7",
-    "DFE_SECRETS_TAGS": '{"dfe-run": "r1", "owner": "acme"}',
+    "DFE_ENGINE_SECRETS_PROVIDER": "aws",
+    "DFE_ENGINE_SECRETS_REGION": "ap-southeast-2",
+    "DFE_ENGINE_SECRETS_NAME_PREFIX": "acme/dfe/test/engine",
+    "DFE_ENGINE_SECRETS_KMS_KEY_ID": "alias/acme-dfe",
+    "DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS": "7",
+    "DFE_ENGINE_SECRETS_TAGS": '{"dfe-run": "r1", "owner": "acme"}',
 }
 
 # AWS's 512-character name limit less '/' and the longest bounded engine path (161).
@@ -43,7 +43,7 @@ def fresh_settings():
 
 
 def test_secrets_defaults_to_file(monkeypatch, fresh_settings):
-    for k in ("DFE_SECRETS_PROVIDER", "DFE_SECRETS_PATH", "DFE_SECRETS_ADDR"):
+    for k in ("DFE_ENGINE_SECRETS_PROVIDER", "DFE_ENGINE_SECRETS_PATH", "DFE_ENGINE_SECRETS_ADDR"):
         monkeypatch.delenv(k, raising=False)
     s = fresh_settings()
     assert s.secrets.provider == "file"
@@ -52,8 +52,8 @@ def test_secrets_defaults_to_file(monkeypatch, fresh_settings):
 
 
 def test_secrets_provider_from_env(monkeypatch, fresh_settings):
-    monkeypatch.setenv("DFE_SECRETS_PROVIDER", "openbao")
-    monkeypatch.setenv("DFE_SECRETS_ADDR", "https://bao:8200")
+    monkeypatch.setenv("DFE_ENGINE_SECRETS_PROVIDER", "openbao")
+    monkeypatch.setenv("DFE_ENGINE_SECRETS_ADDR", "https://bao:8200")
     s = fresh_settings()
     assert s.secrets.provider == "openbao"
     assert s.secrets.addr == "https://bao:8200"
@@ -80,21 +80,24 @@ def test_the_bootstrap_prefix_name_is_not_read_as_the_engines(monkeypatch, fresh
 
 
 def test_malformed_tags_json_refuses_to_load(monkeypatch, fresh_settings):
-    monkeypatch.setenv("DFE_SECRETS_TAGS", "{dfe-run: r1")
-    with pytest.raises(ValueError, match="DFE_SECRETS_TAGS is not valid JSON"):
+    monkeypatch.setenv("DFE_ENGINE_SECRETS_TAGS", "{dfe-run: r1")
+    with pytest.raises(ValueError, match="DFE_ENGINE_SECRETS_TAGS is not valid JSON"):
         fresh_settings()
 
 
 @pytest.mark.parametrize("tags", ['["dfe-run"]', '{"dfe-run": 1}'])
 def test_tags_that_are_not_a_string_map_refuse_to_load(monkeypatch, fresh_settings, tags):
-    monkeypatch.setenv("DFE_SECRETS_TAGS", tags)
+    monkeypatch.setenv("DFE_ENGINE_SECRETS_TAGS", tags)
     with pytest.raises(ValidationError):
         fresh_settings()
 
 
 @pytest.mark.parametrize(
     ("name", "value"),
-    [("DFE_SECRETS_TAGS", "{dfe-run: r1"), ("DFE_SECRETS_RECOVERY_WINDOW_DAYS", "seven")],
+    [
+        ("DFE_ENGINE_SECRETS_TAGS", "{dfe-run: r1"),
+        ("DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS", "seven"),
+    ],
 )
 def test_a_bad_secrets_value_leaves_the_narrow_loads_working(monkeypatch, name, value):
     """dfe-schema reads only ClickHouse settings, so a secrets typo must not stop it."""
@@ -107,8 +110,8 @@ def test_a_bad_secrets_value_leaves_the_narrow_loads_working(monkeypatch, name, 
 @pytest.mark.parametrize(
     ("fields", "message"),
     [
-        pytest.param({"region": ""}, "needs DFE_SECRETS_REGION", id="no-region"),
-        pytest.param({"name_prefix": ""}, "needs DFE_SECRETS_NAME_PREFIX", id="no-prefix"),
+        pytest.param({"region": ""}, "needs DFE_ENGINE_SECRETS_REGION", id="no-region"),
+        pytest.param({"name_prefix": ""}, "needs DFE_ENGINE_SECRETS_NAME_PREFIX", id="no-prefix"),
         pytest.param({"name_prefix": "/acme/dfe"}, "must not start or end", id="leading-slash"),
         pytest.param({"name_prefix": "acme/dfe/"}, "must not start or end", id="trailing-slash"),
         pytest.param({"name_prefix": "AmazonMSK_acme"}, "'AmazonMSK_'", id="msk-prefix"),
@@ -150,7 +153,9 @@ def test_aws_accepts_each_window_aws_allows(window):
 
 @pytest.mark.parametrize("provider", ["gcp", "azure"])
 def test_a_provider_whose_names_allow_no_slash_is_refused(provider):
-    with pytest.raises(ValidationError, match=f"DFE_SECRETS_PROVIDER={provider} is not supported"):
+    with pytest.raises(
+        ValidationError, match=f"DFE_ENGINE_SECRETS_PROVIDER={provider} is not supported"
+    ):
         SecretsSettings(provider=provider)
 
 

@@ -66,7 +66,7 @@ def _spec_version(reported: str) -> str:
 def product_spec() -> dict:
     """The product spec, stamped with the release version, as the committed file holds it."""
     # Schema export only — avoid production posture guard on dev JWT placeholder.
-    os.environ["DFE_ENV"] = "dev"
+    os.environ["DFE_ENGINE_ENV"] = "dev"
     # The spec describes every operation a deployment can switch on, sigma included.
     settings = load_settings().model_copy(
         update={"e2e_server": False, "sigma": SigmaSettings(enabled=True)}

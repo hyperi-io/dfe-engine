@@ -21,7 +21,7 @@ from dfe_engine.auth.models import AuthContext
 from dfe_engine.settings import DFESettings, get_settings, load_settings, reset_settings
 from tests.unit.test_services.test_elastic_schema_service import MINIMAL_BEAT_TEMPLATE
 
-_LIMIT_ENV = "DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"
+_LIMIT_ENV = "DFE_ENGINE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"
 
 
 @pytest.fixture(autouse=True)

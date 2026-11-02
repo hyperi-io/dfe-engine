@@ -108,7 +108,7 @@ def test_the_hunt_runner_user_appears_once_a_late_clickhouse_answers(
     params, start_clickhouse = late_clickhouse
     monkeypatch.setenv(TENANT_ISOLATION_ENV, isolation)
     for role in DEFAULT_SERVICE_ROLES:
-        monkeypatch.delenv(f"DFE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
+        monkeypatch.delenv(f"DFE_ENGINE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
 
     settings = _settings(tmp_path, params)
     ClickHouseManager.reset_instance()
@@ -162,7 +162,7 @@ def test_with_the_schema_phase_on_the_projection_fills_once_a_late_clickhouse_an
     params, start_clickhouse = late_clickhouse
     monkeypatch.setenv(TENANT_ISOLATION_ENV, "true")
     for role in DEFAULT_SERVICE_ROLES:
-        monkeypatch.delenv(f"DFE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
+        monkeypatch.delenv(f"DFE_ENGINE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
 
     settings = _settings(tmp_path, params, bootstrap_tables=True)
     ClickHouseManager.reset_instance()
@@ -215,7 +215,7 @@ def test_a_schema_pass_converging_after_the_reconcile_keeps_the_readers_budget(
     params, start_clickhouse = late_clickhouse
     monkeypatch.setenv(TENANT_ISOLATION_ENV, isolation)
     for role in DEFAULT_SERVICE_ROLES:
-        monkeypatch.delenv(f"DFE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
+        monkeypatch.delenv(f"DFE_ENGINE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
     gate = threading.Event()
 
     class _HeldRetry(ch_bootstrap.SchemaRetry):

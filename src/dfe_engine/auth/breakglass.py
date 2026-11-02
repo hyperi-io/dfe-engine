@@ -15,7 +15,7 @@ own state is gone: its bcrypt hash is committed to the deploy repo's governance
 settings (``governance/settings/auth.yaml``), which survives a total teardown of
 the engine and the UI.
 
-The plaintext is never stored. ``DFE_AUTH_BREAKGLASS_PASSWORD`` is a mint-once
+The plaintext is never stored. ``DFE_ENGINE_AUTH_BREAKGLASS_PASSWORD`` is a mint-once
 input: with no hash committed yet it is hashed and committed, and from then on it
 is ignored, so leaving it in a compose file does not reassert an old password.
 A password reset through the accounts API replaces the committed hash

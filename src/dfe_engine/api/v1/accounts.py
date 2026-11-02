@@ -279,7 +279,7 @@ class ResetPasswordResponse(BaseModel):
 class RotatePasswordRequest(BaseModel):
     """A rotation the deployment can boot on.
 
-    The rotated value becomes ``DFE_AUTH_LOCAL_ADMIN_PASSWORD``, and the boot gate
+    The rotated value becomes ``DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD``, and the boot gate
     refuses an empty or default one outside a dev posture, so an unconstrained
     rotation is a way for an admin to lock the deployment out of its own restart.
     Both rules are the ones that gate startup, not a second opinion on them.
@@ -972,7 +972,7 @@ async def rotate_password(
 ) -> RotatePasswordResponse:
     """Rotate the local admin's password in the deployment's secret store.
 
-    The store that injects ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that
+    The store that injects ``DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD`` is the source of that
     password, so the engine writes the new value through its secrets backend and
     never into its own YAML. The next boot reconcile issues the rotated value to
     the admin, who must replace it at the following login. Returns 501 with the

@@ -130,8 +130,8 @@ class CloudService:
 
         if not self._config.configured:
             raise CloudServiceError(
-                "ClickHouse Cloud is not configured: set DFE_CLICKHOUSE_CLOUD_API_KEY_ID + "
-                "DFE_CLICKHOUSE_CLOUD_API_KEY_SECRET (the control-plane key)."
+                "ClickHouse Cloud is not configured: set DFE_ENGINE_CLICKHOUSE_CLOUD_API_KEY_ID + "
+                "DFE_ENGINE_CLICKHOUSE_CLOUD_API_KEY_SECRET (the control-plane key)."
             )
         return HttpClient(
             base_url=self._config.api_base,

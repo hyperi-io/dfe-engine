@@ -96,7 +96,7 @@ class TestReceiverRoutingFollowsTheSources:
 
         # 202: the source is stored, and the reply says why the apps did not follow it.
         assert resp.status_code == 202, resp.text
-        assert "DFE_SECRETS_PROVIDER=ansible_vault" in resp.json()["apps_sync_error"]
+        assert "DFE_ENGINE_SECRETS_PROVIDER=ansible_vault" in resp.json()["apps_sync_error"]
         # Refused rather than compiled open: the overlay keeps what it had.
         assert "config" not in gc.get("helmvars", RECEIVER_OVERLAY)
 

@@ -240,8 +240,8 @@ class PipelineBuilderController:
 
         if not repo_url:
             raise ValueError(
-                "No template source configured. Set DFE_ARTIFACTORY_URL (for HTTP), "
-                "DFE_STORAGE_PATH (for local/S3), or pass args_repo_url."
+                "No template source configured. Set DFE_ENGINE_ARTIFACTORY_URL (for HTTP), "
+                "DFE_ENGINE_STORAGE_PATH (for local/S3), or pass args_repo_url."
             )
 
         # Get storage backend with auto-detection

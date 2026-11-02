@@ -66,7 +66,7 @@ async def test_mock_loads_groups_and_members(tmp_path, monkeypatch):
         ],
         members={"user-oid": ["g-admins", "g-viewers"]},
     )
-    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+    monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(fixture))
 
     adapter = get_adapter(_mock_provider())
     all_groups = await adapter.list_all_groups()
@@ -84,14 +84,14 @@ async def test_mock_loads_groups_and_members(tmp_path, monkeypatch):
 async def test_mock_unknown_user_has_no_groups(tmp_path, monkeypatch):
     fixture = tmp_path / "dir.json"
     _write_fixture(fixture, groups=[{"id": "g1", "name": "grp"}], members={"known": ["g1"]})
-    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+    monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(fixture))
     adapter = get_adapter(_mock_provider())
     assert await adapter.resolve_user_groups("stranger") == []
 
 
 async def test_a_missing_fixture_fails_the_listing_and_the_login_lookup_open(tmp_path, monkeypatch):
     """A sign-in's lookup answers nothing, and the listing never passes for a directory with none."""
-    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(tmp_path / "nope.json"))
+    monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(tmp_path / "nope.json"))
     adapter = get_adapter(_mock_provider())
     with pytest.raises(DirectoryCredentialError):
         await adapter.list_all_groups()
@@ -102,14 +102,14 @@ async def test_a_missing_fixture_fails_the_listing_and_the_login_lookup_open(tmp
 
 
 async def test_an_unnamed_fixture_reads_as_not_configured(monkeypatch):
-    monkeypatch.delenv("DFE_OIDC_MOCK_DIRECTORY", raising=False)
+    monkeypatch.delenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", raising=False)
     adapter = get_adapter(_mock_provider())
     with pytest.raises(DirectoryNotConfiguredError):
         await adapter.list_all_groups()
 
 
 async def test_a_sync_over_a_missing_fixture_is_an_error(tmp_path, monkeypatch):
-    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(tmp_path / "nope.json"))
+    monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(tmp_path / "nope.json"))
     registry = OIDCProviderRegistry(tmp_path / "oidc")
     registry.create("mock-dir", _mock_provider())
     group_store = GroupStore(tmp_path / "groups")
@@ -139,7 +139,7 @@ async def test_a_malformed_fixture_is_a_failed_listing_not_a_crash(tmp_path, mon
     """Valid JSON of the wrong shape builds an adapter that fails the listing, as an unreadable file does."""
     fixture = tmp_path / "dir.json"
     fixture.write_text(body, encoding="utf-8")
-    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+    monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(fixture))
 
     adapter = get_adapter(_mock_provider())
 
@@ -155,7 +155,7 @@ async def test_a_sync_over_a_fixture_that_is_not_an_object_is_an_error(tmp_path,
     """The sync records the failure on the provider, where it once escaped as an AttributeError."""
     fixture = tmp_path / "dir.json"
     fixture.write_text("[]", encoding="utf-8")
-    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+    monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(fixture))
     registry = OIDCProviderRegistry(tmp_path / "oidc")
     registry.create("mock-dir", _mock_provider())
 
@@ -181,7 +181,7 @@ async def test_rp_enriches_overflowed_groups_at_scale(tmp_path, monkeypatch):
     members = {"user-oid": [g["id"] for g in groups]}
     fixture = tmp_path / "dir.json"
     _write_fixture(fixture, groups=groups, members=members)
-    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+    monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(fixture))
 
     rp = OidcRelyingParty(OIDCProviderRegistry(tmp_path / "reg"))
     provider = _mock_provider()
@@ -199,7 +199,7 @@ async def test_rp_enriches_overflowed_groups_at_scale(tmp_path, monkeypatch):
 
 async def test_rp_overage_enrichment_fails_safe_without_fixture(tmp_path, monkeypatch):
     """An enrichment miss yields no groups (default deny), never an exception."""
-    monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(tmp_path / "absent.json"))
+    monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(tmp_path / "absent.json"))
     rp = OidcRelyingParty(OIDCProviderRegistry(tmp_path / "reg"))
     identity = NormalizedIdentity(subject="s", groups=[], groups_overflowed=True)
     enriched = await rp._enrich_groups_from_directory(

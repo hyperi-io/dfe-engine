@@ -11,7 +11,7 @@ version; the engine returns the exact column snapshot for that version.
 
 Profile resolution order (first match wins):
 1. Explicit ``profiles_dir`` argument
-2. ``DFE_SCHEMAS_DIR`` env var -> ``{dir}/common-header/``
+2. ``DFE_ENGINE_SCHEMAS_DIR`` env var -> ``{dir}/common-header/``
 3. ``common-header/`` under the installed ``dfe-schemas`` package
 4. ``common-header/`` under the image's schema seed directory
 
@@ -54,7 +54,7 @@ _SCHEMAS_PACKAGE_DATA = "data"
 # Where the container image ships the schemas. dfe_engine.bootstrap copies this
 # tree into the runtime schemas dir and imports these from here.
 DEFAULT_SCHEMAS_SEED_DIR = "/app/schemas-seed"
-SEED_DIR_ENV_VAR = "DFE_SCHEMAS_SEED_DIR"
+SEED_DIR_ENV_VAR = "DFE_ENGINE_SCHEMAS_SEED_DIR"
 
 
 def _looks_like_schemas_root(candidate: Path) -> bool:
@@ -103,7 +103,7 @@ def _resolve_package_schemas_root() -> Path | None:
 def _resolve_schemas_root() -> Path | None:
     """Resolve the dfe-schemas root directory.
 
-    Order: ``DFE_SCHEMAS_DIR``, the installed ``dfe-schemas`` package, then the
+    Order: ``DFE_ENGINE_SCHEMAS_DIR``, the installed ``dfe-schemas`` package, then the
     image's seed directory. The env var is first so a deployment's own tree
     wins. The seed is last and present at all because the container ships the
     schemas there: every process in the image needs to read them, while only the
@@ -112,7 +112,7 @@ def _resolve_schemas_root() -> Path | None:
 
     Returns None when no schemas tree is found.
     """
-    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    env_dir = os.getenv("DFE_ENGINE_SCHEMAS_DIR")
     if env_dir and _looks_like_schemas_root(Path(env_dir)):
         return Path(env_dir)
 
@@ -137,7 +137,7 @@ def _resolve_subdir(name: str) -> Path:
     Raises:
         SchemaLoadError: No schemas tree carries the subdirectory.
     """
-    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    env_dir = os.getenv("DFE_ENGINE_SCHEMAS_DIR")
     if env_dir:
         candidate = Path(env_dir) / name
         if candidate.is_dir():
@@ -150,19 +150,19 @@ def _resolve_subdir(name: str) -> Path:
             return candidate
 
     raise SchemaLoadError(
-        f"No dfe-schemas tree carries {name!r}: set DFE_SCHEMAS_DIR or install dfe-schemas"
+        f"No dfe-schemas tree carries {name!r}: set DFE_ENGINE_SCHEMAS_DIR or install dfe-schemas"
     )
 
 
 def _resolve_profiles_dir() -> Path:
-    """Resolve the common-header profiles directory: DFE_SCHEMAS_DIR, then the resolved schemas root."""
+    """Resolve the common-header profiles directory: DFE_ENGINE_SCHEMAS_DIR, then the resolved schemas root."""
     return _resolve_subdir(_COMMON_HEADER_SUBDIR)
 
 
 def resolve_registry_path(name: str) -> Path:
     """``registries/<name>`` from the first dfe-schemas tree that carries it.
 
-    Order: ``DFE_SCHEMAS_DIR``, the installed package, then the image seed. Each
+    Order: ``DFE_ENGINE_SCHEMAS_DIR``, the installed package, then the image seed. Each
     tree is checked for the entry itself, and a directory entry must hold at
     least one file, so a volume that predates the entry or carries an empty copy
     of it does not shadow the package.
@@ -171,7 +171,7 @@ def resolve_registry_path(name: str) -> Path:
         SchemaLoadError: No tree carries the entry.
     """
     roots = []
-    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    env_dir = os.getenv("DFE_ENGINE_SCHEMAS_DIR")
     if env_dir:
         roots.append(Path(env_dir))
     packaged = _resolve_package_schemas_root()
@@ -272,10 +272,10 @@ def _resolve_profile_yaml_path(
             return _profile_yaml_path(root.joinpath(*parts[:-1]), parts[-1])
         return _profile_yaml_path(root / _COMMON_HEADER_SUBDIR, stem)
 
-    # Same as ``_resolve_subdir``: DFE_SCHEMAS_DIR may be a partial tree
+    # Same as ``_resolve_subdir``: DFE_ENGINE_SCHEMAS_DIR may be a partial tree
     # (common-header only, no manifest.yaml). ``_resolve_schemas_root``
     # would skip it and the packaged timeseries profile would win.
-    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    env_dir = os.getenv("DFE_ENGINE_SCHEMAS_DIR")
     if env_dir:
         env_candidate = candidate_under(Path(env_dir))
         if env_candidate.is_file():
@@ -576,7 +576,7 @@ class SchemaLoader:
 
         Resolution order (first match wins):
         1. Explicit ``profiles_dir`` argument
-        2. ``DFE_SCHEMAS_DIR`` env var -> ``{dir}/common-header/``
+        2. ``DFE_ENGINE_SCHEMAS_DIR`` env var -> ``{dir}/common-header/``
         3. ``common-header/`` under the installed ``dfe-schemas`` package
         4. ``common-header/`` under the image's schema seed directory
 
