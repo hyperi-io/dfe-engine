@@ -318,6 +318,11 @@ class ViewExecutor:
         return self._default_timeout
 
 
+def view_timeout_ceiling(query_views: Any) -> int:
+    """The longest a view request may ask for: ``max_timeout``, cut to the reader's ``max_execution_time``."""
+    return min(query_views.max_timeout, query_views.max_execution_time)
+
+
 def build_view_executor(settings: Any) -> ViewExecutor:
     """A ViewExecutor that runs every view as the restricted reader.
 
@@ -354,6 +359,6 @@ def build_view_executor(settings: Any) -> ViewExecutor:
         database=data_db,
         default_limit=qv.default_limit,
         max_limit=qv.max_limit,
-        default_timeout=qv.default_timeout,
-        max_timeout=qv.max_timeout,
+        default_timeout=min(qv.default_timeout, view_timeout_ceiling(qv)),
+        max_timeout=view_timeout_ceiling(qv),
     )

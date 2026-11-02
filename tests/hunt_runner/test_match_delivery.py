@@ -15,6 +15,8 @@ delivery depends on the rows a fire reports and not on where they went.
 
 import json
 import threading
+from collections.abc import Generator
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -106,11 +108,18 @@ class _Coordinator:
     def current_lease(self, hunt_id: str) -> None:
         return None
 
-    def try_claim(self, hunt_id: str, fire: int, now: int) -> bool:
+    def now(self) -> int:
+        return 0
+
+    def try_claim(self, hunt_id: str, fire: int, now: int | None = None) -> bool:
         return True
 
     def release(self, hunt_id: str, fire: int) -> None:
         pass
+
+    @contextmanager
+    def held(self, hunt_id: str, fire: int) -> Generator[None]:
+        yield
 
 
 def _hunts_dir(tmp_path: Path, yaml_text: str = HUNT_YAML) -> Path:

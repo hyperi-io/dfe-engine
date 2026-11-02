@@ -30,7 +30,7 @@ from dfe_engine.schema.phase import apply_plan
 from dfe_engine.schema.plan import build_plan
 from dfe_engine.settings import ClickHouseSettings, DFESettings
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 NEW_COLUMN = "_release_added"
 _TTL_DAYS_RE = re.compile(r"toIntervalDay\((\d+)\)")

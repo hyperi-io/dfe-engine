@@ -19,7 +19,7 @@ from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.schema import phase
 from dfe_engine.settings import DFESettings
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 # Nothing listens on port 1, so every admin call fails as an absent broker does.
 ABSENT_BROKER = "127.0.0.1:1"

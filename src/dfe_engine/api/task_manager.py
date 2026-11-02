@@ -150,16 +150,28 @@ class _Task:
         self._progress_event.clear()
 
 
+class TaskCapacityError(Exception):
+    """The manager already holds as many pending and running tasks as it admits."""
+
+
+MAX_ACTIVE_TASKS = 64
+"""Pending plus running tasks one engine process holds, the last resort under ``api.max_active_tasks``."""
+
+
 class TaskManager:
     """In-memory async task manager.
 
-    Not persistent -- tasks are lost on restart. Stores are bounded by
-    ``max_completed`` to prevent unbounded memory growth.
+    Not persistent -- tasks are lost on restart. Completed tasks are bounded by
+    ``max_completed`` and pending plus running ones by ``max_active``, so neither
+    grows without limit.
     """
 
-    def __init__(self, max_completed: int = 1000) -> None:
+    def __init__(self, max_completed: int = 1000, max_active: int = MAX_ACTIVE_TASKS) -> None:
+        if max_active < 1:
+            raise ValueError(f"max_active must be at least 1, not {max_active}")
         self._tasks: dict[str, _Task] = {}
         self._max_completed = max_completed
+        self._max_active = max_active
 
     def submit(
         self,
@@ -193,7 +205,16 @@ class TaskManager:
 
         Returns:
             TaskInfo snapshot at submission time.
+
+        Raises:
+            TaskCapacityError: ``max_active`` tasks are already pending or running.
         """
+        active = sum(1 for t in self._tasks.values() if not t.status.is_terminal)
+        if active >= self._max_active:
+            raise TaskCapacityError(
+                f"{active} tasks are already pending or running (cap {self._max_active}); "
+                "retry once one finishes"
+            )
         task_id = str(uuid.uuid4())
         task = _Task(task_id, kind, _held(held_to))
         self._tasks[task_id] = task

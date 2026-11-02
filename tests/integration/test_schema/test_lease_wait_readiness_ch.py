@@ -26,7 +26,7 @@ from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, render_one
 from dfe_engine.settings import ClickHouseResilienceSettings, DFESettings
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 FAST = ClickHouseResilienceSettings(wait_initial=0.001, wait_max=0.001)
 

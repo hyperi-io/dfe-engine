@@ -190,7 +190,8 @@ class TestCelOnlyRules:
             ),
             rule_id="ratio_01",
         )
-        assert "failed_count * 100 / total_count > 50" in rule.where_clause
+        # CEL divides two ints as integers, which ClickHouse's ``/`` does not.
+        assert "intDiv(failed_count * 100, total_count) > 50" in rule.where_clause
 
     def test_ternary(self):
         rule = Rule.from_create(

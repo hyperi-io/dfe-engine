@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.settings import DFESettings
+from tests.support.oidc import serve_provider
 
 # The gateway pod's address - not loopback, so the default setting must not trust it.
 _GATEWAY_PEER = ("198.18.2.46", 51234)
@@ -63,6 +64,7 @@ def _proxied_client(api_settings: DFESettings, forwarded_allow_ips: str) -> Iter
     app = create_app(settings=settings)
     try:
         with TestClient(app, client=_GATEWAY_PEER) as client:
+            serve_provider(app)
             app.state.oidc_rp = _EchoRedirectUriRp()
             yield client
     finally:

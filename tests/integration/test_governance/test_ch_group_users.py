@@ -24,7 +24,14 @@ import pytest
 
 from dfe_engine.auth.groups import Group
 from dfe_engine.governance.ch.bindings import derive_group_bindings
-from dfe_engine.governance.ch.models import ChTier, group_user_name, org_user_name
+from dfe_engine.governance.ch.models import (
+    TENANT_ROLE,
+    ChServiceRole,
+    ChTier,
+    GroupChBinding,
+    group_user_name,
+    org_user_name,
+)
 from dfe_engine.governance.ch.reconciler import ChRbacReconciler, ReconcileResult
 from dfe_engine.orgs.models import Org
 from dfe_engine.schema.plan import render_one
@@ -33,7 +40,7 @@ from dfe_engine.settings import SecretsSettings
 
 from .conftest import count_as, drop_safely
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 # The manifest objects the reconcile's dfe_meta projection writes into.
 _META_IDS = ("db.meta", "meta.orgs", "meta.ch_tiers")
@@ -68,10 +75,15 @@ class GroupWorld:
         scope = f"org:{scope_org}" if scope_org else "system"
         return Group(name=f"{base}-{self.uid}", roles=roles, scope=scope)
 
-    def reconcile(self, groups: list[Group]) -> ReconcileResult:
+    def reconcile(
+        self, groups: list[Group], *, service_roles: list[ChServiceRole] | None = None
+    ) -> ReconcileResult:
         bindings = derive_group_bindings(groups, self.orgs)
         result = ChRbacReconciler(self.client, secrets_store=self.store).reconcile(
-            tiers=[self.tier], service_roles=[], orgs=self.orgs, bindings=bindings
+            tiers=[self.tier],
+            service_roles=service_roles or [],
+            orgs=self.orgs,
+            bindings=bindings,
         )
         assert not result.errors, f"reconcile emitted errors: {result.errors}"
         return result
@@ -79,6 +91,14 @@ class GroupWorld:
     def users(self) -> set[str]:
         rows = self.client.query("SELECT name FROM system.users").result_rows
         return {r[0] for r in rows if self.uid in r[0]}
+
+    def roles_held(self, user: str) -> set[str]:
+        """The roles ClickHouse records as granted to ``user``."""
+        rows = self.client.query(
+            "SELECT granted_role_name FROM system.role_grants WHERE user_name = {u:String}",
+            parameters={"u": user},
+        ).result_rows
+        return {r[0] for r in rows}
 
     def grants_held(self, user: str) -> int:
         """Role grants plus direct grants ClickHouse still records for ``user``."""
@@ -246,6 +266,73 @@ class TestDeletedGroups:
         assert group_user_name(old.name) not in w.users()
         assert not w.secret_exists(old)
         assert w.rows_seen_by_group(new) == 5
+
+
+@pytest.fixture
+def otel_reader(group_world) -> Iterator[ChServiceRole]:
+    """The otel_reader service role over the world's database, dropped after unless it pre-existed."""
+    role = ChServiceRole(name="otel_reader", grants=[f"SELECT ON {group_world.db}.*"])
+    existed = bool(
+        group_world.client.query(
+            "SELECT count() FROM system.roles WHERE name = {r:String}",
+            parameters={"r": role.role()},
+        ).result_rows[0][0]
+    )
+    yield role
+    if not existed:
+        drop_safely(group_world.client, f"DROP ROLE IF EXISTS `{role.role()}`")
+
+
+class TestChangedGroups:
+    def test_a_demoted_admin_group_loses_the_otel_reader_role(self, group_world, otel_reader):
+        """Dropping admin removes what admin composed onto the user, not just the binding."""
+        w = group_world
+        ops = w.group("ops", roles=["admin"])
+        w.reconcile([ops], service_roles=[otel_reader])
+        user = group_user_name(ops.name)
+        assert otel_reader.role() in w.roles_held(user)
+
+        w.reconcile(
+            [ops.model_copy(update={"roles": ["data_analyst"]})], service_roles=[otel_reader]
+        )
+        assert w.roles_held(user) == {w.tier.role()}
+
+    def test_a_demotion_naming_a_missing_role_still_revokes_the_old_one(
+        self, group_world, otel_reader
+    ):
+        """A replacing GRANT naming a role that does not exist fails whole, keeping the old set."""
+        w = group_world
+        group = f"ops-{w.uid}"
+        reconciler = ChRbacReconciler(w.client, secrets_store=w.store)
+
+        def reconcile(ch_roles: list[str], service_roles: list[ChServiceRole]) -> ReconcileResult:
+            return reconciler.reconcile(
+                tiers=[w.tier],
+                service_roles=service_roles,
+                orgs=w.orgs,
+                bindings=[GroupChBinding(group=group, ch_roles=ch_roles)],
+            )
+
+        first = reconcile(["otel_reader"], [otel_reader])
+        assert not first.errors, first.errors
+        user = group_user_name(group)
+        assert otel_reader.role() in w.roles_held(user)
+
+        demoted = reconcile(["ghost"], [])
+        assert w.roles_held(user) == {w.tier.role()}
+        assert any("dfe_ghost_role" in error for error in demoted.errors), demoted.errors
+
+    def test_a_group_that_turns_platform_wide_loses_its_tenant_fence(self, group_world):
+        """A group gaining a platform role reads unrestricted, so the pin's role has to go."""
+        w = group_world
+        viewers = w.group("viewers", roles=["org_viewer"])
+        pinned = viewers.model_copy(update={"org_ids": [w.org_b]})
+        w.reconcile([pinned])
+        assert w.rows_seen_by_group(viewers) == 2
+
+        w.reconcile([pinned.model_copy(update={"roles": ["org_viewer", "data_analyst"]})])
+        assert TENANT_ROLE not in w.roles_held(group_user_name(viewers.name))
+        assert w.rows_seen_by_group(viewers) == 5
 
 
 class TestOtherIdentitiesAreUntouched:

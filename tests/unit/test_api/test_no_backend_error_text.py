@@ -40,6 +40,7 @@ from dfe_engine.auth.models import AuthContext
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.clickhouse.cloud import CloudServiceError
 from dfe_engine.gitcrud import GitCrud, default_registry
+from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.gitops.repo import GitopsRepo, GitopsUnavailableError
 from dfe_engine.kafka.contract import KafkaContractError
 from dfe_engine.kafka.topics import (
@@ -64,6 +65,7 @@ from dfe_engine.schema.retention import CLICKHOUSE_REFUSED, apply_pinned_default
 from dfe_engine.services.schema.json_promotion_service import JsonPromotionError
 from dfe_engine.settings import SourceSettings
 from dfe_engine.source.registry import SourceNotFoundError
+from tests.support.oidc import serve_provider
 from tests.support.present import present
 from tests.unit.test_query.view_fakes import view_definition
 
@@ -415,7 +417,8 @@ class TestSources:
         user = AuthContext(user_id="admin")
 
         settings = SimpleNamespace(source=SourceSettings())
-        _, failed, _ = sources_module._apply_bulk(body, {}, user, _Registry(), settings)  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the fields this path reads
+        routing = ReviewRouting()
+        _, failed, _, _ = sources_module._apply_bulk(body, {}, user, _Registry(), settings, routing)  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the fields this path reads
 
         by_source = {entry["source"]: entry for entry in failed}
         assert by_source["gone"]["error"] == "Source 'gone' not found"
@@ -480,6 +483,7 @@ class TestOidcCallback:
             async def handle_callback(self, provider, request):
                 raise RuntimeError(SENTINEL)
 
+        serve_provider(app, "acme")
         app.state.oidc_rp = _RefusingRp()
 
         resp = client.get("/api/v1/auth/oidc/acme/callback")

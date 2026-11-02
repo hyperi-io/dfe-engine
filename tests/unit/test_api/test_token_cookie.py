@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.auth.oidc.rp import NormalizedIdentity
+from tests.support.oidc import serve_provider
 
 _CALLBACK = "/api/v1/auth/oidc/stub/callback"
 _LOGIN = "/api/v1/auth/login"
@@ -51,6 +52,7 @@ def _attributes(header: str) -> set[str]:
 
 @pytest.fixture
 def stub_rp(app) -> None:
+    serve_provider(app)
     app.state.oidc_rp = _CallbackRp()
     app.state.group_store.update("dfe-admins", source_provider="stub", source_id="dfe-admins")
 

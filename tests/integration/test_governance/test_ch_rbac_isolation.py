@@ -35,7 +35,7 @@ from dfe_engine.governance.ch.render import render_pinned_user, render_tenant_ax
 
 from .conftest import count_as, drop_safely
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 _PW = "Rbac_Test_Pw_9f3b2c"  # nosec - throwaway test-user password on a PET cluster
 _PW_HASH = hashlib.sha256(_PW.encode()).hexdigest()

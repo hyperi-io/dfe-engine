@@ -105,7 +105,8 @@ def test_a_target_that_is_not_a_table_name_compiles_nothing(tmp_path: Path, targ
     assert "is not a table name" in record.record["message"]
 
 
-def test_one_refused_rule_leaves_the_hunts_other_rules_compiling(tmp_path: Path):
+def test_one_refused_rule_entry_holds_the_whole_hunt(tmp_path: Path):
+    """The two entries name the same rule, so the refusal is counted per entry, not per name."""
     _save_rule(tmp_path)
 
     statements = compile_hunt_queries(
@@ -122,9 +123,7 @@ def test_one_refused_rule_leaves_the_hunts_other_rules_compiling(tmp_path: Path)
         rules_dir=tmp_path,
     )
 
-    assert [statement.sql.splitlines()[0] for statement in statements] == [
-        "INSERT INTO `dfe`.`detection`"
-    ]
+    assert statements == []
 
 
 def test_the_insert_builder_quotes_whatever_target_it_is_handed():

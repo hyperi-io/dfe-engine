@@ -49,7 +49,7 @@ from dfe_engine.schema.lock import SchemaLock, SchemaLockError, holder_name
 from dfe_engine.schema.phase import apply_plan
 from dfe_engine.schema.plan import LEDGER_ID, LOCK_ID, build_plan, render_one
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 # Kinds that land in the data or meta database and are visible in system.tables.
 _TABLE_KINDS = ("table", "materialized_view", "view")
@@ -214,10 +214,33 @@ def test_a_second_holder_waits_and_reports_rather_than_applying(ch_client, empty
     second.release()
 
 
+class _FirstClaimMisses(SchemaLock):
+    """A lock whose first claim lands too slowly to stand, or lands and then reports a missed quorum."""
+
+    def __init__(self, *args, miss: str, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._miss = miss
+
+    def _claim(self, now: datetime) -> datetime:
+        claimed = super()._claim(now)
+        miss, self._miss = self._miss, "none"
+        if miss == "slow":
+            time.sleep(lock_module._SETTLE_SECONDS)
+        elif miss == "quorum":
+            raise lock_module.SchemaLockQuorumError(
+                "Code: 319. DB::Exception: UNKNOWN_STATUS_OF_INSERT"
+            )
+        return claimed
+
+
+@pytest.mark.parametrize("miss", ["none", "slow", "quorum"])
 def test_appliers_that_find_the_lease_free_together_leave_one_holder(
-    ch_params, ch_client, empty_database, plan
+    ch_params, ch_client, empty_database, plan, miss
 ):
-    """Claims written in the same instant: the latest stands and every other caller reports."""
+    """Claims written in the same instant leave one holder, even when every racer's first claim misses.
+
+    A missed claim never stood, so it must not keep the others waiting out a lease.
+    """
     apply_plan(ch_client, plan)
     table = plan.by_id(LOCK_ID).name
     racers = 4
@@ -227,8 +250,13 @@ def test_appliers_that_find_the_lease_free_together_leave_one_holder(
     def race(holder: str) -> None:
         try:
             client = clickhouse_connect.get_client(**ch_params)
-            lock = SchemaLock(
-                client, database=empty_database, table=table, holder=holder, lease_seconds=60
+            lock = _FirstClaimMisses(
+                client,
+                database=empty_database,
+                table=table,
+                holder=holder,
+                lease_seconds=60,
+                miss=miss,
             )
             start.wait()
             outcomes.append(lock.acquire(wait_seconds=_RIDE_OUT))
@@ -281,7 +309,11 @@ def test_claims_in_the_same_millisecond_keep_one_holder_through_a_merge(
         return stands, [state.holder if state is not None else None for state in seen]
 
     def stored_rows() -> int:
-        return ch_client.query(f"SELECT count() FROM {target}").result_rows[0][0]
+        # The lease rows alone: each claim's marker sits under a lock name of its own.
+        return ch_client.query(
+            f"SELECT count() FROM {target} WHERE lock_name = {{lock:String}}",
+            parameters={"lock": lock_module.LOCK_NAME},
+        ).result_rows[0][0]
 
     assert stored_rows() == 2, "the tie merged before it could be read unmerged"
     stands, named = outcome()
@@ -394,13 +426,13 @@ def replicated_lease(two_replicas):
             pytest.fail("the lease table did not reach replica 2")
         time.sleep(0.5)
 
-    def lock(params: dict, holder: str) -> SchemaLock:
+    def lock(params: dict, holder: str, lease_seconds: int = 60) -> SchemaLock:
         return SchemaLock(
             clickhouse_connect.get_client(**params),
             database=database,
             table=table,
             holder=holder,
-            lease_seconds=60,
+            lease_seconds=lease_seconds,
         )
 
     def fetches(verb: str, *servers: dict) -> None:
@@ -512,7 +544,7 @@ def test_a_claim_short_of_its_quorum_is_not_taken_and_is_once_the_replica_return
 
 
 def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, replicated_lease):
-    """A rival's re-read may have missed a slow claim, so it is not kept, and it lapses unreleased."""
+    """A rival's re-read may have missed a slow claim, so it is not kept, and it holds nobody back."""
     lease = replicated_lease
     held_back = lock_module._SETTLE_SECONDS + 1.0
     lease.fetches("STOP", two_replicas.second)
@@ -532,9 +564,12 @@ def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, 
     assert taken is False, "a claim that landed after the settle stood"
     latest = slow.read()
     assert latest is not None
-    # Releasing it could free a rival that stood while it waited, so it holds until it lapses.
+    # Releasing it could free a rival that stood while it waited, so the row stays unreleased.
     assert (latest.holder, latest.released) == ("pod-slow", False), latest
-    assert lease.lock(two_replicas.second, "pod-next").acquire(wait_seconds=0.0) is False
+    # Its marker is ended, so the next applier takes the lease instead of waiting it out.
+    following = lease.lock(two_replicas.second, "pod-next")
+    assert following.acquire(wait_seconds=0.0) is True
+    following.release()
 
 
 def test_a_slow_claim_is_recognised_as_its_own_and_stands_within_a_settle(
@@ -563,27 +598,42 @@ def test_a_slow_claim_is_recognised_as_its_own_and_stands_within_a_settle(
     slow.release()
 
 
-def test_a_rival_live_claim_beside_a_slow_one_is_still_waited_on(two_replicas, replicated_lease):
-    """A rival that stood while the slow claim was in flight keeps the lease: the slow claim is not re-taken."""
+@pytest.mark.parametrize("evidence", ["claim row", "live marker"])
+def test_a_rival_live_claim_beside_a_slow_one_is_still_waited_on(
+    two_replicas, replicated_lease, evidence
+):
+    """A rival that may have stood keeps the lease, whether its row is unmerged or only its marker is left."""
     lease = replicated_lease
     slow = lease.lock(two_replicas.first, "pod-slow")
     rival = lease.lock(two_replicas.first, "pod-rival")
     now = datetime.now(UTC)
-    # The rival's claim sits beside the slow one, as before a merge collapses them.
-    rival._write(now - timedelta(seconds=3), expires=now + timedelta(seconds=300), released=0)
-    slow._slow_claimed_at = slow._claim(now)
+    earlier = lock_module._millis(now - timedelta(seconds=3))
+    expires = now + timedelta(seconds=300)
+    if evidence == "claim row":
+        # The rival's claim sits beside the slow one, as before a merge collapses them.
+        rival._write(earlier, expires=expires, released=0)
+    else:
+        # A merge has kept only the later row, and the rival's marker is what is left of it.
+        rival._write(earlier, expires=expires, released=0, lock_name=rival._marker(earlier))
+    claimed = slow._claim(now)
+    slow._end_marker(claimed, expires)
     state = slow.read()
     assert state is not None
     assert state.holder == "pod-slow"
 
-    assert slow._own_slow_claim(state, now) is False
+    assert slow._only_ended_claims(now) is False
 
 
 def test_a_slow_claim_never_frees_a_rival_that_stood(two_replicas, replicated_lease):
-    """Y stands while X's later-versioned claim waits on its quorum, so X must not release it."""
+    """Y stands while X's later-versioned claim waits on its quorum, so X must not release it.
+
+    X's lease is shorter than Y's, as a caller with a shorter wait writes, so X's row
+    expires while Y still holds. Neither that nor a merge that folds Y's row away
+    may let a third applier in.
+    """
     lease = replicated_lease
-    y = lease.lock(two_replicas.first, "pod-y")
-    x = lease.lock(two_replicas.second, "pod-x")
+    y = lease.lock(two_replicas.first, "pod-y", lease_seconds=300)
+    x = lease.lock(two_replicas.second, "pod-x", lease_seconds=3)
     observer = lease.lock(two_replicas.first, "pod-observer")
     # Replica 1 stops fetching, so X's claim on replica 2 waits for its quorum.
     lease.fetches("STOP", two_replicas.first)
@@ -624,6 +674,23 @@ def test_a_slow_claim_never_frees_a_rival_that_stood(two_replicas, replicated_le
     taken = lease.lock(two_replicas.first, "pod-z").acquire(wait_seconds=0.0)
     holders = [name for name, held in (("pod-y", outcomes["y"]), ("pod-z", taken)) if held is True]
     assert holders == ["pod-y"], f"two holders: {holders}"
+
+    # X's later-versioned row is the latest and lapses first, while Y's lease runs on.
+    deadline = time.monotonic() + 30
+    while (latest := observer.read()) is None or latest.expires_at > datetime.now(UTC):
+        if time.monotonic() >= deadline:
+            pytest.fail(f"X's claim never lapsed: {latest}")
+        time.sleep(0.5)
+    assert latest.holder == "pod-x", latest
+    assert lease.lock(two_replicas.first, "pod-after-lapse").acquire(wait_seconds=0.0) is False, (
+        "a lapsed missed claim let a third applier in beside Y"
+    )
+
+    first = clickhouse_connect.get_client(**two_replicas.first)
+    first.command(f"OPTIMIZE TABLE `{lease.database}`.`{lease.table}` FINAL")
+    assert lease.lock(two_replicas.first, "pod-after-merge").acquire(wait_seconds=0.0) is False, (
+        "a merge that folded Y's row away let a third applier in beside Y"
+    )
 
 
 def test_an_unreadable_lease_table_fails_the_pass_rather_than_applying_unleased(

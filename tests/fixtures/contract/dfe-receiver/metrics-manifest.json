@@ -2,8 +2,8 @@
   "schema_version": 1,
   "app": "dfe-receiver",
   "namespace": "",
-  "version": "1.15.10",
-  "commit": "cc07306cf042f5a6538b981657d5e31ed41a4c40",
+  "version": "1.15.61",
+  "commit": "unknown",
   "registered_at": "",
   "metrics": [
     {
@@ -99,6 +99,16 @@
       "group": "platform"
     },
     {
+      "name": "transport_message_too_large_total",
+      "type": "counter",
+      "description": "Records over a sender's size ceiling, refused before sending or by the receiver",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
       "name": "transport_recv_errors_total",
       "type": "counter",
       "description": "Receive failures by class (transient: retried, permanent: returned)",
@@ -106,6 +116,28 @@
       "labels": [
         "transport",
         "class"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_consumer_rebuilds_total",
+      "type": "counter",
+      "description": "Consumers replaced after librdkafka flagged them fatal, by the protocol rejoined with",
+      "unit": "",
+      "labels": [
+        "transport",
+        "protocol"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_revoke_discarded_total",
+      "type": "counter",
+      "description": "Records a revoke kept from a write, as the partition's next owner reads them again, by stage: receive (left out by recv) or buffer (discarded by the caller)",
+      "unit": "",
+      "labels": [
+        "transport",
+        "stage"
       ],
       "group": "platform"
     },
@@ -360,6 +392,133 @@
       "group": "platform"
     },
     {
+      "name": "spool_hot_path_total",
+      "type": "counter",
+      "description": "Records the tiered sink's sender took on the hot path (Ok or FilteredDlq)",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "spool_cold_path_total",
+      "type": "counter",
+      "description": "Tiered sink sends that ended on the spool path without error",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "spool_circuit_trips_total",
+      "type": "counter",
+      "description": "Tiered sink hot-path sends that failed (backpressured or timed out), one per send",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "spool_circuit_state",
+      "type": "gauge",
+      "description": "Tiered sink circuit breaker state at the last send (0=closed, 1=half-open, 2=open)",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "tiered_sink_overflow_total",
+      "type": "counter",
+      "description": "Records the tiered sink shed because the spool was full, by when_full policy",
+      "unit": "",
+      "labels": [
+        "policy"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "tiered_sink_dropped_total",
+      "type": "counter",
+      "description": "Records the tiered sink dropped on spool overflow, by when_full policy",
+      "unit": "",
+      "labels": [
+        "policy"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "spool_disk_available_bytes",
+      "type": "gauge",
+      "description": "Bytes free to unprivileged users on the tiered sink spool's filesystem",
+      "unit": "bytes",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "spool_disk_total_bytes",
+      "type": "gauge",
+      "description": "Size of the tiered sink spool's filesystem in bytes",
+      "unit": "bytes",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "spool_dropped_without_shutdown_total",
+      "type": "counter",
+      "description": "Tiered sinks dropped with records spooled and no completed shutdown",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "spool_stale_locks_cleared_total",
+      "type": "counter",
+      "description": "Spool lock files left by a dead process and removed on open, by lock and reason",
+      "unit": "",
+      "labels": [
+        "lock",
+        "reason"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "spool_quarantined_total",
+      "type": "counter",
+      "description": "Spool caches moved aside into a corrupt-* subdirectory, by trigger",
+      "unit": "",
+      "labels": [
+        "trigger"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "spool_queue_depth",
+      "type": "gauge",
+      "description": "Records in a standalone spool queue",
+      "unit": "",
+      "labels": [],
+      "group": "platform"
+    },
+    {
+      "name": "rules_hits_total",
+      "type": "counter",
+      "description": "Records a rule set row set its target on, by rule set and row id",
+      "unit": "",
+      "labels": [
+        "rule_set",
+        "rule"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "rules_clamped_total",
+      "type": "counter",
+      "description": "Records whose clamped target the default replaced, by the row that set the refused value, or (record)",
+      "unit": "",
+      "labels": [
+        "rule_set",
+        "rule"
+      ],
+      "group": "platform"
+    },
+    {
       "name": "dlq_dropped_total",
       "type": "counter",
       "description": "Dead letters no DLQ backend holds, by reason",
@@ -379,6 +538,14 @@
         "to",
         "reason"
       ],
+      "group": "platform"
+    },
+    {
+      "name": "dlq_payload_truncated_total",
+      "type": "counter",
+      "description": "Dead letters whose payload was cut to max_payload_bytes",
+      "unit": "",
+      "labels": [],
       "group": "platform"
     },
     {
@@ -714,6 +881,286 @@
       "group": "backpressure"
     },
     {
+      "name": "receiver_requests_total",
+      "type": "counter",
+      "description": "Requests received, by transport; records_received_total counts the records they carry",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_requests_success_total",
+      "type": "counter",
+      "description": "Total successful requests by transport",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_requests_error_total",
+      "type": "counter",
+      "description": "Total failed requests by transport",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_parse_failures_total",
+      "type": "counter",
+      "description": "Per-protocol ingress parse/decode failures by transport",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_bytes_received_total",
+      "type": "counter",
+      "description": "Total bytes received by transport",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_records_dropped_total",
+      "type": "counter",
+      "description": "Records dropped with no way to tell the sender, by transport and reason",
+      "unit": "",
+      "labels": [
+        "transport",
+        "reason"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_prometheus_rw_unrecorded_total",
+      "type": "counter",
+      "description": "Remote write exemplars and histograms an otel or hyperdx record cannot hold, by kind",
+      "unit": "",
+      "labels": [
+        "kind"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_request_duration_seconds",
+      "type": "histogram",
+      "description": "End-to-end request processing latency",
+      "unit": "seconds",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_active_connections",
+      "type": "gauge",
+      "description": "Currently active inbound connections",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_auth_failures_total",
+      "type": "counter",
+      "description": "Authentication failures by reason",
+      "unit": "",
+      "labels": [
+        "reason"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_validation_failures_total",
+      "type": "counter",
+      "description": "Validation failures by reason",
+      "unit": "",
+      "labels": [
+        "reason"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_request_timeouts_total",
+      "type": "counter",
+      "description": "Requests answered 408 for taking longer than the request timeout, by transport (slow loris indicator)",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_body_size_rejected_total",
+      "type": "counter",
+      "description": "Requests refused for their size, by transport (HTTP 413, gRPC OUT_OF_RANGE or RESOURCE_EXHAUSTED)",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_ip_filter_rejected_total",
+      "type": "counter",
+      "description": "Connections, and syslog UDP datagrams, the IP filter refused, by transport",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_connections_closed_total",
+      "type": "counter",
+      "description": "Connections closed for a connection limit (server.connections), by transport and reason: over_limit, no_first_byte, frame_timeout, idle",
+      "unit": "",
+      "labels": [
+        "transport",
+        "reason"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_rate_limited_total",
+      "type": "counter",
+      "description": "Requests the per-IP rate limit (server.rate_limit) refused with 429, by transport",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_tls_handshake_failures_total",
+      "type": "counter",
+      "description": "TLS handshake failures",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_records_rejected_total",
+      "type": "counter",
+      "description": "Records a destination refused for good, by outcome (dead_lettered, dropped or dlq_refused)",
+      "unit": "",
+      "labels": [
+        "outcome"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_messages_spilled_total",
+      "type": "counter",
+      "description": "Records a destination's buffer held back from its sink, in memory or in the disk spool",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_messages_drained_total",
+      "type": "counter",
+      "description": "Held-back records that have since left the buffer for the sink",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_kafka_send_duration_seconds",
+      "type": "histogram",
+      "description": "Time librdkafka took to queue a record",
+      "unit": "seconds",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_kafka_sends_total",
+      "type": "counter",
+      "description": "Records librdkafka queued",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_kafka_bytes_sent_total",
+      "type": "counter",
+      "description": "Bytes queued to Kafka",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_kafka_send_errors_total",
+      "type": "counter",
+      "description": "Records librdkafka refused to queue",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_kafka_delivered_total",
+      "type": "counter",
+      "description": "Records a broker acknowledged, from librdkafka delivery reports",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_kafka_delivery_failures_total",
+      "type": "counter",
+      "description": "Records no broker confirmed, by librdkafka error code; a timed-out record may still have been written",
+      "unit": "",
+      "labels": [
+        "reason"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_kafka_resends_total",
+      "type": "counter",
+      "description": "Records answered at enqueue that librdkafka gave up on with a message timeout, queued again",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_source_org_id_stripped_total",
+      "type": "counter",
+      "description": "Records whose sender-supplied _org_id was removed (routing.source_org_id: disallow)",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "usage_ingested_bytes_total",
+      "type": "counter",
+      "description": "Payload bytes accepted for delivery, by the org each record was stamped with",
+      "unit": "",
+      "labels": [
+        "org_id"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_events_per_second",
+      "type": "gauge",
+      "description": "Requests per second over the last minute; a request carries one record or more",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
       "name": "receiver_destination_send_failures_total",
       "type": "counter",
       "description": "Records a gRPC destination did not take, by reason (unavailable: down, refusing connections, busy or past its deadline; failed: it answered with an error)",
@@ -722,6 +1169,154 @@
         "reason"
       ],
       "group": "receiver"
+    },
+    {
+      "name": "receiver_destination_build_failures_total",
+      "type": "counter",
+      "description": "Destinations a config reload asked for whose sender failed to build; their records are answered unavailable until a reload builds it",
+      "unit": "",
+      "labels": [],
+      "group": "receiver"
+    },
+    {
+      "name": "receiver_retired_records_total",
+      "type": "counter",
+      "description": "Records held by a destination a config reload retired, by outcome (sent, dead_lettered, spooled: left in its disk spool, dropped)",
+      "unit": "",
+      "labels": [
+        "outcome"
+      ],
+      "group": "receiver"
+    },
+    {
+      "name": "transport_recv_total",
+      "type": "counter",
+      "description": "Flow datagrams received",
+      "unit": "",
+      "labels": [],
+      "group": "flow"
+    },
+    {
+      "name": "transport_recv_bytes_total",
+      "type": "counter",
+      "description": "Flow datagram bytes received",
+      "unit": "",
+      "labels": [],
+      "group": "flow"
+    },
+    {
+      "name": "transport_decode_err_total",
+      "type": "counter",
+      "description": "Flow packets that failed to decode or render, by protocol and reason",
+      "unit": "",
+      "labels": [
+        "transport",
+        "reason"
+      ],
+      "group": "flow"
+    },
+    {
+      "name": "transport_drops_total",
+      "type": "counter",
+      "description": "Flow packets and records dropped, by protocol and reason",
+      "unit": "",
+      "labels": [
+        "transport",
+        "reason"
+      ],
+      "group": "flow"
+    },
+    {
+      "name": "flow_invalid_packet_total",
+      "type": "counter",
+      "description": "Flow packets rejected before decode (truncated, wrong magic, etc.)",
+      "unit": "",
+      "labels": [
+        "transport",
+        "reason"
+      ],
+      "group": "flow"
+    },
+    {
+      "name": "flow_rate_limited_total",
+      "type": "counter",
+      "description": "Flow packets dropped by the per-source UDP rate limiter",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "flow"
+    },
+    {
+      "name": "flow_rate_limit_evicted_total",
+      "type": "counter",
+      "description": "Per-source rate-limit buckets evicted to keep the limiter within cache_size",
+      "unit": "",
+      "labels": [],
+      "group": "flow"
+    },
+    {
+      "name": "flow_records_emitted_total",
+      "type": "counter",
+      "description": "Flow records emitted downstream after decode and envelope rendering",
+      "unit": "",
+      "labels": [
+        "transport",
+        "mode"
+      ],
+      "group": "flow"
+    },
+    {
+      "name": "flow_records_per_packet",
+      "type": "histogram",
+      "description": "Distribution of flow records produced per UDP datagram",
+      "unit": "seconds",
+      "labels": [],
+      "group": "flow"
+    },
+    {
+      "name": "flow_template_cache_size",
+      "type": "gauge",
+      "description": "Current entries in the per-exporter NetFlow/IPFIX template cache",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "flow"
+    },
+    {
+      "name": "flow_template_evicted_total",
+      "type": "counter",
+      "description": "Template cache evictions (LRU + per-exporter cap)",
+      "unit": "",
+      "labels": [],
+      "group": "flow"
+    },
+    {
+      "name": "flow_kernel_drops_total",
+      "type": "counter",
+      "description": "UDP datagrams dropped by the kernel before our recv loop (from /proc/net/udp)",
+      "unit": "",
+      "labels": [],
+      "group": "flow"
+    },
+    {
+      "name": "flow_unknown_version_total",
+      "type": "counter",
+      "description": "Flow packets whose first 16 bits matched no known protocol version",
+      "unit": "",
+      "labels": [],
+      "group": "flow"
+    },
+    {
+      "name": "handler_experimental",
+      "type": "gauge",
+      "description": "Set to 1 while a protocol handler is marked experimental",
+      "unit": "",
+      "labels": [
+        "handler"
+      ],
+      "group": "flow"
     }
   ]
 }

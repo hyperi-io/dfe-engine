@@ -23,7 +23,7 @@ from scalo.api import etag_of
 from scalo.logger import logger
 
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
-from dfe_engine.gitops.repo import PublishResult
+from dfe_engine.gitcrud.routing import GovernedWrites, WriteOutcome, WritePosture
 from dfe_engine.ingest.models import CompatProfile, CompatSetting, IngestRules, RuleOrder
 
 PROFILES_CLASS = "compat_profiles"
@@ -60,8 +60,9 @@ class IngestStore:
         crud: The Governed Ops engine over the deploy repo.
     """
 
-    def __init__(self, crud: GitCrud) -> None:
+    def __init__(self, crud: GitCrud, *, posture: WritePosture | None = None) -> None:
         self._crud = crud
+        self.writes = GovernedWrites(crud, posture=posture)
 
     def read(self) -> IngestRules:
         """The order, profiles and default bindings as the deploy repo holds them now."""
@@ -130,39 +131,53 @@ class IngestStore:
         with self._crud.reading():
             return self._setting(name), self._crud.head_revision()
 
-    def put_order(
-        self, order: RuleOrder, actor: str, *, base_revision: str | None
-    ) -> PublishResult:
+    def put_order(self, order: RuleOrder, actor: str, *, base_revision: str | None) -> WriteOutcome:
         """Store the rule order, conditional on the head it was read at.
 
         Raises:
             ConcurrencyConflictError: The head moved off *base_revision*.
         """
-        return self._crud.put(
+        message = f"ingest: reorder rules (by {actor})"
+        return self.writes(
             SETTINGS_CLASS,
             ORDER_SETTING,
-            order.model_dump(mode="json", by_alias=True),
             actor,
-            message=f"ingest: reorder rules (by {actor})",
-            base_revision=base_revision,
+            message,
+            lambda branch: self._crud.put(
+                SETTINGS_CLASS,
+                ORDER_SETTING,
+                order.model_dump(mode="json", by_alias=True),
+                actor,
+                message=message,
+                base_revision=base_revision,
+                branch=branch,
+            ),
         )
 
     def put_compat(
         self, setting: CompatSetting, actor: str, *, base_revision: str | None
-    ) -> PublishResult:
+    ) -> WriteOutcome:
         """Store the deployment's default bindings, conditional on the head they were read at.
 
         Raises:
             ConcurrencyConflictError: The head moved off *base_revision*.
         """
         bindings = [b.model_dump(mode="json", exclude_defaults=True) for b in setting.profiles]
-        return self._crud.put(
+        message = f"ingest: bind compatibility profiles (by {actor})"
+        return self.writes(
             SETTINGS_CLASS,
             COMPAT_SETTING,
-            {"profiles": bindings},
             actor,
-            message=f"ingest: bind compatibility profiles (by {actor})",
-            base_revision=base_revision,
+            message,
+            lambda branch: self._crud.put(
+                SETTINGS_CLASS,
+                COMPAT_SETTING,
+                {"profiles": bindings},
+                actor,
+                message=message,
+                base_revision=base_revision,
+                branch=branch,
+            ),
         )
 
     def seed_core_profiles(self) -> list[str]:

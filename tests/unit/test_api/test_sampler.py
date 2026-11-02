@@ -159,3 +159,26 @@ def test_unauthenticated_is_rejected(client, fake_ch):
 def test_unknown_sample_task_is_404(client, admin_headers):
     r = client.get("/api/v1/samples/does-not-exist", headers=admin_headers)
     assert r.status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("default", "statuses"),
+    [("recent", {"completed"}), ("smart", {"pending", "running", "failed"})],
+)
+def test_an_omitted_mode_takes_the_configured_default(
+    app, client, fake_ch, admin_headers, default, statuses
+):
+    """recent runs inline and completes, smart goes to the gated reducer and is pending."""
+    sampler = app.state.settings.sampler
+    original = sampler.default_mode
+    sampler.default_mode = default
+    try:
+        r = client.post(
+            "/api/v1/sample",
+            json={"table": "`db`.`events`", "limit": 5},
+            headers=admin_headers,
+        )
+    finally:
+        sampler.default_mode = original
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] in statuses

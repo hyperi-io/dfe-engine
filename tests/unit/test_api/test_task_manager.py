@@ -254,3 +254,29 @@ class TestWaitForProgress:
         # Task is still running after short timeout
         assert result.status in (TaskStatus.RUNNING, TaskStatus.PENDING)
         manager.cancel(info.id)
+
+
+class TestAdmission:
+    @pytest.mark.asyncio
+    async def test_submissions_past_the_active_cap_are_refused_until_one_finishes(self):
+        from dfe_engine.api.task_manager import TaskCapacityError
+
+        manager = TaskManager(max_completed=5, max_active=2)
+        release = asyncio.Event()
+
+        async def held(*, task):
+            await release.wait()
+
+        manager.submit("test:held", held)
+        manager.submit("test:held", held)
+        with pytest.raises(TaskCapacityError, match="2 tasks"):
+            manager.submit("test:held", held)
+
+        release.set()
+        await asyncio.sleep(0.05)
+        manager.submit("test:held", held)
+
+    @pytest.mark.parametrize("cap", [0, -1])
+    def test_a_cap_admitting_nothing_is_refused(self, cap):
+        with pytest.raises(ValueError, match="at least 1"):
+            TaskManager(max_active=cap)

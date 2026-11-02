@@ -17,7 +17,7 @@ stay valid. All statements are convergent: ``IF NOT EXISTS`` creates, and an
 objects that already exist.
 """
 
-from typing import Any
+from typing import Any, Self
 
 from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
 
@@ -52,6 +52,35 @@ def _settings_kv(settings: dict[str, int]) -> str:
     return ", ".join(f"{k} = {v}" for k, v in sorted(settings.items()))
 
 
+class ReplacingGrant(str):
+    """A statement leaving a role holding exactly ``grants``, and what to run if it is refused.
+
+    ClickHouse refuses the whole statement over one malformed entry, and the role
+    then keeps every privilege it held. :meth:`fallback` revokes them all and grants
+    each entry on its own, so a refused list fails closed.
+    """
+
+    role: str
+    grants: tuple[str, ...]
+
+    def __new__(cls, role: str, grants: list[str]) -> Self:
+        """The statement for *role* holding *grants*, or revoking everything when there are none."""
+        if grants:
+            sql = f"GRANT {', '.join(grants)} TO {role} WITH REPLACE OPTION"
+        else:
+            sql = f"REVOKE ALL ON *.* FROM {role}"
+        stmt = super().__new__(cls, sql)
+        stmt.role = role
+        stmt.grants = tuple(grants)
+        return stmt
+
+    def fallback(self) -> list[str]:
+        """Revoke every privilege, then grant each entry alone."""
+        return [f"REVOKE ALL ON *.* FROM {self.role}"] + [
+            f"GRANT {grant} TO {self.role}" for grant in self.grants
+        ]
+
+
 def render_tier(tier: ChTier) -> list[str]:
     """DDL for a quota tier: role -> settings profile -> quota -> grants -> attach.
 
@@ -59,7 +88,8 @@ def render_tier(tier: ChTier) -> list[str]:
     assigned ``TO`` it, and ClickHouse rejects a quota naming a role that does not
     exist yet (UNKNOWN_ROLE) - which only shows up against a cluster where the
     role was not already present. The profile and quota in turn precede the
-    ``ALTER ROLE`` that attaches them. Every statement is idempotent.
+    ``ALTER ROLE`` that attaches them. Every statement is idempotent, and the
+    grant replaces the role's privileges, so one dropped from the tier is revoked.
     """
     role = _bq(tier.role())
     stmts: list[str] = [f"CREATE ROLE IF NOT EXISTS {role}"]
@@ -80,8 +110,7 @@ def render_tier(tier: ChTier) -> list[str]:
             f"ALTER QUOTA {qn} FOR INTERVAL {tier.quota_interval()} MAX {maxima} TO {role}"
         )
 
-    for grant in tier.grants:
-        stmts.append(f"GRANT {grant} TO {role}")
+    stmts.append(ReplacingGrant(role, list(tier.grants)))
     if tier.settings:
         stmts.append(f"ALTER ROLE {role} SETTINGS PROFILE {_bq(tier.profile())}")
     return stmts
@@ -91,7 +120,8 @@ def render_service_role(role_def: ChServiceRole) -> list[str]:
     """DDL for a fixed service role (profile + role + grants + attach).
 
     The minted USER (when ``mint_user`` is set) is created by the reconciler,
-    which holds the freshly minted secret - kept out of this pure path.
+    which holds the freshly minted secret - kept out of this pure path. The grant
+    replaces the role's privileges, as the schema phase's apply of the role does.
     """
     role = _bq(role_def.role())
     stmts: list[str] = []
@@ -102,8 +132,7 @@ def render_service_role(role_def: ChServiceRole) -> list[str]:
         stmts.append(f"ALTER SETTINGS PROFILE {prof} SETTINGS {_settings_kv(role_def.settings)}")
 
     stmts.append(f"CREATE ROLE IF NOT EXISTS {role}")
-    for grant in role_def.grants:
-        stmts.append(f"GRANT {grant} TO {role}")
+    stmts.append(ReplacingGrant(role, list(role_def.grants)))
     if role_def.settings:
         stmts.append(f"ALTER ROLE {role} SETTINGS PROFILE {_bq(role_def.profile())}")
     return stmts
@@ -164,7 +193,7 @@ def render_tenant_axis(
     # deny-by-default, so the embedded HyperDX cannot build a field list without
     # these four; the server config alone would leave a tenant staring at an
     # empty source.
-    stmts += [f"GRANT {grant} TO {role}" for grant in TENANT_SYSTEM_GRANTS]
+    stmts.append(ReplacingGrant(role, list(TENANT_SYSTEM_GRANTS)))
     for db, table in tables:
         stmts += _tenant_policy(db, table, using=predicate, role=role)
     for db, table in deny_tables or []:
@@ -220,15 +249,13 @@ def render_pinned_user(
     a stale hash and every hyperdx connect fails CH auth (code 516) until it is
     realigned. The IDENTIFIED ALTER converges the user to the stored hash on
     every run; it is a no-op when they already match.
+
+    The role GRANT replaces the user's whole role set in one statement, so a
+    demoted tier, a dropped ``extra_roles`` entry or a lifted tenant pin is
+    revoked rather than left granted beside the new set.
     """
     qu = _bq(user)
-    stmts = [
-        f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
-        f"ALTER USER {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
-        f"GRANT {_bq(tier_role)} TO {qu}",
-    ]
-    for role in extra_roles or []:
-        stmts.append(f"GRANT {_bq(role)} TO {qu}")
+    roles = [tier_role, *(extra_roles or [])]
     if org_ids:
         # The pin is comma-joined, so a comma inside an id would silently split
         # into fragments that match nothing.
@@ -238,7 +265,14 @@ def render_pinned_user(
         # An empty id pins '' and matches every row whose _org_id defaulted to empty.
         if "" in org_ids:
             raise ValueError(f"org ids must not be empty: {org_ids!r}")
-        stmts.append(f"GRANT {_bq(TENANT_ROLE)} TO {qu}")
+        roles.append(TENANT_ROLE)
+    granted = ", ".join(_bq(role) for role in roles)
+    stmts = [
+        f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
+        f"ALTER USER {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
+        f"GRANT {granted} TO {qu} WITH REPLACE OPTION",
+    ]
+    if org_ids:
         pin = _sq(",".join(org_ids))
         stmts.append(f"ALTER USER {qu} SETTINGS {TENANT_SETTING} = {pin} READONLY")
     return stmts

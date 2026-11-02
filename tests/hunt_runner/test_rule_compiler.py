@@ -258,20 +258,28 @@ def test_a_hunt_with_no_rules_compiles_to_nothing(tmp_path: Path):
     )
 
 
-def test_a_missing_rule_file_is_dropped_not_guessed(tmp_path: Path):
+def test_a_missing_rule_file_holds_the_whole_hunt(tmp_path: Path):
+    """The rules share one watermark, so running the rest would skip the missing rule's window."""
     _save_rule(tmp_path, rule_id="present", name="Present", where_clause="a = 1")
-    sql = _compiled_sql(
-        {
-            **resolved_customers("acme"),
-            "rules": ["absent", "present"],
-            "global_source_table_name": "dfe.main",
-        },
-        "h",
-        rules_dir=tmp_path,
-        default_target="dfe.detection",
-    )
-    assert len(sql) == 1
-    assert "'present' AS rule_id" in sql[0]
+    captured: list = []
+    handler_id = logger.add(captured.append, level="WARNING")
+    try:
+        sql = _compiled_sql(
+            {
+                **resolved_customers("acme"),
+                "rules": ["absent", "present"],
+                "global_source_table_name": "dfe.main",
+            },
+            "h",
+            rules_dir=tmp_path,
+            default_target="dfe.detection",
+        )
+    finally:
+        logger.remove(handler_id)
+
+    assert sql == []
+    held = [m for m in captured if "runs none of them" in m.record["message"]]
+    assert [m.record["extra"]["rules"] for m in held] == [["absent"]]
 
 
 @pytest.mark.parametrize("escape", ["../outside", "ABSOLUTE"])
@@ -294,8 +302,7 @@ def test_a_rule_name_that_leaves_the_rules_dir_compiles_nothing(tmp_path: Path, 
         default_target="dfe.detection",
     )
 
-    assert [statement.rule_id for statement in statements] == ["present"]
-    assert not any("leaked = 1" in statement.sql for statement in statements)
+    assert statements == []
 
 
 def test_a_rule_with_no_detection_logic_is_dropped(tmp_path: Path):
@@ -346,9 +353,7 @@ def test_a_hand_edited_rule_that_reads_outside_the_row_compiles_nothing(tmp_path
         default_target="dfe.detection",
     )
 
-    assert [statement.rule_id for statement in statements] == ["present"]
-    assert not any(where in statement.sql for statement in statements)
-    assert not any(where in statement.count_sql for statement in statements)
+    assert statements == []
 
 
 def test_a_rule_using_the_in_operator_over_values_compiles(tmp_path: Path):

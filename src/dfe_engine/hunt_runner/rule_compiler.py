@@ -29,7 +29,7 @@ every match in the window, and the INSERT of one summary row carrying that count
 so a truncated run says how much it left out.
 
 A rule that cannot be compiled (file missing, no detection logic, no source or no
-target to resolve) is logged and dropped, as is one whose condition calls a
+target to resolve) is logged and refused, as is one whose condition calls a
 ClickHouse function reading outside the row or sending it to another service --
 the statement runs as a user that may write, so ClickHouse cannot be asked to
 refuse that call. So is one whose target is not a plain ``table`` or
@@ -38,9 +38,12 @@ row off the box. Its source is held to the same rule, since ``FROM url(...)``
 reads another host and a name carrying a bracket or a comment rewrites the
 statement, except that a source may carry ``-``: a source table takes its
 source's label as its name, and both parts are backtick-quoted. A source named
-without a database is read from the data database the caller passes. A hunt
-left with NOTHING to run is a hard failure in the worker rather than a silent
-clean run.
+without a database is read from the data database the caller passes.
+
+One refused rule leaves the whole hunt with nothing to run. Its rules share one
+watermark, so running the others would advance it past windows the refused rule
+never scanned. A hunt with nothing to run is a hard failure in the worker, which
+holds the watermark until every rule compiles.
 
 Every statement reads only the rows whose ``_org_id`` is one of the tenant ids
 the hunt's ``customers`` resolved to (:mod:`~dfe_engine.hunts.customers`), as its
@@ -52,6 +55,7 @@ a rule may read is a lookup database's, which ``hunts.lookup_databases`` lists a
 holding no org's rows.
 """
 
+from collections import Counter
 from collections.abc import Collection
 from pathlib import Path
 from typing import Any
@@ -213,8 +217,8 @@ def compile_hunt_queries(
             condition may look values up in.
 
     Returns:
-        The statements, in the hunt's own rule order. Empty when nothing compiled,
-        among the reasons a hunt naming no customer or one with no stored tenant ids.
+        The statements, in the hunt's own rule order. Empty when any named rule was
+        refused, and for a hunt naming no customer or one with no stored tenant ids.
 
     Raises:
         ValueError: ``max_detections`` is below 1, which would write nothing at all.
@@ -334,4 +338,14 @@ def compile_hunt_queries(
                 },
             )
         )
+    refused = Counter(str(entry["rule_name"]) for entry in entries)
+    refused.subtract(statement.rule_id for statement in statements)
+    if any(count > 0 for count in refused.values()):
+        # Each refusal already logged its own ERROR, and this line names the consequence.
+        logger.warning(
+            "hunt names rules that did not compile, so it runs none of them until each does",
+            hunt_id=hunt_id,
+            rules=sorted(name for name, count in refused.items() if count > 0),
+        )
+        return []
     return statements

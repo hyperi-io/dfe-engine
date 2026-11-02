@@ -395,11 +395,12 @@ class DestinationsConfig(BaseModel):
                     f"grpc.endpoint; the receiver refuses a bare grpc string"
                 )
                 raise ValueError(msg)
-        # An empty fan-out names nowhere to deliver to, so every record the source
-        # labels is accepted and dropped.
-        for ref in [self.default, *self.sources.values()]:
+        # An empty fan-out names nowhere to deliver to, so the receiver answers every
+        # record it routes there delivered and sends it nowhere.
+        refs = {"default": self.default} | {f"sources.{s}": r for s, r in self.sources.items()}
+        for key, ref in refs.items():
             if not destination_names(ref):
-                msg = "A destination reference must name at least one destination"
+                msg = f"destinations.{key} is an empty list: name at least one destination"
                 raise ValueError(msg)
         # A destination the receiver cannot resolve silently drops every record
         # sent to it, so nothing may name one that is neither built in nor

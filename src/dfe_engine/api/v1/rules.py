@@ -51,8 +51,9 @@ _REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
             "one SELECT, names no <db>.<table> source, names a source that is not a table "
             "name (letters, digits, '_' and '-'), has no WHERE to detect with, or "
             "calls a function that reads outside the row (url, s3, a dictionary) or sends "
-            "it to another service (the ai* functions) "
-            "(code invalid_sql, the errors in context.sql_errors). Or the rule matches "
+            "it to another service (the ai* functions), or carries a CEL filter that "
+            "does not transpile (code invalid_sql, the errors in context.sql_errors). "
+            "Or the rule matches "
             "every event in its source (code rule_matches_everything, the source and "
             "detection WHERE in context)."
         ),

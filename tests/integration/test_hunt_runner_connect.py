@@ -29,7 +29,7 @@ from dfe_engine.settings import (
     DFESettings,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 PASSWORD = "runner-probe-password"
 # Sleeps the runner takes before the user is made; each one is a refused login.

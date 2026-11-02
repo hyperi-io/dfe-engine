@@ -33,6 +33,7 @@ from dfe_engine.auth.oidc.rp import (
     OidcRelyingParty,
 )
 from tests.support.loopback import CountingListener
+from tests.support.oidc import serve_provider
 from tests.unit.test_auth.test_oidc.local_cloud_identity import LocalCloudIdentity
 from tests.unit.test_auth.test_oidc.local_directory import AppTokenEntra, fast_http
 from tests.unit.test_auth.test_oidc.local_graph import LocalGraph
@@ -142,6 +143,8 @@ def directory(app, client: TestClient, tmp_path, monkeypatch) -> Iterator[Callab
         adapter = _adapter(kind, base_url)
         monkeypatch.setattr("dfe_engine.auth.oidc.adapters.get_adapter", lambda *_a, **_k: adapter)
         registry = OIDCProviderRegistry(tmp_path / "rp-registry")
+        if app.state.oidc_provider_registry.get(PROVIDER) is None:
+            serve_provider(app, PROVIDER)
         app.state.oidc_rp = _DirectRp(registry, kind, deadline)
 
     yield _point

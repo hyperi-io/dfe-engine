@@ -51,9 +51,14 @@ def _count(ch, table: str) -> int:
     return int(ch.query(f"SELECT count() FROM {table}").result_rows[0][0])
 
 
-def _coord(ch, db, worker_id="w1"):
+def _coord(ch, db, worker_id="w1", clock=None):
     return ChCoordinator(
-        ch, database=db, worker_id=worker_id, settle_seconds=0.0, sleep=lambda _s: None
+        ch,
+        database=db,
+        worker_id=worker_id,
+        settle_seconds=0.0,
+        sleep=lambda _s: None,
+        **({"clock": clock} if clock is not None else {}),
     )
 
 
@@ -102,16 +107,17 @@ def test_tick_runs_due_hunt_and_frees_slot(ch_client, ch_db):
 
 
 def test_tick_never_double_runs_a_leased_hunt(ch_client, ch_db):
-    coord = _coord(ch_client, ch_db, "runner")
+    fire = current_fire("h3", 600, 5000)
+    now = fire + 1
+    # The runner times leases by its coordinator's clock, so both share the tick's.
+    coord = _coord(ch_client, ch_db, "runner", clock=lambda: now)
     coord.ensure_schema()
     worker = HuntWorker(ch_client, coord)
     spec = HuntSpec(hunt_id="h3", interval_seconds=600)  # never reached: the lease blocks it
     runner = HuntRunner(coord, worker, {spec.hunt_id: spec}, cap=4)
 
-    fire = current_fire("h3", 600, 5000)
-    now = fire + 1
     # a DIFFERENT worker holds an active lease (a prior fire still running)
-    other = _coord(ch_client, ch_db, "other")
+    other = _coord(ch_client, ch_db, "other", clock=lambda: now)
     assert other.try_claim("h3", fire=fire, now=now) is True
     # the runner must NOT double-run it - it records an overrun and skips
     assert runner.tick(now) == 0

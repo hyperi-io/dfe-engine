@@ -74,6 +74,55 @@ def quote_ident(name: str, *, what: str = "identifier") -> str:
 _BARE_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
+@dataclass(frozen=True, slots=True)
+class IndexDefinition:
+    """One data-skipping index as a column declares it.
+
+    Attributes:
+        name: The index name.
+        type: Its ``TYPE`` clause, as written.
+        granularity: Its ``GRANULARITY``, None where the server picks it.
+        sql: The whole ``INDEX ...`` definition.
+    """
+
+    name: str
+    type: str
+    granularity: int | None
+    sql: str
+
+    def matches(self, live_type: str, live_granularity: int) -> bool:
+        """Whether a live index of that type and granularity is this one."""
+        return _normal_type(live_type) == _normal_type(self.type) and (
+            self.granularity is None or live_granularity == self.granularity
+        )
+
+
+_INDEX_DEF = re.compile(
+    r"^INDEX (?P<name>\S+) \S+ TYPE (?P<type>.+?)(?: GRANULARITY (?P<granularity>\d+))?$"
+)
+
+
+def _parse_index(sql: str) -> IndexDefinition:
+    found = _INDEX_DEF.match(sql)
+    if found is None:
+        raise ValueError(f"not an INDEX definition: {sql!r}")
+    index_type = found["type"]
+    # ClickHouse stores its own granularity for a text index, whatever the DDL said.
+    server_owned = _normal_type(index_type).startswith("text")
+    granularity = found["granularity"]
+    return IndexDefinition(
+        name=found["name"].strip("`"),
+        type=index_type,
+        granularity=None if server_owned or not granularity else int(granularity),
+        sql=sql,
+    )
+
+
+def _normal_type(index_type: str) -> str:
+    """An index type compared without the spacing ClickHouse rewrites."""
+    return re.sub(r"\s+", "", index_type).lower()
+
+
 def _ident(name: str, *, what: str = "index name") -> str:
     """A name bare when ClickHouse reads it bare, else quoted through :func:`quote_ident`.
 
@@ -426,6 +475,31 @@ class DDLGenerator:
             f"ALTER TABLE {_qualified(cfg.db, table_name, what='table name')}"
             f" MODIFY COLUMN {col_def};\n"
         )
+
+    def index_definitions(self, column: SchemaColumn) -> list[IndexDefinition]:
+        """The indexes a column asks for, each with the name, type and granularity it declares."""
+        return [_parse_index(index) for index in self._index_defs(column)]
+
+    def managed_index_names(self, column: SchemaColumn) -> set[str]:
+        """Every index name this generator can give *column*, whatever it asks for now."""
+        base = f"idx_{column.name}"
+        return {base} | {f"{base}_{suffix}" for suffix, _ in self._key_search_templates}
+
+    def generate_alter_drop_index(
+        self, table_name: str, index_name: str, config: DDLConfig | None = None
+    ) -> str:
+        """Generate ALTER TABLE DROP INDEX for one named index."""
+        cfg = config or DDLConfig()
+        qualified = _qualified(cfg.db, table_name, what="table name")
+        return f"ALTER TABLE {qualified} DROP INDEX IF EXISTS {_ident(index_name)};\n"
+
+    def generate_alter_add_index(
+        self, table_name: str, index: IndexDefinition, config: DDLConfig | None = None
+    ) -> str:
+        """Generate ALTER TABLE ADD INDEX for one index definition."""
+        cfg = config or DDLConfig()
+        qualified = _qualified(cfg.db, table_name, what="table name")
+        return f"ALTER TABLE {qualified} ADD {index.sql};\n"
 
     def generate_alter_add_indexes(
         self,

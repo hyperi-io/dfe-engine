@@ -37,6 +37,7 @@ from typing import Any
 
 from dfe_engine.gitcrud import GitCrud, ResourceClass, ResourceClassRegistry, ResourceNotFoundError
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
+from dfe_engine.gitcrud.routing import GovernedWrites, WritePosture
 from dfe_engine.yaml_utils import deep_merge
 
 from .providers import ProviderConfig, ProviderKind, SigmaProvider, SigmaRuleDoc
@@ -97,6 +98,9 @@ class SyncReport:
     merged: int = 0
     committed: bool = False
     commit_sha: str | None = None
+    review_required: bool = False
+    pr_url: str | None = None
+    review_branch: str | None = None
     warnings: list[str] | None = None
 
     def as_dict(self) -> dict[str, Any]:
@@ -110,6 +114,9 @@ class SyncReport:
             "merged": self.merged,
             "committed": self.committed,
             "commit_sha": self.commit_sha,
+            "review_required": self.review_required,
+            "pr_url": self.pr_url,
+            "review_branch": self.review_branch,
             "warnings": self.warnings or [],
         }
 
@@ -120,8 +127,9 @@ class SyncReport:
 class SigmaCatalogStore:
     """CRUD over the id-keyed sigma rule catalogue (gitcrud sigma_rules)."""
 
-    def __init__(self, crud: GitCrud) -> None:
+    def __init__(self, crud: GitCrud, *, posture: WritePosture | None = None) -> None:
         self._crud = _sigma_crud(crud)
+        self.writes = GovernedWrites(self._crud, posture=posture)
 
     # -- reads --
 
@@ -255,11 +263,19 @@ class SigmaCatalogStore:
         report.total = len(seen)
         if writes:
             scope = (source or "sigma")[:20]
-            result = self._crud.put_many(
-                writes, actor, _msg(scope, f"import {len(writes)} rules", actor)
+            message = _msg(scope, f"import {len(writes)} rules", actor)
+            result = self.writes(
+                RULES_CLASS,
+                f"import-{scope}",
+                actor,
+                message,
+                lambda branch: self._crud.put_many(writes, actor, message, branch=branch),
             )
             report.committed = result.changed
             report.commit_sha = result.commit_sha
+            report.review_required = result.review_required
+            report.pr_url = result.pr_url
+            report.review_branch = result.branch
         return report
 
     # -- operator edits --
@@ -281,7 +297,16 @@ class SigmaCatalogStore:
         # The operator has acted on the rule -> the catalogue-drift review signal is
         # resolved (sticky drift is cleared only by an operator action).
         prov["drift"] = False
-        self._crud.put(RULES_CLASS, rule_id, doc, actor, message=_msg(rule_id[:20], "edit", actor))
+        message = _msg(rule_id[:20], "edit", actor)
+        self.writes(
+            RULES_CLASS,
+            rule_id,
+            actor,
+            message,
+            lambda branch: self._crud.put(
+                RULES_CLASS, rule_id, doc, actor, message=message, branch=branch
+            ),
+        )
         return doc
 
     def adopt_rule(self, rule_id: str, actor: str) -> dict[str, Any]:
@@ -298,14 +323,30 @@ class SigmaCatalogStore:
         if not prov.get("local_edited", False) or drift_pending:
             prov["local_edited"] = True
             prov["drift"] = False
-            self._crud.put(
-                RULES_CLASS, rule_id, doc, actor, message=_msg(rule_id[:20], "adopt", actor)
+            message = _msg(rule_id[:20], "adopt", actor)
+            self.writes(
+                RULES_CLASS,
+                rule_id,
+                actor,
+                message,
+                lambda branch: self._crud.put(
+                    RULES_CLASS, rule_id, doc, actor, message=message, branch=branch
+                ),
             )
         return doc
 
     def delete_rule(self, rule_id: str, actor: str) -> None:
         """Remove a rule from the catalogue (raises if absent)."""
-        self._crud.delete(RULES_CLASS, rule_id, actor, message=_msg(rule_id[:20], "delete", actor))
+        message = _msg(rule_id[:20], "delete", actor)
+        self.writes(
+            RULES_CLASS,
+            rule_id,
+            actor,
+            message,
+            lambda branch: self._crud.delete(
+                RULES_CLASS, rule_id, actor, message=message, branch=branch
+            ),
+        )
 
 
 # ---- selection store (the meta-level 'which rules to implement' list) ----------
@@ -314,8 +355,9 @@ class SigmaCatalogStore:
 class SigmaSelectionStore:
     """CRUD over the curated selection list - which catalogued rules to implement."""
 
-    def __init__(self, crud: GitCrud) -> None:
+    def __init__(self, crud: GitCrud, *, posture: WritePosture | None = None) -> None:
         self._crud = _sigma_crud(crud)
+        self.writes = GovernedWrites(self._crud, posture=posture)
 
     def list_selected(self) -> list[str]:
         """The ids of the selected rules."""
@@ -330,12 +372,20 @@ class SigmaSelectionStore:
         return rule_id in set(self.list_selected())
 
     def _write(self, ids: list[str], actor: str, summary: str) -> None:
-        self._crud.put(
+        message = _msg("selected", summary, actor)
+        self.writes(
             SELECTIONS_CLASS,
             _SELECTION_DOC,
-            {"rules": sorted(set(ids))},
             actor,
-            message=_msg("selected", summary, actor),
+            message,
+            lambda branch: self._crud.put(
+                SELECTIONS_CLASS,
+                _SELECTION_DOC,
+                {"rules": sorted(set(ids))},
+                actor,
+                message=message,
+                branch=branch,
+            ),
         )
 
     def select(self, rule_id: str, actor: str) -> bool:
@@ -385,8 +435,9 @@ class SigmaProviderStore:
     are therefore side-effect free.
     """
 
-    def __init__(self, crud: GitCrud) -> None:
+    def __init__(self, crud: GitCrud, *, posture: WritePosture | None = None) -> None:
         self._crud = _sigma_crud(crud)
+        self.writes = GovernedWrites(self._crud, posture=posture)
 
     def _stored(self) -> dict[str, ProviderConfig]:
         out: dict[str, ProviderConfig] = {}
@@ -415,12 +466,20 @@ class SigmaProviderStore:
 
     def save_config(self, config: ProviderConfig, actor: str) -> ProviderConfig:
         """Store a provider config."""
-        self._crud.put(
+        message = _msg(config.name[:20], "provider config", actor)
+        self.writes(
             PROVIDERS_CLASS,
             config.name,
-            config.model_dump(mode="json"),
             actor,
-            message=_msg(config.name[:20], "provider config", actor),
+            message,
+            lambda branch: self._crud.put(
+                PROVIDERS_CLASS,
+                config.name,
+                config.model_dump(mode="json"),
+                actor,
+                message=message,
+                branch=branch,
+            ),
         )
         return config
 
@@ -432,8 +491,15 @@ class SigmaProviderStore:
 
     def delete_config(self, name: str, actor: str) -> None:
         """Remove a stored provider config (a built-in default reverts to its default)."""
-        self._crud.delete(
-            PROVIDERS_CLASS, name, actor, message=_msg(name[:20], "delete provider", actor)
+        message = _msg(name[:20], "delete provider", actor)
+        self.writes(
+            PROVIDERS_CLASS,
+            name,
+            actor,
+            message,
+            lambda branch: self._crud.delete(
+                PROVIDERS_CLASS, name, actor, message=message, branch=branch
+            ),
         )
 
 

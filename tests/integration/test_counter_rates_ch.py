@@ -56,7 +56,7 @@ from dfe_engine.settings import (
 )
 from tests.support.accounts import admin_on_its_own_password
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 _SERVICE = "dfe-receiver"
 _LOADER = "dfe-loader"

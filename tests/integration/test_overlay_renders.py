@@ -43,7 +43,7 @@ from tests.support.producer_contract import DFE_INFRA, in_ci, producer_file
 if shutil.which("helm") is None:
     pytest.skip("the helm binary is not on PATH", allow_module_level=True)
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 VRL = "dfe-transform-vrl"
 VECTOR = "dfe-transform-vector"

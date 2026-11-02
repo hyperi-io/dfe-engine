@@ -1,10 +1,12 @@
 name: receiver-normal
 description: >-
-  Restore the receiver's KEDA ceiling to the baseline chart default after a
-  surge (the counterpart of receiver-surge).
+  Return the receiver to its tier's own KEDA ceiling after a surge (the
+  counterpart of receiver-surge), by removing the maxReplicaCount override so
+  the tier profile applies again.
 required_action: action:invoke:receiver-normal
 changes:
   - cls: helmvars
     name: dfe-receiver-default-values
     path: keda.maxReplicaCount
-    value: 10
+    value:
+      $unset: true

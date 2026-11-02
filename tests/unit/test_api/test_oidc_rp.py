@@ -35,6 +35,7 @@ from dfe_engine.auth.oidc.rp import NormalizedIdentity, build_relying_party
 from dfe_engine.auth.sessions import AUTH_TIME_CLAIM
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
+from tests.support.oidc import serve_provider
 
 ISS = "https://dfe.test/api"
 
@@ -298,12 +299,17 @@ def test_callback_unknown_provider_404(client):
 
 @pytest.fixture(autouse=True)
 def _stub_group_linked(request):
-    """Link the g1 every stub login asserts to a group with a role, which is what admits it."""
+    """Register the stub provider and link the g1 every stub login asserts to a group with a role.
+
+    A login is served only for a provider the registry enables, so the stub RP's one
+    provider is stored as an RP built from the registry would have found it.
+    """
     if "client" not in request.fixturenames:
         return
     # The client starts the app, which is what builds its group store.
     request.getfixturevalue("client")
     app = request.getfixturevalue("app")
+    serve_provider(app)
     app.state.group_store.create(
         "stub-viewers", ["data_viewer"], source_provider="stub", source_id="g1"
     )
@@ -395,6 +401,58 @@ async def test_reload_ignores_disabled_provider(client, app):
         OIDCProvider(type="generic", issuer="https://idp.example", enabled=False),
     )
     assert await _reload_rp_if_provider_known(_Req(app), "switched-off") is None  # ty: ignore[invalid-argument-type]  # a stand-in request carrying only the app this path reads
+
+
+async def _served(app, name: str) -> None:
+    """Register *name* enabled and rebuild the RP onto it, as a write on this worker would."""
+    from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
+
+    app.state.oidc_provider_registry.create(
+        name, OIDCProvider(type="generic", issuer="https://idp.example")
+    )
+    rp = await _reload_rp_if_provider_known(_Req(app), name)  # ty: ignore[invalid-argument-type]  # a stand-in request carrying only the app this path reads
+    assert rp is not None
+    assert rp.has_provider(name)
+
+
+@pytest.mark.parametrize("change", ["disabled", "deleted"])
+@pytest.mark.parametrize("route", ["login", "callback"])
+async def test_a_provider_changed_by_another_replica_refuses_the_next_login(
+    client, app, change, route
+):
+    """The RP still holds the provider, but the shared registry no longer enables it.
+
+    Another worker or replica writing the providers directory changes it without
+    rebuilding this one's RP, so each login asks the registry first.
+    """
+    await _served(app, "elsewhere")
+    registry = app.state.oidc_provider_registry
+    if change == "disabled":
+        registry.update("elsewhere", enabled=False)
+    else:
+        registry.delete("elsewhere")
+    assert app.state.oidc_rp.has_provider("elsewhere")
+
+    resp = client.get(f"/api/v1/auth/oidc/elsewhere/{route}", follow_redirects=False)
+
+    assert resp.status_code == 404, resp.text
+    # Rebuilt off the registry, so the stale entry is gone for every later request.
+    assert not app.state.oidc_rp.has_provider("elsewhere")
+
+
+async def test_client_config_stops_offering_sso_once_another_replica_disables_it(
+    client, app, admin_headers
+):
+    await _served(app, "elsewhere")
+    assert client.get("/api/v1/config/client", headers=admin_headers).json()["auth_mode"] == "oidc"
+
+    registry = app.state.oidc_provider_registry
+    for name, _ in registry.list():
+        registry.update(name, enabled=False)
+    # The RP was built while they were enabled and still holds them.
+    assert app.state.oidc_rp.has_provider("elsewhere")
+
+    assert client.get("/api/v1/config/client", headers=admin_headers).json()["auth_mode"] == "jwt"
 
 
 def test_login_still_404s_for_a_provider_that_was_never_configured(client):
@@ -780,9 +838,11 @@ def test_a_callback_for_a_vanished_provider_still_spends_return_to(client, app):
     """A provider disabled between login and callback 404s, and leaves nothing to hand back later."""
     app.state.oidc_rp = _FakeOidcRp()
     _start_browser_login(client)
-    app.state.oidc_rp = None
+    registry = app.state.oidc_provider_registry
+    registry.update("stub", enabled=False)
 
     gone = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
+    registry.update("stub", enabled=True)
     app.state.oidc_rp = _GroupsOidcRp(["unlinked-team"])
     after = client.get("https://testserver/api/v1/auth/oidc/stub/callback", follow_redirects=False)
 
@@ -806,9 +866,7 @@ def test_a_refused_browser_login_spends_its_return_to(client, app):
 
 def test_a_failed_idp_exchange_returns_to_the_console_with_no_reason(client, app, audit_events):
     """The IdP's own error text never reaches the fragment, only the engine's code."""
-    app.state.oidc_provider_registry.create(
-        "stub", OIDCProvider(type="generic", issuer="https://idp.example", client_id="c")
-    )
+    app.state.oidc_provider_registry.update("stub", client_id="c")
     app.state.oidc_rp = _rp_with_known_idp(app.state.oidc_provider_registry, "stub")
     _start_browser_login(client)
 

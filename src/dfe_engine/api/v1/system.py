@@ -19,7 +19,7 @@ import sys
 from typing import Any, Literal
 
 from dfe_schemas import __version__ as schemas_version
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
@@ -35,6 +35,12 @@ from dfe_engine.api.deps import (
 )
 from dfe_engine.api.errors import ErrorResponse, backend_failure, engine_message
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
+from dfe_engine.api.review import (
+    ReviewFields,
+    review_fields,
+    routing_audit_detail,
+    set_review_headers,
+)
 from dfe_engine.api.v1.backing_services import BackingFacts, backing_facts
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import DeployTarget, appconfig, routing
@@ -48,6 +54,7 @@ from dfe_engine.gitcrud.retention import (
     resolve_state,
     set_stored,
 )
+from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.gitcrud.table_defaults import (
     UNSET,
     SourceDrift,
@@ -959,17 +966,27 @@ class ApplyDefaultsPin(BaseModel):
     )
 
 
-class ApplyDefaultsResponse(BaseModel):
+class ApplyDefaultsResponse(ReviewFields):
     """Which named sources were pinned, which already had these defaults, and their tables."""
 
     updated: list[ApplyDefaultsPin] = Field(
         description="Sources whose current version was written with the defaults"
     )
+    awaiting_review: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sources whose pin went to a review branch: main still carries them as they "
+            "were, so their tables are left alone and are not listed in live"
+        ),
+    )
     unchanged: list[ApplyDefaultsPin] = Field(
         description="Sources whose current version already matched the defaults"
     )
     live: list[SourceLiveApply] = Field(
-        description="One entry per named source, in request order: what reached its table."
+        description=(
+            "One entry per named source not awaiting review, in request order: what "
+            "reached its table."
+        )
     )
 
 
@@ -991,6 +1008,7 @@ def apply_defaults(
     request: Request,
     settings: Settings,
     registry: SourceReg,
+    response: Response,
 ) -> ApplyDefaultsResponse:
     """Pin the current TTL, common header and merge engine onto the named sources and their tables.
 
@@ -1008,6 +1026,10 @@ def apply_defaults(
     reaches new tables only, and existing columns keep their type. ``live``
     reports each source: what reached the table, what did not and why. A
     ClickHouse failure is reported on that source, and the pin stays committed.
+
+    A pin production+team sends to review is listed in ``awaiting_review`` with
+    ``review_required`` and the review headers, and its table is left alone until
+    the branch merges, since main still carries the source as it was.
     """
     gc = _optional_gitcrud(request)
     ttl = resolve_state(gc, settings)
@@ -1034,7 +1056,9 @@ def apply_defaults(
 
     updated: list[ApplyDefaultsPin] = []
     unchanged: list[ApplyDefaultsPin] = []
+    held: list[str] = []
     saved: list[Source] = []
+    review = ReviewRouting()
     author = git_author(user)
     for source in loaded:
         pin = ApplyDefaultsPin(source=source.source, version=source.current)
@@ -1049,12 +1073,13 @@ def apply_defaults(
             unchanged.append(pin)
             saved.append(source)
             continue
+        one = ReviewRouting()
         stored = registry.save_source(
             pinned,
             created_by=author,
             description=f"source: apply table defaults to {source.source}",
+            routing=one,
         )
-        saved.append(stored)
         audit_resource_change(
             user.user_id,
             "source",
@@ -1066,8 +1091,14 @@ def apply_defaults(
                 "common_header_type": table.header_type,
                 "common_header_version": table.header_version,
                 "engine": table.engine,
+                **(routing_audit_detail(one) or {}),
             },
         )
+        if one.review_required:
+            review.fold(one)
+            held.append(stored.source)
+            continue
+        saved.append(stored)
         updated.append(ApplyDefaultsPin(source=stored.source, version=stored.current))
 
     def connect() -> Any:
@@ -1089,8 +1120,13 @@ def apply_defaults(
                     "columns_added": list(outcome.columns_added),
                 },
             )
+    set_review_headers(response, review_required=review.review_required, pr_url=review.first_pr_url)
     return ApplyDefaultsResponse(
-        updated=updated, unchanged=unchanged, live=[_live_body(o) for o in outcomes]
+        **review_fields(review),
+        updated=updated,
+        unchanged=unchanged,
+        awaiting_review=held,
+        live=[_live_body(o) for o in outcomes],
     )
 
 

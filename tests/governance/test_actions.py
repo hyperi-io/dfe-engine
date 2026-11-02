@@ -201,7 +201,8 @@ def test_a_dial_never_creates_an_instance_the_instance_api_would_refuse(
         assert store.invoke("dial", actor="bob").changed is True
         assert "deploy" in crud.get("helmvars", name)
         return
-    assert len(errors) == 1 and refusal in errors[0], errors
+    assert len(errors) == 1, errors
+    assert refusal in errors[0], errors
     with pytest.raises(ActionForbiddenError, match=refusal):
         store.invoke("dial", actor="bob")
     assert set(crud.list("helmvars")) == names_before

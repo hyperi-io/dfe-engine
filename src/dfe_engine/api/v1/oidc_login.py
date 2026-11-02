@@ -142,24 +142,11 @@ class OidcCallbackResponse(BaseModel):
     groups: list[str] = Field(default_factory=list, description="Resolved group identifiers")
 
 
-async def _reload_rp_if_provider_known(request: Request, provider: str):
-    """Rebuild the RP when the registry knows an enabled provider the RP does not.
+def _registered_state(request: Request, provider: str) -> bool | None:
+    """Whether the provider registry holds *provider* enabled, or None when there is no registry.
 
-    The provider-CRUD endpoints rebuild the RP on every write, but that only
-    heals the worker that served the write. The registry is a directory of YAML
-    files that also changes out-of-band - another uvicorn worker's write, a
-    gitops sync, an operator editing a file - so the login path checks the
-    registry once before giving up. That turns "restart the engine" into a
-    self-heal.
-
-    Costs a single stat + one small YAML parse for the NAMED provider (no
-    directory walk), so an unauthenticated caller spamming bogus names buys
-    itself a failed stat and nothing more.
-
-    The rebuild reads each enabled provider's credentials from the secret store, so it
-    runs on a worker thread.
-
-    Returns the rebuilt RP, or None if the registry does not vindicate the miss.
+    Costs one stat and one small YAML parse for the NAMED provider, with no
+    directory walk. A file that does not load reads as not enabled.
     """
     registry = getattr(request.app.state, "oidc_provider_registry", None)
     if registry is None:
@@ -171,17 +158,21 @@ async def _reload_rp_if_provider_known(request: Request, provider: str):
         logger.warning(
             "OIDC provider registry read failed", provider=provider, **describe_http_error(exc)
         )
-        return None
-    if known is None or not known.enabled:
-        return None
+        return False
+    return known is not None and known.enabled
 
+
+async def _rebuild_rp(request: Request):
+    """Build the RP again from the registry, on a worker thread, and keep it on the app.
+
+    The build reads each enabled provider's credentials from the secret store.
+    """
     from dfe_engine.auth.oidc.rp import build_relying_party
 
-    logger.info("OIDC RP stale - rebuilding for a provider added since startup", provider=provider)
     request.app.state.oidc_rp = await run_blocking(
         functools.partial(
             build_relying_party,
-            registry,
+            request.app.state.oidc_provider_registry,
             secrets=getattr(request.app.state, "dfe_secrets", None),
             metrics=getattr(request.app.state, "oidc_login_metrics", None),
             directory_deadline_seconds=(
@@ -192,19 +183,50 @@ async def _reload_rp_if_provider_known(request: Request, provider: str):
     return request.app.state.oidc_rp
 
 
+async def _reload_rp_if_provider_known(request: Request, provider: str):
+    """Rebuild the RP when the registry knows an enabled provider the RP does not.
+
+    The provider-CRUD endpoints rebuild the RP on every write, but that only
+    heals the worker that served the write. The registry is a directory of YAML
+    files that also changes out-of-band - another worker or replica's write, a
+    gitops sync, an operator editing a file - so the login path checks the
+    registry once before giving up. An unauthenticated caller spamming bogus names
+    buys itself a failed stat and nothing more.
+
+    Returns the rebuilt RP, or None if the registry does not vindicate the miss.
+    """
+    if not _registered_state(request, provider):
+        return None
+    logger.info("OIDC RP stale - rebuilding for a provider added since startup", provider=provider)
+    return await _rebuild_rp(request)
+
+
+def _not_found(provider: str) -> HTTPException:
+    return HTTPException(
+        status_code=404,
+        detail={
+            "code": "not_found",
+            "message": f"OIDC provider '{provider}' not found or disabled",
+        },
+    )
+
+
 async def _rp_or_404(request: Request, provider: str):
-    """Resolve the relying party and assert the provider is registered."""
+    """Resolve the relying party and assert the registry still enables the provider.
+
+    The RP is checked against the registry on every login, both ways: a provider
+    added out-of-band rebuilds it, and one disabled or removed out-of-band rebuilds
+    it without the provider and refuses.
+    """
     rp = getattr(request.app.state, "oidc_rp", None)
     if rp is None or not rp.has_provider(provider):
         rp = await _reload_rp_if_provider_known(request, provider)
     if rp is None or not rp.has_provider(provider):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"OIDC provider '{provider}' not found or disabled",
-            },
-        )
+        raise _not_found(provider)
+    if _registered_state(request, provider) is False:
+        logger.info("OIDC provider disabled or removed out-of-band - rebuilding", provider=provider)
+        await _rebuild_rp(request)
+        raise _not_found(provider)
     return rp
 
 

@@ -40,7 +40,7 @@ from dfe_engine.settings import (
 from tests.support.accounts import admin_on_its_own_password
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 ADMIN_PASSWORD = "test-admin-pw"
 VIEWER_ORGS = ["test_org", "test_org_2"]
@@ -87,11 +87,11 @@ def stack(ch_params, ch_client, tmp_path):
     ch_client.command(f"CREATE DATABASE `{database}`")
     ch_client.command(
         f"CREATE TABLE `{database}`.events (_org_id LowCardinality(String), _json String, "
-        "timestamp_load DateTime64(3)) ENGINE = MergeTree ORDER BY timestamp_load"
+        "_timestamp_load DateTime64(3)) ENGINE = MergeTree ORDER BY _timestamp_load"
     )
     ch_client.command(
-        f"CREATE TABLE `{database}`.untenanted (_json String, timestamp_load DateTime64(3)) "
-        "ENGINE = MergeTree ORDER BY timestamp_load"
+        f"CREATE TABLE `{database}`.untenanted (_json String, _timestamp_load DateTime64(3)) "
+        "ENGINE = MergeTree ORDER BY _timestamp_load"
     )
     values = ", ".join(
         f"('{org}', '{json.dumps({'org': org, 'n': n})}', '2026-10-01 00:00:0{n}')"

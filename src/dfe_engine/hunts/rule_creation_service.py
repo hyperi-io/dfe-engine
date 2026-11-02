@@ -40,6 +40,7 @@ from typing import Any, Literal, Protocol
 import sqlglot
 from clickhouse_connect.driver.exceptions import ClickHouseError
 from pydantic import BaseModel, Field, model_validator
+from scalo.expression import ExpressionError, TranspileError
 from scalo.logger import logger
 from scalo.resilience import ServiceUnavailable
 from sqlglot.errors import ParseError
@@ -255,6 +256,10 @@ _ESCAPE_FIX = (
     "A rule matches rows of its own source table; compare against a list of values, "
     "not another table."
 )
+_CEL_FIX = (
+    "Check the expression's syntax and that it calls only functions the hunt profile "
+    "allows. To divide two fields, wrap an operand in double() or int()."
+)
 
 
 def _syntax_error(message: str) -> SqlValidationError:
@@ -413,7 +418,23 @@ class RuleCreationService:
             hunt_name=request.hunt_name,
             source=request.source,
         )
-        rule = Rule.from_create(rule_create, rule_id=rule_id, rewriter=self._rewriter)
+        try:
+            rule = Rule.from_create(rule_create, rule_id=rule_id, rewriter=self._rewriter)
+        except (ExpressionError, TranspileError) as exc:
+            # The filter is the author's input, so its refusal is reported as refused SQL is.
+            sql_errors = [
+                SqlValidationError(message=f"CEL filter refused: {exc}", suggestion=_CEL_FIX),
+                *sql_errors,
+            ]
+            rule = Rule(
+                rule_id=rule_id,
+                name=request.name,
+                severity=request.severity,
+                cel_filter=request.cel_filter,
+                original_sql=clean_sql or request.user_sql or "",
+                hunt_name=request.hunt_name,
+                source=request.source,
+            )
 
         # The stored WHERE is what the preview and the hunt runner execute, which a
         # transpiled CEL filter reaches without passing through the SQL check above.

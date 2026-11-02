@@ -21,14 +21,16 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.api.deps import CurrentUser, DerivedSchemaReg, SchemaReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.review import routing_audit_detail, set_review_headers
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
+from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.schema.derived import (
     DerivedSchema,
     DerivedSchemaError,
@@ -265,18 +267,26 @@ async def create_derived_schema(
     user: CurrentUser,
     registry: DerivedSchemaReg,
     schema_registry: SchemaReg,
+    response: Response,
 ) -> DerivedSchemaResponse:
     """Create a derived schema at the given registry path."""
     path = _canonical(schema_path)
     if registry.exists(path):
         raise _validation_error(f"A derived schema already exists at {path!r}")
     schema = _checked(body, path=path, schema_registry=schema_registry)
+    routing = ReviewRouting()
     saved = registry.save(
         schema,
         created_by=git_author(user),
         description=f"schema: create derived/{path}",
+        routing=routing,
     )
-    audit_resource_change(user.user_id, "derived_schema", path, "created")
+    audit_resource_change(
+        user.user_id, "derived_schema", path, "created", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
     return _response(saved, path=path)
 
 
@@ -291,6 +301,7 @@ async def update_derived_schema(
     user: CurrentUser,
     registry: DerivedSchemaReg,
     schema_registry: SchemaReg,
+    response: Response,
 ) -> DerivedSchemaResponse:
     """Replace a derived schema. The body is the whole document, as on create."""
     path = _canonical(schema_path)
@@ -300,12 +311,19 @@ async def update_derived_schema(
             detail={"code": "not_found", "message": f"Derived schema {path!r} not found"},
         )
     schema = _checked(body, path=path, schema_registry=schema_registry)
+    routing = ReviewRouting()
     saved = registry.save(
         schema,
         created_by=git_author(user),
         description=f"schema: update derived/{path}",
+        routing=routing,
     )
-    audit_resource_change(user.user_id, "derived_schema", path, "updated")
+    audit_resource_change(
+        user.user_id, "derived_schema", path, "updated", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
     return _response(saved, path=path)
 
 
@@ -318,14 +336,21 @@ async def delete_derived_schema(
     schema_path: str,
     user: CurrentUser,
     registry: DerivedSchemaReg,
+    response: Response,
 ) -> None:
     """Delete a derived schema by registry path."""
     path = _canonical(schema_path)
+    routing = ReviewRouting()
     try:
-        registry.delete(path, created_by=git_author(user))
+        registry.delete(path, created_by=git_author(user), routing=routing)
     except DerivedSchemaNotFoundError as exc:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Derived schema {path!r} not found"},
         ) from exc
-    audit_resource_change(user.user_id, "derived_schema", path, "deleted")
+    audit_resource_change(
+        user.user_id, "derived_schema", path, "deleted", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )

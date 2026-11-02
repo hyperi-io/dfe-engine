@@ -39,6 +39,7 @@ from dfe_engine.exchange.schemas import (
     build_meta_schema_export,
     require_known_format,
 )
+from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.source.models import Source, SourceSchema, SourceVersion
 
 if TYPE_CHECKING:
@@ -262,6 +263,7 @@ def apply_source_bundle(
     bundle: SourceBundle,
     *,
     created_by: str | None = None,
+    routing: ReviewRouting | None = None,
 ) -> SourceImportResult:
     """Apply a bundle to this deployment.
 
@@ -274,6 +276,7 @@ def apply_source_bundle(
         schema_registry: Schema registry the definitions are written through.
         bundle: The bundle document.
         created_by: Git author for the commits.
+        routing: Records the source write when it went to a review branch instead of main.
 
     Returns:
         What was written or resolved.
@@ -322,6 +325,7 @@ def apply_source_bundle(
         source,
         created_by=created_by,
         description=f"source: import {name}",
+        routing=routing,
     )
     logger.info("source bundle imported", source=name, version=source.current, schemas=len(results))
     return SourceImportResult(

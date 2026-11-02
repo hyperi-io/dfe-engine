@@ -237,6 +237,8 @@ class HuntRunner:
         self._metrics = metrics or HuntRunnerMetrics()
         self._failures = failures if failures is not None else HuntFailures()
         self._failures.retain(specs)
+        # Where the next tick starts, so the hunts a full cap left out go first next time.
+        self._start = 0
 
     def _already_run(self, hunt_id: str, fire: int) -> bool:
         """Whether the watermark has reached *fire*, so that fire's window is committed."""
@@ -281,6 +283,8 @@ class HuntRunner:
         """One cycle: claim + run every due hunt (never double-run), up to the cap.
 
         The heartbeat goes first so a runner with nothing due still reads as alive.
+        Every run counts against the cap, failed or not, and a tick the cap cuts short
+        hands the next one the hunts it did not reach, so none is left out tick after tick.
 
         Returns the number of runs executed this tick.
         """
@@ -291,8 +295,12 @@ class HuntRunner:
         # Read every outstanding run-now once per tick, not once per hunt.
         requested = self._coord.pending_runs(now)
         executed = 0
-        for spec in self._specs.values():
-            if running + executed >= self._cap:
+        started = 0
+        specs = list(self._specs.values())
+        first = self._start % len(specs) if specs else 0
+        for reached, spec in enumerate(specs[first:] + specs[:first]):
+            if running + started >= self._cap:
+                self._start = first + reached
                 break  # global cap protects ClickHouse; lateness surfaces as overload
             fire = self._fire_for(spec, now, requested)
             if fire is None:
@@ -300,13 +308,15 @@ class HuntRunner:
             if self._failures.held(spec.hunt_id, now, requested.get(spec.hunt_id)):
                 self._metrics.fire_held(spec.hunt_id)
                 continue
+            # The lease is timed from now, not the tick's start: earlier hunts in this
+            # tick may have run for minutes, and a lease dated then is already short.
             lease = self._coord.current_lease(spec.hunt_id)
-            if lease is not None and lease.lease_until > now:
+            if lease is not None and lease.lease_until > self._coord.now():
                 # still running from a prior fire -> defer, NEVER double-run
                 self._coord.record_overrun(spec.hunt_id)
                 self._metrics.overrun(spec.hunt_id)
                 continue
-            claimed = self._coord.try_claim(spec.hunt_id, fire, now)
+            claimed = self._coord.try_claim(spec.hunt_id, fire)
             if claimed and self._already_run(spec.hunt_id, fire):
                 # A peer ran and released this fire after the watermark read above.
                 self._metrics.claim_already_run(spec.hunt_id)
@@ -316,8 +326,10 @@ class HuntRunner:
             if not claimed:
                 continue  # lost the settle-window race -> another worker has it
             run_began = time.monotonic()
+            started += 1
             try:
-                self._worker.run(spec, fire)
+                with self._coord.held(spec.hunt_id, fire):
+                    self._worker.run(spec, fire)
                 executed += 1
                 self._metrics.run_completed(
                     spec.hunt_id, duration_seconds=time.monotonic() - run_began
@@ -333,7 +345,5 @@ class HuntRunner:
                 self._failures.failed(
                     spec.hunt_id, fire, now, exc, requested=requested.get(spec.hunt_id)
                 )
-            finally:
-                self._coord.release(spec.hunt_id, fire)
         self._metrics.tick_completed(time.monotonic() - tick_began)
         return executed

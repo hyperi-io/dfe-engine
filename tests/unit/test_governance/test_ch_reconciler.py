@@ -432,7 +432,7 @@ class TestReconcileServiceRoles:
         assert "CREATE USER IF NOT EXISTS `dfe_hunt_runner`" in executed
         assert "CREATE USER IF NOT EXISTS `dfe_query_reader`" in executed
         assert "CREATE USER IF NOT EXISTS `dfe_otel_reader`" not in executed
-        assert "GRANT SELECT ON acme.* TO `dfe_hunt_runner_role`" in executed
+        assert "GRANT SELECT ON acme.* TO `dfe_hunt_runner_role` WITH REPLACE OPTION" in executed
         # No tier, tenant role, row policy, projection or drop.
         for absent in ("dfe_tenant_role", "ROW POLICY", "TRUNCATE", "DROP", "_tier_"):
             assert absent not in executed
@@ -443,7 +443,7 @@ class TestReconcileServiceRoles:
     def test_a_failing_statement_is_recorded_and_the_rest_still_run(self, tmp_path):
         class _Refuses(_FakeAdminClient):
             def command(self, stmt: str) -> None:
-                if stmt.startswith("GRANT SELECT"):
+                if stmt.startswith("ALTER SETTINGS PROFILE"):
                     raise RuntimeError("Code: 497. DB::Exception: refused (version 25.8.1.1)")
                 super().command(stmt)
 
@@ -452,14 +452,58 @@ class TestReconcileServiceRoles:
             result = ChRbacReconciler(
                 client, secrets_store=self._store(tmp_path), database="dfe"
             ).reconcile_service_roles(
-                [ChServiceRole(name="query_reader", mint_user=True, grants=["SELECT ON {db}.*"])]
+                [
+                    ChServiceRole(
+                        name="query_reader",
+                        mint_user=True,
+                        grants=["SELECT ON {db}.*"],
+                        settings={"readonly": 2},
+                    )
+                ]
             )
 
         assert len(result.errors) == 1
-        assert result.errors[0].startswith("GRANT SELECT ON dfe.* TO `dfe_query_reader_role`")
+        assert result.errors[0].startswith("ALTER SETTINGS PROFILE `dfe_query_reader_profile`")
         assert "refused" not in result.errors[0]
-        assert any("refused" in line and "GRANT SELECT" in line for line in lines)
+        assert any("refused" in line and "ALTER SETTINGS PROFILE" in line for line in lines)
         assert "GRANT `dfe_query_reader_role` TO `dfe_query_reader`" in client.executed
+
+    @pytest.mark.parametrize(
+        ("refused", "errors", "granted"),
+        [
+            pytest.param(
+                "WITH REPLACE OPTION",
+                1,
+                ["SELECT ON dfe.*", "SELECT ON dfe_x.*"],
+                id="list-refused",
+            ),
+            pytest.param("dfe_x", 2, ["SELECT ON dfe.*"], id="one-entry-refused"),
+        ],
+    )
+    def test_a_refused_replacing_grant_leaves_the_role_only_what_clickhouse_took(
+        self, tmp_path, refused, errors, granted
+    ):
+        """The role's old privileges are revoked even when its new list is refused whole."""
+
+        class _Refuses(_FakeAdminClient):
+            def command(self, stmt: str) -> None:
+                if stmt.startswith("GRANT SELECT") and refused in stmt:
+                    raise RuntimeError("Code: 62. DB::Exception: Syntax error")
+                super().command(stmt)
+
+        client = _Refuses()
+        result = ChRbacReconciler(
+            client, secrets_store=self._store(tmp_path), database="dfe"
+        ).reconcile_service_roles(
+            [ChServiceRole(name="otel_reader", grants=["SELECT ON {db}.*", "SELECT ON dfe_x.*"])]
+        )
+
+        role = "`dfe_otel_reader_role`"
+        assert len(result.errors) == errors
+        after_revoke = client.executed[client.executed.index(f"REVOKE ALL ON *.* FROM {role}") :]
+        assert [s for s in after_revoke if s.startswith("GRANT")] == [
+            f"GRANT {g} TO {role}" for g in granted
+        ]
 
     def test_a_failing_user_statement_never_reports_its_password_hash(self, tmp_path):
         """``result.errors`` reaches API callers, and a CREATE USER carries the hash."""
@@ -643,14 +687,13 @@ class TestRenderAll:
         assert "CREATE USER IF NOT EXISTS `dfe_loader`" in s
         assert "GRANT `dfe_loader_role` TO `dfe_loader`" in s
         # the org's pinned user: tier + tenant role + READONLY pin
-        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in s
+        assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_org_acme`" in s
         assert "ALTER USER `dfe_org_acme` SETTINGS SQL_current_tenant_id = 'acme' READONLY" in s
         # org-scoped group user: same pinned shape
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_soc`" in s
+        assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_grp_soc`" in s
         assert "ALTER USER `dfe_grp_soc` SETTINGS SQL_current_tenant_id = 'acme' READONLY" in s
         # unrestricted user: tier only, no tenant role, no pin
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_admin`" in s
-        assert "GRANT `dfe_tenant_role` TO `dfe_grp_admin`" not in s
+        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_admin` WITH REPLACE OPTION" in s
         assert "ALTER USER `dfe_grp_admin` SETTINGS SQL_current_tenant_id" not in s
         # binding without a minted secret is skipped
         assert "dfe_grp_nohash" not in s
@@ -686,13 +729,12 @@ class TestRenderAll:
         assert "GRANT SELECT ON dfe.main TO `dfe_analyst_tier_2_role`" not in s
         # no per-user data grant: org and platform users alike only hold the tier
         # role, never a direct dfe.* grant on the user itself
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_org_acme`" in s
         assert "GRANT SELECT ON dfe.* TO `dfe_org_acme`" not in s
         assert "GRANT SELECT ON dfe.* TO `dfe_grp_ops`" not in s
         # only the org-scoped users are fenced by the tenant role + pin
-        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in s
-        assert "GRANT `dfe_tenant_role` TO `dfe_grp_soc`" in s
-        assert "GRANT `dfe_tenant_role` TO `dfe_grp_ops`" not in s
+        assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_org_acme`" in s
+        assert "GRANT `dfe_analyst_tier_2_role`, `dfe_tenant_role` TO `dfe_grp_soc`" in s
+        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_ops` WITH REPLACE OPTION" in s
         # the deny backstop fences dfe.otel_logs for the tenant role - the sole
         # control keeping otel away from a fenced user now the grant is broad
         assert (
@@ -700,7 +742,13 @@ class TestRenderAll:
             "AS RESTRICTIVE FOR SELECT USING 0" in s
         )
         # dfe_query_reader (platform reader) keeps whole-db read incl dfe.otel_*
-        assert "GRANT SELECT ON dfe.* TO `dfe_query_reader_role`" in s
+        reader = [
+            x
+            for x in s.splitlines()
+            if x.endswith("TO `dfe_query_reader_role` WITH REPLACE OPTION")
+        ]
+        assert len(reader) == 1
+        assert reader[0].startswith("GRANT SELECT ON dfe.*, ")
 
     def test_explicit_tier_overrides_default(self):
         tiers, _service, _orgs, _b = self._inputs()

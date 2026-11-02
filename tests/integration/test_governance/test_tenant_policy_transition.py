@@ -21,7 +21,7 @@ from dfe_engine.governance.ch.models import ChTier, tenant_policy_name
 from dfe_engine.governance.ch.reconciler import fence_tables
 from dfe_engine.governance.ch.render import render_pinned_user, render_tier
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 TABLE = "events"
 

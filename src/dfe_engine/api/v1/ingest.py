@@ -46,6 +46,7 @@ from scalo.api import (
 
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action, require_own_org_action
 from dfe_engine.api.errors import ErrorCode, ErrorResponse
+from dfe_engine.api.review import ReviewFields, apply_routing_headers, review_fields
 from dfe_engine.api.v1.sources import (
     AppsSync,
     held_source_orgs,
@@ -145,7 +146,7 @@ class RuleOrderRequest(BaseModel):
     )
 
 
-class _AppsFields(BaseModel):
+class _AppsFields(ReviewFields):
     dry_run: bool = Field(description="Nothing was written: this is what the write would do")
     reload: Literal["hot", "restart"] = Field(
         description=(
@@ -434,6 +435,15 @@ def reorder_rule_blocks(
         "rule order",
     )
     audit_resource_change(user.user_id, "ingest_rules", body.target, "reordered", {"blocks": named})
+    held = store.writes.routing
+    apply_routing_headers(response, held)
+    if held.review_required:
+        return RuleOrderResponse(
+            target=body.target,
+            blocks=_blocks(reordered, body.target),
+            **_apps_fields(None, dry_run=False),
+            **review_fields(held),
+        )
     apps = reconcile_derived_apps(request, user, registry)
     return RuleOrderResponse(
         target=body.target,
@@ -520,6 +530,12 @@ def apply_compat(
         "updated",
         {"profiles": [binding.profile for binding in body.profiles]},
     )
+    held = store.writes.routing
+    apply_routing_headers(response, held)
+    if held.review_required:
+        return CompatWriteResponse(
+            profiles=body.profiles, **_apps_fields(None, dry_run=False), **review_fields(held)
+        )
     apps = reconcile_derived_apps(request, user, registry)
     return CompatWriteResponse(profiles=body.profiles, **_apps_fields(apps, dry_run=False))
 

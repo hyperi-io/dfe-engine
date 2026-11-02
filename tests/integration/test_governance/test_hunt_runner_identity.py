@@ -35,7 +35,7 @@ from dfe_engine.settings import SecretsSettings
 
 from .conftest import drop_safely
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 _RUNNER_USER = "dfe_hunt_runner"
 _PROVIDED = "Provided4By7The2Deploy9Layer"  # gitleaks:allow - throwaway test password

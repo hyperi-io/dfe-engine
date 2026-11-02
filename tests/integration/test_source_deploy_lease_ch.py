@@ -19,7 +19,7 @@ import pytest
 from dfe_engine.schema.lock import SchemaLock, holder_name
 from dfe_engine.schema.plan import LOCK_ID, render_one
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 _HELD_SECONDS = 4.0
 

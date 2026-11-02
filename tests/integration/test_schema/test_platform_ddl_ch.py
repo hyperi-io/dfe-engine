@@ -46,7 +46,7 @@ from dfe_engine.schema.schema_ddl import DDLConfig
 from dfe_engine.schema.schema_loader import SchemaLoader
 from dfe_engine.settings import load_settings
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 WRITE_MARKS = "write_marks_for_substreams_in_compact_parts"
 JSON_TABLES = ("main", "detection", "otel_logs")

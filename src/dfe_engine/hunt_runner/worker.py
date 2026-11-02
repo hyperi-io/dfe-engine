@@ -120,8 +120,8 @@ class HuntWorker:
                 watermark does NOT advance.
             UnknownHuntCustomers: a rules hunt holds a customer with no stored tenant
                 ids. The watermark does NOT advance, so no customer's window is lost.
-            EmptyHuntQuery: the hunt has no statement to run, so its rules named no
-                rule file the compiler could resolve. The watermark does NOT advance.
+            EmptyHuntQuery: the hunt has no statement to run, because a rule it names
+                was refused or it names none. The watermark does NOT advance.
                 Raised unlogged: the runner logs it with its back-off.
         """
         if spec.customers is not None and not spec.customers:

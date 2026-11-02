@@ -114,8 +114,11 @@ def _build_ch(settings: DFESettings) -> tuple[Any, str]:
     ``ch_client`` fixture uses). The database is ``effective_data_database`` - NEVER a
     hardcoded 'dfe'; the coordination + schedule tables live in whatever data database
     the connection resolves to.
+
+    The client opens no ClickHouse session, because the lease renewals run on their
+    own thread beside a hunt's statement and a session takes one query at a time.
     """
-    client = clickhouse_connect.get_client(**_ch_params(settings))
+    client = clickhouse_connect.get_client(**_ch_params(settings), autogenerate_session_id=False)
     return client, settings.clickhouse.effective_data_database
 
 

@@ -111,6 +111,7 @@ class ClickHouseAdapter(DatasourceAdapter):
         query: str,
         params: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
+        max_rows: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """Execute a read-only query and return (rows, column_names).
 
@@ -127,11 +128,15 @@ class ClickHouseAdapter(DatasourceAdapter):
         """
         client = self.manager.get_clickhouse_client()
 
-        settings = {"max_execution_time": timeout_seconds, "readonly": 1}
+        settings: dict[str, Any] = {"max_execution_time": timeout_seconds}
+        if max_rows is not None:
+            # ClickHouse stops at the block that passes the cap, so the result is bounded server-side.
+            settings |= {"max_result_rows": max_rows, "result_overflow_mode": "break"}
+        settings["readonly"] = 1
         result = client.query(query, parameters=params or {}, settings=settings)
 
         columns = list(result.column_names)
-        rows = [dict(zip(columns, row, strict=True)) for row in result.result_rows]
+        rows = [dict(zip(columns, row, strict=True)) for row in result.result_rows[:max_rows]]
         if not columns:
             columns = self._describe_columns(client, query, params, settings)
         return rows, columns

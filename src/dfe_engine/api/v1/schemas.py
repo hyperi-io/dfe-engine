@@ -14,7 +14,17 @@ for DDL pipeline execution.
 
 from typing import Any, Literal, cast
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
@@ -43,6 +53,7 @@ from dfe_engine.api.pagination import (
     apply_search,
     apply_sort,
 )
+from dfe_engine.api.review import routing_audit_detail, set_review_headers
 from dfe_engine.api.v1.sources import require_source_readable
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -57,6 +68,7 @@ from dfe_engine.exchange.schemas import (
     build_meta_schema_export,
 )
 from dfe_engine.git_identity import git_author
+from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.schema.applier import SchemaApplyError
 from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.core_schema import landing_table_name
@@ -1957,6 +1969,7 @@ async def promote_field(
     source_name: str,
     body: PromoteFieldRequest,
     request: Request,
+    response: Response,
     user: CurrentUser,
     source_registry: SourceReg,
     schema_registry: SchemaReg,
@@ -2157,6 +2170,7 @@ async def promote_field(
     )
     audit_resource_change(user.user_id, "meta_schema", canonical, "updated")
 
+    review = ReviewRouting()
     try:
         source_registry.update_source_from_write(
             source_name,
@@ -2169,12 +2183,16 @@ async def promote_field(
             ),
             created_by=git_author(user),
             description=f"source: attach {canonical} {new_ver} after field promote",
+            routing=review,
         )
     except SourceValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
-    audit_resource_change(user.user_id, "source", source_name, "updated")
+    audit_resource_change(
+        user.user_id, "source", source_name, "updated", routing_audit_detail(review)
+    )
+    set_review_headers(response, review_required=review.review_required, pr_url=review.first_pr_url)
 
     return PromoteFieldResponse(source_name=source_name, schema_version=new_ver, results=results)

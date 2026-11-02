@@ -27,6 +27,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.auth.oidc.rp import NormalizedIdentity
+from tests.support.oidc import serve_provider
 
 AUDIT_LOGGER = "dfe_engine.auth.audit.logger"
 
@@ -125,6 +126,7 @@ class TestOidcCallbackRefusal:
 
     @pytest.mark.parametrize("rp", [_FailingRp(), _SubjectlessRp()])
     def test_failed_callback_writes_one_denied_event(self, client: TestClient, app, rp):
+        serve_provider(app)
         app.state.oidc_rp = rp
 
         with patch(AUDIT_LOGGER) as mock_logger:

@@ -38,6 +38,7 @@ from dfe_engine.fieldmap.remap_view import (
 )
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
+from dfe_engine.gitcrud.routing import GovernedWrites, WritePosture
 
 from .catalog import VIEWS_CLASS, sigma_registry
 
@@ -168,10 +169,11 @@ class SigmaViewStore:
     rest of the sigma catalogue, via the sigma-local resource-class registry.
     """
 
-    def __init__(self, crud: GitCrud) -> None:
+    def __init__(self, crud: GitCrud, *, posture: WritePosture | None = None) -> None:
         # A second GitCrud over the same working clone but with the sigma registry -
         # the same pattern the rule catalogue store uses (see catalog._sigma_crud).
         self._crud = GitCrud(crud.repo, sigma_registry())
+        self.writes = GovernedWrites(self._crud, posture=posture)
 
     # -- reads --
 
@@ -214,22 +216,34 @@ class SigmaViewStore:
 
     def save(self, definition: SigmaViewDefinition, actor: str) -> SigmaViewDefinition:
         """Create or replace a source's view definition in ONE commit."""
-        self._crud.put(
+        message = _msg(definition.source_name, "sigma view definition", actor)
+        self.writes(
             VIEWS_CLASS,
             definition.source_name,
-            definition.model_dump(mode="json"),
             actor,
-            message=_msg(definition.source_name, "sigma view definition", actor),
+            message,
+            lambda branch: self._crud.put(
+                VIEWS_CLASS,
+                definition.source_name,
+                definition.model_dump(mode="json"),
+                actor,
+                message=message,
+                branch=branch,
+            ),
         )
         return definition
 
     def delete(self, source_name: str, actor: str) -> None:
         """Remove a source's view definition (raises if absent)."""
-        self._crud.delete(
+        message = _msg(source_name, "delete sigma view", actor)
+        self.writes(
             VIEWS_CLASS,
             source_name,
             actor,
-            message=_msg(source_name, "delete sigma view", actor),
+            message,
+            lambda branch: self._crud.delete(
+                VIEWS_CLASS, source_name, actor, message=message, branch=branch
+            ),
         )
 
     # -- generation --
