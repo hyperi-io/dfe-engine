@@ -221,7 +221,7 @@ class TestTheContractRoute:
         assert body["service"] == LOADER
         assert (body["available"], body["source"]) == (True, "mount")
         assert body["schema_version"] == "https://json-schema.org/draft/2020-12/schema"
-        assert len(body["schema"]["properties"]) == 24
+        assert len(body["schema"]["properties"]) == 23
         assert [c["name"] for c in body["capabilities"]] == ["clickhouse", "pipeline"]
 
     def test_dials_are_deferred_and_say_so_by_being_empty(self, client, admin_headers):
@@ -252,7 +252,7 @@ class TestTheConfigRoute:
         _deploy(client, admin_headers)
         body = client.get(CONFIG, headers=admin_headers).json()
         assert body["available"] is True
-        assert len(body["fields"]) == 175
+        assert len(body["fields"]) == 168
         assert body["etag"]
 
     def test_the_chart_derived_key_is_reported_as_the_chart_s(

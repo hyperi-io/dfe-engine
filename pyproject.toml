@@ -162,7 +162,7 @@ dependencies = [
     # Sampler smart (the default) and anomaly modes. [enhanced] adds fuzzy dedup, which
     # SamplerSettings.level (default enhanced) uses. >=3.5.3: every dependency ships a wheel
     # (no drain3 sdist), which the image's UV_NO_BUILD=1 install needs.
-    "logreducer[enhanced]>=3.5.3",
+    "logreducer[enhanced]>=3.5.6",
     "faker>=40.43.0",
     "sqlglot>=30.22.0",
 ]

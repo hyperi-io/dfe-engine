@@ -730,7 +730,7 @@ requires-dist = [
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jmespath", specifier = ">=1.1.0" },
-    { name = "logreducer", extras = ["enhanced"], specifier = ">=3.5.3" },
+    { name = "logreducer", extras = ["enhanced"], specifier = ">=3.5.6" },
     { name = "msal", specifier = ">=1.37.0" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "oauthlib", specifier = ">=4.0.0" },
@@ -1277,7 +1277,7 @@ wheels = [
 
 [[package]]
 name = "logreducer"
-version = "3.5.3"
+version = "3.5.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
@@ -1285,9 +1285,9 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/da/46/59c9a4e4770cc033715ddbfb179cff4b1722a965d9a4bbf803681d9bb567/logreducer-3.5.3.tar.gz", hash = "sha256:0b621a594c82e322fbd9a699aa03b57fb8b86fb045300ff6a90ee0a1da33c324", size = 66577, upload-time = "2026-10-14T07:52:30.828Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/83/72b922a3eb60d93e9fb4e05cbb5081b9c67043958562270f8e6cb0411b0b/logreducer-3.5.6.tar.gz", hash = "sha256:abdb702a3c01bceeea3339c3b57d9194101808aedc9234b54d6f071cbbcbce75", size = 62468, upload-time = "2026-11-01T20:08:47.905Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/9b/453215b61464419bc469f702a9bebee9c08c134909965c9108d08de4d35d/logreducer-3.5.3-py3-none-any.whl", hash = "sha256:8a23c02eb8d9fc4a1cfe09e5d46958661b05d3483d356af72f41a1c74adb172d", size = 67592, upload-time = "2026-10-14T07:52:29.051Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/67/772838fb774961568cd9eaa4b314178e0eae8be40e2f4696a222b9a1f960/logreducer-3.5.6-py3-none-any.whl", hash = "sha256:a5ccace4e73230e57f213e7d762c3e9980dca41096cf5b50286aada86394aa0f", size = 69858, upload-time = "2026-11-01T20:08:46.088Z" },
 ]
 
 [package.optional-dependencies]

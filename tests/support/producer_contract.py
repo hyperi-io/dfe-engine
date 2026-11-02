@@ -103,37 +103,37 @@ class ProducerFile:
 # release, never to a branch: a branch compares against whatever merged last.
 DFE_LOADER = Producer(
     repo="dfe-loader",
-    ref="v1.18.58",
+    ref="v1.18.61",
     dir_env="DFE_LOADER_DIR",
     files=("src/config/pipeline.rs", "src/config/loader.rs", "docs/config-schema.json"),
 )
 DFE_RECEIVER = Producer(
     repo="dfe-receiver",
-    ref="v1.15.58",
+    ref="v1.15.61",
     dir_env="DFE_RECEIVER_DIR",
     files=("docs/config-schema.json",),
 )
 SCALO_RS = Producer(
     repo="scalo-rs",
-    ref="v2.14.20",
+    ref="v2.14.25",
     dir_env="SCALO_RS_DIR",
     files=("tests/fixtures/cel_classifier_parity.json",),
 )
 DFE_TRANSFORM_VRL = Producer(
     repo="dfe-transform-vrl",
-    ref="v1.1.38",
+    ref="v1.1.41",
     dir_env="DFE_TRANSFORM_VRL_DIR",
     files=("tests/fixtures/filebeat/filebeat-testdata.tar.gz", "docs/config-schema.json"),
 )
 DFE_TRANSFORM_VECTOR = Producer(
     repo="dfe-transform-vector",
-    ref="v1.0.55",
+    ref="v1.0.58",
     dir_env="DFE_TRANSFORM_VECTOR_DIR",
     files=("docs/config-schema.json",),
 )
 DFE_DEPLOY = Producer(
     repo="dfe-deploy",
-    ref="v1.0.8",
+    ref="v1.0.10",
     dir_env="DFE_DEPLOY_DIR",
     files=(
         "governance/actions/hunts-pause.yaml",

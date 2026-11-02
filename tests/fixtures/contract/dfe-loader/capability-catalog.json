@@ -37,7 +37,7 @@
         "type": "enum",
         "required": false,
         "default": "http",
-        "description": "Wire protocol. 'native' is rejected at startup: the pinned clickhouse client has no TCP row fetch, so schema queries stall silently.",
+        "description": "Wire protocol: 'http' (8123, 8443 with TLS) or 'native' (9000, 9440 with TLS). json_each_row inserts need 'http'.",
         "enum_values": [
           "native",
           "http"
@@ -54,12 +54,12 @@
       {
         "kind": "service",
         "name": "routing",
-        "description": "Topic -> table routing rules + table mapping."
+        "description": "Table and tenant routing from the common header and the topic."
       },
       {
         "kind": "service",
         "name": "geoip",
-        "description": "MaxMind GeoIP enrichment from mounted MMDB readers."
+        "description": "GeoIP enrichment from MMDB databases provisioned at startup."
       },
       {
         "kind": "service",
