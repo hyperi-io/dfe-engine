@@ -130,7 +130,7 @@ def test_seed_account_skips_break_glass_admin_name(tmp_path: Path, monkeypatch):
 
 
 def test_seed_account_skips_the_configured_break_glass_name(tmp_path: Path, monkeypatch):
-    # DFE_AUTH_LOCAL_ADMIN_NAME renames the break-glass account, and the reconcile
+    # DFE_ENGINE_AUTH_LOCAL_ADMIN_NAME renames the break-glass account, and the reconcile
     # has to skip THAT name -- skipping "admin" would leave the real one clobbered.
     seeds = [SeedAccount(username="root", password="hijack-attempt-long", groups=["dfe-viewers"])]
 

@@ -13,7 +13,7 @@ clickhouse:
   database: "default"
   secure: true
   # null -> follow the SCALO_TLS_VERIFY escape valve (cert verification ON by
-  # default). Set false (DFE_CLICKHOUSE_VERIFY) only for self-signed dev/test CH.
+  # default). Set false (DFE_ENGINE_CLICKHOUSE_VERIFY) only for self-signed dev/test CH.
   verify: null
   connections_min: 10
   connections_max: 300
@@ -53,7 +53,7 @@ auth:
   # ON, to match env's default "production" posture. With it off, api/deps.py
   # hands an unauthenticated request the admin role -- so the previous
   # production + auth-off default granted anonymous admin out of the box.
-  # Dev and test set DFE_AUTH_ENABLED=false together with a dev DFE_ENV.
+  # Dev and test set DFE_ENGINE_AUTH_ENABLED=false together with a dev DFE_ENGINE_ENV.
   enabled: true
   local:
     enabled: true

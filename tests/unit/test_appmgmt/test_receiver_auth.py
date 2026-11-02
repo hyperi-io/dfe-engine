@@ -216,7 +216,7 @@ class TestUnreadableBackend:
         fields = {**SecretsSettings().model_dump(), "provider": provider}
         backend = SecretsSettings.model_construct(**fields)
 
-        with pytest.raises(ValueError, match=f"DFE_SECRETS_PROVIDER={provider}: .*{reason}"):
+        with pytest.raises(ValueError, match=f"DFE_ENGINE_SECRETS_PROVIDER={provider}: .*{reason}"):
             _auth(_on(settings, backend), TENANCY)
 
     def test_with_no_credential_it_compiles_none_rather_than_refusing(self, settings):

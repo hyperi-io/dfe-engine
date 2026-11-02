@@ -78,7 +78,7 @@ secrets exactly as AWS v2 splits `config` and `credentials`:
   api_key = dfe_...             # or nothing here if using `dfe login` (OIDC/JWT)
 ```
 
-- **Selection:** `--profile prod` > `DFE_PROFILE` env > `[default]`.
+- **Selection:** `--profile prod` > `DFE_ENGINE_PROFILE` env > `[default]`.
 - **`dfe configure`** - interactive first-run setup (prompts endpoint, auth, output).
 - **`dfe configure set/get/list/list-profiles`** - the AWS v2 subcommand family
   (`customizations/configure/`), same verbs.
@@ -92,7 +92,7 @@ disabled - `api/deps.py`). The CLI resolves a bearer credential in this fixed or
 first match wins:
 
 1. Explicit flag: `--token <jwt>` or `--api-key <key>`.
-2. Env: `DFE_TOKEN` / `DFE_API_KEY`.
+2. Env: `DFE_ENGINE_API_TOKEN` / `DFE_ENGINE_API_KEY`.
 3. A cached OIDC/JWT session from `dfe login` (`~/.dfe/cache/<profile>.json`,
    auto-refreshed while valid).
 4. Profile credential in `~/.dfe/credentials` (`api_key`).

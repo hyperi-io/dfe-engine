@@ -59,25 +59,25 @@ def _deploy(gc: GitCrud, service: str, instance: str) -> instances.AppInstance:
 def test_seed_refuses_when_env_is_not_test(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "dev")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
     accounts, groups, orgs = _stores(tmp_path)
-    with pytest.raises(PermissionError, match="DFE_ENV=test"):
+    with pytest.raises(PermissionError, match="DFE_ENGINE_ENV=test"):
         Seed(account_store=accounts, group_store=groups, org_registry=orgs)
 
 
 def test_seed_refuses_explicit_non_test_env_even_if_environ_is_test(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
-    with pytest.raises(PermissionError, match="DFE_ENV=test"):
+    with pytest.raises(PermissionError, match="DFE_ENGINE_ENV=test"):
         Seed(account_store=accounts, group_store=groups, org_registry=orgs, env="production")
 
 
 def test_seed_allows_test_env_from_environ(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     Seed(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -85,7 +85,7 @@ def test_seed_allows_test_env_from_environ(tmp_path, monkeypatch):
 def test_seed_allows_explicit_test_env_when_environ_is_dev(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "dev")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
     accounts, groups, orgs = _stores(tmp_path)
     Seed(account_store=accounts, group_store=groups, org_registry=orgs, env="test")
 
@@ -93,7 +93,7 @@ def test_seed_allows_explicit_test_env_when_environ_is_dev(tmp_path, monkeypatch
 def test_seed_dispatches_dfe_admin_user_to_accounts(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     # The seeder adds a well-known e2e account alongside the bootstrap
     # break-glass admin; it must not rename or clobber that admin.
     accounts, groups, orgs = _stores(tmp_path)
@@ -114,7 +114,7 @@ def test_account_ensure_admin_joins_the_bootstrapped_group(tmp_path, monkeypatch
     """The seeder attaches membership; bootstrap owns the group itself."""
     from dfe_engine.api.e2e.seed.accounts import Accounts
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Accounts(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -133,7 +133,7 @@ def test_account_ensure_admin_joins_the_bootstrapped_group(tmp_path, monkeypatch
 def test_account_ensure_admin_resets_existing(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed.accounts import Accounts
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Accounts(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -146,7 +146,7 @@ def test_account_ensure_admin_resets_existing(tmp_path, monkeypatch):
 def test_account_ensure_reuses_private_upsert_for_other_groups(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed.accounts import Accounts
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Accounts(account_store=accounts, group_store=groups, org_registry=orgs)
     seeder._ensure_group("dfe-analysts")
@@ -162,7 +162,7 @@ def test_account_ensure_reuses_private_upsert_for_other_groups(tmp_path, monkeyp
 def test_organisation_seed_creates_default(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed.organisations import Organisations
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Organisations(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -177,7 +177,7 @@ def test_organisation_seed_creates_default(tmp_path, monkeypatch):
 def test_organisation_seed_resets_existing(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed.organisations import Organisations
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Organisations(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -220,7 +220,7 @@ class TestTheOrganisationSeedMovesTheHuntsNamingIt:
     """The seeder writes orgs as the org routes do, so the hunts naming one follow it."""
 
     def test_a_seeded_org_is_stored_in_the_hunts_naming_it(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("DFE_ENV", "test")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "test")
         hunts = _hunts(tmp_path, ["organisation"])
         seeder, _orgs = _organisations(tmp_path, hunts)
 
@@ -231,7 +231,7 @@ class TestTheOrganisationSeedMovesTheHuntsNamingIt:
         }
 
     def test_a_reset_org_restores_its_ids_in_the_hunts_naming_it(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("DFE_ENV", "test")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "test")
         hunts = _hunts(tmp_path, ["organisation"], {"organisation": ["stale"]})
         seeder, orgs = _organisations(tmp_path, hunts)
         orgs.create("organisation", org_ids=["stale"])
@@ -243,7 +243,7 @@ class TestTheOrganisationSeedMovesTheHuntsNamingIt:
         }
 
     def test_deleting_every_org_takes_each_out_of_its_hunts(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("DFE_ENV", "test")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "test")
         hunts = _hunts(tmp_path, ["organisation"])
         seeder, orgs = _organisations(tmp_path, hunts)
         seeder.seed_organisation()
@@ -258,7 +258,7 @@ class TestTheOrganisationSeedMovesTheHuntsNamingIt:
     ):
         from fastapi import HTTPException
 
-        monkeypatch.setenv("DFE_ENV", "test")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "test")
         hunts = _hunts(tmp_path, ["gone"], {"gone": ["organisation"]})
         seeder, orgs = _organisations(tmp_path, hunts)
 
@@ -274,7 +274,7 @@ def test_reset_all_recreates_break_glass_admin(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
     from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
 
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
@@ -295,7 +295,7 @@ def test_reset_all_recreates_break_glass_admin(tmp_path, monkeypatch):
 def test_seed_setup_complete_seeds_organisation(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -311,7 +311,7 @@ def test_seed_organisation_dispatches_to_the_organisation_seeder(tmp_path, monke
     """The script is offered in the request Literal, so it has to reach a seeder."""
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -323,11 +323,11 @@ def test_an_app_seed_without_a_deploy_repo_names_the_setting(tmp_path, monkeypat
     """A misconfigured e2e-server must say what is missing, not seed nothing quietly."""
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
 
-    with pytest.raises(RuntimeError, match="DFE_GITOPS_ENABLED"):
+    with pytest.raises(RuntimeError, match="DFE_ENGINE_GITOPS_ENABLED"):
         seeder.seed_static("seed_app_scaling_state")
 
 
@@ -335,7 +335,7 @@ def test_reset_all_is_safe_without_a_deploy_repo(tmp_path, monkeypatch):
     """The auth-only e2e specs run on a process with gitops off; reset must not raise."""
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
 
@@ -347,7 +347,7 @@ def test_reset_all_keeps_a_single_deployment_apps_values(tmp_path, monkeypatch):
     """dfe-engine's own overlay is standing infra no seeder here writes; a source resets."""
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     gc = _crud(tmp_path)
     single = _deploy(gc, "dfe-engine", "default")
@@ -370,7 +370,7 @@ def test_reset_all_keeps_the_deployers_common_infra_overlay(tmp_path, monkeypatc
     """The stack-wide infra baseline predates any run; a per-chart dial does not."""
     from dfe_engine.api.e2e.seed import Seed
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     gc = _crud(tmp_path)
     gc.put("infravars", "common", {"clickhouse": {"replicas": 3}}, "test", message="test: deploy")
@@ -424,7 +424,7 @@ def test_reset_all_restores_a_marked_pool_and_removes_an_unmarked_one(tmp_path, 
     """The marker is the deployer's record, so a pool it does not name came from a seed."""
     from scalo.metrics import create_metrics
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     gc = _crud(tmp_path)
     gc.repo.publish({".seeded-apps": "dfe-receiver\n"}, "test: marker")
     receiver = _deploy(gc, "dfe-receiver", "default")
@@ -448,7 +448,7 @@ def test_reset_all_restores_a_marked_pool_and_removes_an_unmarked_one(tmp_path, 
 
 def test_reset_all_keeps_the_identity_a_compose_deployer_wrote(tmp_path, monkeypatch):
     """The engine's own seed writes an OTel name, which the reset keeps as it drops the dials."""
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     gc = _crud(tmp_path)
     gc.repo.publish({".seeded-apps": "dfe-receiver\n"}, "test: marker")
     receiver = instances.instance_of("dfe-receiver", "default")
@@ -464,7 +464,7 @@ def test_reset_all_keeps_the_identity_a_compose_deployer_wrote(tmp_path, monkeyp
 def test_reset_all_is_one_commit(tmp_path, monkeypatch):
     from dulwich.repo import Repo
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     gc = _crud(tmp_path)
     gc.repo.publish({".seeded-apps": "dfe-receiver\n"}, "test: marker")
     _deploy(gc, "dfe-receiver", "default")
@@ -500,7 +500,7 @@ def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
     """
     from dfe_engine.api.e2e.seed.accounts import Accounts
 
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Accounts(account_store=accounts, group_store=groups, org_registry=orgs)
 

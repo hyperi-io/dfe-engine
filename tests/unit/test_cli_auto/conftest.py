@@ -124,9 +124,9 @@ class _MergedResult:
 
 @pytest.fixture
 def harness(api_settings: DFESettings, tmp_path: Path, monkeypatch):
-    monkeypatch.setenv("DFE_CONFIG_HOME", str(tmp_path / "dfe-config-home"))
+    monkeypatch.setenv("DFE_ENGINE_CONFIG_HOME", str(tmp_path / "dfe-config-home"))
     # Ensure env creds never leak into resolution during a test.
-    for var in ("DFE_API_KEY", "DFE_API_TOKEN", "DFE_API_URL"):
+    for var in ("DFE_ENGINE_API_KEY", "DFE_ENGINE_API_TOKEN", "DFE_ENGINE_API_URL"):
         monkeypatch.delenv(var, raising=False)
 
     app = create_app(settings=api_settings)

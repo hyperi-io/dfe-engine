@@ -187,12 +187,12 @@ class TestStatedFacts:
         self, client, app, admin_headers, tmp_path, down_ch, monkeypatch
     ):
         _wire_gitcrud(app, tmp_path)
-        monkeypatch.setenv("DFE_DEPLOYMENT_KAFKA_PROVIDER", "confluent-cloud")
-        monkeypatch.setenv("DFE_DEPLOYMENT_KAFKA_TIER", "basic")
-        monkeypatch.setenv("DFE_DEPLOYMENT_KAFKA_REGION", "us-east-1")
-        monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER", "clickhouse-cloud")
-        monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_TIER", "scale")
-        monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_REGION", "eu-west-1")
+        monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER", "confluent-cloud")
+        monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_KAFKA_TIER", "basic")
+        monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_KAFKA_REGION", "us-east-1")
+        monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_PROVIDER", "clickhouse-cloud")
+        monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_TIER", "scale")
+        monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_REGION", "eu-west-1")
         app.state.settings.deployment.backing = backing_from_environment()
 
         body = _by_service(client, admin_headers)

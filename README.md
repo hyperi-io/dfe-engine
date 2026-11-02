@@ -78,7 +78,7 @@ the engine refuses to start on the placeholder JWT secret. `/livez` answers on
 port 8000:
 
 ```bash
-env DFE_ENV=dev uv run dfe-engine
+env DFE_ENGINE_ENV=dev uv run dfe-engine
 ```
 
 With no ClickHouse reachable it retries for a minute, then serves with `/readyz`
@@ -120,29 +120,30 @@ Full system map, invariants, and the docs tree:
 
 ## Configuration
 
-All configuration is environment variables with the `DFE_` prefix
+All configuration is environment variables with the `DFE_ENGINE_` prefix, apart
+from `DFE_CONFIG_DIR`, which other suite apps read too
 (`src/dfe_engine/settings.py` is the reference). The two directory roots:
 
 | Variable | Image default | Local-dev default | Description |
 |----------|---------------|-------------------|-------------|
 | `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config directory - the deployment supplies it (a mounted volume/ConfigMap in k8s; a checkout of the deployment's own config repo for local dev). Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `rules/`, `alert-destinations/`, `queries/`). |
-| `DFE_SCHEMAS_DIR` | `/app/schemas` | unset | Schema tree root. Unset, the engine reads the trees out of the installed `dfe-schemas` package. |
+| `DFE_ENGINE_SCHEMAS_DIR` | `/app/schemas` | unset | Schema tree root. Unset, the engine reads the trees out of the installed `dfe-schemas` package. |
 
 - The Docker image bakes the `dfe-schemas` package's trees in as a seed at
   `/app/schemas`; `/app/config` is an empty baked default. The Dockerfile sets
-  `DFE_CONFIG_DIR` and `DFE_SCHEMAS_DIR` to those paths, so a container runs
+  `DFE_CONFIG_DIR` and `DFE_ENGINE_SCHEMAS_DIR` to those paths, so a container runs
   with no env set - config is supplied at deploy (a mounted volume/ConfigMap).
 - Setting either variable at runtime (`docker run -e ...`, a K8s pod `env:`,
   or a local `.env`) overrides the baked-in default - for example, to point at
   a mounted volume or ConfigMap.
 - For `DFE_CONFIG_DIR`, a more specific per-registry override such as
-  `DFE_SOURCES_DIR` takes precedence over the subdirectory derived from
+  `DFE_ENGINE_SOURCES_DIR` takes precedence over the subdirectory derived from
   `DFE_CONFIG_DIR`.
-- The variable names are exact and `DFE_`-prefixed. A bare `CONFIG_DIR` or
-  `SCHEMAS_DIR` (no prefix) is not read.
+- The variable names are exact. A bare `CONFIG_DIR` or `SCHEMAS_DIR` (no
+  prefix) is not read.
 
 Backing-service connection settings (ClickHouse, Kafka) follow the same
-`DFE_` pattern - see `settings.py` for the full set and defaults.
+`DFE_ENGINE_` pattern - see `settings.py` for the full set and defaults.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow, commit format,
 and DCO.
@@ -232,7 +233,7 @@ moves.
 | repo | how it interacts |
 |---|---|
 | dfe-infra | Deploys this engine, and owns `apps.yaml` -- a byte copy is vendored here at `appmgmt/apps.yaml` as the last resort in the resolution order. Lockstep: a catalogue entry the engine does not carry is not reflected by its management API. |
-| dfe-schemas | Ships the schema and DDL trees as a PACKAGE, not a submodule. Read out of the installed wheel unless `DFE_SCHEMAS_DIR` points elsewhere. |
+| dfe-schemas | Ships the schema and DDL trees as a PACKAGE, not a submodule. Read out of the installed wheel unless `DFE_ENGINE_SCHEMAS_DIR` points elsewhere. |
 | scalo-py | The shared Python library, plus a contract guard: this repo overrides scalo's runtime base image with its own literal, and its own test fails when the committed Dockerfile stops matching. |
 | dfe-loader, dfe-receiver | Their config validation is MIRRORED by hand in `services/plugins_builtin/`. Nothing is copied, so no script can check it -- re-read the producer whenever their config schema changes. |
 | logreducer | A declared dependency (`logreducer[enhanced]`). The sampler's `smart` mode, its default, and `anomaly` mode run it, imported lazily so the scikit-learn stack loads only when one of them does. |

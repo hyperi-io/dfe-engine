@@ -10,7 +10,7 @@
 The stored flag lives in gitops (governance/settings/gitops.yaml, key
 ``auto_merge``) so the UI toggles it through the normal governed-ops CRUD path
 and the toggle is itself an audited commit. The deployment gate decides whether
-the flag may be enabled at all: dev posture (DFE_ENV, ~80% of the want) OR
+the flag may be enabled at all: dev posture (DFE_ENGINE_ENV, ~80% of the want) OR
 gitops.mode=solo (solo-operator production, the rest). effective = stored AND
 gate. Loud by design - see the spec
 (docs/superpowers/specs/2026-07-03-gitcrud-auto-merge-design.md).
@@ -47,12 +47,12 @@ class AutoMergeState:
 def gate(environment: str, mode: str) -> tuple[bool, str]:
     """Deployment gate: dev posture OR gitops.mode=solo may enable auto-merge."""
     if is_dev_posture(environment):
-        return True, f"dev posture (DFE_ENV={environment})"
+        return True, f"dev posture (DFE_ENGINE_ENV={environment})"
     if mode == "solo":
-        return True, "solo operator posture (DFE_GITOPS_MODE=solo)"
+        return True, "solo operator posture (DFE_ENGINE_GITOPS_MODE=solo)"
     return False, (
-        f"production posture (DFE_ENV={environment}) with DFE_GITOPS_MODE=team; "
-        "set DFE_GITOPS_MODE=solo (or a dev DFE_ENV) to permit auto-merge"
+        f"production posture (DFE_ENGINE_ENV={environment}) with DFE_ENGINE_GITOPS_MODE=team; "
+        "set DFE_ENGINE_GITOPS_MODE=solo (or a dev DFE_ENGINE_ENV) to permit auto-merge"
     )
 
 

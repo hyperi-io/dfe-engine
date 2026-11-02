@@ -14,7 +14,7 @@ accounts, and copies the built-in roles.yaml if missing.
 Two accounts are seeded from injected config, through ONE reconcile path:
 
 ``admin``      the everyday local admin. Its password comes from the deployment's
-               secret store (``DFE_AUTH_LOCAL_ADMIN_PASSWORD``) and is issued with
+               secret store (``DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD``) and is issued with
                a forced change: the admin must replace it at first login, in every
                posture. Until then it is reasserted on every boot. After that it is
                issued again only when the injected value is neither the owner's
@@ -94,7 +94,7 @@ def admin_account_name(override: str = "") -> str:
 def seeded_account_email(username: str, recovery_email: str = "") -> str:
     """Contact email for a bootstrap-seeded local account.
 
-    ``DFE_RECOVERY_EMAIL`` wins when set; otherwise ``{username}@dfe.local``.
+    ``DFE_ENGINE_RECOVERY_EMAIL`` wins when set; otherwise ``{username}@dfe.local``.
     """
     if recovery_email.strip():
         return recovery_email.strip()
@@ -183,14 +183,14 @@ def require_admin_password(admin_password: str, environment: str, *, retired: bo
     if is_dev_posture(environment):
         logger.warning(
             f"Local admin is running on the default password '{_DEFAULT_PASSWORD}' "
-            f"(DFE_ENV={environment}); change it before this deployment carries data"
+            f"(DFE_ENGINE_ENV={environment}); change it before this deployment carries data"
         )
         return
     raise DefaultCredentialsError(
-        f"DFE_AUTH_LOCAL_ADMIN_PASSWORD is unset or '{_DEFAULT_PASSWORD}' but "
-        f"DFE_ENV is '{environment}': set DFE_AUTH_LOCAL_ADMIN_PASSWORD to the "
+        f"DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD is unset or '{_DEFAULT_PASSWORD}' but "
+        f"DFE_ENGINE_ENV is '{environment}': set DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD to the "
         "password your deployment minted (dfe-docker: make init; kubernetes: the "
-        "engine Secret), or set DFE_ENV to dev/development/local/test/ci"
+        "engine Secret), or set DFE_ENGINE_ENV to dev/development/local/test/ci"
     )
 
 
@@ -205,7 +205,7 @@ def require_hashable_passwords(admin_password: str, seed_accounts: list[SeedAcco
         DefaultCredentialsError: a configured password over the limit, naming its setting
             and never its value.
     """
-    configured = [("DFE_AUTH_LOCAL_ADMIN_PASSWORD", admin_password)]
+    configured = [("DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD", admin_password)]
     configured += [
         (f"auth.local.seed_accounts[{seed.username}].password", seed.password)
         for seed in seed_accounts
@@ -273,7 +273,7 @@ def bootstrap_auth(
         breakglass_password: First-boot break-glass password. Minted into the
             deploy repo as a hash when none is committed, ignored thereafter.
         recovery_email: Contact email for the admin and break-glass accounts
-            (``DFE_RECOVERY_EMAIL``). Empty falls back to ``{username}@dfe.local``.
+            (``DFE_ENGINE_RECOVERY_EMAIL``). Empty falls back to ``{username}@dfe.local``.
 
     Returns:
         Tuple of (AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig).

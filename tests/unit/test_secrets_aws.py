@@ -136,7 +136,9 @@ def test_a_name_inside_a_recovery_window_is_refused_naming_the_setting(aws):
     store.delete("ch/groups/soc")
 
     assert "DeletedDate" in _described("ch/groups/soc")
-    with pytest.raises(SecretNameHeldError, match="DFE_SECRETS_RECOVERY_WINDOW_DAYS=7") as held:
+    with pytest.raises(
+        SecretNameHeldError, match="DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS=7"
+    ) as held:
         store.put("ch/groups/soc", "new")
     assert isinstance(held.value, ProviderError)
     with pytest.raises(SecretNameHeldError):
@@ -151,7 +153,7 @@ def test_a_reconcile_recreating_a_group_inside_the_window_fails_naming_the_setti
     reconciler._hash_for("ch/groups/soc")
     store.delete("ch/groups/soc")
 
-    with pytest.raises(SecretNameHeldError, match="DFE_SECRETS_RECOVERY_WINDOW_DAYS"):
+    with pytest.raises(SecretNameHeldError, match="DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS"):
         reconciler._hash_for("ch/groups/soc")
 
 
@@ -214,5 +216,5 @@ def test_aws_without_a_kms_key_warns_once_naming_the_setting():
     assert len(lines) == 1
     level, message = lines[0]
     assert level == "WARNING"
-    assert "DFE_SECRETS_KMS_KEY_ID" in message
+    assert "DFE_ENGINE_SECRETS_KMS_KEY_ID" in message
     assert "AWS managed key" in message

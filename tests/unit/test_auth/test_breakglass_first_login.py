@@ -66,8 +66,8 @@ class TestPostureGate:
     def test_default_password_refuses_outside_a_dev_posture(self, env):
         with pytest.raises(DefaultCredentialsError) as exc:
             require_admin_password("changeme", env)
-        assert "DFE_AUTH_LOCAL_ADMIN_PASSWORD" in str(exc.value)
-        assert "DFE_ENV" in str(exc.value)
+        assert "DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD" in str(exc.value)
+        assert "DFE_ENGINE_ENV" in str(exc.value)
 
     @pytest.mark.parametrize("env", ["production", "prod", "staging"])
     def test_unset_password_refuses_outside_a_dev_posture(self, env):
@@ -115,7 +115,7 @@ class TestHashablePasswords:
     def test_an_admin_password_over_the_limit_names_its_setting(self, password):
         with pytest.raises(DefaultCredentialsError) as exc:
             require_hashable_passwords(password, [])
-        assert "DFE_AUTH_LOCAL_ADMIN_PASSWORD" in str(exc.value)
+        assert "DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD" in str(exc.value)
         assert password not in str(exc.value)
 
     def test_a_seed_password_over_the_limit_names_the_account(self):
@@ -804,7 +804,7 @@ class TestDeploymentHints:
 
     def test_docker_and_local_commands(self):
         assert credential_fetch_command(DOCKER) == "make creds"
-        assert "DFE_AUTH_LOCAL_ADMIN_PASSWORD" in credential_fetch_command(LOCAL)
+        assert "DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD" in credential_fetch_command(LOCAL)
 
     def test_rotation_command_is_a_store_operation(self):
         assert "patch secret" in rotation_store_command(

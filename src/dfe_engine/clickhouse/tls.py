@@ -24,7 +24,7 @@ from scalo.crypto import tls_parts
 
 
 class ClickHouseCaCertUnreadable(RuntimeError):
-    """DFE_CLICKHOUSE_CA_CERT names a file the process cannot open."""
+    """DFE_ENGINE_CLICKHOUSE_CA_CERT names a file the process cannot open."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,11 +68,11 @@ def resolve_clickhouse_tls(
 
     The single builder every clickhouse-connect call site in the engine goes
     through. Verify defaults ON whenever ``secure`` is on (scalo's
-    ``tls_parts``, via ``DFE_CLICKHOUSE_VERIFY`` or the ``SCALO_TLS_VERIFY``
+    ``tls_parts``, via ``DFE_ENGINE_CLICKHOUSE_VERIFY`` or the ``SCALO_TLS_VERIFY``
     escape valve); turning it off is an explicit setting and scalo logs one
     warning per process. A ``ca_cert`` path that does not exist or cannot be
     opened raises before any client is built, naming
-    ``DFE_CLICKHOUSE_CA_CERT``, rather than clickhouse-connect silently
+    ``DFE_ENGINE_CLICKHOUSE_CA_CERT``, rather than clickhouse-connect silently
     connecting without a trust anchor.
 
     Args:
@@ -100,7 +100,7 @@ def resolve_clickhouse_tls(
 
 
 def _check_ca_cert_readable(ca_cert: str) -> None:
-    """Raise naming DFE_CLICKHOUSE_CA_CERT if ``ca_cert`` cannot be opened.
+    """Raise naming DFE_ENGINE_CLICKHOUSE_CA_CERT if ``ca_cert`` cannot be opened.
 
     Args:
         ca_cert: PEM CA file path to check.
@@ -113,5 +113,5 @@ def _check_ca_cert_readable(ca_cert: str) -> None:
             pass
     except OSError as exc:
         raise ClickHouseCaCertUnreadable(
-            f"DFE_CLICKHOUSE_CA_CERT ({ca_cert}) could not be read: {exc}"
+            f"DFE_ENGINE_CLICKHOUSE_CA_CERT ({ca_cert}) could not be read: {exc}"
         ) from exc

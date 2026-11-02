@@ -49,7 +49,7 @@ class RetentionState:
         stored: The override committed in the deploy repo; None when there is none.
         effective: Days a time-series table that declares no TTL gets; 0 means none.
         origin: ``override`` when the stored value wins, ``deployment`` otherwise.
-        deployment_default: ``DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`` as deployed.
+        deployment_default: ``DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS`` as deployed.
     """
 
     stored: int | None

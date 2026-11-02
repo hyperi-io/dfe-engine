@@ -46,8 +46,8 @@ class TestGate:
 
     def test_refusal_reason_names_both_knobs(self):
         _, reason = gate("production", "team")
-        assert "DFE_GITOPS_MODE" in reason
-        assert "DFE_ENV" in reason
+        assert "DFE_ENGINE_GITOPS_MODE" in reason
+        assert "DFE_ENGINE_ENV" in reason
 
 
 class TestStoredFlagBrokenFile:

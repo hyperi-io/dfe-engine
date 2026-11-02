@@ -79,10 +79,10 @@ class GlobalOptions:
         if not resolved.url:
             raise DfeConfigError(
                 "No engine URL configured. Run `dfe login --url <URL> ...` or pass "
-                "--url / set DFE_API_URL."
+                "--url / set DFE_ENGINE_API_URL."
             )
         # Warn if we are about to send a credential to a host that differs from the
-        # profile's stored URL host (e.g. --url / $DFE_API_URL redirected the call).
+        # profile's stored URL host (e.g. --url / $DFE_ENGINE_API_URL redirected the call).
         # Warn only - never refuse; the operator may legitimately be pointing at a
         # different endpoint with the same credential.
         if resolved.credential is not None and resolved.credential.value is not None:

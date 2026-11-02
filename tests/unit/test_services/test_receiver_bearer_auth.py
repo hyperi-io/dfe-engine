@@ -75,7 +75,7 @@ def _bearer(backend: str, listener: str) -> dict[str, Any]:
 
 @pytest.fixture
 def engine_on(monkeypatch):
-    """Run the process on a secrets backend, as an engine booted with DFE_SECRETS_PROVIDER is."""
+    """Run the process on a secrets backend, as an engine booted with DFE_ENGINE_SECRETS_PROVIDER is."""
 
     def on(backend: SecretsSettings) -> DFESettings:
         settings = DFESettings(env="dev", secrets=backend)
@@ -110,7 +110,9 @@ def test_a_seed_builds_from_the_settings_it_is_given(engine_on, tmp_path):
 def test_a_backend_the_receiver_cannot_read_refuses_the_seed(engine_on, tmp_path):
     engine_on(SecretsSettings(provider="ansible_vault"))
 
-    with pytest.raises(BearerSourceUnreadableError, match="DFE_SECRETS_PROVIDER=ansible_vault"):
+    with pytest.raises(
+        BearerSourceUnreadableError, match="DFE_ENGINE_SECRETS_PROVIDER=ansible_vault"
+    ):
         _seeded(tmp_path)
 
 
@@ -144,7 +146,9 @@ def test_the_template_reads_the_backend_when_generated_not_when_the_plugin_loads
 def test_a_backend_the_receiver_cannot_read_refuses_the_template(engine_on):
     engine_on(SecretsSettings(provider="ansible_vault"))
 
-    with pytest.raises(BearerSourceUnreadableError, match="DFE_SECRETS_PROVIDER=ansible_vault"):
+    with pytest.raises(
+        BearerSourceUnreadableError, match="DFE_ENGINE_SECRETS_PROVIDER=ansible_vault"
+    ):
         generate_template("receiver", "production")
 
 

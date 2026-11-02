@@ -1955,7 +1955,7 @@ async def _read_file_write(request: Request) -> FileWriteRequest:
             "model": ErrorResponse,
             "description": (
                 "The file exceeds repository.max_object_bytes (HTTP 413, code "
-                "payload_too_large). Tune via DFE_REPOSITORY_MAX_OBJECT_BYTES."
+                "payload_too_large). Tune via DFE_ENGINE_REPOSITORY_MAX_OBJECT_BYTES."
             ),
         },
     },

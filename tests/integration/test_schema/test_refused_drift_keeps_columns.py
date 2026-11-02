@@ -8,7 +8,7 @@
 
 """A dfe-schemas release that adds a column lands, whatever else the table refuses.
 
-The shape this guards: a deployment changes ``DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`` and
+The shape this guards: a deployment changes ``DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS`` and
 takes a dfe-schemas release that adds a column to the landing table, in the same
 boot. The TTL change is refused as drift, which is right. The column must still be
 added, or every writer that sends it fails against a table that never gets it.
@@ -41,7 +41,7 @@ def schemas_root(monkeypatch, tmp_path) -> Path:
     """A copy of the shipped schema tree the plan renders from."""
     root = tmp_path / "schemas"
     shutil.copytree(Path(dfe_schemas.__file__).parent / "data", root)
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(root))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(root))
     return root
 
 

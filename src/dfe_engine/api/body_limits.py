@@ -95,7 +95,7 @@ def own_limit[F: Callable[..., Any]](setting: str, bound: Bound) -> Callable[[F]
 
 def _over_limit_message(limit: int, setting: str) -> str:
     """What an operator reads when a body is refused, naming the limit and how to raise it."""
-    env = "DFE_" + setting.replace(".", "_").upper()
+    env = "DFE_ENGINE_" + setting.replace(".", "_").upper()
     return (
         f"The request body is larger than the {limit}-byte limit. "
         f"Raise {setting} ({env}) to accept a larger one."

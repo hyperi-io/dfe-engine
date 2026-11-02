@@ -103,6 +103,6 @@ def ddl_settings(statement: str, *, ceiling: int | None = None) -> dict[str, int
     if needed > ceiling:
         raise StatementTooLargeError(
             f"the DDL statement is {size} bytes, more than the {ceiling}-byte "
-            "max_query_size ceiling allows (DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE)"
+            "max_query_size ceiling allows (DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE)"
         )
     return {**DDL_OUTPUT_MODE, "max_query_size": needed}

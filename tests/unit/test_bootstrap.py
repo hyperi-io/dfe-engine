@@ -11,7 +11,7 @@ from dfe_engine.settings import DFESettings, SchemasSettings
 def make_settings(*, config_dir: Path, schemas_dir: Path) -> DFESettings:
     """Build settings pointing config and schemas at the given directories."""
     # env="test": DFESettings is a plain BaseModel, so a direct construction never
-    # reads DFE_ENV and `env` falls back to its "production" default, which
+    # reads DFE_ENGINE_ENV and `env` falls back to its "production" default, which
     # requires auth on with a real jwt_secret. Declare the posture the test wants.
     return DFESettings(
         env="test",
@@ -34,12 +34,12 @@ def schemas_dir(tmp_path) -> Path:
 
 @pytest.fixture
 def seed_dir(monkeypatch, tmp_path) -> Path:
-    """Populated seed directory wired via DFE_SCHEMAS_SEED_DIR."""
+    """Populated seed directory wired via DFE_ENGINE_SCHEMAS_SEED_DIR."""
     path = tmp_path / "seed"
     (path / "meta").mkdir(parents=True)
     (path / "meta" / "core.yaml").write_text("name: core\n")
     (path / "top.yaml").write_text("name: top\n")
-    monkeypatch.setenv("DFE_SCHEMAS_SEED_DIR", str(path))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_SEED_DIR", str(path))
     return path
 
 
@@ -102,7 +102,7 @@ class TestEnsureStorage:
     def test_missing_seed_leaves_schemas_empty(
         self, config_dir, monkeypatch, schemas_dir, tmp_path
     ):
-        monkeypatch.setenv("DFE_SCHEMAS_SEED_DIR", str(tmp_path / "absent"))
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_SEED_DIR", str(tmp_path / "absent"))
         ensure_storage(settings=make_settings(config_dir=config_dir, schemas_dir=schemas_dir))
         assert schemas_dir.is_dir()
         assert list(schemas_dir.iterdir()) == []

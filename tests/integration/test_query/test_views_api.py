@@ -87,8 +87,8 @@ def stack(ch_params, ch_client, tmp_path, monkeypatch):
 
     monkeypatch.setenv(TENANT_ISOLATION_ENV, "false")
     for role in DEFAULT_SERVICE_ROLES:
-        monkeypatch.delenv(f"DFE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
-    monkeypatch.delenv("DFE_QUERY_VIEWS_RESTRICTED_PASSWORD", raising=False)
+        monkeypatch.delenv(f"DFE_ENGINE_CLICKHOUSE_{role.name.upper()}_PASSWORD", raising=False)
+    monkeypatch.delenv("DFE_ENGINE_QUERY_VIEWS_RESTRICTED_PASSWORD", raising=False)
 
     uid = uuid.uuid4().hex[:8]
     table = f"`{DATA_DB}`.`probe_{uid}`"

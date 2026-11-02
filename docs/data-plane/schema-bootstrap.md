@@ -16,12 +16,12 @@ The phase sits inside the API lifespan, ahead of readiness
 (`src/dfe_engine/schema/phase.py`):
 
 1. **Connect**, retrying an unreachable ClickHouse for
-   `DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` (default 180). The datastore can be in
+   `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` (default 180). The datastore can be in
    the same deploy wave, so not-up-yet and broken are different answers.
 2. **Resolve the schema tree**: the wheel inside the image, read-only, then the
-   deployment's optional overlay directory (`DFE_SCHEMAS_OVERLAY_DIR`).
+   deployment's optional overlay directory (`DFE_ENGINE_SCHEMAS_OVERLAY_DIR`).
 3. **Render the plan** for the ClickHouse platform dfe-schemas probes off the live
-   server, unless `DFE_CLICKHOUSE_PLATFORM` pins it. Every table is an argumentless
+   server, unless `DFE_ENGINE_CLICKHOUSE_PLATFORM` pins it. Every table is an argumentless
    `Replicated*` engine with no `ON CLUSTER`, inside a Replicated database on
    self-hosted ClickHouse and the Shared database on ClickHouse Cloud. A self-hosted
    server without Keeper, the `{cluster}`, `{shard}` and `{replica}` macros or a
@@ -35,7 +35,7 @@ The phase sits inside the API lifespan, ahead of readiness
    `task_max_lifetime` (7 days by default) misses it. Every rendered object carries a checksum taken
    with the platform token removed, so one schema reads as one checksum on either
    platform. The pattern is at <https://github.com/hyperi-io/dfe-schemas/blob/main/docs/clickhouse-platform.md>
-4. **Take the lease** in `schema_lock`. A second replica waits for the holder to finish, then takes the lease and applies. One whose wait runs out first applies nothing, reports `observed` and stays NotReady, and the engine runs the pass again in the background. An expired lease is taken over. A source deploy takes the same lease around its DDL, waits for it up to `DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS`, and answers 503 `schema_locked` when the wait runs out. Claims wait for a majority of ClickHouse replicas, so with a majority down the lease cannot be taken and the pass reports `observed`. A two-replica cluster cannot take the lease while either replica is down, because a majority of 2 is 2. A claim ClickHouse acknowledges 2 seconds or more after its free read is not kept and is not released either, so it holds the lease until its expiry.
+4. **Take the lease** in `schema_lock`. A second replica waits for the holder to finish, then takes the lease and applies. One whose wait runs out first applies nothing, reports `observed` and stays NotReady, and the engine runs the pass again in the background. An expired lease is taken over. A source deploy takes the same lease around its DDL, waits for it up to `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS`, and answers 503 `schema_locked` when the wait runs out. Claims wait for a majority of ClickHouse replicas, so with a majority down the lease cannot be taken and the pass reports `observed`. A two-replica cluster cannot take the lease while either replica is down, because a majority of 2 is 2. A claim ClickHouse acknowledges 2 seconds or more after its free read is not kept and is not released either, so it holds the lease until its expiry.
 5. **Compare** against `schema_migrations` and against the live catalogue, and
    apply what is additive.
 6. **Record** every applied object: its kind, the dfe-schemas release, the engine
@@ -96,14 +96,14 @@ install with no deploy repo boots core-only.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `DFE_CLICKHOUSE_BOOTSTRAP_TABLES` | `true` | Apply the manifest at startup. Off reports the schema state as unknown and gates nothing. |
-| `DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` | `180` | How long to keep retrying an unreachable ClickHouse before reporting the pass failed. |
-| `DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE` | `16777216` | Ceiling in bytes on the `max_query_size` sent with schema DDL. A statement over ClickHouse's 256 KiB default -- the widest Elastic vendor table is 688 KB -- is sent with its own size plus 4 KiB, by the manifest apply and by a source deploy alike. One that would need more is refused before it is sent. A caller's own SQL never gets the setting. |
-| `DFE_CLICKHOUSE_PLATFORM` | `auto` | The ClickHouse platform schema DDL is rendered for: `auto` probes the server, then reads the hostname. `cloud` or `self_hosted` pins it, for a server the probe reads wrongly. Anything else refuses to start. |
-| `DFE_KAFKA_BOOTSTRAP_TOPICS` | `true` | Create the declared topic set at startup, create-only. |
-| `DFE_KAFKA_TIERED_STORAGE` | `false` | The brokers tier to object storage, so the landing topic is created with `remote.storage.enable`. Off leaves the key unset rather than false, which is what a broker-level setting needs. |
-| `DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES` | the manifest's | `max.message.bytes` on every topic the engine creates, this set and each source's `_land` and `_load`. Set it to the deployment's message size: a managed broker capped below the manifest's refuses the create, and the dead-letter set then holds the engine NotReady. |
-| `DFE_SCHEMAS_OVERLAY_DIR` | unset | The deployment's additive overlay tree. |
+| `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES` | `true` | Apply the manifest at startup. Off reports the schema state as unknown and gates nothing. |
+| `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS` | `180` | How long to keep retrying an unreachable ClickHouse before reporting the pass failed. |
+| `DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE` | `16777216` | Ceiling in bytes on the `max_query_size` sent with schema DDL. A statement over ClickHouse's 256 KiB default -- the widest Elastic vendor table is 688 KB -- is sent with its own size plus 4 KiB, by the manifest apply and by a source deploy alike. One that would need more is refused before it is sent. A caller's own SQL never gets the setting. |
+| `DFE_ENGINE_CLICKHOUSE_PLATFORM` | `auto` | The ClickHouse platform schema DDL is rendered for: `auto` probes the server, then reads the hostname. `cloud` or `self_hosted` pins it, for a server the probe reads wrongly. Anything else refuses to start. |
+| `DFE_ENGINE_KAFKA_BOOTSTRAP_TOPICS` | `true` | Create the declared topic set at startup, create-only. |
+| `DFE_ENGINE_KAFKA_TIERED_STORAGE` | `false` | The brokers tier to object storage, so the landing topic is created with `remote.storage.enable`. Off leaves the key unset rather than false, which is what a broker-level setting needs. |
+| `DFE_ENGINE_KAFKA_TOPIC_MAX_MESSAGE_BYTES` | the manifest's | `max.message.bytes` on every topic the engine creates, this set and each source's `_land` and `_load`. Set it to the deployment's message size: a managed broker capped below the manifest's refuses the create, and the dead-letter set then holds the engine NotReady. |
+| `DFE_ENGINE_SCHEMAS_OVERLAY_DIR` | unset | The deployment's additive overlay tree. |
 
 The two bootstrap dials are separate rather than one: they fail for different
 reasons, and a deployment with an external broker wants one off and the other on.

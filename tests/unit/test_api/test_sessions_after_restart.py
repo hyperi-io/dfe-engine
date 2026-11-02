@@ -174,7 +174,7 @@ class TestLogout:
 
 
 class TestPasswordChangeUnderReview:
-    """Production with DFE_GITOPS_MODE=team: main keeps the old hash until the review merges."""
+    """Production with DFE_ENGINE_GITOPS_MODE=team: main keeps the old hash until the review merges."""
 
     @_POD_AFTER
     def test_the_admins_change_outlives_the_next_start(self, deployment, pod_after):

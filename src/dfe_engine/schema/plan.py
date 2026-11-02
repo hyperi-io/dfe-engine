@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 # Where a deployment's own overlay tree is mounted. Absent is the normal case --
 # a docker install with no deploy repo boots core-only.
-OVERLAY_DIR_ENV_VAR = "DFE_SCHEMAS_OVERLAY_DIR"
+OVERLAY_DIR_ENV_VAR = "DFE_ENGINE_SCHEMAS_OVERLAY_DIR"
 
 # Directories the core owns. An overlay object defining a file under one of these
 # is refused: the core definition is the one the rest of the suite is built on.
@@ -173,7 +173,7 @@ def _require_replicated_databases(client: Any, databases: list[str]) -> None:
             raise DatabaseEngineError(
                 f"database {name!r} uses the {engine} engine, and every DFE table needs a "
                 "Replicated database. DFE 2.2 runs on a fresh deploy only: drop the database "
-                "or point DFE_CLICKHOUSE_DATA_DATABASE at a new one"
+                "or point DFE_ENGINE_CLICKHOUSE_DATA_DATABASE at a new one"
             )
 
 
@@ -344,7 +344,7 @@ def _overlay_objects(
 def core_schemas_root() -> Path:
     """The schema tree the core plan is rendered from.
 
-    ``DFE_SCHEMAS_DIR`` first, then the installed package, then the image's seed
+    ``DFE_ENGINE_SCHEMAS_DIR`` first, then the installed package, then the image's seed
     -- the same resolution the per-source path uses. One tree for both halves:
     two resolvers is how an applier and a generator came to read different trees
     on the same deployment.

@@ -13,24 +13,24 @@ make dev                         # -> Swagger UI at http://localhost:8003/docs
 
 `make dev` exports `DFE_CONFIG_DIR=./config` and runs `uv run dfe-engine run`.
 The console script `dfe-engine` maps to `dfe_engine.api:run_dev_server`, which
-serves the API on `DFE_API_PORT`: 8000 in code, 8003 from `.env.example`, and
+serves the API on `DFE_ENGINE_API_PORT`: 8000 in code, 8003 from `.env.example`, and
 8003 is what `make dev` and the other repos' local docs assume.
 
 Two things trip people up on a fresh clone:
 
 - **The schemas come from the `dfe-schemas` package**, which `uv sync` installs
-  -- there is nothing to check out. `DFE_SCHEMAS_DIR` is deliberately left unset
+  -- there is nothing to check out. `DFE_ENGINE_SCHEMAS_DIR` is deliberately left unset
   by `make dev`; set it only to point the engine at your own tree. `config/` is
   a plain directory: `make dev` points `DFE_CONFIG_DIR` at `./config`, the engine
   seeds its auth store and registries into whatever that directory is, and
   tolerates it being empty or a throwaway. It does NOT need to pre-exist with
   content. The minted signing key and per-group ClickHouse passwords go to
-  `.secrets/` in the CURRENT directory (`DFE_SECRETS_PATH`, default `./.secrets`),
+  `.secrets/` in the CURRENT directory (`DFE_ENGINE_SECRETS_PATH`, default `./.secrets`),
   not under `DFE_CONFIG_DIR`, so a second engine started from the same directory
   reuses that key.
 - **You need a `.env`** for `make dev` (`cp .env.example .env`). For pure
   auth/attributes work you do not want the example's ClickHouse pointed at a real
-  cluster -- set `DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false` and the engine boots with
+  cluster -- set `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES=false` and the engine boots with
   no ClickHouse at all.
 
 ## The no-dependencies auth spike
@@ -39,25 +39,25 @@ To exercise the auth, accounts, groups or attributes endpoints with nothing else
 running -- no ClickHouse, no FerretDB, no deploy repo:
 
 ```sh
-env DFE_ENV=dev \
-    DFE_AUTH_ENABLED=false \
-    DFE_AUTH_STORE_BACKEND=yaml \
-    DFE_GITOPS_ENABLED=false \
-    DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false \
-    DFE_API_PORT=8003 \
+env DFE_ENGINE_ENV=dev \
+    DFE_ENGINE_AUTH_ENABLED=false \
+    DFE_ENGINE_AUTH_STORE_BACKEND=yaml \
+    DFE_ENGINE_GITOPS_ENABLED=false \
+    DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES=false \
+    DFE_ENGINE_API_PORT=8003 \
     DFE_CONFIG_DIR=/tmp/dfe-config \
     uv run dfe-engine run
 ```
 
-- **No token needed.** `DFE_AUTH_ENABLED=false` with `DFE_ENV=dev` hands every
+- **No token needed.** `DFE_ENGINE_AUTH_ENABLED=false` with `DFE_ENGINE_ENV=dev` hands every
   unauthenticated request the `admin` role, so you can call any endpoint straight
   from `curl`/Swagger. The engine still mints an ephemeral ES384 JWT authority at
   boot; you just do not need it on this path. (The offline `auth` subcommands live
   on the separate `dfe` CLI, not the `dfe-engine` daemon.)
 - **`store_backend: auto` falls to yaml** when no document-store URI is configured
-  (`DFE_AUTH_ACCOUNTS_STORE_URI` empty), so you get a file-backed account/group
+  (`DFE_ENGINE_AUTH_ACCOUNTS_STORE_URI` empty), so you get a file-backed account/group
   store under `DFE_CONFIG_DIR/auth` with no FerretDB. Force it with
-  `DFE_AUTH_STORE_BACKEND=yaml` if you want to be explicit.
+  `DFE_ENGINE_AUTH_STORE_BACKEND=yaml` if you want to be explicit.
 - **Attribute request bodies are wrapped.** `PUT
   /api/v1/auth/accounts/{username}/attributes` takes `{"attributes": {...}}`, not
   the bare object, and the `GET` returns the same shape. A bare object is a 422.
@@ -68,11 +68,11 @@ The client is clickhouse-connect over HTTP, so the port is the HTTP one and a
 plain docker ClickHouse is not TLS:
 
 ```sh
-env DFE_ENV=dev \
-    DFE_CLICKHOUSE_HOST=127.0.0.1 \
-    DFE_CLICKHOUSE_PORT=8123 \
-    DFE_CLICKHOUSE_SECURE=false \
-    DFE_CLICKHOUSE_PASSWORD=... \
+env DFE_ENGINE_ENV=dev \
+    DFE_ENGINE_CLICKHOUSE_HOST=127.0.0.1 \
+    DFE_ENGINE_CLICKHOUSE_PORT=8123 \
+    DFE_ENGINE_CLICKHOUSE_SECURE=false \
+    DFE_ENGINE_CLICKHOUSE_PASSWORD=... \
     DFE_CONFIG_DIR=/tmp/dfe-config \
     uv run dfe-engine run
 ```
@@ -89,10 +89,10 @@ and a stock image does not.
 `dfe-engine run` binds the observability listener (`/metrics`, `/livez`,
 `/readyz`) on `0.0.0.0:9090` before the API. With the dfe-docker stack up that
 port is taken and the process dies with `fatal: [Errno 98] Address already in
-use` and no port named. The knob is scalo's, not `DFE_`-prefixed:
+use` and no port named. The knob is scalo's, not `DFE_ENGINE_`-prefixed:
 
 ```sh
-env METRICS_ADDR=127.0.0.1:9197 DFE_ENV=dev uv run dfe-engine run
+env METRICS_ADDR=127.0.0.1:9197 DFE_ENGINE_ENV=dev uv run dfe-engine run
 ```
 
 ## No collector running
@@ -102,7 +102,7 @@ every few seconds while nothing listens. scalo reads a whitespace-only endpoint
 as "no endpoint", which is its off switch:
 
 ```sh
-env OTEL_EXPORTER_OTLP_ENDPOINT=" " DFE_ENV=dev uv run dfe-engine run
+env OTEL_EXPORTER_OTLP_ENDPOINT=" " DFE_ENGINE_ENV=dev uv run dfe-engine run
 ```
 
 ## Running against the interdependent repos
@@ -117,13 +117,13 @@ When Kay runs dfe-engine + dfe-hyperdx + dfe-ui + a local dfe-deploy clone toget
   from that). Set `DFE_ENGINE_ISSUER=https://dfe.local/api` to match the engine's
   advertised issuer (`/.well-known/openid-configuration`), enforced as the token
   `iss`. The fork's `/dfe/*` routes forward the caller's `dfe_token` to the engine.
-  Under a dev `DFE_ENV` that cookie is set without `Secure`, so a plain-http stack
+  Under a dev `DFE_ENGINE_ENV` that cookie is set without `Secure`, so a plain-http stack
   keeps it; production sets `Secure`, like the session cookie.
 - **dfe-ui** talks to the engine API at `http://localhost:8003/api` and embeds the
   fork; the fork's create-rule button opens `${DFE_UI_BASE_URL}/rules/{id}`.
 - **The deploy repo (dfe-deploy)** is the gitops target. Either disable gitops
-  (`DFE_GITOPS_ENABLED=false`) or point it at your local clone with
-  `DFE_GITOPS_REPO_URL`/`DFE_GITOPS_LOCAL_PATH`; with it off the live auth store IS
+  (`DFE_ENGINE_GITOPS_ENABLED=false`) or point it at your local clone with
+  `DFE_ENGINE_GITOPS_REPO_URL`/`DFE_ENGINE_GITOPS_LOCAL_PATH`; with it off the live auth store IS
   the durable store, so there is nothing to commit.
 
 > The single-process boot above is verified. The full four-repo local stack is the

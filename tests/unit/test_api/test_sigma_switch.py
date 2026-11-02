@@ -9,7 +9,7 @@
 
 Off, every sigma path answers 404 while the field-map API that ECS, CIM and OCSF
 share keeps answering. The daemon builds its settings from the environment with no
-config file, so ``DFE_SIGMA_ENABLED`` is the switch a deployment actually reaches.
+config file, so ``DFE_ENGINE_SIGMA_ENABLED`` is the switch a deployment actually reaches.
 """
 
 import re
@@ -89,8 +89,8 @@ def test_enabling_sigma_mounts_every_sigma_route(app, client):
 @pytest.mark.parametrize(("value", "mounted"), [("true", True), ("false", False)])
 def test_the_environment_switch_reaches_the_app(monkeypatch, value, mounted):
     """Built the way the daemon builds it: load_settings() with no file, then create_app."""
-    monkeypatch.setenv("DFE_ENV", "dev")
-    monkeypatch.setenv("DFE_SIGMA_ENABLED", value)
+    monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
+    monkeypatch.setenv("DFE_ENGINE_SIGMA_ENABLED", value)
 
     mounted_paths = _mounted_paths(create_app(settings=load_settings()))
 

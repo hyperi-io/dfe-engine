@@ -87,7 +87,7 @@ class TestAutoMergeApi:
             "allowed": False,
             "reason": body["reason"],
         }
-        assert "DFE_GITOPS_MODE" in body["reason"]
+        assert "DFE_ENGINE_GITOPS_MODE" in body["reason"]
 
     def test_enable_refused_in_prod_team(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)

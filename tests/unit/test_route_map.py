@@ -92,7 +92,7 @@ def test_a_row_whose_route_has_already_moved_passes(route_map):
 
 def test_the_committed_plan_freezes_exactly_the_protocol_routers(route_map, monkeypatch):
     """The plan's protocol rows and the conformance exemptions are one list, read twice."""
-    monkeypatch.setenv("DFE_ENV", "dev")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
     settings = load_settings().model_copy(
         update={"e2e_server": False, "sigma": SigmaSettings(enabled=True)}
     )

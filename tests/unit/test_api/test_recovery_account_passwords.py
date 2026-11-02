@@ -227,7 +227,7 @@ class TestBreakglassOnADirectCommitDeployment:
 
 
 class TestBreakglassOnAReviewDeployment:
-    """Production with DFE_GITOPS_MODE=team: main changes only when the review merges."""
+    """Production with DFE_ENGINE_GITOPS_MODE=team: main changes only when the review merges."""
 
     def test_with_a_forge_the_change_waits_on_the_pull_request(self, tmp_path):
         settings = _settings(tmp_path, gitops=True, env=PROD)

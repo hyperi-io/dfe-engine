@@ -112,7 +112,7 @@ source_provider: "<provider-name>"
 source_id: "<Cloud Identity group id>"
 ```
 
-Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Google refuses it.
+Behind a TLS-terminating proxy, set `api.forwarded_allow_ips` (`DFE_ENGINE_API_FORWARDED_ALLOW_IPS`), or the engine builds the redirect URI with `http://` and Google refuses it.
 
 ## Vendor references
 

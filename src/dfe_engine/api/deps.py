@@ -76,7 +76,7 @@ def secrets_store(request: Request) -> DfeSecrets:
             status_code=503,
             detail={
                 "code": "secrets_unavailable",
-                "message": "no secrets backend is configured; set DFE_SECRETS_PROVIDER",
+                "message": "no secrets backend is configured; set DFE_ENGINE_SECRETS_PROVIDER",
             },
         )
     return store
@@ -195,7 +195,7 @@ def get_schema_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "SchemaRegistry not initialized -- set DFE_SCHEMAS_DIR (schemas.schemas_dir)",
+                "message": "SchemaRegistry not initialized -- set DFE_ENGINE_SCHEMAS_DIR (schemas.schemas_dir)",
             },
         )
     return reg
@@ -210,7 +210,7 @@ def get_derived_schema_registry():
             detail={
                 "code": "not_configured",
                 "message": (
-                    "DerivedSchemaRegistry not initialized -- set DFE_SCHEMAS_DIR "
+                    "DerivedSchemaRegistry not initialized -- set DFE_ENGINE_SCHEMAS_DIR "
                     "(schemas.schemas_dir) or enable gitops"
                 ),
             },
@@ -226,7 +226,7 @@ def get_source_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "SourceRegistry not initialized -- set DFE_SOURCES_DIR",
+                "message": "SourceRegistry not initialized -- set DFE_ENGINE_SOURCES_DIR",
             },
         )
     return reg
@@ -246,7 +246,7 @@ def get_service_config_registry():
             detail={
                 "code": "not_configured",
                 "message": "ServiceConfigRegistry not initialized"
-                " -- set DFE_SERVICES_CONFIG_YAML_DIR",
+                " -- set DFE_ENGINE_SERVICES_CONFIG_YAML_DIR",
             },
         )
     return reg
@@ -260,7 +260,7 @@ def get_field_map_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "FieldMapRegistry not initialized -- set DFE_FIELDMAPS_DIR",
+                "message": "FieldMapRegistry not initialized -- set DFE_ENGINE_FIELDMAPS_DIR",
             },
         )
     return reg
@@ -280,7 +280,7 @@ def get_alert_destinations_registry():
             detail={
                 "code": "not_configured",
                 "message": "Alert destinations not initialized"
-                " -- set DFE_HUNTS_ALERT_DESTINATIONS_DIR",
+                " -- set DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR",
             },
         )
     return reg
@@ -299,7 +299,7 @@ def get_rule_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "RuleRegistry not initialized -- set DFE_HUNTS_RULES_DIR (hunts.rules_dir)",
+                "message": "RuleRegistry not initialized -- set DFE_ENGINE_HUNTS_RULES_DIR (hunts.rules_dir)",
             },
         )
     return reg
@@ -318,7 +318,7 @@ def get_hunt_config_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "HuntConfigRegistry not initialized -- set DFE_HUNTS_DIR (hunts.hunt_dir)",
+                "message": "HuntConfigRegistry not initialized -- set DFE_ENGINE_HUNTS_DIR (hunts.hunt_dir)",
             },
         )
     return reg

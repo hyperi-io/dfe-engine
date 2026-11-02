@@ -7,8 +7,8 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Direct-to-main vs review-PR, decided BEFORE the write and enforced in code.
 
-The auto-merge deployment gate (gitcrud/auto_merge.py) says a production DFE_ENV
-with DFE_GITOPS_MODE=team may NOT auto-merge, and the design says that posture has
+The auto-merge deployment gate (gitcrud/auto_merge.py) says a production DFE_ENGINE_ENV
+with DFE_ENGINE_GITOPS_MODE=team may NOT auto-merge, and the design says that posture has
 NO escape hatch: a governed write must not land straight on the deploy repo's main
 (CLAUDE.md gitops section; docs/control-plane/gitops-commit-standard.md section 4). Historically
 that refusal was only a response badge -- the commit+push happened first
@@ -159,9 +159,9 @@ def route_write(
     # Production + team: refuse direct-to-main. Route to a review branch + PR.
     if forge is None:
         raise ReviewRequiredError(
-            "direct-to-main refused in production with DFE_GITOPS_MODE=team; a "
+            "direct-to-main refused in production with DFE_ENGINE_GITOPS_MODE=team; a "
             "review PR is required but no git forge is configured (set "
-            "DFE_GITOPS_FORGE_* / DFE_GITOPS_REPO_URL, or use a solo/dev posture)"
+            "DFE_ENGINE_GITOPS_FORGE_* / DFE_ENGINE_GITOPS_REPO_URL, or use a solo/dev posture)"
         )
     branch = pr_branch_name(rbac_class, resource, request_id)
     res = write(branch)
@@ -190,8 +190,8 @@ class WritePosture:
     """The deployment's write posture, which decides where a governed write lands.
 
     Attributes:
-        environment: ``DFE_ENV``.
-        mode: ``DFE_GITOPS_MODE``.
+        environment: ``DFE_ENGINE_ENV``.
+        mode: ``DFE_ENGINE_GITOPS_MODE``.
         forge: Opens the review PR, None where no forge is configured.
     """
 

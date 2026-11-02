@@ -55,7 +55,7 @@ def _env(env_var: str, key_name: str, secret_key: str) -> SecretEnvContract:
 def engine_deployment_contract() -> DeploymentContract:
     """Build the deployment contract for dfe-engine.
 
-    ``image_registry`` is ``DFE_DEPLOYMENT_IMAGE_REGISTRY`` when that env var is
+    ``image_registry`` is ``DFE_ENGINE_DEPLOYMENT_IMAGE_REGISTRY`` when that env var is
     set, else ``_DEFAULT_IMAGE_REGISTRY``; no config file sets it. The base image
     is derived by scalo from ``python_version``.
 
@@ -83,11 +83,12 @@ def engine_deployment_contract() -> DeploymentContract:
             metrics_path="/metrics",
             startup_budget_seconds=300,
         ),
-        env_prefix="DFE",
+        env_prefix="DFE_ENGINE",
         metric_prefix="dfe",
         # Empty, so the chart mounts no config file: the YAML SSoT lives in the `config` writable path.
         config_mount_path="",
-        image_registry=os.environ.get("DFE_DEPLOYMENT_IMAGE_REGISTRY") or _DEFAULT_IMAGE_REGISTRY,
+        image_registry=os.environ.get("DFE_ENGINE_DEPLOYMENT_IMAGE_REGISTRY")
+        or _DEFAULT_IMAGE_REGISTRY,
         python_version="3.14",
         # Digest-pinned runtime base (#106). python:3.14-slim is already
         # Debian 13 trixie; pinned so the tag cannot float. The committed
@@ -96,61 +97,71 @@ def engine_deployment_contract() -> DeploymentContract:
         # custom manager in renovate.json, so keep it on one line in this shape.
         base_image="python:3.14-slim@sha256:35caba83af2fe6da9a5d922f9b0156f21d1246a48278c58a08bd253303ba42e8",
         entrypoint_args=["run"],
-        # Env names are the ones dfe_engine.settings reads, single-underscore under the DFE_ prefix.
+        # Env names are the ones dfe_engine.settings reads, single-underscore under the DFE_ENGINE_ prefix.
         secrets=[
             SecretGroupContract(
                 group_name="clickhouse",
-                env_vars=[_env("DFE_CLICKHOUSE_PASSWORD", "password", "password")],
+                env_vars=[_env("DFE_ENGINE_CLICKHOUSE_PASSWORD", "password", "password")],
             ),
             SecretGroupContract(
                 group_name="jwt",
-                env_vars=[_env("DFE_API_JWT_SECRET", "secret", "jwt-secret")],
+                env_vars=[_env("DFE_ENGINE_API_JWT_SECRET", "secret", "jwt-secret")],
             ),
             SecretGroupContract(
                 group_name="admin",
-                env_vars=[_env("DFE_AUTH_LOCAL_ADMIN_PASSWORD", "password", "admin-password")],
+                env_vars=[
+                    _env("DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD", "password", "admin-password")
+                ],
             ),
             SecretGroupContract(
                 group_name="breakglass",
-                env_vars=[_env("DFE_AUTH_BREAKGLASS_PASSWORD", "password", "breakglass-password")],
+                env_vars=[
+                    _env("DFE_ENGINE_AUTH_BREAKGLASS_PASSWORD", "password", "breakglass-password")
+                ],
             ),
             # Each app's own ClickHouse password, from the Secret its pod reads, so
             # the engine creates the user on the value the app connects with.
             SecretGroupContract(
                 group_name="hunt-runner",
-                env_vars=[_env("DFE_CLICKHOUSE_HUNT_RUNNER_PASSWORD", "password", "password")],
+                env_vars=[
+                    _env("DFE_ENGINE_CLICKHOUSE_HUNT_RUNNER_PASSWORD", "password", "password")
+                ],
             ),
             SecretGroupContract(
                 group_name="loader",
-                env_vars=[_env("DFE_CLICKHOUSE_LOADER_PASSWORD", "password", "password")],
+                env_vars=[_env("DFE_ENGINE_CLICKHOUSE_LOADER_PASSWORD", "password", "password")],
             ),
             SecretGroupContract(
                 group_name="query-reader",
-                env_vars=[_env("DFE_CLICKHOUSE_QUERY_READER_PASSWORD", "password", "password")],
+                env_vars=[
+                    _env("DFE_ENGINE_CLICKHOUSE_QUERY_READER_PASSWORD", "password", "password")
+                ],
             ),
             SecretGroupContract(
                 group_name="otel-writer",
-                env_vars=[_env("DFE_CLICKHOUSE_OTEL_WRITER_PASSWORD", "password", "password")],
+                env_vars=[
+                    _env("DFE_ENGINE_CLICKHOUSE_OTEL_WRITER_PASSWORD", "password", "password")
+                ],
             ),
             SecretGroupContract(
                 group_name="kafka",
                 env_vars=[
-                    _env("DFE_KAFKA_SASL_MECHANISM", "mechanism", "sasl.mechanism"),
-                    _env("DFE_KAFKA_SASL_USERNAME", "username", "username"),
-                    _env("DFE_KAFKA_SASL_PASSWORD", "password", "password"),
+                    _env("DFE_ENGINE_KAFKA_SASL_MECHANISM", "mechanism", "sasl.mechanism"),
+                    _env("DFE_ENGINE_KAFKA_SASL_USERNAME", "username", "username"),
+                    _env("DFE_ENGINE_KAFKA_SASL_PASSWORD", "password", "password"),
                 ],
             ),
             SecretGroupContract(
                 group_name="gitops",
                 env_vars=[
-                    _env("DFE_GITOPS_USERNAME", "username", "username"),
-                    _env("DFE_GITOPS_TOKEN", "token", "password"),
+                    _env("DFE_ENGINE_GITOPS_USERNAME", "username", "username"),
+                    _env("DFE_ENGINE_GITOPS_TOKEN", "token", "password"),
                 ],
             ),
             # Optional: an engine with no seed accounts starts with the variable unset.
             SecretGroupContract(
                 group_name="seed-accounts",
-                env_vars=[_env("DFE_AUTH_LOCAL_SEED_ACCOUNTS", "accounts", "seed-accounts")],
+                env_vars=[_env("DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS", "accounts", "seed-accounts")],
                 optional=True,
             ),
         ],

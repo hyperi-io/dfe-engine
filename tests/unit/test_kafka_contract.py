@@ -211,7 +211,7 @@ class TestTopicConfig:
 
 
 class TestEnvWiring:
-    """DFE_KAFKA_PROVIDER binds to the override (the deploy path): deploys set the
+    """DFE_ENGINE_KAFKA_PROVIDER binds to the override (the deploy path): deploys set the
     provider, and the mechanism is derived - never set via env."""
 
     @pytest.fixture(autouse=True)
@@ -222,7 +222,7 @@ class TestEnvWiring:
                 monkeypatch.delenv(key, raising=False)
 
     def test_provider_env_binds_to_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_KAFKA_PROVIDER", "redpanda")
+        monkeypatch.setenv("DFE_ENGINE_KAFKA_PROVIDER", "redpanda")
         overrides = _get_env_overrides()
         assert overrides["kafka"]["provider"] == "redpanda"
         # ... and the derivation turns that into SCRAM at construction.
@@ -230,7 +230,7 @@ class TestEnvWiring:
 
     def test_the_in_cluster_listener_key_binds(self, monkeypatch):
         # The one env the deploy sets, and the pair it derives (dfe-engine#332).
-        monkeypatch.setenv("DFE_KAFKA_PROVIDER", "strimzi-no-tls")
+        monkeypatch.setenv("DFE_ENGINE_KAFKA_PROVIDER", "strimzi-no-tls")
         ks = KafkaSettings(**_get_env_overrides()["kafka"])
         assert (ks.security_protocol, ks.sasl_mechanism) == ("SASL_PLAINTEXT", "SCRAM-SHA-512")
 
@@ -257,27 +257,27 @@ class TestTopicEnvWiring:
 
     @pytest.mark.parametrize("raw", ["false", "False", "0", "no", "anything-not-truthy"])
     def test_ensure_topics_turns_off(self, monkeypatch, raw):
-        monkeypatch.setenv("DFE_KAFKA_ENSURE_TOPICS", raw)
+        monkeypatch.setenv("DFE_ENGINE_KAFKA_ENSURE_TOPICS", raw)
         assert KafkaSettings(**_get_env_overrides()["kafka"]).ensure_topics is False
 
     @pytest.mark.parametrize("raw", ["true", "True", "1", "yes"])
     def test_ensure_topics_turns_on(self, monkeypatch, raw):
-        monkeypatch.setenv("DFE_KAFKA_ENSURE_TOPICS", raw)
+        monkeypatch.setenv("DFE_ENGINE_KAFKA_ENSURE_TOPICS", raw)
         assert KafkaSettings(**_get_env_overrides()["kafka"]).ensure_topics is True
 
     def test_partitions_and_replication_bind(self, monkeypatch):
-        monkeypatch.setenv("DFE_KAFKA_TOPIC_PARTITIONS", "6")
-        monkeypatch.setenv("DFE_KAFKA_TOPIC_REPLICATION_FACTOR", "3")
+        monkeypatch.setenv("DFE_ENGINE_KAFKA_TOPIC_PARTITIONS", "6")
+        monkeypatch.setenv("DFE_ENGINE_KAFKA_TOPIC_REPLICATION_FACTOR", "3")
         ks = KafkaSettings(**_get_env_overrides()["kafka"])
         assert (ks.topic_partitions, ks.topic_replication_factor) == (6, 3)
 
     def test_retention_and_cleanup_bind(self, monkeypatch):
-        monkeypatch.setenv("DFE_KAFKA_TOPIC_RETENTION_MS", "604800000")
-        monkeypatch.setenv("DFE_KAFKA_TOPIC_CLEANUP_POLICY", "delete")
+        monkeypatch.setenv("DFE_ENGINE_KAFKA_TOPIC_RETENTION_MS", "604800000")
+        monkeypatch.setenv("DFE_ENGINE_KAFKA_TOPIC_CLEANUP_POLICY", "delete")
         ks = KafkaSettings(**_get_env_overrides()["kafka"])
         assert (ks.topic_retention_ms, ks.topic_cleanup_policy) == (604800000, "delete")
 
     def test_the_message_size_binds(self, monkeypatch):
-        monkeypatch.setenv("DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES", "8388608")
+        monkeypatch.setenv("DFE_ENGINE_KAFKA_TOPIC_MAX_MESSAGE_BYTES", "8388608")
         ks = KafkaSettings(**_get_env_overrides()["kafka"])
         assert ks.topic_max_message_bytes == 8388608

@@ -609,7 +609,7 @@ class SourceSchema(BaseModel):
             "SummingMergeTree(a, b). Declare the base variant only: the Replicated "
             "form every DFE table takes is added at DDL time, so do NOT "
             "prefix Replicated/Shared here. Empty (the default) means inherit the "
-            "deployment default (DFE_CLICKHOUSE_DEFAULT_ENGINE, itself MergeTree "
+            "deployment default (clickhouse.default_engine, itself MergeTree "
             "unless overridden)."
         ),
     )

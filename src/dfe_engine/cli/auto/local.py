@@ -85,7 +85,7 @@ def _resolve_repo_path(repo: str | None) -> str:
     local = repo or _gitops().local_path
     if not local:
         raise click.ClickException(
-            "no gitops clone path: pass --repo <path> or set DFE_GITOPS_LOCAL_PATH."
+            "no gitops clone path: pass --repo <path> or set DFE_ENGINE_GITOPS_LOCAL_PATH."
         )
     return local
 
@@ -254,7 +254,7 @@ def _do_push(repo_path: str) -> None:
     """
     gs = _gitops()
     if not gs.repo_url:
-        click.echo("no remote configured (DFE_GITOPS_REPO_URL unset); nothing pushed.")
+        click.echo("no remote configured (DFE_ENGINE_GITOPS_REPO_URL unset); nothing pushed.")
         return
     repo = GitopsRepo(
         local_path=repo_path,
@@ -327,7 +327,7 @@ def _repo_option(f):
         "--repo",
         default=None,
         metavar="PATH",
-        help="Gitops clone path (default: configured DFE_GITOPS_LOCAL_PATH).",
+        help="Gitops clone path (default: configured DFE_ENGINE_GITOPS_LOCAL_PATH).",
     )(f)
 
 

@@ -53,7 +53,7 @@ def renamed_landing_tree(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Pat
         tree,
         {LANDING_DEFINITION_FILE: definition.replace('name: "main"', f'name: "{RENAMED}"')},
     )
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tree))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(tree))
     return tree
 
 

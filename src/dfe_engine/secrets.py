@@ -57,7 +57,7 @@ class SecretNameHeldError(ProviderError):
             provider,
             f"secret {path!r} is scheduled for deletion, so its name stays taken until the "
             "deletion finishes. Restore the secret, or wait out its recovery window, then retry. "
-            f"The engine deletes with DFE_SECRETS_RECOVERY_WINDOW_DAYS={window_days}, and 0 "
+            f"The engine deletes with DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS={window_days}, and 0 "
             "deletes with no recovery window",
         )
 
@@ -251,6 +251,6 @@ def warn_on_aws_managed_key(cfg: SecretsSettings) -> None:
     """Warn when AWS secrets will be encrypted with the AWS managed key, not the deployment's own."""
     if cfg.provider == "aws" and not cfg.kms_key_id:
         logger.warning(
-            "AWS secrets are encrypted with the AWS managed key: set DFE_SECRETS_KMS_KEY_ID "
+            "AWS secrets are encrypted with the AWS managed key: set DFE_ENGINE_SECRETS_KMS_KEY_ID "
             "to encrypt them with the deployment's own KMS key",
         )

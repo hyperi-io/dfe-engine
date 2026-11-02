@@ -150,7 +150,7 @@ def test_ch_params_refuses_an_unreadable_ca_cert(tmp_path):
     settings.clickhouse.secure = True
     settings.clickhouse.ca_cert = str(missing)
 
-    with pytest.raises(ClickHouseCaCertUnreadable, match="DFE_CLICKHOUSE_CA_CERT"):
+    with pytest.raises(ClickHouseCaCertUnreadable, match="DFE_ENGINE_CLICKHOUSE_CA_CERT"):
         cli._ch_params(settings)
 
 

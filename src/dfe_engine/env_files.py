@@ -10,7 +10,7 @@
 
 Shell-exported variables always win (``override=False``). Search order:
 
-1. ``DFE_ENV_FILE`` when set
+1. ``DFE_ENGINE_ENV_FILE`` when set
 2. ``./.env`` in the current working directory
 3. ``$DFE_CONFIG_DIR/.env`` when ``DFE_CONFIG_DIR`` is set
 """
@@ -29,7 +29,7 @@ def load_env_files() -> None:
         return
 
     candidates: list[Path] = []
-    explicit = os.environ.get("DFE_ENV_FILE", "").strip()
+    explicit = os.environ.get("DFE_ENGINE_ENV_FILE", "").strip()
     if explicit:
         candidates.append(Path(explicit))
     candidates.append(Path.cwd() / ".env")

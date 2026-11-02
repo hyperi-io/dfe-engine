@@ -196,7 +196,7 @@ class TestLoadProfile:
             {"columns": [{"name": "_from_yml_ref", "type": "string"}]},
             header_dir / "timeseries.yaml",
         )
-        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(tmp_path))
 
         columns = SchemaLoader.load_profile(profile_name)
         assert [c.name for c in columns] == ["_from_yml_ref"]
@@ -547,7 +547,7 @@ class TestPackageResolution:
             assert (root / "common-header").is_dir()
 
     def test_env_var_override(self, tmp_path, monkeypatch):
-        """DFE_SCHEMAS_DIR env var should override the package."""
+        """DFE_ENGINE_SCHEMAS_DIR env var should override the package."""
         # Create a custom schemas dir with common-header
         header_dir = tmp_path / "common-header"
         header_dir.mkdir()
@@ -555,21 +555,21 @@ class TestPackageResolution:
             {"columns": [{"name": "_custom", "type": "string"}]},
             header_dir / "custom_profile.yaml",
         )
-        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(tmp_path))
 
         columns = SchemaLoader.load_profile("custom_profile")
         assert len(columns) == 1
         assert columns[0].name == "_custom"
 
     def test_env_var_profiles_dir_resolution(self, tmp_path, monkeypatch):
-        """DFE_SCHEMAS_DIR should be checked for common-header subdir."""
+        """DFE_ENGINE_SCHEMAS_DIR should be checked for common-header subdir."""
         header_dir = tmp_path / "common-header"
         header_dir.mkdir()
         yaml_dump(
             {"columns": [{"name": "_ts", "type": "timestamp"}]},
             header_dir / "timeseries.yaml",
         )
-        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(tmp_path))
 
         resolved = _resolve_profiles_dir()
         assert resolved == header_dir
@@ -587,8 +587,8 @@ class TestPackageResolution:
         def no_package_root():
             return None
 
-        monkeypatch.delenv("DFE_SCHEMAS_DIR", raising=False)
-        monkeypatch.setenv("DFE_SCHEMAS_SEED_DIR", str(tmp_path / "no-seed"))
+        monkeypatch.delenv("DFE_ENGINE_SCHEMAS_DIR", raising=False)
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_SEED_DIR", str(tmp_path / "no-seed"))
         monkeypatch.setattr(
             "dfe_engine.schema.schema_loader._resolve_package_schemas_root", no_package_root
         )

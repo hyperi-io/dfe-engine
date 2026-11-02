@@ -51,7 +51,7 @@ def _settings_for(*, schemas_dir, tmp_path):
     """Settings pointing the schemas bootstrap at one directory.
 
     ``env="test"``: DFESettings is a plain BaseModel, so a direct construction
-    never reads DFE_ENV and the "production" default would demand a jwt_secret.
+    never reads DFE_ENGINE_ENV and the "production" default would demand a jwt_secret.
     """
     return DFESettings(
         env="test",
@@ -63,7 +63,7 @@ def _settings_for(*, schemas_dir, tmp_path):
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch, tmp_path):
     """Neutralise the dfe-schemas package this test suite runs against."""
-    monkeypatch.delenv("DFE_SCHEMAS_DIR", raising=False)
+    monkeypatch.delenv("DFE_ENGINE_SCHEMAS_DIR", raising=False)
     monkeypatch.setenv(SEED_DIR_ENV_VAR, str(tmp_path / "no-seed-here"))
     monkeypatch.setattr(
         "dfe_engine.schema.schema_loader._resolve_package_schemas_root", lambda: None
@@ -97,10 +97,10 @@ def test_the_installed_package_beats_the_image_seed(monkeypatch, tmp_path):
 
 
 def test_an_explicit_dir_wins_over_the_package(monkeypatch, tmp_path):
-    """DFE_SCHEMAS_DIR is how a deployment overrides the shipped trees."""
+    """DFE_ENGINE_SCHEMAS_DIR is how a deployment overrides the shipped trees."""
     explicit = _make_schemas_tree(tmp_path / "explicit")
     packaged = _make_schemas_tree(tmp_path / "site-packages" / "dfe_schemas" / "data")
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(explicit))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(explicit))
     monkeypatch.setattr(
         "dfe_engine.schema.schema_loader._resolve_package_schemas_root", lambda: packaged
     )
@@ -121,7 +121,7 @@ def test_an_empty_dir_never_shadows_a_real_tree(monkeypatch, tmp_path):
     empty = tmp_path / "schemas"
     empty.mkdir()
     seed = _make_schemas_tree(tmp_path / "schemas-seed")
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(empty))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(empty))
     monkeypatch.setenv(SEED_DIR_ENV_VAR, str(seed))
 
     assert _resolve_schemas_root() == seed
@@ -153,14 +153,14 @@ def _make_seed_with_topic_policy(root):
 def test_a_volume_an_older_engine_seeded_never_shadows_the_seed(monkeypatch, seeded_by, tmp_path):
     """The upgrade regression: v1.21.1 crash-looped over a v1.20.x schemas volume.
 
-    ``DFE_SCHEMAS_DIR`` is the volume, so the partial tree got first refusal and
+    ``DFE_ENGINE_SCHEMAS_DIR`` is the volume, so the partial tree got first refusal and
     won on ``common-header/`` alone. ``ensure_storage`` repairs that tree, but it
     runs in the FastAPI lifespan and the topic policy resolves during app
     construction, so the repair lands after the process has already died.
     """
     volume = _make_partial_volume(tmp_path / "app-schemas", seeded_by=seeded_by)
     seed = _make_seed_with_topic_policy(tmp_path / "app-schemas-seed")
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(volume))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(volume))
     monkeypatch.setenv(SEED_DIR_ENV_VAR, str(seed))
 
     resolved = _resolve_schemas_root()
@@ -179,7 +179,7 @@ def test_a_volume_an_older_engine_seeded_never_shadows_the_package(monkeypatch, 
     """
     volume = _make_partial_volume(tmp_path / "app-schemas", seeded_by="dfe-engine 1.20.20")
     packaged = _make_seed_with_topic_policy(tmp_path / "site-packages" / "dfe_schemas" / "data")
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(volume))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(volume))
     _package_root_is(monkeypatch=monkeypatch, root=packaged)
 
     assert _resolve_schemas_root() == packaged
@@ -189,11 +189,11 @@ def test_a_repaired_volume_resolves_again(monkeypatch, tmp_path):
     """Once ``ensure_storage`` has copied the seed over it, the volume wins back.
 
     The fix must reject a partial tree, not the deployment's own tree -- an
-    operator's ``DFE_SCHEMAS_DIR`` still beats the shipped seed.
+    operator's ``DFE_ENGINE_SCHEMAS_DIR`` still beats the shipped seed.
     """
     volume = _make_partial_volume(tmp_path / "app-schemas", seeded_by="dfe-engine 1.20.20")
     seed = _make_seed_with_topic_policy(tmp_path / "app-schemas-seed")
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(volume))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(volume))
     monkeypatch.setenv(SEED_DIR_ENV_VAR, str(seed))
     assert _resolve_schemas_root() == seed
 
@@ -207,7 +207,7 @@ def test_an_explicit_dir_wins_over_the_seed(monkeypatch, tmp_path):
     """A real checkout must beat whatever the image happens to carry."""
     explicit = _make_schemas_tree(tmp_path / "explicit")
     seed = _make_schemas_tree(tmp_path / "schemas-seed")
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(explicit))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(explicit))
     monkeypatch.setenv(SEED_DIR_ENV_VAR, str(seed))
 
     assert _resolve_schemas_root() == explicit
@@ -241,7 +241,7 @@ def _write_registry_file(*, relative: str, root, text: str = "engines: []\n"):
 def test_a_registry_in_the_explicit_dir_wins(monkeypatch, tmp_path):
     explicit = _write_registry_file(relative="engines.yaml", root=tmp_path / "explicit")
     _write_registry_file(relative="engines.yaml", root=tmp_path / "packaged")
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path / "explicit"))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(tmp_path / "explicit"))
     _package_root_is(monkeypatch=monkeypatch, root=tmp_path / "packaged")
 
     assert resolve_registry_path("engines.yaml") == explicit
@@ -253,7 +253,7 @@ def test_a_volume_without_the_registry_does_not_shadow_the_package(monkeypatch, 
     packaged = _write_registry_file(
         relative="types.yaml", root=tmp_path / "packaged", text="primitives: {}\n"
     )
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(stale))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(stale))
     _package_root_is(monkeypatch=monkeypatch, root=tmp_path / "packaged")
 
     assert resolve_registry_path("types.yaml") == packaged
@@ -264,14 +264,14 @@ def test_an_empty_registry_dir_on_the_volume_does_not_shadow_the_package(monkeyp
     packaged = _write_registry_file(
         relative="field-maps/sigma/_default.yaml", root=tmp_path / "packaged", text="{}\n"
     )
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path / "volume"))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(tmp_path / "volume"))
     _package_root_is(monkeypatch=monkeypatch, root=tmp_path / "packaged")
 
     assert resolve_registry_path("field-maps") == packaged.parent.parent
 
 
 def test_a_missing_registry_names_what_was_searched(monkeypatch, tmp_path):
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path / "explicit"))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(tmp_path / "explicit"))
 
     with pytest.raises(SchemaLoadError, match=r"registries/engines\.yaml.*explicit"):
         resolve_registry_path("engines.yaml")

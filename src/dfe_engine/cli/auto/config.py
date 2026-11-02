@@ -8,7 +8,7 @@
 
 """Credential + configuration store for the ``dfe`` CLI (aws/gcloud shaped).
 
-Layout under ``~/.config/dfe`` (override the whole root with ``$DFE_CONFIG_HOME``)::
+Layout under ``~/.config/dfe`` (override the whole root with ``$DFE_ENGINE_CONFIG_HOME``)::
 
     configurations/config_<name>   INI: [core] url = ..., account = ...
     active_config                  one line: the active profile name
@@ -19,8 +19,8 @@ profile pointer selects one. Credentials are keyed by ``account`` so several
 profiles pointing at the same account share one stored token.
 
 Resolution precedence (first wins):
-  url   : explicit --url / $DFE_API_URL  >  active profile url
-  token : $DFE_API_KEY / $DFE_API_TOKEN  >  stored credential for the active account
+  url   : explicit --url / $DFE_ENGINE_API_URL  >  active profile url
+  token : $DFE_ENGINE_API_KEY / $DFE_ENGINE_API_TOKEN  >  stored credential for the active account
 """
 
 import configparser
@@ -35,8 +35,8 @@ _DEFAULT_PROFILE = "default"
 
 
 def config_home() -> Path:
-    """Root config dir - ``$DFE_CONFIG_HOME`` or ``~/.config/dfe``."""
-    override = os.environ.get("DFE_CONFIG_HOME")
+    """Root config dir - ``$DFE_ENGINE_CONFIG_HOME`` or ``~/.config/dfe``."""
+    override = os.environ.get("DFE_ENGINE_CONFIG_HOME")
     if override:
         return Path(override)
     return Path.home() / ".config" / "dfe"
@@ -259,13 +259,13 @@ def resolve(
     profile = profile_override or store.active_profile()
 
     # URL: explicit flag / env win over the profile.
-    url = url_override or os.environ.get("DFE_API_URL") or store.get_value("url", profile)
+    url = url_override or os.environ.get("DFE_ENGINE_API_URL") or store.get_value("url", profile)
 
     account = store.get_value("account", profile)
 
     # Token: env wins; else the stored credential for the active account.
-    env_key = os.environ.get("DFE_API_KEY")
-    env_token = os.environ.get("DFE_API_TOKEN")
+    env_key = os.environ.get("DFE_ENGINE_API_KEY")
+    env_token = os.environ.get("DFE_ENGINE_API_TOKEN")
     credential: Credential | None = None
     if env_key:
         credential = Credential(account=account or "env", api_key=env_key)

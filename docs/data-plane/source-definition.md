@@ -137,7 +137,7 @@ receiver's router splits on. It is not a ClickHouse column reference: a
 `_json.` prefix would be read as a first path segment that no payload has.
 
 `ttl_days` is optional. A source that leaves it unset gets the deployment
-default (the admin's console value, else `DFE_CLICKHOUSE_DEFAULT_TTL_DAYS`, 90 days shipped, 0 = none); a value
+default (the admin's console value, else `DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS`, 90 days shipped, 0 = none); a value
 here wins over that default and over the table's dfe-schemas definition. The
 next schema apply moves an existing table onto a changed value with `ALTER
 TABLE ... MODIFY TTL`, and shortening it expires the rows older than the new
@@ -245,7 +245,7 @@ emits the schema YAML, which the source then names. The mapping table is in
 The connector-type rule is the source-schema alignment, enforced: one source is
 one schema, so it is one type, and the many connections of that type - accounts,
 tenants, regions, each with its own credential - all land in the one table.
-`DFE_SOURCE_ALLOW_MIXED_FETCHER_TYPES=true` (`source.allow_mixed_fetcher_types`)
+`DFE_ENGINE_SOURCE_ALLOW_MIXED_FETCHER_TYPES=true` (`source.allow_mixed_fetcher_types`)
 turns the enforcement off for a deployment that knowingly wants a mixed fetcher,
 and past that dial you are on your own: no suite support, no schema alignment,
 and dfe-fetcher's own many-to-many semantics apply to what lands in the table.

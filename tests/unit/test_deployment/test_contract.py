@@ -23,23 +23,23 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 # Where _get_env_overrides() puts each Secret-fed variable the contract names.
 _OVERRIDE_PATHS = {
-    "DFE_CLICKHOUSE_PASSWORD": ("clickhouse", "password"),
-    "DFE_API_JWT_SECRET": ("api", "jwt_secret"),
-    "DFE_AUTH_LOCAL_ADMIN_PASSWORD": ("auth", "local", "admin_password"),
-    "DFE_AUTH_BREAKGLASS_PASSWORD": ("auth", "local", "breakglass_password"),
-    "DFE_KAFKA_SASL_MECHANISM": ("kafka", "sasl_mechanism"),
-    "DFE_KAFKA_SASL_USERNAME": ("kafka", "sasl_username"),
-    "DFE_KAFKA_SASL_PASSWORD": ("kafka", "sasl_password"),
-    "DFE_GITOPS_USERNAME": ("gitops", "username"),
-    "DFE_GITOPS_TOKEN": ("gitops", "token"),
+    "DFE_ENGINE_CLICKHOUSE_PASSWORD": ("clickhouse", "password"),
+    "DFE_ENGINE_API_JWT_SECRET": ("api", "jwt_secret"),
+    "DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD": ("auth", "local", "admin_password"),
+    "DFE_ENGINE_AUTH_BREAKGLASS_PASSWORD": ("auth", "local", "breakglass_password"),
+    "DFE_ENGINE_KAFKA_SASL_MECHANISM": ("kafka", "sasl_mechanism"),
+    "DFE_ENGINE_KAFKA_SASL_USERNAME": ("kafka", "sasl_username"),
+    "DFE_ENGINE_KAFKA_SASL_PASSWORD": ("kafka", "sasl_password"),
+    "DFE_ENGINE_GITOPS_USERNAME": ("gitops", "username"),
+    "DFE_ENGINE_GITOPS_TOKEN": ("gitops", "token"),
 }
-_SEED_ACCOUNTS = "DFE_AUTH_LOCAL_SEED_ACCOUNTS"
+_SEED_ACCOUNTS = "DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS"
 # Each app's own ClickHouse user: the secret group, its variable and the service role.
 _SERVICE_PASSWORDS = {
-    "hunt-runner": ("DFE_CLICKHOUSE_HUNT_RUNNER_PASSWORD", "hunt_runner"),
-    "loader": ("DFE_CLICKHOUSE_LOADER_PASSWORD", "loader"),
-    "query-reader": ("DFE_CLICKHOUSE_QUERY_READER_PASSWORD", "query_reader"),
-    "otel-writer": ("DFE_CLICKHOUSE_OTEL_WRITER_PASSWORD", "otel_writer"),
+    "hunt-runner": ("DFE_ENGINE_CLICKHOUSE_HUNT_RUNNER_PASSWORD", "hunt_runner"),
+    "loader": ("DFE_ENGINE_CLICKHOUSE_LOADER_PASSWORD", "loader"),
+    "query-reader": ("DFE_ENGINE_CLICKHOUSE_QUERY_READER_PASSWORD", "query_reader"),
+    "otel-writer": ("DFE_ENGINE_CLICKHOUSE_OTEL_WRITER_PASSWORD", "otel_writer"),
 }
 
 
@@ -63,7 +63,7 @@ class TestContractWellFormed:
         # port; scalo serves health + /metrics on 9090, off the public 8000.
         assert contract.metrics_port == 9090
         assert [(p.name, p.port) for p in contract.extra_ports] == [("http", 8000)]
-        assert contract.env_prefix == "DFE"
+        assert contract.env_prefix == "DFE_ENGINE"
         # No config file: a non-empty path makes the chart render and mount a dfe-engine-config ConfigMap.
         assert contract.config_mount_path == ""
 

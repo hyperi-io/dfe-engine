@@ -21,7 +21,7 @@ def profile_overrides(
 
     A plugin's ``settings_overrides`` read *settings*, the process's own when None, so
     the receiver's production bearer listeners point at the secrets backend
-    ``DFE_SECRETS_PROVIDER`` selects.
+    ``DFE_ENGINE_SECRETS_PROVIDER`` selects.
 
     Args:
         service: Service name (e.g. 'receiver', 'loader', 'archiver').

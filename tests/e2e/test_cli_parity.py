@@ -27,7 +27,7 @@ Runs the installed ``dfe`` console script rather than importing the module: what
 ships is a binary on a PATH, and importing it would prove the library works while
 saying nothing about the entry point. One login serves both windows -- the token
 ``EngineAPI`` mints is handed to the CLI through its env, so the two are
-demonstrably talking to the same engine as the same user. ``DFE_CONFIG_HOME`` is
+demonstrably talking to the same engine as the same user. ``DFE_ENGINE_CONFIG_HOME`` is
 redirected at a tmp dir so a run never reads or writes a developer's profile.
 
 Skipped unless the DFE_E2E_* env is set - see conftest and README-live.md.
@@ -91,11 +91,11 @@ def _run(
     deployment at all.
     """
     env = dict(os.environ)
-    env["DFE_CONFIG_HOME"] = os.path.join(os.environ.get("TMPDIR", "/tmp"), "dfe-cli-parity")
+    env["DFE_ENGINE_CONFIG_HOME"] = os.path.join(os.environ.get("TMPDIR", "/tmp"), "dfe-cli-parity")
     if url is not None:
-        env["DFE_API_URL"] = url
+        env["DFE_ENGINE_API_URL"] = url
     if token is not None:
-        env["DFE_API_TOKEN"] = token
+        env["DFE_ENGINE_API_TOKEN"] = token
 
     proc = subprocess.run(
         [_cli_path(), *args],

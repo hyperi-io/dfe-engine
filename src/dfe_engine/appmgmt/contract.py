@@ -44,7 +44,7 @@ from dfe_engine.masking import (
     words,
 )
 
-CONTRACT_DIR_ENV = "DFE_APP_CONTRACT_DIR"
+CONTRACT_DIR_ENV = "DFE_ENGINE_APP_CONTRACT_DIR"
 """Where a deployment mounts the directory its apps emitted their contracts into."""
 
 DEFAULT_CONTRACT_DIR = Path("/etc/dfe-engine/content/contract")

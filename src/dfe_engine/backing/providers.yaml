@@ -1,13 +1,13 @@
 # providers.yaml -- what each backing service's provider key means to the engine.
 #
 # The deployment dial picks a provider per service and the deployer injects it as
-# DFE_DEPLOYMENT_KAFKA_PROVIDER / DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER. This file says
+# DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER / DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_PROVIDER. This file says
 # what each key means: who runs the service, and which deploy-repo values a write
 # cannot move there because nothing in the deployment reads them.
 #
 # The source of truth is dfe-infra's providers.yaml; this is the snapshot bundled
 # in the engine image. The engine resolves the catalogue in this order:
-# DFE_PROVIDER_CATALOGUE_FILE (which a chart points at its mounted copy), then
+# DFE_ENGINE_PROVIDER_CATALOGUE_FILE (which a chart points at its mounted copy), then
 # this snapshot.
 #
 # services.<service>

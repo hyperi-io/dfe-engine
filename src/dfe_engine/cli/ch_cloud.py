@@ -11,7 +11,7 @@
 See / start / stop the CH Cloud service directly over the management API (NO HTTP
 hop to the daemon), so this doubles as an ops tool AND a k8s initContainer wake
 step - it works even when the daemon is not running. Config comes from the
-``clickhouse.cloud`` block (``DFE_CLICKHOUSE_CLOUD_*`` - the control-plane key).
+``clickhouse.cloud`` block (``DFE_ENGINE_CLICKHOUSE_CLOUD_*`` - the control-plane key).
 A start is BILLABLE. Replaces the standalone scripts/ch_cloud.py helper.
 """
 

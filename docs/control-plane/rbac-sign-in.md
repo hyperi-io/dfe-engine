@@ -78,7 +78,7 @@ dfe-hyperdx decides on the `role` claim of the token it holds, so there a role t
 The deploy mints the credentials, the engine refuses defaults, the UI never holds
 a password.
 
-**`admin`** takes its password from `DFE_AUTH_LOCAL_ADMIN_PASSWORD`, filled by the deployment's own secret store, issued with a forced change at first login. Every boot reasserts it until the admin replaces it, and after that only on a rotation.
+**`admin`** takes its password from `DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD`, filled by the deployment's own secret store, issued with a forced change at first login. Every boot reasserts it until the admin replaces it, and after that only on a rotation.
 
 **`breakglass`** is the recovery admin, verified against a bcrypt hash committed
 at `governance/settings/auth.yaml` in the deploy repo, so it survives losing the
@@ -90,13 +90,13 @@ breakglass:
   enabled: true               # false locks the account out
 ```
 
-`DFE_AUTH_BREAKGLASS_PASSWORD` mints that hash on the first boot with none
+`DFE_ENGINE_AUTH_BREAKGLASS_PASSWORD` mints that hash on the first boot with none
 committed and is ignored afterwards. Gitops off means no hash and no break-glass
 account. Every attempt is audit-logged (`auth.breakglass.login`). With
 `enabled: false` the login returns 403 naming the setting.
 
 **No `changeme` outside dev.** The engine refuses to start on an unset or default
-admin password unless `DFE_ENV` is a dev posture -- the predicate gitops
+admin password unless `DFE_ENGINE_ENV` is a dev posture -- the predicate gitops
 auto-merge gates on (`settings.is_dev_posture`), and the error names the variable
 and the fix. A dev posture running the default reports `default_credentials: true` on setup-status, login and refresh, for the UI to banner and force a change. Each reads the admin account at the request, so the forced change clears it with no restart.
 
@@ -106,7 +106,7 @@ exact comparison reads the `"changeme\n"` a Secret or `.env` line delivers as a
 minted password.
 
 **Reading the minted password.** setup-status carries `deploy_kind` (`docker` |
-`kubernetes` | `local`, from `DFE_DEPLOYMENT_TARGET` else scalo's runtime
+`kubernetes` | `local`, from `DFE_ENGINE_DEPLOYMENT_TARGET` else scalo's runtime
 detection) and `credential_fetch_command`: `make creds` for docker, `kubectl -n
 <ns> get secret <name> -o jsonpath='{.data.<key>}' | base64 -d` for kubernetes,
 the environment file for local. Both survive setup completion (#301) -- that is
@@ -123,8 +123,8 @@ when an operator has lost the password.
 | `admin` | the live account store, and its whole account doc at `governance/rbac/accounts/<admin>.yaml` | the live account store only |
 | `breakglass` | its bcrypt hash at `governance/settings/auth.yaml`, which every boot seeds the account from | no `breakglass` account |
 
-A deployment that commits straight to main (dev, solo, auto-merge) is done at once. Production with `DFE_GITOPS_MODE=team` opens a review instead, and the response's `git.pending` carries the PR URL, or the merge command when no forge is configured. A restart before the review merges brings the old password back. `GET /auth/accounts/{username}/git-status` reports when it has merged.
+A deployment that commits straight to main (dev, solo, auto-merge) is done at once. Production with `DFE_ENGINE_GITOPS_MODE=team` opens a review instead, and the response's `git.pending` carries the PR URL, or the merge command when no forge is configured. A restart before the review merges brings the old password back. `GET /auth/accounts/{username}/git-status` reports when it has merged.
 
-**Rotation.** `POST /auth/accounts/{admin}/rotate-password` changes the value the deployment injects, not the live password: it writes the deployment's secret store when `DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH` is set, else returns 501 with the command that changes it where the deployment keeps it (`context.store_command`). The next boot issues the rotated value with a forced change. The engine never writes the password into its own YAML store. The new password faces the two rules that gate startup -- 12 characters minimum, never the default -- so a rotation cannot lock the deployment out of its own next boot. Either is a 422 naming the field. Any other account answers 400 `not_store_backed` and is reset instead.
+**Rotation.** `POST /auth/accounts/{admin}/rotate-password` changes the value the deployment injects, not the live password: it writes the deployment's secret store when `DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH` is set, else returns 501 with the command that changes it where the deployment keeps it (`context.store_command`). The next boot issues the rotated value with a forced change. The engine never writes the password into its own YAML store. The new password faces the two rules that gate startup -- 12 characters minimum, never the default -- so a rotation cannot lock the deployment out of its own next boot. Either is a 422 naming the field. Any other account answers 400 `not_store_backed` and is reset instead.
 
 **The admin is kept.** The console never retires `admin`: its first login replaces the minted password, and from then on it is reset like any other account. `POST /api/v1/auth/setup/retire-admin` remains for an operator whose policy is to disable it once the deployment has an admin of its own.

@@ -14,7 +14,7 @@ A match is a row in a ClickHouse table. When the hunt names an alert destination
 
 The hunt runner runs each rule of a hunt on the hunt's schedule. Every row the rule matches is written, in full, to the hunt's target table. The default is `detection` in the data database (`<data database>.detection`). A hunt or one of its rules can name another table.
 
-Each run is capped at `hunts.max_detections_per_run` rows per rule (`DFE_HUNTS_MAX_DETECTIONS_PER_RUN`), and a rule hitting its cap is logged and counted in the `detections_capped` metric. The runner is described in [hunt-runner-scaling.md](hunt-runner-scaling.md) and the rules in [source-detections.md](source-detections.md).
+Each run is capped at `hunts.max_detections_per_run` rows per rule (`DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN`), and a rule hitting its cap is logged and counted in the `detections_capped` metric. The runner is described in [hunt-runner-scaling.md](hunt-runner-scaling.md) and the rules in [source-detections.md](source-detections.md).
 
 ## Who sees it
 
@@ -30,8 +30,8 @@ A destination is a name and an [Apprise](https://github.com/caronc/apprise) URL,
 Create destinations one of three ways:
 
 - `POST /api/v1/alerts/destinations`, then `PUT` and `DELETE` on `/api/v1/alerts/destinations/{name}`.
-- A directory of YAML files, one per destination, named by `hunts.alert_destinations_dir` (`DFE_HUNTS_ALERT_DESTINATIONS_DIR`).
-- A JSON map of `{name: apprise_url}` in `hunts.alert_destinations` (`DFE_HUNTS_ALERT_DESTINATIONS`), for a first boot only.
+- A directory of YAML files, one per destination, named by `hunts.alert_destinations_dir` (`DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR`).
+- A JSON map of `{name: apprise_url}` in `hunts.alert_destinations` (`DFE_ENGINE_HUNTS_ALERT_DESTINATIONS`), for a first boot only.
 
 A hunt lists the destinations it wants under `alerts.destinations`, with CEL triggers over `result_count`, the rows the fire wrote:
 
@@ -43,7 +43,7 @@ alerts:
     - when: "result_count >= 10"
 ```
 
-With no trigger the default is `result_count > 0`. Creating a destination with a `hunt_name` adds it to that hunt's list. Apprise URLs in `hunts.alert_channels` (`DFE_HUNTS_ALERT_CHANNELS`) go to every hunt.
+With no trigger the default is `result_count > 0`. Creating a destination with a `hunt_name` adds it to that hunt's list. Apprise URLs in `hunts.alert_channels` (`DFE_ENGINE_HUNTS_ALERT_CHANNELS`) go to every hunt.
 
 ## What the runner sends
 

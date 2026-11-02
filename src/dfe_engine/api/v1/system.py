@@ -254,7 +254,7 @@ class DeploymentResponse(BaseModel):
 
     profile: str = Field(
         description=(
-            "The tier this deployment was stood up as (DFE_PROFILE). Empty means "
+            "The tier this deployment was stood up as (DFE_ENGINE_PROFILE). Empty means "
             "the deployer named none, and every optional app is then reported as "
             "offered rather than hidden."
         )
@@ -343,7 +343,7 @@ class SettingsSummary(BaseModel):
     clickhouse_default_ttl_days: int = Field(
         description=(
             "Retention in days a time-series table gets when it declares none; 0 = none. "
-            "The admin's override when one is set, else DFE_CLICKHOUSE_DEFAULT_TTL_DAYS."
+            "The admin's override when one is set, else DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS."
         )
     )
     sources_dir: str
@@ -523,7 +523,7 @@ class RetentionStatus(BaseModel):
         description="override when the stored value wins, deployment when deployment_default does."
     )
     deployment_default: int = Field(
-        description="DFE_CLICKHOUSE_DEFAULT_TTL_DAYS as deployed; applies whenever no override is set."
+        description="DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS as deployed; applies whenever no override is set."
     )
     editable: bool = Field(
         description=(

@@ -58,7 +58,7 @@ class TestSecureOnWithCaCert:
 
     def test_unreadable_ca_cert_refuses(self, tmp_path):
         missing = tmp_path / "does-not-exist.pem"
-        with pytest.raises(ClickHouseCaCertUnreadable, match="DFE_CLICKHOUSE_CA_CERT"):
+        with pytest.raises(ClickHouseCaCertUnreadable, match="DFE_ENGINE_CLICKHOUSE_CA_CERT"):
             resolve_clickhouse_tls(secure=True, verify=None, ca_cert=str(missing))
 
     def test_unreadable_ca_cert_names_the_configured_path(self, tmp_path):

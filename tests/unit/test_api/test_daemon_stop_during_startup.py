@@ -43,19 +43,19 @@ def _daemon_env(tmp_path: Path) -> dict[str, str]:
     """The suite's environment, pointed at a dead ClickHouse and this test's own paths."""
     env = dict(os.environ)
     # No env file and no ~/.env reach the child, so a developer's stack stays out of it.
-    for name in ("DFE_ENV_FILE", "DOTENV_CASCADE", "PYTEST_ADDOPTS"):
+    for name in ("DFE_ENGINE_ENV_FILE", "DOTENV_CASCADE", "PYTEST_ADDOPTS"):
         env.pop(name, None)
     env.update(
         {
-            "DFE_ENV": "test",
+            "DFE_ENGINE_ENV": "test",
             "DFE_CONFIG_DIR": str(tmp_path / "config"),
-            "DFE_STORAGE_PATH": str(tmp_path / "artifacts"),
-            "DFE_SECRETS_PATH": str(tmp_path / "secrets"),
-            "DFE_GITOPS_ENABLED": "false",
-            "DFE_CLICKHOUSE_HOST": "127.0.0.1",
-            "DFE_CLICKHOUSE_PORT": str(_unused_port()),
-            "DFE_CLICKHOUSE_SECURE": "false",
-            "DFE_CLICKHOUSE_BOOTSTRAP_TABLES": "true",
+            "DFE_ENGINE_STORAGE_PATH": str(tmp_path / "artifacts"),
+            "DFE_ENGINE_SECRETS_PATH": str(tmp_path / "secrets"),
+            "DFE_ENGINE_GITOPS_ENABLED": "false",
+            "DFE_ENGINE_CLICKHOUSE_HOST": "127.0.0.1",
+            "DFE_ENGINE_CLICKHOUSE_PORT": str(_unused_port()),
+            "DFE_ENGINE_CLICKHOUSE_SECURE": "false",
+            "DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES": "true",
             "METRICS_ADDR": "127.0.0.1:0",
         }
     )

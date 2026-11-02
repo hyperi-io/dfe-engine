@@ -61,7 +61,7 @@ the original draft of this doc, which had the engine owning it):
 - The registries (`registries/`): table engines, the type system (primitive -> ClickHouse mapping) and the default field maps
 - Loader directive syntax examples (documented, not parsed by engine)
 
-The engine owns the DDL generation. dfe-engine consumes dfe-schemas as the version-pinned `dfe-schemas` wheel, resolved through `importlib.resources`, and keeps no copies of its own: with neither the package nor `DFE_SCHEMAS_DIR` resolving, loading fails with an error naming what was searched. dfe-loader still consumes it as a `schemas/` git submodule.
+The engine owns the DDL generation. dfe-engine consumes dfe-schemas as the version-pinned `dfe-schemas` wheel, resolved through `importlib.resources`, and keeps no copies of its own: with neither the package nor `DFE_ENGINE_SCHEMAS_DIR` resolving, loading fails with an error naming what was searched. dfe-loader still consumes it as a `schemas/` git submodule.
 
 ```text
 dfe-schemas (source of truth)

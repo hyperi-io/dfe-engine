@@ -1003,14 +1003,14 @@ class TestSeedManagedBacking:
 
     def test_reset_all_puts_back_what_the_environment_states(self, managed_client, monkeypatch):
         for name in (
-            "DFE_DEPLOYMENT_KAFKA_PROVIDER",
-            "DFE_DEPLOYMENT_KAFKA_TIER",
-            "DFE_DEPLOYMENT_KAFKA_REGION",
-            "DFE_DEPLOYMENT_CLICKHOUSE_TIER",
-            "DFE_DEPLOYMENT_CLICKHOUSE_REGION",
+            "DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER",
+            "DFE_ENGINE_DEPLOYMENT_KAFKA_TIER",
+            "DFE_ENGINE_DEPLOYMENT_KAFKA_REGION",
+            "DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_TIER",
+            "DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_REGION",
         ):
             monkeypatch.delenv(name, raising=False)
-        monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER", "clickhouse-cloud")
+        monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_PROVIDER", "clickhouse-cloud")
         _seed(managed_client, "seed_managed_backing")
 
         _seed(managed_client, "reset_all")
@@ -1022,12 +1022,12 @@ class TestSeedManagedBacking:
 
     def test_reset_all_with_nothing_stated_is_self_run(self, managed_client, monkeypatch):
         for name in (
-            "DFE_DEPLOYMENT_KAFKA_PROVIDER",
-            "DFE_DEPLOYMENT_KAFKA_TIER",
-            "DFE_DEPLOYMENT_KAFKA_REGION",
-            "DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER",
-            "DFE_DEPLOYMENT_CLICKHOUSE_TIER",
-            "DFE_DEPLOYMENT_CLICKHOUSE_REGION",
+            "DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER",
+            "DFE_ENGINE_DEPLOYMENT_KAFKA_TIER",
+            "DFE_ENGINE_DEPLOYMENT_KAFKA_REGION",
+            "DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_PROVIDER",
+            "DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_TIER",
+            "DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_REGION",
         ):
             monkeypatch.delenv(name, raising=False)
         _seed(managed_client, "seed_managed_backing")
@@ -1163,7 +1163,7 @@ class TestBreakGlassDurability:
 class TestBreakGlassReviewPosture:
     """A posture that refuses direct-to-main reports pending rather than pretending.
 
-    Not reachable from `make e2e-server`, whose DFE_ENV=test is a dev posture and
+    Not reachable from `make e2e-server`, whose DFE_ENGINE_ENV=test is a dev posture and
     so always commits straight to main -- the seed gate requires that env. Built
     directly here so the honest-pending branch is still pinned.
     """
@@ -1200,7 +1200,7 @@ class TestBreakGlassReviewPosture:
     def test_a_review_posture_commits_to_a_branch_and_reports_unmerged(self, tmp_path, monkeypatch):
         from dfe_engine.auth.account_durability import steady_state
 
-        monkeypatch.setenv("DFE_ENV", "test")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "test")
         seeder, gc, accounts, settings = self._seeder(tmp_path)
 
         assert seeder.seed_static("seed_setup_complete") is True

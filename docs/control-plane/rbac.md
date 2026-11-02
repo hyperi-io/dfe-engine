@@ -37,7 +37,7 @@ flowchart TD
     BIND --> RESOLVE_JWT["GroupStore resolves the account's<br/>groups -> roles + org_ids<br/>token claims ignored"]
     RESOLVE_JWT --> CTX
 
-    JWT -->|No| DISABLED{auth.enabled = false<br/>and a dev DFE_ENV?}
+    JWT -->|No| DISABLED{auth.enabled = false<br/>and a dev DFE_ENGINE_ENV?}
     DISABLED -->|Yes| ROOT[Root context<br/>roles=admin<br/>user_id=dev]
     ROOT --> CTX
 
@@ -54,14 +54,14 @@ flowchart TD
 |------|----------|-------------------|----------------|
 | OIDC headers | Production (Envoy Gateway fronted) | IdP (Entra, Google, etc.) | Session cookie (Envoy managed) |
 | API key | CI/CD, Terraform, scripts | `config/auth/api-keys/*.yaml` (SHA-384 hash) | `expires_at` if set, else `auth.api_key_default_ttl_days` from creation (default 90, `0` for no expiry). Revoke by deleting the file |
-| JWT Bearer | Console sessions, standalone, dev | Issued by `POST /api/v1/auth/login`, the OIDC login callback and `POST /api/v1/auth/refresh` | `api.jwt_expire_minutes` (`DFE_API_JWT_EXPIRE_MINUTES`, default 60) |
+| JWT Bearer | Console sessions, standalone, dev | Issued by `POST /api/v1/auth/login`, the OIDC login callback and `POST /api/v1/auth/refresh` | `api.jwt_expire_minutes` (`DFE_ENGINE_API_JWT_EXPIRE_MINUTES`, default 60) |
 | Disabled | Dev/test | N/A | N/A |
 
 A JWT carries identity, not authority. Its `org_id`, `roles`, `groups` and `org_ids` claims grant nothing: every request re-resolves them from the account the `sub` binds to, so a role or org taken away is gone from the next request.
 
 A session's `org_id` is its account's `org`, set by `POST` or `PUT /api/v1/auth/accounts`, or its API key's `org`, set by `POST /api/v1/auth/api-keys` (`422 unknown_org` for an unregistered org), and empty for one bound to none. A view taking `org_id` runs only when the session's groups grant that org or it reads every org, else `403 no_org` or `403 org_not_granted`. A `sub` that binds no account holds nothing -- an API-key subject, a deleted account -- and with auth enabled `POST /api/v1/auth/refresh` answers 401 for it, since each refresh issues a new expiry.
 
-OIDC headers injected by Envoy Gateway SecurityPolicy, read only when `auth.trust_proxy_auth_headers` (`DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`) is true:
+OIDC headers injected by Envoy Gateway SecurityPolicy, read only when `auth.trust_proxy_auth_headers` (`DFE_ENGINE_AUTH_TRUST_PROXY_AUTH_HEADERS`) is true:
 
 | Header | Content |
 |--------|---------|
@@ -78,7 +78,7 @@ the headers and falls through to API key and JWT.
 
 | Mode | Setting | What's active | Use case |
 |------|---------|--------------|----------|
-| **Dev/test** | `auth.enabled=false` with a dev `DFE_ENV` | Requests with no credential get root admin context. Any other `DFE_ENV` refuses to start | Local development |
+| **Dev/test** | `auth.enabled=false` with a dev `DFE_ENGINE_ENV` | Requests with no credential get root admin context. Any other `DFE_ENGINE_ENV` refuses to start | Local development |
 | **Standalone** | `auth.enabled=true` (the default) | JWT Bearer + API keys + local accounts | Docker, no external IdP |
 | **Production** | `auth.enabled=true` + `auth.trust_proxy_auth_headers=true` + Envoy | OIDC headers (precedence) + JWT + API keys | K8s with Envoy Gateway |
 
@@ -125,7 +125,7 @@ flowchart LR
 | API key long hash | `api-keys/{name}.yaml` | `sha384:{hex}` (legacy `sha256:` keys still verify) | Yes (one-way) |
 | Full API key | Shown once at creation | `dfe_ak_{short}_{long}` | **NO** (never stored) |
 | JWT signing key | Secrets backend at `api.jwt_key_path` (default `jwt/signing-key`), minted on first boot when absent | ECDSA private key, PEM (P-384 for the default ES384) | **NO** |
-| OIDC login session cookie key | `DFE_API_SESSION_SECRET`, else `DFE_API_JWT_SECRET` | Random, `DFE_API_JWT_SECRET` at least 32 bytes | **NO** |
+| OIDC login session cookie key | `DFE_ENGINE_API_SESSION_SECRET`, else `DFE_ENGINE_API_JWT_SECRET` | Random, `DFE_ENGINE_API_JWT_SECRET` at least 32 bytes | **NO** |
 | CH connection passwords | Env var / K8s Secret | Plaintext | **NO** |
 | Role definitions | `rbac/roles.yaml` beside the auth directory, seeded from `auth/resources/roles.yaml` on first boot | Permission patterns | Yes |
 | Group→role mapping | `groups/{name}.yaml` | Role list | Yes |
@@ -707,7 +707,7 @@ the context.
 
 ```python
 class AuthSettings(BaseModel):
-    enabled: bool = True  # Off needs a dev DFE_ENV, else the engine refuses to start
+    enabled: bool = True  # Off needs a dev DFE_ENGINE_ENV, else the engine refuses to start
     auth_dir: str = ""  # Path to config/auth/, OIDC providers in its oidc-providers/
     trust_proxy_auth_headers: bool = False  # Read the X-Oidc-* headers (Path 1)
     oidc_group_sync_enabled: bool = True  # Background sync of api-mode providers
@@ -720,12 +720,12 @@ class AuthSettings(BaseModel):
     api_key_default_ttl_days: int = 90  # 0 = keys created without expires_at never expire
 ```
 
-Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`,
-`DFE_AUTH_TRUST_PROXY_AUTH_HEADERS`, `DFE_AUTH_PROXY_PROVIDER`,
-`DFE_AUTH_SOURCE_PROVIDER_BINDINGS` (a JSON object),
-`DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS`, `DFE_AUTH_OIDC_GROUP_SYNC_ENABLED`,
-`DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS`,
-`DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS`. OIDC provider files always live in the
+Environment variables: `DFE_ENGINE_AUTH_ENABLED`, `DFE_ENGINE_AUTH_DIR`,
+`DFE_ENGINE_AUTH_TRUST_PROXY_AUTH_HEADERS`, `DFE_ENGINE_AUTH_PROXY_PROVIDER`,
+`DFE_ENGINE_AUTH_SOURCE_PROVIDER_BINDINGS` (a JSON object),
+`DFE_ENGINE_AUTH_API_KEY_DEFAULT_TTL_DAYS`, `DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_ENABLED`,
+`DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS`,
+`DFE_ENGINE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS`. OIDC provider files always live in the
 auth directory's `oidc-providers/`.
 
 A login whose directory lookup is still running at the deadline is handled as a directory that did not answer: it keeps the groups the token carries, else the account's stored groups, and logs the timeout once with the elapsed time.
@@ -819,7 +819,7 @@ Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
 | ClickHouse unavailable | `/readyz` reports NotReady while its ping fails. Liveness is untouched, so the pod is not restarted. The CH RBAC reconcile retries in the background (section 6.2) |
 | Unknown OIDC group | No linked group with a role, so the sign-in is refused with `401 no_role_granted` and no account is created (section 2.1) |
 | OIDC adapter failure | Failsafe: returns empty results, auth continues with available info |
-| Default password in use | Dev `DFE_ENV`: warning at startup and `default_credentials: true` on setup-status. Any other `DFE_ENV`: the engine refuses to start (section 3.5) |
+| Default password in use | Dev `DFE_ENGINE_ENV`: warning at startup and `default_credentials: true` on setup-status. Any other `DFE_ENGINE_ENV`: the engine refuses to start (section 3.5) |
 
 ---
 

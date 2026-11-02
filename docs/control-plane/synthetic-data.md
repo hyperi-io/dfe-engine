@@ -52,7 +52,7 @@ Full contract: `openapi-spec/openapi.json`.
 
 ## Ceilings and the standing demo stream
 
-`SyntheticDataSettings` (`DFE_SYNTHETIC_DATA_*`) caps inline counts, stream
+`SyntheticDataSettings` (`DFE_ENGINE_SYNTHETIC_DATA_*`) caps inline counts, stream
 rate and stream duration. The **autostart** knobs are the sales-demo posture:
 name pack refs and a receiver URL (chart values
 `config.synthetic_data.autostart_*`) and the engine keeps those streams
