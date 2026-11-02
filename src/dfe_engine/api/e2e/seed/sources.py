@@ -167,6 +167,15 @@ class Sources(Seed):
                 continue
             registry.delete_source(str(entry["source"]), created_by=SEED_ACTOR)
 
+    def seed_undeployed_source(self) -> bool:
+        """Seed a source that is not deployed.
+
+        Returns True when created.
+        """
+        return self._ensure_source(
+            name='undeployedsource', fetched=False, meta_schema=None, transform=None, display_name="Undeployed Source"
+        )
+
     def _ensure_source(
         self,
         name: str,

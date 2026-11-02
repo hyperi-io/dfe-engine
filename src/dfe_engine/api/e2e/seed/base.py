@@ -189,26 +189,9 @@ class Seed:
 
     def _run(self, script: str) -> bool:
         """The body of ``seed_static``: dispatch *script*, False when unknown."""
-        if script == "seed_dfe_admin_user":
-            account = self.accounts.seed_dfe_admin_user()
-            logger.info("e2e seed", script=script, account=account)
-            return True
-        if script == "seed_dfe_analyst_user":
-            account = self.accounts.seed_dfe_analyst_user()
-            logger.info("e2e seed", script=script, account=account)
-            return True
-        if script == "seed_dfe_infra_user":
-            account = self.accounts.seed_dfe_infra_user()
-            logger.info("e2e seed", script=script, account=account)
-            return True
-        if script == "seed_dfe_viewers_user":
-            account = self.accounts.seed_dfe_viewers_user()
-            logger.info("e2e seed", script=script, account=account)
-            return True
-        if script == "seed_organisation":
-            organisation = self.organisations.seed_organisation()
-            logger.info("e2e seed", script=script, organisation=organisation)
-            return True
+        # ------------------------------------------------------------
+        # Initial
+        # ------------------------------------------------------------
         if script == "seed_setup_complete":
             # ------------------------------------------------------------
             # Pre-requisites before seeding the setup complete account
@@ -227,6 +210,39 @@ class Seed:
                 initial_user=initial_user,
                 organisation=organisation,
             )
+            return True
+        # ------------------------------------------------------------
+        # Accounts
+        # ------------------------------------------------------------
+        if script == "seed_dfe_admin_user":
+            account = self.accounts.seed_dfe_admin_user()
+            logger.info("e2e seed", script=script, account=account)
+            return True
+        if script == "seed_dfe_analyst_user":
+            account = self.accounts.seed_dfe_analyst_user()
+            logger.info("e2e seed", script=script, account=account)
+            return True
+        if script == "seed_dfe_infra_user":
+            account = self.accounts.seed_dfe_infra_user()
+            logger.info("e2e seed", script=script, account=account)
+            return True
+        if script == "seed_dfe_viewers_user":
+            account = self.accounts.seed_dfe_viewers_user()
+            logger.info("e2e seed", script=script, account=account)
+            return True
+        # ------------------------------------------------------------
+        # Organisations
+        # ------------------------------------------------------------
+        if script == "seed_organisation":
+            organisation = self.organisations.seed_organisation()
+            logger.info("e2e seed", script=script, organisation=organisation)
+            return True
+        # ------------------------------------------------------------
+        # Sources
+        # ------------------------------------------------------------
+        if script == "seed_undeployed_source":
+            source = self.sources.seed_undeployed_source()
+            logger.info("e2e seed", script=script, source=source)
             return True
         if script == "seed_source_with_transform":
             # ------------------------------------------------------------
@@ -271,6 +287,9 @@ class Seed:
                 pools=pools,
             )
             return True
+        # ------------------------------------------------------------
+        # Artefacts
+        # ------------------------------------------------------------
         if script == "seed_library_artefact":
             # The link needs a file set to resolve into, so the instance that
             # consumes the artefact is seeded before the artefact itself.
@@ -295,6 +314,10 @@ class Seed:
             providers = self.backing.seed_managed_backing()
             logger.info("e2e seed", script=script, providers=providers)
             return True
+
+        # ------------------------------------------------------------
+        # Reset
+        # ------------------------------------------------------------
         if script == "reset_all":
             # Delete all accounts and organisations
             self.accounts.delete_all()
