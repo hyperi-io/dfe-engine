@@ -106,6 +106,11 @@ def bootstrap_registries(
     registry falls back to its plain YAML directory. ``forge`` opens the review
     PR when the deployment posture refuses a direct commit.
     """
+    from dfe_engine.gitcrud.routing import WritePosture
+
+    # Source and derived-schema writes take the same review path as hunts and rules.
+    posture = WritePosture.from_settings(settings, forge=forge)
+
     if settings.schemas.schemas_dir:
         from dfe_engine.schema.registry import SchemaRegistry
 
@@ -117,7 +122,9 @@ def bootstrap_registries(
     if gitcrud is not None or settings.schemas.schemas_dir:
         from dfe_engine.schema.derived_registry import DerivedSchemaRegistry
 
-        _registries["derived_schema"] = DerivedSchemaRegistry.from_settings(settings, crud=gitcrud)
+        _registries["derived_schema"] = DerivedSchemaRegistry.from_settings(
+            settings, crud=gitcrud, posture=posture
+        )
 
     if gitcrud is not None or settings.source.sources_dir:
         from dfe_engine.source.registry import SourceRegistry
@@ -125,6 +132,7 @@ def bootstrap_registries(
         _registries["source"] = SourceRegistry(
             sources_directory=settings.source.sources_dir or None,
             crud=gitcrud,
+            posture=posture,
         )
 
     if settings.services.config_yaml_dir:

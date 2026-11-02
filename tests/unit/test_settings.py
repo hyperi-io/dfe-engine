@@ -1285,7 +1285,6 @@ class TestEverySettingIsRead:
         ("HuntsSettings", "default_max_sample_events"),
         ("QuerySettings", "yaml_dir"),
         ("QueryViewSettings", "auto_bootstrap"),
-        ("SamplerSettings", "default_mode"),
         ("HelmSettings", "environment_file"),
         ("HyperDXSettings", "api_key_env"),
         ("DFESettings", "e2e_server"),
@@ -1302,10 +1301,6 @@ class TestEverySettingIsRead:
         # its viewer twin are routed and land nowhere -- no such account is made.
         ("LocalAuthSettings", "operator_password"),
         ("LocalAuthSettings", "viewer_password"),
-        # No reader: the query_reader profile takes its limits from the CH role
-        # catalogue in dfe-schemas, not from these.
-        ("QueryViewSettings", "max_memory_usage"),
-        ("QueryViewSettings", "max_rows_to_read"),
         # Its one reader was HuntCheckpointManager, deleted as dead code; the field
         # is the same leftover as checkpoint_path and goes with it.
         ("HuntsSettings", "checkpoint_destination"),

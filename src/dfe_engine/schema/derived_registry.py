@@ -30,12 +30,14 @@ from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
 
+from dfe_engine.gitcrud.routing import ReviewRouting, WritePosture
 from dfe_engine.schema.derived import DERIVED_PREFIX, DerivedSchema
 from dfe_engine.schema.schema_loader import resolve_schema_yaml_path
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:
     from dfe_engine.gitcrud.engine import GitCrud
+    from dfe_engine.gitcrud.routing import WriteOutcome
 
 DERIVED_CLASS = "derived_schemas"
 
@@ -154,6 +156,7 @@ class DerivedSchemaRegistry:
         *,
         crud: GitCrud | None = None,
         shipped_directory: str | Path | None = None,
+        posture: WritePosture | None = None,
     ) -> None:
         """Bind the store to a backend.
 
@@ -166,8 +169,12 @@ class DerivedSchemaRegistry:
             shipped_directory: The release's own ``<schemas_dir>/derived``,
                 read as a second root for ``list`` and ``get``. ``None`` when
                 the deployment configures no schemas tree.
+            posture: Where a gitcrud write lands. A production+team write goes to a
+                review branch. None reads the posture from the loaded settings, with
+                no forge.
         """
         self._crud = crud
+        self._posture = posture
         self._shipped_directory = (
             Path(shipped_directory).expanduser().resolve(strict=False)
             if shipped_directory is not None
@@ -183,11 +190,17 @@ class DerivedSchemaRegistry:
         self._directory.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def from_settings(cls, settings: Any, *, crud: GitCrud | None = None) -> DerivedSchemaRegistry:
+    def from_settings(
+        cls,
+        settings: Any,
+        *,
+        crud: GitCrud | None = None,
+        posture: WritePosture | None = None,
+    ) -> DerivedSchemaRegistry:
         """Bind to the deploy repo when gitops is on, else to the schemas tree."""
         shipped = shipped_derived_directory(settings)
         if crud is not None:
-            return cls(crud=crud, shipped_directory=shipped)
+            return cls(crud=crud, shipped_directory=shipped, posture=posture)
         return cls(derived_directory(settings), shipped_directory=shipped)
 
     @property
@@ -278,6 +291,16 @@ class DerivedSchemaRegistry:
             return None
         return yaml_load(path) or {}
 
+    def _route_write(
+        self, crud: GitCrud, key: str, actor: str, message: str, write: Callable[[str], Any]
+    ) -> WriteOutcome:
+        """Run a gitcrud write on main or, where production+team refuses main, a review branch."""
+        if self._posture is None:
+            self._posture = WritePosture.from_loaded_settings()
+        return self._posture.route(
+            gc=crud, cls_name=DERIVED_CLASS, name=key, actor=actor, title=message, write=write
+        )
+
     def _put_raw(
         self,
         key: str,
@@ -286,37 +309,61 @@ class DerivedSchemaRegistry:
         created_by: str | None,
         message: str,
         summary: str = "",
+        routing: ReviewRouting | None = None,
     ):
         """Write one document; returns the destination label for the save log."""
-        if self._crud is not None:
+        if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.metadata import ResourceMetadata, with_metadata
 
             stored = with_metadata(doc, ResourceMetadata(description=summary))
-            self._crud.put(
-                DERIVED_CLASS,
+            actor = created_by or "engine"
+            outcome = self._route_write(
+                crud,
                 key,
-                stored,
-                actor=created_by or "engine",
-                message=message,
+                actor,
+                message,
+                lambda branch: crud.put(
+                    DERIVED_CLASS, key, stored, actor=actor, message=message, branch=branch
+                ),
             )
-            return f"gitcrud {self._crud.resource_class(DERIVED_CLASS).directory}"
+            if routing is not None:
+                routing.record(outcome)
+            if outcome.review_required:
+                return f"review branch {outcome.branch}"
+            return f"gitcrud {crud.resource_class(DERIVED_CLASS).directory}"
 
         path = self._yaml_path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         yaml_dump(doc, path)
         return str(path)
 
-    def _delete_raw(self, key: str, *, created_by: str | None, message: str) -> bool:
-        if self._crud is not None:
+    def _delete_raw(
+        self,
+        key: str,
+        *,
+        created_by: str | None,
+        message: str,
+        routing: ReviewRouting | None = None,
+    ) -> bool:
+        if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.engine import ResourceNotFoundError
 
             commit_msg = f"{message} (by {created_by})" if created_by else message
+            actor = created_by or "engine"
             try:
-                self._crud.delete(
-                    DERIVED_CLASS, key, actor=created_by or "engine", message=commit_msg
+                outcome = self._route_write(
+                    crud,
+                    key,
+                    actor,
+                    commit_msg,
+                    lambda branch: crud.delete(
+                        DERIVED_CLASS, key, actor=actor, message=commit_msg, branch=branch
+                    ),
                 )
             except ResourceNotFoundError:
                 return False
+            if routing is not None:
+                routing.record(outcome)
             return True
 
         path = self._yaml_path(key)
@@ -364,8 +411,12 @@ class DerivedSchemaRegistry:
         *,
         created_by: str | None = None,
         description: str | None = None,
+        routing: ReviewRouting | None = None,
     ) -> DerivedSchema:
-        """Write one derived schema, replacing whatever is stored at its path."""
+        """Write one derived schema, replacing whatever is stored at its path.
+
+        ``routing`` records the write when it went to a review branch instead of main.
+        """
         if not schema.path:
             raise DerivedSchemaValidationError("DerivedSchema.path is required when saving")
         key = canonical_derived_path(schema.path)
@@ -378,19 +429,22 @@ class DerivedSchemaRegistry:
             created_by=created_by,
             message=message,
             summary=schema.version().summary,
+            routing=routing,
         )
         logger.info(f"Saved derived schema {key!r} -> {dest}")
         return schema.model_copy(update={"path": derived_reference(key)})
 
-    def delete(self, path: str, *, created_by: str | None = None) -> None:
-        """Remove one derived schema.
+    def delete(
+        self, path: str, *, created_by: str | None = None, routing: ReviewRouting | None = None
+    ) -> None:
+        """Remove one derived schema, ``routing`` recording a delete sent to review.
 
         Raises:
             DerivedSchemaNotFoundError: Nothing stored at that path.
         """
         key = canonical_derived_path(path)
         if not self._delete_raw(
-            key, created_by=created_by, message=f"schema: delete derived/{key}"
+            key, created_by=created_by, message=f"schema: delete derived/{key}", routing=routing
         ):
             raise DerivedSchemaNotFoundError(f"Derived schema not found: {key!r}")
         logger.info(f"Deleted derived schema {key!r}")

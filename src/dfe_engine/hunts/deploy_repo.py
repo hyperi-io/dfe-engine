@@ -22,21 +22,12 @@ With gitops off (the docker tier) no backend is built and the registries keep
 their DirectoryConfigStore over the shared config volume the docker runner reads.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from scalo.logger import logger
-
 from dfe_engine.gitcrud.commit_policy import CommitContext, CommitPolicyError, build_message
 from dfe_engine.gitcrud.engine import ResourceNotFoundError
-from dfe_engine.gitcrud.routing import (
-    ReviewRequiredError,
-    WriteOutcome,
-    pr_branch_name,
-    route_write,
-)
+from dfe_engine.gitcrud.routing import WriteOutcome, WritePosture
 from dfe_engine.yaml_utils import yaml_load_string
 
 if TYPE_CHECKING:
@@ -87,9 +78,7 @@ class DeployRepoStore:
     ) -> None:
         self._crud = crud
         self._cls_name = cls_name
-        self._environment = environment
-        self._mode = mode
-        self._forge = forge
+        self._posture = WritePosture(environment=environment, mode=mode, forge=forge)
 
     @property
     def directory(self) -> Path:
@@ -209,41 +198,14 @@ class DeployRepoStore:
         actor: str,
         write: Callable[[str], Any],
     ) -> WriteOutcome:
-        resource = f"{self._cls_name}/{name}"
-        try:
-            return route_write(
-                gc=self._crud,
-                forge=self._forge,
-                environment=self._environment,
-                mode=self._mode,
-                rbac_class=self._rbac_class,
-                resource=resource,
-                actor=actor,
-                title=f"{_COMMIT_TYPE}({name}): {summary}",
-                body=(
-                    f"Governed change to {resource} by {actor}. Opened for review "
-                    "because production+team may not commit straight to main."
-                ),
-                write=write,
-            )
-        except ReviewRequiredError:
-            # Production+team with no forge: commit to a review branch, never main,
-            # and say what has to happen for the runner to pick the change up.
-            branch = pr_branch_name(self._rbac_class, resource, "")
-            res = write(branch)
-            logger.warning(
-                "REVIEW REQUIRED: change committed to a branch; no forge to open a "
-                "PR, so the hunt runner sees it only once the branch is merged",
-                actor=actor,
-                resource=resource,
-                branch=branch,
-            )
-            return WriteOutcome(
-                changed=res.changed,
-                commit_sha=res.commit_sha,
-                review_required=True,
-                branch=branch,
-            )
+        return self._posture.route(
+            gc=self._crud,
+            cls_name=self._cls_name,
+            name=name,
+            actor=actor,
+            title=f"{_COMMIT_TYPE}({name}): {summary}",
+            write=write,
+        )
 
 
 def deploy_store(

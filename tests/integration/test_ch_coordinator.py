@@ -14,14 +14,15 @@ leans on: claim exclusivity, lease expiry + reclaim, release, the cap input
 (active_count), crash-safe watermark resume, and the too-aggressive overrun signal.
 """
 
-from __future__ import annotations
-
+import time
 from collections.abc import Callable
 
 import pytest
 
 from dfe_engine.hunt_runner import ChCoordinator
 from dfe_engine.hunt_runner.ch_coordinator import Lease
+from dfe_engine.hunt_runner.models import HuntSpec
+from dfe_engine.hunt_runner.runner import HuntRunner
 
 
 def _coord(ch_client, db, worker_id, *, now=None, lease_seconds=300):
@@ -216,3 +217,65 @@ def test_a_refused_claim_leaves_nothing_that_holds_the_hunt(ch_client, dfe_db):
     a.release("h", fire=1000)
     c = _coord(ch_client, dfe_db, "c")
     assert c.try_claim("h", fire=1000, now=1002) is True
+
+
+def test_a_stale_owner_releasing_late_leaves_the_successors_lease(ch_client, dfe_db):
+    """a's lease ran out and b took the hunt, so a's late release must not free it for c."""
+    a = _coord(ch_client, dfe_db, "a", lease_seconds=10)
+    a.ensure_schema()
+    assert a.try_claim("h", fire=1000, now=100) is True
+    b = _coord(ch_client, dfe_db, "b")
+    assert b.try_claim("h", fire=1000, now=200) is True
+
+    a.release("h", fire=1000)
+
+    assert b.current_lease("h").owner == "b"
+    assert _coord(ch_client, dfe_db, "c").try_claim("h", fire=1000, now=201) is False
+
+
+def test_a_stale_owner_cannot_renew_a_lease_a_successor_holds(ch_client, dfe_db):
+    a = _coord(ch_client, dfe_db, "a", lease_seconds=10)
+    a.ensure_schema()
+    assert a.try_claim("h", fire=1000, now=100) is True
+    b = _coord(ch_client, dfe_db, "b")
+    assert b.try_claim("h", fire=1000, now=200) is True
+
+    assert a.renew("h", fire=1000, now=201) is False
+    assert b.current_lease("h").owner == "b"
+
+
+class _LongWorker:
+    """A worker whose one statement outlasts the lease, then asks whether a peer could claim."""
+
+    def __init__(self, client, peer: ChCoordinator) -> None:
+        self._client = client
+        self._peer = peer
+        self.peer_claimed: list[bool] = []
+
+    def run(self, spec: HuntSpec, fire: int) -> None:
+        # The runner's own client, as a hunt statement uses it, while the lease is renewed.
+        self._client.command("SELECT sleep(3)")
+        self.peer_claimed.append(self._peer.try_claim(spec.hunt_id, fire))
+
+
+def test_a_run_longer_than_its_lease_keeps_the_hunt_from_peers(ch_params, ch_client, dfe_db):
+    import clickhouse_connect
+
+    client = clickhouse_connect.get_client(**ch_params, autogenerate_session_id=False)
+    holder = ChCoordinator(
+        client, database=dfe_db, worker_id="holder", lease_seconds=2, settle_seconds=0.0
+    )
+    holder.ensure_schema()
+    peer = ChCoordinator(ch_client, database=dfe_db, worker_id="peer", settle_seconds=0.0)
+    worker = _LongWorker(client, peer)
+    spec = HuntSpec(hunt_id="long", interval_seconds=60, queries=["SELECT 1"])
+    runner = HuntRunner(holder, worker, {"long": spec})  # ty: ignore[invalid-argument-type]  # a worker carrying only run()
+
+    assert runner.tick(int(time.time())) == 1
+
+    assert worker.peer_claimed == [False]
+    # Released once the run ends, so the next claimant gets it at once.
+    released = holder.current_lease("long")
+    assert released is not None
+    assert released.lease_until == 0
+    assert peer.try_claim("long", fire=released.fire) is True

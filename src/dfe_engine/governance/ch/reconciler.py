@@ -35,6 +35,7 @@ from .models import (
     GROUP_USER_PREFIX,
     META_ORGS_ID,
     META_TIERS_ID,
+    TENANT_ROLE,
     group_of_user,
     group_secret_path,
     meta_projection,
@@ -42,6 +43,7 @@ from .models import (
     tenant_policy_name,
 )
 from .render import (
+    ReplacingGrant,
     _bq,
     render_materialise,
     render_pinned_user,
@@ -263,6 +265,10 @@ class ChRbacReconciler:
         ).result_rows
         return [(r[0], r[1]) for r in rows]
 
+    def _existing_roles(self) -> set[str]:
+        rows = self._client.query("SELECT name FROM system.roles").result_rows
+        return {r[0] for r in rows}
+
     def _existing_org_roles(self) -> set[str]:
         rows = self._client.query(
             "SELECT name FROM system.roles WHERE name LIKE 'dfe_org_%'"
@@ -350,6 +356,9 @@ class ChRbacReconciler:
         ClickHouse's error text goes to the log only. ``result.errors`` reaches API
         callers, so it names the statement up to any password hash and nothing more.
 
+        A refused :class:`ReplacingGrant` is followed by its fallback, so the role is
+        left holding only the entries ClickHouse accepts.
+
         Returns:
             The statements that failed.
         """
@@ -364,6 +373,8 @@ class ChRbacReconciler:
                 logger.warning("CH RBAC statement failed", statement=head, error=str(exc))
                 result.errors.append(f"{head} failed; the engine log has ClickHouse's reason")
                 failed.add(stmt)
+                if isinstance(stmt, ReplacingGrant):
+                    failed |= self._apply(stmt.fallback(), result)
         return failed
 
     def _forget_dropped_groups(
@@ -442,12 +453,20 @@ class ChRbacReconciler:
         group_hashes: dict[str, str],
         org_hashes: dict[str, str],
         deny_tables: list[tuple[str, str]] | None = None,
+        existing_roles: Collection[str] | None = None,
+        missing_roles: list[str] | None = None,
     ) -> list[str]:
         """Full ordered DDL (spec 7), pure given ``org_tables`` and the minted ``*_hashes``.
 
         The order is tiers -> service roles -> tenant axis -> org users -> group users.
         Resolves ``{db}`` in the grants, so calling this directly on the seeds
         renders the same DDL ``reconcile`` applies.
+
+        ``existing_roles`` are the roles already on the server. With it, each user is
+        granted only the roles that exist or that this render creates, so its
+        replacing GRANT cannot fail whole and leave a demoted user its old roles. A
+        user whose tier role is missing is dropped. Each role left out is appended
+        to ``missing_roles`` as ``<role> for <user>``. None grants every role named.
         """
         tiers = resolve_grant_databases(tiers, self._database)
         service_roles = resolve_grant_databases(service_roles, self._database)
@@ -458,16 +477,37 @@ class ChRbacReconciler:
         default_analyst = _default_tier_name(tiers, "analyst")
         default_tier_role = f"dfe_{default_analyst}_role"
         stmts += render_tenant_axis(org_tables, deny_tables)
+        available = (
+            None
+            if existing_roles is None
+            else {*existing_roles, TENANT_ROLE}
+            | {t.role() for t in tiers}
+            | {r.role() for r in service_roles}
+        )
+        missing = missing_roles if missing_roles is not None else []
+
+        def pinned(user: str, pw_hash: str, tier_role: str, org_ids: list[str], extra=()):
+            absent = [
+                r for r in (tier_role, *extra) if available is not None and r not in available
+            ]
+            missing.extend(f"{role} for {user}" for role in absent)
+            if tier_role in absent:
+                return [_drop_user(user)]
+            return render_pinned_user(
+                user,
+                pw_hash,
+                tier_role=tier_role,
+                org_ids=org_ids,
+                extra_roles=[r for r in extra if r not in absent],
+            )
+
         # The org's pinned user: the identity its hyperdx team connects as.
         orgs_by_name = {o.name: o for o in orgs}
         for o in orgs:
             if o.name not in org_hashes:
                 continue  # no minted secret (no secrets store) -> skip the user
-            stmts += render_pinned_user(
-                org_user_name(o.name),
-                org_hashes[o.name],
-                tier_role=default_tier_role,
-                org_ids=org_tenant_ids(o),
+            stmts += pinned(
+                org_user_name(o.name), org_hashes[o.name], default_tier_role, org_tenant_ids(o)
             )
         for b in bindings:
             if b.group not in group_hashes:
@@ -475,13 +515,8 @@ class ChRbacReconciler:
             tier_role = f"dfe_{b.tier or default_analyst}_role"
             org = orgs_by_name.get(b.org) if b.org else None
             org_ids = org_tenant_ids(org) if org is not None else []
-            stmts += render_pinned_user(
-                b.user(),
-                group_hashes[b.group],
-                tier_role=tier_role,
-                org_ids=org_ids,
-                extra_roles=[f"dfe_{r}_role" for r in getattr(b, "ch_roles", [])],
-            )
+            extra = [f"dfe_{r}_role" for r in getattr(b, "ch_roles", [])]
+            stmts += pinned(b.user(), group_hashes[b.group], tier_role, org_ids, extra)
         return stmts
 
     # ---- reconcile -------------------------------------------------------
@@ -524,6 +559,7 @@ class ChRbacReconciler:
                 group_hashes[b.group] = self._hash_for(group_secret_path(b.group))
                 result.minted.append(f"group/{b.group}")
 
+        missing_roles: list[str] = []
         stmts = self.render_all(
             tiers=tiers,
             service_roles=service_roles,
@@ -534,7 +570,12 @@ class ChRbacReconciler:
             group_hashes=group_hashes,
             org_hashes=org_hashes,
             deny_tables=deny_tables,
+            existing_roles=self._existing_roles(),
+            missing_roles=missing_roles,
         )
+        for entry in missing_roles:
+            logger.warning("CH RBAC role not granted: it does not exist", role=entry)
+            result.errors.append(f"role {entry} not granted: it does not exist")
         existing_group_users = self._existing_group_users()
         drops = compute_drops(
             self._existing_org_roles(),
@@ -628,12 +669,16 @@ def fence_tables(
         deny_tables = [t for t in deny_tables if t in wanted]
 
     applied = 0
-    for stmt in render_tenant_axis(org_tables, deny_tables):
+    pending = render_tenant_axis(org_tables, deny_tables)
+    while pending:
+        stmt = pending.pop(0)
         try:
             admin_client.command(stmt)
             applied += 1
         except Exception as exc:
             logger.warning("tenant fence statement failed", statement=stmt[:60], error=str(exc))
+            if isinstance(stmt, ReplacingGrant):
+                pending[:0] = stmt.fallback()
     logger.info(
         "tenant fence applied",
         statements=applied,

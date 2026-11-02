@@ -23,7 +23,7 @@ from dfe_engine.schema.phase import apply_plan
 from dfe_engine.schema.plan import build_plan
 from tests.support.engine_stack import deploy_source
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 URL = "/api/v1/system/retention"
 _TTL_DAYS_RE = re.compile(r"toIntervalDay\((\d+)\)")

@@ -52,12 +52,12 @@ HOLDING_BLOCKS = [
 # What each app's contract flattens to. Asserted exactly: these move only when an
 # app changes its own config or the flattener changes what it counts as an option.
 LEAF_COUNTS = {
-    "dfe-receiver": 323,
-    "dfe-loader": 175,
+    "dfe-receiver": 330,
+    "dfe-loader": 168,
     "dfe-archiver": 78,
     "dfe-fetcher": 314,
-    "dfe-transform-vrl": 45,
-    "dfe-transform-vector": 70,
+    "dfe-transform-vrl": 56,
+    "dfe-transform-vector": 87,
 }
 
 APPS = sorted(LEAF_COUNTS)
@@ -950,7 +950,7 @@ class TestJudgingAWrite:
         assert "takes one of" in contract.check_value(option, "native-ish")
 
     def test_a_nullable_option_takes_a_null_and_a_plain_one_does_not(self):
-        nullable = self._option("dfe-loader", "config.routing.mapping_file")
+        nullable = self._option("dfe-loader", "config.kafka.topic_regex")
         assert nullable.nullable is True
         assert contract.check_value(nullable, None) == ""
         plain = self._option("dfe-loader", "config.batch_processing.max_chunk_size")

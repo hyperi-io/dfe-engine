@@ -42,7 +42,7 @@ class TestAdapterRegistry:
     def test_register_adapter_decorator(self):
         @register_adapter("test_custom")
         class CustomAdapter(DatasourceAdapter):
-            def execute(self, query, params=None, timeout_seconds=30):
+            def execute(self, query, params=None, timeout_seconds=30, max_rows=None):
                 return [{"x": 1}], ["x"]
 
             def explain(self, query, params=None):
@@ -59,7 +59,7 @@ class TestAdapterRegistry:
 class TestDatasourceAdapterBase:
     def test_execute_with_explain_sequential(self):
         class TestAdapter(DatasourceAdapter):
-            def execute(self, query, params=None, timeout_seconds=30):
+            def execute(self, query, params=None, timeout_seconds=30, max_rows=None):
                 return [{"x": 1}, {"x": 2}, {"x": 3}], ["x"]
 
             def explain(self, query, params=None):
@@ -78,7 +78,7 @@ class TestDatasourceAdapterBase:
         call_order = []
 
         class TestAdapter(DatasourceAdapter):
-            def execute(self, query, params=None, timeout_seconds=30):
+            def execute(self, query, params=None, timeout_seconds=30, max_rows=None):
                 call_order.append("execute")
                 return [{"x": 1}], ["x"]
 
@@ -329,7 +329,7 @@ class TestClickHouseAdapterExplainParsing:
 class TestAdapterConfig:
     def test_adapter_with_config(self):
         class ConfigurableAdapter(DatasourceAdapter):
-            def execute(self, query, params=None, timeout_seconds=30):
+            def execute(self, query, params=None, timeout_seconds=30, max_rows=None):
                 return [], []
 
             def explain(self, query, params=None):
@@ -343,7 +343,7 @@ class TestAdapterConfig:
 
     def test_adapter_default_config(self):
         class SimpleAdapter(DatasourceAdapter):
-            def execute(self, query, params=None, timeout_seconds=30):
+            def execute(self, query, params=None, timeout_seconds=30, max_rows=None):
                 return [], []
 
             def explain(self, query, params=None):

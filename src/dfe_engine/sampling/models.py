@@ -50,6 +50,15 @@ class SampleBackend(str, Enum):
 GATED_MODES: frozenset[SampleMode] = frozenset({SampleMode.SMART, SampleMode.ANOMALY})
 
 
+def configured_mode(settings: Any = None) -> SampleMode:
+    """``sampler.default_mode`` from *settings*, or from the loaded settings when None."""
+    if settings is None:
+        from dfe_engine.settings import get_settings
+
+        settings = get_settings()
+    return SampleMode(settings.sampler.default_mode)
+
+
 class SampleRequest(BaseModel):
     """A request to sample a source.
 
@@ -61,7 +70,10 @@ class SampleRequest(BaseModel):
     refused when the request is built.
     """
 
-    mode: SampleMode = SampleMode.SMART
+    mode: SampleMode = Field(
+        default_factory=lambda: configured_mode(),
+        description="Sample mode; absent takes sampler.default_mode",
+    )
     backend: SampleBackend = SampleBackend.CLICKHOUSE
     limit: int | None = Field(
         default=None, ge=1, description="Rows to return (defaults to sampler.default_limit)"

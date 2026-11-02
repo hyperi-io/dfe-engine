@@ -44,7 +44,7 @@ def _logged(warnings: list, reference: str) -> list[dict]:
 
 
 class _FailingAdapter:
-    def execute(self, query, params, timeout):
+    def execute(self, query, params, timeout, max_rows=None):
         raise RuntimeError(BACKEND_TEXT)
 
 

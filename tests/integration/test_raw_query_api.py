@@ -13,11 +13,13 @@ the admin's writes, table-function writes included, because the adapter sends
 ``readonly=1``. The refusal's text reaches the log, under the reference the answer names.
 """
 
+import asyncio
 import re
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from scalo.logger import logger
@@ -38,7 +40,7 @@ from dfe_engine.settings import (
 from tests.support.accounts import admin_on_its_own_password
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 RAW = "/api/v1/queries/raw"
 ADMIN_PASSWORD = "test-admin-pw"
@@ -93,6 +95,7 @@ def stack(ch_params, ch_client, tmp_path):
             app.state.group_store.create("raw-viewers", roles=["data_viewer"], members=["reader"])
             app.state.account_store.create("reader", "reader-password-2026", groups=["raw-viewers"])
             yield SimpleNamespace(
+                app=app,
                 client=client,
                 database=database,
                 admin=_bearer("admin", settings),
@@ -104,10 +107,58 @@ def stack(ch_params, ch_client, tmp_path):
         drop_database_and_policies(ch_client, database)
 
 
-def _raw(stack, headers: dict[str, str], sql: str):
-    return stack.client.post(
-        RAW, headers=headers, json={"datasource": "clickhouse:default", "query": sql}
-    )
+def _raw(stack, headers: dict[str, str], sql: str, **options: int):
+    body: dict = {"datasource": "clickhouse:default", "query": sql}
+    if options:
+        body["options"] = options
+    return stack.client.post(RAW, headers=headers, json=body)
+
+
+def test_a_slow_query_does_not_hold_the_event_loop(stack):
+    """A liveness probe sent while the query sleeps answers before the query does."""
+    finished: list[str] = []
+
+    async def race() -> None:
+        transport = httpx.ASGITransport(app=stack.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://engine") as client:
+
+            async def slow() -> None:
+                resp = await client.post(
+                    RAW,
+                    headers=stack.admin,
+                    json={"datasource": "clickhouse:default", "query": "SELECT sleep(2)"},
+                )
+                assert resp.status_code == 200, resp.text
+                finished.append("query")
+
+            async def probe() -> None:
+                await asyncio.sleep(0.2)
+                resp = await client.get("/livez")
+                assert resp.status_code == 200, resp.text
+                finished.append("livez")
+
+            await asyncio.gather(slow(), probe())
+
+    asyncio.run(race())
+
+    assert finished == ["livez", "query"]
+
+
+@pytest.mark.parametrize(
+    ("options", "want"),
+    [
+        pytest.param({"limit": 10}, 10, id="limit"),
+        pytest.param({}, 1000, id="default"),
+    ],
+)
+def test_a_raw_query_returns_at_most_its_limit(stack, options, want):
+    resp = _raw(stack, stack.admin, "SELECT number FROM numbers(5000)", **options)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["row_count"] == want
+    assert len(body["rows"]) == want
+    assert body["has_more"] is True
 
 
 def test_a_data_viewer_is_refused_before_any_sql_runs(stack):

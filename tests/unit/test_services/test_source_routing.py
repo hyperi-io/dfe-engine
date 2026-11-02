@@ -409,9 +409,25 @@ class TestDestinationsModel:
 
         assert config.default == ["loader", "dfe-archiver"]
 
-    def test_a_fan_out_naming_nothing_is_refused(self):
-        with pytest.raises(ValueError, match="at least one destination"):
-            DestinationsConfig(sources={"auth": []})
+    @pytest.mark.parametrize(
+        ("config", "key"),
+        [
+            pytest.param({"default": []}, "destinations.default", id="default"),
+            pytest.param({"sources": {"auth": []}}, "destinations.sources.auth", id="source"),
+        ],
+    )
+    def test_a_fan_out_naming_nothing_is_refused_by_its_key(self, config, key):
+        # The receiver answers such a record delivered while sending it nowhere.
+        with pytest.raises(ValueError, match=rf"{key} is an empty list"):
+            DestinationsConfig.model_validate(config)
+
+    @pytest.mark.parametrize(
+        "config",
+        [{"default": ["kafka"]}, {"sources": {"auth": ["kafka"]}}],
+        ids=["default", "source"],
+    )
+    def test_the_same_lists_naming_a_destination_validate(self, config):
+        DestinationsConfig.model_validate(config)
 
     def test_the_retired_rules_list_is_refused_as_a_named_destination(self):
         with pytest.raises(ValueError, match="rules"):

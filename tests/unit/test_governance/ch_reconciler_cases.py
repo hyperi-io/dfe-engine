@@ -27,7 +27,7 @@ class FenceTablesCase(TypedDict):
 FENCE_TABLES_CASES: list[FenceTablesCase] = [
     {
         "id": "one_org_table",
-        "expected_applied": 7,
+        "expected_applied": 4,
         "expected_policies": [
             "CREATE ROW POLICY IF NOT EXISTS `dfe_rowpol_tenant_dfe_all_sources` ON `dfe`.`all_sources` AS RESTRICTIVE FOR SELECT USING has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id) TO `dfe_tenant_role`",
             "ALTER ROW POLICY `dfe_rowpol_tenant_dfe_all_sources` ON `dfe`.`all_sources` AS RESTRICTIVE FOR SELECT USING has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id) TO `dfe_tenant_role`",
@@ -36,7 +36,7 @@ FENCE_TABLES_CASES: list[FenceTablesCase] = [
     },
     {
         "id": "one_table_without_org_id",
-        "expected_applied": 7,
+        "expected_applied": 4,
         "expected_policies": [
             "CREATE ROW POLICY IF NOT EXISTS `dfe_rowpol_tenant_dfe_hunt_state` ON `dfe`.`hunt_state` AS RESTRICTIVE FOR SELECT USING 0 TO `dfe_tenant_role`",
             "ALTER ROW POLICY `dfe_rowpol_tenant_dfe_hunt_state` ON `dfe`.`hunt_state` AS RESTRICTIVE FOR SELECT USING 0 TO `dfe_tenant_role`",
@@ -45,13 +45,13 @@ FENCE_TABLES_CASES: list[FenceTablesCase] = [
     },
     {
         "id": "a_table_nothing_discovered",
-        "expected_applied": 5,
+        "expected_applied": 2,
         "expected_policies": [],
         "tables": ["absent"],
     },
     {
         "id": "every_table",
-        "expected_applied": 13,
+        "expected_applied": 10,
         "expected_policies": [
             "CREATE ROW POLICY IF NOT EXISTS `dfe_rowpol_tenant_dfe_all_sources` ON `dfe`.`all_sources` AS RESTRICTIVE FOR SELECT USING has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id) TO `dfe_tenant_role`",
             "ALTER ROW POLICY `dfe_rowpol_tenant_dfe_all_sources` ON `dfe`.`all_sources` AS RESTRICTIVE FOR SELECT USING has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id) TO `dfe_tenant_role`",

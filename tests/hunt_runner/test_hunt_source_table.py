@@ -181,7 +181,8 @@ def test_a_source_parsed_from_the_rules_own_sql_is_held_to_the_same_rule(tmp_pat
     assert "main) -- x" in message
 
 
-def test_one_refused_rule_leaves_the_hunts_other_rules_compiling(tmp_path: Path):
+def test_one_refused_rule_entry_holds_the_whole_hunt(tmp_path: Path):
+    """The two entries name the same rule, so the refusal is counted per entry, not per name."""
     _save_rule(tmp_path)
 
     statements = compile_hunt_queries(
@@ -198,9 +199,7 @@ def test_one_refused_rule_leaves_the_hunts_other_rules_compiling(tmp_path: Path)
         rules_dir=tmp_path,
     )
 
-    assert [statement.sql.split("\n    FROM ")[1].splitlines()[0] for statement in statements] == [
-        "`dfe`.`main`"
-    ]
+    assert statements == []
 
 
 def test_the_insert_builder_quotes_whatever_source_it_is_handed():

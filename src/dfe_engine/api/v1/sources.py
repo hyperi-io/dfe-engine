@@ -81,6 +81,13 @@ from dfe_engine.api.errors import (
     raise_exchange_http,
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.review import (
+    AWAITING_REVIEW,
+    ReviewFields,
+    review_fields,
+    routing_audit_detail,
+    set_review_headers,
+)
 from dfe_engine.api.v1.apps import commit_overlay, metrics_unavailable, remove_overlay
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import (
@@ -102,6 +109,7 @@ from dfe_engine.exchange.models import SourceBundle, SourceImportResult
 from dfe_engine.exchange.schemas import ExchangeError
 from dfe_engine.exchange.sources import apply_source_bundle, build_source_bundle
 from dfe_engine.git_identity import git_author
+from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.manifest import ManifestError
 from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError, resync_bearer_tokens
 from dfe_engine.orgs.models import DEFAULT_ORG_NAME
@@ -293,7 +301,7 @@ def _failure_code(exc: Exception) -> str:
 # -- Response models --
 
 
-class SourceResponse(BaseModel):
+class SourceResponse(ReviewFields):
     """Legacy compact metadata after create/update (prefer full ``Source`` on write)."""
 
     source: str
@@ -347,7 +355,7 @@ def _apply_hints_field() -> Any:
     )
 
 
-class SourceDeleteResponse(BaseModel):
+class SourceDeleteResponse(ReviewFields):
     """A deleted source, and what the apps now need to follow the delete."""
 
     source: str
@@ -420,11 +428,14 @@ def _source_response(
     *,
     message: str,
     apps: AppsSync | None = None,
+    routing: ReviewRouting | None = None,
 ) -> SourceResponse:
     synced = apps or AppsSync(changes=[])
+    review = review_fields(routing)
     return SourceResponse(
+        **review,
         source=source.source,
-        message=message,
+        message=AWAITING_REVIEW if review else message,
         current=source.current,
         deployed_version=source.deployed_version,
         versions=sorted(source.versions.keys()),
@@ -745,11 +756,18 @@ class BulkDeployTask(BaseModel):
     kind: str = Field(default="source:deploy", description="Task kind")
 
 
-class BulkActionResponse(BaseModel):
+class BulkActionResponse(ReviewFields):
     """Result of a bulk operation."""
 
     action: str
     succeeded: list[str] = Field(default_factory=list)
+    awaiting_review: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Sources whose write went to a review branch: main still carries them as "
+            "they were, so nothing else was done for them"
+        ),
+    )
     failed: list[dict[str, str]] = Field(
         default_factory=list,
         description=(
@@ -913,7 +931,7 @@ class CatalogueSourceFailure(BaseModel):
     message: str
 
 
-class CatalogueSourcesResponse(BaseModel):
+class CatalogueSourcesResponse(ReviewFields):
     """What creating the requested catalogue entries did.
 
     ``created`` is what was stored. ``failed`` is what was left unstored. A later
@@ -923,6 +941,10 @@ class CatalogueSourcesResponse(BaseModel):
 
     created: list[CatalogueCreatedSource]
     failed: list[CatalogueSourceFailure]
+    awaiting_review: list[str] = Field(
+        default_factory=list,
+        description="Sources whose create went to a review branch, so main does not carry them yet",
+    )
     apps_synced: list[str] = _apps_synced_field()
     apps_sync_error: str | None = _apps_sync_error_field()
     restart_required: list[str] = _apply_hints_field()
@@ -1263,7 +1285,9 @@ _CREATED_APPS_NOT_SYNCED = {
     "model": SourceResponse,
     "description": (
         "The source was stored and the apps were not brought into step with it: "
-        "apps_sync_error says why, and POST /sources/reconcile-apps retries it"
+        "apps_sync_error says why, and POST /sources/reconcile-apps retries it. Or, "
+        "with review_required, the source awaits review on a branch and main does "
+        "not carry it yet"
     ),
 }
 
@@ -1304,7 +1328,8 @@ def create_source(
     brings every schema it pins.
 
     201 when the apps follow the new source, 202 when the source is stored and the
-    reconcile that brings the apps into step with it did not complete.
+    reconcile that brings the apps into step with it did not complete, or when
+    production+team sent it to review (``review_required``).
     """
     name = body.source
 
@@ -1327,11 +1352,22 @@ def create_source(
         )
     _refuse_unknown_fetched_org(request, body)
 
+    routing = ReviewRouting()
     try:
-        source = registry.create_source_from_write(body, created_by=git_author(user))
+        source = registry.create_source_from_write(
+            body, created_by=git_author(user), routing=routing
+        )
     except SourceValidationError as e:
         _raise_save_validation_http(e)
-    audit_resource_change(user.user_id, "source", source.source, "created")
+    audit_resource_change(
+        user.user_id, "source", source.source, "created", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
+    if routing.review_required:
+        response.status_code = 202
+        return _source_response(source, message="created", routing=routing)
     apps = reconcile_derived_apps(request, user, registry)
     if apps.error is not None:
         response.status_code = 202
@@ -1687,6 +1723,8 @@ def create_sources_from_catalogue(
     catalogue = _source_catalogue()
     created: list[CatalogueCreatedSource] = []
     failed: list[CatalogueSourceFailure] = []
+    held: list[str] = []
+    review = ReviewRouting()
     for item in body.entries:
         compiled = _compile_catalogue_item(catalogue, item, request=request)
         if isinstance(compiled, CatalogueSourceFailure):
@@ -1704,12 +1742,21 @@ def create_sources_from_catalogue(
                 )
             )
             continue
+        one = ReviewRouting()
         try:
-            source = registry.create_source_from_write(write, created_by=git_author(user))
+            source = registry.create_source_from_write(
+                write, created_by=git_author(user), routing=one
+            )
         except SourceValidationError as exc:
             failed.append(_catalogue_failure(item.entry, exc, source=name))
             continue
-        audit_resource_change(user.user_id, "source", source.source, "created")
+        audit_resource_change(
+            user.user_id, "source", source.source, "created", routing_audit_detail(one)
+        )
+        if one.review_required:
+            review.fold(one)
+            held.append(source.source)
+            continue
         created.append(
             CatalogueCreatedSource(
                 entry=item.entry,
@@ -1723,9 +1770,12 @@ def create_sources_from_catalogue(
     if created:
         apps = reconcile_derived_apps(request, user, registry)
     response.status_code = _catalogue_status(created, failed, apps_error=apps.error)
+    set_review_headers(response, review_required=review.review_required, pr_url=review.first_pr_url)
     return CatalogueSourcesResponse(
+        **review_fields(review),
         created=created,
         failed=failed,
+        awaiting_review=held,
         apps_synced=apps.changes,
         apps_sync_error=apps.error,
         restart_required=apps.restart_required,
@@ -2414,6 +2464,7 @@ async def _execute_source_deploy(
         ttl_change=ttl_change,
     )
     store = SourceDeploymentStore.from_settings(settings)
+    record = ReviewRouting()
     apps = await run_blocking(
         functools.partial(
             _record_source_deploy,
@@ -2425,6 +2476,7 @@ async def _execute_source_deploy(
             user,
             registry,
             request,
+            record,
         )
     )
 
@@ -2437,6 +2489,7 @@ async def _execute_source_deploy(
 
     deploy_result = deploy_result.model_copy(
         update={
+            **review_fields(record),
             "apps_synced": apps.changes,
             "apps_sync_error": apps.error,
             "restart_required": apps.restart_required,
@@ -2606,8 +2659,13 @@ def _record_source_deploy(
     user: Any,
     registry: Any,
     request: Request,
+    routing: ReviewRouting,
 ) -> AppsSync:
-    """Record the deploy, mark the version deployed and reconcile the apps it makes live."""
+    """Record the deploy, mark the version deployed and reconcile the apps it makes live.
+
+    A record production+team sends to review leaves main on the old version, so the
+    apps are left as main has them until it merges.
+    """
     store.save_deploy(deploy_result, source)
     try:
         registry.set_deployed_version(
@@ -2615,9 +2673,12 @@ def _record_source_deploy(
             version_id,
             created_by=git_author(user),
             description=f"source: deploy {name} version {version_id}",
+            routing=routing,
         )
     except SourceValidationError as exc:
         _raise_save_validation_http(exc)
+    if routing.review_required:
+        return AppsSync(changes=[])
 
     # The receiver's rule for this source, the loader's table map and (for a
     # fetcher-based source) the fetcher instance are what make the deploy live.
@@ -3015,6 +3076,7 @@ def update_source(
     user: CurrentUser,
     registry: SourceReg,
     request: Request,
+    response: Response,
 ):
     """Update a source from a flat revision body.
 
@@ -3049,8 +3111,11 @@ def update_source(
         )
     _refuse_unknown_fetched_org(request, body)
 
+    routing = ReviewRouting()
     try:
-        source = registry.update_source_from_write(name, body, created_by=git_author(user))
+        source = registry.update_source_from_write(
+            name, body, created_by=git_author(user), routing=routing
+        )
     except SourceNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -3061,7 +3126,14 @@ def update_source(
         ) from None
     except SourceValidationError as e:
         _raise_save_validation_http(e)
-    audit_resource_change(user.user_id, "source", source.source, "updated")
+    audit_resource_change(
+        user.user_id, "source", source.source, "updated", routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
+    if routing.review_required:
+        return _source_response(source, message="updated", routing=routing)
     return _source_response(
         source, message="updated", apps=reconcile_derived_apps(request, user, registry)
     )
@@ -3089,6 +3161,7 @@ def patch_source_enabled(
     user: CurrentUser,
     registry: SourceReg,
     request: Request,
+    response: Response,
 ):
     """Set a source's lifecycle state without changing versioned configuration.
 
@@ -3112,16 +3185,25 @@ def patch_source_enabled(
         return _source_response(source, message=target)
 
     updated = source.model_copy(update={"state": target})
+    routing = ReviewRouting()
     try:
         saved = registry.save_source(
             updated,
             created_by=git_author(user),
             description=f"source: set {name} {target}",
+            routing=routing,
         )
     except SourceValidationError as e:
         _raise_save_validation_http(e)
 
-    audit_resource_change(user.user_id, "source", saved.source, target)
+    audit_resource_change(
+        user.user_id, "source", saved.source, target, routing_audit_detail(routing)
+    )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
+    if routing.review_required:
+        return _source_response(saved, message=target, routing=routing)
     return _source_response(
         saved, message=target, apps=reconcile_derived_apps(request, user, registry)
     )
@@ -3139,7 +3221,12 @@ def patch_source_enabled(
     dependencies=[Depends(require_action(scopes_dict["source_delete"]))],
 )
 async def delete_source(
-    name: str, user: CurrentUser, registry: SourceReg, settings: Settings, request: Request
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    settings: Settings,
+    request: Request,
+    response: Response,
 ) -> SourceDeleteResponse:
     """Delete a source by name. Its fetcher instance, receiver rule and topics go with it.
 
@@ -3149,10 +3236,23 @@ async def delete_source(
     The answer reports the reconcile as a create or an update does: on a
     deployment that renders the app config itself, ``restart_required`` names the
     command that takes away the containers the source's instances ran in.
+
+    A delete production+team sends to review answers ``review_required`` and
+    touches nothing else: main still carries the source, so its topics, records and
+    HyperDX source stay until the branch is merged.
     """
+    routing = ReviewRouting()
     source = await run_blocking(
-        functools.partial(_delete_stored_source, name, user, registry, settings)
+        functools.partial(_delete_stored_source, name, user, registry, settings, routing)
     )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
+    if routing.review_required:
+        audit_resource_change(
+            user.user_id, "source", name, "deleted", routing_audit_detail(routing)
+        )
+        return SourceDeleteResponse(source=name, message=AWAITING_REVIEW, **review_fields(routing))
     # Off the event loop: the admin calls block for their full timeout when no
     # broker answers, which is the norm on the Kafka-less profile.
     topics_removed, topics_failed = await asyncio.to_thread(_remove_source_topics, source, settings)
@@ -3177,7 +3277,9 @@ async def delete_source(
     )
 
 
-def _delete_stored_source(name: str, user: Any, registry: Any, settings: Any) -> Source:
+def _delete_stored_source(
+    name: str, user: Any, registry: Any, settings: Any, routing: ReviewRouting
+) -> Source:
     """Delete one source and its deployment records and return it as it was, or 404."""
     try:
         source = registry.get_source(name)
@@ -3194,6 +3296,7 @@ def _delete_stored_source(name: str, user: Any, registry: Any, settings: Any) ->
             name,
             created_by=git_author(user),
             deployment_store=SourceDeploymentStore.from_settings(settings),
+            routing=routing,
         )
     except SourceValidationError as e:
         _raise_save_validation_http(e)
@@ -3239,9 +3342,17 @@ async def bulk_action(
         response.status_code = 202
         return _submit_bulk_deploys(body, user, registry, settings, request)
 
-    succeeded, failed, deleted = await run_blocking(
-        functools.partial(_apply_bulk, body, action_to_state, user, registry, settings)
+    routing = ReviewRouting()
+    succeeded, failed, deleted, held = await run_blocking(
+        functools.partial(_apply_bulk, body, action_to_state, user, registry, settings, routing)
     )
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
+    if held:
+        audit_resource_change(
+            user.user_id, "source", ",".join(held), body.action, routing_audit_detail(routing)
+        )
 
     apps = AppsSync(changes=[])
     if succeeded:
@@ -3259,8 +3370,10 @@ async def bulk_action(
             # Once for the batch: each rebuild reads the whole registry.
             await _rebuild_all_sources(registry=registry, settings=settings, sources=succeeded)
     return BulkActionResponse(
+        **review_fields(routing),
         action=body.action,
         succeeded=succeeded,
+        awaiting_review=held,
         failed=failed,
         apps_synced=apps.changes,
         apps_sync_error=apps.error,
@@ -3357,26 +3470,39 @@ def _apply_bulk(
     user: Any,
     registry: Any,
     settings: Any,
-) -> tuple[list[str], list[dict[str, str]], list[Source]]:
-    """Apply a bulk action source by source, returning the names done, the failures and the deleted."""
+    routing: ReviewRouting,
+) -> tuple[list[str], list[dict[str, str]], list[Source], list[str]]:
+    """Apply a bulk action source by source.
+
+    Returns the names done, the failures, the sources deleted, and the names whose
+    write went to review, each of which is folded into *routing*.
+    """
     succeeded: list[str] = []
     failed: list[dict[str, str]] = []
     deleted: list[Source] = []
+    held: list[str] = []
     records = SourceDeploymentStore.from_settings(settings)
     for item in body.sources:
         name = item.source
+        one = ReviewRouting()
         try:
             if body.action == "delete":
                 # Read before the delete, for the topics it owns. A name with no
                 # stored source still deletes, as it did before it had topics.
                 stored = registry.get_source(name) if registry.source_exists(name) else None
-                registry.delete_source(name, created_by=git_author(user), deployment_store=records)
-                if stored is not None:
+                registry.delete_source(
+                    name, created_by=git_author(user), deployment_store=records, routing=one
+                )
+                if stored is not None and not one.review_required:
                     deleted.append(stored)
             else:
                 source = registry.get_source(name)
                 updated = source.model_copy(update={"state": action_to_state[body.action]})
-                registry.save_source(updated, created_by=git_author(user))
+                registry.save_source(updated, created_by=git_author(user), routing=one)
+            if one.review_required:
+                routing.fold(one)
+                held.append(name)
+                continue
             succeeded.append(name)
         except Exception as e:
             code = _failure_code(e)
@@ -3391,7 +3517,7 @@ def _apply_bulk(
                     source=name,
                 )
             failed.append({"source": name, "code": code, "error": error})
-    return succeeded, failed, deleted
+    return succeeded, failed, deleted, held
 
 
 @router.post(
@@ -3460,6 +3586,7 @@ def import_source(
     registry: SourceReg,
     schema_registry: SchemaReg,
     request: Request,
+    response: Response,
 ) -> SourceImportResponse:
     """Import a source bundle exported from another deployment.
 
@@ -3473,12 +3600,14 @@ def import_source(
     version it pins, that neither the bundle nor this deployment defines is a 422
     ``unresolved_reference``.
     """
+    review = ReviewRouting()
     try:
         result = apply_source_bundle(
             registry,
             schema_registry,
             body,
             created_by=git_author(user),
+            routing=review,
         )
     except ExchangeError as exc:
         raise_exchange_http(exc)
@@ -3486,7 +3615,12 @@ def import_source(
     if result.action == "resolved":
         return SourceImportResponse(**result.model_dump())
 
-    audit_resource_change(user.user_id, "source", result.source, "created")
+    audit_resource_change(
+        user.user_id, "source", result.source, "created", routing_audit_detail(review)
+    )
+    set_review_headers(response, review_required=review.review_required, pr_url=review.first_pr_url)
+    if review.review_required:
+        return SourceImportResponse(**result.model_dump())
     apps = reconcile_derived_apps(request, user, registry)
     return SourceImportResponse(
         **result.model_dump(),

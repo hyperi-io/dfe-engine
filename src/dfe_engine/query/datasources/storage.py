@@ -90,6 +90,7 @@ class S3Adapter(DatasourceAdapter):
         query: str,
         params: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
+        max_rows: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """List objects in S3 bucket. Returns (rows, columns)."""
         params = params or {}
@@ -152,7 +153,7 @@ class S3Adapter(DatasourceAdapter):
                 }
             )
 
-        return rows, LISTING_COLUMNS
+        return rows[:max_rows], LISTING_COLUMNS
 
     @override
     def explain(self, query: str, params: dict[str, Any] | None = None) -> ExplainPlan:
@@ -236,6 +237,7 @@ class FilesystemAdapter(DatasourceAdapter):
         query: str,
         params: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
+        max_rows: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[str]]:
         """List files in directory. Returns (rows, columns)."""
         params = params or {}
@@ -283,7 +285,7 @@ class FilesystemAdapter(DatasourceAdapter):
             logger.error("Filesystem listing failed", path=subpath, error=str(e))
             raise StorageListingError(f"Failed to list directory: {e}") from e
 
-        return rows, LISTING_COLUMNS
+        return rows[:max_rows], LISTING_COLUMNS
 
     def _guess_content_type(self, path: Path) -> str | None:
         import mimetypes

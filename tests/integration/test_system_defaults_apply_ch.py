@@ -26,7 +26,7 @@ from dfe_engine.gitcrud.table_defaults import commit_patch
 from dfe_engine.schema.schema_loader import SchemaLoader
 from tests.support.engine_stack import default_header, deploy_source
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 DEFAULTS = "/api/v1/system/defaults"
 APPLY = "/api/v1/system/defaults/apply"
@@ -304,3 +304,62 @@ def test_a_redeploy_moves_an_existing_tables_ttl(ch_client, stack):
     assert resp.json()["statements_applied"] >= 1
     assert resp.json()["ttl_change"]["move"] == "90 -> 60"
     assert resp.json()["ttl_change"]["expires_rows"] is True
+
+
+class _RecordingForge:
+    def open_pull_request(self, *, head, base, title, body):
+        from dfe_engine.gitcrud.forge import PullRequest
+
+        return PullRequest(number=9, url="http://forge/pr/9", branch=head)
+
+
+def _behind_review(stack, tmp_path, *names: str):
+    """Point the app's source registry at a deploy repo holding *names*, in production+team."""
+    from dfe_engine.api.deps import _registries
+    from dfe_engine.gitcrud import GitCrud, default_registry
+    from dfe_engine.gitcrud.routing import WritePosture
+    from dfe_engine.gitops.repo import GitopsRepo
+    from dfe_engine.source.registry import SourceRegistry
+
+    directory = _registries["source"]
+    crud = GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry())
+    for name in names:
+        crud.put("sources", name, directory.get_source(name).to_yaml_dict(), "seed")
+    _registries["source"] = SourceRegistry(
+        crud=crud,
+        posture=WritePosture(environment="production", mode="team", forge=_RecordingForge()),
+    )
+    directory.close()
+    return crud
+
+
+def test_a_pin_held_for_review_is_reported_and_reaches_no_table(ch_client, stack, tmp_path):
+    """Main still carries the old source, so only a source main already has on the defaults moves."""
+    db = stack.database
+    _patch(stack, {"ttl_days": 91})
+    deploy_source(
+        name="syslog-held", schema={"meta_schema": "meta/syslog", "ttl_days": 90}, stack=stack
+    )
+    deploy_source(name="syslog-on", schema={**ON_THE_DEFAULTS, "ttl_days": 91}, stack=stack)
+    ch_client.command(
+        f"ALTER TABLE `{db}`.`syslog-on` MODIFY TTL _timestamp_load + INTERVAL 90 DAY"
+    )
+    crud = _behind_review(stack, tmp_path, "syslog-held", "syslog-on")
+
+    resp = stack.client.post(
+        APPLY, headers=stack.headers, json={"sources": ["syslog-held", "syslog-on"]}
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["updated"] == []
+    assert body["awaiting_review"] == ["syslog-held"]
+    assert body["review_required"] is True
+    assert body["pr_url"] == "http://forge/pr/9"
+    assert resp.headers["X-DFE-Review-Required"] == "true"
+    assert [entry["source"] for entry in body["live"]] == ["syslog-on"]
+    assert body["live"][0]["status"] == "altered"
+    assert _live_ttl_days(ch_client, db, "syslog-held") == 90
+    assert _live_ttl_days(ch_client, db, "syslog-on") == 91
+    # main still holds the version the table was deployed from
+    assert crud.get("sources", "syslog-held")["current"] == "1.0.0"

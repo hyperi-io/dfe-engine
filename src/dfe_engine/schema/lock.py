@@ -30,11 +30,17 @@ it, and every read answers only from a replica holding all of them, so a re-read
 lands on a lagging replica still sees the claim that beat it. A claim that cannot
 reach its majority, with a replica down, is a missed attempt retried within the wait.
 So is one acknowledged a settle or more after its free read: a rival's re-read may
-have missed it, so it is not kept. It is never released, because a release at its
-version could free a rival that stood while it waited. The next attempt by the same
-lock finds that claim under its own holder name. It claims afresh when no other
-holder has a live claim in the table, so a slow claim costs seconds. Otherwise the
-claim is read as a rival's and waited on.
+have missed it, so it is not kept.
+
+A missed claim is never released, because it may be the latest row while a rival
+stood under it, and a release would read as a free lease. Instead each claim also
+writes a marker of its own under ``<lock name>/claim/<holder>/<acquired_at>``, which
+no merge collapses into another. The marker stays live while its claim holds and is
+ended when the claim loses or misses. A live claim row whose marker is ended blocks
+nobody, so racers whose first claims all miss claim again rather than wait out a lease.
+A live marker always blocks, so a holder stays visible after a merge keeps only a
+later row. Every attempt reads the claims and markers, never the latest row alone:
+a missed claim with a shorter lease can be the latest row and lapse first.
 
 The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 """
@@ -42,7 +48,7 @@ The boot phase holds it, and so does every source deploy (:func:`ddl_lease`).
 import secrets
 import socket
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -146,14 +152,15 @@ class LockState:
     released: bool
     acquired_at: datetime
 
-    def held_at(self, now: datetime) -> bool:
-        """Whether this row is a live claim rather than a finished or lapsed one."""
-        return not self.released and self.expires_at > now
-
 
 def _utc(value: datetime) -> datetime:
     """*value* as an aware UTC time, since the driver hands back naive UTC times."""
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+
+
+def _millis(value: datetime) -> datetime:
+    """*value* to the millisecond the table's ``DateTime64(3)`` stores."""
+    return value.replace(microsecond=value.microsecond // 1000 * 1000)
 
 
 def holder_name() -> str:
@@ -185,7 +192,6 @@ class SchemaLock:
         self._holder = holder or f"{holder_name()}/{secrets.token_hex(4)}"
         self._lease_seconds = max(lease_seconds, 1)
         self._claimed_at: datetime | None = None
-        self._slow_claimed_at: datetime | None = None
         self.acquired = False
 
     @property
@@ -249,16 +255,18 @@ class SchemaLock:
         deadline = time.monotonic() + max(wait_seconds, 0.0)
         missed: set[type[Exception]] = set()
         while True:
+            state: LockState | None = None
             try:
                 started = time.monotonic()
-                state = self.read()
-                now = datetime.now(UTC)
-                if state is None or not state.held_at(now) or self._own_slow_claim(state, now):
-                    if self._try_claim(now, started=started):
+                # The free read is the claims and markers, never the latest row alone: a
+                # missed claim can be the latest row and lapse while an earlier holder holds.
+                if self._only_ended_claims(datetime.now(UTC)):
+                    if self._try_claim(datetime.now(UTC), started=started):
                         return True
                     if time.monotonic() >= deadline:
                         return False
                     continue
+                state = self.read()
             except (SchemaLockQuorumError, _SlowClaim) as exc:
                 # Once per wait and cause: a down replica stays down for every attempt in it.
                 if type(exc) not in missed:
@@ -282,7 +290,13 @@ class SchemaLock:
         if not self.acquired or self._claimed_at is None:
             return
         # The claim's own version, so a takeover written after this claim lapsed still outranks it.
-        self._write(self._claimed_at, expires=datetime.now(UTC), released=1)
+        claimed, ends = self._claimed_at, datetime.now(UTC)
+        self._write_rows(
+            [
+                self._row(LOCK_NAME, claimed, ends, 1),
+                self._row(self._marker(claimed), claimed, ends, 1),
+            ]
+        )
         self._claimed_at = None
         self.acquired = False
 
@@ -302,54 +316,99 @@ class SchemaLock:
     def _try_claim(self, now: datetime, *, started: float) -> bool:
         """Claim, let racing claimers land theirs, and keep the claim if it is still the latest.
 
+        A claim that misses or loses has its marker ended, so it holds nobody back.
+
         Raises:
             _SlowClaim: The claim was acknowledged a settle or more after *started*,
                 the free read's start, so it was left to lapse at its expiry.
+            SchemaLockQuorumError: The claim or its marker missed its quorum.
         """
-        claimed_at = self._claim(now)
+        claimed_at = _millis(now)
+        expires = now + timedelta(seconds=self._lease_seconds)
+        try:
+            self._claim(now)
+        except SchemaLockQuorumError:
+            self._end_marker_quietly(claimed_at, expires)
+            raise
         landed = time.monotonic() - started
         if landed >= _SETTLE_SECONDS:
-            self._slow_claimed_at = claimed_at
+            self._end_marker_quietly(claimed_at, expires)
             raise _SlowClaim(f"the claim landed {landed:.2f}s after its free read")
         time.sleep(_SETTLE_SECONDS)
         if not self._claim_stands(claimed_at):
+            self._end_marker_quietly(claimed_at, expires)
             return False
         self._claimed_at = claimed_at
         self.acquired = True
         return True
 
-    def _own_slow_claim(self, state: LockState, now: datetime) -> bool:
-        """Whether *state* is this lock's own slow claim and no other holder has a live one.
+    def _marker(self, claimed_at: datetime) -> str:
+        """The lock name of this lock's marker for the claim made at *claimed_at*."""
+        return f"{LOCK_NAME}/claim/{self._holder}/{claimed_at.isoformat(timespec='milliseconds')}"
 
-        A rival that stood while the slow claim was in flight wrote its claim before
-        ours became visible. The table keeps the latest write per lock name, so that
-        claim is only found among rows a merge has not yet collapsed, and any
-        holder's live row there makes this a rival's lease to wait on.
-        """
-        if self._slow_claimed_at is None or state.holder != self._holder:
-            return False
-        if state.acquired_at != self._slow_claimed_at:
-            return False
-        target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
-        sql = (
-            f"SELECT holder FROM {target} "  # noqa: S608 - quoted database and manifest table; values bound
-            "WHERE lock_name = {lock:String} AND holder != {me:String} "
-            "GROUP BY holder HAVING max(released) = 0 AND max(expires_at) > {now:DateTime}"
-        )
+    def _end_marker(self, claimed_at: datetime, expires: datetime | None = None) -> None:
+        """Mark the claim made at *claimed_at* as holding nothing."""
+        ends = expires if expires is not None else datetime.now(UTC)
+        self._write(claimed_at, expires=ends, released=1, lock_name=self._marker(claimed_at))
+
+    def _end_marker_quietly(self, claimed_at: datetime, expires: datetime) -> None:
+        """End a claim's marker, or log that rivals wait out its lease when that write fails."""
         try:
-            result = self._client.query(
-                sql,
-                parameters={"lock": LOCK_NAME, "me": self._holder, "now": now.replace(tzinfo=None)},
-                settings=_READ_SETTINGS,
+            self._end_marker(claimed_at, expires)
+        except SchemaLockError as exc:
+            logger.warning(
+                "missed schema lease claim not marked ended; rivals wait out its lease",
+                error=str(exc),
             )
-            return not list(result.result_rows)
+
+    def _only_ended_claims(self, now: datetime) -> bool:
+        """Whether every live claim on the lease is one its claimer marked ended, with no live marker.
+
+        True when nothing has ever claimed it. Reads rows a merge has not yet
+        collapsed, so a claim kept only under a later row is still caught by its
+        marker, which sits under a lock name of its own.
+        """
+        target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
+        claims = (
+            f"SELECT holder, acquired_at FROM {target} "  # noqa: S608 - quoted database and manifest table; values bound
+            "WHERE lock_name = {lock:String} GROUP BY holder, acquired_at "
+            "HAVING max(released) = 0 AND max(expires_at) > {now:DateTime}"
+        )
+        markers = (
+            f"SELECT holder, acquired_at, max(released), max(expires_at) > {{now:DateTime}} FROM {target} "  # noqa: S608 - quoted database and manifest table; values bound
+            "WHERE startsWith(lock_name, {prefix:String}) GROUP BY holder, acquired_at"
+        )
+        parameters = {
+            "lock": LOCK_NAME,
+            "prefix": f"{LOCK_NAME}/claim/",
+            "now": now.replace(tzinfo=None),
+        }
+        try:
+            live = self._client.query(claims, parameters=parameters, settings=_READ_SETTINGS)
+            marked = self._client.query(markers, parameters=parameters, settings=_READ_SETTINGS)
         except Exception as exc:
             raise _lock_error("could not read the schema lock", exc) from exc
+        ended: set[tuple[str, datetime]] = set()
+        for holder, acquired, released, unexpired in marked.result_rows:
+            if released:
+                ended.add((str(holder), _utc(acquired)))
+            elif unexpired:
+                return False
+        return all((str(holder), _utc(acquired)) in ended for holder, acquired in live.result_rows)
 
     def _claim(self, now: datetime) -> datetime:
-        """Write a claim and return its acquired_at as the table stores it (milliseconds)."""
-        acquired = now.replace(microsecond=now.microsecond // 1000 * 1000)
-        self._write(acquired, expires=now + timedelta(seconds=self._lease_seconds), released=0)
+        """Write a claim and its marker, and return its acquired_at as the table stores it.
+
+        One insert carries both rows, so they land in one part under one quorum.
+        """
+        acquired = _millis(now)
+        expires = now + timedelta(seconds=self._lease_seconds)
+        self._write_rows(
+            [
+                self._row(LOCK_NAME, acquired, expires, 0),
+                self._row(self._marker(acquired), acquired, expires, 0),
+            ]
+        )
         return acquired
 
     def _claim_stands(self, claimed_at: datetime) -> bool:
@@ -383,12 +442,22 @@ class SchemaLock:
             raise _lock_error("could not read the schema lock's engine and replicas", exc) from exc
         return _write_settings_for(engine, int(replicas[0][0]) if replicas else 1)
 
-    def _write(self, acquired: datetime, *, expires: datetime, released: int) -> None:
+    def _row(
+        self, lock_name: str, acquired: datetime, expires: datetime, released: int
+    ) -> list[Any]:
+        return [lock_name, self._holder, acquired, expires.replace(microsecond=0), released]
+
+    def _write(
+        self, acquired: datetime, *, expires: datetime, released: int, lock_name: str = LOCK_NAME
+    ) -> None:
+        self._write_rows([self._row(lock_name, acquired, expires, released)])
+
+    def _write_rows(self, rows: list[list[Any]]) -> None:
         settings = self._write_settings()
         try:
             self._client.insert(
                 self._table,
-                [[LOCK_NAME, self._holder, acquired, expires.replace(microsecond=0), released]],
+                rows,
                 column_names=["lock_name", "holder", "acquired_at", "expires_at", "released"],
                 database=self._database,
                 settings=settings,
@@ -404,7 +473,7 @@ class SchemaLock:
 
 
 @contextmanager
-def ddl_lease(client: Any, *, data_database: str, wait_seconds: float) -> Iterator[None]:
+def ddl_lease(client: Any, *, data_database: str, wait_seconds: float) -> Generator[None]:
     """Hold the schema lease around DDL applied outside the boot phase.
 
     A server without the lease table has never run the phase, so there is no lease

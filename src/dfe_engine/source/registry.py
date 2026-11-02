@@ -23,7 +23,7 @@ Usage:
 
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +38,7 @@ from dfe_engine.core_resources.yaml_resource_type import (
     config_is_core,
 )
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
+from dfe_engine.gitcrud.routing import ReviewRouting, WriteOutcome, WritePosture
 from dfe_engine.source.alignment import MixedConnectorTypesError, require_one_type
 from dfe_engine.source.engine_registry import InvalidEngineError
 from dfe_engine.source.models import (
@@ -321,6 +322,7 @@ class SourceRegistry:
         refresh_interval: int = 30,
         *,
         crud: GitCrud | None = None,
+        posture: WritePosture | None = None,
     ) -> None:
         """Initialize the registry.
 
@@ -334,8 +336,12 @@ class SourceRegistry:
             crud: Governed Ops engine over the deploy repo. When provided the
                 ``sources`` resource class (config/sources/) is the SSoT and
                 every mutation is one git commit.
+            posture: Where a gitcrud write lands. A production+team write goes to a
+                review branch. None reads the posture from the loaded settings, with
+                no forge.
         """
         self._crud = crud
+        self._posture = posture
         self._store: DirectoryConfigStore | None = None
 
         if crud is not None:
@@ -420,6 +426,30 @@ class SourceRegistry:
                 return None
         return self._require_store().get(source_name)
 
+    def _route_write(
+        self,
+        crud: GitCrud,
+        name: str,
+        actor: str,
+        message: str,
+        write: Callable[[str], Any],
+        *,
+        engine_owned: bool = False,
+    ) -> WriteOutcome:
+        """Run a gitcrud write on main or, where production+team refuses main, a review branch.
+
+        An engine-owned write keeps a core source in step and is no operator's edit, so it
+        commits to main in every posture.
+        """
+        if engine_owned:
+            done = write("")
+            return WriteOutcome(changed=done.changed, commit_sha=done.commit_sha)
+        if self._posture is None:
+            self._posture = WritePosture.from_loaded_settings()
+        return self._posture.route(
+            gc=crud, cls_name=_SOURCES_CLASS, name=name, actor=actor, title=message, write=write
+        )
+
     def _put_raw(
         self,
         name: str,
@@ -427,6 +457,8 @@ class SourceRegistry:
         *,
         created_by: str | None,
         message: str,
+        routing: ReviewRouting | None = None,
+        engine_owned: bool = False,
     ) -> str:
         """Write one stored source doc; returns the destination label for the save log.
 
@@ -435,7 +467,7 @@ class SourceRegistry:
         in the deploy repo. Directory backend: plain YAML write, git commit when
         the directory is a repo, then a cache refresh.
         """
-        if self._crud is not None:
+        if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.metadata import ResourceMetadata, with_metadata
 
             stored = with_metadata(
@@ -445,13 +477,21 @@ class SourceRegistry:
                     display_name=doc.get("display_name"),
                 ),
             )
-            self._crud.put(
-                _SOURCES_CLASS,
+            actor = created_by or "engine"
+            outcome = self._route_write(
+                crud,
                 name,
-                stored,
-                actor=created_by or "engine",
-                message=message,
+                actor,
+                message,
+                lambda branch: crud.put(
+                    _SOURCES_CLASS, name, stored, actor=actor, message=message, branch=branch
+                ),
+                engine_owned=engine_owned,
             )
+            if routing is not None:
+                routing.record(outcome)
+            if outcome.review_required:
+                return f"review branch {outcome.branch}"
             return "gitcrud config/sources"
 
         store = self._require_store()
@@ -464,26 +504,41 @@ class SourceRegistry:
         store._refresh_all()
         return str(yaml_path)
 
-    def _delete_raw(self, name: str, *, created_by: str | None, message: str) -> bool:
+    def _delete_raw(
+        self,
+        name: str,
+        *,
+        created_by: str | None,
+        message: str,
+        routing: ReviewRouting | None = None,
+        engine_owned: bool = False,
+    ) -> bool:
         """Remove one stored source doc; False when it did not exist.
 
         gitcrud: one attributed commit ("(by <created_by>)" suffix, like save).
         Directory backend: unlink + engine-identity commit when git - it never
         carried delete attribution, so ``created_by`` is deliberately unused there.
         """
-        if self._crud is not None:
+        if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.engine import ResourceNotFoundError
 
             commit_msg = f"{message} (by {created_by})" if created_by else message
+            actor = created_by or "engine"
             try:
-                self._crud.delete(
-                    _SOURCES_CLASS,
+                outcome = self._route_write(
+                    crud,
                     name,
-                    actor=created_by or "engine",
-                    message=commit_msg,
+                    actor,
+                    commit_msg,
+                    lambda branch: crud.delete(
+                        _SOURCES_CLASS, name, actor=actor, message=commit_msg, branch=branch
+                    ),
+                    engine_owned=engine_owned,
                 )
             except ResourceNotFoundError:
                 return False
+            if routing is not None:
+                routing.record(outcome)
             return True
 
         store = self._require_store()
@@ -601,6 +656,7 @@ class SourceRegistry:
         description: str | None = None,
         *,
         core_reconcile: bool = False,
+        routing: ReviewRouting | None = None,
     ) -> Source:
         """Save a source definition to the YAML directory.
 
@@ -614,6 +670,7 @@ class SourceRegistry:
             description: Description of the change.
             core_reconcile: Engine-only. Permits the write that keeps a core source
                 in step with the deployment's settings. No request path sets it.
+            routing: Records the write when it went to a review branch instead of main.
 
         Returns:
             Validated Source model.
@@ -638,7 +695,14 @@ class SourceRegistry:
         if created_by:
             commit_msg = f"{commit_msg} (by {created_by})"
 
-        dest = self._put_raw(source.source, config_data, created_by=created_by, message=commit_msg)
+        dest = self._put_raw(
+            source.source,
+            config_data,
+            created_by=created_by,
+            message=commit_msg,
+            routing=routing,
+            engine_owned=core_reconcile,
+        )
         logger.info(f"Saved source {source.source!r} -> {dest}")
         return source
 
@@ -648,6 +712,7 @@ class SourceRegistry:
         *,
         created_by: str | None = None,
         description: str | None = None,
+        routing: ReviewRouting | None = None,
     ) -> Source:
         """Create a source from a flat write body (initial version ``1.0.0``)."""
         if isinstance(write, dict):
@@ -666,7 +731,9 @@ class SourceRegistry:
             source = source_from_write(write, source_name=write.source)
         except ValidationError as e:
             raise SourceValidationError(_first_error_message(e)) from e
-        return self.save_source(source, created_by=created_by, description=description)
+        return self.save_source(
+            source, created_by=created_by, description=description, routing=routing
+        )
 
     def update_source_from_write(
         self,
@@ -676,6 +743,7 @@ class SourceRegistry:
         created_by: str | None = None,
         description: str | None = None,
         deployment_store: Any | None = None,
+        routing: ReviewRouting | None = None,
     ) -> Source:
         """Update a source; version bump only when the deployed version is edited."""
         if isinstance(write, dict):
@@ -700,7 +768,9 @@ class SourceRegistry:
             if store is not None and store.load_build(source_name, invalidate_version) is not None:
                 store.delete_build(source_name, invalidate_version, source=updated)
 
-        return self.save_source(updated, created_by=created_by, description=description)
+        return self.save_source(
+            updated, created_by=created_by, description=description, routing=routing
+        )
 
     def set_deployed_version(
         self,
@@ -709,6 +779,7 @@ class SourceRegistry:
         *,
         created_by: str | None = None,
         description: str | None = None,
+        routing: ReviewRouting | None = None,
     ) -> Source:
         """Record which source version is deployed to ClickHouse runtime."""
         source = self.get_source(source_name)
@@ -718,7 +789,7 @@ class SourceRegistry:
             )
         updated = source.model_copy(update={"deployed_version": version_id})
         msg = description or f"source: deploy {source_name} version {version_id}"
-        return self.save_source(updated, created_by=created_by, description=msg)
+        return self.save_source(updated, created_by=created_by, description=msg, routing=routing)
 
     @staticmethod
     def _resolve_deployment_store(
@@ -772,6 +843,7 @@ class SourceRegistry:
         *,
         core_reconcile: bool = False,
         deployment_store: SourceDeploymentStore | None = None,
+        routing: ReviewRouting | None = None,
     ) -> None:
         """Delete a source definition and its build, plan and deploy records.
 
@@ -785,6 +857,8 @@ class SourceRegistry:
                 landing table no longer names. No request path sets it.
             deployment_store: Where the source's records live. Defaults to the store
                 the loaded settings name.
+            routing: Records the delete when it went to a review branch. A delete held
+                for review keeps the records, since main still carries the source.
 
         Raises:
             SourceCoreResourceError: The stored source is engine-owned.
@@ -793,13 +867,19 @@ class SourceRegistry:
         if not (core_reconcile) and self.is_core(source_name):
             raise SourceCoreResourceError(action="delete", source=source_name)
 
+        held = routing if routing is not None else ReviewRouting()
         deleted = self._delete_raw(
             source_name,
             created_by=created_by,
             message=f"source: delete {source_name}",
+            routing=held,
+            engine_owned=core_reconcile,
         )
         if not deleted:
             logger.warning(f"Source does not exist: {source_name!r}")
+            return
+        if held.review_required:
+            logger.info(f"Delete of source {source_name!r} is awaiting review")
             return
         self._forget_deployment_records(source_name, deployment_store)
         logger.info(f"Deleted source {source_name!r}")
@@ -908,7 +988,7 @@ class SourceRegistry:
             return None
         from dfe_engine.ingest.store import IngestStore
 
-        return IngestStore(self._crud)
+        return IngestStore(self._crud, posture=self._posture)
 
     def ingest_rules(self) -> IngestRules:
         """The rule order, profiles and default bindings, empty without a deploy repo."""

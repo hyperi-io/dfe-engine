@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -718,7 +718,7 @@ requires-dist = [
     { name = "confluent-kafka", specifier = ">=2.16.0" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "dfe-schemas", specifier = ">=0.2.20,<1" },
+    { name = "dfe-schemas", specifier = ">=0.2.22,<1" },
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "dulwich", specifier = ">=1.2.7" },
     { name = "faker", specifier = ">=40.43.0" },
@@ -730,7 +730,7 @@ requires-dist = [
     { name = "itsdangerous", specifier = ">=2.2.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "jmespath", specifier = ">=1.1.0" },
-    { name = "logreducer", extras = ["enhanced"], specifier = ">=3.5.3" },
+    { name = "logreducer", extras = ["enhanced"], specifier = ">=3.5.6" },
     { name = "msal", specifier = ">=1.37.0" },
     { name = "numpy", specifier = ">=2.5.4" },
     { name = "oauthlib", specifier = ">=4.0.0" },
@@ -746,7 +746,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["api", "expression", "http", "metrics", "secrets-kubernetes"], specifier = ">=2.32.1,<3" },
+    { name = "scalo", extras = ["api", "expression", "http", "metrics", "secrets-kubernetes"], specifier = ">=2.32.4,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.22.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -775,14 +775,14 @@ dev = [
 
 [[package]]
 name = "dfe-schemas"
-version = "0.2.20"
+version = "0.2.22"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9a/67/ad25a5074b0b6b1c0525b8ed515837942d5ce6a06edd1714621b8ef591d0/dfe_schemas-0.2.20.tar.gz", hash = "sha256:37bb2dc9b4ec11835d0ae2c1be4d9781377e89f07a71494021efcf9a0af9fca3", size = 1260557, upload-time = "2026-10-29T02:38:22.075Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/86/53/f508fa8d07409535d5434b17b26f59a18344161cc2980f7c3c6a7a039550/dfe_schemas-0.2.22.tar.gz", hash = "sha256:dd93806ed3a34ab71601e775c72585c810af1c999aea7a981a85fb6ff9cb25bd", size = 1267863, upload-time = "2026-11-01T07:30:03.144Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/d7/898a4a7a4f5befa8b53e693ec6895c60f3a738cd188c93f76c7343f9d624/dfe_schemas-0.2.20-py3-none-any.whl", hash = "sha256:16e26eb40775a6d4c0fcd2386db2f737c9ea09295dc8f27320534055dffc4ac6", size = 2810981, upload-time = "2026-10-29T02:38:18.922Z" },
+    { url = "https://files.pythonhosted.org/packages/25/34/111ddb2648397c8c8d1dd81d5b6ec32bef7e998e99c292a724b431d92f9e/dfe_schemas-0.2.22-py3-none-any.whl", hash = "sha256:df764d74ac1e34a5a0264c7374c58ee2aadbbc0142ea735e1f8f4d1740fd8f1e", size = 2807449, upload-time = "2026-11-01T07:30:00.625Z" },
 ]
 
 [[package]]
@@ -1277,7 +1277,7 @@ wheels = [
 
 [[package]]
 name = "logreducer"
-version = "3.5.3"
+version = "3.5.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy" },
@@ -1285,9 +1285,9 @@ dependencies = [
     { name = "scikit-learn" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/da/46/59c9a4e4770cc033715ddbfb179cff4b1722a965d9a4bbf803681d9bb567/logreducer-3.5.3.tar.gz", hash = "sha256:0b621a594c82e322fbd9a699aa03b57fb8b86fb045300ff6a90ee0a1da33c324", size = 66577, upload-time = "2026-10-14T07:52:30.828Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/49/83/72b922a3eb60d93e9fb4e05cbb5081b9c67043958562270f8e6cb0411b0b/logreducer-3.5.6.tar.gz", hash = "sha256:abdb702a3c01bceeea3339c3b57d9194101808aedc9234b54d6f071cbbcbce75", size = 62468, upload-time = "2026-11-01T20:08:47.905Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/bb/9b/453215b61464419bc469f702a9bebee9c08c134909965c9108d08de4d35d/logreducer-3.5.3-py3-none-any.whl", hash = "sha256:8a23c02eb8d9fc4a1cfe09e5d46958661b05d3483d356af72f41a1c74adb172d", size = 67592, upload-time = "2026-10-14T07:52:29.051Z" },
+    { url = "https://files.pythonhosted.org/packages/e7/67/772838fb774961568cd9eaa4b314178e0eae8be40e2f4696a222b9a1f960/logreducer-3.5.6-py3-none-any.whl", hash = "sha256:a5ccace4e73230e57f213e7d762c3e9980dca41096cf5b50286aada86394aa0f", size = 69858, upload-time = "2026-11-01T20:08:46.088Z" },
 ]
 
 [package.optional-dependencies]
@@ -2422,7 +2422,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.32.2"
+version = "2.32.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2440,9 +2440,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9b/7f/380529ddf4146c563c2d8a693bb039ad0deb074b33415ae653abe51f6c70/scalo-2.32.2.tar.gz", hash = "sha256:7a1bce930001e47f986ac34ddecaac9374755d2a4ad48b202aebb4d38893380c", size = 493055, upload-time = "2026-10-25T09:29:47.297Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/40/c3/0fd22195a16851d11368a090fe5a110c7e81fef2bc608b14df0eb2b9ba26/scalo-2.32.4.tar.gz", hash = "sha256:d5cc1c9dd5cd14c19dca996de6d564223669b067b80f2ecefb0de7f3e810c830", size = 548113, upload-time = "2026-11-01T05:14:03.674Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/08/27/562f58f0ae7b7035215b06ddf364dd7cd555c8ddb65f2b1c7deab6e2a6ed/scalo-2.32.2-py3-none-any.whl", hash = "sha256:c0ffdf81cef9d1868d618a8c0447a86cdaac4119ad40b45e65c175ffb65ef751", size = 579700, upload-time = "2026-10-25T09:29:44.762Z" },
+    { url = "https://files.pythonhosted.org/packages/8f/bd/311ad62baf5b09b616500434d89bbe7fc35a33eb0017a3ecd4f99a09d2cd/scalo-2.32.4-py3-none-any.whl", hash = "sha256:bc58c89f6814c629717f2fb9e22be650c38c94e3da656ae3522938e628e6019f", size = 640615, upload-time = "2026-11-01T05:14:00.012Z" },
 ]
 
 [package.optional-dependencies]

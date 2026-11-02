@@ -18,10 +18,12 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel, Field
+
 if TYPE_CHECKING:
     from fastapi import Response
 
-    from dfe_engine.gitcrud.routing import WriteOutcome
+    from dfe_engine.gitcrud.routing import ReviewRouting, WriteOutcome
 
 
 def set_review_headers(response: Response, *, review_required: bool, pr_url: str | None) -> None:
@@ -35,6 +37,13 @@ def set_review_headers(response: Response, *, review_required: bool, pr_url: str
     response.headers["X-DFE-Review-Required"] = "true"
     if pr_url:
         response.headers["X-DFE-PR-Url"] = pr_url
+
+
+def apply_routing_headers(response: Response, routing: ReviewRouting) -> None:
+    """Mark a response whose writes, folded into *routing*, went to review."""
+    set_review_headers(
+        response, review_required=routing.review_required, pr_url=routing.first_pr_url
+    )
 
 
 def apply_review_headers(response: Response, outcome: WriteOutcome | None) -> None:
@@ -58,3 +67,43 @@ def review_audit_detail(outcome: WriteOutcome | None) -> dict[str, Any] | None:
         detail["branch"] = outcome.branch
         detail["pr_url"] = outcome.pr_url
     return detail
+
+
+def routing_audit_detail(routing: ReviewRouting) -> dict[str, Any] | None:
+    """Audit detail for writes folded into *routing*, or None when every one reached main."""
+    if not routing.review_required:
+        return None
+    return {"review_required": True, "branches": routing.branches, "pr_urls": routing.pr_urls}
+
+
+class ReviewFields(BaseModel):
+    """Whether the write went to a review branch rather than main, as a governed write reports it."""
+
+    review_required: bool = Field(
+        default=False,
+        description=(
+            "True when production+team sent the write to a review branch: main is "
+            "unchanged and the apps follow once the branch is merged"
+        ),
+    )
+    pr_url: str | None = Field(
+        default=None, description="The review PR, where a forge is configured to open one"
+    )
+    review_branch: str | None = Field(
+        default=None, description="The branch carrying the write, while it awaits review"
+    )
+
+
+def review_fields(routing: ReviewRouting | None) -> dict[str, Any]:
+    """The :class:`ReviewFields` values for writes folded into *routing*, empty when all reached main."""
+    if routing is None or not routing.review_required:
+        return {}
+    return {
+        "review_required": True,
+        "pr_url": routing.first_pr_url,
+        "review_branch": routing.branches[0] if routing.branches else None,
+    }
+
+
+# What a write held for review answers in ``message`` in place of what it would have done.
+AWAITING_REVIEW = "awaiting review"

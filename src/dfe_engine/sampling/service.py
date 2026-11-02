@@ -21,6 +21,7 @@ importing it loads scikit-learn and scipy, which the fast modes never need.
 import asyncio
 import json
 import uuid
+from collections.abc import Callable
 from typing import Any
 
 from clickhouse_connect.driver.exceptions import DatabaseError
@@ -64,6 +65,25 @@ class Sampler:
             self._gate = asyncio.Semaphore(self._cfg.max_concurrent)
         return self._gate
 
+    async def _gated[T](self, fn: Callable[..., T], *args: Any) -> T:
+        """Run *fn* on a worker thread under the concurrency gate.
+
+        A thread cannot be stopped, so a cancelled run keeps its permit until the
+        thread returns. Otherwise each cancel would start one more reducer than
+        ``sampler.max_concurrent`` allows, and its memory with it.
+        """
+        async with self._semaphore():
+            work = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+            try:
+                return await asyncio.shield(work)
+            except asyncio.CancelledError:
+                while not work.done():
+                    try:
+                        await asyncio.wait({work})
+                    except asyncio.CancelledError:
+                        continue
+                raise
+
     # -- public entry point -------------------------------------
 
     async def run(
@@ -93,11 +113,10 @@ class Sampler:
         gated = req.mode in GATED_MODES
         _progress(task, 30, f"Sampling ({req.mode.value}, {req.backend.value})")
         if gated:
-            async with self._semaphore():
-                _progress(task, 40, "Running logreducer")
-                lines, stats, note = await asyncio.to_thread(
-                    self._reduce_sample, req, ch, target, source_label, org_ids, limit
-                )
+            _progress(task, 40, "Running logreducer")
+            lines, stats, note = await self._gated(
+                self._reduce_sample, req, ch, target, source_label, org_ids, limit
+            )
         else:
             lines, stats, note = await asyncio.to_thread(
                 self._fast_sample, req, ch, target, source_label, org_ids, limit

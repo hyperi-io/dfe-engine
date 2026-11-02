@@ -49,7 +49,7 @@ from tests.integration.conftest import _unavailable
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 from tests.support.engine_stack import bootstrap_settings, deploy_source
 
-pytestmark = pytest.mark.integration
+pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
 LANDING = "main"
 MINIMAL = "allsrc-minimal"

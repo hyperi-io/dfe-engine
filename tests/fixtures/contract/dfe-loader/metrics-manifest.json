@@ -2,8 +2,8 @@
   "schema_version": 1,
   "app": "dfe-loader",
   "namespace": "",
-  "version": "1.18.2",
-  "commit": "6d9ffaaea0ed496056629f2a71efd36075557962",
+  "version": "1.18.61",
+  "commit": "unknown",
   "registered_at": "",
   "metrics": [
     {
@@ -99,6 +99,16 @@
       "group": "platform"
     },
     {
+      "name": "transport_message_too_large_total",
+      "type": "counter",
+      "description": "Records over a sender's size ceiling, refused before sending or by the receiver",
+      "unit": "",
+      "labels": [
+        "transport"
+      ],
+      "group": "platform"
+    },
+    {
       "name": "transport_recv_errors_total",
       "type": "counter",
       "description": "Receive failures by class (transient: retried, permanent: returned)",
@@ -117,6 +127,17 @@
       "labels": [
         "transport",
         "protocol"
+      ],
+      "group": "platform"
+    },
+    {
+      "name": "transport_revoke_discarded_total",
+      "type": "counter",
+      "description": "Records a revoke kept from a write, as the partition's next owner reads them again, by stage: receive (left out by recv) or buffer (discarded by the caller)",
+      "unit": "",
+      "labels": [
+        "transport",
+        "stage"
       ],
       "group": "platform"
     },
@@ -390,6 +411,14 @@
         "to",
         "reason"
       ],
+      "group": "platform"
+    },
+    {
+      "name": "dlq_payload_truncated_total",
+      "type": "counter",
+      "description": "Dead letters whose payload was cut to max_payload_bytes",
+      "unit": "",
+      "labels": [],
       "group": "platform"
     },
     {
@@ -724,6 +753,14 @@
       "group": "custom"
     },
     {
+      "name": "self_regulation_max_hold_releases_total",
+      "type": "counter",
+      "description": "Inbound holds ended by max_hold with pressure above resume_below (per signal)",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
       "name": "dfe_loader_header_pass_skipped_total",
       "type": "counter",
       "description": "Messages rejected because the header pass promoted no columns",
@@ -735,6 +772,14 @@
       "name": "dfe_loader_routing_field_absent_total",
       "type": "counter",
       "description": "Records on a source topic that named no table and fell back to the default",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_fields_unstored_total",
+      "type": "counter",
+      "description": "Payload fields that matched no column, in a table with no _json column to keep them",
       "unit": "",
       "labels": [],
       "group": "custom"
@@ -796,9 +841,10 @@
     {
       "name": "consumer_lag",
       "type": "gauge",
-      "description": "Kafka consumer lag per topic/partition",
+      "description": "Kafka consumer lag per group/topic/partition",
       "unit": "",
       "labels": [
+        "group_id",
         "topic",
         "partition"
       ],
@@ -807,17 +853,21 @@
     {
       "name": "consumer_partitions_assigned",
       "type": "gauge",
-      "description": "Current assigned partition count",
+      "description": "Current assigned partition count per group",
       "unit": "",
-      "labels": [],
+      "labels": [
+        "group_id"
+      ],
       "group": "consumer"
     },
     {
       "name": "consumer_rebalance_total",
       "type": "counter",
-      "description": "Consumer group rebalance events",
+      "description": "Consumer group rebalance events per group",
       "unit": "",
-      "labels": [],
+      "labels": [
+        "group_id"
+      ],
       "group": "consumer"
     },
     {
@@ -965,6 +1015,14 @@
       "group": "schema_cache"
     },
     {
+      "name": "rows_inserted_total",
+      "type": "counter",
+      "description": "Total rows inserted to ClickHouse",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
       "name": "messages_received_total",
       "type": "counter",
       "description": "Total messages received from Kafka",
@@ -992,14 +1050,6 @@
       "name": "batches_flushed_total",
       "type": "counter",
       "description": "Total batches flushed to ClickHouse",
-      "unit": "",
-      "labels": [],
-      "group": "custom"
-    },
-    {
-      "name": "rows_inserted_total",
-      "type": "counter",
-      "description": "Total rows inserted to ClickHouse",
       "unit": "",
       "labels": [],
       "group": "custom"
@@ -1232,6 +1282,14 @@
       "name": "dfe_loader_batched_ndjson_records_total",
       "type": "counter",
       "description": "Records split out of newline-separated messages",
+      "unit": "",
+      "labels": [],
+      "group": "custom"
+    },
+    {
+      "name": "dfe_loader_duplicate_header_total",
+      "type": "counter",
+      "description": "Records dead-lettered for carrying the _org_id or _source key more than once",
       "unit": "",
       "labels": [],
       "group": "custom"

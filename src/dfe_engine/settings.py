@@ -142,6 +142,7 @@ Storage:
 - DFE_S3_REGION -> storage.s3_region
 
 API request bodies:
+- DFE_API_MAX_ACTIVE_TASKS -> api.max_active_tasks
 - DFE_API_MAX_REQUEST_BODY_BYTES -> api.max_request_body_bytes
 
 API (Elasticsearch template elastic-converter upload limits):
@@ -945,9 +946,10 @@ class QueryViewSettings(BaseModel):
         default=10_000_000,
         description="ClickHouse settings profile max_rows_to_read",
     )
-    max_memory_usage: str = Field(
-        default="2G",
-        description="ClickHouse settings profile max_memory_usage",
+    max_memory_usage: int = Field(
+        default=2_147_483_648,
+        ge=1,
+        description="ClickHouse settings profile max_memory_usage, in bytes",
     )
 
 
@@ -973,9 +975,9 @@ class SamplerSettings(BaseModel):
     - DFE_SAMPLER_MAX_EXECUTION_TIME -> sampler.max_execution_time
     """
 
-    default_mode: str = Field(
+    default_mode: Literal["recent", "random", "smart", "anomaly"] = Field(
         default="smart",
-        description="Default sample mode: recent | random | smart | anomaly",
+        description="Mode of a sample request that names none: recent | random | smart | anomaly",
     )
     default_limit: int = Field(default=100, ge=1, description="Default rows returned")
     max_limit: int = Field(default=10_000, ge=1, description="Hard cap on rows returned")
@@ -998,8 +1000,8 @@ class SamplerSettings(BaseModel):
         default=20_000, ge=1, description="Max Kafka messages read per sample pass"
     )
     timestamp_field: str = Field(
-        default="timestamp_load",
-        description="Column used to order 'recent' samples (DESC)",
+        default="_timestamp_load",
+        description="Column used to order 'recent' samples (DESC), the common header's load column",
     )
     wait_seconds: float = Field(
         default=8.0,
@@ -1948,6 +1950,7 @@ class APISettings(BaseModel):
     - DFE_API_FORWARDED_ALLOW_IPS -> api.forwarded_allow_ips (comma-separated)
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
     - DFE_API_MAX_SESSION_MINUTES -> api.max_session_minutes
+    - DFE_API_MAX_ACTIVE_TASKS -> api.max_active_tasks
     - DFE_API_MAX_REQUEST_BODY_BYTES -> api.max_request_body_bytes
     - DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
     - DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
@@ -2027,6 +2030,15 @@ class APISettings(BaseModel):
             "scripts from a public CDN into the engine's own origin, so unset serves "
             "them in a dev posture only. /openapi.json is served either way. "
             "DFE_API_DOCS_ENABLED."
+        ),
+    )
+    max_active_tasks: int = Field(
+        default=64,
+        ge=1,
+        description=(
+            "Background tasks (samples, synthetic streams) one engine process holds "
+            "pending or running at once. A submission past it is refused with 429. "
+            "DFE_API_MAX_ACTIVE_TASKS."
         ),
     )
     max_request_body_bytes: int = Field(
@@ -2685,7 +2697,7 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_QUERY_VIEWS_MAX_ROWS_TO_READ"):
         overrides["query_views"]["max_rows_to_read"] = int(val)
     if val := _get_env("DFE_QUERY_VIEWS_MAX_MEMORY_USAGE"):
-        overrides["query_views"]["max_memory_usage"] = val
+        overrides["query_views"]["max_memory_usage"] = int(val)
 
     # Sampler settings (source sampling: recent/random/smart/anomaly)
     if val := _get_env("DFE_SAMPLER_DEFAULT_MODE"):
@@ -2998,6 +3010,8 @@ def _get_env_overrides() -> dict:
         overrides["api"]["jwt_expire_minutes"] = int(val)
     if val := _get_env("DFE_API_MAX_SESSION_MINUTES"):
         overrides["api"]["max_session_minutes"] = int(val)
+    if val := _get_env("DFE_API_MAX_ACTIVE_TASKS"):
+        overrides["api"]["max_active_tasks"] = int(val)
     if val := _get_env("DFE_API_MAX_REQUEST_BODY_BYTES"):
         overrides["api"]["max_request_body_bytes"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"):

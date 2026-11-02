@@ -32,13 +32,14 @@ from dfe_engine.api.deps import (
     require_action,
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams
-from dfe_engine.api.review import set_review_headers
+from dfe_engine.api.review import ReviewFields, apply_routing_headers, set_review_headers
 from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.clickhouse.quoting import plain_table_name
 from dfe_engine.fieldmap.registry import FieldMapError
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
+from dfe_engine.gitcrud.routing import WritePosture
 from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
 from dfe_engine.schema.schema_loader import SchemaLoadError
 from dfe_engine.sigma.catalog import (
@@ -133,7 +134,14 @@ def _view_store_or_none(request: Request) -> SigmaViewStore | None:
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
         return None
-    return SigmaViewStore(gc)
+    return SigmaViewStore(gc, posture=_posture(request))
+
+
+def _posture(request: Request) -> WritePosture:
+    """Where the request's sigma writes land: main, or a review branch in production+team."""
+    return WritePosture.from_settings(
+        request.app.state.settings, forge=getattr(request.app.state, "forge", None)
+    )
 
 
 def _table_columns_loader(request: Request) -> Callable[[Source], list[str]]:
@@ -248,7 +256,7 @@ async def list_sigma_view_definitions(
     pagination: PaginationParams = Depends(),
 ) -> PaginatedResponse[SigmaViewSummary]:
     """List the sources that have a stored Sigma view definition, paginated."""
-    store = SigmaViewStore(_gitcrud(request))
+    store = SigmaViewStore(_gitcrud(request), posture=_posture(request))
     items = [SigmaViewSummary(**row) for row in store.summaries()]
     return PaginatedResponse.from_list(items, pagination.page, pagination.per_page)
 
@@ -258,7 +266,7 @@ async def get_sigma_view_definition(
     source_name: str, request: Request, user: CurrentUser
 ) -> SigmaViewDefinition:
     """Get a source's stored Sigma view definition."""
-    store = SigmaViewStore(_gitcrud(request))
+    store = SigmaViewStore(_gitcrud(request), posture=_posture(request))
     try:
         return store.get(source_name)
     except ResourceNotFoundError as exc:
@@ -273,6 +281,7 @@ async def put_sigma_view_definition(
     source_name: str,
     body: SigmaViewWriteRequest,
     request: Request,
+    response: Response,
     user: CurrentUser,
 ) -> SigmaViewDefinition:
     """Create or replace a source's Sigma view definition."""
@@ -282,18 +291,19 @@ async def put_sigma_view_definition(
         columns=body.columns,
         include_source_columns=body.include_source_columns,
     )
-    store = SigmaViewStore(_gitcrud(request))
+    store = SigmaViewStore(_gitcrud(request), posture=_posture(request))
     saved = await asyncio.to_thread(store.save, definition, user.user_id)
     audit_resource_change(user.user_id, "sigma_view", source_name, "updated")
+    apply_routing_headers(response, store.writes.routing)
     return saved
 
 
 @router.delete("/views/{source_name}", status_code=204, dependencies=[_WRITE])
 async def delete_sigma_view_definition(
-    source_name: str, request: Request, user: CurrentUser
+    source_name: str, request: Request, response: Response, user: CurrentUser
 ) -> None:
     """Delete a source's Sigma view definition."""
-    store = SigmaViewStore(_gitcrud(request))
+    store = SigmaViewStore(_gitcrud(request), posture=_posture(request))
     try:
         await asyncio.to_thread(store.delete, source_name, user.user_id)
     except ResourceNotFoundError as exc:
@@ -302,6 +312,7 @@ async def delete_sigma_view_definition(
             detail={"code": "not_found", "message": f"no sigma view for '{source_name}'"},
         ) from exc
     audit_resource_change(user.user_id, "sigma_view", source_name, "deleted")
+    apply_routing_headers(response, store.writes.routing)
 
 
 # -- View DDL generation / preview ---------------------------
@@ -414,8 +425,8 @@ async def find_sources_for_logsource(
 # -- Models --------------------------------------------------
 
 
-class SyncReportModel(BaseModel):
-    """Counts from a provider sync into the catalogue."""
+class SyncReportModel(ReviewFields):
+    """Counts from a provider sync into the catalogue, and whether its import awaits review."""
 
     source: str
     total: int
@@ -486,15 +497,15 @@ def _gitcrud(request: Request) -> GitCrud:
 
 
 def _catalog(request: Request) -> SigmaCatalogStore:
-    return SigmaCatalogStore(_gitcrud(request))
+    return SigmaCatalogStore(_gitcrud(request), posture=_posture(request))
 
 
 def _selection_store(request: Request) -> SigmaSelectionStore:
-    return SigmaSelectionStore(_gitcrud(request))
+    return SigmaSelectionStore(_gitcrud(request), posture=_posture(request))
 
 
 def _provider_store(request: Request) -> SigmaProviderStore:
-    return SigmaProviderStore(_gitcrud(request))
+    return SigmaProviderStore(_gitcrud(request), posture=_posture(request))
 
 
 def _task_manager(request: Request) -> TaskManager:
@@ -683,12 +694,14 @@ async def list_providers(request: Request, user: CurrentUser) -> list[ProviderCo
 
 @router.post("/providers", response_model=ProviderConfig, status_code=201, dependencies=[_ADMIN])
 async def register_provider(
-    body: ProviderConfig, request: Request, user: CurrentUser
+    body: ProviderConfig, request: Request, response: Response, user: CurrentUser
 ) -> ProviderConfig:
     """Register (or overwrite) a provider config."""
     _validate_provider_reach(request, body)
-    saved = await asyncio.to_thread(_provider_store(request).save_config, body, user.user_id)
+    store = _provider_store(request)
+    saved = await asyncio.to_thread(store.save_config, body, user.user_id)
     audit_resource_change(user.user_id, "sigma_provider", body.name, "registered")
+    apply_routing_headers(response, store.writes.routing)
     return saved
 
 
@@ -705,56 +718,66 @@ async def get_provider(name: str, request: Request, user: CurrentUser) -> Provid
 
 @router.put("/providers/{name}", response_model=ProviderConfig, dependencies=[_ADMIN])
 async def update_provider(
-    name: str, body: ProviderConfig, request: Request, user: CurrentUser
+    name: str, body: ProviderConfig, request: Request, response: Response, user: CurrentUser
 ) -> ProviderConfig:
     """Update a provider config. The path name wins over the body name."""
     config = body.model_copy(update={"name": name})
     _validate_provider_reach(request, config)
-    saved = await asyncio.to_thread(_provider_store(request).save_config, config, user.user_id)
+    store = _provider_store(request)
+    saved = await asyncio.to_thread(store.save_config, config, user.user_id)
     audit_resource_change(user.user_id, "sigma_provider", name, "updated")
+    apply_routing_headers(response, store.writes.routing)
     return saved
 
 
 @router.post("/providers/{name}/enable", response_model=ProviderConfig, dependencies=[_WRITE])
-async def enable_provider(name: str, request: Request, user: CurrentUser) -> ProviderConfig:
+async def enable_provider(
+    name: str, request: Request, response: Response, user: CurrentUser
+) -> ProviderConfig:
     """Enable a provider (polling budget applies)."""
+    store = _provider_store(request)
     try:
-        saved = await asyncio.to_thread(
-            _provider_store(request).set_enabled, name, True, user.user_id
-        )
+        saved = await asyncio.to_thread(store.set_enabled, name, True, user.user_id)
     except ResourceNotFoundError as exc:
         raise HTTPException(
             404, detail={"code": "not_found", "message": f"provider '{name}' not found"}
         ) from exc
     audit_resource_change(user.user_id, "sigma_provider", name, "enabled")
+    apply_routing_headers(response, store.writes.routing)
     return saved
 
 
 @router.post("/providers/{name}/disable", response_model=ProviderConfig, dependencies=[_WRITE])
-async def disable_provider(name: str, request: Request, user: CurrentUser) -> ProviderConfig:
+async def disable_provider(
+    name: str, request: Request, response: Response, user: CurrentUser
+) -> ProviderConfig:
     """Disable a provider (blocks scheduled polling; a manual sync is refused)."""
+    store = _provider_store(request)
     try:
-        saved = await asyncio.to_thread(
-            _provider_store(request).set_enabled, name, False, user.user_id
-        )
+        saved = await asyncio.to_thread(store.set_enabled, name, False, user.user_id)
     except ResourceNotFoundError as exc:
         raise HTTPException(
             404, detail={"code": "not_found", "message": f"provider '{name}' not found"}
         ) from exc
     audit_resource_change(user.user_id, "sigma_provider", name, "disabled")
+    apply_routing_headers(response, store.writes.routing)
     return saved
 
 
 @router.delete("/providers/{name}", status_code=204, dependencies=[_ADMIN])
-async def delete_provider(name: str, request: Request, user: CurrentUser) -> None:
+async def delete_provider(
+    name: str, request: Request, response: Response, user: CurrentUser
+) -> None:
     """Delete a stored provider config (a built-in default reverts to its default)."""
+    store = _provider_store(request)
     try:
-        await asyncio.to_thread(_provider_store(request).delete_config, name, user.user_id)
+        await asyncio.to_thread(store.delete_config, name, user.user_id)
     except ResourceNotFoundError as exc:
         raise HTTPException(
             404, detail={"code": "not_found", "message": f"provider '{name}' not found"}
         ) from exc
     audit_resource_change(user.user_id, "sigma_provider", name, "deleted")
+    apply_routing_headers(response, store.writes.routing)
 
 
 # -- Provider sync (submit -> poll) --------------------------
@@ -854,7 +877,7 @@ async def get_catalogue_rule(
 
 @router.put("/catalogue/{rule_id}", response_model=CatalogRuleDetail, dependencies=[_WRITE])
 async def edit_catalogue_rule(
-    rule_id: str, body: RuleEditRequest, request: Request, user: CurrentUser
+    rule_id: str, body: RuleEditRequest, request: Request, response: Response, user: CurrentUser
 ) -> CatalogRuleDetail:
     """Edit a rule's content. Marks it locally edited so a re-import preserves it."""
     catalog = _catalog(request)
@@ -867,12 +890,13 @@ async def edit_catalogue_rule(
             404, detail={"code": "not_found", "message": f"rule '{rule_id}' not found"}
         ) from exc
     audit_resource_change(user.user_id, "sigma_rule", rule_id, "edited")
+    apply_routing_headers(response, catalog.writes.routing)
     return _detail(doc, _selection_store(request).is_selected(rule_id))
 
 
 @router.post("/catalogue/{rule_id}/adopt", response_model=CatalogRuleDetail, dependencies=[_WRITE])
 async def adopt_catalogue_rule(
-    rule_id: str, request: Request, user: CurrentUser
+    rule_id: str, request: Request, response: Response, user: CurrentUser
 ) -> CatalogRuleDetail:
     """Detach a rule from upstream (pin its content; a re-import records drift only)."""
     catalog = _catalog(request)
@@ -883,19 +907,24 @@ async def adopt_catalogue_rule(
             404, detail={"code": "not_found", "message": f"rule '{rule_id}' not found"}
         ) from exc
     audit_resource_change(user.user_id, "sigma_rule", rule_id, "adopted")
+    apply_routing_headers(response, catalog.writes.routing)
     return _detail(doc, _selection_store(request).is_selected(rule_id))
 
 
 @router.delete("/catalogue/{rule_id}", status_code=204, dependencies=[_WRITE])
-async def delete_catalogue_rule(rule_id: str, request: Request, user: CurrentUser) -> None:
+async def delete_catalogue_rule(
+    rule_id: str, request: Request, response: Response, user: CurrentUser
+) -> None:
     """Remove a rule from the catalogue."""
+    catalog = _catalog(request)
     try:
-        await asyncio.to_thread(_catalog(request).delete_rule, rule_id, user.user_id)
+        await asyncio.to_thread(catalog.delete_rule, rule_id, user.user_id)
     except ResourceNotFoundError as exc:
         raise HTTPException(
             404, detail={"code": "not_found", "message": f"rule '{rule_id}' not found"}
         ) from exc
     audit_resource_change(user.user_id, "sigma_rule", rule_id, "deleted")
+    apply_routing_headers(response, catalog.writes.routing)
 
 
 # -- Selection CRUD (the meta-level "which rules to implement") -------
@@ -908,7 +937,9 @@ async def list_selected(request: Request, user: CurrentUser) -> SelectionRespons
 
 
 @router.post("/catalogue/{rule_id}/select", response_model=SelectionResponse, dependencies=[_WRITE])
-async def select_rule(rule_id: str, request: Request, user: CurrentUser) -> SelectionResponse:
+async def select_rule(
+    rule_id: str, request: Request, response: Response, user: CurrentUser
+) -> SelectionResponse:
     """Select a catalogued rule to implement."""
     if not _catalog(request).exists(rule_id):
         raise HTTPException(
@@ -917,17 +948,21 @@ async def select_rule(rule_id: str, request: Request, user: CurrentUser) -> Sele
     store = _selection_store(request)
     await asyncio.to_thread(store.select, rule_id, user.user_id)
     audit_resource_change(user.user_id, "sigma_selection", rule_id, "selected")
+    apply_routing_headers(response, store.writes.routing)
     return SelectionResponse(rules=store.list_selected())
 
 
 @router.post(
     "/catalogue/{rule_id}/deselect", response_model=SelectionResponse, dependencies=[_WRITE]
 )
-async def deselect_rule(rule_id: str, request: Request, user: CurrentUser) -> SelectionResponse:
+async def deselect_rule(
+    rule_id: str, request: Request, response: Response, user: CurrentUser
+) -> SelectionResponse:
     """Deselect a rule (idempotent)."""
     store = _selection_store(request)
     await asyncio.to_thread(store.deselect, rule_id, user.user_id)
     audit_resource_change(user.user_id, "sigma_selection", rule_id, "deselected")
+    apply_routing_headers(response, store.writes.routing)
     return SelectionResponse(rules=store.list_selected())
 
 

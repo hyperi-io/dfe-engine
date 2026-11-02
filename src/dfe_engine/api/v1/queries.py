@@ -247,9 +247,10 @@ def execute_view(
     response_model=QueryResponse,
     dependencies=[Depends(require_action(scopes_dict["raw_query_execute"]))],
 )
-async def execute_raw_query(
+def execute_raw_query(
     request: RawQueryRequest,
     user: CurrentUser,
+    settings: Settings,
 ) -> QueryResponse:
     """Execute a raw query against a registered datasource adapter.
 
@@ -257,6 +258,10 @@ async def execute_raw_query(
     datasource adapters rather than parameterized views. The SQL runs as the
     engine's own ClickHouse user, so it requires ``raw_query:execute``, which no
     built-in role but ``admin`` holds, and ClickHouse runs it read-only.
+
+    It returns at most ``options.limit`` rows, or ``query_views.default_limit``,
+    capped at ``query_views.max_limit``, with ``has_more`` set when the query had
+    more. The datasource stops reading past the cap.
     """
     from dfe_engine.query.datasources import get_adapter
 
@@ -270,13 +275,15 @@ async def execute_raw_query(
 
     options = request.options or QueryOptions()
     timeout = options.timeout_seconds or 30
+    views = settings.query_views
+    limit = min(options.limit or views.default_limit, views.max_limit)
 
     start = time.perf_counter()
 
     try:
         # Risk accepted: running caller SQL is this route's job; only raw_query:execute reaches it and ClickHouse runs it with readonly=1.
         # nosemgrep: python.django.security.injection.sql.sql-injection-using-db-cursor-execute.sql-injection-db-cursor-execute
-        rows, columns = adapter.execute(request.query, request.params, timeout)
+        rows, columns = adapter.execute(request.query, request.params, timeout, limit + 1)
     except Exception as exc:
         raise backend_failure(
             500,
@@ -289,11 +296,14 @@ async def execute_raw_query(
 
     duration_ms = int((time.perf_counter() - start) * 1000)
 
+    has_more = len(rows) > limit
+    rows = rows[:limit]
     return QueryResponse(
         rows=rows,
         columns=columns,
         row_count=len(rows),
         query_duration_ms=duration_ms,
+        has_more=has_more,
     )
 
 
@@ -318,7 +328,7 @@ class CostLeaderboardRow(BaseModel):
     response_model=list[CostLeaderboardRow],
     dependencies=[Depends(require_action(scopes_dict["query_read"]))],
 )
-async def query_cost_leaderboard(
+def query_cost_leaderboard(
     user: CurrentUser,
     feature: str = Query("hunts", description="Attribution feature to rank (e.g. 'hunts')"),
     days: int = Query(7, ge=1, le=365, description="Lookback window in days"),

@@ -6016,7 +6016,7 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.\n\n201 when the apps follow the new source, 202 when the source is stored and the\nreconcile that brings the apps into step with it did not complete.",
+        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).\n\nA schema pin naming nothing is accepted here so a source can be written before\nits schema, while ``/sources/import`` refuses one because an exported bundle\nbrings every schema it pins.\n\n201 when the apps follow the new source, 202 when the source is stored and the\nreconcile that brings the apps into step with it did not complete, or when\nproduction+team sent it to review (``review_required``).",
         "operationId": "sources.create",
         "requestBody": {
           "required": true,
@@ -6040,7 +6040,7 @@
             }
           },
           "202": {
-            "description": "The source was stored and the apps were not brought into step with it: apps_sync_error says why, and POST /sources/reconcile-apps retries it",
+            "description": "The source was stored and the apps were not brought into step with it: apps_sync_error says why, and POST /sources/reconcile-apps retries it. Or, with review_required, the source awaits review on a branch and main does not carry it yet",
             "content": {
               "application/json": {
                 "schema": {
@@ -7528,7 +7528,7 @@
           "Sources"
         ],
         "summary": "Delete Source",
-        "description": "Delete a source by name. Its fetcher instance, receiver rule and topics go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.\n\nThe answer reports the reconcile as a create or an update does: on a\ndeployment that renders the app config itself, ``restart_required`` names the\ncommand that takes away the containers the source's instances ran in.",
+        "description": "Delete a source by name. Its fetcher instance, receiver rule and topics go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.\n\nThe answer reports the reconcile as a create or an update does: on a\ndeployment that renders the app config itself, ``restart_required`` names the\ncommand that takes away the containers the source's instances ran in.\n\nA delete production+team sends to review answers ``review_required`` and\ntouches nothing else: main still carries the source, so its topics, records and\nHyperDX source stay until the branch is merged.",
         "operationId": "sources.delete",
         "parameters": [
           {
@@ -10889,7 +10889,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions) (code invalid_sql, the errors in context.sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile (code invalid_sql, the errors in context.sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/json": {
                 "schema": {
@@ -10971,7 +10971,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions) (code invalid_sql, the errors in context.sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile (code invalid_sql, the errors in context.sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/json": {
                 "schema": {
@@ -11227,7 +11227,7 @@
             }
           },
           "422": {
-            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions) (code invalid_sql, the errors in context.sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
+            "description": "Refused, nothing written. The body failed validation (code validation_error). Or the hunt runner could not compile the rule -- its SQL does not parse as one SELECT, names no <db>.<table> source, names a source that is not a table name (letters, digits, '_' and '-'), has no WHERE to detect with, or calls a function that reads outside the row (url, s3, a dictionary) or sends it to another service (the ai* functions), or carries a CEL filter that does not transpile (code invalid_sql, the errors in context.sql_errors). Or the rule matches every event in its source (code rule_matches_everything, the source and detection WHERE in context).",
             "content": {
               "application/json": {
                 "schema": {
@@ -12471,7 +12471,7 @@
           "System"
         ],
         "summary": "Apply Defaults",
-        "description": "Pin the current TTL, common header and merge engine onto the named sources and their tables.\n\nSources that are not in the list are left alone. A source that already stores\nthese values is unchanged in the deploy repo. A missing or engine-owned name\nfails the request before any source is written.\n\nA draft takes the values in place. A deployed version is never rewritten: the\nvalues land on a new major version, which becomes ``current``. Either way the\ntable takes them when that version is deployed.\n\nA named source whose deployed version already carries the values has its table\nbrought to them in this request: the TTL moves and the header's missing\ncolumns are added. The engine of an existing table needs a rebuild, so it\nreaches new tables only, and existing columns keep their type. ``live``\nreports each source: what reached the table, what did not and why. A\nClickHouse failure is reported on that source, and the pin stays committed.",
+        "description": "Pin the current TTL, common header and merge engine onto the named sources and their tables.\n\nSources that are not in the list are left alone. A source that already stores\nthese values is unchanged in the deploy repo. A missing or engine-owned name\nfails the request before any source is written.\n\nA draft takes the values in place. A deployed version is never rewritten: the\nvalues land on a new major version, which becomes ``current``. Either way the\ntable takes them when that version is deployed.\n\nA named source whose deployed version already carries the values has its table\nbrought to them in this request: the TTL moves and the header's missing\ncolumns are added. The engine of an existing table needs a rebuild, so it\nreaches new tables only, and existing columns keep their type. ``live``\nreports each source: what reached the table, what did not and why. A\nClickHouse failure is reported on that source, and the pin stays committed.\n\nA pin production+team sends to review is listed in ``awaiting_review`` with\n``review_required`` and the review headers, and its table is left alone until\nthe branch merges, since main still carries the source as it was.",
         "operationId": "system.defaults.apply",
         "requestBody": {
           "content": {
@@ -14009,7 +14009,7 @@
           "queries"
         ],
         "summary": "Execute Raw Query",
-        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path -- for ad-hoc queries against\ndatasource adapters rather than parameterized views. The SQL runs as the\nengine's own ClickHouse user, so it requires ``raw_query:execute``, which no\nbuilt-in role but ``admin`` holds, and ClickHouse runs it read-only.",
+        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path -- for ad-hoc queries against\ndatasource adapters rather than parameterized views. The SQL runs as the\nengine's own ClickHouse user, so it requires ``raw_query:execute``, which no\nbuilt-in role but ``admin`` holds, and ClickHouse runs it read-only.\n\nIt returns at most ``options.limit`` rows, or ``query_views.default_limit``,\ncapped at ``query_views.max_limit``, with ``has_more`` set when the query had\nmore. The datasource stops reading past the cap.",
         "operationId": "queries.raw",
         "requestBody": {
           "content": {
@@ -30815,6 +30815,36 @@
       },
       "ApplyDefaultsResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "updated": {
             "items": {
               "$ref": "#/components/schemas/ApplyDefaultsPin"
@@ -30822,6 +30852,14 @@
             "type": "array",
             "title": "Updated",
             "description": "Sources whose current version was written with the defaults"
+          },
+          "awaiting_review": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Awaiting Review",
+            "description": "Sources whose pin went to a review branch: main still carries them as they were, so their tables are left alone and are not listed in live"
           },
           "unchanged": {
             "items": {
@@ -30837,7 +30875,7 @@
             },
             "type": "array",
             "title": "Live",
-            "description": "One entry per named source, in request order: what reached its table."
+            "description": "One entry per named source not awaiting review, in request order: what reached its table."
           }
         },
         "type": "object",
@@ -31413,6 +31451,36 @@
       },
       "BulkActionResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "action": {
             "type": "string",
             "title": "Action"
@@ -31423,6 +31491,14 @@
             },
             "type": "array",
             "title": "Succeeded"
+          },
+          "awaiting_review": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Awaiting Review",
+            "description": "Sources whose write went to a review branch: main still carries them as they were, so nothing else was done for them"
           },
           "failed": {
             "items": {
@@ -32237,6 +32313,36 @@
       },
       "CatalogueSourcesResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "created": {
             "items": {
               "$ref": "#/components/schemas/CatalogueCreatedSource"
@@ -32250,6 +32356,14 @@
             },
             "type": "array",
             "title": "Failed"
+          },
+          "awaiting_review": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Awaiting Review",
+            "description": "Sources whose create went to a review branch, so main does not carry them yet"
           },
           "apps_synced": {
             "items": {
@@ -32956,6 +33070,36 @@
       },
       "CompatWriteResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "dry_run": {
             "type": "boolean",
             "title": "Dry Run",
@@ -42723,6 +42867,36 @@
       },
       "RuleOrderResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "dry_run": {
             "type": "boolean",
             "title": "Dry Run",
@@ -43118,7 +43292,7 @@
         "properties": {
           "mode": {
             "$ref": "#/components/schemas/SampleMode",
-            "default": "smart"
+            "description": "Sample mode; absent takes sampler.default_mode"
           },
           "backend": {
             "$ref": "#/components/schemas/SampleBackend",
@@ -44056,6 +44230,36 @@
             "type": "boolean",
             "title": "Applied",
             "description": "Whether the DDL was executed against ClickHouse"
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the deployed-version record to a review branch: the table is live, and main records the version once it merges",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR for that record"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying it"
           },
           "create_table": {
             "type": "string",
@@ -45637,6 +45841,36 @@
       },
       "SourceDeleteResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "source": {
             "type": "string",
             "title": "Source"
@@ -46414,6 +46648,36 @@
       },
       "SourceResponse": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "source": {
             "type": "string",
             "title": "Source"
@@ -47917,6 +48181,36 @@
       },
       "SyncReportModel": {
         "properties": {
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "description": "True when production+team sent the write to a review branch: main is unchanged and the apps follow once the branch is merged",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "The review PR, where a forge is configured to open one"
+          },
+          "review_branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Branch",
+            "description": "The branch carrying the write, while it awaits review"
+          },
           "source": {
             "type": "string",
             "title": "Source"
@@ -47975,7 +48269,7 @@
           "committed"
         ],
         "title": "SyncReportModel",
-        "description": "Counts from a provider sync into the catalogue."
+        "description": "Counts from a provider sync into the catalogue, and whether its import awaits review."
       },
       "SystemDefaults": {
         "properties": {

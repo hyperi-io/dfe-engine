@@ -31,7 +31,12 @@ from scalo.logger import logger
 # Shared RBAC test fixtures (client_as + the canonical fixture identities).
 # Registered at the root so `client_as` is available wherever the app/api_settings
 # fixtures exist (the API test tree).
-pytest_plugins = ["tests.support.rbac_fixtures", "tests.support.arg_order"]
+# scalo's plugin gives the run its one ClickHouse, shared by every xdist worker.
+pytest_plugins = [
+    "tests.support.rbac_fixtures",
+    "tests.support.arg_order",
+    "scalo.deployment.test_support.pytest_plugin",
+]
 
 # --------------------------------------------------------------------------
 # Test-session guard 1/2: never start a live OTLP metrics/trace/log exporter.
