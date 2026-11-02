@@ -119,7 +119,7 @@ class GroupResolutionConfig(BaseModel):
     is deliberately NOT settable through the provider admin API - flip it in the
     provider YAML only. Never ``mock`` in a real deployment."""
 
-    mock_directory_env: str = "DFE_OIDC_MOCK_DIRECTORY"
+    mock_directory_env: str = "DFE_ENGINE_OIDC_MOCK_DIRECTORY"
     """Env var name whose value is the path to the Surface-B directory JSON fixture.
 
     Read only when ``directory_backend == 'mock'``. A path is not a secret, but it

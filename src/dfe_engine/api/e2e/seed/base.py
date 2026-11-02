@@ -33,11 +33,11 @@ if TYPE_CHECKING:
     from dfe_engine.source.registry import SourceRegistry
 
 _TEST_ENV = "test"
-_SETUP_ADMIN_PASSWORD = "already_reset"  # noqa: S105, RUF100 - e2e fixture password; Seed refuses any DFE_ENV but test
+_SETUP_ADMIN_PASSWORD = "already_reset"  # noqa: S105, RUF100 - e2e fixture password; Seed refuses any DFE_ENGINE_ENV but test
 
 
 class Seed:
-    """Shared stores for e2e seeders. Refuses to construct outside ``DFE_ENV=test``.
+    """Shared stores for e2e seeders. Refuses to construct outside ``DFE_ENGINE_ENV=test``.
 
     The account, group and organisation stores are always present. The deploy
     repo, the source registry and the settings are optional, because the auth and
@@ -70,9 +70,11 @@ class Seed:
         metrics: SeedMetrics | None = None,
         hunt_registry: HuntConfigRegistry | None = None,
     ) -> None:
-        resolved = (env if env is not None else os.environ.get("DFE_ENV", "")).strip().lower()
+        resolved = (
+            (env if env is not None else os.environ.get("DFE_ENGINE_ENV", "")).strip().lower()
+        )
         if resolved != _TEST_ENV:
-            raise PermissionError("e2e seed helpers require DFE_ENV=test")
+            raise PermissionError("e2e seed helpers require DFE_ENGINE_ENV=test")
         self._account_store = account_store
         self._group_store = group_store
         self._org_registry = org_registry
@@ -140,7 +142,7 @@ class Seed:
         if self._gitcrud is None:
             raise RuntimeError(
                 "this e2e seed writes to the gitops deploy repo, which this process "
-                "does not have; set DFE_GITOPS_ENABLED=true and DFE_GITOPS_LOCAL_PATH"
+                "does not have; set DFE_ENGINE_GITOPS_ENABLED=true and DFE_ENGINE_GITOPS_LOCAL_PATH"
             )
         return self._gitcrud
 
@@ -149,7 +151,7 @@ class Seed:
         if self._source_registry is None:
             raise RuntimeError(
                 "this e2e seed writes source definitions, and no source registry is "
-                "configured; set DFE_SOURCES_DIR or enable gitops"
+                "configured; set DFE_ENGINE_SOURCES_DIR or enable gitops"
             )
         return self._source_registry
 

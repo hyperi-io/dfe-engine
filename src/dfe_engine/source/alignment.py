@@ -33,7 +33,7 @@ from scalo.logger import logger
 MIXED_TYPES_SETTING = "source.allow_mixed_fetcher_types"
 """The dial, as an operator sets it in the engine's config file."""
 
-MIXED_TYPES_ENV = "DFE_SOURCE_ALLOW_MIXED_FETCHER_TYPES"
+MIXED_TYPES_ENV = "DFE_ENGINE_SOURCE_ALLOW_MIXED_FETCHER_TYPES"
 """The same dial as an environment variable, which is how a chart sets it."""
 
 CONNECTION_TYPE_KEYS = ("type", "source_type")

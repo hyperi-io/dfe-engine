@@ -41,7 +41,7 @@ RUN uv sync --frozen --no-dev
 
 # /app/schemas-seed is copied out of the installed dfe-schemas wheel, so the
 # image ships exactly the version uv.lock pins; bootstrap.py copies it into
-# DFE_SCHEMAS_DIR on the first run of each engine version. It stays root-owned
+# DFE_ENGINE_SCHEMAS_DIR on the first run of each engine version. It stays root-owned
 # and read-only, as the COPY it replaced was.
 #
 # The rest are writable dirs owned by the runtime UID. /app/secrets is the
@@ -97,11 +97,11 @@ ENV PATH="/app/.venv/bin:$PATH"
 # (e.g. the secrets root) resolves under /, unwritable by the non-root user.
 WORKDIR /app
 
-# DFE_SECRETS_PATH holds a directory path, not a secret value, and the engine and chart read it by name.
+# DFE_ENGINE_SECRETS_PATH holds a directory path, not a secret value, and the engine and chart read it by name.
 # hadolint ignore=DL3064
 ENV DFE_CONFIG_DIR=/app/config \
-    DFE_SCHEMAS_DIR=/app/schemas \
-    DFE_SECRETS_PATH=/app/secrets
+    DFE_ENGINE_SCHEMAS_DIR=/app/schemas \
+    DFE_ENGINE_SECRETS_PATH=/app/secrets
 
 RUN useradd --create-home --uid 1000 appuser
 USER 1000

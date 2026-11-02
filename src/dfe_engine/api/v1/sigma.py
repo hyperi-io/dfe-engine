@@ -536,7 +536,7 @@ def _confine_provider_url(url: str, field: str) -> None:
     reserved - even the trailing-dot form, no DNS needed). A HOSTNAME is resolved
     BEST-EFFORT and rejected if it resolves to such an address; if resolution is
     UNAVAILABLE (a network-restricted runner / CI) it is NOT hard-failed - the
-    ``DFE_SIGMA_ALLOWED_HOSTS`` allowlist + pin-at-connect (follow-up) are the
+    ``DFE_ENGINE_SIGMA_ALLOWED_HOSTS`` allowlist + pin-at-connect (follow-up) are the
     backstop. Private RFC1918 hosts are NOT blocked (internal feeds are legitimate).
     """
     import ipaddress
@@ -602,7 +602,7 @@ def _confine_provider_url(url: str, field: str) -> None:
                 )
     allowed = [
         h.strip().lower()
-        for h in os.environ.get("DFE_SIGMA_ALLOWED_HOSTS", "").split(",")
+        for h in os.environ.get("DFE_ENGINE_SIGMA_ALLOWED_HOSTS", "").split(",")
         if h.strip()
     ]
     if allowed and host not in allowed:
@@ -610,7 +610,7 @@ def _confine_provider_url(url: str, field: str) -> None:
             422,
             detail={
                 "code": "host_not_allowed",
-                "message": f"{field} host {host!r} not in DFE_SIGMA_ALLOWED_HOSTS",
+                "message": f"{field} host {host!r} not in DFE_ENGINE_SIGMA_ALLOWED_HOSTS",
             },
         )
 
@@ -625,7 +625,7 @@ def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
       provider cannot read arbitrary server files.
     - a git_repo ``url`` and a valhalla ``base_url`` are confined by
       :func:`_confine_provider_url` (http(s), no loopback/link-local/metadata host,
-      and the ``DFE_SIGMA_ALLOWED_HOSTS`` allowlist when set).
+      and the ``DFE_ENGINE_SIGMA_ALLOWED_HOSTS`` allowlist when set).
     """
     if config.kind == ProviderKind.LOCAL_FILES:
         directory = str(config.options.get("directory", "")).strip()

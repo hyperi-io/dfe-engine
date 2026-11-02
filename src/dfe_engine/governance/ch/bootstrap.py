@@ -37,8 +37,8 @@ _DISABLED_VALUES = ("false", "0", "no")
 # ClickHouse the other, so the endpoint, startup and the change trigger take turns.
 _RECONCILE_LOCK = threading.Lock()
 
-TENANT_ISOLATION_ENV = "DFE_TENANT_ISOLATION_ENABLED"
-LEGACY_TENANT_ISOLATION_ENV = "DFE_ORG_PROVISIONING_ENABLED"
+TENANT_ISOLATION_ENV = "DFE_ENGINE_TENANT_ISOLATION_ENABLED"
+LEGACY_TENANT_ISOLATION_ENV = "DFE_ENGINE_ORG_PROVISIONING_ENABLED"
 
 
 def tenant_isolation_enabled() -> bool:

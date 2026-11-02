@@ -126,7 +126,7 @@ async def list_destinations(
                 status_code=503,
                 detail={
                     "code": "not_configured",
-                    "message": "Hunt config registry not initialized -- set DFE_HUNTS_DIR (hunts.hunt_dir)",
+                    "message": "Hunt config registry not initialized -- set DFE_ENGINE_HUNTS_DIR (hunts.hunt_dir)",
                 },
             )
         try:
@@ -341,7 +341,7 @@ def _ensure_hunt_for_link(hunt_registry: Any | None, hunt_name: str) -> None:
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "Hunt config registry not initialized -- set DFE_HUNTS_DIR (hunts.hunt_dir)",
+                "message": "Hunt config registry not initialized -- set DFE_ENGINE_HUNTS_DIR (hunts.hunt_dir)",
             },
         )
     try:

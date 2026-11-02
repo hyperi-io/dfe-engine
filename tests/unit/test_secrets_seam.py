@@ -146,7 +146,7 @@ def test_a_recovery_window_is_refused_without_waiting():
     manager = _ScriptedManager(pending_creates=1)
     store = _scripted_store(manager, window=7, sleeps=sleeps)
 
-    with pytest.raises(SecretNameHeldError, match="DFE_SECRETS_RECOVERY_WINDOW_DAYS=7"):
+    with pytest.raises(SecretNameHeldError, match="DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS=7"):
         store.put("ch/groups/soc", "new")
 
     assert len(manager.created_tags) == 1

@@ -46,7 +46,7 @@ def _refuse_connection(monkeypatch) -> None:
 
 
 def test_apply_with_the_bootstrap_off_reports_unknown_and_exits_clean(monkeypatch):
-    monkeypatch.setenv("DFE_CLICKHOUSE_BOOTSTRAP_TABLES", "false")
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES", "false")
 
     result, state = _apply()
 
@@ -56,7 +56,7 @@ def test_apply_with_the_bootstrap_off_reports_unknown_and_exits_clean(monkeypatc
 
 def test_apply_reaches_clickhouse_with_its_metrics_built(monkeypatch):
     """The phase gets as far as connecting, and the refusal is its own failed state."""
-    monkeypatch.setenv("DFE_CLICKHOUSE_BOOTSTRAP_TABLES", "true")
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES", "true")
     _refuse_connection(monkeypatch)
 
     result, state = _apply()
@@ -68,7 +68,7 @@ def test_apply_reaches_clickhouse_with_its_metrics_built(monkeypatch):
 
 def test_apply_still_runs_when_its_metrics_cannot_be_built(monkeypatch):
     """A fault in the metrics library is logged and the phase carries on without them."""
-    monkeypatch.setenv("DFE_CLICKHOUSE_BOOTSTRAP_TABLES", "true")
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES", "true")
     _refuse_connection(monkeypatch)
 
     def unavailable(*_args, **_kwargs):

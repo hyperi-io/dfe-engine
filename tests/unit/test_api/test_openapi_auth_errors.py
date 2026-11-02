@@ -50,7 +50,7 @@ def _clean_settings():
 @pytest.fixture
 def spec(monkeypatch) -> dict[str, Any]:
     """The product spec, built exactly as ``openapi-spec/generate.py`` builds it."""
-    monkeypatch.setenv("DFE_ENV", "dev")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
     settings = load_settings()
     if settings.e2e_server:
         settings = settings.model_copy(update={"e2e_server": False})

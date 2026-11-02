@@ -314,7 +314,7 @@ class TestSyncNeverTakesAGroupNoAdminLinked:
         fixture = tmp_path / "directory.json"
         group = {"id": attacker, "name": "DFE Admins", "email": ""}
         fixture.write_text(json.dumps({"groups": [group]}), encoding="utf-8")
-        monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+        monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(fixture))
         return MockDirectoryAdapter(provider)
 
     @pytest.mark.parametrize("directory", ["_entra", "_okta", "_mock_directory"])
@@ -955,7 +955,7 @@ class TestSyncRefusesAGroupWithNoId:
         fixture = tmp_path / "directory.json"
         groups = [{"name": name, "email": ""} for name in cls.NAMES]
         fixture.write_text(json.dumps({"groups": groups}), encoding="utf-8")
-        monkeypatch.setenv("DFE_OIDC_MOCK_DIRECTORY", str(fixture))
+        monkeypatch.setenv("DFE_ENGINE_OIDC_MOCK_DIRECTORY", str(fixture))
         return MockDirectoryAdapter(provider)
 
     @pytest.mark.parametrize("directory", ["_fake", "_okta", "_mock_directory"])

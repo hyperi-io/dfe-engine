@@ -391,7 +391,7 @@ def resolve_mode(
     """'pr' for production posture / protected / governance / explicit, else 'direct'.
 
     PRs for production-controlling changes, direct-commit for low-risk - enforced at
-    the git level (the standard). Production posture is anything DFE_ENV does not
+    the git level (the standard). Production posture is anything DFE_ENGINE_ENV does not
     declare as dev (is_dev_posture), matching auto_merge.gate(). auto_merge=True
     (the solo/dev fast path) force-directs EVERYTHING - the caller is responsible
     for gating + loud warnings (see gitcrud/auto_merge.py).

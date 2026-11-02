@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""With DFE_INGEST_BEARER_SECRET set, every listener's bearer entries also land in that Secret.
+"""With DFE_ENGINE_INGEST_BEARER_SECRET set, every listener's bearer entries also land in that Secret.
 
 The engine writes it through scalo's ``kubernetes`` provider, here against a loopback
 stand-in for the API server, and the receiver mounts it read-only.
@@ -197,7 +197,7 @@ class TestBuild:
 
 class TestSetting:
     def test_the_environment_names_the_secret(self, monkeypatch):
-        monkeypatch.setenv("DFE_INGEST_BEARER_SECRET", "dfe-ingest-bearer-tokens")
+        monkeypatch.setenv("DFE_ENGINE_INGEST_BEARER_SECRET", "dfe-ingest-bearer-tokens")
 
         assert _get_env_overrides()["ingest"]["bearer_secret"] == "dfe-ingest-bearer-tokens"
 
@@ -206,5 +206,5 @@ class TestSetting:
 
     @pytest.mark.parametrize("bad", ["Upper", "under_score", "-lead", "x" * 254])
     def test_a_name_the_api_server_would_refuse_is_refused(self, bad):
-        with pytest.raises(ValueError, match="DFE_INGEST_BEARER_SECRET"):
+        with pytest.raises(ValueError, match="DFE_ENGINE_INGEST_BEARER_SECRET"):
             IngestSettings(bearer_secret=bad)

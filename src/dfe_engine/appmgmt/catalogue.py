@@ -810,11 +810,11 @@ def _kind_from(name: str, raw: dict) -> ArtifactKind:
 def _manifest_source(path: Path | str | None) -> Path:
     """Where the manifest is read from.
 
-    Resolution order: the given path, then ``DFE_APP_CATALOGUE_FILE``, then the
+    Resolution order: the given path, then ``DFE_ENGINE_APP_CATALOGUE_FILE``, then the
     snapshot bundled in the image. The snapshot is always there, so the resolver
     always names a file.
     """
-    source = manifest_path(path, "DFE_APP_CATALOGUE_FILE", BUNDLED_MANIFEST)
+    source = manifest_path(path, "DFE_ENGINE_APP_CATALOGUE_FILE", BUNDLED_MANIFEST)
     if source is None:
         raise CatalogueError("app manifest not found: nothing names one")
     return source

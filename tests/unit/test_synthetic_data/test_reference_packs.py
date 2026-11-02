@@ -38,7 +38,7 @@ SSH_MARKERS = ("password for", "publickey for", "Invalid user", "Connection clos
 
 
 def schemas_root() -> Path | None:
-    """The same tree the engine reads: DFE_SCHEMAS_DIR, the package, or the seed."""
+    """The same tree the engine reads: DFE_ENGINE_SCHEMAS_DIR, the package, or the seed."""
     return _resolve_schemas_root()
 
 

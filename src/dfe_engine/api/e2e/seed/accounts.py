@@ -106,7 +106,7 @@ class Accounts(Seed):
         """Put ``breakglass`` back the way a first boot seeds it.
 
         A fresh gitops deployment has the account, and :meth:`delete_all` removed
-        it. The hash is minted from ``DFE_AUTH_BREAKGLASS_PASSWORD`` when the deploy
+        it. The hash is minted from ``DFE_ENGINE_AUTH_BREAKGLASS_PASSWORD`` when the deploy
         repo carries none, so every reset leaves the password the engine was
         configured with. With no deploy repo, or neither a hash nor a configured
         password, there is nothing to seed from.

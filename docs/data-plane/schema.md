@@ -570,7 +570,7 @@ different tokenizers. `word_search` uses word-level tokenization
 strings, like partial hostnames or embedded error codes.
 
 **Retention (TTL):** every time-series table gets a TTL, 90 days unless the
-deployment sets `DFE_CLICKHOUSE_DEFAULT_TTL_DAYS` (`clickhouse.default_ttl_days`,
+deployment sets `DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS` (`clickhouse.default_ttl_days`,
 0 = no default) or an admin sets a console value (below). Precedence is the source's
 `schema.ttl_days`, then the table's own dfe-schemas definition, then the console
 value, then the deployment default. State tables (the
@@ -580,7 +580,7 @@ older than the new value.
 
 **Changing the default:** an admin sets it with `PUT /api/v1/system/retention` (`system:write`, which only the `admin` role holds by default); `GET` reports the effective value, the console value and the deployment value. The console value is committed to the deploy repo at `governance/settings/retention.yaml` (`default_ttl_days`), so it survives the loss of the engine and every change is an audited commit; `null` clears it. The PUT applies the new value in the same request to every table that follows the default, the engine's own time-series tables and each deployed source's table, with `ALTER TABLE ... MODIFY TTL` (`REMOVE TTL` for 0). Every later build, plan, deploy and boot reads the same value.
 
-On a restart the engine brings every deployed source's table to the effective default, but the schema apply refuses a changed default on its own tables, so after changing `DFE_CLICKHOUSE_DEFAULT_TTL_DAYS` send the PUT with `null` to apply it there. `dfe schema plan` and `dfe schema apply` read the deployment settings, never the deploy repo, so while a console value is set they report the engine's time-series tables as TTL drift, and `dfe schema apply --allow-drift` rewrites those TTLs to the deployment default.
+On a restart the engine brings every deployed source's table to the effective default, but the schema apply refuses a changed default on its own tables, so after changing `DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS` send the PUT with `null` to apply it there. `dfe schema plan` and `dfe schema apply` read the deployment settings, never the deploy repo, so while a console value is set they report the engine's time-series tables as TTL drift, and `dfe schema apply --allow-drift` rewrites those TTLs to the deployment default.
 
 ---
 

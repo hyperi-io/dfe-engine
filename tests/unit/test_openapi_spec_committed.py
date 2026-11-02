@@ -68,7 +68,7 @@ def _drop_version(spec: dict) -> dict:
 @pytest.fixture
 def generated(monkeypatch) -> dict:
     """The spec the app produces now, built exactly as generate.py builds it."""
-    monkeypatch.setenv("DFE_ENV", "dev")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
     settings = load_settings().model_copy(
         update={"e2e_server": False, "sigma": SigmaSettings(enabled=True)}
     )

@@ -32,7 +32,7 @@ def _hermetic_env(monkeypatch, tmp_path):
     """Isolate settings tests from a populated developer .env.
 
     tests/conftest.py loads the project .env with override=True, so a real .env
-    (CH host, DFE_ENV=dev, a jwt secret, ...) leaks into os.environ and breaks the
+    (CH host, DFE_ENGINE_ENV=dev, a jwt secret, ...) leaks into os.environ and breaks the
     default / fallback / production-guard assertions here. Strip every DFE_* and
     legacy CLICKHOUSE_* var so each test controls exactly the environment it sets.
 
@@ -44,13 +44,13 @@ def _hermetic_env(monkeypatch, tmp_path):
     env "production" and auth on with the placeholder jwt_secret, which
     ``DFESettings`` rejects by design -- correct for a deployment, useless for the
     forty-odd tests here that call ``load_settings()`` to check an unrelated field
-    mapping. Tests that DO exercise the posture set DFE_ENV themselves or build
+    mapping. Tests that DO exercise the posture set DFE_ENGINE_ENV themselves or build
     ``DFESettings`` directly, and both override this.
     """
     for key in list(os.environ):
         if key.startswith(("DFE_", "CLICKHOUSE_")):
             monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     monkeypatch.chdir(tmp_path)
 
 
@@ -65,11 +65,11 @@ def config_dir(tmp_path):
 def _clear_registry_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip path overrides so tests/conftest .env cannot shadow DFE_CONFIG_DIR."""
     for key in (
-        "DFE_SOURCES_DIR",
-        "DFE_SERVICES_CONFIG_YAML_DIR",
-        "DFE_HUNTS_DIR",
-        "DFE_QUERY_YAML_DIR",
-        "DFE_FIELDMAPS_DIR",
+        "DFE_ENGINE_SOURCES_DIR",
+        "DFE_ENGINE_SERVICES_CONFIG_YAML_DIR",
+        "DFE_ENGINE_HUNTS_DIR",
+        "DFE_ENGINE_QUERY_YAML_DIR",
+        "DFE_ENGINE_FIELDMAPS_DIR",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -116,7 +116,7 @@ class TestConfigDir:
         custom_sources = str(tmp_path / "custom-sources")
         _clear_registry_path_env(monkeypatch)
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
-        monkeypatch.setenv("DFE_SOURCES_DIR", custom_sources)
+        monkeypatch.setenv("DFE_ENGINE_SOURCES_DIR", custom_sources)
         settings = load_settings()
         # sources_dir should use the specific override
         assert settings.source.sources_dir == custom_sources
@@ -146,28 +146,28 @@ class TestEnvOverrides:
     """Test env var overrides for the config cascade in load_settings()."""
 
     def test_clickhouse_host_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_HOST", "ch.example.com")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", "ch.example.com")
         settings = load_settings()
         assert settings.clickhouse.host == "ch.example.com"
 
     def test_clickhouse_port_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_PORT", "9000")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PORT", "9000")
         settings = load_settings()
         assert settings.clickhouse.port == 9000
 
     def test_clickhouse_username_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_USERNAME", "admin")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_USERNAME", "admin")
         settings = load_settings()
         assert settings.clickhouse.username == "admin"
 
     def test_clickhouse_database_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATABASE", "analytics")
         settings = load_settings()
         assert settings.clickhouse.database == "analytics"
 
     def test_clickhouse_data_database_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "default")
-        monkeypatch.setenv("DFE_CLICKHOUSE_DATA_DATABASE", "dfe")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATABASE", "default")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE", "dfe")
         settings = load_settings()
         assert settings.clickhouse.data_database == "dfe"
         assert settings.clickhouse.effective_data_database == "dfe"
@@ -179,72 +179,72 @@ class TestEnvOverrides:
         same place; a rename had to be applied to each or the grants and the
         tables disagreed.
         """
-        monkeypatch.delenv("DFE_CLICKHOUSE_DATA_DATABASE", raising=False)
+        monkeypatch.delenv("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE", raising=False)
         clickhouse = load_settings().clickhouse
         assert clickhouse.effective_data_database == "dfe"
         for gone in ("otel_database", "hunts_database", "internal_database"):
             assert not hasattr(clickhouse, gone)
 
     def test_renaming_the_database_moves_everything(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_DATA_DATABASE", "telemetry")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE", "telemetry")
         assert load_settings().clickhouse.effective_data_database == "telemetry"
 
     def test_e2e_server_env_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENV", "test")
-        monkeypatch.setenv("DFE_E2E_SERVER", "true")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+        monkeypatch.setenv("DFE_ENGINE_E2E_SERVER", "true")
         settings = load_settings()
         assert settings.e2e_server is True
 
     def test_effective_data_database_defaults_to_dfe(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")
-        monkeypatch.delenv("DFE_CLICKHOUSE_DATA_DATABASE", raising=False)
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATABASE", "analytics")
+        monkeypatch.delenv("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE", raising=False)
         settings = load_settings()
         assert settings.clickhouse.data_database == "dfe"
         assert settings.clickhouse.effective_data_database == "dfe"
 
     def test_effective_data_database_falls_back_when_emptied(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATABASE", "analytics")
         settings = load_settings()
         settings.clickhouse.data_database = ""
         assert settings.clickhouse.effective_data_database == "analytics"
 
     def test_clickhouse_secure_true(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_SECURE", "true")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_SECURE", "true")
         settings = load_settings()
         assert settings.clickhouse.secure is True
 
     def test_clickhouse_secure_false(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_SECURE", "false")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_SECURE", "false")
         settings = load_settings()
         assert settings.clickhouse.secure is False
 
     def test_clickhouse_connections_min(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_CONNECTIONS_MIN", "5")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MIN", "5")
         settings = load_settings()
         assert settings.clickhouse.connections_min == 5
 
     def test_clickhouse_connections_max(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_CONNECTIONS_MAX", "20")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MAX", "20")
         settings = load_settings()
         assert settings.clickhouse.connections_max == 20
 
     def test_clickhouse_default_ttl_days_override_parses_to_int(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "30")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "30")
         settings = load_settings()
         assert settings.clickhouse.default_ttl_days == 30
 
     def test_clickhouse_default_ttl_days_ships_at_ninety(self, monkeypatch):
-        monkeypatch.delenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", raising=False)
+        monkeypatch.delenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", raising=False)
         settings = load_settings()
         assert settings.clickhouse.default_ttl_days == 90
 
     def test_clickhouse_default_ttl_days_refuses_a_negative(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS", "-1")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "-1")
         with pytest.raises(ValidationError):
             load_settings()
 
     def test_clickhouse_platform_ships_auto(self, monkeypatch):
-        monkeypatch.delenv("DFE_CLICKHOUSE_PLATFORM", raising=False)
+        monkeypatch.delenv("DFE_ENGINE_CLICKHOUSE_PLATFORM", raising=False)
         assert load_settings().clickhouse.platform == "auto"
 
     @pytest.mark.parametrize(
@@ -253,31 +253,31 @@ class TestEnvOverrides:
     def test_clickhouse_platform_override_is_read_from_the_environment(
         self, monkeypatch, value, stored
     ):
-        monkeypatch.setenv("DFE_CLICKHOUSE_PLATFORM", value)
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PLATFORM", value)
         assert load_settings().clickhouse.platform == stored
 
     def test_clickhouse_platform_refuses_an_unknown_choice_naming_the_list(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_PLATFORM", "hybrid")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PLATFORM", "hybrid")
         with pytest.raises(ValidationError, match="auto, cloud, self_hosted"):
             load_settings()
 
     def test_api_host_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_HOST", "127.0.0.1")
+        monkeypatch.setenv("DFE_ENGINE_API_HOST", "127.0.0.1")
         settings = load_settings()
         assert settings.api.host == "127.0.0.1"
 
     def test_api_port_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_PORT", "9090")
+        monkeypatch.setenv("DFE_ENGINE_API_PORT", "9090")
         settings = load_settings()
         assert settings.api.port == 9090
 
     def test_api_jwt_secret_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_JWT_SECRET", "super-secret-hmac-key-at-least-32-bytes")
+        monkeypatch.setenv("DFE_ENGINE_API_JWT_SECRET", "super-secret-hmac-key-at-least-32-bytes")
         settings = load_settings()
         assert settings.api.jwt_secret == "super-secret-hmac-key-at-least-32-bytes"
 
     def test_api_cors_origins_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_CORS_ORIGINS", "http://a.com,http://b.com")
+        monkeypatch.setenv("DFE_ENGINE_API_CORS_ORIGINS", "http://a.com,http://b.com")
         settings = load_settings()
         assert settings.api.cors_origins == ["http://a.com", "http://b.com"]
 
@@ -285,12 +285,14 @@ class TestEnvOverrides:
         assert load_settings().auth.api_key_default_ttl_days == 90
 
     def test_api_key_default_ttl_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS", "0")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_API_KEY_DEFAULT_TTL_DAYS", "0")
         assert load_settings().auth.api_key_default_ttl_days == 0
 
     def test_api_cors_origins_trust_no_localhost_outside_a_dev_posture(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENV", "production")
-        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-production-secret-at-least-32-bytes-long")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "production")
+        monkeypatch.setenv(
+            "DFE_ENGINE_API_JWT_SECRET", "a-production-secret-at-least-32-bytes-long"
+        )
         assert load_settings().api.cors_origins == []
 
     def test_api_cors_origins_trust_the_local_console_in_a_dev_posture(self):
@@ -301,13 +303,15 @@ class TestEnvOverrides:
         ]
 
     def test_api_cors_origins_set_in_production_are_taken_as_set(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENV", "production")
-        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-production-secret-at-least-32-bytes-long")
-        monkeypatch.setenv("DFE_API_CORS_ORIGINS", "https://console.example")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "production")
+        monkeypatch.setenv(
+            "DFE_ENGINE_API_JWT_SECRET", "a-production-secret-at-least-32-bytes-long"
+        )
+        monkeypatch.setenv("DFE_ENGINE_API_CORS_ORIGINS", "https://console.example")
         assert load_settings().api.cors_origins == ["https://console.example"]
 
     def test_api_forwarded_allow_ips_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_FORWARDED_ALLOW_IPS", "10.42.0.0/16")
+        monkeypatch.setenv("DFE_ENGINE_API_FORWARDED_ALLOW_IPS", "10.42.0.0/16")
         settings = load_settings()
         assert settings.api.forwarded_allow_ips == "10.42.0.0/16"
 
@@ -318,7 +322,7 @@ class TestEnvOverrides:
         assert load_settings().api.max_session_minutes == 720
 
     def test_api_max_session_minutes_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_MAX_SESSION_MINUTES", "90")
+        monkeypatch.setenv("DFE_ENGINE_API_MAX_SESSION_MINUTES", "90")
         assert load_settings().api.max_session_minutes == 90
 
     def test_login_throttle_defaults(self):
@@ -328,10 +332,10 @@ class TestEnvOverrides:
         assert throttle.max_delay_seconds == 900
 
     def test_login_throttle_overrides(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_ENABLED", "false")
-        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES", "3")
-        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES", "40")
-        monkeypatch.setenv("DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS", "120")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_LOGIN_THROTTLE_ENABLED", "false")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES", "3")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES", "40")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS", "120")
         throttle = load_settings().auth.login_throttle
         assert throttle.enabled is False
         assert (throttle.username_failures, throttle.client_failures) == (3, 40)
@@ -343,14 +347,14 @@ class TestEnvOverrides:
         assert auth.oidc_group_sync_tick_seconds == 60
 
     def test_oidc_group_sync_overrides(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_OIDC_GROUP_SYNC_ENABLED", "false")
-        monkeypatch.setenv("DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS", "15")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_ENABLED", "false")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS", "15")
         auth = load_settings().auth
         assert auth.oidc_group_sync_enabled is False
         assert auth.oidc_group_sync_tick_seconds == 15
 
     def test_oidc_group_sync_tick_below_one_second_is_refused(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS", "0")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS", "0")
         with pytest.raises(ValidationError):
             load_settings()
 
@@ -358,12 +362,12 @@ class TestEnvOverrides:
         assert load_settings().auth.oidc_login_directory_deadline_seconds == 10.0
 
     def test_oidc_login_directory_deadline_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS", "2.5")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS", "2.5")
         assert load_settings().auth.oidc_login_directory_deadline_seconds == 2.5
 
     @pytest.mark.parametrize("value", ["0", "-1"])
     def test_oidc_login_directory_deadline_must_be_positive(self, monkeypatch, value):
-        monkeypatch.setenv("DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS", value)
+        monkeypatch.setenv("DFE_ENGINE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS", value)
         with pytest.raises(ValidationError):
             load_settings()
 
@@ -380,35 +384,35 @@ class TestEnvOverrides:
         assert load_settings().api.max_request_body_bytes == 4 * 1024 * 1024
 
     def test_api_max_request_body_bytes_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_MAX_REQUEST_BODY_BYTES", "65536")
+        monkeypatch.setenv("DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES", "65536")
         assert load_settings().api.max_request_body_bytes == 65_536
 
     def test_api_elastic_converter_max_upload_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
+        monkeypatch.setenv("DFE_ENGINE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
         settings = load_settings()
         assert settings.api.elastic_converter_max_upload_bytes == 1_048_576
 
     def test_api_elastic_converter_read_chunk_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE", "32768")
+        monkeypatch.setenv("DFE_ENGINE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE", "32768")
         settings = load_settings()
         assert settings.api.elastic_converter_read_chunk_size == 32_768
 
     def test_api_elastic_converter_content_length_slack_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES", "65536")
+        monkeypatch.setenv("DFE_ENGINE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES", "65536")
         settings = load_settings()
         assert settings.api.elastic_converter_content_length_slack_bytes == 65_536
 
     @pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
     def test_api_docs_enabled_override(self, monkeypatch, value, expected):
-        monkeypatch.setenv("DFE_API_DOCS_ENABLED", value)
+        monkeypatch.setenv("DFE_ENGINE_API_DOCS_ENABLED", value)
         assert load_settings().api.docs_enabled is expected
 
     def test_api_docs_enabled_is_unset_by_default(self):
         assert load_settings().api.docs_enabled is None
 
     def test_auth_enabled_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
-        monkeypatch.setenv("DFE_ENV", "dev")  # dev posture: placeholder secret allowed
+        monkeypatch.setenv("DFE_ENGINE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "dev")  # dev posture: placeholder secret allowed
         settings = load_settings()
         assert settings.auth.enabled is True
 
@@ -417,56 +421,56 @@ class TestEnvOverrides:
         # fail fast rather than run with a forgeable token key. The posture is set
         # explicitly -- _hermetic_env declares a dev one, which would make this
         # pass or fail for the wrong reason.
-        monkeypatch.setenv("DFE_ENV", "production")
-        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "production")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_ENABLED", "true")
         with pytest.raises(ValidationError):
             load_settings()
 
     def test_placeholder_jwt_secret_allowed_in_dev(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
-        monkeypatch.setenv("DFE_ENV", "dev")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
         assert load_settings().auth.enabled is True
 
     def test_production_accepts_real_jwt_secret(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENV", "production")
-        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
-        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-real-production-secret-over-32-bytes")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "production")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENGINE_API_JWT_SECRET", "a-real-production-secret-over-32-bytes")
         assert load_settings().auth.enabled is True
 
     def test_auth_dir_override(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("DFE_AUTH_DIR", str(tmp_path / "auth"))
+        monkeypatch.setenv("DFE_ENGINE_AUTH_DIR", str(tmp_path / "auth"))
         settings = load_settings()
         assert settings.auth.auth_dir == str(tmp_path / "auth")
 
     def test_hunt_log_path_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNT_LOG_PATH", "/var/log/hunts")
+        monkeypatch.setenv("DFE_ENGINE_HUNT_LOG_PATH", "/var/log/hunts")
         settings = load_settings()
         assert settings.hunts.log_path == "/var/log/hunts"
 
     def test_local_admin_name_and_password_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "breakglass")
-        monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", "a-configured-admin-password")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_LOCAL_ADMIN_NAME", "breakglass")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD", "a-configured-admin-password")
         settings = load_settings()
         assert settings.auth.local.admin_name == "breakglass"
         assert settings.auth.local.admin_password == "a-configured-admin-password"
 
     def test_recovery_email_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_RECOVERY_EMAIL", "ops@example.com")
+        monkeypatch.setenv("DFE_ENGINE_RECOVERY_EMAIL", "ops@example.com")
         settings = load_settings()
         assert settings.auth.local.recovery_email == "ops@example.com"
 
     def test_local_admin_unset_falls_back_to_shipped_defaults(self, monkeypatch):
         # Unset leaves the defaults.yaml values, so a deploy that sets neither
         # var seeds the admin account with the published "changeme".
-        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
-        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
+        monkeypatch.delenv("DFE_ENGINE_AUTH_LOCAL_ADMIN_NAME", raising=False)
+        monkeypatch.delenv("DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
         settings = load_settings()
         assert settings.auth.local.admin_name == "admin"
         assert settings.auth.local.admin_password == "changeme"
 
     def test_seed_accounts_json_override(self, monkeypatch):
         monkeypatch.setenv(
-            "DFE_AUTH_LOCAL_SEED_ACCOUNTS",
+            "DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS",
             '[{"username": "kay", "password": "pw-long", "groups": ["dfe-analysts"]}]',
         )
         settings = load_settings()
@@ -477,7 +481,7 @@ class TestEnvOverrides:
         assert seed.groups == ["dfe-analysts"]
 
     def test_seed_accounts_malformed_json_fails_loud(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_LOCAL_SEED_ACCOUNTS", "{not-json")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS", "{not-json")
         with pytest.raises(ValueError, match="not valid JSON"):
             load_settings()
 
@@ -487,7 +491,7 @@ class TestEnvOverrides:
         assert load_settings().auth.proxy_provider == "oidc"
 
     def test_proxy_provider_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_PROXY_PROVIDER", "entra")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_PROXY_PROVIDER", "entra")
         assert load_settings().auth.proxy_provider == "entra"
 
     def test_source_provider_bindings_default_empty(self):
@@ -495,17 +499,17 @@ class TestEnvOverrides:
         assert load_settings().auth.source_provider_bindings == {}
 
     def test_source_provider_bindings_json_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_SOURCE_PROVIDER_BINDINGS", '{"scim": "entra"}')
+        monkeypatch.setenv("DFE_ENGINE_AUTH_SOURCE_PROVIDER_BINDINGS", '{"scim": "entra"}')
         assert load_settings().auth.source_provider_bindings == {"scim": "entra"}
 
     def test_source_provider_bindings_malformed_json_fails_loud(self, monkeypatch):
-        monkeypatch.setenv("DFE_AUTH_SOURCE_PROVIDER_BINDINGS", "{not-json")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_SOURCE_PROVIDER_BINDINGS", "{not-json")
         with pytest.raises(ValueError, match="not valid JSON"):
             load_settings()
 
     def test_seed_orgs_json_override(self, monkeypatch):
         monkeypatch.setenv(
-            "DFE_ORGS_SEED_ORGS",
+            "DFE_ENGINE_ORGS_SEED_ORGS",
             '[{"name": "acme", "display_name": "Acme Corp", "org_ids": ["acme"]}]',
         )
         settings = load_settings()
@@ -519,30 +523,30 @@ class TestEnvOverrides:
         assert load_settings().orgs.seed_orgs == []
 
     def test_seed_orgs_malformed_json_fails_loud(self, monkeypatch):
-        monkeypatch.setenv("DFE_ORGS_SEED_ORGS", "{not-json")
+        monkeypatch.setenv("DFE_ENGINE_ORGS_SEED_ORGS", "{not-json")
         with pytest.raises(ValueError, match="not valid JSON"):
             load_settings()
 
     def test_seed_orgs_invalid_name_fails_at_startup(self, monkeypatch):
-        monkeypatch.setenv("DFE_ORGS_SEED_ORGS", '[{"name": "../escape"}]')
+        monkeypatch.setenv("DFE_ENGINE_ORGS_SEED_ORGS", '[{"name": "../escape"}]')
         with pytest.raises(ValueError, match="name"):
             load_settings()
 
     def test_legacy_clickhouse_host_fallback(self, monkeypatch):
-        """Legacy env var (no DFE_ prefix) should also work."""
+        """Legacy env var (no DFE_ENGINE_ prefix) should also work."""
         monkeypatch.setenv("CLICKHOUSE_HOST", "legacy.ch.com")
         settings = load_settings()
         assert settings.clickhouse.host == "legacy.ch.com"
 
     def test_dfe_prefix_takes_precedence(self, monkeypatch):
-        """DFE_ prefixed var takes precedence over legacy var."""
+        """DFE_ENGINE_ prefixed var takes precedence over legacy var."""
         monkeypatch.setenv("CLICKHOUSE_HOST", "legacy.ch.com")
-        monkeypatch.setenv("DFE_CLICKHOUSE_HOST", "new.ch.com")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", "new.ch.com")
         settings = load_settings()
         assert settings.clickhouse.host == "new.ch.com"
 
     def test_hyperdx_enabled_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HYPERDX_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENGINE_HYPERDX_ENABLED", "true")
         settings = load_settings()
         assert settings.hyperdx.enabled is True
 
@@ -551,16 +555,16 @@ class TestEnvOverrides:
 
     @pytest.mark.parametrize(("value", "expected"), [("true", True), ("1", True), ("false", False)])
     def test_sigma_enabled_override(self, monkeypatch, value, expected):
-        monkeypatch.setenv("DFE_SIGMA_ENABLED", value)
+        monkeypatch.setenv("DFE_ENGINE_SIGMA_ENABLED", value)
         assert load_settings().sigma.enabled is expected
 
     def test_hyperdx_base_url_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HYPERDX_BASE_URL", "http://hdx:8080")
+        monkeypatch.setenv("DFE_ENGINE_HYPERDX_BASE_URL", "http://hdx:8080")
         settings = load_settings()
         assert settings.hyperdx.base_url == "http://hdx:8080"
 
     def test_clickhouse_verify_true(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_VERIFY", "1")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_VERIFY", "1")
         settings = load_settings()
         assert settings.clickhouse.verify is True
 
@@ -571,7 +575,7 @@ class TestEnvOverrides:
         assert settings.clickhouse.verify is None
 
     def test_clickhouse_verify_false(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_VERIFY", "false")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_VERIFY", "false")
         settings = load_settings()
         assert settings.clickhouse.verify is False
 
@@ -579,12 +583,12 @@ class TestEnvOverrides:
         # The chart ships verify: "" so the code's default governs, and an empty
         # env var must reach the same None as an unset one. Were this to resolve
         # False instead, verification would go off with the chart unchanged.
-        monkeypatch.setenv("DFE_CLICKHOUSE_VERIFY", "")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_VERIFY", "")
         settings = load_settings()
         assert settings.clickhouse.verify is None
 
     def test_clickhouse_ca_cert_override_flows_to_config(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_CA_CERT", "/etc/ssl/internal-ca.pem")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_CA_CERT", "/etc/ssl/internal-ca.pem")
         settings = load_settings()
         assert settings.clickhouse.ca_cert == "/etc/ssl/internal-ca.pem"
         from dfe_engine.settings import get_clickhouse_config
@@ -592,13 +596,13 @@ class TestEnvOverrides:
         assert get_clickhouse_config(settings)["ch_ca_cert"] == "/etc/ssl/internal-ca.pem"
 
     def test_dfe_tls_verify_bridges_to_scalo_env(self, monkeypatch):
-        # The DFE_-prefixed valve maps onto scalo's env seam so one setting flips
+        # The DFE_ENGINE_-prefixed valve maps onto scalo's env seam so one setting flips
         # every scalo client. load_settings writes SCALO_TLS_VERIFY straight into
         # os.environ, which monkeypatch never recorded, so patch.dict removes it.
         from scalo.crypto import tls_verify_default
 
         monkeypatch.delenv("SCALO_TLS_VERIFY", raising=False)
-        monkeypatch.setenv("DFE_TLS_VERIFY", "false")
+        monkeypatch.setenv("DFE_ENGINE_TLS_VERIFY", "false")
         with mock.patch.dict(os.environ):
             load_settings()
             assert os.environ.get("SCALO_TLS_VERIFY") == "false"
@@ -608,53 +612,53 @@ class TestEnvOverrides:
         from scalo.crypto import tls_allow_weak
 
         monkeypatch.delenv("SCALO_TLS_ALLOW_WEAK", raising=False)
-        monkeypatch.setenv("DFE_TLS_ALLOW_WEAK", "true")
+        monkeypatch.setenv("DFE_ENGINE_TLS_ALLOW_WEAK", "true")
         with mock.patch.dict(os.environ):
             load_settings()
             assert tls_allow_weak() is True
 
     def test_clickhouse_password_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_PASSWORD", "secret123")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PASSWORD", "secret123")
         settings = load_settings()
         assert settings.clickhouse.password == "secret123"
 
     def test_api_jwt_expire_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_JWT_EXPIRE_MINUTES", "60")
+        monkeypatch.setenv("DFE_ENGINE_API_JWT_EXPIRE_MINUTES", "60")
         settings = load_settings()
         assert settings.api.jwt_expire_minutes == 60
 
     def test_hunts_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_DIR", "/custom/hunts")
+        monkeypatch.setenv("DFE_ENGINE_HUNTS_DIR", "/custom/hunts")
         settings = load_settings()
         assert settings.hunts.hunt_dir == "/custom/hunts"
 
     def test_query_yaml_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_QUERY_YAML_DIR", "/custom/queries")
+        monkeypatch.setenv("DFE_ENGINE_QUERY_YAML_DIR", "/custom/queries")
         settings = load_settings()
         assert settings.query.yaml_dir == "/custom/queries"
 
     def test_helm_output_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HELM_OUTPUT_DIR", "/helm/out")
+        monkeypatch.setenv("DFE_ENGINE_HELM_OUTPUT_DIR", "/helm/out")
         settings = load_settings()
         assert settings.helm.output_dir == "/helm/out"
 
     def test_helm_environment_file_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HELM_ENVIRONMENT_FILE", "/env.yaml")
+        monkeypatch.setenv("DFE_ENGINE_HELM_ENVIRONMENT_FILE", "/env.yaml")
         settings = load_settings()
         assert settings.helm.environment_file == "/env.yaml"
 
     def test_fieldmap_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_FIELDMAPS_DIR", "/custom/fieldmaps")
+        monkeypatch.setenv("DFE_ENGINE_FIELDMAPS_DIR", "/custom/fieldmaps")
         settings = load_settings()
         assert settings.fieldmap.fieldmaps_dir == "/custom/fieldmaps"
 
     def test_alert_channels_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_ALERT_CHANNELS", "email,slack")
+        monkeypatch.setenv("DFE_ENGINE_HUNTS_ALERT_CHANNELS", "email,slack")
         settings = load_settings()
         assert "email" in settings.hunts.alert_channels
 
     def test_profile_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_PROFILE", " mesh ")
+        monkeypatch.setenv("DFE_ENGINE_PROFILE", " mesh ")
         settings = load_settings()
         assert settings.deployment.profile == "mesh"
 
@@ -665,7 +669,7 @@ class TestEnvOverrides:
 
     def test_admin_links_override_is_held_as_given(self, monkeypatch):
         # Parsing is left to dfe_engine.admin_links, so a broken list cannot fail the load.
-        monkeypatch.setenv("DFE_ADMIN_LINKS", ' [{"name": "Argo CD",  ')
+        monkeypatch.setenv("DFE_ENGINE_ADMIN_LINKS", ' [{"name": "Argo CD",  ')
         settings = load_settings()
         assert settings.deployment.admin_links == '[{"name": "Argo CD",'
 
@@ -673,22 +677,22 @@ class TestEnvOverrides:
         assert load_settings().deployment.admin_links == []
 
     def test_ui_version_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_UI_VERSION", "v1.5.1")
+        monkeypatch.setenv("DFE_ENGINE_UI_VERSION", "v1.5.1")
         settings = load_settings()
         assert settings.ui_version == "v1.5.1"
 
     def test_services_config_yaml_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_SERVICES_CONFIG_YAML_DIR", "/custom/svc")
+        monkeypatch.setenv("DFE_ENGINE_SERVICES_CONFIG_YAML_DIR", "/custom/svc")
         settings = load_settings()
         assert settings.services.config_yaml_dir == "/custom/svc"
 
     def test_sources_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_SOURCES_DIR", "/custom/sources")
+        monkeypatch.setenv("DFE_ENGINE_SOURCES_DIR", "/custom/sources")
         settings = load_settings()
         assert settings.source.sources_dir == "/custom/sources"
 
     def test_hunt_default_cooldown_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN", "600")
+        monkeypatch.setenv("DFE_ENGINE_HUNTS_DEFAULT_ALERT_COOLDOWN", "600")
         settings = load_settings()
         assert settings.hunts.default_alert_cooldown == "600"
 
@@ -698,8 +702,8 @@ class TestEnvOverrides:
         assert hunts.max_detections_per_run_ceiling == 10_000
 
     def test_hunt_detection_cap_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_MAX_DETECTIONS_PER_RUN", "50")
-        monkeypatch.setenv("DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING", "500")
+        monkeypatch.setenv("DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN", "50")
+        monkeypatch.setenv("DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING", "500")
         hunts = load_settings().hunts
         assert hunts.max_detections_per_run == 50
         assert hunts.max_detections_per_run_ceiling == 500
@@ -714,26 +718,26 @@ class TestEnvOverrides:
             HuntsSettings(**{field: value})
 
     def test_hyperdx_api_key_env_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HYPERDX_API_KEY_ENV", "MY_KEY_VAR")
+        monkeypatch.setenv("DFE_ENGINE_HYPERDX_API_KEY_ENV", "MY_KEY_VAR")
         settings = load_settings()
         assert settings.hyperdx.api_key_env == "MY_KEY_VAR"
 
     def test_hunt_alert_destinations_json_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_ALERT_DESTINATIONS", '{"email": "alert@test.com"}')
+        monkeypatch.setenv("DFE_ENGINE_HUNTS_ALERT_DESTINATIONS", '{"email": "alert@test.com"}')
         settings = load_settings()
         assert settings.hunts.alert_destinations == {"email": "alert@test.com"}
 
     def test_hunt_alert_destinations_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_ALERT_DESTINATIONS_DIR", "/data/alert-destinations")
+        monkeypatch.setenv("DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR", "/data/alert-destinations")
         settings = load_settings()
         assert settings.hunts.alert_destinations_dir == "/data/alert-destinations"
 
     def test_multiple_overrides_at_once(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_HOST", "ch1.example.com")
-        monkeypatch.setenv("DFE_CLICKHOUSE_PORT", "9000")
-        monkeypatch.setenv("DFE_API_PORT", "9090")
-        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
-        monkeypatch.setenv("DFE_ENV", "dev")  # dev posture: placeholder secret allowed
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", "ch1.example.com")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PORT", "9000")
+        monkeypatch.setenv("DFE_ENGINE_API_PORT", "9090")
+        monkeypatch.setenv("DFE_ENGINE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "dev")  # dev posture: placeholder secret allowed
         settings = load_settings()
         assert settings.clickhouse.host == "ch1.example.com"
         assert settings.clickhouse.port == 9000
@@ -743,9 +747,9 @@ class TestEnvOverrides:
     @pytest.mark.parametrize(
         ("env_name", "field"),
         [
-            ("DFE_TRANSFORM_VALIDATION_ENABLED", "enabled"),
-            ("DFE_TRANSFORM_VALIDATION_BLOCKING", "blocking"),
-            ("DFE_TRANSFORM_DRY_RUN_ENABLED", "dry_run"),
+            ("DFE_ENGINE_TRANSFORM_VALIDATION_ENABLED", "enabled"),
+            ("DFE_ENGINE_TRANSFORM_VALIDATION_BLOCKING", "blocking"),
+            ("DFE_ENGINE_TRANSFORM_DRY_RUN_ENABLED", "dry_run"),
         ],
     )
     def test_transform_validation_override(self, monkeypatch, env_name, field):
@@ -767,7 +771,7 @@ def _listed(settings: DFESettings, path: str, key: str | None) -> list:
 _LIST_SETTINGS = [
     pytest.param(
         "api.cors_origins",
-        "DFE_API_CORS_ORIGINS",
+        "DFE_ENGINE_API_CORS_ORIGINS",
         "https://env.example",
         None,
         ["https://env.example"],
@@ -775,7 +779,7 @@ _LIST_SETTINGS = [
     ),
     pytest.param(
         "hunts.alert_channels",
-        "DFE_HUNTS_ALERT_CHANNELS",
+        "DFE_ENGINE_HUNTS_ALERT_CHANNELS",
         "json://env.example",
         None,
         ["json://env.example"],
@@ -783,7 +787,7 @@ _LIST_SETTINGS = [
     ),
     pytest.param(
         "hunts.lookup_databases",
-        "DFE_HUNTS_LOOKUP_DATABASES",
+        "DFE_ENGINE_HUNTS_LOOKUP_DATABASES",
         "threat, geo",
         None,
         ["threat", "geo"],
@@ -791,7 +795,7 @@ _LIST_SETTINGS = [
     ),
     pytest.param(
         "auth.local.seed_accounts",
-        "DFE_AUTH_LOCAL_SEED_ACCOUNTS",
+        "DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS",
         '[{"username": "from-env"}]',
         "username",
         ["from-env"],
@@ -799,7 +803,7 @@ _LIST_SETTINGS = [
     ),
     pytest.param(
         "orgs.seed_orgs",
-        "DFE_ORGS_SEED_ORGS",
+        "DFE_ENGINE_ORGS_SEED_ORGS",
         '[{"name": "from-env"}]',
         "name",
         ["from-env"],
@@ -854,7 +858,7 @@ class TestListsAcrossLayers:
         assert _listed(settings, path, key) == expected
 
     def test_an_env_list_replaces_the_shipped_default(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_CORS_ORIGINS", "https://a.example,https://b.example")
+        monkeypatch.setenv("DFE_ENGINE_API_CORS_ORIGINS", "https://a.example,https://b.example")
         assert load_settings().api.cors_origins == ["https://a.example", "https://b.example"]
 
 
@@ -887,8 +891,8 @@ class TestLookupDatabases:
 
     def test_the_data_database_is_refused(self, monkeypatch):
         """Every org's rows are in it, so a lookup there reads them all."""
-        monkeypatch.setenv("DFE_CLICKHOUSE_DATA_DATABASE", "telemetry")
-        monkeypatch.setenv("DFE_HUNTS_LOOKUP_DATABASES", "threat,telemetry")
+        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE", "telemetry")
+        monkeypatch.setenv("DFE_ENGINE_HUNTS_LOOKUP_DATABASES", "threat,telemetry")
 
         with pytest.raises(ValidationError, match="telemetry"):
             load_settings()
@@ -902,7 +906,7 @@ class TestHuntDir:
 
     def test_a_list_of_directories_is_refused(self, monkeypatch):
         """The engine read only the first and the runner none, so a list ran no hunt."""
-        monkeypatch.setenv("DFE_HUNTS_DIR", "/config/hunts,/extra/hunts")
+        monkeypatch.setenv("DFE_ENGINE_HUNTS_DIR", "/config/hunts,/extra/hunts")
 
         with pytest.raises(ValidationError, match="one directory"):
             load_settings()
@@ -951,7 +955,7 @@ class TestTransportAvailability:
     def test_a_bus_default_without_a_bus_is_refused(self):
         from dfe_engine.settings import TransportSettings
 
-        with pytest.raises(ValidationError, match="DFE_TRANSPORT_BUS_PRESENT"):
+        with pytest.raises(ValidationError, match="DFE_ENGINE_TRANSPORT_BUS_PRESENT"):
             TransportSettings(default="bus", bus_present=False)
 
 
@@ -968,9 +972,14 @@ class TestBrokerlessLocalE2e:
 
         example = Path(__file__).resolve().parents[2] / ".env.e2e.example"
         documented = dict(
-            re.findall(r"^# (DFE_TRANSPORT_[A-Z_]+)=(\S+)", example.read_text("utf-8"), flags=re.M)
+            re.findall(
+                r"^# (DFE_ENGINE_TRANSPORT_[A-Z_]+)=(\S+)", example.read_text("utf-8"), flags=re.M
+            )
         )
-        assert set(documented) == {"DFE_TRANSPORT_BUS_PRESENT", "DFE_TRANSPORT_DEFAULT"}
+        assert set(documented) == {
+            "DFE_ENGINE_TRANSPORT_BUS_PRESENT",
+            "DFE_ENGINE_TRANSPORT_DEFAULT",
+        }
         for name, value in documented.items():
             monkeypatch.setenv(name, value)
 
@@ -988,19 +997,22 @@ class TestBrokerListFromEnv:
         [
             pytest.param({}, "localhost:9092", False, id="unset_keeps_the_dev_default"),
             pytest.param(
-                {"DFE_KAFKA_BOOTSTRAP_SERVERS": "b1:9092,b2:9092"},
+                {"DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS": "b1:9092,b2:9092"},
                 "b1:9092,b2:9092",
                 False,
                 id="a_list_is_read",
             ),
             pytest.param(
-                {"DFE_KAFKA_BOOTSTRAP_SERVERS": "", "DFE_TRANSPORT_BUS_PRESENT": "false"},
+                {
+                    "DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS": "",
+                    "DFE_ENGINE_TRANSPORT_BUS_PRESENT": "false",
+                },
                 "",
                 False,
                 id="empty_without_a_bus_is_a_brokerless_deployment",
             ),
             pytest.param(
-                {"DFE_KAFKA_BOOTSTRAP_SERVERS": ""},
+                {"DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS": ""},
                 None,
                 True,
                 id="empty_with_a_bus_is_refused",
@@ -1012,7 +1024,7 @@ class TestBrokerListFromEnv:
                 id="empty_legacy_name_is_refused_too",
             ),
             pytest.param(
-                {"DFE_KAFKA_BOOTSTRAP_SERVERS": "", "KAFKA_BOOTSTRAP_SERVERS": "old:9092"},
+                {"DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS": "", "KAFKA_BOOTSTRAP_SERVERS": "old:9092"},
                 None,
                 True,
                 id="the_dfe_name_wins_even_when_empty",
@@ -1022,15 +1034,15 @@ class TestBrokerListFromEnv:
     def test_the_broker_list_follows_the_env(self, monkeypatch, env, want, refused):
         from dfe_engine.settings import _get_env_overrides
 
-        if env.get("DFE_TRANSPORT_BUS_PRESENT") == "false":
-            monkeypatch.setenv("DFE_TRANSPORT_DEFAULT", "direct")
+        if env.get("DFE_ENGINE_TRANSPORT_BUS_PRESENT") == "false":
+            monkeypatch.setenv("DFE_ENGINE_TRANSPORT_DEFAULT", "direct")
         for name, value in env.items():
             monkeypatch.setenv(name, value)
         overrides = _get_env_overrides()
         sections = {k: overrides.get(k, {}) for k in ("kafka", "transport")}
 
         if refused:
-            with pytest.raises(ValidationError, match="DFE_KAFKA_BOOTSTRAP_SERVERS"):
+            with pytest.raises(ValidationError, match="DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS"):
                 DFESettings(env="test", **sections)
             return
         assert DFESettings(env="test", **sections).kafka.bootstrap_servers == want
@@ -1050,7 +1062,7 @@ class TestTransportMesh:
     def test_mesh_without_a_namespace_is_refused(self):
         from dfe_engine.settings import TransportSettings
 
-        with pytest.raises(ValidationError, match="DFE_MESH_NAMESPACE"):
+        with pytest.raises(ValidationError, match="DFE_ENGINE_MESH_NAMESPACE"):
             TransportSettings(mesh_enabled=True)
 
     def test_a_namespace_with_the_mesh_off_is_accepted(self):
@@ -1062,8 +1074,8 @@ class TestTransportMesh:
     def test_env_override(self, monkeypatch):
         from dfe_engine.settings import _get_env_overrides
 
-        monkeypatch.setenv("DFE_MESH_ENABLED", "true")
-        monkeypatch.setenv("DFE_MESH_NAMESPACE", "envoy-gateway-system")
+        monkeypatch.setenv("DFE_ENGINE_MESH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENGINE_MESH_NAMESPACE", "envoy-gateway-system")
         overrides = _get_env_overrides()
 
         assert overrides["transport"]["mesh_enabled"] is True
@@ -1093,17 +1105,17 @@ class TestGitopsMode:
     def test_env_override(self, monkeypatch):
         from dfe_engine.settings import _get_env_overrides
 
-        monkeypatch.setenv("DFE_GITOPS_MODE", "solo")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_MODE", "solo")
         overrides = _get_env_overrides()
         assert overrides["gitops"]["mode"] == "solo"
 
     def test_write_bounds_come_from_the_environment(self, monkeypatch):
         from dfe_engine.settings import GitopsSettings, _get_env_overrides
 
-        monkeypatch.setenv("DFE_GITOPS_WRITE_TIMEOUT_SECONDS", "30")
-        monkeypatch.setenv("DFE_GITOPS_WRITE_BUDGET_SECONDS", "45.5")
-        monkeypatch.setenv("DFE_GITOPS_WRITE_FAILURE_THRESHOLD", "5")
-        monkeypatch.setenv("DFE_GITOPS_WRITE_RESET_TIMEOUT", "90")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_WRITE_TIMEOUT_SECONDS", "30")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_WRITE_BUDGET_SECONDS", "45.5")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_WRITE_FAILURE_THRESHOLD", "5")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_WRITE_RESET_TIMEOUT", "90")
         write = GitopsSettings(**_get_env_overrides()["gitops"]).write
         assert write.timeout_seconds == 30.0
         assert write.budget_seconds == 45.5
@@ -1121,9 +1133,9 @@ class TestGitopsMode:
     def test_pack_thresholds_come_from_the_environment(self, monkeypatch):
         from dfe_engine.settings import GitopsSettings, _get_env_overrides
 
-        monkeypatch.setenv("DFE_GITOPS_PACK_LOOSE_OBJECTS", "1000")
-        monkeypatch.setenv("DFE_GITOPS_PACK_PACKS", "0")
-        monkeypatch.setenv("DFE_GITOPS_PACK_INTERVAL_SECONDS", "60.5")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_PACK_LOOSE_OBJECTS", "1000")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_PACK_PACKS", "0")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_PACK_INTERVAL_SECONDS", "60.5")
         pack = GitopsSettings(**_get_env_overrides()["gitops"]).pack
         assert pack.loose_objects == 1000
         assert pack.packs == 0
@@ -1143,7 +1155,7 @@ class TestGitopsMode:
     def test_the_read_bound_comes_from_the_environment(self, monkeypatch):
         from dfe_engine.settings import GitopsSettings, _get_env_overrides
 
-        monkeypatch.setenv("DFE_GITOPS_READ_TIMEOUT_SECONDS", "1.5")
+        monkeypatch.setenv("DFE_ENGINE_GITOPS_READ_TIMEOUT_SECONDS", "1.5")
         read = GitopsSettings(**_get_env_overrides()["gitops"]).read
         assert read.timeout_seconds == 1.5
 
@@ -1209,8 +1221,8 @@ class TestProductionPostureCannotShipWithAuthOff:
 
     def test_shipped_defaults_enable_auth(self, monkeypatch):
         """defaults.yaml is the file a plain container runs on."""
-        monkeypatch.setenv("DFE_ENV", "production")
-        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-real-production-secret-over-32-bytes")
+        monkeypatch.setenv("DFE_ENGINE_ENV", "production")
+        monkeypatch.setenv("DFE_ENGINE_API_JWT_SECRET", "a-real-production-secret-over-32-bytes")
         assert load_settings().auth.enabled is True
 
     def test_deps_root_context_condition_excludes_a_production_posture(self):
@@ -1297,7 +1309,7 @@ class TestEverySettingIsRead:
         ("HuntsSettings", "log_path"),
         ("StorageSettings", "s3_bucket"),
         # auth.local seeds three passwords and bootstrap consumes only
-        # admin_password (api/app.py:130). DFE_AUTH_LOCAL_OPERATOR_PASSWORD and
+        # admin_password (api/app.py:130). DFE_ENGINE_AUTH_LOCAL_OPERATOR_PASSWORD and
         # its viewer twin are routed and land nowhere -- no such account is made.
         ("LocalAuthSettings", "operator_password"),
         ("LocalAuthSettings", "viewer_password"),
@@ -1373,7 +1385,7 @@ class TestEverySettingIsRead:
         whether the deployment can SET it: every settings docstring maps its
         environment names, and a name missing from the override block resolves
         to the default however the deployer sets it. That is how
-        DFE_DEPLOYMENT_APP_ENV_DIR left the engine unable to write an app's
+        DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR left the engine unable to write an app's
         custom environment on every Compose tier.
         """
         import re
@@ -1382,11 +1394,11 @@ class TestEverySettingIsRead:
         package = Path(__file__).resolve().parents[2] / "src" / "dfe_engine"
         settings_py = package / "settings.py"
         source = settings_py.read_text(encoding="utf-8")
-        documented = set(re.findall(r"^\s*- (DFE_[A-Z0-9_]+) -> ", source, re.MULTILINE))
+        documented = set(re.findall(r"^\s*- (DFE_ENGINE_[A-Z0-9_]+) -> ", source, re.MULTILINE))
         assert documented, "parsed no documented env names -- the parser, not the code, is wrong"
 
         # Either settings.py routes it, or a module reads the name for itself.
-        routed = set(re.findall(r'_get_env\(\s*"(DFE_[A-Z0-9_]+)"', source))
+        routed = set(re.findall(r'_get_env\(\s*"(DFE_ENGINE_[A-Z0-9_]+)"', source))
         elsewhere = "\n".join(
             path.read_text(encoding="utf-8", errors="replace")
             for path in sorted(package.rglob("*.py"))

@@ -1007,7 +1007,7 @@ class TestRouting:
 
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "receiver_auth_unreadable"
-        assert "DFE_SECRETS_PROVIDER=ansible_vault" in resp.json()["message"]
+        assert "DFE_ENGINE_SECRETS_PROVIDER=ansible_vault" in resp.json()["message"]
 
     def test_sync_writes_the_block_and_commits(self, client, app, admin_headers, tmp_path):
         gc = self._deployed(client, app, admin_headers, tmp_path)

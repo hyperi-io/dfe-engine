@@ -8,7 +8,7 @@
 
 """e2e-server-only API group.
 
-Mounted by ``create_app`` only when ``DFE_E2E_SERVER`` is on and the posture is
+Mounted by ``create_app`` only when ``DFE_ENGINE_E2E_SERVER`` is on and the posture is
 non-production. Lives under ``/api/e2e`` (not the versioned product API). In
 that process, ``/docs`` has a spec dropdown: **API** (``/openapi.json``) vs
 **E2E** (``/openapi.e2e.json``). The committed product spec never includes

@@ -32,7 +32,7 @@ def _clean_settings():
 
 @pytest.fixture
 def spec_app(monkeypatch) -> FastAPI:
-    monkeypatch.setenv("DFE_ENV", "dev")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
     settings = load_settings().model_copy(
         update={"e2e_server": False, "sigma": SigmaSettings(enabled=True)}
     )

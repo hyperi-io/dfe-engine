@@ -195,7 +195,7 @@ written = writer.write_all(Path("out/"))  # writes + returns paths
   engine warns but does not reject.
 - **Shipped schemas are read-only**: `is_shipped_schema()` detects paths
   inside the resolved schemas root (the `dfe-schemas` package, or the image
-  seed) - custom schemas live outside those directories (`DFE_SCHEMAS_DIR`).
+  seed) - custom schemas live outside those directories (`DFE_ENGINE_SCHEMAS_DIR`).
 - **Profile name matches the FILENAME**: use `timeseries` / `minimal` /
   `passthrough` in `header.type`, matching the YAML filenames.
 - **registries/types.yaml loads via YAML 1.1** (PyYAML through

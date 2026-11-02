@@ -59,7 +59,7 @@ def _schemas_tree(tmp_path, monkeypatch):
     (tmp_path / "manifest.yaml").write_text("objects: []\n", encoding="utf-8")
     tables = tmp_path / "tables"
     tables.mkdir()
-    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
+    monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(tmp_path))
     return tables
 
 
@@ -149,8 +149,8 @@ class TestResolution:
 
     def test_a_missing_tree_raises_rather_than_yielding_nothing(self, monkeypatch, tmp_path):
         """An empty table list would let the data plane start on an empty db."""
-        monkeypatch.delenv("DFE_SCHEMAS_DIR", raising=False)
-        monkeypatch.setenv("DFE_SCHEMAS_SEED_DIR", str(tmp_path / "absent"))
+        monkeypatch.delenv("DFE_ENGINE_SCHEMAS_DIR", raising=False)
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_SEED_DIR", str(tmp_path / "absent"))
         monkeypatch.setattr(
             "dfe_engine.schema.schema_loader._resolve_package_schemas_root", lambda: None
         )

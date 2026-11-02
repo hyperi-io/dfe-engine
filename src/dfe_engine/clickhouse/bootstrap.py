@@ -17,7 +17,7 @@ refuses a changed default on a core table as TTL drift; an admin's change throug
 ``PUT /api/v1/system/retention`` is what applies it there.
 
 The phase is a GATE, not best-effort: its outcome decides readiness. Disable it
-with ``DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false``, which reports the schema state as
+with ``DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES=false``, which reports the schema state as
 unknown and gates nothing. A pass ClickHouse failed for load or reachability runs
 again in the background (:class:`SchemaRetry`), so one transient error does not hold
 the pod NotReady until a restart. So does a pass that gave up waiting on another

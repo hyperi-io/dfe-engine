@@ -60,7 +60,7 @@ POLICY either way.
 
 The NAME is never written here. This layer is pure config with no runtime
 settings, so a literal would silently ignore a deployment that sets
-``DFE_CLICKHOUSE_DATA_DATABASE`` and grant on a database it does not have. The
+``DFE_ENGINE_CLICKHOUSE_DATA_DATABASE`` and grant on a database it does not have. The
 reconciler substitutes ``clickhouse.effective_data_database`` (see
 ``resolve_grant_databases``).
 """

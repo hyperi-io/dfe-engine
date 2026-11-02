@@ -60,7 +60,7 @@ for _otel_key, _otel_val in (
 os.environ.setdefault("VERSION_CHECK__ENABLED", "false")
 
 # --------------------------------------------------------------------------
-# Declare the dev posture explicitly. `DFE_ENV` defaults to "production", and
+# Declare the dev posture explicitly. `DFE_ENGINE_ENV` defaults to "production", and
 # under that posture `DFESettings` refuses `auth.enabled: False` -- it would hand
 # an unauthenticated request the admin role. Most tests here construct settings
 # with auth off and want exactly the dev semantics, so say so rather than relying
@@ -69,8 +69,8 @@ os.environ.setdefault("VERSION_CHECK__ENABLED", "false")
 # setdefault, so a test run that deliberately wants the production posture
 # (test_settings.py's own posture cases construct DFESettings directly) is not
 # overridden.
-os.environ.setdefault("DFE_ENV", "test")
-os.environ.setdefault("DFE_AUTH_ENABLED", "false")
+os.environ.setdefault("DFE_ENGINE_ENV", "test")
+os.environ.setdefault("DFE_ENGINE_AUTH_ENABLED", "false")
 
 # Load this tree's own .env, filling only what the shell and the guards above left
 # unset, so a developer .env cannot flip the test posture.

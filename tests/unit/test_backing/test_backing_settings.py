@@ -8,7 +8,7 @@
 
 """Six env vars carry who runs Kafka and ClickHouse, and one that must not.
 
-``DFE_KAFKA_PROVIDER`` derives the engine's OWN broker protocol, and every
+``DFE_ENGINE_KAFKA_PROVIDER`` derives the engine's OWN broker protocol, and every
 in-cluster deploy's listener differs from what a provider key derives, so the
 facts travel under their own names and the two never mix.
 """
@@ -26,12 +26,12 @@ from dfe_engine.settings import (
 )
 
 FACT_ENV = {
-    "DFE_DEPLOYMENT_KAFKA_PROVIDER": ("kafka", "provider"),
-    "DFE_DEPLOYMENT_KAFKA_TIER": ("kafka", "tier"),
-    "DFE_DEPLOYMENT_KAFKA_REGION": ("kafka", "region"),
-    "DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER": ("clickhouse", "provider"),
-    "DFE_DEPLOYMENT_CLICKHOUSE_TIER": ("clickhouse", "tier"),
-    "DFE_DEPLOYMENT_CLICKHOUSE_REGION": ("clickhouse", "region"),
+    "DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER": ("kafka", "provider"),
+    "DFE_ENGINE_DEPLOYMENT_KAFKA_TIER": ("kafka", "tier"),
+    "DFE_ENGINE_DEPLOYMENT_KAFKA_REGION": ("kafka", "region"),
+    "DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_PROVIDER": ("clickhouse", "provider"),
+    "DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_TIER": ("clickhouse", "tier"),
+    "DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_REGION": ("clickhouse", "region"),
 }
 
 
@@ -41,7 +41,7 @@ def _hermetic_env(monkeypatch, tmp_path):
     for key in list(os.environ):
         if key.startswith(("DFE_", "CLICKHOUSE_")):
             monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     monkeypatch.chdir(tmp_path)
     reset_settings()
     yield
@@ -70,8 +70,8 @@ def test_each_env_var_lands_on_its_own_fact(monkeypatch, env_var, where):
 
 
 def test_the_provider_key_is_lower_cased_and_the_tier_kept_as_given(monkeypatch):
-    monkeypatch.setenv("DFE_DEPLOYMENT_KAFKA_PROVIDER", " Confluent-Cloud ")
-    monkeypatch.setenv("DFE_DEPLOYMENT_KAFKA_TIER", "Express.M7g.Large")
+    monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER", " Confluent-Cloud ")
+    monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_KAFKA_TIER", "Express.M7g.Large")
 
     kafka = load_settings().deployment.backing.kafka
 
@@ -80,9 +80,9 @@ def test_the_provider_key_is_lower_cased_and_the_tier_kept_as_given(monkeypatch)
 
 
 def test_the_engines_own_kafka_provider_never_becomes_a_backing_fact(monkeypatch):
-    monkeypatch.setenv("DFE_KAFKA_PROVIDER", "strimzi")
-    monkeypatch.setenv("DFE_KAFKA_SASL_USERNAME", "u")
-    monkeypatch.setenv("DFE_KAFKA_SASL_PASSWORD", "p")
+    monkeypatch.setenv("DFE_ENGINE_KAFKA_PROVIDER", "strimzi")
+    monkeypatch.setenv("DFE_ENGINE_KAFKA_SASL_USERNAME", "u")
+    monkeypatch.setenv("DFE_ENGINE_KAFKA_SASL_PASSWORD", "p")
 
     settings = load_settings()
 
@@ -92,7 +92,7 @@ def test_the_engines_own_kafka_provider_never_becomes_a_backing_fact(monkeypatch
 
 def test_a_backing_fact_never_moves_the_engines_own_protocol(monkeypatch):
     """A managed broker's key derives SASL_SSL; the engine's in-cluster listener is not that."""
-    monkeypatch.setenv("DFE_DEPLOYMENT_KAFKA_PROVIDER", "confluent-cloud")
+    monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER", "confluent-cloud")
 
     settings = load_settings()
 
@@ -105,8 +105,8 @@ def test_an_unstated_service_answers_empty_facts():
 
 
 def test_backing_from_environment_reads_what_load_settings_reads(monkeypatch):
-    monkeypatch.setenv("DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER", "clickhouse-cloud")
-    monkeypatch.setenv("DFE_DEPLOYMENT_KAFKA_REGION", "eu-west-1")
+    monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_PROVIDER", "clickhouse-cloud")
+    monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_KAFKA_REGION", "eu-west-1")
 
     assert backing_from_environment() == load_settings().deployment.backing
     assert backing_from_environment().clickhouse.provider == "clickhouse-cloud"

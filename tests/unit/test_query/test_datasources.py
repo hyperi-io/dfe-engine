@@ -252,7 +252,7 @@ class TestRestrictedReaderPassword:
 
     @pytest.fixture(autouse=True)
     def _no_provided_password(self, monkeypatch):
-        monkeypatch.delenv("DFE_CLICKHOUSE_QUERY_READER_PASSWORD", raising=False)
+        monkeypatch.delenv("DFE_ENGINE_CLICKHOUSE_QUERY_READER_PASSWORD", raising=False)
 
     def _settings(self, tmp_path) -> DFESettings:
         return DFESettings(env="test", secrets=SecretsSettings(provider="file", path=str(tmp_path)))

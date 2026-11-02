@@ -521,9 +521,9 @@ def test_every_threshold_takes_its_env_override(monkeypatch):
         "BLOCK_MATCH_RATIO": "0.3",
         "MIN_ROWS_FOR_RATIO": "5",
     }.items():
-        monkeypatch.setenv(f"DFE_DETECTION_GUARD_{name}", value)
-    monkeypatch.setenv("DFE_ENV", "dev")
-    monkeypatch.setenv("DFE_AUTH_ENABLED", "false")
+        monkeypatch.setenv(f"DFE_ENGINE_DETECTION_GUARD_{name}", value)
+    monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
+    monkeypatch.setenv("DFE_ENGINE_AUTH_ENABLED", "false")
 
     guard = load_settings().hunts.detection_guard
 

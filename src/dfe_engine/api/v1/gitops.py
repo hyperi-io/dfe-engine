@@ -12,7 +12,7 @@ their selects from the enumeration.
 
 GET /api/v1/gitops/auto-merge -> {stored, effective, allowed, reason} (governance:read)
 PUT /api/v1/gitops/auto-merge -> toggle; refuses to enable when the deployment
-gate (dev posture OR DFE_GITOPS_MODE=solo) does not permit (governance:write).
+gate (dev posture OR DFE_ENGINE_GITOPS_MODE=solo) does not permit (governance:write).
 GET /api/v1/gitops/log -> flat {entries, next_before} or, with ?group_by=,
 {groups} - every gitcrud commit, newest-first (governance:read).
 GET /api/v1/gitops/classes -> registry dump (any authenticated caller)

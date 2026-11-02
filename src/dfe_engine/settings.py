@@ -13,142 +13,142 @@ Provides centralized configuration management through the engine's own cascade i
 variables mapped below. It is not scalo's settings cascade; moving onto it is #600.
 Configuration priority: Environment Variables > Config Files > Defaults
 
-Environment variable mapping (DFE_ prefixed, with legacy fallbacks):
+Environment variable mapping (DFE_ENGINE_ prefixed, with legacy fallbacks):
 
 Config Directory:
 - DFE_CONFIG_DIR -> config_dir (auto-resolves registry subdirectories)
 
 ClickHouse:
-- DFE_CLICKHOUSE_HOST (legacy: CLICKHOUSE_HOST) -> clickhouse.host
-- DFE_CLICKHOUSE_PORT (legacy: CLICKHOUSE_PORT) -> clickhouse.port
-- DFE_CLICKHOUSE_USERNAME (legacy: CLICKHOUSE_USER) -> clickhouse.username
-- DFE_CLICKHOUSE_PASSWORD (legacy: CLICKHOUSE_PASSWORD) -> clickhouse.password
-- DFE_CLICKHOUSE_<ROLE>_PASSWORD -> the password a minted service user adopts instead
-  of one the engine mints, e.g. DFE_CLICKHOUSE_HUNT_RUNNER_PASSWORD. Environment only,
+- DFE_ENGINE_CLICKHOUSE_HOST (legacy: CLICKHOUSE_HOST) -> clickhouse.host
+- DFE_ENGINE_CLICKHOUSE_PORT (legacy: CLICKHOUSE_PORT) -> clickhouse.port
+- DFE_ENGINE_CLICKHOUSE_USERNAME (legacy: CLICKHOUSE_USER) -> clickhouse.username
+- DFE_ENGINE_CLICKHOUSE_PASSWORD (legacy: CLICKHOUSE_PASSWORD) -> clickhouse.password
+- DFE_ENGINE_CLICKHOUSE_<ROLE>_PASSWORD -> the password a minted service user adopts instead
+  of one the engine mints, e.g. DFE_ENGINE_CLICKHOUSE_HUNT_RUNNER_PASSWORD. Environment only,
   never a config file (see provided_service_password)
-- DFE_CLICKHOUSE_DATABASE (legacy: CLICKHOUSE_DATABASE) -> clickhouse.database
-- DFE_CLICKHOUSE_DATA_DATABASE (legacy: CLICKHOUSE_DATA_DATABASE) -> clickhouse.data_database
-- DFE_CLICKHOUSE_SECURE (legacy: CLICKHOUSE_SECURE) -> clickhouse.secure (true/false)
-- DFE_CLICKHOUSE_VERIFY (legacy: CLICKHOUSE_VERIFY) -> clickhouse.verify (true/false)
-- DFE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
-- DFE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
-- DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE -> clickhouse.ddl_max_query_size (bytes)
-- DFE_CLICKHOUSE_PLATFORM -> clickhouse.platform (auto, cloud or self_hosted)
-- DFE_CLICKHOUSE_DEFAULT_TTL_DAYS -> clickhouse.default_ttl_days (0 = no default TTL)
-- DFE_CLICKHOUSE_BOOTSTRAP_TABLES -> clickhouse.bootstrap_tables (true/false)
-- DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS -> clickhouse.bootstrap_wait_seconds
-- DFE_KAFKA_BOOTSTRAP_TOPICS -> kafka.bootstrap_topics (true/false)
-- DFE_KAFKA_TIERED_STORAGE -> kafka.tiered_storage (true/false)
-- DFE_SCHEMAS_OVERLAY_DIR -> the deployment's additive schema overlay directory
+- DFE_ENGINE_CLICKHOUSE_DATABASE (legacy: CLICKHOUSE_DATABASE) -> clickhouse.database
+- DFE_ENGINE_CLICKHOUSE_DATA_DATABASE (legacy: CLICKHOUSE_DATA_DATABASE) -> clickhouse.data_database
+- DFE_ENGINE_CLICKHOUSE_SECURE (legacy: CLICKHOUSE_SECURE) -> clickhouse.secure (true/false)
+- DFE_ENGINE_CLICKHOUSE_VERIFY (legacy: CLICKHOUSE_VERIFY) -> clickhouse.verify (true/false)
+- DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
+- DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
+- DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE -> clickhouse.ddl_max_query_size (bytes)
+- DFE_ENGINE_CLICKHOUSE_PLATFORM -> clickhouse.platform (auto, cloud or self_hosted)
+- DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS -> clickhouse.default_ttl_days (0 = no default TTL)
+- DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES -> clickhouse.bootstrap_tables (true/false)
+- DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS -> clickhouse.bootstrap_wait_seconds
+- DFE_ENGINE_KAFKA_BOOTSTRAP_TOPICS -> kafka.bootstrap_topics (true/false)
+- DFE_ENGINE_KAFKA_TIERED_STORAGE -> kafka.tiered_storage (true/false)
+- DFE_ENGINE_SCHEMAS_OVERLAY_DIR -> the deployment's additive schema overlay directory
 
 ClickHouse Cloud (control plane; opt-in, billable):
-- DFE_CLICKHOUSE_CLOUD_API_KEY_ID -> clickhouse.cloud.api_key_id
-- DFE_CLICKHOUSE_CLOUD_API_KEY_SECRET -> clickhouse.cloud.api_key_secret
-- DFE_CLICKHOUSE_CLOUD_API_BASE -> clickhouse.cloud.api_base
-- DFE_CLICKHOUSE_CLOUD_ORGANIZATION_ID -> clickhouse.cloud.organization_id
-- DFE_CLICKHOUSE_CLOUD_SERVICE_ID -> clickhouse.cloud.service_id
-- DFE_CLICKHOUSE_CLOUD_SERVICE (or _SERVICE_NAME) -> clickhouse.cloud.service_name
-- DFE_CLICKHOUSE_CLOUD_AUTOWAKE -> clickhouse.cloud.autowake (true/false)
+- DFE_ENGINE_CLICKHOUSE_CLOUD_API_KEY_ID -> clickhouse.cloud.api_key_id
+- DFE_ENGINE_CLICKHOUSE_CLOUD_API_KEY_SECRET -> clickhouse.cloud.api_key_secret
+- DFE_ENGINE_CLICKHOUSE_CLOUD_API_BASE -> clickhouse.cloud.api_base
+- DFE_ENGINE_CLICKHOUSE_CLOUD_ORGANIZATION_ID -> clickhouse.cloud.organization_id
+- DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE_ID -> clickhouse.cloud.service_id
+- DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE (or _SERVICE_NAME) -> clickhouse.cloud.service_name
+- DFE_ENGINE_CLICKHOUSE_CLOUD_AUTOWAKE -> clickhouse.cloud.autowake (true/false)
 
 Hunts:
-- DFE_HUNT_LOG_PATH -> hunts.log_path
-- DFE_HUNTS_DIR -> hunts.hunt_dir
-- DFE_HUNTS_RULES_DIR -> hunts.rules_dir
-- DFE_HUNTS_NUM_THREADS -> hunts.num_threads
-- DFE_HUNTS_CHECKPOINT_DESTINATION -> hunts.checkpoint_destination
-- DFE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD -> hunts.checkpoint_timestamp_field
-- DFE_HUNTS_CHECKPOINT_PATH -> hunts.checkpoint_path
-- DFE_HUNTS_CRON_TASK_TIMEOUT -> hunts.cron_task_timeout
-- DFE_HUNTS_JITTER_SECONDS -> hunts.jitter_seconds
-- DFE_HUNTS_ALERT_DESTINATIONS -> hunts.alert_destinations (JSON {name: apprise_url})
-- DFE_HUNTS_ALERT_DESTINATIONS_DIR -> hunts.alert_destinations_dir
-- DFE_HUNTS_MAX_DETECTIONS_PER_RUN -> hunts.max_detections_per_run
-- DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING -> hunts.max_detections_per_run_ceiling
-- DFE_HUNTS_LOOKUP_DATABASES -> hunts.lookup_databases (comma-separated)
-- DFE_DETECTION_GUARD_ENABLED -> hunts.detection_guard.enabled (true/false)
-- DFE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES -> hunts.detection_guard.preview_window_minutes
-- DFE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS -> hunts.detection_guard.preview_timeout_seconds
-- DFE_DETECTION_GUARD_PREVIEW_MAX_ROWS -> hunts.detection_guard.preview_max_rows
-- DFE_DETECTION_GUARD_WARN_PER_DAY -> hunts.detection_guard.warn_per_day
-- DFE_DETECTION_GUARD_ACK_PER_DAY -> hunts.detection_guard.ack_per_day
-- DFE_DETECTION_GUARD_BLOCK_PER_DAY -> hunts.detection_guard.block_per_day
-- DFE_DETECTION_GUARD_WARN_MATCH_RATIO -> hunts.detection_guard.warn_match_ratio
-- DFE_DETECTION_GUARD_BLOCK_MATCH_RATIO -> hunts.detection_guard.block_match_ratio
-- DFE_DETECTION_GUARD_MIN_ROWS_FOR_RATIO -> hunts.detection_guard.min_rows_for_ratio
+- DFE_ENGINE_HUNT_LOG_PATH -> hunts.log_path
+- DFE_ENGINE_HUNTS_DIR -> hunts.hunt_dir
+- DFE_ENGINE_HUNTS_RULES_DIR -> hunts.rules_dir
+- DFE_ENGINE_HUNTS_NUM_THREADS -> hunts.num_threads
+- DFE_ENGINE_HUNTS_CHECKPOINT_DESTINATION -> hunts.checkpoint_destination
+- DFE_ENGINE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD -> hunts.checkpoint_timestamp_field
+- DFE_ENGINE_HUNTS_CHECKPOINT_PATH -> hunts.checkpoint_path
+- DFE_ENGINE_HUNTS_CRON_TASK_TIMEOUT -> hunts.cron_task_timeout
+- DFE_ENGINE_HUNTS_JITTER_SECONDS -> hunts.jitter_seconds
+- DFE_ENGINE_HUNTS_ALERT_DESTINATIONS -> hunts.alert_destinations (JSON {name: apprise_url})
+- DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR -> hunts.alert_destinations_dir
+- DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN -> hunts.max_detections_per_run
+- DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING -> hunts.max_detections_per_run_ceiling
+- DFE_ENGINE_HUNTS_LOOKUP_DATABASES -> hunts.lookup_databases (comma-separated)
+- DFE_ENGINE_DETECTION_GUARD_ENABLED -> hunts.detection_guard.enabled (true/false)
+- DFE_ENGINE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES -> hunts.detection_guard.preview_window_minutes
+- DFE_ENGINE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS -> hunts.detection_guard.preview_timeout_seconds
+- DFE_ENGINE_DETECTION_GUARD_PREVIEW_MAX_ROWS -> hunts.detection_guard.preview_max_rows
+- DFE_ENGINE_DETECTION_GUARD_WARN_PER_DAY -> hunts.detection_guard.warn_per_day
+- DFE_ENGINE_DETECTION_GUARD_ACK_PER_DAY -> hunts.detection_guard.ack_per_day
+- DFE_ENGINE_DETECTION_GUARD_BLOCK_PER_DAY -> hunts.detection_guard.block_per_day
+- DFE_ENGINE_DETECTION_GUARD_WARN_MATCH_RATIO -> hunts.detection_guard.warn_match_ratio
+- DFE_ENGINE_DETECTION_GUARD_BLOCK_MATCH_RATIO -> hunts.detection_guard.block_match_ratio
+- DFE_ENGINE_DETECTION_GUARD_MIN_ROWS_FOR_RATIO -> hunts.detection_guard.min_rows_for_ratio
 
 Artifactory:
-- DFE_ARTIFACTORY_URL -> artifactory.url
-- DFE_ARTIFACTORY_USERNAME -> artifactory.username
-- DFE_ARTIFACTORY_PASSWORD -> artifactory.password
-- DFE_TEMPLATES_VERSION -> artifactory.templates_version
+- DFE_ENGINE_ARTIFACTORY_URL -> artifactory.url
+- DFE_ENGINE_ARTIFACTORY_USERNAME -> artifactory.username
+- DFE_ENGINE_ARTIFACTORY_PASSWORD -> artifactory.password
+- DFE_ENGINE_TEMPLATES_VERSION -> artifactory.templates_version
 
 Kafka:
-- DFE_KAFKA_PROVIDER -> kafka.provider (DERIVES security_protocol + sasl_mechanism
+- DFE_ENGINE_KAFKA_PROVIDER -> kafka.provider (DERIVES security_protocol + sasl_mechanism
   per the credential contract; deploys set this, never the mechanism)
-- DFE_KAFKA_BOOTSTRAP_SERVERS (legacy: KAFKA_BOOTSTRAP_SERVERS) -> kafka.bootstrap_servers
-- DFE_KAFKA_SECURITY_PROTOCOL (legacy: KAFKA_SECURITY_PROTOCOL) -> kafka.security_protocol
+- DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS (legacy: KAFKA_BOOTSTRAP_SERVERS) -> kafka.bootstrap_servers
+- DFE_ENGINE_KAFKA_SECURITY_PROTOCOL (legacy: KAFKA_SECURITY_PROTOCOL) -> kafka.security_protocol
 
 Transport (what carries a source's records between its stages):
-- DFE_TRANSPORT_DEFAULT -> transport.default (bus | direct)
-- DFE_TRANSPORT_BUS_PRESENT -> transport.bus_present (true/false)
-- DFE_MESH_ENABLED -> transport.mesh_enabled (true/false)
-- DFE_MESH_NAMESPACE -> transport.mesh_namespace (where the pool listeners live)
+- DFE_ENGINE_TRANSPORT_DEFAULT -> transport.default (bus | direct)
+- DFE_ENGINE_TRANSPORT_BUS_PRESENT -> transport.bus_present (true/false)
+- DFE_ENGINE_MESH_ENABLED -> transport.mesh_enabled (true/false)
+- DFE_ENGINE_MESH_NAMESPACE -> transport.mesh_namespace (where the pool listeners live)
 
 Schemas:
-- DFE_SCHEMAS_DIR -> schemas.schemas_dir (dfe-schemas tree root)
+- DFE_ENGINE_SCHEMAS_DIR -> schemas.schemas_dir (dfe-schemas tree root)
 
 Ingest tenancy (compiled into dfe-receiver):
-- DFE_INGEST_SOURCE_ORG_ID -> ingest.source_org_id (disallow | allow)
-- DFE_INGEST_BEARER_SECRET -> ingest.bearer_secret (Kubernetes Secret the bearer tokens mirror into)
+- DFE_ENGINE_INGEST_SOURCE_ORG_ID -> ingest.source_org_id (disallow | allow)
+- DFE_ENGINE_INGEST_BEARER_SECRET -> ingest.bearer_secret (Kubernetes Secret the bearer tokens mirror into)
 
 Auth (local):
-- DFE_AUTH_LOCAL_ENABLED -> auth.local.enabled
-- DFE_AUTH_LOCAL_ADMIN_NAME -> auth.local.admin_name
-- DFE_AUTH_LOCAL_ADMIN_PASSWORD -> auth.local.admin_password
-- DFE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
-- DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
-- DFE_AUTH_BREAKGLASS_PASSWORD -> auth.local.breakglass_password
-- DFE_RECOVERY_EMAIL -> auth.local.recovery_email
-- DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH -> auth.local.admin_password_secret_path
-- DFE_AUTH_LOCAL_ADMIN_SECRET_NAME -> auth.local.admin_secret_name
-- DFE_AUTH_LOCAL_ADMIN_SECRET_KEY -> auth.local.admin_secret_key
+- DFE_ENGINE_AUTH_LOCAL_ENABLED -> auth.local.enabled
+- DFE_ENGINE_AUTH_LOCAL_ADMIN_NAME -> auth.local.admin_name
+- DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD -> auth.local.admin_password
+- DFE_ENGINE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
+- DFE_ENGINE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
+- DFE_ENGINE_AUTH_BREAKGLASS_PASSWORD -> auth.local.breakglass_password
+- DFE_ENGINE_RECOVERY_EMAIL -> auth.local.recovery_email
+- DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH -> auth.local.admin_password_secret_path
+- DFE_ENGINE_AUTH_LOCAL_ADMIN_SECRET_NAME -> auth.local.admin_secret_name
+- DFE_ENGINE_AUTH_LOCAL_ADMIN_SECRET_KEY -> auth.local.admin_secret_key
 
 E2E server (Playwright host-run helpers; refused in production):
-- DFE_E2E_SERVER -> e2e_server
+- DFE_ENGINE_E2E_SERVER -> e2e_server
 
 Stack identity (what the deploy says this pod came from):
-- DFE_STACK_VERSION -> stack_version
-- DFE_UI_VERSION -> ui_version (the dfe-ui pin the deploy rendered)
-- DFE_PROFILE -> deployment.profile (the tier the deploy chose; empty = unknown)
-- DFE_ADMIN_LINKS -> deployment.admin_links (JSON array of the admin UIs the deploy runs)
+- DFE_ENGINE_STACK_VERSION -> stack_version
+- DFE_ENGINE_UI_VERSION -> ui_version (the dfe-ui pin the deploy rendered)
+- DFE_ENGINE_PROFILE -> deployment.profile (the tier the deploy chose; empty = unknown)
+- DFE_ENGINE_ADMIN_LINKS -> deployment.admin_links (JSON array of the admin UIs the deploy runs)
 
-Backing-service facts (who runs Kafka and ClickHouse; never DFE_KAFKA_PROVIDER, which
+Backing-service facts (who runs Kafka and ClickHouse; never DFE_ENGINE_KAFKA_PROVIDER, which
 derives the engine's own SASL protocol):
-- DFE_DEPLOYMENT_KAFKA_PROVIDER -> deployment.backing.kafka.provider
-- DFE_DEPLOYMENT_KAFKA_TIER -> deployment.backing.kafka.tier
-- DFE_DEPLOYMENT_KAFKA_REGION -> deployment.backing.kafka.region
-- DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER -> deployment.backing.clickhouse.provider
-- DFE_DEPLOYMENT_CLICKHOUSE_TIER -> deployment.backing.clickhouse.tier
-- DFE_DEPLOYMENT_CLICKHOUSE_REGION -> deployment.backing.clickhouse.region
+- DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER -> deployment.backing.kafka.provider
+- DFE_ENGINE_DEPLOYMENT_KAFKA_TIER -> deployment.backing.kafka.tier
+- DFE_ENGINE_DEPLOYMENT_KAFKA_REGION -> deployment.backing.kafka.region
+- DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_PROVIDER -> deployment.backing.clickhouse.provider
+- DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_TIER -> deployment.backing.clickhouse.tier
+- DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_REGION -> deployment.backing.clickhouse.region
 
 Repository (scope-aligned small-object store; lives in the DFE database):
-- DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
-- DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
+- DFE_ENGINE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
+- DFE_ENGINE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
 
 Storage:
-- DFE_STORAGE_TYPE -> storage.type (local, s3, http - auto-detected from path if not set)
-- DFE_STORAGE_PATH -> storage.path (local path, S3 URI, or HTTP URL)
-- DFE_S3_BUCKET -> storage.s3_bucket
-- DFE_S3_REGION -> storage.s3_region
+- DFE_ENGINE_STORAGE_TYPE -> storage.type (local, s3, http - auto-detected from path if not set)
+- DFE_ENGINE_STORAGE_PATH -> storage.path (local path, S3 URI, or HTTP URL)
+- DFE_ENGINE_S3_BUCKET -> storage.s3_bucket
+- DFE_ENGINE_S3_REGION -> storage.s3_region
 
 API request bodies:
-- DFE_API_MAX_ACTIVE_TASKS -> api.max_active_tasks
-- DFE_API_MAX_REQUEST_BODY_BYTES -> api.max_request_body_bytes
+- DFE_ENGINE_API_MAX_ACTIVE_TASKS -> api.max_active_tasks
+- DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES -> api.max_request_body_bytes
 
 API (Elasticsearch template elastic-converter upload limits):
-- DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
-- DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
-- DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
+- DFE_ENGINE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
+- DFE_ENGINE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
+- DFE_ENGINE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
   api.elastic_converter_content_length_slack_bytes
 """
 
@@ -168,7 +168,7 @@ from .yaml_utils import yaml_load
 
 
 def _get_env(primary: str, *fallbacks: str) -> str | None:
-    """Get env var with fallback support. Primary (DFE_*) takes precedence over legacy names."""
+    """Get env var with fallback support. Primary (DFE_ENGINE_*) takes precedence over legacy names."""
     if val := os.getenv(primary):
         return val
     for fallback in fallbacks:
@@ -267,7 +267,7 @@ class ClickHouseSettings(BaseModel):
     data_database: str = Field(
         default="dfe",
         description=(
-            "THE DFE database, from DFE_CLICKHOUSE_DATA_DATABASE (default `dfe`). "
+            "THE DFE database, from DFE_ENGINE_CLICKHOUSE_DATA_DATABASE (default `dfe`). "
             "Everything DFE writes lives here: the landing table, per-source tables, "
             "hunt output, the OTel telemetry tables, and the engine's own state. One "
             "name, because org isolation is by ROW POLICY rather than by splitting "
@@ -278,12 +278,12 @@ class ClickHouseSettings(BaseModel):
     )
     default_table_profile: str = Field(
         default="timeseries",
-        description="Schema profile the bootstrapped landing table is built from (DFE_DEFAULT_TABLE_PROFILE)",
+        description="Schema profile the bootstrapped landing table is built from (DFE_ENGINE_DEFAULT_TABLE_PROFILE)",
     )
     bootstrap_tables: bool = Field(
         default=True,
         description=(
-            "Apply the dfe-schemas manifest at startup (DFE_CLICKHOUSE_BOOTSTRAP_TABLES). "
+            "Apply the dfe-schemas manifest at startup (DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES). "
             "Off means the engine reports the schema state as unknown and gates nothing; "
             "it does not bring a separate bootstrapper back."
         ),
@@ -293,7 +293,7 @@ class ClickHouseSettings(BaseModel):
         ge=0.0,
         description=(
             "How long the schema phase keeps retrying an unreachable ClickHouse before "
-            "reporting the pass failed (DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS). The "
+            "reporting the pass failed (DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS). The "
             "datastore can be in the same deploy wave as the engine, so not-up-yet and "
             "broken are different answers."
         ),
@@ -304,20 +304,20 @@ class ClickHouseSettings(BaseModel):
         description=(
             "Verify the ClickHouse server certificate. None (default) follows the "
             "SCALO_TLS_VERIFY escape valve - i.e. verify ON unless the whole "
-            "environment disables it; DFE_CLICKHOUSE_VERIFY overrides per-CH "
+            "environment disables it; DFE_ENGINE_CLICKHOUSE_VERIFY overrides per-CH "
             "(set false for self-signed dev/test infra)."
         ),
     )
     ca_cert: str | None = Field(
         default=None,
-        description="PEM CA file trusted to verify the ClickHouse server cert (internal CA); DFE_CLICKHOUSE_CA_CERT.",
+        description="PEM CA file trusted to verify the ClickHouse server cert (internal CA); DFE_ENGINE_CLICKHOUSE_CA_CERT.",
     )
     connections_min: int = Field(default=10)
     connections_max: int = Field(default=300)
     platform: str = Field(
         default="auto",
         description=(
-            "The ClickHouse platform schema DDL is rendered for (DFE_CLICKHOUSE_PLATFORM): "
+            "The ClickHouse platform schema DDL is rendered for (DFE_ENGINE_CLICKHOUSE_PLATFORM): "
             "auto, cloud or self_hosted. auto asks the server, then reads the hostname. "
             "cloud or self_hosted pins it, for a server the probe reads wrongly."
         ),
@@ -327,7 +327,7 @@ class ClickHouseSettings(BaseModel):
         ge=262_144,
         description=(
             "Ceiling in bytes on the max_query_size sent with a schema DDL statement "
-            "(DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE). A statement over ClickHouse's 256 KiB "
+            "(DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE). A statement over ClickHouse's 256 KiB "
             "default is sent with its own size plus a small margin; one that would need "
             "more than this is refused before it is sent."
         ),
@@ -398,14 +398,14 @@ class DetectionGuardSettings(BaseModel):
 
     enabled: bool = Field(
         default=True,
-        description="Warn on a rule's measured alert volume. DFE_DETECTION_GUARD_ENABLED.",
+        description="Warn on a rule's measured alert volume. DFE_ENGINE_DETECTION_GUARD_ENABLED.",
     )
     preview_window_minutes: int = Field(
         default=60,
         gt=0,
         description=(
             "Lookback window the preview counts over, unless the request names its own. "
-            "DFE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES."
+            "DFE_ENGINE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES."
         ),
     )
     preview_timeout_seconds: float = Field(
@@ -413,7 +413,7 @@ class DetectionGuardSettings(BaseModel):
         gt=0,
         description=(
             "Longest the preview query may run before it is reported unfinished. "
-            "DFE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS."
+            "DFE_ENGINE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS."
         ),
     )
     preview_max_rows: int = Field(
@@ -421,7 +421,7 @@ class DetectionGuardSettings(BaseModel):
         gt=0,
         description=(
             "Most rows the preview may read before it is reported unfinished. "
-            "DFE_DETECTION_GUARD_PREVIEW_MAX_ROWS."
+            "DFE_ENGINE_DETECTION_GUARD_PREVIEW_MAX_ROWS."
         ),
     )
     warn_per_day: int = Field(
@@ -429,7 +429,7 @@ class DetectionGuardSettings(BaseModel):
         gt=0,
         description=(
             "Projected alerts a day above which the rule gets guidance. "
-            "DFE_DETECTION_GUARD_WARN_PER_DAY."
+            "DFE_ENGINE_DETECTION_GUARD_WARN_PER_DAY."
         ),
     )
     ack_per_day: int = Field(
@@ -437,7 +437,7 @@ class DetectionGuardSettings(BaseModel):
         gt=0,
         description=(
             "Projected alerts a day above which the rule gets a warning. "
-            "DFE_DETECTION_GUARD_ACK_PER_DAY."
+            "DFE_ENGINE_DETECTION_GUARD_ACK_PER_DAY."
         ),
     )
     block_per_day: int = Field(
@@ -445,7 +445,7 @@ class DetectionGuardSettings(BaseModel):
         gt=0,
         description=(
             "Projected alerts a day above which the rule is called out as plainly bad. "
-            "DFE_DETECTION_GUARD_BLOCK_PER_DAY."
+            "DFE_ENGINE_DETECTION_GUARD_BLOCK_PER_DAY."
         ),
     )
     warn_match_ratio: float = Field(
@@ -454,7 +454,7 @@ class DetectionGuardSettings(BaseModel):
         le=1,
         description=(
             "Share of the window's events a rule may match before it gets a note. "
-            "DFE_DETECTION_GUARD_WARN_MATCH_RATIO."
+            "DFE_ENGINE_DETECTION_GUARD_WARN_MATCH_RATIO."
         ),
     )
     block_match_ratio: float = Field(
@@ -463,7 +463,7 @@ class DetectionGuardSettings(BaseModel):
         le=1,
         description=(
             "Share of the window's events that makes a rule over ack_per_day plainly "
-            "bad. DFE_DETECTION_GUARD_BLOCK_MATCH_RATIO."
+            "bad. DFE_ENGINE_DETECTION_GUARD_BLOCK_MATCH_RATIO."
         ),
     )
     min_rows_for_ratio: int = Field(
@@ -471,7 +471,7 @@ class DetectionGuardSettings(BaseModel):
         ge=0,
         description=(
             "Events the window must hold before the match share is judged at all. "
-            "DFE_DETECTION_GUARD_MIN_ROWS_FOR_RATIO."
+            "DFE_ENGINE_DETECTION_GUARD_MIN_ROWS_FOR_RATIO."
         ),
     )
 
@@ -504,7 +504,7 @@ class HuntsSettings(BaseModel):
         description=(
             "The one directory holding hunt YAML, which the engine's hunt registry writes "
             "with gitops off and the hunt runner reads. A comma-separated list is refused. "
-            "DFE_HUNTS_DIR."
+            "DFE_ENGINE_HUNTS_DIR."
         ),
     )
     rules_dir: str = Field(
@@ -612,7 +612,7 @@ class HuntsSettings(BaseModel):
             "of its own rows, as a view is. The engine refuses to start on one when "
             "ClickHouse answers at its start, and starts with the check unrun when it does not. "
             "The hunt runner's role needs SELECT on each. Empty refuses every lookup. "
-            "DFE_HUNTS_LOOKUP_DATABASES (comma-separated)."
+            "DFE_ENGINE_HUNTS_LOOKUP_DATABASES (comma-separated)."
         ),
     )
 
@@ -674,10 +674,10 @@ class TransportSettings(BaseModel):
     so it has to address the pool the way the charts front it.
 
     Environment variables:
-    - DFE_TRANSPORT_DEFAULT -> transport.default
-    - DFE_TRANSPORT_BUS_PRESENT -> transport.bus_present
-    - DFE_MESH_ENABLED -> transport.mesh_enabled
-    - DFE_MESH_NAMESPACE -> transport.mesh_namespace
+    - DFE_ENGINE_TRANSPORT_DEFAULT -> transport.default
+    - DFE_ENGINE_TRANSPORT_BUS_PRESENT -> transport.bus_present
+    - DFE_ENGINE_MESH_ENABLED -> transport.mesh_enabled
+    - DFE_ENGINE_MESH_NAMESPACE -> transport.mesh_namespace
     """
 
     default: SourceTransport = Field(
@@ -723,7 +723,7 @@ class TransportSettings(BaseModel):
         if self.default == "bus" and not self.bus_present:
             raise ValueError(
                 "transport.default is 'bus' but this deployment runs no bus: set "
-                "DFE_TRANSPORT_DEFAULT=direct, or DFE_TRANSPORT_BUS_PRESENT=true"
+                "DFE_ENGINE_TRANSPORT_DEFAULT=direct, or DFE_ENGINE_TRANSPORT_BUS_PRESENT=true"
             )
         return self
 
@@ -734,7 +734,7 @@ class TransportSettings(BaseModel):
         if self.mesh_enabled and not self.mesh_namespace:
             raise ValueError(
                 "transport.mesh_enabled is on but no namespace holds the listeners: set "
-                "DFE_MESH_NAMESPACE, or DFE_MESH_ENABLED=false to dial the pools directly"
+                "DFE_ENGINE_MESH_NAMESPACE, or DFE_ENGINE_MESH_ENABLED=false to dial the pools directly"
             )
         return self
 
@@ -785,7 +785,7 @@ class KafkaSettings(BaseModel):
         default=True,
         description=(
             "Create the dfe-schemas bootstrap topic set at startup, create-only "
-            "(DFE_KAFKA_BOOTSTRAP_TOPICS). Separate from the ClickHouse dial because "
+            "(DFE_ENGINE_KAFKA_BOOTSTRAP_TOPICS). Separate from the ClickHouse dial because "
             "the two fail for different reasons and a deployment with an external "
             "broker wants one off and the other on. A deployment with no bus skips "
             "the set and still converges."
@@ -795,7 +795,7 @@ class KafkaSettings(BaseModel):
         default=False,
         description=(
             "Whether this deployment's brokers tier to object storage "
-            "(DFE_KAFKA_TIERED_STORAGE). On, the landing topic is created with "
+            "(DFE_ENGINE_KAFKA_TIERED_STORAGE). On, the landing topic is created with "
             "``remote.storage.enable``; off, the key is absent rather than set "
             "false, so a broker-level setting is left to decide. Tiering is a "
             "per-topic switch as well as a per-broker one: with the broker "
@@ -819,7 +819,7 @@ class KafkaSettings(BaseModel):
         le=10,
         description=(
             "Replication factor for each source's _land and _load topics "
-            "(DFE_KAFKA_TOPIC_REPLICATION_FACTOR), used as given when set. Unset "
+            "(DFE_ENGINE_KAFKA_TOPIC_REPLICATION_FACTOR), used as given when set. Unset "
             "takes the dfe-schemas landing default clamped to the brokers the bus "
             "reports, so a managed broker that refuses fewer than 3 replicas gets 3 "
             "and a one-broker dev cluster gets 1."
@@ -855,7 +855,7 @@ class KafkaSettings(BaseModel):
         description=(
             "``max.message.bytes`` for every topic DFE creates and converges: the "
             "bootstrap set and each source's _land and _load "
-            "(DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES). Set it to the deployment's message "
+            "(DFE_ENGINE_KAFKA_TOPIC_MAX_MESSAGE_BYTES). Set it to the deployment's message "
             "size, the one its broker and producers carry. Unset falls back to the "
             "dfe-schemas manifest's size, which a managed broker capped below it "
             "refuses at create."
@@ -896,7 +896,7 @@ class QuerySettings(BaseModel):
     """Query registry settings.
 
     Environment variables:
-    - DFE_QUERY_YAML_DIR -> query.yaml_dir
+    - DFE_ENGINE_QUERY_YAML_DIR -> query.yaml_dir
     """
 
     yaml_dir: str = Field(default="", description="YAML directory for query definitions (SSoT)")
@@ -908,11 +908,11 @@ class QueryViewSettings(BaseModel):
     Controls the restricted RBAC user, resource limits, and catalog caching.
 
     Environment variables:
-    - DFE_QUERY_VIEWS_RESTRICTED_USER -> query_views.restricted_user
-    - DFE_QUERY_VIEWS_RESTRICTED_PASSWORD -> query_views.restricted_password
-    - DFE_QUERY_VIEWS_MAX_EXECUTION_TIME -> query_views.max_execution_time
-    - DFE_QUERY_VIEWS_MAX_ROWS_TO_READ -> query_views.max_rows_to_read
-    - DFE_QUERY_VIEWS_MAX_MEMORY_USAGE -> query_views.max_memory_usage
+    - DFE_ENGINE_QUERY_VIEWS_RESTRICTED_USER -> query_views.restricted_user
+    - DFE_ENGINE_QUERY_VIEWS_RESTRICTED_PASSWORD -> query_views.restricted_password
+    - DFE_ENGINE_QUERY_VIEWS_MAX_EXECUTION_TIME -> query_views.max_execution_time
+    - DFE_ENGINE_QUERY_VIEWS_MAX_ROWS_TO_READ -> query_views.max_rows_to_read
+    - DFE_ENGINE_QUERY_VIEWS_MAX_MEMORY_USAGE -> query_views.max_memory_usage
     """
 
     restricted_user: str = Field(
@@ -961,18 +961,18 @@ class SamplerSettings(BaseModel):
     is memory-hungry, so its concurrency is capped at ``max_concurrent`` instances,
     each bounded to ``max_memory_gb`` - both small by default.
 
-    Environment variables (DFE_SAMPLER_ prefix):
-    - DFE_SAMPLER_DEFAULT_MODE -> sampler.default_mode
-    - DFE_SAMPLER_DEFAULT_LIMIT -> sampler.default_limit
-    - DFE_SAMPLER_MAX_LIMIT -> sampler.max_limit
-    - DFE_SAMPLER_LEVEL -> sampler.level
-    - DFE_SAMPLER_MAX_CONCURRENT -> sampler.max_concurrent
-    - DFE_SAMPLER_MAX_MEMORY_GB -> sampler.max_memory_gb
-    - DFE_SAMPLER_MAX_SCAN_ROWS -> sampler.max_scan_rows
-    - DFE_SAMPLER_KAFKA_MAX_MESSAGES -> sampler.kafka_max_messages
-    - DFE_SAMPLER_TIMESTAMP_FIELD -> sampler.timestamp_field
-    - DFE_SAMPLER_WAIT_SECONDS -> sampler.wait_seconds
-    - DFE_SAMPLER_MAX_EXECUTION_TIME -> sampler.max_execution_time
+    Environment variables (DFE_ENGINE_SAMPLER_ prefix):
+    - DFE_ENGINE_SAMPLER_DEFAULT_MODE -> sampler.default_mode
+    - DFE_ENGINE_SAMPLER_DEFAULT_LIMIT -> sampler.default_limit
+    - DFE_ENGINE_SAMPLER_MAX_LIMIT -> sampler.max_limit
+    - DFE_ENGINE_SAMPLER_LEVEL -> sampler.level
+    - DFE_ENGINE_SAMPLER_MAX_CONCURRENT -> sampler.max_concurrent
+    - DFE_ENGINE_SAMPLER_MAX_MEMORY_GB -> sampler.max_memory_gb
+    - DFE_ENGINE_SAMPLER_MAX_SCAN_ROWS -> sampler.max_scan_rows
+    - DFE_ENGINE_SAMPLER_KAFKA_MAX_MESSAGES -> sampler.kafka_max_messages
+    - DFE_ENGINE_SAMPLER_TIMESTAMP_FIELD -> sampler.timestamp_field
+    - DFE_ENGINE_SAMPLER_WAIT_SECONDS -> sampler.wait_seconds
+    - DFE_ENGINE_SAMPLER_MAX_EXECUTION_TIME -> sampler.max_execution_time
     """
 
     default_mode: Literal["recent", "random", "smart", "anomaly"] = Field(
@@ -1024,17 +1024,17 @@ class SyntheticDataSettings(BaseModel):
     name reference packs and a receiver URL and the engine keeps those streams
     running for the pod's lifetime. Default empty = off.
 
-    Environment variables (DFE_SYNTHETIC_DATA_ prefix):
-    - DFE_SYNTHETIC_DATA_MAX_COUNT -> synthetic_data.max_count
-    - DFE_SYNTHETIC_DATA_MAX_RATE_EPS -> synthetic_data.max_rate_eps
-    - DFE_SYNTHETIC_DATA_MAX_STREAM_SECONDS -> synthetic_data.max_stream_seconds
-    - DFE_SYNTHETIC_DATA_DEFAULT_RATE_EPS -> synthetic_data.default_rate_eps
-    - DFE_SYNTHETIC_DATA_AUTOSTART_SCHEMAS -> synthetic_data.autostart_schemas
-    - DFE_SYNTHETIC_DATA_AUTOSTART_RECEIVER_URL -> synthetic_data.autostart_receiver_url
-    - DFE_SYNTHETIC_DATA_AUTOSTART_RATE_EPS -> synthetic_data.autostart_rate_eps
-    - DFE_SYNTHETIC_DATA_AUTOSTART_SEED -> synthetic_data.autostart_seed
-    - DFE_SYNTHETIC_DATA_MAX_CONCURRENT_STREAMS -> synthetic_data.max_concurrent_streams
-    - DFE_SYNTHETIC_DATA_ALLOWED_RECEIVER_HOSTS -> synthetic_data.allowed_receiver_hosts
+    Environment variables (DFE_ENGINE_SYNTHETIC_DATA_ prefix):
+    - DFE_ENGINE_SYNTHETIC_DATA_MAX_COUNT -> synthetic_data.max_count
+    - DFE_ENGINE_SYNTHETIC_DATA_MAX_RATE_EPS -> synthetic_data.max_rate_eps
+    - DFE_ENGINE_SYNTHETIC_DATA_MAX_STREAM_SECONDS -> synthetic_data.max_stream_seconds
+    - DFE_ENGINE_SYNTHETIC_DATA_DEFAULT_RATE_EPS -> synthetic_data.default_rate_eps
+    - DFE_ENGINE_SYNTHETIC_DATA_AUTOSTART_SCHEMAS -> synthetic_data.autostart_schemas
+    - DFE_ENGINE_SYNTHETIC_DATA_AUTOSTART_RECEIVER_URL -> synthetic_data.autostart_receiver_url
+    - DFE_ENGINE_SYNTHETIC_DATA_AUTOSTART_RATE_EPS -> synthetic_data.autostart_rate_eps
+    - DFE_ENGINE_SYNTHETIC_DATA_AUTOSTART_SEED -> synthetic_data.autostart_seed
+    - DFE_ENGINE_SYNTHETIC_DATA_MAX_CONCURRENT_STREAMS -> synthetic_data.max_concurrent_streams
+    - DFE_ENGINE_SYNTHETIC_DATA_ALLOWED_RECEIVER_HOSTS -> synthetic_data.allowed_receiver_hosts
     """
 
     max_count: int = Field(
@@ -1084,10 +1084,10 @@ class KedaShimSettings(BaseModel):
     optional mounted override), so a HyperDX schema rename or a new scaling signal is
     a CONFIG edit, never a shim rebuild.
 
-    Environment variables (DFE_KEDA_SHIM_ prefix):
-    - DFE_KEDA_SHIM_HOST -> keda_shim.host
-    - DFE_KEDA_SHIM_PORT -> keda_shim.port
-    - DFE_KEDA_SHIM_QUERY_CONFIG -> keda_shim.query_config (override catalogue path)
+    Environment variables (DFE_ENGINE_KEDA_SHIM_ prefix):
+    - DFE_ENGINE_KEDA_SHIM_HOST -> keda_shim.host
+    - DFE_ENGINE_KEDA_SHIM_PORT -> keda_shim.port
+    - DFE_ENGINE_KEDA_SHIM_QUERY_CONFIG -> keda_shim.query_config (override catalogue path)
     """
 
     host: str = Field(default="0.0.0.0", description="Shim HTTP bind address")  # noqa: S104
@@ -1108,8 +1108,8 @@ class RepositorySettings(BaseModel):
     table -- it carries no database of its own.
 
     Environment variables:
-    - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
-    - DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
+    - DFE_ENGINE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
+    - DFE_ENGINE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
     """
 
     max_prefs_bytes: int = Field(
@@ -1161,12 +1161,12 @@ class BackingSettings(BaseModel):
     """The deployer's facts for each backing service the engine reports on.
 
     Environment variables:
-    - DFE_DEPLOYMENT_KAFKA_PROVIDER -> deployment.backing.kafka.provider
-    - DFE_DEPLOYMENT_KAFKA_TIER -> deployment.backing.kafka.tier
-    - DFE_DEPLOYMENT_KAFKA_REGION -> deployment.backing.kafka.region
-    - DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER -> deployment.backing.clickhouse.provider
-    - DFE_DEPLOYMENT_CLICKHOUSE_TIER -> deployment.backing.clickhouse.tier
-    - DFE_DEPLOYMENT_CLICKHOUSE_REGION -> deployment.backing.clickhouse.region
+    - DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER -> deployment.backing.kafka.provider
+    - DFE_ENGINE_DEPLOYMENT_KAFKA_TIER -> deployment.backing.kafka.tier
+    - DFE_ENGINE_DEPLOYMENT_KAFKA_REGION -> deployment.backing.kafka.region
+    - DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_PROVIDER -> deployment.backing.clickhouse.provider
+    - DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_TIER -> deployment.backing.clickhouse.tier
+    - DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_REGION -> deployment.backing.clickhouse.region
     """
 
     kafka: BackingFactSettings = Field(default_factory=BackingFactSettings)
@@ -1182,15 +1182,15 @@ class DeploymentSettings(BaseModel):
     """Deployment configuration settings.
 
     Environment variables:
-    - DFE_DEPLOYMENT_TARGET -> deployment.target
-    - DFE_DEPLOYMENT_NAMESPACE -> deployment.namespace
-    - DFE_PROFILE -> deployment.profile
-    - DFE_ADMIN_LINKS -> deployment.admin_links
-    - DFE_DEPLOYMENT_APP_CONFIG_DIR -> deployment.app_config_dir
-    - DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR -> deployment.app_config_base_dir
-    - DFE_DEPLOYMENT_APP_CONFIG_MOUNT -> deployment.app_config_mount
-    - DFE_DEPLOYMENT_APP_ENV_DIR -> deployment.app_env_dir
-    - DFE_DEPLOYMENT_KAFKA_* / DFE_DEPLOYMENT_CLICKHOUSE_* -> deployment.backing
+    - DFE_ENGINE_DEPLOYMENT_TARGET -> deployment.target
+    - DFE_ENGINE_DEPLOYMENT_NAMESPACE -> deployment.namespace
+    - DFE_ENGINE_PROFILE -> deployment.profile
+    - DFE_ENGINE_ADMIN_LINKS -> deployment.admin_links
+    - DFE_ENGINE_DEPLOYMENT_APP_CONFIG_DIR -> deployment.app_config_dir
+    - DFE_ENGINE_DEPLOYMENT_APP_CONFIG_BASE_DIR -> deployment.app_config_base_dir
+    - DFE_ENGINE_DEPLOYMENT_APP_CONFIG_MOUNT -> deployment.app_config_mount
+    - DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR -> deployment.app_env_dir
+    - DFE_ENGINE_DEPLOYMENT_KAFKA_* / DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_* -> deployment.backing
     """
 
     backing: BackingSettings = Field(
@@ -1211,7 +1211,7 @@ class DeploymentSettings(BaseModel):
             "rather than interpreted: the engine judges an app's offer against it "
             "but never changes what it deploys. Empty means unknown, which a "
             "hand-run engine is; every deployer names one, dfe-docker included. "
-            "DFE_PROFILE."
+            "DFE_ENGINE_PROFILE."
         ),
     )
     admin_links: str | list[Any] = Field(
@@ -1224,7 +1224,7 @@ class DeploymentSettings(BaseModel):
             "in-network address the engine GETs to report the UI up or down. Held "
             "as given and read at startup, where an entry that does not validate is "
             "dropped and counted rather than stopping the engine. Empty means none "
-            "listed. DFE_ADMIN_LINKS."
+            "listed. DFE_ENGINE_ADMIN_LINKS."
         ),
     )
     namespace: str = Field(
@@ -1232,7 +1232,7 @@ class DeploymentSettings(BaseModel):
         description=(
             "Kubernetes namespace this engine runs in, injected by the chart from "
             "metadata.namespace. Names the namespace in the credential-fetch command "
-            "the login page shows. DFE_DEPLOYMENT_NAMESPACE."
+            "the login page shows. DFE_ENGINE_DEPLOYMENT_NAMESPACE."
         ),
     )
     target: Literal["kubernetes", "docker", "unknown"] = Field(
@@ -1252,7 +1252,7 @@ class DeploymentSettings(BaseModel):
             "sub-directory per app. Set by a deployer that has no chart to do it "
             "and mounts the result into its containers; empty means something "
             "else delivers the overlay, which on Kubernetes is the app's chart. "
-            "DFE_DEPLOYMENT_APP_CONFIG_DIR."
+            "DFE_ENGINE_DEPLOYMENT_APP_CONFIG_DIR."
         ),
     )
     app_config_base_dir: str = Field(
@@ -1262,7 +1262,7 @@ class DeploymentSettings(BaseModel):
             "<service>.yaml. The instance overlay is merged OVER it, so brokers, "
             "warehouse credentials and spool paths stay with the deployment "
             "instead of being committed to the deploy repo. "
-            "DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR."
+            "DFE_ENGINE_DEPLOYMENT_APP_CONFIG_BASE_DIR."
         ),
     )
     app_config_mount: str = Field(
@@ -1271,7 +1271,7 @@ class DeploymentSettings(BaseModel):
             "Path the APPS see app_config_dir at, where the two differ - the "
             "engine and the app mount one directory at their own paths, and a "
             "rendered file names the app's. Empty means they are the same. "
-            "DFE_DEPLOYMENT_APP_CONFIG_MOUNT."
+            "DFE_ENGINE_DEPLOYMENT_APP_CONFIG_MOUNT."
         ),
     )
     app_env_dir: str = Field(
@@ -1282,7 +1282,7 @@ class DeploymentSettings(BaseModel):
             "from the host. Each file is written 0640 with the directory's group, "
             "so the engine must hold that group. Empty means something else "
             "delivers the overlay's extraEnv block, which on Kubernetes is the "
-            "app's own chart. DFE_DEPLOYMENT_APP_ENV_DIR."
+            "app's own chart. DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR."
         ),
     )
 
@@ -1291,10 +1291,10 @@ class TransformValidationSettings(BaseModel):
     """Syntax validation for authored transform files.
 
     Environment variables:
-    - DFE_TRANSFORM_VALIDATION_ENABLED -> transform_validation.enabled
-    - DFE_TRANSFORM_VALIDATION_BLOCKING -> transform_validation.blocking
-    - DFE_TRANSFORM_DRY_RUN_ENABLED -> transform_validation.dry_run
-    - DFE_TRANSFORM_ALLOW_HOST_FUNCTIONS -> transform_validation.allow_host_functions
+    - DFE_ENGINE_TRANSFORM_VALIDATION_ENABLED -> transform_validation.enabled
+    - DFE_ENGINE_TRANSFORM_VALIDATION_BLOCKING -> transform_validation.blocking
+    - DFE_ENGINE_TRANSFORM_DRY_RUN_ENABLED -> transform_validation.dry_run
+    - DFE_ENGINE_TRANSFORM_ALLOW_HOST_FUNCTIONS -> transform_validation.allow_host_functions
     """
 
     enabled: bool = Field(
@@ -1336,7 +1336,7 @@ class SchemasSettings(BaseModel):
     """Shared schemas settings (dfe-schemas tree).
 
     Environment variables:
-    - DFE_SCHEMAS_DIR -> schemas.schemas_dir
+    - DFE_ENGINE_SCHEMAS_DIR -> schemas.schemas_dir
     """
 
     schemas_dir: str = Field(
@@ -1349,11 +1349,11 @@ class SourceSettings(BaseModel):
     """Source registry settings.
 
     Environment variables:
-    - DFE_SOURCES_DIR -> source.sources_dir
-    - DFE_SOURCE_BUILDS_DIR -> source.builds_dir
-    - DFE_SOURCE_PLANS_DIR -> source.plans_dir
-    - DFE_SOURCE_DEPLOYS_DIR -> source.deploys_dir
-    - DFE_SOURCE_ALLOW_MIXED_FETCHER_TYPES -> source.allow_mixed_fetcher_types
+    - DFE_ENGINE_SOURCES_DIR -> source.sources_dir
+    - DFE_ENGINE_SOURCE_BUILDS_DIR -> source.builds_dir
+    - DFE_ENGINE_SOURCE_PLANS_DIR -> source.plans_dir
+    - DFE_ENGINE_SOURCE_DEPLOYS_DIR -> source.deploys_dir
+    - DFE_ENGINE_SOURCE_ALLOW_MIXED_FETCHER_TYPES -> source.allow_mixed_fetcher_types
     """
 
     sources_dir: str = Field(default="", description="YAML directory for Source definitions (SSoT)")
@@ -1382,7 +1382,7 @@ class FieldMapSettings(BaseModel):
     """Field map registry settings.
 
     Environment variables:
-    - DFE_FIELDMAPS_DIR -> fieldmap.fieldmaps_dir
+    - DFE_ENGINE_FIELDMAPS_DIR -> fieldmap.fieldmaps_dir
     """
 
     fieldmaps_dir: str = Field(
@@ -1394,7 +1394,7 @@ class SigmaSettings(BaseModel):
     """Sigma detection pipeline settings.
 
     Environment variables:
-    - DFE_SIGMA_ENABLED -> sigma.enabled
+    - DFE_ENGINE_SIGMA_ENABLED -> sigma.enabled
     """
 
     enabled: bool = Field(
@@ -1410,9 +1410,9 @@ class ServicesSettings(BaseModel):
     replica dir.
 
     Environment variables:
-    - DFE_SERVICES_TRANSFORM_WASM_URL -> services.transform_wasm_url
-    - DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL -> services.transform_wasm_compiler_url
-    - DFE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
+    - DFE_ENGINE_SERVICES_TRANSFORM_WASM_URL -> services.transform_wasm_url
+    - DFE_ENGINE_SERVICES_TRANSFORM_WASM_COMPILER_URL -> services.transform_wasm_compiler_url
+    - DFE_ENGINE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
     """
 
     transform_wasm_url: str = Field(default="http://localhost:8080")
@@ -1426,8 +1426,8 @@ class HelmSettings(BaseModel):
     """Helm values compiler settings.
 
     Environment variables:
-    - DFE_HELM_OUTPUT_DIR -> helm.output_dir
-    - DFE_HELM_ENVIRONMENT_FILE -> helm.environment_file
+    - DFE_ENGINE_HELM_OUTPUT_DIR -> helm.output_dir
+    - DFE_ENGINE_HELM_ENVIRONMENT_FILE -> helm.environment_file
     """
 
     output_dir: str = Field(default="", description="Output directory for compiled Helm values")
@@ -1464,7 +1464,7 @@ class LocalAuthSettings(BaseModel):
     """Built-in local-account bootstrap config (nested under auth.local).
 
     When enabled, the engine seeds admin/operator/viewer accounts at startup with
-    these passwords. Populated by load_settings from the DFE_AUTH_LOCAL_* env
+    these passwords. Populated by load_settings from the DFE_ENGINE_AUTH_LOCAL_* env
     vars; field names must match the keys set there.
     """
 
@@ -1478,7 +1478,7 @@ class LocalAuthSettings(BaseModel):
         description=(
             "Named accounts reconciled on EVERY startup (config wins), so shared team "
             "logins survive a teardown+rebuild unchanged (dfe-infra #106). Set from "
-            "DFE_AUTH_LOCAL_SEED_ACCOUNTS: a JSON list of "
+            "DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS: a JSON list of "
             "{username, password, groups}. Profile-independent (same across slim/single/scale)."
         ),
     )
@@ -1487,14 +1487,14 @@ class LocalAuthSettings(BaseModel):
         description=(
             "First-boot password for the break-glass recovery admin. Hashed into the "
             "deploy repo's governance settings when no hash is committed yet, and "
-            "ignored from then on. DFE_AUTH_BREAKGLASS_PASSWORD."
+            "ignored from then on. DFE_ENGINE_AUTH_BREAKGLASS_PASSWORD."
         ),
     )
     recovery_email: str = Field(
         default="",
         description=(
             "Contact email for the bootstrap admin and break-glass recovery accounts. "
-            "DFE_RECOVERY_EMAIL. Empty falls back to {username}@dfe.local."
+            "DFE_ENGINE_RECOVERY_EMAIL. Empty falls back to {username}@dfe.local."
         ),
     )
     admin_password_secret_path: str = Field(
@@ -1503,19 +1503,19 @@ class LocalAuthSettings(BaseModel):
             "Where in the secret store the deployment keeps the admin password. Set "
             "= the rotation endpoint writes the new password there; empty = the "
             "password is changed where the deployment keeps it, and the endpoint "
-            "returns 501 with the command. DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH."
+            "returns 501 with the command. DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH."
         ),
     )
     admin_secret_name: str = Field(
         default="dfe-engine",
         description=(
             "Secret holding the admin password, for the credential-fetch command the "
-            "login page shows while setup is incomplete. DFE_AUTH_LOCAL_ADMIN_SECRET_NAME."
+            "login page shows while setup is incomplete. DFE_ENGINE_AUTH_LOCAL_ADMIN_SECRET_NAME."
         ),
     )
     admin_secret_key: str = Field(
         default="admin-password",
-        description=("Key within admin_secret_name. DFE_AUTH_LOCAL_ADMIN_SECRET_KEY."),
+        description=("Key within admin_secret_name. DFE_ENGINE_AUTH_LOCAL_ADMIN_SECRET_KEY."),
     )
 
 
@@ -1527,9 +1527,9 @@ class AccountStoreSettings(BaseModel):
     database is separate from HyperDX's for isolation.
 
     Environment variables:
-    - DFE_AUTH_ACCOUNTS_STORE_URI -> auth.accounts_store.uri
-    - DFE_AUTH_ACCOUNTS_STORE_DATABASE -> auth.accounts_store.database
-    - DFE_AUTH_ACCOUNTS_STORE_COLLECTION -> auth.accounts_store.collection
+    - DFE_ENGINE_AUTH_ACCOUNTS_STORE_URI -> auth.accounts_store.uri
+    - DFE_ENGINE_AUTH_ACCOUNTS_STORE_DATABASE -> auth.accounts_store.database
+    - DFE_ENGINE_AUTH_ACCOUNTS_STORE_COLLECTION -> auth.accounts_store.collection
     """
 
     uri: str = Field(
@@ -1551,10 +1551,10 @@ class LoginThrottleSettings(BaseModel):
     ``max_delay_seconds``; a key forgets its failures after the same span with none.
 
     Environment variables:
-    - DFE_AUTH_LOGIN_THROTTLE_ENABLED -> auth.login_throttle.enabled
-    - DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES -> auth.login_throttle.username_failures
-    - DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES -> auth.login_throttle.client_failures
-    - DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS -> auth.login_throttle.max_delay_seconds
+    - DFE_ENGINE_AUTH_LOGIN_THROTTLE_ENABLED -> auth.login_throttle.enabled
+    - DFE_ENGINE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES -> auth.login_throttle.username_failures
+    - DFE_ENGINE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES -> auth.login_throttle.client_failures
+    - DFE_ENGINE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS -> auth.login_throttle.max_delay_seconds
     """
 
     enabled: bool = Field(default=True, description="Throttle failed sign-ins")
@@ -1587,12 +1587,12 @@ class AuthSettings(BaseModel):
     Bespoke role->permission RBAC. Zero external dependencies.
 
     Environment variables:
-    - DFE_AUTH_ENABLED -> auth.enabled
-    - DFE_AUTH_DIR -> auth.auth_dir
-    - DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS -> auth.api_key_default_ttl_days
-    - DFE_AUTH_OIDC_GROUP_SYNC_ENABLED -> auth.oidc_group_sync_enabled
-    - DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS -> auth.oidc_group_sync_tick_seconds
-    - DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS -> auth.oidc_login_directory_deadline_seconds
+    - DFE_ENGINE_AUTH_ENABLED -> auth.enabled
+    - DFE_ENGINE_AUTH_DIR -> auth.auth_dir
+    - DFE_ENGINE_AUTH_API_KEY_DEFAULT_TTL_DAYS -> auth.api_key_default_ttl_days
+    - DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_ENABLED -> auth.oidc_group_sync_enabled
+    - DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS -> auth.oidc_group_sync_tick_seconds
+    - DFE_ENGINE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS -> auth.oidc_login_directory_deadline_seconds
     """
 
     enabled: bool = Field(
@@ -1601,7 +1601,7 @@ class AuthSettings(BaseModel):
             "Enable authorization. Defaults ON so it matches env's default "
             "'production' posture -- with it off, api/deps.py hands an "
             "unauthenticated request the admin role. Dev and test opt out with "
-            "DFE_AUTH_ENABLED=false, which needs DFE_ENV set to a dev posture too "
+            "DFE_ENGINE_AUTH_ENABLED=false, which needs DFE_ENGINE_ENV set to a dev posture too "
             "(see DFESettings._reject_insecure_production_posture)."
         ),
     )
@@ -1624,7 +1624,7 @@ class AuthSettings(BaseModel):
         default=True,
         description=(
             "Sync each enabled api-mode OIDC provider's groups every sync_interval in the background. "
-            "Off leaves only POST /oidc-providers/{name}/sync. DFE_AUTH_OIDC_GROUP_SYNC_ENABLED."
+            "Off leaves only POST /oidc-providers/{name}/sync. DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_ENABLED."
         ),
     )
     oidc_group_sync_tick_seconds: int = Field(
@@ -1632,7 +1632,7 @@ class AuthSettings(BaseModel):
         ge=1,
         description=(
             "How often the background group sync checks which providers are due. "
-            "DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS."
+            "DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS."
         ),
     )
     oidc_login_directory_deadline_seconds: float = Field(
@@ -1643,7 +1643,7 @@ class AuthSettings(BaseModel):
             "and retry included. Past it the login keeps the groups it already has, "
             "the same as a directory that does not answer. Each page alone may take "
             "the HTTP client's full timeout, so without this a slow directory can hold "
-            "a login for minutes. DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS."
+            "a login for minutes. DFE_ENGINE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS."
         ),
     )
     proxy_provider: str = Field(
@@ -1656,7 +1656,7 @@ class AuthSettings(BaseModel):
             "IdP's accounts are not two identities. Default 'oidc' is the protocol, "
             "not a provider: it keeps a proxy-only deployment's existing accounts "
             "reachable, and it matches no RP provider name. "
-            "DFE_AUTH_PROXY_PROVIDER."
+            "DFE_ENGINE_AUTH_PROXY_PROVIDER."
         ),
     )
     source_provider_bindings: dict[str, str] = Field(
@@ -1671,7 +1671,7 @@ class AuthSettings(BaseModel):
             "every such account stays refused -- fail closed. A stamp maps to one "
             "provider, so a second IdP can never claim the same accounts, and an "
             "account with NO stamp is a local credential that no binding can name. "
-            "DFE_AUTH_SOURCE_PROVIDER_BINDINGS, a JSON object."
+            "DFE_ENGINE_AUTH_SOURCE_PROVIDER_BINDINGS, a JSON object."
         ),
     )
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
@@ -1693,7 +1693,7 @@ class AuthSettings(BaseModel):
         description=(
             "Lifetime of an API key created without expires_at, in days. 0 creates "
             "such a key with no expiry. A key that names its own expires_at keeps it. "
-            "DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS."
+            "DFE_ENGINE_AUTH_API_KEY_DEFAULT_TTL_DAYS."
         ),
     )
 
@@ -1715,14 +1715,14 @@ class HyperDXSettings(BaseModel):
     """HyperDX integration settings.
 
     Environment variables:
-    - DFE_HYPERDX_BASE_URL -> hyperdx.base_url
-    - DFE_HYPERDX_ENABLED -> hyperdx.enabled
-    - DFE_HYPERDX_API_KEY_ENV -> hyperdx.api_key_env
+    - DFE_ENGINE_HYPERDX_BASE_URL -> hyperdx.base_url
+    - DFE_ENGINE_HYPERDX_ENABLED -> hyperdx.enabled
+    - DFE_ENGINE_HYPERDX_API_KEY_ENV -> hyperdx.api_key_env
     """
 
     base_url: str = Field(default="", description="HyperDX API base URL")
     api_key_env: str = Field(
-        default="DFE_HYPERDX_API_KEY",
+        default="DFE_ENGINE_HYPERDX_API_KEY",
         description="Env var for HyperDX API key",
     )
     enabled: bool = Field(default=False, description="Enable HyperDX integration")
@@ -1754,10 +1754,10 @@ class GitopsWriteSettings(BaseModel):
     :class:`~scalo.resilience.CircuitBreakerConfig`.
 
     Environment variables:
-    - DFE_GITOPS_WRITE_TIMEOUT_SECONDS -> gitops.write.timeout_seconds
-    - DFE_GITOPS_WRITE_BUDGET_SECONDS -> gitops.write.budget_seconds
-    - DFE_GITOPS_WRITE_FAILURE_THRESHOLD -> gitops.write.failure_threshold
-    - DFE_GITOPS_WRITE_RESET_TIMEOUT -> gitops.write.reset_timeout
+    - DFE_ENGINE_GITOPS_WRITE_TIMEOUT_SECONDS -> gitops.write.timeout_seconds
+    - DFE_ENGINE_GITOPS_WRITE_BUDGET_SECONDS -> gitops.write.budget_seconds
+    - DFE_ENGINE_GITOPS_WRITE_FAILURE_THRESHOLD -> gitops.write.failure_threshold
+    - DFE_ENGINE_GITOPS_WRITE_RESET_TIMEOUT -> gitops.write.reset_timeout
     """
 
     timeout_seconds: float = Field(
@@ -1800,10 +1800,10 @@ class GitopsReadSettings(BaseModel):
     cannot hold startup.
 
     Environment variables:
-    - DFE_GITOPS_READ_TIMEOUT_SECONDS -> gitops.read.timeout_seconds
+    - DFE_ENGINE_GITOPS_READ_TIMEOUT_SECONDS -> gitops.read.timeout_seconds
     """
 
-    # The cascade's last rung: a config file or DFE_GITOPS_READ_TIMEOUT_SECONDS overrides it.
+    # The cascade's last rung: a config file or DFE_ENGINE_GITOPS_READ_TIMEOUT_SECONDS overrides it.
     timeout_seconds: float = Field(
         default=3.0,
         gt=0.0,
@@ -1827,9 +1827,9 @@ class GitopsPackSettings(BaseModel):
     each repack starts an unreachable object's two-week grace period again.
 
     Environment variables:
-    - DFE_GITOPS_PACK_LOOSE_OBJECTS -> gitops.pack.loose_objects
-    - DFE_GITOPS_PACK_PACKS -> gitops.pack.packs
-    - DFE_GITOPS_PACK_INTERVAL_SECONDS -> gitops.pack.interval_seconds
+    - DFE_ENGINE_GITOPS_PACK_LOOSE_OBJECTS -> gitops.pack.loose_objects
+    - DFE_ENGINE_GITOPS_PACK_PACKS -> gitops.pack.packs
+    - DFE_ENGINE_GITOPS_PACK_INTERVAL_SECONDS -> gitops.pack.interval_seconds
     """
 
     # git's own gc.auto default.
@@ -1859,20 +1859,20 @@ class GitopsSettings(BaseModel):
     and pushes when push=True. Secrets never go here -- only declarative config
     Argo consumes.
 
-    Environment variables (DFE_GITOPS_ prefix):
-    - DFE_GITOPS_ENABLED -> gitops.enabled
-    - DFE_GITOPS_REPO_URL -> gitops.repo_url
-    - DFE_GITOPS_BRANCH -> gitops.branch
-    - DFE_GITOPS_LOCAL_PATH -> gitops.local_path
-    - DFE_GITOPS_PUSH -> gitops.push
-    - DFE_GITOPS_USERNAME / DFE_GITOPS_TOKEN -> HTTPS push auth
-    - DFE_GITOPS_AUTHOR_NAME / DFE_GITOPS_AUTHOR_EMAIL -> commit identity
-    - DFE_GITOPS_MODE -> gitops.mode
-    - DFE_GITOPS_FORGE_PROVIDER -> gitops.forge_provider (review-PR seam)
-    - DFE_GITOPS_FORGE_API_BASE -> gitops.forge_api_base
-    - DFE_GITOPS_READ_* -> gitops.read (see GitopsReadSettings)
-    - DFE_GITOPS_WRITE_* -> gitops.write (see GitopsWriteSettings)
-    - DFE_GITOPS_PACK_* -> gitops.pack (see GitopsPackSettings)
+    Environment variables (DFE_ENGINE_GITOPS_ prefix):
+    - DFE_ENGINE_GITOPS_ENABLED -> gitops.enabled
+    - DFE_ENGINE_GITOPS_REPO_URL -> gitops.repo_url
+    - DFE_ENGINE_GITOPS_BRANCH -> gitops.branch
+    - DFE_ENGINE_GITOPS_LOCAL_PATH -> gitops.local_path
+    - DFE_ENGINE_GITOPS_PUSH -> gitops.push
+    - DFE_ENGINE_GITOPS_USERNAME / DFE_ENGINE_GITOPS_TOKEN -> HTTPS push auth
+    - DFE_ENGINE_GITOPS_AUTHOR_NAME / DFE_ENGINE_GITOPS_AUTHOR_EMAIL -> commit identity
+    - DFE_ENGINE_GITOPS_MODE -> gitops.mode
+    - DFE_ENGINE_GITOPS_FORGE_PROVIDER -> gitops.forge_provider (review-PR seam)
+    - DFE_ENGINE_GITOPS_FORGE_API_BASE -> gitops.forge_api_base
+    - DFE_ENGINE_GITOPS_READ_* -> gitops.read (see GitopsReadSettings)
+    - DFE_ENGINE_GITOPS_WRITE_* -> gitops.write (see GitopsWriteSettings)
+    - DFE_ENGINE_GITOPS_PACK_* -> gitops.pack (see GitopsPackSettings)
     """
 
     enabled: bool = Field(default=False, description="Enable gitops publishing")
@@ -1889,7 +1889,7 @@ class GitopsSettings(BaseModel):
         description=(
             "Operator posture. 'solo' declares a single-operator deployment and "
             "is the explicit override that permits gitops auto-merge in a "
-            "production DFE_ENV; 'team' (default) refuses auto-merge outside "
+            "production DFE_ENGINE_ENV; 'team' (default) refuses auto-merge outside "
             "dev postures."
         ),
     )
@@ -1926,15 +1926,15 @@ _DEV_CORS_ORIGINS = ("http://localhost:5173", "http://localhost:5174", "http://l
 
 
 def is_dev_posture(env: str) -> bool:
-    """True when DFE_ENV declares a non-production posture (dev/local/test/ci)."""
+    """True when DFE_ENGINE_ENV declares a non-production posture (dev/local/test/ci)."""
     return env.strip().lower() in _NON_PROD_ENVS
 
 
 def e2e_routes_enabled(settings: DFESettings) -> bool:
     """True when the unauthenticated /api/e2e/* group may be mounted.
 
-    Requires both the explicit DFE_E2E_SERVER flag and a non-production posture.
-    ``make e2e-server`` sets the flag; a production DFE_ENV refuses it at load.
+    Requires both the explicit DFE_ENGINE_E2E_SERVER flag and a non-production posture.
+    ``make e2e-server`` sets the flag; a production DFE_ENGINE_ENV refuses it at load.
     """
     return bool(settings.e2e_server) and is_dev_posture(settings.env)
 
@@ -1943,20 +1943,20 @@ class APISettings(BaseModel):
     """API server settings.
 
     Environment variables:
-    - DFE_API_HOST -> api.host
-    - DFE_API_PORT -> api.port
-    - DFE_API_JWT_SECRET -> api.jwt_secret
-    - DFE_API_CORS_ORIGINS -> api.cors_origins (comma-separated)
-    - DFE_API_FORWARDED_ALLOW_IPS -> api.forwarded_allow_ips (comma-separated)
-    - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
-    - DFE_API_MAX_SESSION_MINUTES -> api.max_session_minutes
-    - DFE_API_MAX_ACTIVE_TASKS -> api.max_active_tasks
-    - DFE_API_MAX_REQUEST_BODY_BYTES -> api.max_request_body_bytes
-    - DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
-    - DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
-    - DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
+    - DFE_ENGINE_API_HOST -> api.host
+    - DFE_ENGINE_API_PORT -> api.port
+    - DFE_ENGINE_API_JWT_SECRET -> api.jwt_secret
+    - DFE_ENGINE_API_CORS_ORIGINS -> api.cors_origins (comma-separated)
+    - DFE_ENGINE_API_FORWARDED_ALLOW_IPS -> api.forwarded_allow_ips (comma-separated)
+    - DFE_ENGINE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
+    - DFE_ENGINE_API_MAX_SESSION_MINUTES -> api.max_session_minutes
+    - DFE_ENGINE_API_MAX_ACTIVE_TASKS -> api.max_active_tasks
+    - DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES -> api.max_request_body_bytes
+    - DFE_ENGINE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
+    - DFE_ENGINE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
+    - DFE_ENGINE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
       api.elastic_converter_content_length_slack_bytes
-    - DFE_API_DOCS_ENABLED -> api.docs_enabled (true/false)
+    - DFE_ENGINE_API_DOCS_ENABLED -> api.docs_enabled (true/false)
     """
 
     host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104
@@ -1967,7 +1967,7 @@ class APISettings(BaseModel):
             "CORS allowed origins, which are also the only origins an OIDC login hands "
             "its token back to (return_to). Empty by default. Left unset in a dev "
             "posture, the local console dev servers' origins are allowed. "
-            "DFE_API_CORS_ORIGINS, comma-separated."
+            "DFE_ENGINE_API_CORS_ORIGINS, comma-separated."
         ),
     )
     forwarded_allow_ips: str = Field(
@@ -2005,7 +2005,7 @@ class APISettings(BaseModel):
         description=(
             "Longest a session runs from its sign-in, in minutes. POST /auth/refresh "
             "is refused past it and never mints a token that outlives it, so the "
-            "owner signs in again. DFE_API_MAX_SESSION_MINUTES."
+            "owner signs in again. DFE_ENGINE_API_MAX_SESSION_MINUTES."
         ),
     )
     jwt_issuer: str = Field(
@@ -2029,7 +2029,7 @@ class APISettings(BaseModel):
             "Serve Swagger UI at /docs and ReDoc at /redoc. Both pages load their "
             "scripts from a public CDN into the engine's own origin, so unset serves "
             "them in a dev posture only. /openapi.json is served either way. "
-            "DFE_API_DOCS_ENABLED."
+            "DFE_ENGINE_API_DOCS_ENABLED."
         ),
     )
     max_active_tasks: int = Field(
@@ -2038,7 +2038,7 @@ class APISettings(BaseModel):
         description=(
             "Background tasks (samples, synthetic streams) one engine process holds "
             "pending or running at once. A submission past it is refused with 429. "
-            "DFE_API_MAX_ACTIVE_TASKS."
+            "DFE_ENGINE_API_MAX_ACTIVE_TASKS."
         ),
     )
     max_request_body_bytes: int = Field(
@@ -2049,7 +2049,7 @@ class APISettings(BaseModel):
             "DELETE. A body is refused with 413 the moment it passes this, so no config "
             "document over this size is parsed or masked. The routes that take a file "
             "upload are bounded by their own setting instead. "
-            "DFE_API_MAX_REQUEST_BODY_BYTES."
+            "DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES."
         ),
     )
     elastic_converter_max_upload_bytes: int = Field(
@@ -2080,7 +2080,7 @@ class APISettings(BaseModel):
         if len(v.encode("utf-8")) < 32:
             raise ValueError(
                 "api.jwt_secret must be at least 32 bytes (HS256 minimum); "
-                "set a strong DFE_API_JWT_SECRET"
+                "set a strong DFE_ENGINE_API_JWT_SECRET"
             )
         return v
 
@@ -2108,17 +2108,17 @@ class SecretsSettings(BaseModel):
     'gcp' and 'azure' are refused: their secret names allow no '/', and every path
     the engine mints carries one. See docs/deployment/backing-services.md.
 
-    Environment variables (DFE_SECRETS_ prefix):
-    - DFE_SECRETS_PROVIDER -> secrets.provider (file|ansible_vault|openbao|vault|aws)
-    - DFE_SECRETS_PATH -> secrets.path (file/ansible_vault root)
-    - DFE_SECRETS_ADDR -> secrets.addr (openbao/vault address)
-    - DFE_SECRETS_MOUNT -> secrets.mount (kv mount / key prefix)
-    - DFE_SECRETS_ROLE -> secrets.role (openbao AppRole role id)
-    - DFE_SECRETS_REGION -> secrets.region (aws region)
-    - DFE_SECRETS_NAME_PREFIX -> secrets.name_prefix (aws: a secret is <name_prefix>/<path>)
-    - DFE_SECRETS_KMS_KEY_ID -> secrets.kms_key_id (aws KMS key id, ARN or alias)
-    - DFE_SECRETS_RECOVERY_WINDOW_DAYS -> secrets.recovery_window_days (aws: 0 or 7-30)
-    - DFE_SECRETS_TAGS -> secrets.tags (aws: JSON object of tags on each secret it creates)
+    Environment variables (DFE_ENGINE_SECRETS_ prefix):
+    - DFE_ENGINE_SECRETS_PROVIDER -> secrets.provider (file|ansible_vault|openbao|vault|aws)
+    - DFE_ENGINE_SECRETS_PATH -> secrets.path (file/ansible_vault root)
+    - DFE_ENGINE_SECRETS_ADDR -> secrets.addr (openbao/vault address)
+    - DFE_ENGINE_SECRETS_MOUNT -> secrets.mount (kv mount / key prefix)
+    - DFE_ENGINE_SECRETS_ROLE -> secrets.role (openbao AppRole role id)
+    - DFE_ENGINE_SECRETS_REGION -> secrets.region (aws region)
+    - DFE_ENGINE_SECRETS_NAME_PREFIX -> secrets.name_prefix (aws: a secret is <name_prefix>/<path>)
+    - DFE_ENGINE_SECRETS_KMS_KEY_ID -> secrets.kms_key_id (aws KMS key id, ARN or alias)
+    - DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS -> secrets.recovery_window_days (aws: 0 or 7-30)
+    - DFE_ENGINE_SECRETS_TAGS -> secrets.tags (aws: JSON object of tags on each secret it creates)
     """
 
     provider: str = Field(default="file", description="scalo.secrets backend provider")
@@ -2151,13 +2151,13 @@ class SecretsSettings(BaseModel):
         try:
             return json.loads(value)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"DFE_SECRETS_TAGS is not valid JSON: {exc}") from exc
+            raise ValueError(f"DFE_ENGINE_SECRETS_TAGS is not valid JSON: {exc}") from exc
 
     @model_validator(mode="after")
     def _check_provider(self) -> SecretsSettings:
         if self.provider in _UNNAMEABLE_SECRET_PROVIDERS:
             raise ValueError(
-                f"DFE_SECRETS_PROVIDER={self.provider} is not supported yet for the secrets "
+                f"DFE_ENGINE_SECRETS_PROVIDER={self.provider} is not supported yet for the secrets "
                 "the engine mints: its secret names cannot hold the '/' every engine path "
                 "carries. Use file, ansible_vault, openbao or aws"
             )
@@ -2167,12 +2167,12 @@ class SecretsSettings(BaseModel):
 
     def _check_aws(self) -> None:
         if not self.region:
-            raise ValueError("DFE_SECRETS_PROVIDER=aws needs DFE_SECRETS_REGION")
+            raise ValueError("DFE_ENGINE_SECRETS_PROVIDER=aws needs DFE_ENGINE_SECRETS_REGION")
         self._check_name_prefix(self.name_prefix)
         window = self.recovery_window_days
         if window != 0 and not 7 <= window <= 30:
             raise ValueError(
-                "DFE_SECRETS_RECOVERY_WINDOW_DAYS must be 0 (no recovery window) or 7-30, "
+                "DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS must be 0 (no recovery window) or 7-30, "
                 f"got {window}"
             )
 
@@ -2180,24 +2180,26 @@ class SecretsSettings(BaseModel):
     def _check_name_prefix(prefix: str) -> None:
         if not prefix:
             raise ValueError(
-                "DFE_SECRETS_PROVIDER=aws needs DFE_SECRETS_NAME_PREFIX, so two deployments "
+                "DFE_ENGINE_SECRETS_PROVIDER=aws needs DFE_ENGINE_SECRETS_NAME_PREFIX, so two deployments "
                 "in one account never share a secret name"
             )
         if not _AWS_SECRET_NAME.fullmatch(prefix):
             raise ValueError(
-                f"DFE_SECRETS_NAME_PREFIX {prefix!r} may hold only ASCII letters, digits "
+                f"DFE_ENGINE_SECRETS_NAME_PREFIX {prefix!r} may hold only ASCII letters, digits "
                 "and /_+=.@-, the characters AWS Secrets Manager allows in a name"
             )
         if len(prefix) > _NAME_PREFIX_MAX:
             raise ValueError(
-                f"DFE_SECRETS_NAME_PREFIX is {len(prefix)} characters: at most {_NAME_PREFIX_MAX} "
+                f"DFE_ENGINE_SECRETS_NAME_PREFIX is {len(prefix)} characters: at most {_NAME_PREFIX_MAX} "
                 f"keeps every engine secret name within AWS's {_AWS_SECRET_NAME_MAX}"
             )
         if prefix.startswith("/") or prefix.endswith("/"):
-            raise ValueError(f"DFE_SECRETS_NAME_PREFIX {prefix!r} must not start or end with '/'")
+            raise ValueError(
+                f"DFE_ENGINE_SECRETS_NAME_PREFIX {prefix!r} must not start or end with '/'"
+            )
         if prefix.startswith(_MSK_NAME_PREFIX):
             raise ValueError(
-                f"DFE_SECRETS_NAME_PREFIX {prefix!r} must not start with {_MSK_NAME_PREFIX!r}, "
+                f"DFE_ENGINE_SECRETS_NAME_PREFIX {prefix!r} must not start with {_MSK_NAME_PREFIX!r}, "
                 "which names the secrets Amazon MSK authenticates against"
             )
 
@@ -2217,8 +2219,8 @@ class IngestSettings(BaseModel):
     """Tenancy settings the engine compiles into dfe-receiver.
 
     Environment variables:
-    - DFE_INGEST_SOURCE_ORG_ID -> ingest.source_org_id (disallow | allow)
-    - DFE_INGEST_BEARER_SECRET -> ingest.bearer_secret (Kubernetes Secret name)
+    - DFE_ENGINE_INGEST_SOURCE_ORG_ID -> ingest.source_org_id (disallow | allow)
+    - DFE_ENGINE_INGEST_BEARER_SECRET -> ingest.bearer_secret (Kubernetes Secret name)
     """
 
     source_org_id: Literal["disallow", "allow"] = Field(
@@ -2248,7 +2250,7 @@ class IngestSettings(BaseModel):
             try:
                 KubernetesConfig(secret_name=value)
             except ValueError as exc:
-                raise ValueError(f"DFE_INGEST_BEARER_SECRET: {exc}") from exc
+                raise ValueError(f"DFE_ENGINE_INGEST_BEARER_SECRET: {exc}") from exc
         return value
 
 
@@ -2259,7 +2261,7 @@ class OrgsSettings(BaseModel):
         default_factory=list,
         description=(
             "Orgs created on startup when absent; an existing org is never changed, "
-            "so console edits survive a restart. DFE_ORGS_SEED_ORGS: a JSON list of "
+            "so console edits survive a restart. DFE_ENGINE_ORGS_SEED_ORGS: a JSON list of "
             "{name, display_name, org_ids}."
         ),
     )
@@ -2309,7 +2311,7 @@ class DFESettings(BaseModel):
         description=(
             "The certified stack this pod was deployed from, passed by the chart "
             "from the cluster secret. The console falls back to it when the deploy "
-            "repo pins no stack. DFE_STACK_VERSION."
+            "repo pins no stack. DFE_ENGINE_STACK_VERSION."
         ),
     )
     ui_version: str = Field(
@@ -2318,22 +2320,22 @@ class DFESettings(BaseModel):
             "The dfe-ui version this deployment renders, passed by the engine chart "
             "from the same versions.yaml pin the ui chart's appVersion carries. "
             "Helm cannot read a sibling chart, so the engine is told rather than "
-            "asked. The deploy repo's pins win where they name one. DFE_UI_VERSION."
+            "asked. The deploy repo's pins win where they name one. DFE_ENGINE_UI_VERSION."
         ),
     )
     env: str = Field(
         default="production",
         description=(
             "Deployment posture. 'production' (default, secure) rejects the "
-            "placeholder api.jwt_secret when auth is enabled; set DFE_ENV to "
-            "dev/development/local/test/ci for local development. DFE_ENV."
+            "placeholder api.jwt_secret when auth is enabled; set DFE_ENGINE_ENV to "
+            "dev/development/local/test/ci for local development. DFE_ENGINE_ENV."
         ),
     )
     e2e_server: bool = Field(
         default=False,
         description=(
             "Mount the unauthenticated /api/e2e/* Playwright helpers "
-            "(seed-admin). DFE_E2E_SERVER. Refused in a production posture."
+            "(seed-admin). DFE_ENGINE_E2E_SERVER. Refused in a production posture."
         ),
     )
 
@@ -2343,8 +2345,8 @@ class DFESettings(BaseModel):
         if self.transport.bus_present and not self.kafka.bootstrap_servers:
             raise ValueError(
                 "transport.bus_present is true but kafka.bootstrap_servers is empty: set "
-                "DFE_KAFKA_BOOTSTRAP_SERVERS, or DFE_TRANSPORT_BUS_PRESENT=false and "
-                "DFE_TRANSPORT_DEFAULT=direct for a deployment with no broker"
+                "DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS, or DFE_ENGINE_TRANSPORT_BUS_PRESENT=false and "
+                "DFE_ENGINE_TRANSPORT_DEFAULT=direct for a deployment with no broker"
             )
         return self
 
@@ -2374,8 +2376,8 @@ class DFESettings(BaseModel):
         if self.e2e_server and is_prod:
             raise ValueError(
                 "e2e_server is True but env is production: the unauthenticated "
-                "/api/e2e/* seed endpoints must not ship. Set DFE_ENV to "
-                "dev/test/ci, or DFE_E2E_SERVER=false"
+                "/api/e2e/* seed endpoints must not ship. Set DFE_ENGINE_ENV to "
+                "dev/test/ci, or DFE_ENGINE_E2E_SERVER=false"
             )
         if not is_prod:
             return self
@@ -2390,8 +2392,8 @@ class DFESettings(BaseModel):
         if not self.auth.enabled:
             raise ValueError(
                 f"auth.enabled is False but env is '{self.env}': that grants every "
-                "unauthenticated caller the admin role. Set DFE_AUTH_ENABLED=true, "
-                "or DFE_ENV=dev for local development"
+                "unauthenticated caller the admin role. Set DFE_ENGINE_AUTH_ENABLED=true, "
+                "or DFE_ENGINE_ENV=dev for local development"
             )
 
         # A production deployment that turns auth on but never overrode the known
@@ -2400,8 +2402,8 @@ class DFESettings(BaseModel):
         if self.api.jwt_secret == _DEV_JWT_SECRET:
             raise ValueError(
                 "api.jwt_secret is the known dev placeholder but env is "
-                f"'{self.env}' with auth enabled; set a strong DFE_API_JWT_SECRET "
-                "(or DFE_ENV=dev for local development)"
+                f"'{self.env}' with auth enabled; set a strong DFE_ENGINE_API_JWT_SECRET "
+                "(or DFE_ENGINE_ENV=dev for local development)"
             )
         return self
 
@@ -2427,7 +2429,7 @@ def backing_from_environment() -> BackingSettings:
 def _get_env_overrides() -> dict:
     """Get configuration overrides from environment variables.
 
-    DFE_ prefixed vars take precedence over legacy names.
+    DFE_ENGINE_ prefixed vars take precedence over legacy names.
     """
     # Mixed value types by design: section dicts plus top-level scalars
     # (env, config_dir), so the annotation is Any, not dict.
@@ -2461,110 +2463,112 @@ def _get_env_overrides() -> dict:
         "secrets": {},
     }
 
-    # ClickHouse settings (DFE_ prefix with legacy fallbacks)
-    if val := _get_env("DFE_CLICKHOUSE_HOST", "CLICKHOUSE_HOST"):
+    # ClickHouse settings (DFE_ENGINE_ prefix with legacy fallbacks)
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_HOST", "CLICKHOUSE_HOST"):
         overrides["clickhouse"]["host"] = val
-    if val := _get_env("DFE_CLICKHOUSE_PORT", "CLICKHOUSE_PORT"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_PORT", "CLICKHOUSE_PORT"):
         overrides["clickhouse"]["port"] = int(val)
-    if val := _get_env("DFE_CLICKHOUSE_USERNAME", "CLICKHOUSE_USER"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_USERNAME", "CLICKHOUSE_USER"):
         overrides["clickhouse"]["username"] = val
-    if val := _get_env("DFE_CLICKHOUSE_PASSWORD", "CLICKHOUSE_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_PASSWORD", "CLICKHOUSE_PASSWORD"):
         overrides["clickhouse"]["password"] = val
-    if val := _get_env("DFE_CLICKHOUSE_DATABASE", "CLICKHOUSE_DATABASE"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_DATABASE", "CLICKHOUSE_DATABASE"):
         overrides["clickhouse"]["database"] = val
-    if val := _get_env("DFE_CLICKHOUSE_DATA_DATABASE", "CLICKHOUSE_DATA_DATABASE"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE", "CLICKHOUSE_DATA_DATABASE"):
         overrides["clickhouse"]["data_database"] = val
-    if val := _get_env("DFE_DEFAULT_TABLE_PROFILE"):
+    if val := _get_env("DFE_ENGINE_DEFAULT_TABLE_PROFILE"):
         overrides["clickhouse"]["default_table_profile"] = val
-    if val := _get_env("DFE_CLICKHOUSE_BOOTSTRAP_TABLES"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES"):
         overrides["clickhouse"]["bootstrap_tables"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS"):
         overrides["clickhouse"]["bootstrap_wait_seconds"] = float(val)
-    if val := _get_env("DFE_CLICKHOUSE_SECURE", "CLICKHOUSE_SECURE"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_SECURE", "CLICKHOUSE_SECURE"):
         overrides["clickhouse"]["secure"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_CLICKHOUSE_VERIFY", "CLICKHOUSE_VERIFY"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_VERIFY", "CLICKHOUSE_VERIFY"):
         overrides["clickhouse"]["verify"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_CLICKHOUSE_CA_CERT", "CLICKHOUSE_CA_CERT"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CA_CERT", "CLICKHOUSE_CA_CERT"):
         overrides["clickhouse"]["ca_cert"] = val
 
-    # Engine-wide TLS escape valves (config cascade): map the DFE_-prefixed knobs
+    # Engine-wide TLS escape valves (config cascade): map the DFE_ENGINE_-prefixed knobs
     # onto scalo's env seam so ONE setting relaxes every scalo-minted client - CH,
     # scalo.http (HyperDX/OIDC), scalo.secrets (OpenBao) - consistently. Both are
     # secure-by-default; setdefault lets an explicit SCALO_* env win.
-    #   DFE_TLS_VERIFY=false    -> drop cert verification (self-signed dev/test).
-    #   DFE_TLS_ALLOW_WEAK=true -> accept a legacy peer below the algorithm floor.
-    if val := _get_env("DFE_TLS_VERIFY"):
+    #   DFE_ENGINE_TLS_VERIFY=false    -> drop cert verification (self-signed dev/test).
+    #   DFE_ENGINE_TLS_ALLOW_WEAK=true -> accept a legacy peer below the algorithm floor.
+    if val := _get_env("DFE_ENGINE_TLS_VERIFY"):
         os.environ.setdefault("SCALO_TLS_VERIFY", val)
-    if val := _get_env("DFE_TLS_ALLOW_WEAK"):
+    if val := _get_env("DFE_ENGINE_TLS_ALLOW_WEAK"):
         os.environ.setdefault("SCALO_TLS_ALLOW_WEAK", val)
-    if val := _get_env("DFE_CLICKHOUSE_CONNECTIONS_MIN"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MIN"):
         overrides["clickhouse"]["connections_min"] = int(val)
-    if val := _get_env("DFE_CLICKHOUSE_CONNECTIONS_MAX"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MAX"):
         overrides["clickhouse"]["connections_max"] = int(val)
-    if val := _get_env("DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE"):
         overrides["clickhouse"]["ddl_max_query_size"] = int(val)
-    if val := _get_env("DFE_CLICKHOUSE_PLATFORM"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_PLATFORM"):
         overrides["clickhouse"]["platform"] = val
-    if val := _get_env("DFE_CLICKHOUSE_DEFAULT_TTL_DAYS"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS"):
         overrides["clickhouse"]["default_ttl_days"] = int(val)
 
     # ClickHouse Cloud lifecycle (control-plane mgmt API; opt-in, billable).
     ch_cloud: dict = {}
-    if val := _get_env("DFE_CLICKHOUSE_CLOUD_API_KEY_ID"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CLOUD_API_KEY_ID"):
         ch_cloud["api_key_id"] = val
-    if val := _get_env("DFE_CLICKHOUSE_CLOUD_API_KEY_SECRET"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CLOUD_API_KEY_SECRET"):
         ch_cloud["api_key_secret"] = val
-    if val := _get_env("DFE_CLICKHOUSE_CLOUD_API_BASE"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CLOUD_API_BASE"):
         ch_cloud["api_base"] = val
-    if val := _get_env("DFE_CLICKHOUSE_CLOUD_ORGANIZATION_ID"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CLOUD_ORGANIZATION_ID"):
         ch_cloud["organization_id"] = val
-    if val := _get_env("DFE_CLICKHOUSE_CLOUD_SERVICE_ID"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE_ID"):
         ch_cloud["service_id"] = val
-    if val := _get_env("DFE_CLICKHOUSE_CLOUD_SERVICE", "DFE_CLICKHOUSE_CLOUD_SERVICE_NAME"):
+    if val := _get_env(
+        "DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE", "DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE_NAME"
+    ):
         ch_cloud["service_name"] = val
-    if val := _get_env("DFE_CLICKHOUSE_CLOUD_AUTOWAKE"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CLOUD_AUTOWAKE"):
         ch_cloud["autowake"] = val.lower() in ("true", "1", "yes")
     if ch_cloud:
         overrides["clickhouse"]["cloud"] = ch_cloud
 
     # Hunts settings
-    if val := _get_env("DFE_HUNT_LOG_PATH", "HUNT_LOG_PATH"):
+    if val := _get_env("DFE_ENGINE_HUNT_LOG_PATH", "HUNT_LOG_PATH"):
         overrides["hunts"]["log_path"] = val
-    if val := _get_env("DFE_HUNTS_DIR"):
+    if val := _get_env("DFE_ENGINE_HUNTS_DIR"):
         overrides["hunts"]["hunt_dir"] = val
-    if val := _get_env("DFE_HUNTS_RULES_DIR"):
+    if val := _get_env("DFE_ENGINE_HUNTS_RULES_DIR"):
         overrides["hunts"]["rules_dir"] = val
-    if val := _get_env("DFE_HUNTS_NUM_THREADS"):
+    if val := _get_env("DFE_ENGINE_HUNTS_NUM_THREADS"):
         overrides["hunts"]["num_threads"] = int(val)
-    if val := _get_env("DFE_HUNTS_CHECKPOINT_DESTINATION"):
+    if val := _get_env("DFE_ENGINE_HUNTS_CHECKPOINT_DESTINATION"):
         overrides["hunts"]["checkpoint_destination"] = val
-    if val := _get_env("DFE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD"):
+    if val := _get_env("DFE_ENGINE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD"):
         overrides["hunts"]["checkpoint_timestamp_field"] = val
-    if val := _get_env("DFE_HUNTS_CHECKPOINT_PATH"):
+    if val := _get_env("DFE_ENGINE_HUNTS_CHECKPOINT_PATH"):
         overrides["hunts"]["checkpoint_path"] = val
-    if val := _get_env("DFE_HUNTS_CRON_TASK_TIMEOUT"):
+    if val := _get_env("DFE_ENGINE_HUNTS_CRON_TASK_TIMEOUT"):
         overrides["hunts"]["cron_task_timeout"] = int(val)
-    if val := _get_env("DFE_HUNTS_JITTER_SECONDS"):
+    if val := _get_env("DFE_ENGINE_HUNTS_JITTER_SECONDS"):
         overrides["hunts"]["jitter_seconds"] = int(val)
-    if val := _get_env("DFE_HUNTS_SCHEDULING_MODE"):
+    if val := _get_env("DFE_ENGINE_HUNTS_SCHEDULING_MODE"):
         overrides["hunts"]["scheduling_mode"] = val
-    if val := _get_env("DFE_HUNTS_MIN_INTERVAL_SECONDS"):
+    if val := _get_env("DFE_ENGINE_HUNTS_MIN_INTERVAL_SECONDS"):
         overrides["hunts"]["min_interval_seconds"] = int(val)
-    if val := _get_env("DFE_HUNTS_EXPLAIN_QUERIES"):
+    if val := _get_env("DFE_ENGINE_HUNTS_EXPLAIN_QUERIES"):
         overrides["hunts"]["explain_queries"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_HUNTS_MAX_CONCURRENT_QUERIES"):
+    if val := _get_env("DFE_ENGINE_HUNTS_MAX_CONCURRENT_QUERIES"):
         overrides["hunts"]["max_concurrent_queries"] = int(val)
-    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_READ_ROWS"):
+    if val := _get_env("DFE_ENGINE_HUNTS_RESOURCE_LIMIT_READ_ROWS"):
         overrides["hunts"]["resource_limit_read_rows"] = int(val)
-    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_READ_BYTES"):
+    if val := _get_env("DFE_ENGINE_HUNTS_RESOURCE_LIMIT_READ_BYTES"):
         overrides["hunts"]["resource_limit_read_bytes"] = int(val)
-    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_MEMORY_BYTES"):
+    if val := _get_env("DFE_ENGINE_HUNTS_RESOURCE_LIMIT_MEMORY_BYTES"):
         overrides["hunts"]["resource_limit_memory_bytes"] = int(val)
-    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_EXECUTION_MS"):
+    if val := _get_env("DFE_ENGINE_HUNTS_RESOURCE_LIMIT_EXECUTION_MS"):
         overrides["hunts"]["resource_limit_execution_ms"] = int(val)
-    if val := _get_env("DFE_HUNTS_ALERT_CHANNELS"):
+    if val := _get_env("DFE_ENGINE_HUNTS_ALERT_CHANNELS"):
         overrides["hunts"]["alert_channels"] = [u.strip() for u in val.split(",") if u.strip()]
-    if val := _get_env("DFE_HUNTS_ALERT_DESTINATIONS"):
+    if val := _get_env("DFE_ENGINE_HUNTS_ALERT_DESTINATIONS"):
         # JSON format: {"slack-dfe-alerts": "slack://T.../B.../x.../"}
         import json
 
@@ -2572,269 +2576,269 @@ def _get_env_overrides() -> dict:
             overrides["hunts"]["alert_destinations"] = json.loads(val)
         except json.JSONDecodeError:
             pass
-    if val := _get_env("DFE_HUNTS_ALERT_DESTINATIONS_DIR"):
+    if val := _get_env("DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR"):
         overrides["hunts"]["alert_destinations_dir"] = val
-    if val := _get_env("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN"):
+    if val := _get_env("DFE_ENGINE_HUNTS_DEFAULT_ALERT_COOLDOWN"):
         overrides["hunts"]["default_alert_cooldown"] = val
-    if val := _get_env("DFE_HUNTS_MAX_DETECTIONS_PER_RUN"):
+    if val := _get_env("DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN"):
         overrides["hunts"]["max_detections_per_run"] = int(val)
-    if val := _get_env("DFE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING"):
+    if val := _get_env("DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING"):
         overrides["hunts"]["max_detections_per_run_ceiling"] = int(val)
-    if val := _get_env("DFE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
+    if val := _get_env("DFE_ENGINE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
         overrides["hunts"]["default_max_sample_events"] = int(val)
-    if val := _get_env("DFE_HUNTS_LOOKUP_DATABASES"):
+    if val := _get_env("DFE_ENGINE_HUNTS_LOOKUP_DATABASES"):
         overrides["hunts"]["lookup_databases"] = [d.strip() for d in val.split(",") if d.strip()]
 
     guard: dict[str, Any] = {}
-    if val := _get_env("DFE_DETECTION_GUARD_ENABLED"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_ENABLED"):
         guard["enabled"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES"):
         guard["preview_window_minutes"] = int(val)
-    if val := _get_env("DFE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS"):
         guard["preview_timeout_seconds"] = float(val)
-    if val := _get_env("DFE_DETECTION_GUARD_PREVIEW_MAX_ROWS"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_PREVIEW_MAX_ROWS"):
         guard["preview_max_rows"] = int(val)
-    if val := _get_env("DFE_DETECTION_GUARD_WARN_PER_DAY"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_WARN_PER_DAY"):
         guard["warn_per_day"] = int(val)
-    if val := _get_env("DFE_DETECTION_GUARD_ACK_PER_DAY"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_ACK_PER_DAY"):
         guard["ack_per_day"] = int(val)
-    if val := _get_env("DFE_DETECTION_GUARD_BLOCK_PER_DAY"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_BLOCK_PER_DAY"):
         guard["block_per_day"] = int(val)
-    if val := _get_env("DFE_DETECTION_GUARD_WARN_MATCH_RATIO"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_WARN_MATCH_RATIO"):
         guard["warn_match_ratio"] = float(val)
-    if val := _get_env("DFE_DETECTION_GUARD_BLOCK_MATCH_RATIO"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_BLOCK_MATCH_RATIO"):
         guard["block_match_ratio"] = float(val)
-    if val := _get_env("DFE_DETECTION_GUARD_MIN_ROWS_FOR_RATIO"):
+    if val := _get_env("DFE_ENGINE_DETECTION_GUARD_MIN_ROWS_FOR_RATIO"):
         guard["min_rows_for_ratio"] = int(val)
     if guard:
         overrides["hunts"]["detection_guard"] = guard
 
     # Artifactory settings
-    if val := _get_env("DFE_ARTIFACTORY_URL", "ARTIFACTORY_VECTOR_TEMPLATES"):
+    if val := _get_env("DFE_ENGINE_ARTIFACTORY_URL", "ARTIFACTORY_VECTOR_TEMPLATES"):
         overrides["artifactory"]["url"] = val
-    if val := _get_env("DFE_ARTIFACTORY_USERNAME", "ARTIFACTORY_USERNAME"):
+    if val := _get_env("DFE_ENGINE_ARTIFACTORY_USERNAME", "ARTIFACTORY_USERNAME"):
         overrides["artifactory"]["username"] = val
-    if val := _get_env("DFE_ARTIFACTORY_PASSWORD", "ARTIFACTORY_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_ARTIFACTORY_PASSWORD", "ARTIFACTORY_PASSWORD"):
         overrides["artifactory"]["password"] = val
-    if val := _get_env("DFE_TEMPLATES_VERSION", "TEMPLATES_VERSION"):
+    if val := _get_env("DFE_ENGINE_TEMPLATES_VERSION", "TEMPLATES_VERSION"):
         overrides["artifactory"]["templates_version"] = val
 
-    # Kafka settings (DFE_ prefix with legacy fallbacks)
-    # DFE_KAFKA_PROVIDER DERIVES protocol + mechanism (contract dfe-engine#98);
+    # Kafka settings (DFE_ENGINE_ prefix with legacy fallbacks)
+    # DFE_ENGINE_KAFKA_PROVIDER DERIVES protocol + mechanism (contract dfe-engine#98);
     # deploys set it, not the mechanism. security_protocol/sasl_mechanism below
     # are the transition/manual path (empty provider) - see KafkaSettings.
-    if val := _get_env("DFE_KAFKA_PROVIDER"):
+    if val := _get_env("DFE_ENGINE_KAFKA_PROVIDER"):
         overrides["kafka"]["provider"] = val
     # An empty list is the operator saying there is no broker, so it overrides the dev default.
     if (
-        val := _get_env_if_set("DFE_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS")
+        val := _get_env_if_set("DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS")
     ) is not None:
         overrides["kafka"]["bootstrap_servers"] = val
-    if val := _get_env("DFE_KAFKA_SECURITY_PROTOCOL", "KAFKA_SECURITY_PROTOCOL"):
+    if val := _get_env("DFE_ENGINE_KAFKA_SECURITY_PROTOCOL", "KAFKA_SECURITY_PROTOCOL"):
         overrides["kafka"]["security_protocol"] = val
-    if val := _get_env("DFE_KAFKA_SASL_MECHANISM", "KAFKA_SASL_MECHANISM"):
+    if val := _get_env("DFE_ENGINE_KAFKA_SASL_MECHANISM", "KAFKA_SASL_MECHANISM"):
         overrides["kafka"]["sasl_mechanism"] = val
-    if val := _get_env("DFE_KAFKA_SASL_USERNAME", "KAFKA_SASL_USERNAME"):
+    if val := _get_env("DFE_ENGINE_KAFKA_SASL_USERNAME", "KAFKA_SASL_USERNAME"):
         overrides["kafka"]["sasl_username"] = val
-    if val := _get_env("DFE_KAFKA_SASL_PASSWORD", "KAFKA_SASL_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_KAFKA_SASL_PASSWORD", "KAFKA_SASL_PASSWORD"):
         overrides["kafka"]["sasl_password"] = val
     # Topic creation on source deploy. Setting this env is the override; left
     # unset it follows transport.bus_present, which is what a brokerless profile
     # already declares.
-    if val := _get_env("DFE_KAFKA_ENSURE_TOPICS"):
+    if val := _get_env("DFE_ENGINE_KAFKA_ENSURE_TOPICS"):
         overrides["kafka"]["ensure_topics"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_KAFKA_BOOTSTRAP_TOPICS"):
+    if val := _get_env("DFE_ENGINE_KAFKA_BOOTSTRAP_TOPICS"):
         overrides["kafka"]["bootstrap_topics"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_KAFKA_TIERED_STORAGE"):
+    if val := _get_env("DFE_ENGINE_KAFKA_TIERED_STORAGE"):
         overrides["kafka"]["tiered_storage"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_KAFKA_TOPIC_PARTITIONS"):
+    if val := _get_env("DFE_ENGINE_KAFKA_TOPIC_PARTITIONS"):
         overrides["kafka"]["topic_partitions"] = int(val)
-    if val := _get_env("DFE_KAFKA_TOPIC_REPLICATION_FACTOR"):
+    if val := _get_env("DFE_ENGINE_KAFKA_TOPIC_REPLICATION_FACTOR"):
         overrides["kafka"]["topic_replication_factor"] = int(val)
-    if val := _get_env("DFE_KAFKA_TOPIC_RETENTION_MS"):
+    if val := _get_env("DFE_ENGINE_KAFKA_TOPIC_RETENTION_MS"):
         overrides["kafka"]["topic_retention_ms"] = int(val)
-    if val := _get_env("DFE_KAFKA_TOPIC_CLEANUP_POLICY"):
+    if val := _get_env("DFE_ENGINE_KAFKA_TOPIC_CLEANUP_POLICY"):
         overrides["kafka"]["topic_cleanup_policy"] = val
-    if val := _get_env("DFE_KAFKA_TOPIC_COMPRESSION_TYPE"):
+    if val := _get_env("DFE_ENGINE_KAFKA_TOPIC_COMPRESSION_TYPE"):
         overrides["kafka"]["topic_compression_type"] = val
-    if val := _get_env("DFE_KAFKA_TOPIC_MAX_MESSAGE_BYTES"):
+    if val := _get_env("DFE_ENGINE_KAFKA_TOPIC_MAX_MESSAGE_BYTES"):
         overrides["kafka"]["topic_max_message_bytes"] = int(val)
 
     # Transport: what this deployment can carry a source on. The profile sets
     # both - a brokerless profile is bus_present=false, default=direct.
-    if val := _get_env("DFE_TRANSPORT_DEFAULT"):
+    if val := _get_env("DFE_ENGINE_TRANSPORT_DEFAULT"):
         overrides["transport"]["default"] = val
-    if val := _get_env("DFE_TRANSPORT_BUS_PRESENT"):
+    if val := _get_env("DFE_ENGINE_TRANSPORT_BUS_PRESENT"):
         overrides["transport"]["bus_present"] = val.lower() in ("true", "1", "yes")
     # How the direct transport addresses a stage: the pool's own Service, or the
     # balancing listener a profile put in front of it. Both come from the chart.
-    if val := _get_env("DFE_MESH_ENABLED"):
+    if val := _get_env("DFE_ENGINE_MESH_ENABLED"):
         overrides["transport"]["mesh_enabled"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_MESH_NAMESPACE"):
+    if val := _get_env("DFE_ENGINE_MESH_NAMESPACE"):
         overrides["transport"]["mesh_namespace"] = val
 
     # Storage settings (for on-prem/Rancher deployments)
-    if val := _get_env("DFE_STORAGE_TYPE"):
+    if val := _get_env("DFE_ENGINE_STORAGE_TYPE"):
         overrides["storage"]["type"] = val
-    if val := _get_env("DFE_STORAGE_PATH"):
+    if val := _get_env("DFE_ENGINE_STORAGE_PATH"):
         overrides["storage"]["path"] = val
-    if val := _get_env("DFE_S3_BUCKET"):
+    if val := _get_env("DFE_ENGINE_S3_BUCKET"):
         overrides["storage"]["s3_bucket"] = val
-    if val := _get_env("DFE_S3_REGION"):
+    if val := _get_env("DFE_ENGINE_S3_REGION"):
         overrides["storage"]["s3_region"] = val
 
     # Query settings
-    if val := _get_env("DFE_QUERY_YAML_DIR"):
+    if val := _get_env("DFE_ENGINE_QUERY_YAML_DIR"):
         overrides["query"]["yaml_dir"] = val
 
     # Query views settings (parameterized views)
-    if val := _get_env("DFE_QUERY_VIEWS_RESTRICTED_USER"):
+    if val := _get_env("DFE_ENGINE_QUERY_VIEWS_RESTRICTED_USER"):
         overrides["query_views"]["restricted_user"] = val
-    if val := _get_env("DFE_QUERY_VIEWS_RESTRICTED_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_QUERY_VIEWS_RESTRICTED_PASSWORD"):
         overrides["query_views"]["restricted_password"] = val
-    if val := _get_env("DFE_QUERY_VIEWS_MAX_EXECUTION_TIME"):
+    if val := _get_env("DFE_ENGINE_QUERY_VIEWS_MAX_EXECUTION_TIME"):
         overrides["query_views"]["max_execution_time"] = int(val)
-    if val := _get_env("DFE_QUERY_VIEWS_MAX_ROWS_TO_READ"):
+    if val := _get_env("DFE_ENGINE_QUERY_VIEWS_MAX_ROWS_TO_READ"):
         overrides["query_views"]["max_rows_to_read"] = int(val)
-    if val := _get_env("DFE_QUERY_VIEWS_MAX_MEMORY_USAGE"):
+    if val := _get_env("DFE_ENGINE_QUERY_VIEWS_MAX_MEMORY_USAGE"):
         overrides["query_views"]["max_memory_usage"] = int(val)
 
     # Sampler settings (source sampling: recent/random/smart/anomaly)
-    if val := _get_env("DFE_SAMPLER_DEFAULT_MODE"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_DEFAULT_MODE"):
         overrides["sampler"]["default_mode"] = val
-    if val := _get_env("DFE_SAMPLER_DEFAULT_LIMIT"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_DEFAULT_LIMIT"):
         overrides["sampler"]["default_limit"] = int(val)
-    if val := _get_env("DFE_SAMPLER_MAX_LIMIT"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_MAX_LIMIT"):
         overrides["sampler"]["max_limit"] = int(val)
-    if val := _get_env("DFE_SAMPLER_LEVEL"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_LEVEL"):
         overrides["sampler"]["level"] = val
-    if val := _get_env("DFE_SAMPLER_MAX_CONCURRENT"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_MAX_CONCURRENT"):
         overrides["sampler"]["max_concurrent"] = int(val)
-    if val := _get_env("DFE_SAMPLER_MAX_MEMORY_GB"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_MAX_MEMORY_GB"):
         overrides["sampler"]["max_memory_gb"] = float(val)
-    if val := _get_env("DFE_SAMPLER_MAX_SCAN_ROWS"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_MAX_SCAN_ROWS"):
         overrides["sampler"]["max_scan_rows"] = int(val)
-    if val := _get_env("DFE_SAMPLER_KAFKA_MAX_MESSAGES"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_KAFKA_MAX_MESSAGES"):
         overrides["sampler"]["kafka_max_messages"] = int(val)
-    if val := _get_env("DFE_SAMPLER_TIMESTAMP_FIELD"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_TIMESTAMP_FIELD"):
         overrides["sampler"]["timestamp_field"] = val
-    if val := _get_env("DFE_SAMPLER_WAIT_SECONDS"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_WAIT_SECONDS"):
         overrides["sampler"]["wait_seconds"] = float(val)
-    if val := _get_env("DFE_SAMPLER_MAX_EXECUTION_TIME"):
+    if val := _get_env("DFE_ENGINE_SAMPLER_MAX_EXECUTION_TIME"):
         overrides["sampler"]["max_execution_time"] = int(val)
 
     # Synthetic data settings (ceilings + the standing demo stream)
-    if val := _get_env("DFE_SYNTHETIC_DATA_MAX_COUNT"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_MAX_COUNT"):
         overrides["synthetic_data"]["max_count"] = int(val)
-    if val := _get_env("DFE_SYNTHETIC_DATA_MAX_RATE_EPS"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_MAX_RATE_EPS"):
         overrides["synthetic_data"]["max_rate_eps"] = float(val)
-    if val := _get_env("DFE_SYNTHETIC_DATA_MAX_STREAM_SECONDS"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_MAX_STREAM_SECONDS"):
         overrides["synthetic_data"]["max_stream_seconds"] = float(val)
-    if val := _get_env("DFE_SYNTHETIC_DATA_DEFAULT_RATE_EPS"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_DEFAULT_RATE_EPS"):
         overrides["synthetic_data"]["default_rate_eps"] = float(val)
-    if val := _get_env("DFE_SYNTHETIC_DATA_AUTOSTART_SCHEMAS"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_AUTOSTART_SCHEMAS"):
         overrides["synthetic_data"]["autostart_schemas"] = val
-    if val := _get_env("DFE_SYNTHETIC_DATA_AUTOSTART_RECEIVER_URL"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_AUTOSTART_RECEIVER_URL"):
         overrides["synthetic_data"]["autostart_receiver_url"] = val
-    if val := _get_env("DFE_SYNTHETIC_DATA_AUTOSTART_RATE_EPS"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_AUTOSTART_RATE_EPS"):
         overrides["synthetic_data"]["autostart_rate_eps"] = float(val)
-    if val := _get_env("DFE_SYNTHETIC_DATA_AUTOSTART_SEED"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_AUTOSTART_SEED"):
         overrides["synthetic_data"]["autostart_seed"] = int(val)
-    if val := _get_env("DFE_SYNTHETIC_DATA_MAX_CONCURRENT_STREAMS"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_MAX_CONCURRENT_STREAMS"):
         overrides["synthetic_data"]["max_concurrent_streams"] = int(val)
-    if val := _get_env("DFE_SYNTHETIC_DATA_ALLOWED_RECEIVER_HOSTS"):
+    if val := _get_env("DFE_ENGINE_SYNTHETIC_DATA_ALLOWED_RECEIVER_HOSTS"):
         overrides["synthetic_data"]["allowed_receiver_hosts"] = val
 
     # KEDA shim settings (the metrics-api -> ClickHouse query adapter)
-    if val := _get_env("DFE_KEDA_SHIM_HOST"):
+    if val := _get_env("DFE_ENGINE_KEDA_SHIM_HOST"):
         overrides["keda_shim"]["host"] = val
-    if val := _get_env("DFE_KEDA_SHIM_PORT"):
+    if val := _get_env("DFE_ENGINE_KEDA_SHIM_PORT"):
         overrides["keda_shim"]["port"] = int(val)
-    if val := _get_env("DFE_KEDA_SHIM_QUERY_CONFIG"):
+    if val := _get_env("DFE_ENGINE_KEDA_SHIM_QUERY_CONFIG"):
         overrides["keda_shim"]["query_config"] = val
 
     # Schemas settings (dfe-schemas tree)
-    if val := _get_env("DFE_SCHEMAS_DIR"):
+    if val := _get_env("DFE_ENGINE_SCHEMAS_DIR"):
         overrides["schemas"]["schemas_dir"] = val
 
     # Source settings
-    if val := _get_env("DFE_SOURCES_DIR"):
+    if val := _get_env("DFE_ENGINE_SOURCES_DIR"):
         overrides["source"]["sources_dir"] = val
-    if val := _get_env("DFE_SOURCE_BUILDS_DIR"):
+    if val := _get_env("DFE_ENGINE_SOURCE_BUILDS_DIR"):
         overrides["source"]["builds_dir"] = val
-    if val := _get_env("DFE_SOURCE_PLANS_DIR"):
+    if val := _get_env("DFE_ENGINE_SOURCE_PLANS_DIR"):
         overrides["source"]["plans_dir"] = val
-    if val := _get_env("DFE_SOURCE_DEPLOYS_DIR"):
+    if val := _get_env("DFE_ENGINE_SOURCE_DEPLOYS_DIR"):
         overrides["source"]["deploys_dir"] = val
-    if val := _get_env("DFE_SOURCE_ALLOW_MIXED_FETCHER_TYPES"):
+    if val := _get_env("DFE_ENGINE_SOURCE_ALLOW_MIXED_FETCHER_TYPES"):
         overrides["source"]["allow_mixed_fetcher_types"] = val.lower() in ("true", "1", "yes")
 
     # FieldMap settings
-    if val := _get_env("DFE_FIELDMAPS_DIR"):
+    if val := _get_env("DFE_ENGINE_FIELDMAPS_DIR"):
         overrides["fieldmap"]["fieldmaps_dir"] = val
 
     # Sigma settings
-    if val := _get_env("DFE_SIGMA_ENABLED"):
+    if val := _get_env("DFE_ENGINE_SIGMA_ENABLED"):
         overrides["sigma"]["enabled"] = val.lower() in ("true", "1", "yes")
 
     # Services settings
-    if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_URL"):
+    if val := _get_env("DFE_ENGINE_SERVICES_TRANSFORM_WASM_URL"):
         overrides["services"]["transform_wasm_url"] = val
-    if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL"):
+    if val := _get_env("DFE_ENGINE_SERVICES_TRANSFORM_WASM_COMPILER_URL"):
         overrides["services"]["transform_wasm_compiler_url"] = val
-    if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
+    if val := _get_env("DFE_ENGINE_SERVICES_CONFIG_YAML_DIR"):
         overrides["services"]["config_yaml_dir"] = val
 
     # Repository (small-object store) settings
-    if val := _get_env("DFE_REPOSITORY_MAX_PREFS_BYTES"):
+    if val := _get_env("DFE_ENGINE_REPOSITORY_MAX_PREFS_BYTES"):
         overrides["repository"]["max_prefs_bytes"] = int(val)
-    if val := _get_env("DFE_REPOSITORY_MAX_OBJECT_BYTES"):
+    if val := _get_env("DFE_ENGINE_REPOSITORY_MAX_OBJECT_BYTES"):
         overrides["repository"]["max_object_bytes"] = int(val)
 
     # Deployment settings
-    if val := _get_env("DFE_DEPLOYMENT_TARGET"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_TARGET"):
         overrides["deployment"]["target"] = val.strip().lower()
-    if val := _get_env("DFE_DEPLOYMENT_NAMESPACE"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_NAMESPACE"):
         overrides["deployment"]["namespace"] = val
-    if val := _get_env("DFE_PROFILE"):
+    if val := _get_env("DFE_ENGINE_PROFILE"):
         overrides["deployment"]["profile"] = val.strip()
-    if val := _get_env("DFE_ADMIN_LINKS"):
+    if val := _get_env("DFE_ENGINE_ADMIN_LINKS"):
         # Parsed by dfe_engine.admin_links, which drops a bad entry instead of failing the load.
         overrides["deployment"]["admin_links"] = val.strip()
-    if val := _get_env("DFE_DEPLOYMENT_APP_CONFIG_DIR"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_APP_CONFIG_DIR"):
         overrides["deployment"]["app_config_dir"] = val.strip()
-    if val := _get_env("DFE_DEPLOYMENT_APP_CONFIG_BASE_DIR"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_APP_CONFIG_BASE_DIR"):
         overrides["deployment"]["app_config_base_dir"] = val.strip()
-    if val := _get_env("DFE_DEPLOYMENT_APP_CONFIG_MOUNT"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_APP_CONFIG_MOUNT"):
         overrides["deployment"]["app_config_mount"] = val.strip()
-    if val := _get_env("DFE_DEPLOYMENT_APP_ENV_DIR"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR"):
         overrides["deployment"]["app_env_dir"] = val.strip()
-    # Who runs each backing service. Never DFE_KAFKA_PROVIDER: it derives the engine's own
+    # Who runs each backing service. Never DFE_ENGINE_KAFKA_PROVIDER: it derives the engine's own
     # SASL protocol, and an in-cluster listener does not speak what a provider key derives.
     backing: dict[str, dict[str, str]] = {"kafka": {}, "clickhouse": {}}
-    if val := _get_env("DFE_DEPLOYMENT_KAFKA_PROVIDER"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER"):
         backing["kafka"]["provider"] = val.strip()
-    if val := _get_env("DFE_DEPLOYMENT_KAFKA_TIER"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_KAFKA_TIER"):
         backing["kafka"]["tier"] = val.strip()
-    if val := _get_env("DFE_DEPLOYMENT_KAFKA_REGION"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_KAFKA_REGION"):
         backing["kafka"]["region"] = val.strip()
-    if val := _get_env("DFE_DEPLOYMENT_CLICKHOUSE_PROVIDER"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_PROVIDER"):
         backing["clickhouse"]["provider"] = val.strip()
-    if val := _get_env("DFE_DEPLOYMENT_CLICKHOUSE_TIER"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_TIER"):
         backing["clickhouse"]["tier"] = val.strip()
-    if val := _get_env("DFE_DEPLOYMENT_CLICKHOUSE_REGION"):
+    if val := _get_env("DFE_ENGINE_DEPLOYMENT_CLICKHOUSE_REGION"):
         backing["clickhouse"]["region"] = val.strip()
     if stated := {service: facts for service, facts in backing.items() if facts}:
         overrides["deployment"]["backing"] = stated
 
     # Transform validation
-    if val := _get_env("DFE_TRANSFORM_VALIDATION_ENABLED"):
+    if val := _get_env("DFE_ENGINE_TRANSFORM_VALIDATION_ENABLED"):
         overrides["transform_validation"]["enabled"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_TRANSFORM_VALIDATION_BLOCKING"):
+    if val := _get_env("DFE_ENGINE_TRANSFORM_VALIDATION_BLOCKING"):
         overrides["transform_validation"]["blocking"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_TRANSFORM_DRY_RUN_ENABLED"):
+    if val := _get_env("DFE_ENGINE_TRANSFORM_DRY_RUN_ENABLED"):
         overrides["transform_validation"]["dry_run"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_TRANSFORM_ALLOW_HOST_FUNCTIONS"):
+    if val := _get_env("DFE_ENGINE_TRANSFORM_ALLOW_HOST_FUNCTIONS"):
         overrides["transform_validation"]["allow_host_functions"] = val.lower() in (
             "true",
             "1",
@@ -2842,29 +2846,29 @@ def _get_env_overrides() -> dict:
         )
 
     # Helm settings
-    if val := _get_env("DFE_HELM_OUTPUT_DIR"):
+    if val := _get_env("DFE_ENGINE_HELM_OUTPUT_DIR"):
         overrides["helm"]["output_dir"] = val
-    if val := _get_env("DFE_HELM_ENVIRONMENT_FILE"):
+    if val := _get_env("DFE_ENGINE_HELM_ENVIRONMENT_FILE"):
         overrides["helm"]["environment_file"] = val
 
     # Auth settings
-    if val := _get_env("DFE_AUTH_ENABLED"):
+    if val := _get_env("DFE_ENGINE_AUTH_ENABLED"):
         overrides["auth"]["enabled"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_AUTH_DIR"):
+    if val := _get_env("DFE_ENGINE_AUTH_DIR"):
         overrides["auth"]["auth_dir"] = val
-    if val := _get_env("DFE_AUTH_TRUST_PROXY_AUTH_HEADERS"):
+    if val := _get_env("DFE_ENGINE_AUTH_TRUST_PROXY_AUTH_HEADERS"):
         overrides["auth"]["trust_proxy_auth_headers"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_AUTH_PROXY_PROVIDER"):
+    if val := _get_env("DFE_ENGINE_AUTH_PROXY_PROVIDER"):
         overrides["auth"]["proxy_provider"] = val
-    if val := _get_env("DFE_AUTH_API_KEY_DEFAULT_TTL_DAYS"):
+    if val := _get_env("DFE_ENGINE_AUTH_API_KEY_DEFAULT_TTL_DAYS"):
         overrides["auth"]["api_key_default_ttl_days"] = int(val)
-    if val := _get_env("DFE_AUTH_OIDC_GROUP_SYNC_ENABLED"):
+    if val := _get_env("DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_ENABLED"):
         overrides["auth"]["oidc_group_sync_enabled"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS"):
+    if val := _get_env("DFE_ENGINE_AUTH_OIDC_GROUP_SYNC_TICK_SECONDS"):
         overrides["auth"]["oidc_group_sync_tick_seconds"] = int(val)
-    if val := _get_env("DFE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS"):
+    if val := _get_env("DFE_ENGINE_AUTH_OIDC_LOGIN_DIRECTORY_DEADLINE_SECONDS"):
         overrides["auth"]["oidc_login_directory_deadline_seconds"] = float(val)
-    if val := _get_env("DFE_AUTH_SOURCE_PROVIDER_BINDINGS"):
+    if val := _get_env("DFE_ENGINE_AUTH_SOURCE_PROVIDER_BINDINGS"):
         # A JSON object of {source_provider_stamp: oidc_provider_name}. Fail loudly
         # on malformed config: a dropped binding locks every bound user out at login.
         import json
@@ -2872,31 +2876,33 @@ def _get_env_overrides() -> dict:
         try:
             bindings = json.loads(val)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"DFE_AUTH_SOURCE_PROVIDER_BINDINGS is not valid JSON: {exc}") from exc
+            raise ValueError(
+                f"DFE_ENGINE_AUTH_SOURCE_PROVIDER_BINDINGS is not valid JSON: {exc}"
+            ) from exc
         overrides["auth"]["source_provider_bindings"] = bindings
 
     # Local auth settings (nested under auth.local)
-    if val := _get_env("DFE_AUTH_LOCAL_ENABLED"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOCAL_ENABLED"):
         overrides["auth"].setdefault("local", {})["enabled"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_NAME"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOCAL_ADMIN_NAME"):
         overrides["auth"].setdefault("local", {})["admin_name"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD"):
         overrides["auth"].setdefault("local", {})["admin_password"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_OPERATOR_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOCAL_OPERATOR_PASSWORD"):
         overrides["auth"].setdefault("local", {})["operator_password"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_VIEWER_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOCAL_VIEWER_PASSWORD"):
         overrides["auth"].setdefault("local", {})["viewer_password"] = val
-    if val := _get_env("DFE_AUTH_BREAKGLASS_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_AUTH_BREAKGLASS_PASSWORD"):
         overrides["auth"].setdefault("local", {})["breakglass_password"] = val
-    if val := _get_env("DFE_RECOVERY_EMAIL"):
+    if val := _get_env("DFE_ENGINE_RECOVERY_EMAIL"):
         overrides["auth"].setdefault("local", {})["recovery_email"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD_SECRET_PATH"):
         overrides["auth"].setdefault("local", {})["admin_password_secret_path"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_SECRET_NAME"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOCAL_ADMIN_SECRET_NAME"):
         overrides["auth"].setdefault("local", {})["admin_secret_name"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_SECRET_KEY"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOCAL_ADMIN_SECRET_KEY"):
         overrides["auth"].setdefault("local", {})["admin_secret_key"] = val
-    if val := _get_env("DFE_AUTH_LOCAL_SEED_ACCOUNTS"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS"):
         # A JSON list of {username, password, groups}. Fail loudly on malformed
         # config: a dropped list would silently strip the shared team logins.
         import json
@@ -2904,162 +2910,164 @@ def _get_env_overrides() -> dict:
         try:
             seed = json.loads(val)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"DFE_AUTH_LOCAL_SEED_ACCOUNTS is not valid JSON: {exc}") from exc
+            raise ValueError(
+                f"DFE_ENGINE_AUTH_LOCAL_SEED_ACCOUNTS is not valid JSON: {exc}"
+            ) from exc
         overrides["auth"].setdefault("local", {})["seed_accounts"] = seed
-    if val := _get_env("DFE_ORGS_SEED_ORGS"):
+    if val := _get_env("DFE_ENGINE_ORGS_SEED_ORGS"):
         import json
 
         try:
             seed = json.loads(val)
         except json.JSONDecodeError as exc:
-            raise ValueError(f"DFE_ORGS_SEED_ORGS is not valid JSON: {exc}") from exc
+            raise ValueError(f"DFE_ENGINE_ORGS_SEED_ORGS is not valid JSON: {exc}") from exc
         overrides["orgs"]["seed_orgs"] = seed
-    if val := _get_env("DFE_INGEST_SOURCE_ORG_ID"):
+    if val := _get_env("DFE_ENGINE_INGEST_SOURCE_ORG_ID"):
         overrides["ingest"]["source_org_id"] = val.lower()
-    if val := _get_env("DFE_INGEST_BEARER_SECRET"):
+    if val := _get_env("DFE_ENGINE_INGEST_BEARER_SECRET"):
         overrides["ingest"]["bearer_secret"] = val.strip()
 
     # Failed sign-in backoff (nested under auth.login_throttle)
-    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_ENABLED"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOGIN_THROTTLE_ENABLED"):
         overrides["auth"].setdefault("login_throttle", {})["enabled"] = val.lower() in (
             "true",
             "1",
             "yes",
         )
-    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOGIN_THROTTLE_USERNAME_FAILURES"):
         overrides["auth"].setdefault("login_throttle", {})["username_failures"] = int(val)
-    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOGIN_THROTTLE_CLIENT_FAILURES"):
         overrides["auth"].setdefault("login_throttle", {})["client_failures"] = int(val)
-    if val := _get_env("DFE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS"):
+    if val := _get_env("DFE_ENGINE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS"):
         overrides["auth"].setdefault("login_throttle", {})["max_delay_seconds"] = int(val)
 
     # Central users+groups store backend (auto default; document nested under auth.accounts_store)
-    if val := _get_env("DFE_AUTH_STORE_BACKEND"):
+    if val := _get_env("DFE_ENGINE_AUTH_STORE_BACKEND"):
         overrides["auth"]["store_backend"] = val
-    if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_URI"):
+    if val := _get_env("DFE_ENGINE_AUTH_ACCOUNTS_STORE_URI"):
         overrides["auth"].setdefault("accounts_store", {})["uri"] = val
-    if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_DATABASE"):
+    if val := _get_env("DFE_ENGINE_AUTH_ACCOUNTS_STORE_DATABASE"):
         overrides["auth"].setdefault("accounts_store", {})["database"] = val
-    if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_COLLECTION"):
+    if val := _get_env("DFE_ENGINE_AUTH_ACCOUNTS_STORE_COLLECTION"):
         overrides["auth"].setdefault("accounts_store", {})["collection"] = val
 
     # HyperDX settings
-    if val := _get_env("DFE_HYPERDX_BASE_URL"):
+    if val := _get_env("DFE_ENGINE_HYPERDX_BASE_URL"):
         overrides["hyperdx"]["base_url"] = val
-    if val := _get_env("DFE_HYPERDX_ENABLED"):
+    if val := _get_env("DFE_ENGINE_HYPERDX_ENABLED"):
         overrides["hyperdx"]["enabled"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_HYPERDX_API_KEY_ENV"):
+    if val := _get_env("DFE_ENGINE_HYPERDX_API_KEY_ENV"):
         overrides["hyperdx"]["api_key_env"] = val
 
     # Gitops settings
-    if val := _get_env("DFE_GITOPS_ENABLED"):
+    if val := _get_env("DFE_ENGINE_GITOPS_ENABLED"):
         overrides["gitops"]["enabled"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_GITOPS_REPO_URL"):
+    if val := _get_env("DFE_ENGINE_GITOPS_REPO_URL"):
         overrides["gitops"]["repo_url"] = val
-    if val := _get_env("DFE_GITOPS_BRANCH"):
+    if val := _get_env("DFE_ENGINE_GITOPS_BRANCH"):
         overrides["gitops"]["branch"] = val
-    if val := _get_env("DFE_GITOPS_LOCAL_PATH"):
+    if val := _get_env("DFE_ENGINE_GITOPS_LOCAL_PATH"):
         overrides["gitops"]["local_path"] = val
-    if val := _get_env("DFE_GITOPS_PUSH"):
+    if val := _get_env("DFE_ENGINE_GITOPS_PUSH"):
         overrides["gitops"]["push"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_GITOPS_USERNAME"):
+    if val := _get_env("DFE_ENGINE_GITOPS_USERNAME"):
         overrides["gitops"]["username"] = val
-    if val := _get_env("DFE_GITOPS_TOKEN"):
+    if val := _get_env("DFE_ENGINE_GITOPS_TOKEN"):
         overrides["gitops"]["token"] = val
-    if val := _get_env("DFE_GITOPS_AUTHOR_NAME"):
+    if val := _get_env("DFE_ENGINE_GITOPS_AUTHOR_NAME"):
         overrides["gitops"]["author_name"] = val
-    if val := _get_env("DFE_GITOPS_AUTHOR_EMAIL"):
+    if val := _get_env("DFE_ENGINE_GITOPS_AUTHOR_EMAIL"):
         overrides["gitops"]["author_email"] = val
-    if val := _get_env("DFE_GITOPS_MODE"):
+    if val := _get_env("DFE_ENGINE_GITOPS_MODE"):
         overrides["gitops"]["mode"] = val.strip().lower()
-    if val := _get_env("DFE_GITOPS_FORGE_PROVIDER"):
+    if val := _get_env("DFE_ENGINE_GITOPS_FORGE_PROVIDER"):
         overrides["gitops"]["forge_provider"] = val.strip().lower()
-    if val := _get_env("DFE_GITOPS_FORGE_API_BASE"):
+    if val := _get_env("DFE_ENGINE_GITOPS_FORGE_API_BASE"):
         overrides["gitops"]["forge_api_base"] = val
-    if val := _get_env("DFE_GITOPS_READ_TIMEOUT_SECONDS"):
+    if val := _get_env("DFE_ENGINE_GITOPS_READ_TIMEOUT_SECONDS"):
         overrides["gitops"].setdefault("read", {})["timeout_seconds"] = float(val)
-    if val := _get_env("DFE_GITOPS_WRITE_TIMEOUT_SECONDS"):
+    if val := _get_env("DFE_ENGINE_GITOPS_WRITE_TIMEOUT_SECONDS"):
         overrides["gitops"].setdefault("write", {})["timeout_seconds"] = float(val)
-    if val := _get_env("DFE_GITOPS_WRITE_BUDGET_SECONDS"):
+    if val := _get_env("DFE_ENGINE_GITOPS_WRITE_BUDGET_SECONDS"):
         overrides["gitops"].setdefault("write", {})["budget_seconds"] = float(val)
-    if val := _get_env("DFE_GITOPS_WRITE_FAILURE_THRESHOLD"):
+    if val := _get_env("DFE_ENGINE_GITOPS_WRITE_FAILURE_THRESHOLD"):
         overrides["gitops"].setdefault("write", {})["failure_threshold"] = int(val)
-    if val := _get_env("DFE_GITOPS_WRITE_RESET_TIMEOUT"):
+    if val := _get_env("DFE_ENGINE_GITOPS_WRITE_RESET_TIMEOUT"):
         overrides["gitops"].setdefault("write", {})["reset_timeout"] = float(val)
-    if val := _get_env("DFE_GITOPS_PACK_LOOSE_OBJECTS"):
+    if val := _get_env("DFE_ENGINE_GITOPS_PACK_LOOSE_OBJECTS"):
         overrides["gitops"].setdefault("pack", {})["loose_objects"] = int(val)
-    if val := _get_env("DFE_GITOPS_PACK_PACKS"):
+    if val := _get_env("DFE_ENGINE_GITOPS_PACK_PACKS"):
         overrides["gitops"].setdefault("pack", {})["packs"] = int(val)
-    if val := _get_env("DFE_GITOPS_PACK_INTERVAL_SECONDS"):
+    if val := _get_env("DFE_ENGINE_GITOPS_PACK_INTERVAL_SECONDS"):
         overrides["gitops"].setdefault("pack", {})["interval_seconds"] = float(val)
 
     # API settings
-    if val := _get_env("DFE_API_HOST"):
+    if val := _get_env("DFE_ENGINE_API_HOST"):
         overrides["api"]["host"] = val
-    if val := _get_env("DFE_API_PORT"):
+    if val := _get_env("DFE_ENGINE_API_PORT"):
         overrides["api"]["port"] = int(val)
-    if val := _get_env("DFE_API_JWT_SECRET"):
+    if val := _get_env("DFE_ENGINE_API_JWT_SECRET"):
         overrides["api"]["jwt_secret"] = val
-    if val := _get_env("DFE_API_SESSION_SECRET"):
+    if val := _get_env("DFE_ENGINE_API_SESSION_SECRET"):
         overrides["api"]["session_secret"] = val
-    if val := _get_env("DFE_API_CORS_ORIGINS"):
+    if val := _get_env("DFE_ENGINE_API_CORS_ORIGINS"):
         overrides["api"]["cors_origins"] = [o.strip() for o in val.split(",") if o.strip()]
-    if val := _get_env("DFE_API_FORWARDED_ALLOW_IPS"):
+    if val := _get_env("DFE_ENGINE_API_FORWARDED_ALLOW_IPS"):
         overrides["api"]["forwarded_allow_ips"] = val.strip()
-    if val := _get_env("DFE_API_JWT_EXPIRE_MINUTES"):
+    if val := _get_env("DFE_ENGINE_API_JWT_EXPIRE_MINUTES"):
         overrides["api"]["jwt_expire_minutes"] = int(val)
-    if val := _get_env("DFE_API_MAX_SESSION_MINUTES"):
+    if val := _get_env("DFE_ENGINE_API_MAX_SESSION_MINUTES"):
         overrides["api"]["max_session_minutes"] = int(val)
-    if val := _get_env("DFE_API_MAX_ACTIVE_TASKS"):
+    if val := _get_env("DFE_ENGINE_API_MAX_ACTIVE_TASKS"):
         overrides["api"]["max_active_tasks"] = int(val)
-    if val := _get_env("DFE_API_MAX_REQUEST_BODY_BYTES"):
+    if val := _get_env("DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES"):
         overrides["api"]["max_request_body_bytes"] = int(val)
-    if val := _get_env("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"):
+    if val := _get_env("DFE_ENGINE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"):
         overrides["api"]["elastic_converter_max_upload_bytes"] = int(val)
-    if val := _get_env("DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE"):
+    if val := _get_env("DFE_ENGINE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE"):
         overrides["api"]["elastic_converter_read_chunk_size"] = int(val)
-    if val := _get_env("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES"):
+    if val := _get_env("DFE_ENGINE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES"):
         overrides["api"]["elastic_converter_content_length_slack_bytes"] = int(val)
-    if val := _get_env("DFE_API_DOCS_ENABLED"):
+    if val := _get_env("DFE_ENGINE_API_DOCS_ENABLED"):
         overrides["api"]["docs_enabled"] = val.lower() in ("true", "1", "yes")
 
     # Secrets settings (the scalo.secrets seam for minted secrets)
-    if val := _get_env("DFE_SECRETS_PROVIDER"):
+    if val := _get_env("DFE_ENGINE_SECRETS_PROVIDER"):
         overrides["secrets"]["provider"] = val
-    if val := _get_env("DFE_SECRETS_PATH"):
+    if val := _get_env("DFE_ENGINE_SECRETS_PATH"):
         overrides["secrets"]["path"] = val
-    if val := _get_env("DFE_SECRETS_ADDR"):
+    if val := _get_env("DFE_ENGINE_SECRETS_ADDR"):
         overrides["secrets"]["addr"] = val
-    if val := _get_env("DFE_SECRETS_MOUNT"):
+    if val := _get_env("DFE_ENGINE_SECRETS_MOUNT"):
         overrides["secrets"]["mount"] = val
-    if val := _get_env("DFE_SECRETS_ROLE"):
+    if val := _get_env("DFE_ENGINE_SECRETS_ROLE"):
         overrides["secrets"]["role"] = val
-    if val := _get_env("DFE_SECRETS_REGION"):
+    if val := _get_env("DFE_ENGINE_SECRETS_REGION"):
         overrides["secrets"]["region"] = val
-    if val := _get_env("DFE_SECRETS_NAME_PREFIX"):
+    if val := _get_env("DFE_ENGINE_SECRETS_NAME_PREFIX"):
         overrides["secrets"]["name_prefix"] = val
-    if val := _get_env("DFE_SECRETS_KMS_KEY_ID"):
+    if val := _get_env("DFE_ENGINE_SECRETS_KMS_KEY_ID"):
         overrides["secrets"]["kms_key_id"] = val
     # Left as text for SecretsSettings to parse, so a bad value fails only a secrets load.
-    if val := _get_env("DFE_SECRETS_RECOVERY_WINDOW_DAYS"):
+    if val := _get_env("DFE_ENGINE_SECRETS_RECOVERY_WINDOW_DAYS"):
         overrides["secrets"]["recovery_window_days"] = val
-    if val := _get_env("DFE_SECRETS_TAGS"):
+    if val := _get_env("DFE_ENGINE_SECRETS_TAGS"):
         overrides["secrets"]["tags"] = val
 
     # The stack this pod was deployed from, when the deploy passed it in
-    if val := _get_env("DFE_STACK_VERSION"):
+    if val := _get_env("DFE_ENGINE_STACK_VERSION"):
         overrides["stack_version"] = val
-    if val := _get_env("DFE_UI_VERSION"):
+    if val := _get_env("DFE_ENGINE_UI_VERSION"):
         overrides["ui_version"] = val
 
     # Deployment posture (production|dev|test|...) - gates the placeholder-secret guard
-    if val := _get_env("DFE_ENV"):
+    if val := _get_env("DFE_ENGINE_ENV"):
         overrides["env"] = val
-    if val := _get_env("DFE_E2E_SERVER"):
+    if val := _get_env("DFE_ENGINE_E2E_SERVER"):
         overrides["e2e_server"] = val.lower() in ("true", "1", "yes")
 
     # Config directory the deployment supplies -- auto-resolves registry subdirs
-    # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.
+    # Individual env vars (DFE_ENGINE_SOURCES_DIR, etc.) take precedence.
     config_dir = _get_env("DFE_CONFIG_DIR")
     if config_dir:
         overrides["config_dir"] = config_dir
@@ -3137,7 +3145,7 @@ def load_clickhouse_settings(config_file: str | None = None) -> ClickHouseSettin
     must be on outside dev, and the dev jwt_secret placeholder is rejected. They
     are correct for the service and fatal for a tool that never serves a
     request: ``dfe-schema`` connects to ClickHouse and applies DDL, so loading
-    the whole model made an unset ``DFE_API_JWT_SECRET`` fail a schema job that
+    the whole model made an unset ``DFE_ENGINE_API_JWT_SECRET`` fail a schema job that
     has no API surface to secure.
 
     Narrowing the load is the fix rather than relaxing the validators, which
@@ -3176,7 +3184,7 @@ def default_data_database() -> str:
 def provided_service_password(role: str) -> str:
     """The password a deployment supplies for a minted ClickHouse service user, or "".
 
-    Read from ``DFE_CLICKHOUSE_<ROLE>_PASSWORD`` and never from a config file,
+    Read from ``DFE_ENGINE_CLICKHOUSE_<ROLE>_PASSWORD`` and never from a config file,
     because config files live in the deployment's git repo. Not stripped: the pod
     that connects as the user reads the same Secret verbatim, and a password that
     differs by one byte fails ClickHouse auth.
@@ -3187,7 +3195,7 @@ def provided_service_password(role: str) -> str:
     Returns:
         The provided password, or ``""`` when the deployment supplies none.
     """
-    return os.getenv(f"DFE_CLICKHOUSE_{role.upper()}_PASSWORD") or ""
+    return os.getenv(f"DFE_ENGINE_CLICKHOUSE_{role.upper()}_PASSWORD") or ""
 
 
 def get_clickhouse_config(settings: DFESettings | None = None) -> dict:

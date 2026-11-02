@@ -126,7 +126,7 @@ def test_the_widest_vendor_table_measured_gets_a_setting_sized_to_it():
 
 def test_a_statement_over_the_ceiling_is_refused_before_it_is_sent():
     statement = _statement_of(600_000)
-    with pytest.raises(StatementTooLargeError, match="DFE_CLICKHOUSE_DDL_MAX_QUERY_SIZE"):
+    with pytest.raises(StatementTooLargeError, match="DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE"):
         ddl_settings(statement, ceiling=500_000)
 
 

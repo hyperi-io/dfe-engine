@@ -94,7 +94,7 @@ class TestProviderReachConfinement:
 
         from dfe_engine.api.v1.sigma import _validate_provider_reach
 
-        monkeypatch.setenv("DFE_SIGMA_ALLOWED_HOSTS", "github.com,gitlab.com")
+        monkeypatch.setenv("DFE_ENGINE_SIGMA_ALLOWED_HOSTS", "github.com,gitlab.com")
         cfg = ProviderConfig(
             name="evil", kind=ProviderKind.GIT_REPO, options={"url": "https://evil.example/x"}
         )
@@ -105,7 +105,7 @@ class TestProviderReachConfinement:
     def test_git_host_on_allowlist_ok(self, tmp_path, monkeypatch):
         from dfe_engine.api.v1.sigma import _validate_provider_reach
 
-        monkeypatch.setenv("DFE_SIGMA_ALLOWED_HOSTS", "github.com")
+        monkeypatch.setenv("DFE_ENGINE_SIGMA_ALLOWED_HOSTS", "github.com")
         cfg = ProviderConfig(
             name="ok",
             kind=ProviderKind.GIT_REPO,

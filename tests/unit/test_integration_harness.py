@@ -9,7 +9,7 @@
 
 They also pick the ClickHouse a run reaches. The app settings read a checkout's .env,
 which can name a shared server, so they count only when the cluster tier is asked for.
-``DFE_CLICKHOUSE_HOST`` stands in for that .env here.
+``DFE_ENGINE_CLICKHOUSE_HOST`` stands in for that .env here.
 """
 
 import pytest
@@ -23,7 +23,7 @@ TEST_HOST = "test-ch.example.internal"
 @pytest.fixture
 def app_names_a_clickhouse(monkeypatch: pytest.MonkeyPatch) -> None:
     """The app settings name a non-local ClickHouse, and no test target or tier is set."""
-    monkeypatch.setenv("DFE_CLICKHOUSE_HOST", APP_HOST)
+    monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", APP_HOST)
     for name in ("DFE_TEST_CH_HOST", "DFE_TEST_TIER", "DFE_TEST_DOCKER_HOST"):
         monkeypatch.delenv(name, raising=False)
 

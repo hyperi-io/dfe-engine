@@ -23,7 +23,7 @@ The receiver authenticates a listener only while an accepted credential lists it
 and ``mode: none`` otherwise, under which a record lands in the default org.
 
 On Kubernetes the ``file`` backend writes under the engine's own volume, which no
-receiver pod can mount. With ``DFE_INGEST_BEARER_SECRET`` set, :func:`sync_bearer_tokens`
+receiver pod can mount. With ``DFE_ENGINE_INGEST_BEARER_SECRET`` set, :func:`sync_bearer_tokens`
 also writes each listener's content into that Kubernetes Secret, keyed by listener, and
 the receiver mounts it at :data:`RECEIVER_BEARER_MOUNT`. Every startup and every apps
 reconcile syncs again, so a Secret recreated empty is refilled without a credential write.
@@ -119,9 +119,9 @@ def bearer_secret_source(listener: str, backend: SecretsSettings) -> str:
             reason = "that is not a scalo secrets provider"
     raise BearerSourceUnreadableError(
         f"dfe-receiver cannot read the ingest bearer tokens on "
-        f"DFE_SECRETS_PROVIDER={backend.provider}: {reason}. Use openbao or aws, or file with "
-        f"the receiver mounting DFE_SECRETS_PATH/{BEARER_SECRET_PREFIX}, or on Kubernetes the "
-        f"DFE_INGEST_BEARER_SECRET Secret, at {RECEIVER_BEARER_MOUNT}"
+        f"DFE_ENGINE_SECRETS_PROVIDER={backend.provider}: {reason}. Use openbao or aws, or file with "
+        f"the receiver mounting DFE_ENGINE_SECRETS_PATH/{BEARER_SECRET_PREFIX}, or on Kubernetes the "
+        f"DFE_ENGINE_INGEST_BEARER_SECRET Secret, at {RECEIVER_BEARER_MOUNT}"
     )
 
 

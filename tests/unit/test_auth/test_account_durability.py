@@ -463,7 +463,7 @@ def test_is_local_admin_matches_the_admin(monkeypatch):
 
 
 def test_is_local_admin_follows_the_configured_admin_name():
-    # DFE_AUTH_LOCAL_ADMIN_NAME renames the admin; without the name threaded
+    # DFE_ENGINE_AUTH_LOCAL_ADMIN_NAME renames the admin; without the name threaded
     # through, the renamed account loses its git-durability path entirely.
     assert ad.is_local_admin("root", "root") is True
     assert ad.is_local_admin("admin", "root") is False
