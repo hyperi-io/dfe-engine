@@ -55,6 +55,7 @@ The rule lives in `src/dfe_engine/scaling_pressure.py` and is substituted into b
 | dfe-engine | KEDA disabled by default (control-plane singleton) | CPU (opt-in) |
 | dfe-fetcher | KEDA disabled by default | - |
 | dfe-hunt-runner | no KEDA - one static pod | BETA: due-hunt backlog via the shim (`metrics-api`, `AverageValue`) - see [hunt-runner-scaling](../data-plane/hunt-runner-scaling.md) |
+
 All ScaledObjects default `minReplicaCount: 1` - there is no scale-to-zero on
 the fleet baseline today (`idleReplicaCount` support exists in `_keda.tpl` for
 a later opt-in, e.g. the Kafka-pipeline apps once that is wired).
