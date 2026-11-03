@@ -50,8 +50,8 @@ dev:
 # only takes effect when .env.e2e sets DFE_ENGINE_GITOPS_ENABLED=true -- the
 # app-management seeds write their instances, artefacts and sources into it.
 # NOT swept: ClickHouse users/roles, which are server-global rather than
-# per-database. Only the governance reconcile creates those, and it is off
-# unless DFE_ENGINE_ORG_PROVISIONING_ENABLED is set.
+# per-database. Only the governance reconcile creates those, and it runs
+# unless DFE_ENGINE_TENANT_ISOLATION_ENABLED is false.
 E2E_WORKSPACE := $(CURDIR)/tmp/e2e
 E2E_CH_PREFIX := dfe_e2e
 E2E_CH_DATA_DB := $(E2E_CH_PREFIX)

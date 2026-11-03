@@ -532,18 +532,11 @@ class TestEnvOverrides:
         with pytest.raises(ValueError, match="name"):
             load_settings()
 
-    def test_legacy_clickhouse_host_fallback(self, monkeypatch):
-        """Legacy env var (no DFE_ENGINE_ prefix) should also work."""
-        monkeypatch.setenv("CLICKHOUSE_HOST", "legacy.ch.com")
-        settings = load_settings()
-        assert settings.clickhouse.host == "legacy.ch.com"
-
-    def test_dfe_prefix_takes_precedence(self, monkeypatch):
-        """DFE_ENGINE_ prefixed var takes precedence over legacy var."""
-        monkeypatch.setenv("CLICKHOUSE_HOST", "legacy.ch.com")
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", "new.ch.com")
-        settings = load_settings()
-        assert settings.clickhouse.host == "new.ch.com"
+    @pytest.mark.parametrize("name", ["CLICKHOUSE_HOST", "DFE_CLICKHOUSE_HOST"])
+    def test_an_unprefixed_or_old_name_is_not_read(self, monkeypatch, name):
+        default = load_settings().clickhouse.host
+        monkeypatch.setenv(name, "other.ch.com")
+        assert load_settings().clickhouse.host == default
 
     def test_hyperdx_enabled_override(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_HYPERDX_ENABLED", "true")
@@ -1018,16 +1011,10 @@ class TestBrokerListFromEnv:
                 id="empty_with_a_bus_is_refused",
             ),
             pytest.param(
-                {"KAFKA_BOOTSTRAP_SERVERS": ""},
-                None,
-                True,
-                id="empty_legacy_name_is_refused_too",
-            ),
-            pytest.param(
-                {"DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS": "", "KAFKA_BOOTSTRAP_SERVERS": "old:9092"},
-                None,
-                True,
-                id="the_dfe_name_wins_even_when_empty",
+                {"KAFKA_BOOTSTRAP_SERVERS": "old:9092"},
+                "localhost:9092",
+                False,
+                id="an_unprefixed_name_is_not_read",
             ),
         ],
     )
@@ -1398,7 +1385,7 @@ class TestEverySettingIsRead:
         assert documented, "parsed no documented env names -- the parser, not the code, is wrong"
 
         # Either settings.py routes it, or a module reads the name for itself.
-        routed = set(re.findall(r'_get_env\(\s*"(DFE_ENGINE_[A-Z0-9_]+)"', source))
+        routed = set(re.findall(r'_get_env(?:_if_set)?\(\s*"(DFE_ENGINE_[A-Z0-9_]+)"', source))
         elsewhere = "\n".join(
             path.read_text(encoding="utf-8", errors="replace")
             for path in sorted(package.rglob("*.py"))

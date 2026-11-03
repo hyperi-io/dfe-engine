@@ -24,21 +24,17 @@ import os
 import threading
 from typing import Any
 
-from scalo.logger import logger
-
 from .bindings import derive_group_bindings
 from .models import DEFAULT_SERVICE_ROLES, ChServiceRole, catalogue
 from .reconciler import ReconcileResult, reconcile_ch_rbac, reconcile_ch_service_roles
 
 _ENABLED_VALUES = ("true", "1", "yes")
-_DISABLED_VALUES = ("false", "0", "no")
 
 # Two runs minting the same new identity at once store one password and give
 # ClickHouse the other, so the endpoint, startup and the change trigger take turns.
 _RECONCILE_LOCK = threading.Lock()
 
 TENANT_ISOLATION_ENV = "DFE_ENGINE_TENANT_ISOLATION_ENABLED"
-LEGACY_TENANT_ISOLATION_ENV = "DFE_ENGINE_ORG_PROVISIONING_ENABLED"
 
 
 def tenant_isolation_enabled() -> bool:
@@ -47,14 +43,8 @@ def tenant_isolation_enabled() -> bool:
     The row policies this gates ARE the isolation, so a deployment that leaves it
     unset gets enforcement rather than `_org_id` columns nothing reads.
     """
-    for env in (TENANT_ISOLATION_ENV, LEGACY_TENANT_ISOLATION_ENV):
-        raw = os.environ.get(env, "").strip().lower()
-        if not raw:
-            continue
-        if env == LEGACY_TENANT_ISOLATION_ENV:
-            logger.warning(f"{env} is deprecated; use {TENANT_ISOLATION_ENV}")
-        return raw in _ENABLED_VALUES
-    return True
+    raw = os.environ.get(TENANT_ISOLATION_ENV, "").strip().lower()
+    return raw in _ENABLED_VALUES if raw else True
 
 
 def ch_admin_client(settings: Any) -> Any:
