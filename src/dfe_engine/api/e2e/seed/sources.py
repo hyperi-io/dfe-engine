@@ -173,7 +173,11 @@ class Sources(Seed):
         Returns True when created.
         """
         return self._ensure_source(
-            name='undeployedsource', fetched=False, meta_schema=None, transform=None, display_name="Undeployed Source"
+            name="undeployedsource",
+            fetched=False,
+            meta_schema=None,
+            transform=None,
+            display_name="Undeployed Source",
         )
 
     def _ensure_source(
