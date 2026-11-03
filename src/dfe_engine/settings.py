@@ -13,23 +13,23 @@ Provides centralized configuration management through the engine's own cascade i
 variables mapped below. It is not scalo's settings cascade; moving onto it is #600.
 Configuration priority: Environment Variables > Config Files > Defaults
 
-Environment variable mapping (DFE_ENGINE_ prefixed, with legacy fallbacks):
+Environment variable mapping (DFE_ENGINE_ prefixed):
 
 Config Directory:
 - DFE_CONFIG_DIR -> config_dir (auto-resolves registry subdirectories)
 
 ClickHouse:
-- DFE_ENGINE_CLICKHOUSE_HOST (legacy: CLICKHOUSE_HOST) -> clickhouse.host
-- DFE_ENGINE_CLICKHOUSE_PORT (legacy: CLICKHOUSE_PORT) -> clickhouse.port
-- DFE_ENGINE_CLICKHOUSE_USERNAME (legacy: CLICKHOUSE_USER) -> clickhouse.username
-- DFE_ENGINE_CLICKHOUSE_PASSWORD (legacy: CLICKHOUSE_PASSWORD) -> clickhouse.password
+- DFE_ENGINE_CLICKHOUSE_HOST -> clickhouse.host
+- DFE_ENGINE_CLICKHOUSE_PORT -> clickhouse.port
+- DFE_ENGINE_CLICKHOUSE_USERNAME -> clickhouse.username
+- DFE_ENGINE_CLICKHOUSE_PASSWORD -> clickhouse.password
 - DFE_ENGINE_CLICKHOUSE_<ROLE>_PASSWORD -> the password a minted service user adopts instead
   of one the engine mints, e.g. DFE_ENGINE_CLICKHOUSE_HUNT_RUNNER_PASSWORD. Environment only,
   never a config file (see provided_service_password)
-- DFE_ENGINE_CLICKHOUSE_DATABASE (legacy: CLICKHOUSE_DATABASE) -> clickhouse.database
-- DFE_ENGINE_CLICKHOUSE_DATA_DATABASE (legacy: CLICKHOUSE_DATA_DATABASE) -> clickhouse.data_database
-- DFE_ENGINE_CLICKHOUSE_SECURE (legacy: CLICKHOUSE_SECURE) -> clickhouse.secure (true/false)
-- DFE_ENGINE_CLICKHOUSE_VERIFY (legacy: CLICKHOUSE_VERIFY) -> clickhouse.verify (true/false)
+- DFE_ENGINE_CLICKHOUSE_DATABASE -> clickhouse.database
+- DFE_ENGINE_CLICKHOUSE_DATA_DATABASE -> clickhouse.data_database
+- DFE_ENGINE_CLICKHOUSE_SECURE -> clickhouse.secure (true/false)
+- DFE_ENGINE_CLICKHOUSE_VERIFY -> clickhouse.verify (true/false)
 - DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
 - DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
 - DFE_ENGINE_CLICKHOUSE_DDL_MAX_QUERY_SIZE -> clickhouse.ddl_max_query_size (bytes)
@@ -47,7 +47,7 @@ ClickHouse Cloud (control plane; opt-in, billable):
 - DFE_ENGINE_CLICKHOUSE_CLOUD_API_BASE -> clickhouse.cloud.api_base
 - DFE_ENGINE_CLICKHOUSE_CLOUD_ORGANIZATION_ID -> clickhouse.cloud.organization_id
 - DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE_ID -> clickhouse.cloud.service_id
-- DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE (or _SERVICE_NAME) -> clickhouse.cloud.service_name
+- DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE -> clickhouse.cloud.service_name
 - DFE_ENGINE_CLICKHOUSE_CLOUD_AUTOWAKE -> clickhouse.cloud.autowake (true/false)
 
 Hunts:
@@ -85,8 +85,8 @@ Artifactory:
 Kafka:
 - DFE_ENGINE_KAFKA_PROVIDER -> kafka.provider (DERIVES security_protocol + sasl_mechanism
   per the credential contract; deploys set this, never the mechanism)
-- DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS (legacy: KAFKA_BOOTSTRAP_SERVERS) -> kafka.bootstrap_servers
-- DFE_ENGINE_KAFKA_SECURITY_PROTOCOL (legacy: KAFKA_SECURITY_PROTOCOL) -> kafka.security_protocol
+- DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS -> kafka.bootstrap_servers
+- DFE_ENGINE_KAFKA_SECURITY_PROTOCOL -> kafka.security_protocol
 
 Transport (what carries a source's records between its stages):
 - DFE_ENGINE_TRANSPORT_DEFAULT -> transport.default (bus | direct)
@@ -167,22 +167,14 @@ from .transport import SourceTransport
 from .yaml_utils import yaml_load
 
 
-def _get_env(primary: str, *fallbacks: str) -> str | None:
-    """Get env var with fallback support. Primary (DFE_ENGINE_*) takes precedence over legacy names."""
-    if val := os.getenv(primary):
-        return val
-    for fallback in fallbacks:
-        if val := os.getenv(fallback):
-            return val
-    return None
+def _get_env(name: str) -> str | None:
+    """Return env var *name*, or None when it is unset or empty."""
+    return os.getenv(name) or None
 
 
-def _get_env_if_set(primary: str, *fallbacks: str) -> str | None:
+def _get_env_if_set(name: str) -> str | None:
     """Like ``_get_env``, but a variable set to the empty string counts as set."""
-    for name in (primary, *fallbacks):
-        if name in os.environ:
-            return os.environ[name]
-    return None
+    return os.environ.get(name)
 
 
 class ClickHouseCloudSettings(BaseModel):
@@ -2427,10 +2419,7 @@ def backing_from_environment() -> BackingSettings:
 
 
 def _get_env_overrides() -> dict:
-    """Get configuration overrides from environment variables.
-
-    DFE_ENGINE_ prefixed vars take precedence over legacy names.
-    """
+    """Get configuration overrides from environment variables."""
     # Mixed value types by design: section dicts plus top-level scalars
     # (env, config_dir), so the annotation is Any, not dict.
     overrides: dict[str, Any] = {
@@ -2463,18 +2452,18 @@ def _get_env_overrides() -> dict:
         "secrets": {},
     }
 
-    # ClickHouse settings (DFE_ENGINE_ prefix with legacy fallbacks)
-    if val := _get_env("DFE_ENGINE_CLICKHOUSE_HOST", "CLICKHOUSE_HOST"):
+    # ClickHouse settings
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_HOST"):
         overrides["clickhouse"]["host"] = val
-    if val := _get_env("DFE_ENGINE_CLICKHOUSE_PORT", "CLICKHOUSE_PORT"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_PORT"):
         overrides["clickhouse"]["port"] = int(val)
-    if val := _get_env("DFE_ENGINE_CLICKHOUSE_USERNAME", "CLICKHOUSE_USER"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_USERNAME"):
         overrides["clickhouse"]["username"] = val
-    if val := _get_env("DFE_ENGINE_CLICKHOUSE_PASSWORD", "CLICKHOUSE_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_PASSWORD"):
         overrides["clickhouse"]["password"] = val
-    if val := _get_env("DFE_ENGINE_CLICKHOUSE_DATABASE", "CLICKHOUSE_DATABASE"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_DATABASE"):
         overrides["clickhouse"]["database"] = val
-    if val := _get_env("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE", "CLICKHOUSE_DATA_DATABASE"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE"):
         overrides["clickhouse"]["data_database"] = val
     if val := _get_env("DFE_ENGINE_DEFAULT_TABLE_PROFILE"):
         overrides["clickhouse"]["default_table_profile"] = val
@@ -2482,11 +2471,11 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["bootstrap_tables"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS"):
         overrides["clickhouse"]["bootstrap_wait_seconds"] = float(val)
-    if val := _get_env("DFE_ENGINE_CLICKHOUSE_SECURE", "CLICKHOUSE_SECURE"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_SECURE"):
         overrides["clickhouse"]["secure"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_ENGINE_CLICKHOUSE_VERIFY", "CLICKHOUSE_VERIFY"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_VERIFY"):
         overrides["clickhouse"]["verify"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CA_CERT", "CLICKHOUSE_CA_CERT"):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CA_CERT"):
         overrides["clickhouse"]["ca_cert"] = val
 
     # Engine-wide TLS escape valves (config cascade): map the DFE_ENGINE_-prefixed knobs
@@ -2522,9 +2511,7 @@ def _get_env_overrides() -> dict:
         ch_cloud["organization_id"] = val
     if val := _get_env("DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE_ID"):
         ch_cloud["service_id"] = val
-    if val := _get_env(
-        "DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE", "DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE_NAME"
-    ):
+    if val := _get_env("DFE_ENGINE_CLICKHOUSE_CLOUD_SERVICE"):
         ch_cloud["service_name"] = val
     if val := _get_env("DFE_ENGINE_CLICKHOUSE_CLOUD_AUTOWAKE"):
         ch_cloud["autowake"] = val.lower() in ("true", "1", "yes")
@@ -2532,7 +2519,7 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["cloud"] = ch_cloud
 
     # Hunts settings
-    if val := _get_env("DFE_ENGINE_HUNT_LOG_PATH", "HUNT_LOG_PATH"):
+    if val := _get_env("DFE_ENGINE_HUNT_LOG_PATH"):
         overrides["hunts"]["log_path"] = val
     if val := _get_env("DFE_ENGINE_HUNTS_DIR"):
         overrides["hunts"]["hunt_dir"] = val
@@ -2614,33 +2601,31 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["detection_guard"] = guard
 
     # Artifactory settings
-    if val := _get_env("DFE_ENGINE_ARTIFACTORY_URL", "ARTIFACTORY_VECTOR_TEMPLATES"):
+    if val := _get_env("DFE_ENGINE_ARTIFACTORY_URL"):
         overrides["artifactory"]["url"] = val
-    if val := _get_env("DFE_ENGINE_ARTIFACTORY_USERNAME", "ARTIFACTORY_USERNAME"):
+    if val := _get_env("DFE_ENGINE_ARTIFACTORY_USERNAME"):
         overrides["artifactory"]["username"] = val
-    if val := _get_env("DFE_ENGINE_ARTIFACTORY_PASSWORD", "ARTIFACTORY_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_ARTIFACTORY_PASSWORD"):
         overrides["artifactory"]["password"] = val
-    if val := _get_env("DFE_ENGINE_TEMPLATES_VERSION", "TEMPLATES_VERSION"):
+    if val := _get_env("DFE_ENGINE_TEMPLATES_VERSION"):
         overrides["artifactory"]["templates_version"] = val
 
-    # Kafka settings (DFE_ENGINE_ prefix with legacy fallbacks)
+    # Kafka settings
     # DFE_ENGINE_KAFKA_PROVIDER DERIVES protocol + mechanism (contract dfe-engine#98);
     # deploys set it, not the mechanism. security_protocol/sasl_mechanism below
     # are the transition/manual path (empty provider) - see KafkaSettings.
     if val := _get_env("DFE_ENGINE_KAFKA_PROVIDER"):
         overrides["kafka"]["provider"] = val
     # An empty list is the operator saying there is no broker, so it overrides the dev default.
-    if (
-        val := _get_env_if_set("DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS")
-    ) is not None:
+    if (val := _get_env_if_set("DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS")) is not None:
         overrides["kafka"]["bootstrap_servers"] = val
-    if val := _get_env("DFE_ENGINE_KAFKA_SECURITY_PROTOCOL", "KAFKA_SECURITY_PROTOCOL"):
+    if val := _get_env("DFE_ENGINE_KAFKA_SECURITY_PROTOCOL"):
         overrides["kafka"]["security_protocol"] = val
-    if val := _get_env("DFE_ENGINE_KAFKA_SASL_MECHANISM", "KAFKA_SASL_MECHANISM"):
+    if val := _get_env("DFE_ENGINE_KAFKA_SASL_MECHANISM"):
         overrides["kafka"]["sasl_mechanism"] = val
-    if val := _get_env("DFE_ENGINE_KAFKA_SASL_USERNAME", "KAFKA_SASL_USERNAME"):
+    if val := _get_env("DFE_ENGINE_KAFKA_SASL_USERNAME"):
         overrides["kafka"]["sasl_username"] = val
-    if val := _get_env("DFE_ENGINE_KAFKA_SASL_PASSWORD", "KAFKA_SASL_PASSWORD"):
+    if val := _get_env("DFE_ENGINE_KAFKA_SASL_PASSWORD"):
         overrides["kafka"]["sasl_password"] = val
     # Topic creation on source deploy. Setting this env is the override; left
     # unset it follows transport.bus_present, which is what a brokerless profile
