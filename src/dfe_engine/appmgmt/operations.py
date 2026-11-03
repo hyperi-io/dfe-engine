@@ -45,8 +45,8 @@ START_TIME = "start_time_seconds"
 # The canonical bare name. An app may emit the composite under its own namespace,
 # so the query matches by rule and reports every spelling under this one name.
 SCALING_PRESSURE = scaling_pressure.GAUGE
-# scalo registers this through `gauge!`, so it lands in otel_metrics_gauge and
-# holds a CPU percentage rather than cumulative seconds despite the name.
+# scalo registers this through `gauge!`, so it lands in otel_metrics_gauge, but it holds
+# cumulative CPU seconds: resource_series reports it as cores used.
 CPU_SECONDS = "process_cpu_seconds_total"
 
 GAUGE_METRICS = (
@@ -230,6 +230,7 @@ class OperationalReader:
             {
                 "service": service,
                 "names": list(metrics),
+                "cpu_seconds": CPU_SECONDS,
                 "window_seconds": window_seconds,
                 "bucket_seconds": bucket_seconds,
             },

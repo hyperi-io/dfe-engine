@@ -123,21 +123,52 @@ queries:
   # under-provisions anything with a spiky profile.
   # Scaling pressure buckets under its canonical bare name whatever prefix the app
   # emitted, so one series is graphed rather than one per namespace.
+  # CPU seconds is cumulative, so each sample is cores used since the series' reading
+  # before it: a series is keyed as latest_gauges keys it, and a drop (a restart) or a
+  # repeated timestamp yields no sample.
   resource_series:
     database: otel
     sql: >
       SELECT
-        toStartOfInterval(TimeUnix, INTERVAL {bucket_seconds:UInt32} SECOND) AS bucket,
-        __PRESSURE_NAME__ AS metric,
-        min(Value) AS min_value,
-        max(Value) AS max_value,
-        avg(Value) AS avg_value,
-        quantile(0.95)(Value) AS p95_value,
+        bucket,
+        metric,
+        min(value) AS min_value,
+        max(value) AS max_value,
+        avg(value) AS avg_value,
+        quantile(0.95)(value) AS p95_value,
         count() AS samples
-      FROM __DB__.otel_metrics_gauge
-      WHERE ServiceName = {service:String}
-        AND (MetricName IN {names:Array(String)} OR __PRESSURE_MATCH__)
-        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+      FROM (
+        SELECT
+          toStartOfInterval(TimeUnix, INTERVAL {bucket_seconds:UInt32} SECOND) AS bucket,
+          __PRESSURE_NAME__ AS metric,
+          Value AS value
+        FROM __DB__.otel_metrics_gauge
+        WHERE ServiceName = {service:String}
+          AND ((MetricName IN {names:Array(String)} AND MetricName != {cpu_seconds:String})
+               OR __PRESSURE_MATCH__)
+          AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+        UNION ALL
+        SELECT
+          toStartOfInterval(sample.1, INTERVAL {bucket_seconds:UInt32} SECOND) AS bucket,
+          {cpu_seconds:String} AS metric,
+          sample.2 AS value
+        FROM (
+          SELECT
+            arraySort(groupArray((TimeUnix, Value))) AS points,
+            arrayPopFront(arrayMap(point -> point.1, points)) AS ends,
+            arrayPopFront(arrayDifference(arrayMap(point -> point.2, points))) AS used,
+            arrayPopFront(arrayDifference(arrayMap(point -> toInt64(toUnixTimestamp(point.1)), points))) AS spans,
+            arrayJoin(arrayMap(step -> (step.1, step.2 / step.3),
+                               arrayFilter(step -> step.3 > 0 AND step.2 >= 0,
+                                           arrayZip(ends, used, spans)))) AS sample
+          FROM __DB__.otel_metrics_gauge
+          WHERE ServiceName = {service:String}
+            AND MetricName = {cpu_seconds:String}
+            AND has({names:Array(String)}, {cpu_seconds:String})
+            AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+          GROUP BY cityHash64(Attributes), ResourceAttributes['service.instance.id']
+        )
+      )
       GROUP BY bucket, metric
       ORDER BY bucket
     params: [service]
