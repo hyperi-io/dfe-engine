@@ -1293,7 +1293,8 @@ class SourceRegistry:
         except FlowError:  # _validate_flow already reported it
             return
 
-        needed = {flow.transform.app} if flow.transform is not None else set()
+        # An external transform is the customer's pipeline, so it takes no deployment of ours.
+        needed = {flow.transform.app} if flow.transform and flow.transform.app else set()
         if source.fetcher is not None:
             needed.add(FETCHER_SERVICE)
         for service in sorted(needed):

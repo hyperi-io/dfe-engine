@@ -49,15 +49,14 @@ dfe-docker for a compose stack. Neither carries a copy of the fixtures.
 
 ## test_live_pipeline.py -- the 3 critical tests
 
-1. **HTTPS -> ClickHouse** (`test_https_ingest_lands_in_clickhouse`)
-   POST a uniquely-tagged event to the receiver over HTTPS; assert it lands in
-   the `dfe.main` ClickHouse table.
-2. **-> HyperDX** (`test_ingested_data_visible_in_hyperdx`)
-   Ingest, confirm it is in CH, then confirm HyperDX's search API returns it
-   (proves the HyperDX -> CH datasource wiring).
-3. **dfe-ui schema change via git** (`test_ui_deploys_schema_change_via_git`)
-   Create a source/meta-schema via the engine API, publish, and assert the
-   generated DDL (`ddl/<table>.sql`) reached the deploy repo with the new column.
+1. `test_https_ingest_lands_in_clickhouse` POSTs a uniquely-tagged event to the
+   receiver over HTTPS and asserts it lands in the `dfe.main` ClickHouse table.
+2. `test_ingested_data_visible_in_hyperdx` ingests, confirms the row is in CH,
+   then confirms HyperDX's search API returns it, which proves the HyperDX to CH
+   datasource wiring.
+3. `test_ui_deploys_schema_change_via_git` creates a source via the engine API
+   and asserts the generated DDL (`ddl/<table>.sql`) reached the deploy repo with
+   the new column.
 
 ## test_data_evolution.py -- the acceptance path, step by step
 
@@ -104,6 +103,15 @@ It is NOT parameterised over dfe-transform-vrl and dfe-transform-vector. They
 run the same VRL, read the same land topic and emit to the same load topic, and
 a landed row names neither, so two cases would be one experiment run twice.
 `DFE_E2E_TRANSFORM` names the deployed app in the failure message only.
+
+`test_external_pipelines.py` puts the customer's own pipeline in both places it
+plugs in: a real Vector as a source's origin, and a real Fluent Bit as its
+transform, each configured from the source's `connection` block. A compliant
+record, a bare one and one claiming another tenant each land once, in the
+source's own org under its own name. The containers run on the docker daemon the
+shell points at, so they need a broker they can reach: `DFE_E2E_KAFKA_BOOTSTRAP`,
+plus `DFE_E2E_DOCKER_NETWORK` for a dfe-docker stack's compose network. Config is
+copied in rather than mounted, so a remote daemon works.
 
 ## Assumed deployment
 

@@ -37,7 +37,8 @@ from scalo.rules import RuleSet as ScaloRuleSet
 
 from dfe_engine.ingest.models import ALIASES_TABLE, IngestRules
 from dfe_engine.orgs.models import DEFAULT_ORG_ID
-from dfe_engine.services.models.loader import LoaderRoutingConfig
+from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError
+from dfe_engine.services.models.loader import LoaderExternalTopic, LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
     BUS_DESTINATION,
     LOADER_DESTINATION,
@@ -68,6 +69,7 @@ from dfe_engine.source.models import (
     Source,
     SourceMatch,
     SourceVersion,
+    transformed_topic,
 )
 from dfe_engine.source.reader import SourceReader
 
@@ -778,6 +780,7 @@ def compile_loader_routing(
     registry: SourceReader,
     *,
     db: str = "dfe",
+    tenancy: Tenancy | None = None,
 ) -> LoaderRoutingConfig:
     """Compile Source definitions into a LoaderRoutingConfig.
 
@@ -795,16 +798,60 @@ def compile_loader_routing(
     receiver and fetcher are compiled with, so a record no first hop stamped
     lands in the org every other app would have put it in.
 
+    ``external_topics`` holds each topic a customer's own pipeline writes to the
+    source's org and name, which only ``tenancy`` can resolve to a tenant id.
+
     Args:
         registry: Where the Source definitions are read from.
         db: Default database for the loader.
+        tenancy: The registered orgs, to resolve an external source's org.
     """
     source_to_table: dict[str, str] = {}
+    external: list[LoaderExternalTopic] = []
     for source in registry.get_all_sources(states=("active",)):
         source_to_table[source.source] = source.table_name
+        entry = _external_topic(source, tenancy)
+        if entry is not None:
+            external.append(entry)
 
-    return LoaderRoutingConfig(
+    config = LoaderRoutingConfig(
         default_db=db,
         default_org_id=DEFAULT_ORG_ID,
         source_to_table=source_to_table,
+    )
+    # Set only when there is one, so an emitted block with no external source is unchanged.
+    if external:
+        config.external_topics = external
+    return config
+
+
+def _external_topic(source: Source, tenancy: Tenancy | None) -> LoaderExternalTopic | None:
+    """The loader's hold on the topic *source*'s external pipeline writes, or None without one.
+
+    A source whose org is not registered is left out with a warning rather than
+    held to the default org, which would put its records in a tenant that is not theirs.
+    """
+    pipeline = source.external_pipeline()
+    if pipeline is None:
+        return None
+    topic = source.topic_land if source.external is not None else transformed_topic(source.source)
+    if pipeline.org is None:
+        org_id = DEFAULT_ORG_ID
+    else:
+        try:
+            if tenancy is None:
+                raise UnknownOrgError(pipeline.org)
+            org_id = tenancy.tenant_id(pipeline.org)
+        except UnknownOrgError:
+            logger.warning(
+                f"Source {source.source!r} names org {pipeline.org!r}, which is not "
+                "registered - its external topic is left out of the loader compile"
+            )
+            return None
+    return LoaderExternalTopic(
+        topic=topic,
+        org_id=org_id,
+        allowed_org_ids=list(pipeline.allowed_org_ids),
+        source=source.source,
+        allowed_sources=list(pipeline.allowed_sources),
     )

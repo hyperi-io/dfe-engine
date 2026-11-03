@@ -8,13 +8,13 @@ One row per operation the engine serves today. **New** is where it goes, and its
 
 | Status | Operations | Meaning |
 |---|---|---|
-| moved | 89 | A new path, method or both |
+| moved | 90 | A new path, method or both |
 | merged into | 9 | Folded into the operation **New** names |
 | unchanged | 38 | Same method and path |
 | frozen | 54 | Kept as it is |
 | decide | 129 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 319 | |
+| total | 320 | |
 
 ## Questions
 
@@ -201,6 +201,7 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | `POST /api/v1/sources/{name}/deploy` | `POST /api/v1/sources/{source}/deploy` | `sources.deploy` | `dfe sources deploy` | `dfe_sources_deploy` | moved | ui 4, infra 1 | Same URL: the path parameter is renamed. |
 | `GET /api/v1/sources/{name}/export` | `GET /api/v1/sources/{source}/export` | `sources.export` | `dfe sources export` | `dfe_sources_export` | moved | 0 | Same URL: the path parameter is renamed. |
 | `GET /api/v1/sources/{name}/flow` | `GET /api/v1/sources/{source}/flow` | `sources.flow` | `dfe sources flow` | `dfe_sources_flow` | moved | ui 2 | Same URL: the path parameter is renamed. |
+| `GET /api/v1/sources/{name}/lag` | `GET /api/v1/sources/{source}/lag` | `sources.lag` | `dfe sources lag` | `dfe_sources_lag` | moved | 0 | Same URL: the path parameter is renamed. |
 | `POST /api/v1/sources/{name}/plan` | `POST /api/v1/sources/{source}/plan` | `sources.plan` | `dfe sources plan` | `dfe_sources_plan` | moved | ui 2 | Same URL: the path parameter is renamed. |
 | `GET /api/v1/sources/{name}/signals` | `GET /api/v1/sources/{source}/signals` | `sources.signals` | `dfe sources signals` | `dfe_sources_signals` | moved | 0 | Same URL: the path parameter is renamed. |
 | `GET /api/v1/sources/{name}/versions/{version}` | `GET /api/v1/sources/{source}/versions/{version}` | `sources.versions.get` | `dfe sources versions get` | `dfe_sources_versions_get` | moved | ui 2 | Same URL: the path parameter is renamed. |

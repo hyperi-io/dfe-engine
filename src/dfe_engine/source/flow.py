@@ -24,8 +24,6 @@ condition added here.
 See docs/data-plane/source-flow.md for the shape this builds.
 """
 
-from __future__ import annotations
-
 from collections.abc import Collection
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -33,7 +31,7 @@ from typing import TYPE_CHECKING
 from dfe_engine.appmgmt import catalogue
 from dfe_engine.appmgmt.catalogue import AppDescriptor, Multiplicity
 from dfe_engine.appmgmt.scaling import DeployTarget, instance_ceiling
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import EXTERNAL_ENGINE, Source, external_consumer_group
 from dfe_engine.transport import SourceTransport
 
 if TYPE_CHECKING:
@@ -77,11 +75,14 @@ def stage_instance_ceiling(app: AppDescriptor, settings: DFESettings) -> int | N
 class FlowTransform:
     """The transform stage, when the source has one."""
 
-    app: str
-    """Catalogued app running it, e.g. ``dfe-transform-vrl``."""
+    engine: str
+    """The engine the source names, ``external`` for the customer's own pipeline."""
 
-    instance: str
-    """Its deployed name, e.g. ``dfe-transform-vrl-auth``."""
+    app: str | None
+    """Catalogued app running it, e.g. ``dfe-transform-vrl``. None for an external transform."""
+
+    instance: str | None
+    """Its deployed name, e.g. ``dfe-transform-vrl-auth``. None for an external transform."""
 
     variant: str | None
     """The compiled-in program it runs, where the app offers a catalogue of them."""
@@ -91,6 +92,9 @@ class FlowTransform:
 
     topics: tuple[str, str] | None
     """Bus: the (landing, transformed) topic pair. None on direct."""
+
+    group: str | None = None
+    """Bus: the consumer group it reads the landing topic in. None on direct."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,10 +123,10 @@ class SourceFlow:
     """
 
     origin: str | None
-    """``receiver``, ``fetcher``, or None when nothing selects the records."""
+    """``receiver``, ``fetcher``, ``external``, or None when nothing selects the records."""
 
     input: str
-    """The receiver match that selects the records, or the fetcher instance polling them."""
+    """The receiver match, the fetcher instance, or the landing topic an external pipeline writes."""
 
     transform: FlowTransform | None
     outputs: FlowOutputs
@@ -224,6 +228,20 @@ def _resolve_transform(
     transform = source.transform
     if transform is None:
         return None
+    # topic_load is set exactly when the source has a transform, which is here.
+    topics = (source.topic_land, str(source.topic_load))
+
+    if transform.engine == EXTERNAL_ENGINE:
+        _require_bus(source, transport, settings, stage="its external transform reads")
+        return FlowTransform(
+            engine=EXTERNAL_ENGINE,
+            app=None,
+            instance=None,
+            variant=None,
+            endpoint=None,
+            topics=topics,
+            group=external_consumer_group(source.source),
+        )
 
     service = catalogue.transform_service(transform.engine)
     app = _stage_app(
@@ -234,18 +252,29 @@ def _resolve_transform(
         purpose=f"run its {transform.engine} transform",
         settings=settings,
     )
-
+    on_bus = transport == "bus"
     return FlowTransform(
+        engine=transform.engine,
         app=service,
         instance=catalogue.instance_name(app, source.source),
         variant=transform.variant,
-        endpoint=(
-            catalogue.push_endpoint(app, source.source, mesh_namespace)
-            if transport == "direct"
-            else None
-        ),
-        # topic_load is set exactly when the source has a transform, which is here.
-        topics=(source.topic_land, str(source.topic_load)) if transport == "bus" else None,
+        endpoint=None if on_bus else catalogue.push_endpoint(app, source.source, mesh_namespace),
+        topics=topics if on_bus else None,
+        group=catalogue.transform_group(app, source.source) if on_bus else None,
+    )
+
+
+def _require_bus(
+    source: Source, transport: SourceTransport, settings: DFESettings, *, stage: str
+) -> None:
+    """Refuse an external stage off the bus: the customer's pipeline meets DFE at a topic."""
+    if transport == "bus":
+        return
+    raise FlowError(
+        f"source {source.source!r} is on the {settings.transport.direct_protocol} "
+        f"transport, but {stage} {source.topic_land}, a "
+        f"{settings.transport.bus_provider} topic. A pipeline the customer runs plugs in "
+        "on the bus only: set transport to bus"
     )
 
 
@@ -255,16 +284,20 @@ def _resolve_input(
     apps: dict[str, AppDescriptor],
     settings: DFESettings,
 ) -> str:
-    """The receiver match that selects the records, or the fetcher that pulls them.
+    """The receiver match that selects the records, the fetcher that pulls them, or the topic.
 
     The receiver is stack-wide and takes every source, so only a fetcher-based
-    source has an app to check here.
+    source has an app to check here. An external pipeline runs nothing of ours,
+    so its input is the landing topic it produces to.
     """
     if source.origin is None:
         # Nothing selects these records. They arrived through a receiver or a fetcher like any other and reached this table because the loader had nowhere else to send them.
         return "records the loader could not route elsewhere"
     if source.origin == "receiver":
         return _match_expression(source)
+    if source.origin == "external":
+        _require_bus(source, transport, settings, stage="its external pipeline writes")
+        return source.topic_land
     fetcher = _stage_app(
         FETCHER_SERVICE,
         transport,

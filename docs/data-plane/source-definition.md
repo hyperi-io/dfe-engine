@@ -40,7 +40,7 @@ header:
   type: timeseries                      # Profile name (timeseries, minimal, passthrough)
   version: 1.0.0                        # Common header version (semver)
 
-# --- Origin: receiver match or when, OR fetcher (exactly one) ---
+# --- Origin: receiver match or when, OR fetcher, OR external (exactly one) ---
 # A receiver-based source is identified by the always-present receiver pool:
 # the receiver evaluates match rules and sets _source in the JSON payload.
 match:
@@ -91,6 +91,14 @@ match:
 #       source: okta-policy             # Their landing, table and transform, not this source's
 #   org: acme                           # The registered org every fetched record belongs to, unset is the default org
 
+# An external source is written by the customer's own pipeline, which produces to
+# <source>_land past the receiver. Bus only. See external-pipelines.md.
+# external:
+#   credential_ref: vault:kv/acme/kafka/vector   # A reference only: vault:, bao:, openbao:, env: or file:
+#   org: acme                           # The registered org its records belong to, unset is the default org
+#   allowed_org_ids: []                 # Further tenant ids a record may keep in _org_id, any other is replaced
+#   allowed_sources: []                 # Further sources a record may keep in _source, any other is replaced
+
 # --- Topics (derived, not configured) ---
 # topic_land: filebeat_land             # Auto: {_source}_land
 # topic_load: filebeat_load             # Auto: {_source}_load (only if transform exists)
@@ -108,6 +116,9 @@ transform:
   config_file: /etc/vector/filebeat.yaml
   env: {}                               # Per-transform ENV overrides
   files: []                             # Enrichment files (CSV, MMDB)
+# engine: external reads _land in dfe-external-<source> and writes _load with the
+# customer's own pipeline. It takes none of the keys above, only the four that
+# `external` takes (credential_ref, org, allowed_org_ids, allowed_sources).
 
 # --- Views (optional) ---
 # Naming-standard views this source exposes (sigma, ecs, cim, ocsf).
