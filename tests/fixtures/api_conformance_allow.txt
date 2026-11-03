@@ -274,6 +274,7 @@ hierarchy GET /api/v1/sigma/views
 hierarchy GET /api/v1/sigma/views/{source_name}
 hierarchy GET /api/v1/sources/{name}/export
 hierarchy GET /api/v1/sources/{name}/flow
+hierarchy GET /api/v1/sources/{name}/lag
 hierarchy GET /api/v1/synthetic-data/packs
 hierarchy GET /api/v1/synthetic-data/streams
 hierarchy GET /api/v1/synthetic-data/streams/{task_id}
@@ -494,6 +495,7 @@ pagination GET /api/v1/sources
 pagination GET /api/v1/sources/{name}/columns
 pagination GET /api/v1/sources/{name}/export
 pagination GET /api/v1/sources/{name}/flow
+pagination GET /api/v1/sources/{name}/lag
 pagination GET /api/v1/sources/{name}/signals
 pagination GET /api/v1/system/clickhouse-cloud
 pagination GET /api/v1/system/defaults/drift
