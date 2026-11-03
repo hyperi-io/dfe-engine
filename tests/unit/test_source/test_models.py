@@ -252,7 +252,8 @@ class TestSourceTransform:
     def test_invalid_engine_names_the_catalogue(self):
         with pytest.raises(ValueError, match="Invalid transform engine") as exc:
             SourceTransform(engine="spark")
-        assert ", ".join(sorted(transform_engines())) in str(exc.value)
+        # The catalogue's engines, plus the customer's own pipeline.
+        assert ", ".join(sorted(transform_engines() | {"external"})) in str(exc.value)
 
     @pytest.mark.parametrize(
         ("id_", "fields", "mode", "detect"),
@@ -520,7 +521,7 @@ class TestSourceOrigin:
     def test_an_operator_source_needs_exactly_one_origin(self):
         with pytest.raises(ValueError, match="exactly one"):
             Source.model_validate({"source": "x"})
-        with pytest.raises(ValueError, match="not both"):
+        with pytest.raises(ValueError, match="not more"):
             Source.model_validate(
                 {
                     "source": "x",
@@ -538,7 +539,7 @@ class TestSourceOrigin:
         assert s.model_dump(mode="json")["origin"] is None
 
     def test_a_core_source_still_cannot_declare_both(self):
-        with pytest.raises(ValueError, match="not both"):
+        with pytest.raises(ValueError, match="not more"):
             Source.model_validate(
                 {
                     "source": "main",

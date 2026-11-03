@@ -32,9 +32,9 @@ than being listed inside a service's config:
 | Component | Required | Purpose |
 |-----------|----------|---------|
 | **identity** | Yes | `_source` label, display name |
-| **origin** | Yes | Exactly one of a receiver `match` rule or a `fetcher` |
+| **origin** | Yes | Exactly one of a receiver `match` rule, a `fetcher`, or `external` for your own pipeline. See [external-pipelines.md](external-pipelines.md) |
 | **schema** | Yes | ClickHouse table definition (starts as the common header alone). See [schema.md](schema.md) |
-| **transform** | No | Enrichment or normalisation stage |
+| **transform** | No | Enrichment or normalisation stage: a DFE transform app, or `engine: external` for your own |
 | **flow** | No | `transport` (bus or direct) and `archive`; unset takes the deployment default. See [source-flow.md](source-flow.md) |
 | **rules** | No | SQL detections against this source's table |
 | **views** | No | Naming-standard views (sigma, ecs, cim, ocsf) with per-source overrides |
@@ -95,4 +95,5 @@ A hyphenated name has to be quoted in a ClickHouse identifier position, so the D
 | [source-registry.md](source-registry.md) | states, storage backends, CRUD, topics on deploy, the API surface |
 | [source-flow.md](source-flow.md) | the two transports, what the engine compiles, how a change reaches a pod |
 | [source-routing.md](source-routing.md) | the exact receiver and loader config a source compiles into |
+| [external-pipelines.md](external-pipelines.md) | your own Vector, Fluentd or Logstash as the origin or the transform |
 | [source-detections.md](source-detections.md) | rules, hunts, and Sigma views |

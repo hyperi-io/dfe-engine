@@ -86,6 +86,7 @@ Kafka:
 - DFE_ENGINE_KAFKA_PROVIDER -> kafka.provider (DERIVES security_protocol + sasl_mechanism
   per the credential contract; deploys set this, never the mechanism)
 - DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS -> kafka.bootstrap_servers
+- DFE_ENGINE_KAFKA_EXTERNAL_BOOTSTRAP_SERVERS -> kafka.external_bootstrap_servers
 - DFE_ENGINE_KAFKA_SECURITY_PROTOCOL -> kafka.security_protocol
 
 Transport (what carries a source's records between its stages):
@@ -755,6 +756,15 @@ class KafkaSettings(BaseModel):
         ),
     )
     bootstrap_servers: str = Field(default="localhost:9092")
+    external_bootstrap_servers: str = Field(
+        default="",
+        description=(
+            "The broker address a pipeline the customer runs outside the deployment "
+            "connects to (DFE_ENGINE_KAFKA_EXTERNAL_BOOTSTRAP_SERVERS). Shown to the "
+            "operator in a source's external connection. Empty shows bootstrap_servers, "
+            "which is right where the customer's pipeline runs beside the brokers"
+        ),
+    )
     security_protocol: str = Field(default="PLAINTEXT")
     sasl_mechanism: str = Field(
         default="",
@@ -2619,6 +2629,8 @@ def _get_env_overrides() -> dict:
     # An empty list is the operator saying there is no broker, so it overrides the dev default.
     if (val := _get_env_if_set("DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS")) is not None:
         overrides["kafka"]["bootstrap_servers"] = val
+    if val := _get_env("DFE_ENGINE_KAFKA_EXTERNAL_BOOTSTRAP_SERVERS"):
+        overrides["kafka"]["external_bootstrap_servers"] = val
     if val := _get_env("DFE_ENGINE_KAFKA_SECURITY_PROTOCOL"):
         overrides["kafka"]["security_protocol"] = val
     if val := _get_env("DFE_ENGINE_KAFKA_SASL_MECHANISM"):

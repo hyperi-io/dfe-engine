@@ -134,9 +134,16 @@ from dfe_engine.source.deployment import (
     settings_change_for_table,
     ttl_change_for_table,
 )
+from dfe_engine.source.external import (
+    HEADER_FIELDS,
+    external_connection,
+    external_group_lag,
+    sample_record,
+)
 from dfe_engine.source.flow import FlowError, SourceFlow, resolve_flow
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
+    EXTERNAL_ENGINE,
     PaginatedSourceSummaryResponse,
     Source,
     SourceState,
@@ -145,6 +152,7 @@ from dfe_engine.source.models import (
     SourceVersionGetResponse,
     SourceWriteRequest,
     engine_registry,
+    external_consumer_group,
 )
 from dfe_engine.source.registry import (
     SourceAliasConflictError,
@@ -455,13 +463,19 @@ def _one_per_app(hints: list[str]) -> list[str]:
 
 
 def _refuse_unknown_fetched_org(request: Request, body: SourceWriteRequest) -> None:
-    """Refuse a fetched source naming an org the registry does not hold.
+    """Refuse a fetched or external source naming an org the registry does not hold.
 
     Raises:
         HTTPException: 422 ``unknown_org``.
     """
-    if body.fetcher is not None and body.fetcher.org is not None:
-        refuse_unknown_orgs(request, [body.fetcher.org])
+    pipeline = body.external or (
+        body.transform if body.transform is not None and body.transform.is_external else None
+    )
+    named = [
+        body.fetcher.org if body.fetcher is not None else None,
+        pipeline.org if pipeline is not None else None,
+    ]
+    refuse_unknown_orgs(request, [org for org in named if org])
 
 
 def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSync:
@@ -1023,6 +1037,55 @@ class SourceVersionDetail(SourceVersion):
     )
 
 
+class HeaderFieldModel(BaseModel):
+    """One common header field, and what setting it buys."""
+
+    field: str
+    when_missing: str = Field(description="What the loader does when the record leaves it out")
+    when_set: str = Field(description="What the record gets when the pipeline sets it")
+
+
+class ExternalConnectionModel(BaseModel):
+    """What the customer's own pipeline connects with. Never a secret."""
+
+    role: Literal["origin", "transform"] = Field(
+        description="origin writes the landing topic; transform reads it and writes the transformed one"
+    )
+    reads: str | None = Field(
+        default=None, description="The topic a transform consumes; null for an origin"
+    )
+    writes: str = Field(description="The topic the pipeline produces to")
+    consumer_group: str | None = Field(
+        default=None,
+        description="The consumer group a transform must read in; null for an origin",
+    )
+    bootstrap: str = Field(description="The broker address the pipeline connects to")
+    security_protocol: str = Field(description="The broker's security protocol for this deployment")
+    sasl_mechanism: str = Field(
+        description="The SASL mechanism the broker contract derives, empty where there is no auth"
+    )
+    credential_ref: str | None = Field(
+        default=None,
+        description="Where the pipeline's own Kafka credential is kept, as the operator set it",
+    )
+    org: str | None = Field(
+        default=None,
+        description="The registered org the records belong to; null is the default org",
+    )
+    allowed_org_ids: list[str] = Field(
+        description="Further tenant ids a record may keep in _org_id; any other is replaced"
+    )
+    allowed_sources: list[str] = Field(
+        description="Further source names a record may keep in _source; any other is replaced"
+    )
+    header_fields: list[HeaderFieldModel] = Field(
+        description="The common header fields the loader reads, in column order"
+    )
+    sample_record: dict[str, Any] = Field(
+        description="A record carrying every header field, for the pipeline to copy"
+    )
+
+
 class SourceDetailResponse(Source):
     """Full source definition with per-version build/plan/deploy status."""
 
@@ -1030,13 +1093,48 @@ class SourceDetailResponse(Source):
         default_factory=dict,
         description="Version id -> configuration snapshot and pipeline artifacts",
     )
+    connection: ExternalConnectionModel | None = Field(
+        default=None,
+        description=(
+            "Where the customer's own pipeline plugs in, for a source with an external "
+            "origin or transform; null otherwise"
+        ),
+    )
+
+
+class ExternalLagResponse(BaseModel):
+    """How far the customer's transform is behind on the landing topic."""
+
+    source: str
+    consumer_group: str
+    topic: str
+    lag: int | None = Field(
+        description="Records the group has not committed past; null when the broker was not reached"
+    )
+    committed: bool | None = Field(
+        description="False while the group has never committed, so every record counts as unread"
+    )
+    state: str | None = Field(
+        description="The group's state (stable, empty, dead, ...); null when not reached"
+    )
+    members: int | None = Field(description="Live consumers in the group; null when not reached")
+    error: str | None = Field(
+        default=None, description="Why the broker could not be asked; null on an answer"
+    )
 
 
 class FlowTransformModel(BaseModel):
     """The transform stage, when the source has one."""
 
-    app: str = Field(description="Catalogued app running it, e.g. dfe-transform-vrl")
-    instance: str = Field(description="Its deployed name, e.g. dfe-transform-vrl-auth")
+    engine: str = Field(description="The engine the source names; external for the customer's own")
+    app: str | None = Field(
+        default=None,
+        description="Catalogued app running it, e.g. dfe-transform-vrl; null for external",
+    )
+    instance: str | None = Field(
+        default=None,
+        description="Its deployed name, e.g. dfe-transform-vrl-auth; null for external",
+    )
     variant: str | None = Field(
         default=None,
         description="The compiled-in program it runs, where the app offers a catalogue of them",
@@ -1046,6 +1144,10 @@ class FlowTransformModel(BaseModel):
     )
     topics: list[str] | None = Field(
         default=None, description="Bus: the landing and transformed topics. Null on direct."
+    )
+    consumer_group: str | None = Field(
+        default=None,
+        description="Bus: the consumer group it reads the landing topic in. Null on direct.",
     )
 
 
@@ -1077,10 +1179,13 @@ class SourceFlowResponse(BaseModel):
     )
     origin: str | None = Field(
         default=None,
-        description="receiver, fetcher, or null when nothing selects the records",
+        description="receiver, fetcher, external, or null when nothing selects the records",
     )
     input: str = Field(
-        description="The receiver match that selects the records, or the fetcher instance polling them"
+        description=(
+            "The receiver match that selects the records, the fetcher instance polling them, "
+            "or the landing topic an external pipeline writes"
+        )
     )
     transform: FlowTransformModel | None = None
     outputs: FlowOutputsModel
@@ -1097,11 +1202,13 @@ def _flow_response(flow: SourceFlow) -> SourceFlowResponse:
         input=flow.input,
         transform=(
             FlowTransformModel(
+                engine=flow.transform.engine,
                 app=flow.transform.app,
                 instance=flow.transform.instance,
                 variant=flow.transform.variant,
                 endpoint=flow.transform.endpoint,
                 topics=list(flow.transform.topics) if flow.transform.topics else None,
+                consumer_group=flow.transform.group,
             )
             if flow.transform
             else None
@@ -2160,6 +2267,9 @@ def _writer_groups(source: Any, registry: Any) -> list[str]:
     engines = {version.transform.engine for version in owner.versions.values() if version.transform}
     groups: list[str] = []
     for engine in sorted(engines):
+        if engine == EXTERNAL_ENGINE:
+            groups.append(external_consumer_group(owner.source))
+            continue
         try:
             app = app_catalogue.descriptor(app_catalogue.transform_service(engine))
         except app_catalogue.UnknownAppError:
@@ -2935,8 +3045,9 @@ def get_source(name: str, user: CurrentUser, registry: SourceReg):
                 "message": f"Source {name!r} not found",
             },
         ) from None
-    store = SourceDeploymentStore.from_settings(get_settings())
-    return _to_source_detail_response(source, store)
+    settings = get_settings()
+    store = SourceDeploymentStore.from_settings(settings)
+    return _to_source_detail_response(source, store, settings)
 
 
 @router.get(
@@ -2972,6 +3083,71 @@ def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, settings:
             status_code=422,
             detail={"code": "flow_error", "message": str(exc)},
         ) from exc
+
+
+@router.get(
+    "/{name}/lag",
+    response_model=ExternalLagResponse,
+    responses={
+        422: {"description": "The source's transform is not the customer's own pipeline"},
+    },
+    dependencies=[
+        Depends(require_own_org_action(scopes_dict["source_read"])),
+        Depends(require_source_in_held_orgs),
+    ],
+)
+async def get_external_lag(
+    name: str, user: CurrentUser, registry: SourceReg, settings: Settings
+) -> ExternalLagResponse:
+    """How far the customer's own transform is behind on this source's landing topic.
+
+    Read from the broker on each call. A broker that cannot be reached answers 200
+    with nulls and the reason, because "no lag" and "could not look" call for
+    opposite reactions.
+    """
+    from dfe_engine.kafka.contract import KafkaContractError
+    from dfe_engine.kafka.topics import BROKER_UNREACHABLE, KAFKA_CONFIG_REJECTED, build_admin
+
+    source = _resolve_source(name, registry)
+    transform = source.version(source.current).transform
+    if transform is None or transform.engine != EXTERNAL_ENGINE:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "no_external_transform",
+                "message": (
+                    f"source {name!r} has no external transform, so no consumer group of the "
+                    "customer's reads its landing topic"
+                ),
+            },
+        )
+    group = external_consumer_group(source.source)
+    unread = ExternalLagResponse(
+        source=source.source,
+        consumer_group=group,
+        topic=source.topic_land,
+        lag=None,
+        committed=None,
+        state=None,
+        members=None,
+    )
+    try:
+        admin = build_admin(settings=settings)
+        lag = await run_blocking(external_group_lag, source, admin)
+    except KafkaContractError as exc:
+        logger.warning("external lag not read; kafka config rejected", error=str(exc))
+        return unread.model_copy(update={"error": KAFKA_CONFIG_REJECTED})
+    except Exception as exc:  # any broker fault is reported, never raised to the console
+        logger.warning("external lag not read; broker unreachable", error=str(exc))
+        return unread.model_copy(update={"error": BROKER_UNREACHABLE})
+    return unread.model_copy(
+        update={
+            "lag": lag.lag,
+            "committed": lag.committed,
+            "state": lag.state,
+            "members": lag.members,
+        }
+    )
 
 
 @router.get(
@@ -3747,9 +3923,35 @@ def _build_to_response(artifact: SourceBuildArtifact) -> SchemaBuildResult:
     )
 
 
+def _connection_model(source: Source, settings: Any) -> ExternalConnectionModel | None:
+    """The external connection block for the working version, or None without one."""
+    connection = external_connection(source, settings, source.current)
+    if connection is None:
+        return None
+    return ExternalConnectionModel(
+        role=connection.role,
+        reads=connection.reads,
+        writes=connection.writes,
+        consumer_group=connection.group,
+        bootstrap=connection.bootstrap,
+        security_protocol=connection.security_protocol,
+        sasl_mechanism=connection.sasl_mechanism,
+        credential_ref=connection.credential_ref,
+        org=connection.org,
+        allowed_org_ids=list(connection.allowed_org_ids),
+        allowed_sources=list(connection.allowed_sources),
+        header_fields=[
+            HeaderFieldModel(field=f.field, when_missing=f.when_missing, when_set=f.when_set)
+            for f in HEADER_FIELDS
+        ],
+        sample_record=sample_record(source),
+    )
+
+
 def _to_source_detail_response(
     source: Source,
     store: SourceDeploymentStore,
+    settings: Any,
 ) -> SourceDetailResponse:
     versions: dict[str, SourceVersionDetail] = {}
     for version_id, snap in source.versions.items():
@@ -3757,6 +3959,7 @@ def _to_source_detail_response(
     return SourceDetailResponse(
         **source.model_dump(mode="json", exclude={"versions"}),
         versions=versions,
+        connection=_connection_model(source, settings),
     )
 
 
