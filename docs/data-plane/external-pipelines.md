@@ -57,6 +57,8 @@ An external transform takes none of `variant`, `mode`, `detect`, `config_file`, 
 
 DFE creates both topics when the source deploys and removes them when it's deleted, the same as for any source ([topic-contract.md](topic-contract.md)). The group name is fixed rather than yours to choose. The engine reads that group's lag, and before it deletes a `_load` topic you've stopped writing, it checks the group has no live member and nothing left to read.
 
+Set your consumer's `auto.offset.reset` to `earliest`. Most Kafka clients default to `latest`, so a transform that joins after records have landed starts past them and never reads them.
+
 `GET /api/v1/sources/{name}/lag` reports how far your transform is behind on `_land`: the group's state, its live members, and the records it hasn't committed past. A group that has never committed counts every record on the topic. A broker the engine can't reach answers with `lag: null` and the reason, never a zero.
 
 `GET /api/v1/sources/{name}` carries a `connection` block for a source with either one. The DFE console shows it on the source.

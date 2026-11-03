@@ -47959,6 +47959,17 @@
           "version": {
             "$ref": "#/components/schemas/SourceVersionDetail",
             "description": "Configuration snapshot for ``selected`` plus pipeline artifacts"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalConnectionModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the customer's own pipeline plugs in, for a ``selected`` version with an external origin or transform; null otherwise"
           }
         },
         "type": "object",

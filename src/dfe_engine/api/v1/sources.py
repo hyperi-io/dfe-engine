@@ -1256,6 +1256,13 @@ class SourceVersionGetDetailResponse(SourceVersionGetResponse):
         ...,
         description="Configuration snapshot for ``selected`` plus pipeline artifacts",
     )
+    connection: ExternalConnectionModel | None = Field(
+        default=None,
+        description=(
+            "Where the customer's own pipeline plugs in, for a ``selected`` version with an "
+            "external origin or transform; null otherwise"
+        ),
+    )
 
 
 # -- Endpoints --
@@ -1924,7 +1931,8 @@ def get_source_version(
             },
         )
 
-    store = SourceDeploymentStore.from_settings(get_settings())
+    settings = get_settings()
+    store = SourceDeploymentStore.from_settings(settings)
     deploy_doc = store.load_deploy_document(source.source)
     version_ids = sorted(source.versions.keys())
     prev_deployed = previous_deployed_version_ids(source, deploy_doc)
@@ -1943,6 +1951,7 @@ def get_source_version(
         previous_deployed_versions=prev_deployed,
         current_table_topic_type=source.table_topic_type,
         version=_version_detail_from_snapshot(source.source, version, snap, store),
+        connection=_connection_model(source, settings, version),
     )
 
 
@@ -3923,9 +3932,11 @@ def _build_to_response(artifact: SourceBuildArtifact) -> SchemaBuildResult:
     )
 
 
-def _connection_model(source: Source, settings: Any) -> ExternalConnectionModel | None:
-    """The external connection block for the working version, or None without one."""
-    connection = external_connection(source, settings, source.current)
+def _connection_model(
+    source: Source, settings: Any, version_id: str | None = None
+) -> ExternalConnectionModel | None:
+    """The external connection block for *version_id*, the working version by default."""
+    connection = external_connection(source, settings, version_id or source.current)
     if connection is None:
         return None
     return ExternalConnectionModel(
