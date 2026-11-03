@@ -3,6 +3,18 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.80](https://github.com/hyperi-io/dfe-engine/compare/v1.22.79...v1.22.80) (2026-11-03)
+
+### Bug Fixes
+
+* **appmgmt:** match bundled apps.yaml to archiver env rename ([#1056](https://github.com/hyperi-io/dfe-engine/issues/1056)) ([005a0cf](https://github.com/hyperi-io/dfe-engine/commit/005a0cf151e6aa13a7b61e9334c49804d56dff5d))
+* **appmgmt:** write transform env under each app's prefix ([#1059](https://github.com/hyperi-io/dfe-engine/issues/1059)) ([cd48219](https://github.com/hyperi-io/dfe-engine/commit/cd4821902a26576e76ca02f60a79a23d6303afc8))
+* **engine:** read env under DFE_ENGINE_ ([#1058](https://github.com/hyperi-io/dfe-engine/issues/1058)) ([b3a8fcd](https://github.com/hyperi-io/dfe-engine/commit/b3a8fcde4718f2022ff3cfe4cd951f339dedcb61))
+* **loader:** stop seeding raw_source_fields with logoriginal ([f19f0f1](https://github.com/hyperi-io/dfe-engine/commit/f19f0f19f79372e0c9d5a21a1c61e69ace7c3fc2))
+* **settings:** stop reading unprefixed and retired env names ([#1060](https://github.com/hyperi-io/dfe-engine/issues/1060)) ([34cebbe](https://github.com/hyperi-io/dfe-engine/commit/34cebbe0e0b9b71ee925099518eaeb5e1b7bc46d))
+* **sources:** support external origins and transforms on the bus ([#1061](https://github.com/hyperi-io/dfe-engine/issues/1061)) ([8ed1640](https://github.com/hyperi-io/dfe-engine/commit/8ed1640a0635dc96f86ba51ea73d74fb73700b00))
+* **tests:** pin the contract tests to dfe-loader v1.18.62 ([#1055](https://github.com/hyperi-io/dfe-engine/issues/1055)) ([87dc9f4](https://github.com/hyperi-io/dfe-engine/commit/87dc9f44bd87087804fc85fc51609d0aaf6ff080))
+
 ## [1.22.79](https://github.com/hyperi-io/dfe-engine/compare/v1.22.78...v1.22.79) (2026-11-02)
 
 ### Bug Fixes
