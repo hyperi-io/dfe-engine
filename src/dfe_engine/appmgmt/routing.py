@@ -238,7 +238,7 @@ def _loader(
     db = settings.clickhouse.effective_data_database
     # Only the keys the sources derive: the block is written whole, so a model
     # default in it would overwrite the deployment's own setting for that key.
-    compiled = compile_loader_routing(registry, db=db)
+    compiled = compile_loader_routing(registry, db=db, tenancy=tenancy)
     blocks: dict[str, Any] = {"routing": compiled.model_dump(mode="json", exclude_unset=True)}
     capture = compile_loader_capture(
         registry,
@@ -407,6 +407,11 @@ def _transform(
     flow = _flow(source, settings)
     if flow.transform is None:
         raise RoutingNotApplicableError(f"source {instance!r} has no transform stage")
+    if flow.transform.app is None:
+        raise RoutingNotApplicableError(
+            f"source {instance!r} is transformed by the customer's own pipeline, "
+            "which the engine does not deploy"
+        )
     if flow.transform.app != app.service:
         raise RoutingNotApplicableError(
             f"source {instance!r} is transformed by {flow.transform.app}, not {app.service}"

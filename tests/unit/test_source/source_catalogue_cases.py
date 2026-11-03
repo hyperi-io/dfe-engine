@@ -197,7 +197,7 @@ LOAD_SOURCE_CATALOGUE_SKIP_CASES: list[LoadSourceCatalogueSkipCase] = [
         "id": "not_a_write_body",
         "text": _document(changes={"fetcher": {"source_type": "aws", "topic": "own"}}),
         "expected_reason": "it is not a source write body: Value error, a source is "
-        "receiver-based (match or when) or fetcher-based (fetcher): set exactly one",
+        "receiver-based (match or when), fetcher-based (fetcher) or written by the ",
     },
     {
         "id": "an_engine_the_app_manifest_lacks",

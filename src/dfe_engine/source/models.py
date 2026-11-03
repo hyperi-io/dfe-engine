@@ -37,7 +37,7 @@ from dfe_engine.clickhouse.function_guard import (
 )
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.masking import CREDENTIAL_MAP, credential_name, words
-from dfe_engine.orgs.models import ORG_NAME_PATTERN
+from dfe_engine.orgs.models import ORG_NAME_PATTERN, TENANT_ID_PATTERN
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
 from dfe_engine.source.type_registry import (
     LOWCARDINALITY_ATTRIBUTE,
@@ -636,6 +636,51 @@ TransformMode = Literal["agent", "agentless"]
 DetectUnmatched = Literal["passthrough", "fallback", "stop"]
 """What an agentless transform does with an event no detector claims."""
 
+EXTERNAL_ENGINE = "external"
+"""The transform engine a pipeline the customer runs takes, in place of a catalogued app.
+
+The engine deploys nothing for it. The pipeline reads the source's landing topic
+in :func:`external_consumer_group` and writes the transformed topic.
+"""
+
+EXTERNAL_GROUP_PREFIX = "dfe-external-"
+
+
+def external_consumer_group(source_name: str) -> str:
+    """The consumer group a customer's pipeline reads a source's landing topic in.
+
+    Fixed rather than chosen, because the engine reads that group's lag and
+    checks it is idle before deleting a topic the pipeline wrote.
+    """
+    return f"{EXTERNAL_GROUP_PREFIX}{source_name}"
+
+
+def _credential_reference(value: str | None) -> str | None:
+    """*value* when it is a reference to a secret, never the secret itself.
+
+    The source is committed to git and returned on every read, so a literal
+    credential here would be published to everyone who can read the source.
+    """
+    if value is None:
+        return None
+    reference = value.strip()
+    if not reference:
+        return None
+    if not reference.startswith(_CREDENTIAL_REFERENCE_PREFIXES):
+        raise ValueError(
+            "credential_ref names where the pipeline's Kafka credential is kept, never the "
+            f"credential itself: use one of {', '.join(_CREDENTIAL_REFERENCE_PREFIXES)}"
+        )
+    return reference
+
+
+_CREDENTIAL_REF_DESCRIPTION = (
+    "Where the customer's pipeline keeps the Kafka principal it authenticates as, e.g. "
+    "vault:kv/acme/kafka/vector. A reference only: the engine never reads, stores or "
+    "mints the credential, and refuses a value that is not one of vault:, bao:, "
+    "openbao:, env: or file:"
+)
+
 
 class TransformDetect(BaseModel):
     """How an agentless transform decides which source each event belongs to."""
@@ -691,12 +736,86 @@ class TransformDetect(BaseModel):
         return self
 
 
-class SourceTransform(BaseModel):
-    """Transform stage configuration: the engine is one of the catalogue's transform apps."""
+class ExternalPipeline(BaseModel):
+    """What a pipeline the customer runs is held to, as an origin or as a transform.
+
+    The pipeline writes ``_org_id`` and ``_source`` itself and nothing checks them on
+    the way in, so the loader holds its topic to these: a value outside the lists is
+    replaced with the source's own org or name and counted, never rejected.
+    """
+
+    credential_ref: str | None = Field(default=None, description=_CREDENTIAL_REF_DESCRIPTION)
+    org: str | None = Field(
+        default=None,
+        pattern=ORG_NAME_PATTERN,
+        description=(
+            "The registered org the pipeline's records belong to. Unset is the default org. "
+            "A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
+        ),
+    )
+    allowed_org_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Further tenant ids a record may keep in _org_id, for a provider whose pipeline "
+            "carries its own customers' records. Empty keeps every record in org"
+        ),
+    )
+    allowed_sources: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Further source names a record may keep in _source, which sends it to that "
+            "source's table. Empty keeps every record in this source's table"
+        ),
+    )
+
+    @field_validator("credential_ref")
+    @classmethod
+    def _validate_credential_ref(cls, v: str | None) -> str | None:
+        return _credential_reference(v)
+
+    @field_validator("allowed_org_ids")
+    @classmethod
+    def _validate_allowed_org_ids(cls, v: list[str]) -> list[str]:
+        for tenant in v:
+            if re.fullmatch(TENANT_ID_PATTERN, tenant) is None:
+                raise ValueError(
+                    f"allowed_org_ids holds {tenant!r}, which is not a tenant id: no commas, "
+                    "control characters or surrounding space"
+                )
+        return _listed_once(v, "allowed_org_ids")
+
+    @field_validator("allowed_sources")
+    @classmethod
+    def _validate_allowed_sources(cls, v: list[str]) -> list[str]:
+        for name in v:
+            validate_source_name(name)
+        return _listed_once(v, "allowed_sources")
+
+    def holds_pipeline_settings(self) -> bool:
+        """Whether any field here is set, which only an external pipeline may do."""
+        return bool(self.credential_ref or self.org or self.allowed_org_ids or self.allowed_sources)
+
+
+def _listed_once(values: list[str], field: str) -> list[str]:
+    """*values* when none repeats, so a duplicate reads as the typo it usually is."""
+    repeated = sorted({value for value in values if values.count(value) > 1})
+    if repeated:
+        raise ValueError(f"{field} lists {', '.join(repeated)} more than once")
+    return values
+
+
+class SourceTransform(ExternalPipeline):
+    """Transform stage configuration: a catalogued transform app, or the customer's own pipeline.
+
+    The :class:`ExternalPipeline` fields are read only for ``external`` and refused otherwise.
+    """
 
     engine: str = Field(
         ...,
-        description="Transform engine - a catalogued transform app by engine name (e.g. vrl, vector)",
+        description=(
+            "Transform engine - a catalogued transform app by engine name (e.g. vrl, "
+            "vector), or external for a pipeline the customer runs on the bus"
+        ),
     )
     variant: str | None = Field(
         default=None,
@@ -730,16 +849,52 @@ class SourceTransform(BaseModel):
     @field_validator("engine")
     @classmethod
     def _validate_engine(cls, v: str) -> str:
+        if v == EXTERNAL_ENGINE:
+            return v
         # The catalogue (dfe-infra apps.yaml) is the only list of transform apps
         # that exist, so the accepted engines are read from it, never written here.
         # Imported at call time: appmgmt's package init reaches this module through
         # appmgmt.routing -> dfe_engine.source, so a top-level import is a cycle.
         from dfe_engine.appmgmt.catalogue import transform_engines
 
-        valid = transform_engines()
+        valid = transform_engines() | {EXTERNAL_ENGINE}
         if v not in valid:
             raise ValueError(f"Invalid transform engine {v!r}. Valid: {', '.join(sorted(valid))}")
         return v
+
+    @property
+    def is_external(self) -> bool:
+        """Whether the customer's own pipeline runs this stage, so the engine deploys nothing."""
+        return self.engine == EXTERNAL_ENGINE
+
+    @model_validator(mode="after")
+    def _external_takes_no_app_settings(self) -> SourceTransform:
+        # Every one of these configures an app the engine deploys, and for external it deploys none.
+        if not self.is_external:
+            if self.holds_pipeline_settings():
+                raise ValueError(
+                    "credential_ref, org, allowed_org_ids and allowed_sources belong to an "
+                    f"external transform: the engine deploys {self.engine!r} itself"
+                )
+            return self
+        given = [
+            name
+            for name, value in (
+                ("variant", self.variant),
+                ("mode", self.mode),
+                ("detect", self.detect),
+                ("config_file", self.config_file),
+                ("env", self.env),
+                ("files", self.files),
+            )
+            if value
+        ]
+        if given:
+            raise ValueError(
+                f"an external transform is the customer's own pipeline, which the engine "
+                f"neither deploys nor configures, so it takes no {', '.join(given)}"
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_mode_and_detect(self) -> SourceTransform:
@@ -762,11 +917,12 @@ class SourceTransform(BaseModel):
         return self
 
 
-SourceOrigin = Literal["receiver", "fetcher"]
+SourceOrigin = Literal["receiver", "fetcher", "external"]
 """How a source's data enters the platform.
 
 ``receiver``: the always-present receiver pool identifies it by ``match``.
 ``fetcher``: one dfe-fetcher deployment, named for the source, polls it in.
+``external``: the customer's own pipeline writes the landing topic, past the receiver.
 
 A source can have NO origin, and then it is None. That is the catch-all table the loader writes to when it has nowhere else to send a record: those records came in through a receiver or a fetcher like any other, so naming either would be false, and the table does not select them.
 """
@@ -1020,6 +1176,14 @@ class SourceFetcher(BaseModel):
         return source_name if self.topic == "own" else _topic_policy().default_landing_label
 
 
+class SourceExternal(ExternalPipeline):
+    """External origin: the customer's own pipeline produces to this source's landing topic.
+
+    Nothing the engine runs selects these records, so there is no match and no
+    fetcher. The engine creates the topic and the loader reads it like any other.
+    """
+
+
 class SourceView(BaseModel):
     """A naming-standard view this source exposes (sigma, ecs, cim, ocsf).
 
@@ -1083,6 +1247,7 @@ _VERSIONED_KEYS = (
     "schema_config",
     "views",
     "fetcher",
+    "external",
     "match",
     "when",
     "transform",
@@ -1093,9 +1258,18 @@ _VERSIONED_KEYS = (
 )
 
 # ``variant``, ``mode`` and ``detect`` select which compiled-in program the
-# transform runs on a record; they change what a record becomes, never the shape of
-# the table it lands in.
-_TRANSFORM_KEYS_WITHOUT_TABLE_EFFECT = {"variant", "mode", "detect"}
+# transform runs on a record, and the external pipeline fields say where its
+# credential is kept and which org and source labels it may keep. None changes the
+# shape of the table records land in.
+_TRANSFORM_KEYS_WITHOUT_TABLE_EFFECT = {
+    "variant",
+    "mode",
+    "detect",
+    "credential_ref",
+    "org",
+    "allowed_org_ids",
+    "allowed_sources",
+}
 
 # Named alike on SourceWriteRequest and SourceVersion; an update omitting one keeps the stored value.
 _INHERITED_ON_ABSENCE = (
@@ -1123,6 +1297,33 @@ _WHEN_DESCRIPTION = (
     "It is checked at save under the profile the receiver compiles it with"
 )
 
+_ONE_ORIGIN = (
+    "a source is receiver-based (match or when), fetcher-based (fetcher) or written by "
+    "the customer's own pipeline (external)"
+)
+
+
+def _refuse_two_external_pipelines(
+    external: SourceExternal | None, transform: SourceTransform | None
+) -> None:
+    """Refuse the customer's pipeline as both the origin and the transform of one source.
+
+    That is two pipelines on one topic pair, and the one writing the landing topic
+    can transform before it writes.
+    """
+    if external is not None and transform is not None and transform.is_external:
+        raise ValueError(
+            "an external origin and an external transform on one source are two of the "
+            "customer's pipelines on one topic pair: transform in the pipeline that writes "
+            "the landing topic, or name a DFE transform"
+        )
+
+
+def _origins_declared(match: Any, when: Any, fetcher: Any, external: Any) -> int:
+    """How many origins one source definition declares, match and when counting as one."""
+    receives = match is not None or when is not None
+    return sum((receives, fetcher is not None, external is not None))
+
 
 class SourceVersion(BaseModel):
     """Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."""
@@ -1144,6 +1345,10 @@ class SourceVersion(BaseModel):
         description="Naming-standard views this version exposes (sigma, ecs, cim, ocsf)",
     )
     fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
+    external: SourceExternal | None = Field(
+        default=None,
+        description="External origin: the customer's own pipeline writes the landing topic",
+    )
 
     @field_validator("views")
     @classmethod
@@ -1204,11 +1409,9 @@ class SourceVersion(BaseModel):
         # Declaring both is always wrong. Declaring NEITHER is legal only for a core source fronting the landing table, which the receiver reaches through default_source rather than through a rule -- so the exactly-one rule is enforced one level up, on Source, where resource_type is known.
         if self.match is not None and self.when is not None:
             raise ValueError("a receiver-based source takes match or when, not both")
-        if self.receives and self.fetcher is not None:
-            raise ValueError(
-                "a source is receiver-based (match or when) or fetcher-based (fetcher): set "
-                "one, not both"
-            )
+        if _origins_declared(self.match, self.when, self.fetcher, self.external) > 1:
+            raise ValueError(f"{_ONE_ORIGIN}: set one, not more")
+        _refuse_two_external_pipelines(self.external, self.transform)
         return self
 
     @property
@@ -1226,6 +1429,8 @@ class SourceVersion(BaseModel):
         """
         if self.fetcher is not None:
             return "fetcher"
+        if self.external is not None:
+            return "external"
         return "receiver" if self.receives else None
 
     def effective_header(self) -> SourceHeader:
@@ -1352,7 +1557,15 @@ class SourceWriteRequest(BaseModel):
         default=None, description="Transform stage (optional, top-level)"
     )
     fetcher: SourceFetcher | None = Field(
-        default=None, description="Fetcher-based origin. One of match, when or fetcher is set"
+        default=None,
+        description="Fetcher-based origin. One of match, when, fetcher or external is set",
+    )
+    external: SourceExternal | None = Field(
+        default=None,
+        description=(
+            "External origin: the customer's own pipeline writes the landing topic. One of "
+            "match, when, fetcher or external is set"
+        ),
     )
     transport: SourceTransport | None = Field(
         default=None,
@@ -1394,12 +1607,9 @@ class SourceWriteRequest(BaseModel):
     def _exactly_one_origin(self) -> SourceWriteRequest:
         if self.match is not None and self.when is not None:
             raise ValueError("a receiver-based source takes match or when, not both")
-        receives = self.match is not None or self.when is not None
-        if receives == (self.fetcher is not None):
-            raise ValueError(
-                "a source is receiver-based (match or when) or fetcher-based (fetcher): set "
-                "exactly one"
-            )
+        if _origins_declared(self.match, self.when, self.fetcher, self.external) != 1:
+            raise ValueError(f"{_ONE_ORIGIN}: set exactly one")
+        _refuse_two_external_pipelines(self.external, self.transform)
         return self
 
     @model_validator(mode="before")
@@ -1440,6 +1650,7 @@ class SourceWriteRequest(BaseModel):
             schema_config=self.schema_config or SourceSchema(),
             views=self.views or [],
             fetcher=self.fetcher,
+            external=self.external,
             match=self.match,
             when=self.when,
             aliases=self.aliases,
@@ -1591,7 +1802,7 @@ def _reject_origin_or_table_paradigm_change(
     if previous.origin != updated.origin:
         raise ValueError(
             f"Cannot change source origin from {previous.origin!r} to {updated.origin!r}: "
-            "a source is receiver-based or fetcher-based for its whole life"
+            "a source keeps one origin, receiver, fetcher or external, for its whole life"
         )
     previous_owns_table = bool(previous.effective_schema().meta_schema)
     updated_owns_table = bool(updated.effective_schema().meta_schema)
@@ -1801,10 +2012,7 @@ class Source(BaseModel):
             return
         for version_id, version in self.versions.items():
             if version.origin is None:
-                raise ValueError(
-                    f"version '{version_id}': a source is receiver-based (match or when) or "
-                    "fetcher-based (fetcher): set exactly one"
-                )
+                raise ValueError(f"version '{version_id}': {_ONE_ORIGIN}: set exactly one")
 
     @computed_field  # type: ignore[prop-decorator]
     @property
@@ -1851,6 +2059,19 @@ class Source(BaseModel):
         """Deployed version fetcher config (legacy accessor)."""
         return self.version().fetcher
 
+    @property
+    def external(self) -> SourceExternal | None:
+        """Deployed version's external origin, where the customer's pipeline writes the landing topic."""
+        return self.version().external
+
+    def external_pipeline(self, version_id: str | None = None) -> ExternalPipeline | None:
+        """The customer's pipeline on *version_id*, as origin or transform, or None without one."""
+        version = self.version(version_id)
+        if version.external is not None:
+            return version.external
+        transform = version.transform
+        return transform if transform is not None and transform.is_external else None
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def match(self) -> SourceMatch | None:
@@ -1882,7 +2103,7 @@ class Source(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def origin(self) -> SourceOrigin | None:
-        """How the deployed version's data enters: a receiver match, a fetcher, or nothing."""
+        """How the deployed version's data enters: a receiver match, a fetcher, the customer's pipeline, or nothing."""
         return self.version().origin
 
     @computed_field  # type: ignore[prop-decorator]
@@ -2045,7 +2266,7 @@ class SourceSummaryObject(BaseModel):
     has_fetcher: bool = Field(default=False, description="Whether a fetcher is configured")
     origin: SourceOrigin | None = Field(
         default=None,
-        description="How data enters: a receiver match, a fetcher, or null when nothing selects it",
+        description="How data enters: a receiver match, a fetcher, the customer's own pipeline (external), or null when nothing selects it",
     )
     current_table_topic_type: FetcherTopic = Field(
         description=(

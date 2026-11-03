@@ -821,6 +821,42 @@ class TestGetSourceVersion:
         assert body["version"]["source_build"] is None
         assert body["version"]["source_deployment"] is None
 
+    def test_an_external_transform_carries_its_connection_and_never_a_secret(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        external = {
+            **sample_source,
+            "transport": "bus",
+            "transform": {"engine": "external", "credential_ref": "vault:kv/acme/kafka"},
+        }
+        created = client.post("/api/v1/sources", json=external, headers=admin_headers)
+        assert created.status_code == 201, created.text
+
+        version = client.get("/api/v1/sources/test-source/versions/1.0.0", headers=admin_headers)
+        detail = client.get("/api/v1/sources/test-source", headers=admin_headers)
+
+        for body in (version.json(), detail.json()):
+            connection = body["connection"]
+            assert connection["role"] == "transform"
+            assert connection["reads"] == "test-source_land"
+            assert connection["writes"] == "test-source_load"
+            assert connection["consumer_group"] == "dfe-external-test-source"
+            assert connection["credential_ref"] == "vault:kv/acme/kafka"
+
+    def test_a_literal_credential_is_refused_at_save(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        external = {
+            **sample_source,
+            "transport": "bus",
+            "transform": {"engine": "external", "credential_ref": "hunter2"},
+        }
+
+        resp = client.post("/api/v1/sources", json=external, headers=admin_headers)
+
+        assert resp.status_code == 422
+        assert "hunter2" not in client.get("/api/v1/sources", headers=admin_headers).text
+
     def test_get_version_reports_own_when_current_pins_meta_schema(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):

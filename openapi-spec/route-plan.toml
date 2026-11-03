@@ -294,6 +294,7 @@ routes = [
   { old = "POST /api/v1/sources/{name}/deploy", new = "POST /api/v1/sources/{source}/deploy", status = "moved" },
   { old = "GET /api/v1/sources/{name}/export", new = "GET /api/v1/sources/{source}/export", verb = "export", status = "moved" },
   { old = "GET /api/v1/sources/{name}/flow", new = "GET /api/v1/sources/{source}/flow", verb = "flow", status = "moved" },
+  { old = "GET /api/v1/sources/{name}/lag", new = "GET /api/v1/sources/{source}/lag", verb = "lag", status = "moved" },
   { old = "POST /api/v1/sources/{name}/plan", new = "POST /api/v1/sources/{source}/plan", status = "moved" },
   { old = "GET /api/v1/sources/{name}/signals", new = "GET /api/v1/sources/{source}/signals", verb = "signals", status = "moved" },
   { old = "GET /api/v1/sources/{name}/versions/{version}", new = "GET /api/v1/sources/{source}/versions/{version}", status = "moved" },

@@ -7692,6 +7692,83 @@
         }
       }
     },
+    "/api/v1/sources/{name}/lag": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Get External Lag",
+        "description": "How far the customer's own transform is behind on this source's landing topic.\n\nRead from the broker on each call. A broker that cannot be reached answers 200\nwith nulls and the reason, because \"no lag\" and \"could not look\" call for\nopposite reactions.",
+        "operationId": "sources.lag.list",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExternalLagResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "The source's transform is not the customer's own pipeline"
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "sources",
+          "resource": "lag",
+          "hierarchy": [
+            "sources",
+            "lag"
+          ],
+          "verb": "list",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "source:read"
+        }
+      }
+    },
     "/api/v1/sources/{name}/signals": {
       "get": {
         "tags": [
@@ -34989,6 +35066,219 @@
         "title": "ErrorResponse",
         "description": "Unified error response.\n\nAll API errors return this shape. The UI can always parse:\n- ``code`` for programmatic branching\n- ``message`` for a human-readable summary\n- ``errors`` for field-level validation details (422 only)\n- ``context`` for optional structured data on specific errors (e.g. conflicts)"
       },
+      "ExternalConnectionModel": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "origin",
+              "transform"
+            ],
+            "title": "Role",
+            "description": "origin writes the landing topic; transform reads it and writes the transformed one"
+          },
+          "reads": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reads",
+            "description": "The topic a transform consumes; null for an origin"
+          },
+          "writes": {
+            "type": "string",
+            "title": "Writes",
+            "description": "The topic the pipeline produces to"
+          },
+          "consumer_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumer Group",
+            "description": "The consumer group a transform must read in; null for an origin"
+          },
+          "bootstrap": {
+            "type": "string",
+            "title": "Bootstrap",
+            "description": "The broker address the pipeline connects to"
+          },
+          "security_protocol": {
+            "type": "string",
+            "title": "Security Protocol",
+            "description": "The broker's security protocol for this deployment"
+          },
+          "sasl_mechanism": {
+            "type": "string",
+            "title": "Sasl Mechanism",
+            "description": "The SASL mechanism the broker contract derives, empty where there is no auth"
+          },
+          "credential_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Ref",
+            "description": "Where the pipeline's own Kafka credential is kept, as the operator set it"
+          },
+          "org": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org",
+            "description": "The registered org the records belong to; null is the default org"
+          },
+          "allowed_org_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Org Ids",
+            "description": "Further tenant ids a record may keep in _org_id; any other is replaced"
+          },
+          "allowed_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Sources",
+            "description": "Further source names a record may keep in _source; any other is replaced"
+          },
+          "header_fields": {
+            "items": {
+              "$ref": "#/components/schemas/HeaderFieldModel"
+            },
+            "type": "array",
+            "title": "Header Fields",
+            "description": "The common header fields the loader reads, in column order"
+          },
+          "sample_record": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Sample Record",
+            "description": "A record carrying every header field, for the pipeline to copy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "role",
+          "writes",
+          "bootstrap",
+          "security_protocol",
+          "sasl_mechanism",
+          "allowed_org_ids",
+          "allowed_sources",
+          "header_fields",
+          "sample_record"
+        ],
+        "title": "ExternalConnectionModel",
+        "description": "What the customer's own pipeline connects with. Never a secret."
+      },
+      "ExternalLagResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "consumer_group": {
+            "type": "string",
+            "title": "Consumer Group"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          },
+          "lag": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lag",
+            "description": "Records the group has not committed past; null when the broker was not reached"
+          },
+          "committed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Committed",
+            "description": "False while the group has never committed, so every record counts as unread"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State",
+            "description": "The group's state (stable, empty, dead, ...); null when not reached"
+          },
+          "members": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Members",
+            "description": "Live consumers in the group; null when not reached"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Why the broker could not be asked; null on an answer"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "consumer_group",
+          "topic",
+          "lag",
+          "committed",
+          "state",
+          "members"
+        ],
+        "title": "ExternalLagResponse",
+        "description": "How far the customer's transform is behind on the landing topic."
+      },
       "FetcherRoute": {
         "properties": {
           "match": {
@@ -35343,15 +35633,34 @@
       },
       "FlowTransformModel": {
         "properties": {
-          "app": {
+          "engine": {
             "type": "string",
+            "title": "Engine",
+            "description": "The engine the source names; external for the customer's own"
+          },
+          "app": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "App",
-            "description": "Catalogued app running it, e.g. dfe-transform-vrl"
+            "description": "Catalogued app running it, e.g. dfe-transform-vrl; null for external"
           },
           "instance": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Instance",
-            "description": "Its deployed name, e.g. dfe-transform-vrl-auth"
+            "description": "Its deployed name, e.g. dfe-transform-vrl-auth; null for external"
           },
           "variant": {
             "anyOf": [
@@ -35391,12 +35700,23 @@
             ],
             "title": "Topics",
             "description": "Bus: the landing and transformed topics. Null on direct."
+          },
+          "consumer_group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Consumer Group",
+            "description": "Bus: the consumer group it reads the landing topic in. Null on direct."
           }
         },
         "type": "object",
         "required": [
-          "app",
-          "instance"
+          "engine"
         ],
         "title": "FlowTransformModel",
         "description": "The transform stage, when the source has one."
@@ -35931,6 +36251,32 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HeaderFieldModel": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "when_missing": {
+            "type": "string",
+            "title": "When Missing",
+            "description": "What the loader does when the record leaves it out"
+          },
+          "when_set": {
+            "type": "string",
+            "title": "When Set",
+            "description": "What the record gets when the pipeline sets it"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "when_missing",
+          "when_set"
+        ],
+        "title": "HeaderFieldModel",
+        "description": "One common header field, and what setting it buys."
       },
       "HistoryEntry": {
         "properties": {
@@ -46023,6 +46369,17 @@
             "title": "Versions",
             "description": "Version id -> configuration snapshot and pipeline artifacts"
           },
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalConnectionModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the customer's own pipeline plugs in, for a source with an external origin or transform; null otherwise"
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
@@ -46072,7 +46429,8 @@
                 "type": "string",
                 "enum": [
                   "receiver",
-                  "fetcher"
+                  "fetcher",
+                  "external"
                 ]
               },
               {
@@ -46080,7 +46438,7 @@
               }
             ],
             "title": "Origin",
-            "description": "How the deployed version's data enters: a receiver match, a fetcher, or nothing.",
+            "description": "How the deployed version's data enters: a receiver match, a fetcher, the customer's pipeline, or nothing.",
             "readOnly": true
           },
           "transport": {
@@ -46157,6 +46515,54 @@
         "type": "object",
         "title": "SourceEnabledPatchRequest",
         "description": "Partial update for source lifecycle state only.\n\nSend ``state`` for the tri-state (active | dormant | disabled), or the\ncompat boolean ``enabled`` (True -> active, False -> disabled). ``state``\nwins when both are sent."
+      },
+      "SourceExternal": {
+        "properties": {
+          "credential_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Ref",
+            "description": "Where the customer's pipeline keeps the Kafka principal it authenticates as, e.g. vault:kv/acme/kafka/vector. A reference only: the engine never reads, stores or mints the credential, and refuses a value that is not one of vault:, bao:, openbao:, env: or file:"
+          },
+          "org": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org",
+            "description": "The registered org the pipeline's records belong to. Unset is the default org. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
+          },
+          "allowed_org_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Org Ids",
+            "description": "Further tenant ids a record may keep in _org_id, for a provider whose pipeline carries its own customers' records. Empty keeps every record in org"
+          },
+          "allowed_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Sources",
+            "description": "Further source names a record may keep in _source, which sends it to that source's table. Empty keeps every record in this source's table"
+          }
+        },
+        "type": "object",
+        "title": "SourceExternal",
+        "description": "External origin: the customer's own pipeline produces to this source's landing topic.\n\nNothing the engine runs selects these records, so there is no match and no\nfetcher. The engine creates the topic and the loader reads it like any other."
       },
       "SourceFetcher": {
         "properties": {
@@ -46236,12 +46642,12 @@
               }
             ],
             "title": "Origin",
-            "description": "receiver, fetcher, or null when nothing selects the records"
+            "description": "receiver, fetcher, external, or null when nothing selects the records"
           },
           "input": {
             "type": "string",
             "title": "Input",
-            "description": "The receiver match that selects the records, or the fetcher instance polling them"
+            "description": "The receiver match that selects the records, the fetcher instance polling them, or the landing topic an external pipeline writes"
           },
           "transform": {
             "anyOf": [
@@ -47093,7 +47499,8 @@
                 "type": "string",
                 "enum": [
                   "receiver",
-                  "fetcher"
+                  "fetcher",
+                  "external"
                 ]
               },
               {
@@ -47101,7 +47508,7 @@
               }
             ],
             "title": "Origin",
-            "description": "How data enters: a receiver match, a fetcher, or null when nothing selects it"
+            "description": "How data enters: a receiver match, a fetcher, the customer's own pipeline (external), or null when nothing selects it"
           },
           "current_table_topic_type": {
             "type": "string",
@@ -47133,10 +47540,51 @@
       },
       "SourceTransform": {
         "properties": {
+          "credential_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential Ref",
+            "description": "Where the customer's pipeline keeps the Kafka principal it authenticates as, e.g. vault:kv/acme/kafka/vector. A reference only: the engine never reads, stores or mints the credential, and refuses a value that is not one of vault:, bao:, openbao:, env: or file:"
+          },
+          "org": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org",
+            "description": "The registered org the pipeline's records belong to. Unset is the default org. A record carrying any other _org_id lands here, unless allowed_org_ids lists it"
+          },
+          "allowed_org_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Org Ids",
+            "description": "Further tenant ids a record may keep in _org_id, for a provider whose pipeline carries its own customers' records. Empty keeps every record in org"
+          },
+          "allowed_sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Sources",
+            "description": "Further source names a record may keep in _source, which sends it to that source's table. Empty keeps every record in this source's table"
+          },
           "engine": {
             "type": "string",
             "title": "Engine",
-            "description": "Transform engine - a catalogued transform app by engine name (e.g. vrl, vector)"
+            "description": "Transform engine - a catalogued transform app by engine name (e.g. vrl, vector), or external for a pipeline the customer runs on the bus"
           },
           "variant": {
             "anyOf": [
@@ -47211,7 +47659,7 @@
           "engine"
         ],
         "title": "SourceTransform",
-        "description": "Transform stage configuration: the engine is one of the catalogue's transform apps."
+        "description": "Transform stage configuration: a catalogued transform app, or the customer's own pipeline.\n\nThe :class:`ExternalPipeline` fields are read only for ``external`` and refused otherwise."
       },
       "SourceVersionDetail": {
         "properties": {
@@ -47260,6 +47708,17 @@
               }
             ],
             "description": "SaaS API fetcher (optional)"
+          },
+          "external": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceExternal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External origin: the customer's own pipeline writes the landing topic"
           },
           "match": {
             "anyOf": [
@@ -47371,7 +47830,8 @@
                 "type": "string",
                 "enum": [
                   "receiver",
-                  "fetcher"
+                  "fetcher",
+                  "external"
                 ]
               },
               {
@@ -47499,6 +47959,17 @@
           "version": {
             "$ref": "#/components/schemas/SourceVersionDetail",
             "description": "Configuration snapshot for ``selected`` plus pipeline artifacts"
+          },
+          "connection": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ExternalConnectionModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the customer's own pipeline plugs in, for a ``selected`` version with an external origin or transform; null otherwise"
           }
         },
         "type": "object",
@@ -47737,7 +48208,18 @@
                 "type": "null"
               }
             ],
-            "description": "Fetcher-based origin. One of match, when or fetcher is set"
+            "description": "Fetcher-based origin. One of match, when, fetcher or external is set"
+          },
+          "external": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceExternal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "External origin: the customer's own pipeline writes the landing topic. One of match, when, fetcher or external is set"
           },
           "transport": {
             "anyOf": [

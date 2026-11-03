@@ -420,15 +420,21 @@ class TopicAdmin:
             raise listed.errors[0]
         committed: dict[str, dict[int, int]] = {}
         for group in listed.valid or []:
-            request = ConsumerGroupTopicPartitions(
-                group.group_id, [TopicPartition(name, partition) for partition in partitions]
-            )
-            futures = self._admin.list_consumer_group_offsets([request], request_timeout=timeout)
-            answer = futures[group.group_id].result()
-            offsets = {tp.partition: tp.offset for tp in answer.topic_partitions if tp.offset >= 0}
+            offsets = self.group_offsets(group.group_id, name, partitions, timeout=timeout)
             if offsets:
                 committed[group.group_id] = offsets
         return committed
+
+    def group_offsets(
+        self, group: str, name: str, partitions: list[int], *, timeout: float = 10.0
+    ) -> dict[int, int]:
+        """One consumer group's committed offsets on one topic, empty when it has committed none."""
+        request = ConsumerGroupTopicPartitions(
+            group, [TopicPartition(name, partition) for partition in partitions]
+        )
+        futures = self._admin.list_consumer_group_offsets([request], request_timeout=timeout)
+        answer = futures[group].result()
+        return {tp.partition: tp.offset for tp in answer.topic_partitions if tp.offset >= 0}
 
     def describe_group(self, group: str, *, timeout: float = 10.0) -> tuple[str, int]:
         """One consumer group's state, lower-cased (``stable``, ``empty``, ``dead``), and its member count.
@@ -756,6 +762,19 @@ def unread_records(name: str, *, admin: TopicAdmin) -> int:
     if not groups:
         return sum(high - low for low, high in marks.values())
     return max(_backlog(marks, offsets) for offsets in groups.values())
+
+
+def consumer_group_backlog(name: str, group: str, *, admin: TopicAdmin) -> tuple[int, bool]:
+    """Records on one topic that *group* has not committed past, and whether it has committed any.
+
+    A group that never committed counts every record the topic still holds.
+
+    Raises:
+        Exception: The broker did not report the watermarks or the group's offsets.
+    """
+    marks = admin.watermarks(name)
+    committed = admin.group_offsets(group, name, list(marks))
+    return _backlog(marks, committed), bool(committed)
 
 
 def _backlog(marks: dict[int, tuple[int, int]], committed: dict[int, int]) -> int:

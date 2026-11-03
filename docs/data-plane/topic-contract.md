@@ -9,6 +9,8 @@ unavailable on Confluent Cloud's non-Dedicated tiers anyway.
 The deploy creates a source's topics and the delete removes them. The old `_load` topic of a version that dropped its transform goes once its transform instance has left the deploy repo, the transform's consumer group has no live member, and no consumer group has records left to read on it. The apps reconcile after a later source write, `POST /api/v1/sources/reconcile-apps`, or the engine's next start deletes it. A transform with no consumer group the engine can name keeps the topic. Everything else
 is `/api/v1/kafka/topics`.
 
+A pipeline you run yourself writes these same topics, as a source's origin or its transform, and [external-pipelines.md](external-pipelines.md) says which and in which consumer group.
+
 A fetcher source pushing to the main topic is the exception at both ends: it arrives on the landing source's `main_land`, so it creates no landing topic on deploy and removes none on delete. Deleting it otherwise takes `main_land` out from under the receiver's default flow and every other source landing there.
 
 ## Deleting a stranded `_load` topic

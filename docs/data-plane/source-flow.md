@@ -141,6 +141,8 @@ With no sources defined, every record the receiver accepts is stamped `_source: 
 
 A transform is an apps.yaml entry with a `source_binding` and its `transports`, and a chart that exposes the transport dial and the Push Service. No engine release is involved. dfe-transform-vrl, dfe-transform-vector and dfe-transform-elastic run a Push listener beside their bus consumer, but a transform is one deployment per source, so none runs on a direct deployment until the mesh is GA. dfe-transform-elastic's `source.name` selects one of the compiled-in transforms its contract lists.
 
+A transform can also be a pipeline you run yourself. `engine: external` deploys nothing, and your pipeline reads `_land` in `dfe-external-<source>` and writes `_load` ([external-pipelines.md](external-pipelines.md)).
+
 ## Content another repo ships
 
 The engine serves two sorts of file it does not own. The reference pipelines the library and the console's copy-paste view show are pinned in dfe-infra `versions.yaml` under `content:`, and the engine chart materialises them into `/etc/dfe-engine/content` with one init container running the pinned app image. Neither a ConfigMap nor a Helm value carries them, because either form re-serialises them into etcd on every Argo sync.

@@ -149,6 +149,23 @@ class LoaderDlqConfig(BaseModel):
     topic_suffix: str = ".dlq"
 
 
+class LoaderExternalTopic(BaseModel):
+    """One topic a customer's own pipeline writes, and the labels its records may keep.
+
+    The loader's ``ExternalTopic`` entry: on this topic a record whose ``_org_id`` is
+    neither ``org_id`` nor listed in ``allowed_org_ids`` is given ``org_id``, and the
+    same for ``_source``. Each replacement is counted and the record is never refused.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    topic: str
+    org_id: str
+    allowed_org_ids: list[str] = Field(default_factory=list)
+    source: str
+    allowed_sources: list[str] = Field(default_factory=list)
+
+
 class LoaderRoutingConfig(BaseModel):
     """Database/table routing configuration for the loader.
 
@@ -185,6 +202,10 @@ class LoaderRoutingConfig(BaseModel):
     source_to_table: dict[str, str] = Field(default_factory=dict)
     topic_suffixes: list[str] = Field(default_factory=lambda: ["_land", "_load"])
     dlq: LoaderDlqConfig = Field(default_factory=LoaderDlqConfig)
+    external_topics: list[LoaderExternalTopic] = Field(
+        default_factory=list,
+        description="The topics a customer's own pipeline writes, each held to its source's org and name",
+    )
 
 
 # ---------------------------------------------------------------------------
