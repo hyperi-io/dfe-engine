@@ -5,7 +5,6 @@ from types import SimpleNamespace
 import pytest
 
 from dfe_engine.governance.ch.bootstrap import (
-    LEGACY_TENANT_ISOLATION_ENV,
     TENANT_ISOLATION_ENV,
     provided_service_passwords,
     service_user_password,
@@ -23,7 +22,6 @@ def _password_env(role: str) -> str:
 @pytest.fixture(autouse=True)
 def _clear_env(monkeypatch):
     monkeypatch.delenv(TENANT_ISOLATION_ENV, raising=False)
-    monkeypatch.delenv(LEGACY_TENANT_ISOLATION_ENV, raising=False)
     for role in DEFAULT_SERVICE_ROLES:
         monkeypatch.delenv(_password_env(role.name), raising=False)
 
@@ -47,25 +45,6 @@ class TestDefault:
         """An explicit setting that is not truthy stays off rather than defaulting on."""
         monkeypatch.setenv(TENANT_ISOLATION_ENV, "maybe")
         assert tenant_isolation_enabled() is False
-
-
-class TestLegacyName:
-    def test_legacy_off_is_honoured(self, monkeypatch):
-        monkeypatch.setenv(LEGACY_TENANT_ISOLATION_ENV, "false")
-        assert tenant_isolation_enabled() is False
-
-    def test_legacy_on_is_honoured(self, monkeypatch):
-        monkeypatch.setenv(LEGACY_TENANT_ISOLATION_ENV, "true")
-        assert tenant_isolation_enabled() is True
-
-    def test_current_name_wins_over_legacy(self, monkeypatch):
-        monkeypatch.setenv(TENANT_ISOLATION_ENV, "true")
-        monkeypatch.setenv(LEGACY_TENANT_ISOLATION_ENV, "false")
-        assert tenant_isolation_enabled() is True
-
-    def test_empty_legacy_falls_through_to_the_default(self, monkeypatch):
-        monkeypatch.setenv(LEGACY_TENANT_ISOLATION_ENV, "")
-        assert tenant_isolation_enabled() is True
 
 
 class TestProvidedPasswords:
