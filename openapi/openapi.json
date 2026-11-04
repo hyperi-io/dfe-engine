@@ -20678,7 +20678,7 @@
           "SCIM"
         ],
         "summary": "List Users",
-        "description": "List users (SCIM ListResponse). Supports ``userName eq`` filter + paging.",
+        "description": "List users (SCIM ListResponse). Supports ``userName eq``, ``externalId eq`` + paging.",
         "operationId": "scim.v2.users.list",
         "responses": {
           "200": {
@@ -21186,7 +21186,7 @@
           "SCIM"
         ],
         "summary": "List Groups",
-        "description": "List groups (SCIM ListResponse). Supports ``displayName eq`` filter + paging.",
+        "description": "List groups (SCIM ListResponse). Supports ``displayName eq``, ``id eq`` + paging.\n\n``id eq`` may add ``and members[value eq]``, which lists the group only for a member.",
         "operationId": "scim.v2.groups.list",
         "responses": {
           "200": {

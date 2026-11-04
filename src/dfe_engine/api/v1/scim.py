@@ -590,7 +590,10 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     dependencies=[Depends(require_action(scopes_dict["group_read"]))],
 )
 async def list_groups(user: CurrentUser, request: Request) -> Response:
-    """List groups (SCIM ListResponse). Supports the ``_GROUP_FILTERS`` forms + paging."""
+    """List groups (SCIM ListResponse). Supports ``displayName eq``, ``id eq`` + paging.
+
+    ``id eq`` may add ``and members[value eq]``, which lists the group only for a member.
+    """
     store = request.app.state.group_store
     groups = _filtered(request, store.list(), _GROUP_FILTERS)
     if isinstance(groups, JSONResponse):
