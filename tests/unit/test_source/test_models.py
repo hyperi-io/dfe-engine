@@ -34,6 +34,55 @@ from dfe_engine.source.models import (
 from dfe_engine.source.type_registry import TypeRegistry
 from tests.support.present import present
 
+MATCH = {"field": "f", "value": "v"}
+OKTA_MAIN = {"source_type": "okta", "topic": "main"}
+SIGMA_VIEW = {"standard": "sigma", "taxonomy": "windows"}
+ELASTIC = {"engine": "elastic", "variant": "filebeat.cisco_asa.default"}
+
+
+def _with_origin(body: dict[str, Any]) -> dict[str, Any]:
+    """*body*, given a receiver match unless it already names an origin."""
+    if {"match", "when", "fetcher", "external"} & body.keys():
+        return body
+    return {"match": MATCH, **body}
+
+
+def _source(**body: Any) -> Source:
+    return Source.model_validate({"source": "x", **_with_origin(body)})
+
+
+def _write(**body: Any) -> SourceWriteRequest:
+    return SourceWriteRequest.model_validate(_with_origin(body))
+
+
+def _version(**body: Any) -> SourceVersion:
+    return SourceVersion.model_validate({"date_time": "2026-01-01", **_with_origin(body)})
+
+
+def _stored(
+    versions: dict[str, dict[str, Any]], *, deployed: str | None = None, current: str | None = None
+) -> Source:
+    """A source with the version bodies in *versions*, whose current version is the last unless *current* is given."""
+    return Source.model_validate(
+        {
+            "source": "src-a",
+            "deployed_version": deployed,
+            "current": current or list(versions)[-1],
+            "versions": {
+                vid: {"date_time": "2026-01-01", **_with_origin(body)}
+                for vid, body in versions.items()
+            },
+        }
+    )
+
+
+def _at(source: Source, version: str, *path: str) -> Any:
+    """Follow *path* as attributes from one stored version, e.g. ("schema_config", "ttl_days")."""
+    value: Any = source.versions[version]
+    for attr in path:
+        value = getattr(value, attr)
+    return value
+
 
 @pytest.fixture
 def registry() -> TypeRegistry:
@@ -48,84 +97,56 @@ def registry() -> TypeRegistry:
 class TestSchemaColumn:
     def test_minimal(self):
         col = SchemaColumn(name="user_name", type="string")
-        assert col.name == "user_name"
-        assert col.type == "string"
         assert col.attribute == []
         assert col.use_case is None
         assert col.ch_override is None
 
     def test_full(self):
-        col = SchemaColumn(
-            name="source_ip",
-            type="ip",
-            attribute=["lowcardinality"],
-            use_case="range",
-            default="'::'",
-            order=3,
-            expr="@source: src_ip",
-            comment="Source IP address",
-            ch_override=None,
-        )
-        assert col.name == "source_ip"
-        assert col.attribute == ["lowcardinality"]
-        assert col.use_case == "range"
-        assert col.order == 3
-        assert col.expr == "@source: src_ip"
-        assert col.comment == "Source IP address"
+        fields: dict[str, Any] = {
+            "name": "source_ip",
+            "type": "ip",
+            "attribute": ["lowcardinality"],
+            "use_case": "range",
+            "default": "'::'",
+            "order": 3,
+            "expr": "@source: src_ip",
+            "comment": "Source IP address",
+        }
+        col = SchemaColumn(**fields)
+        assert {key: getattr(col, key) for key in fields} == fields
 
-    def test_attribute_coercion_from_string(self):
-        col = SchemaColumn(name="x", type="string", attribute="lowcardinality")
-        assert col.attribute == ["lowcardinality"]
+    @pytest.mark.parametrize(
+        ("attribute", "expected"),
+        [
+            ("lowcardinality", ["lowcardinality"]),
+            (["lowcardinality", "nullable"], ["lowcardinality", "nullable"]),
+            (None, []),
+        ],
+    )
+    def test_attribute_coercion(self, attribute, expected):
+        assert SchemaColumn(name="x", type="string", attribute=attribute).attribute == expected
 
-    def test_attribute_coercion_from_list(self):
-        col = SchemaColumn(name="x", type="string", attribute=["lowcardinality", "nullable"])
-        assert col.attribute == ["lowcardinality", "nullable"]
+    @pytest.mark.parametrize(
+        ("fields", "needles"),
+        [
+            ({"type": "string", "ch_override": "String"}, []),
+            ({"type": "string", "use_case": "dimension"}, []),
+            ({"type": "integer", "use_case": "word_search"}, ["word_search"]),
+            ({"type": "json", "attribute": ["lowcardinality"]}, ["lowcardinality"]),
+            ({"type": "string", "ch_override": "NotAType"}, ["NotAType"]),
+            ({"type": "nonexistent"}, ["unknown primitive"]),
+            (
+                {"type": "json", "attribute": ["lowcardinality"], "use_case": "dimension"},
+                ["dimension", "lowcardinality"],
+            ),
+        ],
+    )
+    def test_validate_against_registry(self, registry: TypeRegistry, fields, needles):
+        errors = SchemaColumn(name="x", **fields).validate_against_registry(registry)
 
-    def test_validate_valid_ch_override(self, registry: TypeRegistry):
-        col = SchemaColumn(name="x", type="string", ch_override="String")
-        errors = col.validate_against_registry(registry)
-        assert errors == []
-
-    def test_attribute_coercion_from_none(self):
-        col = SchemaColumn(name="x", type="string", attribute=None)
-        assert col.attribute == []
-
-    def test_validate_valid_column(self, registry: TypeRegistry):
-        col = SchemaColumn(name="x", type="string", use_case="dimension")
-        errors = col.validate_against_registry(registry)
-        assert errors == []
-        col = SchemaColumn(name="x", type="integer", use_case="word_search")
-        errors = col.validate_against_registry(registry)
-        assert len(errors) == 1
-        assert "word_search" in errors[0]
-
-    def test_validate_invalid_attribute(self, registry: TypeRegistry):
-        col = SchemaColumn(name="x", type="json", attribute=["lowcardinality"])
-        errors = col.validate_against_registry(registry)
-        assert len(errors) == 1
-        assert "lowcardinality" in errors[0]
-
-    def test_validate_invalid_ch_override(self, registry: TypeRegistry):
-        col = SchemaColumn(name="x", type="string", ch_override="NotAType")
-        errors = col.validate_against_registry(registry)
-        assert len(errors) == 1
-        assert "NotAType" in errors[0]
-
-    def test_validate_unknown_primitive(self, registry: TypeRegistry):
-        col = SchemaColumn(name="x", type="nonexistent")
-        errors = col.validate_against_registry(registry)
-        assert len(errors) == 1
-        assert "unknown primitive" in errors[0]
-
-    def test_validate_multiple_errors(self, registry: TypeRegistry):
-        col = SchemaColumn(
-            name="x",
-            type="json",
-            attribute=["lowcardinality"],
-            use_case="dimension",
-        )
-        errors = col.validate_against_registry(registry)
-        assert len(errors) == 2
+        assert len(errors) == len(needles)
+        for error, needle in zip(errors, needles, strict=True):
+            assert needle in error
 
 
 # ---------------------------------------------------------------------------
@@ -139,10 +160,8 @@ class TestSourceHeader:
         assert h.type == "timeseries"
         assert h.version == "1.0.3"
 
-    def test_custom(self):
-        h = SourceHeader(type="minimal", version="2.0.0")
-        assert h.type == "minimal"
-        assert h.version == "2.0.0"
+        custom = SourceHeader(type="minimal", version="2.0.0")
+        assert (custom.type, custom.version) == ("minimal", "2.0.0")
 
     def test_default_version_is_its_own_profile_s_current_marker(self):
         """An unpinned header lands on the revision its profile ships as ``current``.
@@ -168,8 +187,6 @@ class TestSourceHeader:
 class TestSourceMatch:
     def test_creation(self):
         m = SourceMatch(field="tags.collector.type", value="filebeat")
-        assert m.field == "tags.collector.type"
-        assert m.value == "filebeat"
         assert m.operator == "equals"
 
     def test_exists_operator_allows_empty_value(self):
@@ -181,6 +198,12 @@ class TestSourceMatch:
         with pytest.raises(ValueError, match=r"match\.value is required"):
             SourceMatch(field="_json.f", operator="includes", value="  ")
 
+    def test_always_needs_no_operand_and_every_other_operator_does(self):
+        assert SourceMatch(field="_source", operator="always").value == ""
+
+        with pytest.raises(ValueError, match=r"match\.value is required"):
+            SourceMatch(field="_source", operator="equals")
+
 
 # ---------------------------------------------------------------------------
 # SourceSchema
@@ -190,14 +213,8 @@ class TestSourceMatch:
 class TestSourceSchema:
     def test_minimal(self):
         s = SourceSchema(ttl_days=90)
-        assert s.ttl_days == 90
         assert s.engine == ""  # empty = inherit the deployment default at DDL time
         assert s.meta_schema is None
-
-    def test_zero_ttl_is_accepted_and_negative_refused(self):
-        assert SourceSchema(ttl_days=0).ttl_days == 0
-        with pytest.raises(ValidationError):
-            SourceSchema(ttl_days=-1)
 
     def test_full(self):
         s = SourceSchema(
@@ -211,21 +228,22 @@ class TestSourceSchema:
         assert s.meta_schema == "logs_beats_filebeat"
         assert s.engine == "ReplacingMergeTree"
 
+    def test_zero_ttl_is_accepted_and_negative_refused(self):
+        assert SourceSchema(ttl_days=0).ttl_days == 0
+        with pytest.raises(ValidationError):
+            SourceSchema(ttl_days=-1)
+
     def test_parameterised_engine(self):
         # A parameterised variant is accepted - the registry gates the variant,
         # the params (a version column here) are the caller's.
         s = SourceSchema(engine="ReplacingMergeTree(_timestamp_load)")
         assert s.engine == "ReplacingMergeTree(_timestamp_load)"
 
-    def test_invalid_engine(self):
+    @pytest.mark.parametrize("engine", ["InvalidEngine", "ReplicatedMergeTree"])
+    def test_invalid_engine(self, engine):
+        # The Replicated prefix is added at DDL time, never declared in source config.
         with pytest.raises(ValueError, match="Invalid engine"):
-            SourceSchema(engine="InvalidEngine")
-
-    def test_replicated_prefix_rejected(self):
-        # The Replicated prefix is added at DDL time, never declared in source
-        # config - so it is not a permitted variant.
-        with pytest.raises(ValueError, match="Invalid engine"):
-            SourceSchema(engine="ReplicatedMergeTree")
+            SourceSchema(engine=engine)
 
 
 # ---------------------------------------------------------------------------
@@ -234,15 +252,10 @@ class TestSourceSchema:
 
 
 class TestSourceTransform:
-    def test_vector(self):
+    def test_defaults(self):
         t = SourceTransform(engine="vector", config_file="/etc/vector/fb.yaml")
-        assert t.engine == "vector"
         assert t.env == {}
         assert t.files == []
-
-    def test_vrl(self):
-        t = SourceTransform(engine="vrl")
-        assert t.engine == "vrl"
 
     def test_every_catalogued_transform_is_accepted(self):
         engines = transform_engines()
@@ -389,17 +402,22 @@ class TestSourceTransform:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# SourceFetcher
+# ---------------------------------------------------------------------------
+
+
 class TestSourceFetcher:
-    def test_minimal(self):
+    def test_defaults(self):
         f = SourceFetcher(source_type="crowdstrike")
-        assert f.source_type == "crowdstrike"
         assert f.topic == "own"
         assert f.config == {}
-        assert f.landing_label("edr") == "edr"
 
-    def test_main_topic_lands_on_the_shared_landing(self):
-        f = SourceFetcher(source_type="okta", topic="main")
-        assert f.landing_label("okta-audit") == "main"
+    @pytest.mark.parametrize(
+        ("topic", "source", "label"), [("own", "edr", "edr"), ("main", "okta-audit", "main")]
+    )
+    def test_main_topic_lands_on_the_shared_landing(self, topic, source, label):
+        assert SourceFetcher(source_type="okta", topic=topic).landing_label(source) == label
 
     def test_the_topic_literal_still_carries_the_landing_label(self):
         # FetcherTopic cannot be built from a constant, so it restates the label.
@@ -524,11 +542,7 @@ class TestSourceOrigin:
             Source.model_validate({"source": "x"})
         with pytest.raises(ValueError, match="not more"):
             Source.model_validate(
-                {
-                    "source": "x",
-                    "match": {"field": "f", "value": "v"},
-                    "fetcher": {"source_type": "okta"},
-                }
+                {"source": "x", "match": MATCH, "fetcher": {"source_type": "okta"}}
             )
 
     def test_a_core_source_may_have_no_origin_at_all(self):
@@ -545,13 +559,13 @@ class TestSourceOrigin:
                 {
                     "source": "main",
                     "resource_type": "core",
-                    "match": {"field": "f", "value": "v"},
+                    "match": MATCH,
                     "fetcher": {"source_type": "okta"},
                 }
             )
 
     def test_a_match_rule_makes_a_receiver_source(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
+        s = _source(source="syslog")
         assert s.origin == "receiver"
         assert s.fetcher is None
         assert s.landing_label() == "syslog"
@@ -559,31 +573,23 @@ class TestSourceOrigin:
         assert s.model_dump(mode="json")["origin"] == "receiver"
 
     def test_a_fetcher_makes_a_fetcher_source(self):
-        s = Source.model_validate(
-            {"source": "okta-audit", "fetcher": {"source_type": "okta", "topic": "main"}}
-        )
+        s = _source(source="okta-audit", fetcher=OKTA_MAIN)
         assert s.origin == "fetcher"
         assert s.match is None
         assert s.landing_label() == "main"
         assert s.table_topic_type == "main"
         assert "match" not in s.to_yaml_dict()["versions"]["1.0.0"]
 
-    def test_a_meta_schema_pin_means_the_source_owns_its_table(self):
-        s = Source.model_validate(
-            {
-                "source": "aws-cloudtrail",
-                "match": {"field": "f", "value": "v"},
-                "schema": {"meta_schema": "meta/aws_cloudtrail", "meta_schema_version": "1.0.0"},
-            }
-        )
-        assert s.table_topic_type == "own"
-
-    def test_no_meta_schema_shares_the_main_table(self):
-        s = Source.model_validate(
-            {"source": "azure", "match": {"field": "azure", "value": "azure"}, "schema": {}}
-        )
-        assert s.schema_config.meta_schema is None
-        assert s.table_topic_type == "main"
+    @pytest.mark.parametrize(
+        ("schema", "topic_type"),
+        [
+            ({"meta_schema": "meta/aws_cloudtrail", "meta_schema_version": "1.0.0"}, "own"),
+            ({}, "main"),
+        ],
+        ids=["meta-schema-pinned", "no-meta-schema"],
+    )
+    def test_a_meta_schema_pin_means_the_source_owns_its_table(self, schema, topic_type):
+        assert _source(schema=schema).table_topic_type == topic_type
 
     def test_the_landing_source_is_the_main_table(self):
         s = Source.model_validate({"source": "main", "resource_type": "core"})
@@ -591,27 +597,12 @@ class TestSourceOrigin:
 
     def test_table_topic_type_follows_the_current_version_not_the_deployed_one(self):
         """An undeployed current without a meta schema shares main, even if deployed owns a table."""
-        s = Source.model_validate(
+        s = _stored(
             {
-                "source": "azure",
-                "deployed_version": "1.0.0",
-                "current": "2.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "azure", "value": "azure"},
-                        "schema": {
-                            "meta_schema": "meta/azure",
-                            "meta_schema_version": "1.0.0",
-                        },
-                    },
-                    "2.0.0": {
-                        "date_time": "2026-01-02",
-                        "match": {"field": "azure", "value": "azure"},
-                        "schema": {},
-                    },
-                },
-            }
+                "1.0.0": {"schema": {"meta_schema": "meta/azure", "meta_schema_version": "1.0.0"}},
+                "2.0.0": {"schema": {}},
+            },
+            deployed="1.0.0",
         )
         assert s.version("1.0.0").effective_schema().meta_schema == "meta/azure"
         assert s.version("2.0.0").effective_schema().meta_schema is None
@@ -627,70 +618,55 @@ class TestSourceOrigin:
         body = SourceWriteRequest(source="x", fetcher=SourceFetcher(source_type="pypi"))
         assert body.to_version_snapshot().origin == "fetcher"
 
-    def test_an_update_cannot_swap_receiver_for_fetcher(self):
-        existing = Source.model_validate(
-            {"source": "syslog", "match": {"field": "f", "value": "v"}}
-        )
-        write = SourceWriteRequest.model_validate(
-            {"fetcher": {"source_type": "okta", "topic": "own"}}
-        )
-        with pytest.raises(ValueError, match="Cannot change source origin"):
-            apply_source_write_update(existing, write)
+    @pytest.mark.parametrize(
+        ("existing", "body", "refusal"),
+        [
+            (
+                {"match": MATCH},
+                {"fetcher": {"source_type": "okta", "topic": "own"}},
+                "Cannot change source origin",
+            ),
+            (
+                {"fetcher": {"source_type": "okta", "topic": "own"}},
+                {"match": MATCH},
+                "Cannot change source origin",
+            ),
+            (
+                {
+                    "match": MATCH,
+                    "schema": {"meta_schema": "meta/aws", "meta_schema_version": "1.0.0"},
+                },
+                {"match": MATCH, "schema": {"engine": "MergeTree"}},
+                "Cannot remove the meta schema",
+            ),
+        ],
+        ids=["receiver-to-fetcher", "fetcher-to-receiver", "clear-meta-schema"],
+    )
+    def test_an_update_cannot_swap_the_origin_or_drop_the_meta_schema(
+        self, existing, body, refusal
+    ):
+        with pytest.raises(ValueError, match=refusal):
+            apply_source_write_update(
+                Source.model_validate({"source": "x", **existing}),
+                SourceWriteRequest.model_validate(body),
+            )
 
-    def test_an_update_cannot_swap_fetcher_for_receiver(self):
-        existing = Source.model_validate(
-            {"source": "okta", "fetcher": {"source_type": "okta", "topic": "own"}}
-        )
-        write = SourceWriteRequest.model_validate({"match": {"field": "f", "value": "v"}})
-        with pytest.raises(ValueError, match="Cannot change source origin"):
-            apply_source_write_update(existing, write)
+    @pytest.mark.parametrize(
+        ("before", "after", "pinned"),
+        [
+            (
+                {"meta_schema": "meta/aws", "meta_schema_version": "1.0.0"},
+                {"meta_schema": "meta/aws_cloudtrail", "meta_schema_version": "2.0.0"},
+                "meta/aws_cloudtrail",
+            ),
+            ({}, {"meta_schema": "meta/azure", "meta_schema_version": "1.0.0"}, "meta/azure"),
+        ],
+        ids=["change-the-pin", "gain-a-pin"],
+    )
+    def test_an_update_may_change_or_gain_a_meta_schema(self, before, after, pinned):
+        updated = apply_source_write_update(_source(schema=before), _write(schema=after))
 
-    def test_an_update_cannot_clear_a_pinned_meta_schema(self):
-        existing = Source.model_validate(
-            {
-                "source": "aws",
-                "match": {"field": "f", "value": "v"},
-                "schema": {"meta_schema": "meta/aws", "meta_schema_version": "1.0.0"},
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "schema": {"engine": "MergeTree"},
-            }
-        )
-        with pytest.raises(ValueError, match="Cannot remove the meta schema"):
-            apply_source_write_update(existing, write)
-
-    def test_an_update_may_still_change_which_meta_schema_is_pinned(self):
-        existing = Source.model_validate(
-            {
-                "source": "aws",
-                "match": {"field": "f", "value": "v"},
-                "schema": {"meta_schema": "meta/aws", "meta_schema_version": "1.0.0"},
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "schema": {"meta_schema": "meta/aws_cloudtrail", "meta_schema_version": "2.0.0"},
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert present(updated.versions["1.0.0"].schema_config).meta_schema == "meta/aws_cloudtrail"
-        assert updated.table_topic_type == "own"
-
-    def test_a_source_without_a_meta_schema_may_still_gain_one(self):
-        existing = Source.model_validate(
-            {"source": "azure", "match": {"field": "azure", "value": "azure"}, "schema": {}}
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "azure", "value": "azure"},
-                "schema": {"meta_schema": "meta/azure", "meta_schema_version": "1.0.0"},
-            }
-        )
-        updated = apply_source_write_update(existing, write)
+        assert present(updated.versions["1.0.0"].schema_config).meta_schema == pinned
         assert updated.table_topic_type == "own"
 
 
@@ -702,7 +678,6 @@ class TestSourceOrigin:
 class TestSourceView:
     def test_defaults(self):
         v = SourceView(standard="sigma")
-        assert v.standard == "sigma"
         assert v.field_map is None
         assert v.custom_mappings == {}
         assert v.taxonomy is None
@@ -711,43 +686,44 @@ class TestSourceView:
 
     def test_with_mappings(self):
         v = SourceView(
-            standard="sigma",
+            standard="ecs",
             taxonomy="windows",
+            field_map="ecs/filebeat",
             custom_mappings={"CommandLine": "command_line"},
         )
         assert v.taxonomy == "windows"
+        assert v.field_map == "ecs/filebeat"
         assert v.custom_mappings["CommandLine"] == "command_line"
 
     def test_standard_forced_lowercase(self):
-        v = SourceView(standard="ECS")
-        assert v.standard == "ecs"
+        assert SourceView(standard="ECS").standard == "ecs"
 
     def test_unknown_standard_rejected(self):
         with pytest.raises(ValueError, match="Unknown view standard"):
             SourceView(standard="splunk_cim_v9")
 
-    def test_field_map_path(self):
-        v = SourceView(standard="ecs", field_map="ecs/filebeat")
-        assert v.field_map == "ecs/filebeat"
-
 
 # ---------------------------------------------------------------------------
-# Source — Top-Level
+# Source - Top-Level
 # ---------------------------------------------------------------------------
 
 
 class TestSource:
-    def test_minimal(self):
-        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-            source="syslog",
-            match=SourceMatch(field="tags.collector.type", value="syslog"),
-        )
-        assert s.source == "syslog"
+    def test_defaults(self):
+        s = _source(source="crowdstrike-edr")
+        assert s.display_name == "Crowdstrike Edr"
         assert s.enabled is True
-        assert s.display_name == "Syslog"
+        assert s.state == "active"
         assert s.version().header is None
         assert s.header == SourceHeader()
         assert s.schema_config.engine == ""  # empty = inherit deployment default
+        assert s.views == []
+        assert s.view_for("sigma") is None
+        assert s.transport is None
+        assert s.archive is False
+        assert s.topic_land == "crowdstrike-edr_land"
+        assert s.topic_load is None
+        assert s.table_name == "crowdstrike-edr"
 
     def test_full(self):
         s = Source.model_validate(
@@ -763,10 +739,7 @@ class TestSource:
                     "ttl_days": 90,
                     "engine": "MergeTree",
                 },
-                "transform": {
-                    "engine": "vector",
-                    "config_file": "/etc/vector/filebeat.yaml",
-                },
+                "transform": {"engine": "vector", "config_file": "/etc/vector/filebeat.yaml"},
                 "views": [
                     {
                         "standard": "sigma",
@@ -776,175 +749,102 @@ class TestSource:
                 ],
             }
         )
-        assert s.source == "filebeat"
         assert s.display_name == "Elastic Filebeat"
         assert s.schema_config.meta_schema == "logs_beats_filebeat"
         assert present(s.transform).engine == "vector"
-        assert s.view_for("sigma") is not None
         assert present(s.view_for("sigma")).taxonomy == "linux"
-
-    def test_derived_properties(self):
-        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-            source="filebeat",
-            match=SourceMatch(field="f", value="v"),
-            transform=SourceTransform(engine="vector"),
-        )
-        assert s.topic_land == "filebeat_land"
         assert s.topic_load == "filebeat_load"
-        assert s.table_name == "filebeat"
-
-    def test_no_transform_no_load_topic(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-        assert s.topic_land == "syslog_land"
-        assert s.topic_load is None
-
-    def test_display_name_auto(self):
-        s = Source(source="crowdstrike-edr", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-        assert s.display_name == "Crowdstrike Edr"
 
     def test_display_name_explicit(self):
-        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-            source="crowdstrike-edr",
-            display_name="CrowdStrike EDR",
-            match=SourceMatch(field="f", value="v"),
-        )
+        s = _source(source="crowdstrike-edr", display_name="CrowdStrike EDR")
         assert s.display_name == "CrowdStrike EDR"
 
-    def test_views_default_empty(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-        assert s.views == []
-        assert s.view_for("sigma") is None
+    @pytest.mark.parametrize(
+        ("lifecycle", "state"),
+        [
+            ({"enabled": False}, "disabled"),
+            ({"enabled": True}, "active"),
+            ({"enabled": True, "state": "dormant"}, "dormant"),
+            ({"state": "dormant"}, "dormant"),
+        ],
+        ids=["legacy-disabled", "legacy-enabled", "state-wins", "state-only"],
+    )
+    def test_state_and_the_compat_enabled_flag(self, lifecycle, state):
+        s = _source(**lifecycle)
 
-    def test_state_default_active(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-        assert s.state == "active"
-        assert s.enabled is True
-
-    def test_legacy_enabled_false_maps_to_disabled(self):
-        s = Source(source="syslog", enabled=False, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-        assert s.state == "disabled"
-        assert s.enabled is False
-
-    def test_state_wins_over_enabled(self):
-        s = Source.model_validate(
-            {
-                "source": "syslog",
-                "enabled": True,
-                "state": "dormant",
-                "match": {"field": "f", "value": "v"},
-            }
-        )
-        assert s.state == "dormant"
-        assert s.enabled is False  # compat accessor: enabled == (state == active)
-
-    def test_state_in_yaml_dict(self):
-        s = Source.model_validate(
-            {"source": "syslog", "state": "dormant", "match": {"field": "f", "value": "v"}}
-        )
-        d = s.to_yaml_dict()
-        assert d["state"] == "dormant"
-        assert "enabled" not in d
-        # round-trips
-        assert Source.model_validate(d).state == "dormant"
-
-    def test_enabled_serialized_on_api_dump(self):
-        s = Source.model_validate(
-            {"source": "syslog", "state": "dormant", "match": {"field": "f", "value": "v"}}
-        )
+        assert s.state == state
+        assert s.enabled is (state == "active")
         dumped = s.model_dump(mode="json")
-        assert dumped["state"] == "dormant"
-        assert dumped["enabled"] is False
+        assert (dumped["state"], dumped["enabled"]) == (state, state == "active")
+        yaml_dict = s.to_yaml_dict()
+        assert "enabled" not in yaml_dict
+        assert Source.model_validate(yaml_dict).state == state
 
     def test_views_set(self):
-        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-            source="syslog",
-            match=SourceMatch(field="f", value="v"),
-            views=[SourceView(standard="sigma"), SourceView(standard="ecs")],
-        )
+        s = _source(views=[SourceView(standard="sigma"), SourceView(standard="ecs")])
+
         assert [v.standard for v in s.views] == ["sigma", "ecs"]
-
-    def test_views_in_yaml_dict(self):
-        s = Source(  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-            source="syslog",
-            match=SourceMatch(field="f", value="v"),
-            views=[SourceView(standard="sigma")],
-        )
-        d = s.to_yaml_dict()
-        assert d["versions"]["1.0.0"]["views"] == [{"standard": "sigma"}]
-
-    def test_views_excluded_when_empty(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-        d = s.to_yaml_dict()
-        assert "views" not in d["versions"]["1.0.0"]
+        assert s.to_yaml_dict()["versions"]["1.0.0"]["views"] == [
+            {"standard": "sigma"},
+            {"standard": "ecs"},
+        ]
 
 
 # ---------------------------------------------------------------------------
-# Source — Naming Validation
+# Source - Naming Validation
 # ---------------------------------------------------------------------------
 
 
 class TestSourceNaming:
     """A source name has to survive as the DNS-1123 label an instance is named for."""
 
-    def test_valid_names(self):
-        for name in ["filebeat", "syslog", "crowdstrike-edr", "a", "x123-456"]:
-            s = Source(source=name, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-            assert s.source == name
+    @pytest.mark.parametrize(
+        "name", ["filebeat", "syslog", "crowdstrike-edr", "a", "x123-456", "a" * 40]
+    )
+    def test_valid_names_are_legal_instance_names(self, name):
+        from dfe_engine.appmgmt.instances import validate_instance
 
-    def test_starts_with_digit(self):
-        with pytest.raises(ValueError, match="DNS-1123 label"):
-            Source(source="123abc")
+        assert _source(source=name).source == name
+        validate_instance(name)
 
-    def test_uppercase(self):
-        with pytest.raises(ValueError, match="DNS-1123 label"):
-            Source(source="FileBeat")
+    @pytest.mark.parametrize(
+        ("name", "refusal"),
+        [
+            ("123abc", "DNS-1123 label"),
+            ("FileBeat", "DNS-1123 label"),
+            ("filebeat-", "DNS-1123 label"),
+            ("file beat", "DNS-1123 label"),
+            ("_test", "DNS-1123 label"),
+            ("a" * 41, "exceeds max length"),
+            ("", "DNS-1123 label"),
+        ],
+        ids=[
+            "digit-first",
+            "uppercase",
+            "trailing-hyphen",
+            "space",
+            "underscore-first",
+            "too-long",
+            "empty",
+        ],
+    )
+    def test_invalid_names_are_refused(self, name, refusal):
+        with pytest.raises(ValueError, match=refusal):
+            Source.model_validate({"source": name})
 
     def test_underscores_are_refused_and_the_error_says_why(self):
         """The message has to name the constraint, not just quote the regex."""
         with pytest.raises(ValueError) as caught:
-            Source(source="crowdstrike_edr", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
+            _source(source="crowdstrike_edr")
         message = str(caught.value)
         assert "DNS-1123 label" in message
         assert "use '-' instead of '_'" in message
         # It says what breaks, so the reader knows why the rule exists.
         assert "instance" in message
 
-    def test_trailing_hyphen(self):
-        """A DNS-1123 label ends alphanumeric, so the instance would be rejected."""
-        with pytest.raises(ValueError, match="DNS-1123 label"):
-            Source(source="filebeat-")
-
-    def test_spaces(self):
-        with pytest.raises(ValueError, match="DNS-1123 label"):
-            Source(source="file beat")
-
-    def test_too_long(self):
-        with pytest.raises(ValueError, match="exceeds max length"):
-            Source(source="a" * 41)
-
-    def test_max_length_ok(self):
-        s = Source(source="a" * 40, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-        assert len(s.source) == 40
-
-    def test_empty(self):
-        with pytest.raises(ValueError):
-            Source(source="")
-
-    def test_leading_underscore(self):
-        with pytest.raises(ValueError, match="DNS-1123 label"):
-            Source(source="_test")
-
-    def test_every_legal_name_is_a_legal_instance_name(self):
-        """The alignment this rule exists for, asserted against the instance rule."""
-        from dfe_engine.appmgmt.instances import validate_instance
-
-        for name in ["filebeat", "crowdstrike-edr", "x123-456", "a", "a" * 40]:
-            Source(source=name, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-            validate_instance(name)
-
 
 # ---------------------------------------------------------------------------
-# Source — YAML Serialisation
+# Source - YAML Serialisation
 # ---------------------------------------------------------------------------
 
 
@@ -952,126 +852,77 @@ class TestSourceYaml:
     def test_round_trip(self):
         data = {
             "source": "filebeat",
+            "display_name": "Filebeat",
+            "description": "A test",
+            "enabled": False,
             "match": {"field": "tags.collector.type", "value": "filebeat"},
-            "header": {"type": "timeseries", "version": "1.0.0"},
-            "schema": {"ttl_days": 90},
+            "header": {"type": "minimal", "version": "2.0.0"},
+            "schema": {"meta_schema": "test_meta", "ttl_days": 90, "engine": "SummingMergeTree"},
         }
         s = Source.model_validate(data)
         yaml_dict = s.to_yaml_dict()
 
-        assert yaml_dict["source"] == "filebeat"
         assert yaml_dict["versions"]["1.0.0"]["match"]["field"] == "tags.collector.type"
         assert yaml_dict["versions"]["1.0.0"]["schema"]["ttl_days"] == 90
         assert "schema_config" not in yaml_dict
         assert "deployed_version" not in yaml_dict
         assert "current" in yaml_dict
+        assert Source.model_validate(yaml_dict).to_yaml_dict() == yaml_dict
 
     def test_excludes_none(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-        yaml_dict = s.to_yaml_dict()
-        assert "match" not in yaml_dict
-        assert "transform" not in yaml_dict
-        assert "deployed_version" not in yaml_dict
-        assert "fetcher" not in yaml_dict
-        assert "views" not in yaml_dict
-        assert "description" not in yaml_dict
-        assert "from_catalogue_item" not in yaml_dict
-        assert "from_catalogue_intake" not in yaml_dict
+        yaml_dict = _source().to_yaml_dict()
+        for key in (
+            "match",
+            "transform",
+            "deployed_version",
+            "fetcher",
+            "views",
+            "description",
+            "from_catalogue_item",
+            "from_catalogue_intake",
+        ):
+            assert key not in yaml_dict
 
     def test_catalogue_provenance_is_stored_and_kept_across_an_edit(self):
-        existing = Source.model_validate(
-            {
-                "source": "okta",
-                "from_catalogue_item": "okta",
-                "from_catalogue_intake": "beats",
-                "match": {"field": "f", "value": "v"},
-            }
-        )
+        existing = _source(source="okta", from_catalogue_item="okta", from_catalogue_intake="beats")
         dumped = existing.to_yaml_dict()
         assert dumped["from_catalogue_item"] == "okta"
         assert dumped["from_catalogue_intake"] == "beats"
         assert Source.model_validate(dumped).from_catalogue_intake == "beats"
 
-        updated = apply_source_write_update(
-            existing,
-            SourceWriteRequest.model_validate(
-                {"description": "doc-only edit", "match": {"field": "f", "value": "v"}}
-            ),
-        )
+        updated = apply_source_write_update(existing, _write(description="doc-only edit"))
         assert updated.from_catalogue_item == "okta"
         assert updated.from_catalogue_intake == "beats"
         assert updated.description == "doc-only edit"
 
-    def test_round_trip_preserves_data(self):
-        data = {
-            "source": "test-source",
-            "display_name": "Test Source",
-            "description": "A test",
-            "enabled": False,
-            "match": {"field": "f", "value": "v"},
-            "header": {"type": "minimal", "version": "2.0.0"},
-            "schema": {
-                "meta_schema": "test_meta",
-                "ttl_days": 30,
-                "engine": "SummingMergeTree",
-            },
-        }
-        s1 = Source.model_validate(data)
-        yaml_dict = s1.to_yaml_dict()
-        s2 = Source.model_validate(yaml_dict)
-
-        assert s1.source == s2.source
-        assert s1.display_name == s2.display_name
-        assert s1.enabled == s2.enabled
-        assert s1.schema_config.engine == s2.schema_config.engine
-
 
 class TestSourceVersion:
-    def test_to_yaml_dict_omits_empty_containers(self):
-        ver = SourceVersion(
-            date_time="2026-06-10",
-            match=SourceMatch(field="f", value="v"),
-            views=[],
-        )
+    def test_yaml_omits_empty_containers_and_the_derived_origin(self):
+        ver = _version(views=[], date_time="2026-06-10")
         out = ver.to_yaml_dict()
         assert "views" not in out
         assert out["date_time"] == "2026-06-10"
 
-    def test_origin_is_on_the_api_dump_but_not_in_yaml(self):
+        with_view = _version(views=[SourceView(standard="sigma")]).to_yaml_dict()
+        assert with_view["views"] == [{"standard": "sigma"}]
+
+    @pytest.mark.parametrize(
+        ("body", "origin"),
+        [
+            ({"match": MATCH}, "receiver"),
+            ({"fetcher": {"source_type": "okta"}}, "fetcher"),
+            ({"match": None}, None),
+        ],
+    )
+    def test_origin_is_on_the_api_dump_but_not_in_yaml(self, body, origin):
         """origin is derived for responses; writing it would duplicate match/fetcher."""
-        receiver = SourceVersion(
-            date_time="2026-06-10",
-            match=SourceMatch(field="f", value="v"),
-        )
-        assert receiver.model_dump(mode="json")["origin"] == "receiver"
-        assert "origin" not in receiver.to_yaml_dict()
+        ver = SourceVersion.model_validate({"date_time": "2026-06-10", **body})
 
-        fetcher = SourceVersion(
-            date_time="2026-06-10",
-            fetcher=SourceFetcher(source_type="okta"),
-        )
-        assert fetcher.model_dump(mode="json")["origin"] == "fetcher"
-        assert "origin" not in fetcher.to_yaml_dict()
-
-        bare = SourceVersion(date_time="2026-06-10")
-        assert bare.model_dump(mode="json")["origin"] is None
-        assert "origin" not in bare.to_yaml_dict()
-
-    def test_to_yaml_dict_prunes_empty_view_containers(self):
-        ver = SourceVersion(
-            date_time="2026-06-10",
-            match=SourceMatch(field="f", value="v"),
-            views=[SourceView(standard="sigma")],
-        )
-        out = ver.to_yaml_dict()
-        assert out["views"] == [{"standard": "sigma"}]
+        assert ver.model_dump(mode="json")["origin"] == origin
+        assert "origin" not in ver.to_yaml_dict()
 
     def test_view_for(self):
-        ver = SourceVersion(
-            date_time="2026-06-10",
-            match=SourceMatch(field="f", value="v"),
-            views=[SourceView(standard="sigma", taxonomy="windows")],
-        )
+        ver = _version(views=[SourceView(standard="sigma", taxonomy="windows")])
         assert present(ver.view_for("sigma")).taxonomy == "windows"
         assert ver.view_for("ecs") is None
 
@@ -1079,70 +930,59 @@ class TestSourceVersion:
         """Duplicate standards would let view_for (first wins) and the DDL
         overlay (last wins) silently disagree - refused outright."""
         with pytest.raises(ValueError, match="duplicate view"):
-            SourceVersion(
-                date_time="2026-01-01",
-                match=SourceMatch(field="f", value="v"),
+            _version(
                 views=[
                     SourceView(standard="sigma", taxonomy="windows"),
                     SourceView(standard="sigma", taxonomy="linux"),
-                ],
+                ]
             )
 
 
 class TestSourceWriteRequest:
-    def test_rejects_version_tree_keys(self):
-        with pytest.raises(ValueError, match="not allowed"):
-            SourceWriteRequest.model_validate(
-                {
-                    "source": "x",
-                    "versions": {"1.0.0": {}},
-                }
-            )
-
-    def test_rejects_deployed_version_on_write(self):
-        with pytest.raises(ValueError, match="not allowed"):
-            SourceWriteRequest.model_validate(
-                {"source": "x", "deployed_version": "1.0.0"},
-            )
-
-    @pytest.mark.parametrize("removed_key", ["sigma", "mapping_standards", "field_mappings"])
-    def test_rejects_removed_2_1_keys(self, removed_key):
+    @pytest.mark.parametrize(
+        ("body", "refusal"),
+        [
+            ({"versions": {"1.0.0": {}}}, "not allowed"),
+            ({"deployed_version": "1.0.0"}, "not allowed"),
+            *(
+                ({removed: {"taxonomy": "windows"}}, r"removed in 2\.2")
+                for removed in ("sigma", "mapping_standards", "field_mappings")
+            ),
+        ],
+    )
+    def test_refuses_version_tree_and_removed_2_1_keys(self, body, refusal):
         """Pre-2.2 mapping keys fail LOUDLY - extra=ignore would otherwise 200
         while the client's mapping config silently vanished."""
-        with pytest.raises(ValueError, match=r"removed in 2\.2"):
-            SourceWriteRequest.model_validate(
-                {
-                    "source": "x",
-                    "match": {"field": "f", "value": "v"},
-                    removed_key: {"taxonomy": "windows"},
-                }
-            )
+        with pytest.raises(ValueError, match=refusal):
+            _write(source="x", **body)
+
+    @pytest.mark.parametrize(
+        ("lifecycle", "state"),
+        [
+            ({}, "dormant"),
+            ({"enabled": False}, "disabled"),
+            ({"enabled": True}, "active"),
+            ({"enabled": True, "state": "dormant"}, "dormant"),
+        ],
+        ids=["neither-keeps-the-current-state", "enabled-false", "enabled-true", "state-wins"],
+    )
+    def test_effective_state(self, lifecycle, state):
+        assert _write(**lifecycle).effective_state("dormant") == state
 
     def test_apply_write_update_without_state_or_enabled_keeps_dormant(self):
         """A PUT that sends NEITHER state nor enabled must not re-activate a
         dormant source (effective_state keeps the current tri-state)."""
-        existing = Source.model_validate(
-            {
-                "source": "dormant-src",
-                "state": "dormant",
-                "match": {"field": "f", "value": "v"},
-            }
+        updated = apply_source_write_update(
+            _source(state="dormant"), _write(description="doc-only edit")
         )
-        write = SourceWriteRequest.model_validate(
-            {"description": "doc-only edit", "match": {"field": "f", "value": "v"}}
-        )
-        updated = apply_source_write_update(existing, write)
         assert updated.state == "dormant"
         assert updated.description == "doc-only edit"
 
     def test_create_uses_1_0_0_not_header_profile_version(self):
-        write = SourceWriteRequest.model_validate(
-            {
-                "source": "profile-pin",
-                "header": {"type": "common-header/minimal", "version": "1.1.0"},
-                "match": {"field": "f", "value": "v"},
-                "schema": {"engine": "MergeTree"},
-            }
+        write = _write(
+            source="profile-pin",
+            header={"type": "common-header/minimal", "version": "1.1.0"},
+            schema={"engine": "MergeTree"},
         )
         src = source_from_write(write, source_name="profile-pin")
         assert "1.0.0" in src.versions
@@ -1151,14 +991,7 @@ class TestSourceWriteRequest:
         assert src.deployed_version is None
 
     def test_create_without_header_leaves_header_unset(self):
-        write = SourceWriteRequest.model_validate(
-            {
-                "source": "no-header",
-                "match": {"field": "f", "value": "v"},
-                "schema": {"engine": "MergeTree"},
-            }
-        )
-        src = source_from_write(write, source_name="no-header")
+        src = source_from_write(_write(source="no-header"), source_name="no-header")
         ver = src.versions["1.0.0"]
         assert ver.header is None
         assert "header" not in ver.to_yaml_dict()
@@ -1179,446 +1012,261 @@ class TestSourceWriteRequest:
             _next_major_semver("not-a-version")
 
     def test_apply_write_update_refuses_overwrite(self, monkeypatch):
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "header": {"type": "timeseries", "version": "1.0.0"},
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {},
-                    },
-                    "2.0.0": {
-                        "date_time": "2026-01-02",
-                        "header": {"type": "timeseries", "version": "1.0.0"},
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {},
-                    },
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "schema": {
-                    "engine": "MergeTree",
-                    "meta_schema_version": "2.0.0",
-                },
-            }
-        )
+        existing = _stored({"1.0.0": {}, "2.0.0": {}}, deployed="1.0.0", current="1.0.0")
         monkeypatch.setattr(
-            "dfe_engine.source.models.next_major_source_version",
-            lambda _versions: "2.0.0",
+            "dfe_engine.source.models.next_major_source_version", lambda _versions: "2.0.0"
         )
         with pytest.raises(ValueError, match="Refusing to overwrite"):
-            apply_source_write_update(existing, write)
+            apply_source_write_update(
+                existing, _write(schema={"engine": "MergeTree", "meta_schema_version": "2.0.0"})
+            )
 
-    def test_apply_write_update_appends_on_bump_worthy_change_after_deploy(self):
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {
+    @pytest.mark.parametrize(
+        ("stored", "deployed", "body", "current", "ids", "checks"),
+        [
+            pytest.param(
+                {"1.0.0": {"schema": {"ttl_days": 90, "meta_schema_version": "1.0.0"}}},
+                "1.0.0",
+                {
+                    "description": "rev 2",
+                    "schema": {"ttl_days": 30, "meta_schema_version": "2.0.0"},
+                },
+                "2.0.0",
+                {"1.0.0", "2.0.0"},
+                [
+                    (("1.0.0", "schema_config", "ttl_days"), 90),
+                    (("2.0.0", "schema_config", "ttl_days"), 30),
+                    (("2.0.0", "schema_config", "meta_schema_version"), "2.0.0"),
+                ],
+                id="schema-pin-bumps-a-deployed-version",
+            ),
+            pytest.param(
+                {"1.0.0": {"schema": {"meta_schema_version": "1.0.0"}}},
+                None,
+                {"schema": {"meta_schema_version": "2.0.0"}},
+                "1.0.0",
+                {"1.0.0"},
+                [(("1.0.0", "schema_config", "meta_schema_version"), "2.0.0")],
+                id="an-undeployed-version-is-edited-in-place",
+            ),
+            pytest.param(
+                {"1.0.0": {"schema": {"ttl_days": 90}}},
+                "1.0.0",
+                {"match": {"field": "g", "value": "w"}, "schema": {"ttl_days": 90}},
+                "1.0.0",
+                {"1.0.0"},
+                [(("1.0.0", "match", "field"), "g")],
+                id="a-match-change-does-not-shape-the-table",
+            ),
+            pytest.param(
+                {"1.0.0": {"schema": {"ttl_days": 90}}},
+                "1.0.0",
+                {"schema": {"ttl_days": 30}},
+                "2.0.0",
+                {"1.0.0", "2.0.0"},
+                [
+                    (("1.0.0", "schema_config", "ttl_days"), 90),
+                    (("2.0.0", "schema_config", "ttl_days"), 30),
+                ],
+                id="ttl-alone-bumps-a-deployed-version",
+            ),
+            pytest.param(
+                {"1.0.0": {"schema": {"engine": "MergeTree"}}},
+                "1.0.0",
+                {"schema": {"engine": "ReplacingMergeTree"}},
+                "2.0.0",
+                {"1.0.0", "2.0.0"},
+                [(("2.0.0", "schema_config", "engine"), "ReplacingMergeTree")],
+                id="engine-bumps-a-deployed-version",
+            ),
+            pytest.param(
+                {"1.0.0": {"header": {"type": "timeseries", "version": "1.0.0"}, "schema": {}}},
+                "1.0.0",
+                {"header": {"type": "timeseries", "version": "1.0.1"}, "schema": {}},
+                "2.0.0",
+                {"1.0.0", "2.0.0"},
+                [(("2.0.0", "header", "version"), "1.0.1")],
+                id="header-bumps-a-deployed-version",
+            ),
+            pytest.param(
+                {
+                    "1.0.0": {"schema": {}},
+                    "2.0.0": {
+                        "schema": {
+                            "meta_schema": "meta/aws/cloudwatch",
+                            "meta_schema_version": "1.0.0",
+                        }
+                    },
+                },
+                "2.0.0",
+                {"schema": {"meta_schema": "meta/aws/guardduty", "meta_schema_version": "1.0.0"}},
+                "3.0.0",
+                {"1.0.0", "2.0.0", "3.0.0"},
+                [
+                    (("2.0.0", "schema_config", "meta_schema"), "meta/aws/cloudwatch"),
+                    (("3.0.0", "schema_config", "meta_schema"), "meta/aws/guardduty"),
+                ],
+                id="meta-schema-path-bumps-a-deployed-version",
+            ),
+            pytest.param(
+                {
                     "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "header": {"type": "timeseries", "version": "1.0.0"},
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {"ttl_days": 90, "meta_schema_version": "1.0.0"},
+                        "schema": {
+                            "meta_schema": "meta/aws/cloudwatch",
+                            "meta_schema_version": "1.0.0",
+                        }
+                    },
+                    "2.0.0": {
+                        "schema": {
+                            "meta_schema": "meta/aws/cloudwatch",
+                            "meta_schema_version": "1.0.0",
+                        }
+                    },
+                },
+                "1.0.0",
+                {"schema": {"meta_schema": "meta/aws/guardduty", "meta_schema_version": "1.0.0"}},
+                "2.0.0",
+                {"1.0.0", "2.0.0"},
+                [(("2.0.0", "schema_config", "meta_schema"), "meta/aws/guardduty")],
+                id="a-draft-current-is-edited-in-place",
+            ),
+            pytest.param(
+                {
+                    "1.0.0": {
+                        "schema": {},
+                        "transform": {"engine": "vector", "config_file": "/a.toml"},
                     }
                 },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "enabled": True,
-                "description": "rev 2",
-                "match": {"field": "f", "value": "v"},
-                "schema": {
-                    "ttl_days": 30,
-                    "engine": "MergeTree",
-                    "meta_schema_version": "2.0.0",
-                },
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert "1.0.0" in updated.versions
-        assert present(updated.versions["1.0.0"].schema_config).ttl_days == 90
-        assert "2.0.0" in updated.versions
-        assert present(updated.versions["2.0.0"].schema_config).ttl_days == 30
-        assert present(updated.versions["2.0.0"].schema_config).meta_schema_version == "2.0.0"
-        assert updated.current == "2.0.0"
-        assert updated.deployed_version == "1.0.0"
-        assert updated.description == "rev 2"
+                "1.0.0",
+                {"transform": {"engine": "vector", "config_file": "/b.toml"}},
+                "2.0.0",
+                {"1.0.0", "2.0.0"},
+                [(("2.0.0", "transform", "config_file"), "/b.toml")],
+                id="transform-bumps-a-deployed-version",
+            ),
+        ],
+    )
+    def test_apply_write_update_version_cutting(self, stored, deployed, body, current, ids, checks):
+        updated = apply_source_write_update(_stored(stored, deployed=deployed), _write(**body))
 
-    def test_apply_write_update_in_place_before_deploy(self):
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": None,
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {"meta_schema_version": "1.0.0"},
-                    }
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "schema": {"meta_schema_version": "2.0.0"},
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert updated.versions.keys() == {"1.0.0"}
-        assert updated.current == "1.0.0"
-        assert present(updated.versions["1.0.0"].schema_config).meta_schema_version == "2.0.0"
+        assert updated.current == current
+        assert updated.versions.keys() == ids
+        assert updated.deployed_version == deployed
+        assert updated.description == body.get("description")
+        for path, expected in checks:
+            assert _at(updated, *path) == expected
 
     def test_apply_write_update_omitted_header_keeps_the_stored_one(self):
-        existing = Source.model_validate(
+        existing = _stored(
             {
-                "source": "src-a",
-                "deployed_version": None,
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "header": {"type": "timeseries", "version": "1.0.0"},
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {"engine": "MergeTree"},
-                    }
-                },
+                "1.0.0": {
+                    "header": {"type": "timeseries", "version": "1.0.0"},
+                    "schema": {"engine": "MergeTree"},
+                }
             }
         )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "schema": {"engine": "MergeTree", "ttl_days": 30},
-            }
+        updated = apply_source_write_update(
+            existing, _write(schema={"engine": "MergeTree", "ttl_days": 30})
         )
-        updated = apply_source_write_update(existing, write)
         ver = updated.versions["1.0.0"]
         assert ver.header == SourceHeader(type="timeseries", version="1.0.0")
         assert ver.to_yaml_dict()["header"] == {"type": "timeseries", "version": "1.0.0"}
         assert present(ver.schema_config).ttl_days == 30
 
-    def test_apply_write_update_in_place_after_deploy_non_bump_fields(self):
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {"ttl_days": 90, "meta_schema_version": "1.0.0"},
-                    }
-                },
-            }
-        )
-        # Match alone does not shape the table, so the deployed version stays current.
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "g", "value": "w"},
-                "schema": {"ttl_days": 90, "meta_schema_version": "1.0.0"},
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert updated.versions.keys() == {"1.0.0"}
-        assert present(updated.versions["1.0.0"].schema_config).ttl_days == 90
-        assert present(updated.versions["1.0.0"].match).field == "g"
-
-    def test_apply_write_update_bumps_on_ttl_days_after_deploy(self):
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {"ttl_days": 90},
-                    }
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "schema": {"ttl_days": 30},
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert updated.current == "2.0.0"
-        assert present(updated.versions["1.0.0"].schema_config).ttl_days == 90
-        assert present(updated.versions["2.0.0"].schema_config).ttl_days == 30
-
-    def test_apply_write_update_bumps_on_engine_after_deploy(self):
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {"engine": "MergeTree"},
-                    }
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "schema": {"engine": "ReplacingMergeTree"},
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert updated.current == "2.0.0"
-        assert present(updated.versions["2.0.0"].schema_config).engine == "ReplacingMergeTree"
-
-    def test_apply_write_update_bumps_on_header_after_deploy(self):
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "header": {"type": "timeseries", "version": "1.0.0"},
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {},
-                    }
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "header": {"type": "timeseries", "version": "1.0.1"},
-                "match": {"field": "f", "value": "v"},
-                "schema": {},
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert updated.current == "2.0.0"
-        assert updated.versions["2.0.0"].header is not None
-        assert updated.versions["2.0.0"].header.version == "1.0.1"
-
-    def test_source_version_bump_required_ttl_engine_and_header(self):
-        base = {
-            "date_time": "2026-01-01",
-            "header": {"type": "timeseries", "version": "1.0.0"},
-            "match": {"field": "f", "value": "v"},
-            "schema": {"ttl_days": 90, "engine": "MergeTree"},
-        }
-        prev = SourceVersion.model_validate(base)
-        assert (
-            source_version_bump_required(
-                prev,
-                SourceVersion.model_validate(
-                    {**base, "schema": {"ttl_days": 30, "engine": "MergeTree"}}
-                ),
-            )
-            is True
-        )
-        assert (
-            source_version_bump_required(
-                prev,
-                SourceVersion.model_validate(
-                    {**base, "schema": {"ttl_days": 90, "engine": "ReplacingMergeTree"}}
-                ),
-            )
-            is True
-        )
-        assert (
-            source_version_bump_required(
-                prev,
-                SourceVersion.model_validate(
-                    {
-                        **base,
-                        "header": {"type": "minimal", "version": "1.0.0"},
-                    }
-                ),
-            )
-            is True
-        )
-        assert source_version_bump_required(prev, SourceVersion.model_validate(base)) is False
-
     @pytest.mark.parametrize(
-        "transform",
+        ("before", "after", "bumps"),
         [
-            {"engine": "elastic", "mode": "agentless"},
-            {"engine": "elastic", "mode": "agentless", "detect": {"unmatched": "stop"}},
-            {"engine": "elastic", "variant": "filebeat.cisco_asa.default", "mode": "agent"},
+            ({}, {"schema": {"ttl_days": 30, "engine": "MergeTree"}}, True),
+            ({}, {"schema": {"ttl_days": 90, "engine": "ReplacingMergeTree"}}, True),
+            ({}, {"header": {"type": "minimal", "version": "1.0.0"}}, True),
+            ({}, {"transform": {"engine": "vector"}}, True),
+            ({}, {"views": [SIGMA_VIEW]}, True),
+            (
+                {"views": [SIGMA_VIEW]},
+                {"views": [{**SIGMA_VIEW, "custom_mappings": {"User": "u"}}]},
+                True,
+            ),
+            ({"views": [SIGMA_VIEW]}, {"views": [{**SIGMA_VIEW, "service": "sysmon"}]}, True),
+            ({"views": [SIGMA_VIEW]}, {"views": [SIGMA_VIEW]}, False),
+            ({}, {}, False),
+            ({}, {"transport": "direct"}, False),
+            ({}, {"archive": True}, False),
+            (
+                {"transform": ELASTIC},
+                {"transform": {"engine": "elastic", "mode": "agentless"}},
+                False,
+            ),
+            (
+                {"transform": ELASTIC},
+                {
+                    "transform": {
+                        "engine": "elastic",
+                        "mode": "agentless",
+                        "detect": {"unmatched": "stop"},
+                    }
+                },
+                False,
+            ),
+            ({"transform": ELASTIC}, {"transform": {**ELASTIC, "mode": "agent"}}, False),
+            (
+                {"transform": {"engine": "vrl"}},
+                {"transform": {"engine": "vrl", "variant": "okta"}},
+                False,
+            ),
+            ({"transform": {"engine": "vrl"}}, {"transform": {"engine": "vector"}}, True),
+            (
+                {"fetcher": {"source_type": "okta"}},
+                {
+                    "fetcher": {
+                        "source_type": "okta",
+                        "routes": [{"match": MATCH | {"field": "eventType"}, "source": "other"}],
+                    }
+                },
+                False,
+            ),
+        ],
+        ids=[
+            "ttl",
+            "engine",
+            "header",
+            "transform-added",
+            "views-added",
+            "view-mappings",
+            "view-service",
+            "views-unchanged",
+            "unchanged",
+            "transport",
+            "archive",
+            "mode",
+            "detect",
+            "mode-agent",
+            "variant",
+            "transform-engine",
+            "fetcher-route",
         ],
     )
-    def test_the_mode_and_detect_of_a_transform_never_bump_the_version(self, transform):
+    def test_source_version_bump_required(self, before, after, bumps):
+        """A version id pins the shape of a table, so routing changes must not bump it."""
         base = {
-            "date_time": "2026-01-01",
-            "match": {"field": "f", "value": "v"},
-            "transform": {"engine": "elastic", "variant": "filebeat.cisco_asa.default"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
+            "schema": {"ttl_days": 90, "engine": "MergeTree"},
         }
-        prev = SourceVersion.model_validate(base)
-        updated = SourceVersion.model_validate({**base, "transform": transform})
 
-        assert source_version_bump_required(prev, updated) is False
-
-    def test_apply_write_update_bumps_on_meta_schema_path_after_deploy(self):
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": "2.0.0",
-                "current": "2.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {},
-                    },
-                    "2.0.0": {
-                        "date_time": "2026-01-02",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {
-                            "meta_schema": "meta/aws/cloudwatch",
-                            "meta_schema_version": "1.0.0",
-                        },
-                    },
-                },
-            }
+        assert (
+            source_version_bump_required(
+                _version(**base, **before), _version(**{**base, **before, **after})
+            )
+            is bumps
         )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "schema": {
-                    "meta_schema": "meta/aws/guardduty",
-                    "meta_schema_version": "1.0.0",
-                },
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert updated.current == "3.0.0"
-        assert present(updated.versions["2.0.0"].schema_config).meta_schema == "meta/aws/cloudwatch"
-        assert present(updated.versions["3.0.0"].schema_config).meta_schema == "meta/aws/guardduty"
-        assert updated.deployed_version == "2.0.0"
-
-    def test_apply_write_update_draft_current_no_bump_after_deploy(self):
-        """Bump-worthy edits on a non-deployed ``current`` stay in place."""
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": "1.0.0",
-                "current": "2.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {
-                            "meta_schema": "meta/aws/cloudwatch",
-                            "meta_schema_version": "1.0.0",
-                        },
-                    },
-                    "2.0.0": {
-                        "date_time": "2026-01-02",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {
-                            "meta_schema": "meta/aws/cloudwatch",
-                            "meta_schema_version": "1.0.0",
-                        },
-                    },
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "schema": {
-                    "meta_schema": "meta/aws/guardduty",
-                    "meta_schema_version": "1.0.0",
-                },
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert updated.current == "2.0.0"
-        assert "3.0.0" not in updated.versions
-        assert present(updated.versions["2.0.0"].schema_config).meta_schema == "meta/aws/guardduty"
-        assert updated.deployed_version == "1.0.0"
-
-    def test_source_version_bump_required_transform(self):
-        base = {
-            "date_time": "2026-01-01",
-            "match": {"field": "f", "value": "v"},
-            "schema": {},
-            "transform": {"engine": "vector", "config_file": "/a.toml"},
-        }
-        prev = SourceVersion.model_validate(base)
-        updated = SourceVersion.model_validate(
-            {**base, "transform": {"engine": "vector", "config_file": "/b.toml"}}
-        )
-        assert source_version_bump_required(prev, updated) is True
-
-    def test_apply_write_update_bumps_transform_when_current_deployed(self):
-        existing = Source.model_validate(
-            {
-                "source": "src-a",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {},
-                        "transform": {"engine": "vector", "config_file": "/a.toml"},
-                    }
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "f", "value": "v"},
-                "transform": {"engine": "vector", "config_file": "/b.toml"},
-            }
-        )
-        updated = apply_source_write_update(existing, write)
-        assert updated.current == "2.0.0"
-        assert updated.versions["2.0.0"].transform is not None
-        assert updated.versions["2.0.0"].transform.config_file == "/b.toml"
-        assert updated.deployed_version == "1.0.0"
 
     def test_draft_build_version_to_invalidate(self):
-        existing = Source.model_validate(
-            {
-                "source": "x",
-                "deployed_version": "1.0.0",
-                "current": "2.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {},
-                    },
-                    "2.0.0": {
-                        "date_time": "2026-01-02",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {"meta_schema": "meta/a"},
-                    },
-                },
-            }
+        existing = _stored(
+            {"1.0.0": {"schema": {}}, "2.0.0": {"schema": {"meta_schema": "meta/a"}}},
+            deployed="1.0.0",
         )
         updated = existing.model_copy(deep=True)
         updated.versions["2.0.0"] = updated.versions["2.0.0"].model_copy(
-            update={
-                "schema_config": SourceSchema(meta_schema="meta/b"),
-            }
+            update={"schema_config": SourceSchema(meta_schema="meta/b")}
         )
         assert draft_build_version_to_invalidate(existing, updated) == "2.0.0"
         updated.versions["2.0.0"] = existing.versions["2.0.0"].model_copy(
@@ -1627,20 +1275,8 @@ class TestSourceWriteRequest:
         assert draft_build_version_to_invalidate(existing, updated) is None
 
     def test_draft_build_invalidate_before_first_deploy(self):
-        existing = Source.model_validate(
-            {
-                "source": "x",
-                "deployed_version": None,
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "match": {"field": "f", "value": "v"},
-                        "schema": {"meta_schema": "meta/a", "meta_schema_version": "1.0.0"},
-                    }
-                },
-            }
-        )
+        schema = {"meta_schema": "meta/a", "meta_schema_version": "1.0.0"}
+        existing = _stored({"1.0.0": {"schema": schema}})
         updated = existing.model_copy(deep=True)
         updated.versions["1.0.0"] = updated.versions["1.0.0"].model_copy(
             update={
@@ -1649,407 +1285,189 @@ class TestSourceWriteRequest:
         )
         assert draft_build_version_to_invalidate(existing, updated) == "1.0.0"
 
-    def test_source_version_bump_required_views(self):
-        """LANDMINE 2 guard: any views change must bump a deployed version."""
-        base = {
-            "date_time": "2026-01-01",
-            "match": {"field": "f", "value": "v"},
-            "schema": {},
-        }
-        prev = SourceVersion.model_validate(base)
-
-        # Standard set change bumps.
-        added = SourceVersion.model_validate(
-            {**base, "views": [{"standard": "sigma", "taxonomy": "windows"}]}
-        )
-        assert source_version_bump_required(prev, added) is True
-
-        # Per-view custom_mappings change bumps.
-        remapped = SourceVersion.model_validate(
-            {
-                **base,
-                "views": [
-                    {
-                        "standard": "sigma",
-                        "taxonomy": "windows",
-                        "custom_mappings": {"User": "user_name"},
-                    }
-                ],
-            }
-        )
-        assert source_version_bump_required(added, remapped) is True
-
-        # Sigma logsource facet change bumps.
-        rebound = SourceVersion.model_validate(
-            {
-                **base,
-                "views": [{"standard": "sigma", "taxonomy": "windows", "service": "sysmon"}],
-            }
-        )
-        assert source_version_bump_required(added, rebound) is True
-
-        # Identical views do not bump.
-        same = SourceVersion.model_validate(
-            {**base, "views": [{"standard": "sigma", "taxonomy": "windows"}]}
-        )
-        assert source_version_bump_required(added, same) is False
-
 
 class TestDeployedVersionOnWrite:
     """A source landing on the shared main table with no meta_schema owns no table to deploy."""
 
-    def test_a_main_landing_fetcher_is_deployed_from_creation(self):
-        write = SourceWriteRequest.model_validate(
-            {"source": "okta-main", "fetcher": {"source_type": "okta", "topic": "main"}}
-        )
-
-        src = source_from_write(write, source_name="okta-main")
+    @pytest.mark.parametrize(
+        ("body", "deployed"),
+        [
+            ({"fetcher": OKTA_MAIN}, "1.0.0"),
+            ({"fetcher": {"source_type": "okta", "topic": "own"}}, None),
+            (
+                {
+                    "fetcher": OKTA_MAIN,
+                    "schema": {"meta_schema": "meta/okta/system", "meta_schema_version": "1.0.0"},
+                },
+                None,
+            ),
+            ({"match": {"field": "_source", "value": "syslog"}}, None),
+        ],
+        ids=["main-fetcher", "own-topic-fetcher", "main-fetcher-with-meta-schema", "receiver"],
+    )
+    def test_a_source_is_deployed_from_creation_only_when_it_owns_no_table(self, body, deployed):
+        src = source_from_write(_write(source="okta-main", **body), source_name="okta-main")
 
         assert src.current == "1.0.0"
-        assert src.deployed_version == "1.0.0"
+        assert src.deployed_version == deployed
 
-    def test_an_own_topic_fetcher_is_not_deployed_on_creation(self):
-        write = SourceWriteRequest.model_validate(
-            {"source": "okta-audit", "fetcher": {"source_type": "okta", "topic": "own"}}
-        )
-
-        assert source_from_write(write, source_name="okta-audit").deployed_version is None
-
-    def test_a_main_landing_fetcher_with_a_meta_schema_is_not_deployed(self):
-        write = SourceWriteRequest.model_validate(
-            {
-                "source": "okta-schema",
-                "fetcher": {"source_type": "okta", "topic": "main"},
-                "schema": {"meta_schema": "meta/okta/system", "meta_schema_version": "1.0.0"},
-            }
-        )
-
-        assert source_from_write(write, source_name="okta-schema").deployed_version is None
-
-    def test_a_receiver_source_is_not_deployed_on_creation(self):
-        write = SourceWriteRequest.model_validate(
-            {"source": "syslog", "match": {"field": "_source", "value": "syslog"}}
-        )
-
-        assert source_from_write(write, source_name="syslog").deployed_version is None
-
-    def test_a_bumped_main_landing_source_tracks_the_new_current(self):
-        existing = Source.model_validate(
-            {
-                "source": "okta-main",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "fetcher": {"source_type": "okta", "topic": "main"},
-                        "schema": {},
-                    }
+    @pytest.mark.parametrize(
+        ("topic", "stored_deployed", "body", "current", "deployed"),
+        [
+            (
+                "main",
+                "1.0.0",
+                {"fetcher": OKTA_MAIN, "views": [{"standard": "sigma", "taxonomy": "okta"}]},
+                "2.0.0",
+                "2.0.0",
+            ),
+            (
+                "main",
+                "1.0.0",
+                {"fetcher": {"source_type": "okta", "topic": "own"}},
+                "1.0.0",
+                "1.0.0",
+            ),
+            (
+                "main",
+                None,
+                {"fetcher": OKTA_MAIN, "description": "doc-only edit"},
+                "1.0.0",
+                "1.0.0",
+            ),
+            (
+                "own",
+                None,
+                {
+                    "fetcher": {"source_type": "okta", "topic": "own"},
+                    "description": "doc-only edit",
                 },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "fetcher": {"source_type": "okta", "topic": "main"},
-                "views": [{"standard": "sigma", "taxonomy": "okta"}],
-            }
-        )
-
-        updated = apply_source_write_update(existing, write)
-
-        assert updated.current == "2.0.0"
-        assert updated.deployed_version == "2.0.0"
-
-    def test_moving_a_main_landing_source_to_its_own_topic_keeps_the_deployed_version(self):
-        existing = Source.model_validate(
-            {
-                "source": "okta-main",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "fetcher": {"source_type": "okta", "topic": "main"},
-                        "schema": {},
-                    }
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {"fetcher": {"source_type": "okta", "topic": "own"}}
+                "1.0.0",
+                None,
+            ),
+        ],
+        ids=[
+            "bumped-main-tracks-the-new-current",
+            "moving-to-own-keeps-the-deployed-version",
+            "undeployed-main-picks-up-current",
+            "undeployed-own-table-stays-undeployed",
+        ],
+    )
+    def test_a_save_derives_the_deployed_version(
+        self, topic, stored_deployed, body, current, deployed
+    ):
+        existing = _stored(
+            {"1.0.0": {"fetcher": {"source_type": "okta", "topic": topic}, "schema": {}}},
+            deployed=stored_deployed,
         )
 
-        updated = apply_source_write_update(existing, write)
+        updated = apply_source_write_update(existing, _write(**body))
 
-        assert updated.current == "1.0.0"
-        assert updated.deployed_version == "1.0.0"
-
-    def test_an_undeployed_main_landing_source_picks_up_its_current_on_the_next_save(self):
-        existing = Source.model_validate(
-            {
-                "source": "okta-main",
-                "deployed_version": None,
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "fetcher": {"source_type": "okta", "topic": "main"},
-                        "schema": {},
-                    }
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {"description": "doc-only edit", "fetcher": {"source_type": "okta", "topic": "main"}}
-        )
-
-        updated = apply_source_write_update(existing, write)
-
-        assert updated.current == "1.0.0"
-        assert updated.deployed_version == "1.0.0"
-
-    def test_an_undeployed_own_table_source_stays_undeployed(self):
-        existing = Source.model_validate(
-            {
-                "source": "okta-audit",
-                "deployed_version": None,
-                "current": "1.0.0",
-                "versions": {
-                    "1.0.0": {
-                        "date_time": "2026-01-01",
-                        "fetcher": {"source_type": "okta", "topic": "own"},
-                        "schema": {},
-                    }
-                },
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {"description": "doc-only edit", "fetcher": {"source_type": "okta", "topic": "own"}}
-        )
-
-        updated = apply_source_write_update(existing, write)
-
-        assert updated.deployed_version is None
+        assert updated.current == current
+        assert updated.deployed_version == deployed
 
 
 class TestLandingTopic:
     """A source landing on the shared topic arrives there but never owns it."""
 
-    def test_a_main_landing_fetcher_arrives_on_the_shared_topic(self):
-        s = Source(source="aws-cloudtrail", fetcher=SourceFetcher(source_type="aws", topic="main"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-
-        assert s.topic_land == "main_land"
-
-    def test_a_main_landing_fetcher_owns_no_landing_topic(self):
-        s = Source(source="aws-cloudtrail", fetcher=SourceFetcher(source_type="aws", topic="main"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-
-        assert s.owns_landing_topic is False
-
-    def test_an_own_topic_fetcher_arrives_on_its_own_topic(self):
-        s = Source(source="okta-audit", fetcher=SourceFetcher(source_type="okta", topic="own"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-
-        assert s.topic_land == "okta-audit_land"
-        assert s.owns_landing_topic is True
-
-    def test_a_receiver_source_owns_its_landing_topic(self):
-        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-
-        assert s.topic_land == "syslog_land"
-        assert s.owns_landing_topic is True
-
-    def test_the_landing_source_owns_the_shared_topic(self):
-        # The core `main` source is named for the landing table, so the shared
-        # topic has an owner and the sources landing on it do not need one.
-        s = Source(source=DEFAULT_LANDING_LABEL, match=SourceMatch(field="f", value="v"))  # ty: ignore[pydantic-discarded-extra-argument]  # Source lifts its flat fields into the version tree in a before-validator
-
-        assert s.topic_land == "main_land"
-        assert s.owns_landing_topic is True
-
-
-class TestFlowFieldsDoNotBump:
-    """A version id pins the shape of a table, so routing changes must not bump it."""
-
-    BASE = {
-        "date_time": "2026-01-01",
-        "match": {"field": "f", "value": "v"},
-        "schema": {},
-        "transform": {"engine": "vrl"},
-    }
-
     @pytest.mark.parametrize(
-        "change",
+        ("body", "topic", "owns"),
         [
-            pytest.param({"transport": "direct"}, id="transport"),
-            pytest.param({"archive": True}, id="archive"),
-            pytest.param({"transform": {"engine": "vrl", "variant": "okta"}}, id="variant"),
+            (
+                {"source": "aws-cloudtrail", "fetcher": {"source_type": "aws", "topic": "main"}},
+                "main_land",
+                False,
+            ),
+            (
+                {"source": "okta-audit", "fetcher": {"source_type": "okta", "topic": "own"}},
+                "okta-audit_land",
+                True,
+            ),
+            ({"source": "syslog"}, "syslog_land", True),
+            # The core `main` source is named for the landing table, so the shared
+            # topic has an owner and the sources landing on it do not need one.
+            ({"source": DEFAULT_LANDING_LABEL}, "main_land", True),
         ],
+        ids=["main-fetcher", "own-fetcher", "receiver", "landing-source"],
     )
-    def test_routing_change_does_not_bump(self, change):
-        prev = SourceVersion.model_validate(self.BASE)
-        updated = SourceVersion.model_validate({**self.BASE, **change})
+    def test_topic_and_ownership(self, body, topic, owns):
+        s = _source(**body)
 
-        assert source_version_bump_required(prev, updated) is False
-
-    def test_a_fetcher_route_does_not_bump(self):
-        base = {"date_time": "2026-01-01", "fetcher": {"source_type": "okta"}, "schema": {}}
-        prev = SourceVersion.model_validate(base)
-        routed = SourceVersion.model_validate(
-            {
-                **base,
-                "fetcher": {
-                    "source_type": "okta",
-                    "routes": [{"match": {"field": "eventType", "value": "x"}, "source": "other"}],
-                },
-            }
-        )
-
-        assert source_version_bump_required(prev, routed) is False
-
-    def test_swapping_the_transform_engine_still_bumps(self):
-        prev = SourceVersion.model_validate(self.BASE)
-        swapped = SourceVersion.model_validate({**self.BASE, "transform": {"engine": "vector"}})
-
-        assert source_version_bump_required(prev, swapped) is True
+        assert s.topic_land == topic
+        assert s.owns_landing_topic is owns
 
 
 class TestFlowFields:
-    def test_transport_and_archive_default_to_the_deployment_and_off(self):
-        source = Source.model_validate(
-            {"source": "auth", "match": {"field": "_source", "value": "auth"}}
-        )
-
-        assert source.transport is None
-        assert source.archive is False
-
     def test_flow_fields_round_trip_through_a_write(self):
-        write = SourceWriteRequest.model_validate(
-            {
-                "source": "auth",
-                "match": {"field": "_source", "value": "auth"},
-                "transport": "direct",
-                "archive": False,
-                "transform": {"engine": "vrl", "variant": "okta_system"},
-            }
-        )
-        snapshot = write.to_version_snapshot()
+        snapshot = _write(
+            source="auth",
+            transport="direct",
+            archive=False,
+            transform={"engine": "vrl", "variant": "okta_system"},
+        ).to_version_snapshot()
 
         assert snapshot.transport == "direct"
         assert snapshot.archive is False
-        assert snapshot.transform is not None
-        assert snapshot.transform.variant == "okta_system"
+        assert present(snapshot.transform).variant == "okta_system"
 
-    def test_a_put_that_omits_them_keeps_the_flow_the_source_already_has(self):
-        """A description edit is not a request to move the source off direct."""
-        existing = Source.model_validate(
-            {
-                "source": "auth",
-                "match": {"field": "_source", "value": "auth"},
-                "transport": "direct",
-                "archive": True,
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {"description": "doc-only edit", "match": {"field": "_source", "value": "auth"}}
-        )
-
-        updated = apply_source_write_update(existing, write)
-
-        assert updated.transport == "direct"
-        assert updated.archive is True
-        assert updated.description == "doc-only edit"
-
-    def test_a_put_that_sends_them_still_turns_them_off(self):
-        """Inheritance is on ABSENCE, so neither field becomes one-way."""
-        existing = Source.model_validate(
-            {
-                "source": "auth",
-                "match": {"field": "_source", "value": "auth"},
-                "transport": "direct",
-                "archive": True,
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": {"field": "_source", "value": "auth"},
-                "transport": None,
-                "archive": False,
-            }
+    @pytest.mark.parametrize(
+        ("body", "expected"),
+        [
+            pytest.param(
+                {"description": "doc-only edit"},
+                {"transport": "direct", "archive": True, "description": "doc-only edit"},
+                id="omitted-flow-fields-are-kept",
+            ),
+            pytest.param(
+                {"transport": None, "archive": False},
+                {"transport": None, "archive": False},
+                id="sent-flow-fields-turn-them-off",
+            ),
+            pytest.param(
+                {"transform": None}, {"transform": None}, id="null-transform-releases-the-app"
+            ),
+            pytest.param(
+                {"description": "doc-only edit"},
+                {"variant": "okta_system"},
+                id="omitted-transform-is-kept",
+            ),
+        ],
+    )
+    def test_a_put_keeps_what_it_omits_and_clears_what_it_nulls(self, body, expected):
+        existing = _source(
+            source="auth",
+            transport="direct",
+            archive=True,
+            transform={"engine": "vrl", "variant": "okta_system"},
         )
 
-        updated = apply_source_write_update(existing, write)
+        updated = apply_source_write_update(existing, _write(**body))
 
-        assert updated.transport is None
-        assert updated.archive is False
+        actual = {
+            "transport": updated.transport,
+            "archive": updated.archive,
+            "description": updated.description,
+            "transform": updated.transform,
+            "variant": getattr(updated.transform, "variant", None),
+        }
+        assert {name: actual[name] for name in expected} == expected
 
-    def test_a_put_that_sends_a_null_transform_releases_the_app(self):
-        """The only way to free a transform app slot short of deleting the source."""
-        existing = Source.model_validate(
-            {
-                "source": "auth",
-                "match": {"field": "_source", "value": "auth"},
-                "transform": {"engine": "vrl", "variant": "okta_system"},
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {"match": {"field": "_source", "value": "auth"}, "transform": None}
-        )
-
-        updated = apply_source_write_update(existing, write)
-
-        assert updated.transform is None
-
-    def test_a_put_that_omits_the_transform_keeps_it(self):
-        """Absence is not a request to unbind the app; only an explicit null is."""
-        existing = Source.model_validate(
-            {
-                "source": "auth",
-                "match": {"field": "_source", "value": "auth"},
-                "transform": {"engine": "vrl", "variant": "okta_system"},
-            }
-        )
-        write = SourceWriteRequest.model_validate(
-            {"description": "doc-only edit", "match": {"field": "_source", "value": "auth"}}
-        )
-
-        updated = apply_source_write_update(existing, write)
-
-        assert updated.transform is not None
-        assert updated.transform.variant == "okta_system"
-
-    def test_a_legacy_flat_document_carries_the_flow_fields_into_its_version(self):
-        source = Source.model_validate(
-            {
-                "source": "auth",
-                "match": {"field": "_source", "value": "auth"},
-                "transport": "bus",
-                "archive": True,
-            }
-        )
+    def test_a_flat_document_carries_the_flow_fields_into_its_version(self):
+        source = _source(source="auth", transport="bus", archive=True)
 
         assert source.versions["1.0.0"].transport == "bus"
         assert source.archive is True
 
-    def test_always_needs_no_operand_and_every_other_operator_does(self):
-        assert SourceMatch(field="_source", operator="always").value == ""
-
-        with pytest.raises(ValueError, match=r"match\.value is required"):
-            SourceMatch(field="_source", operator="equals")
-
     def test_a_fetcher_route_validates_the_source_it_names(self):
         with pytest.raises(ValueError, match="DNS-1123 label"):
-            FetcherRoute.model_validate(
-                {"match": {"field": "f", "value": "v"}, "source": "Not_A_Label"}
-            )
+            FetcherRoute.model_validate({"match": MATCH, "source": "Not_A_Label"})
 
 
 class TestOmittedFieldsKeepTheStoredValue:
     """A PUT keeps what its body leaves out; only an explicit empty value clears it."""
 
-    MATCH = {"field": "f", "value": "v"}
     STORED: dict[str, Any] = {
-        "date_time": "2026-01-01",
         "header": {"type": "minimal", "version": "1.0.0"},
-        "match": MATCH,
         "schema": {"ttl_days": 30},
         "views": [{"standard": "sigma", "taxonomy": "windows", "field_map": "sigma/windows"}],
         "transform": {"engine": "vrl"},
@@ -2057,15 +1475,8 @@ class TestOmittedFieldsKeepTheStoredValue:
     OWN_TABLE = {"meta_schema": "meta/aws/cloudtrail", "meta_schema_version": "1.0.0"}
 
     def _deployed(self, schema: dict) -> Source:
-        version = {**self.STORED, "schema": {**self.STORED["schema"], **schema}}
-        return Source.model_validate(
-            {
-                "source": "auth",
-                "deployed_version": "1.0.0",
-                "current": "1.0.0",
-                "versions": {"1.0.0": version},
-            }
-        )
+        stored = {**self.STORED, "schema": {**self.STORED["schema"], **schema}}
+        return _stored({"1.0.0": stored}, deployed="1.0.0")
 
     @pytest.mark.parametrize(
         "schema",
@@ -2073,11 +1484,8 @@ class TestOmittedFieldsKeepTheStoredValue:
     )
     def test_an_unchanged_save_keeps_every_field_and_cuts_no_version(self, schema):
         existing = self._deployed(schema)
-        write = SourceWriteRequest.model_validate(
-            {"description": "doc-only edit", "match": self.MATCH}
-        )
 
-        updated = apply_source_write_update(existing, write)
+        updated = apply_source_write_update(existing, _write(description="doc-only edit"))
 
         assert updated.versions.keys() == {"1.0.0"}
         assert updated.current == "1.0.0"
@@ -2087,17 +1495,10 @@ class TestOmittedFieldsKeepTheStoredValue:
     @pytest.mark.parametrize("cleared_views", [[], None], ids=["empty-list", "null"])
     def test_an_explicit_empty_value_clears_each_field(self, cleared_views):
         existing = self._deployed({})
-        write = SourceWriteRequest.model_validate(
-            {
-                "match": self.MATCH,
-                "views": cleared_views,
-                "header": None,
-                "schema": None,
-                "transform": None,
-            }
-        )
 
-        updated = apply_source_write_update(existing, write)
+        updated = apply_source_write_update(
+            existing, _write(views=cleared_views, header=None, schema=None, transform=None)
+        )
 
         assert updated.current == "2.0.0"
         cleared = updated.versions["2.0.0"]
@@ -2113,22 +1514,13 @@ class TestOmittedFieldsKeepTheStoredValue:
             "header": {"type": "timeseries", "version": "1.0.0"},
             "transform": {"engine": "vrl", "variant": "okta_system"},
         }
-        existing = Source.model_validate(
-            {
-                "source": "auth",
-                "deployed_version": "1.0.0",
-                "current": "2.0.0",
-                "versions": {"1.0.0": self.STORED, "2.0.0": draft},
-            }
-        )
-        write = SourceWriteRequest.model_validate({"match": self.MATCH})
+        existing = _stored({"1.0.0": self.STORED, "2.0.0": draft}, deployed="1.0.0")
 
-        updated = apply_source_write_update(existing, write)
+        updated = apply_source_write_update(existing, _write())
 
         kept = updated.versions["2.0.0"]
         assert kept.header == SourceHeader(type="timeseries", version="1.0.0")
-        assert kept.transform is not None
-        assert kept.transform.variant == "okta_system"
+        assert present(kept.transform).variant == "okta_system"
 
 
 class TestSourceVersionGetResponse:
@@ -2154,27 +1546,20 @@ class TestSourceVersionGetResponse:
         assert resp.source == "my-source"
         assert resp.current_table_topic_type == "main"
         assert present(resp.version.schema_config).engine == "MergeTree"
-        assert resp.version.match is not None
-        assert resp.version.match.value == "x"
+        assert present(resp.version.match).value == "x"
 
 
 class TestSourceSummaryPage:
     def test_from_summaries_pagination_and_tree(self):
         objs = [
             SourceSummaryObject(
-                name="aws-cloudtrail",
+                name=name,
                 current="1.0.0",
                 deployed_version="1.0.0",
                 versions=["1.0.0"],
-                current_table_topic_type="own",
-            ),
-            SourceSummaryObject(
-                name="syslog",
-                current="1.0.0",
-                deployed_version="1.0.0",
-                versions=["1.0.0"],
-                current_table_topic_type="main",
-            ),
+                current_table_topic_type=topic,
+            )
+            for name, topic in (("aws-cloudtrail", "own"), ("syslog", "main"))
         ]
         resp = SourceSummaryPage.from_summaries(objs, ListQuery(page_size=1), {})
         assert resp.total_size == 2
@@ -2186,80 +1571,70 @@ class TestSourceSummaryPage:
 
 class TestSourceVersioning:
     def test_versioned_input_migrates_top_level_match_and_transform(self):
-        ver_body = {
-            "date_time": "2026-01-01",
-            "header": {"type": "timeseries", "version": "1.0.0"},
-            "match": {"field": "f", "value": "v"},
-            "schema": {},
-        }
         s = Source.model_validate(
             {
                 "source": "legacy-top",
                 "current": "1.0.0",
                 "deployed_version": "1.0.0",
-                "match": {"field": "f", "value": "v"},
+                "match": MATCH,
                 "transform": {"engine": "vector"},
-                "versions": {"1.0.0": ver_body},
+                "versions": {"1.0.0": {"date_time": "2026-01-01", "match": MATCH}},
             }
         )
-        assert s.versions["1.0.0"].match is not None
-        assert s.versions["1.0.0"].match.value == "v"
+        assert present(s.versions["1.0.0"].match).value == "v"
         assert s.versions["1.0.0"].transform is not None
         out = s.to_yaml_dict()
         assert "match" not in out
         assert out["versions"]["1.0.0"]["match"]["value"] == "v"
 
     def test_versioned_yaml_shape(self):
-        data = {
-            "source": "no-transform",
-            "display_name": "No Transform",
-            "enabled": True,
-            "deployed_version": "1.0.0",
-            "current": "1.0.0",
-            "versions": {
-                "1.0.0": {
-                    "date_time": "2026-06-10",
-                    "header": {"type": "timeseries", "version": "1.0.0"},
-                    "match": {"field": "f", "value": "v"},
-                    "schema": {
-                        "meta_schema": "meta/aws/cloudwatch_logs",
-                        "meta_schema_version": "1.0.0",
-                        "engine": "MergeTree",
-                    },
-                    "views": [
-                        {"standard": "ecs", "field_map": "ecs/no_transform"},
-                        {"standard": "sigma", "field_map": "sigma/no_transform"},
-                    ],
-                }
-            },
-        }
-        s = Source.model_validate(data)
+        s = Source.model_validate(
+            {
+                "source": "no-transform",
+                "display_name": "No Transform",
+                "enabled": True,
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-06-10",
+                        "match": MATCH,
+                        "transform": {"engine": "vector", "config_file": "/etc/vector/x.yaml"},
+                        "schema": {
+                            "meta_schema": "meta/aws/cloudwatch_logs",
+                            "meta_schema_version": "1.0.0",
+                            "engine": "MergeTree",
+                        },
+                    }
+                },
+            }
+        )
         out = s.to_yaml_dict()
+        ver = out["versions"]["1.0.0"]
         assert out["deployed_version"] == "1.0.0"
-        assert out["versions"]["1.0.0"]["date_time"] == "2026-06-10"
-        assert out["versions"]["1.0.0"]["schema"]["meta_schema"] == "meta/aws/cloudwatch_logs"
+        assert ver["date_time"] == "2026-06-10"
+        assert ver["schema"]["meta_schema"] == "meta/aws/cloudwatch_logs"
+        assert ver["transform"]["engine"] == "vector"
+        assert ver["transform"]["config_file"] == "/etc/vector/x.yaml"
         assert s.fetcher is None
 
-    def test_legacy_flat_input_normalizes_to_versions(self):
-        s = Source.model_validate(
-            {"source": "syslog", "match": {"field": "f", "value": "v"}, "schema": {"ttl_days": 90}}
-        )
-        assert "1.0.0" in s.versions
-        assert s.schema_config.ttl_days == 90
-        assert s.current == "1.0.0"
-        assert s.deployed_version is None
-
-    def test_legacy_flat_schema_config_key(self):
+    @pytest.mark.parametrize(
+        "schema_key", ["schema", "schema_config"], ids=["schema", "schema_config-alias"]
+    )
+    def test_a_flat_document_normalizes_to_one_version(self, schema_key):
         s = Source.model_validate(
             {
                 "source": "syslog",
-                "match": {"field": "f", "value": "v"},
-                "schema_config": {"ttl_days": 45, "engine": "MergeTree"},
+                "match": MATCH,
+                schema_key: {"ttl_days": 45, "engine": "MergeTree"},
             }
         )
+        assert s.versions.keys() == {"1.0.0"}
         assert s.schema_config.ttl_days == 45
+        assert s.current == "1.0.0"
+        assert s.deployed_version is None
 
-    def test_legacy_flat_moves_versioned_keys_into_snapshot(self):
+    def test_a_flat_document_moves_versioned_keys_into_the_snapshot(self):
         """Guards _VERSIONED_KEYS: flat bodies normalize into the version tree."""
         s = Source.model_validate(
             {
@@ -2269,48 +1644,49 @@ class TestSourceVersioning:
             }
         )
         ver = s.versions["1.0.0"]
-        assert ver.fetcher is not None
-        assert ver.fetcher.config == {"services": [{"name": "alerts"}]}
+        assert present(ver.fetcher).config == {"services": [{"name": "alerts"}]}
         assert ver.origin == "fetcher"
-        assert ver.view_for("sigma") is not None
         assert present(ver.view_for("sigma")).taxonomy == "windows"
 
-    def test_versioned_input_defaults_current_from_deployed_only(self):
-        ver_body = {
-            "date_time": "2026-01-01",
-            "header": {"type": "timeseries", "version": "1.0.0"},
-            "match": {"field": "f", "value": "v"},
-            "schema": {},
-        }
+    @pytest.mark.parametrize(
+        ("pointers", "versions", "current", "deployed"),
+        [
+            ({"deployed_version": "1.0.0"}, ["1.0.0"], "1.0.0", "1.0.0"),
+            ({"current": "2.0.0"}, ["2.0.0"], "2.0.0", None),
+        ],
+        ids=["current-defaults-from-deployed", "deployed-stays-unset"],
+    )
+    def test_versioned_input_pointers(self, pointers, versions, current, deployed):
         s = Source.model_validate(
             {
                 "source": "x",
-                "deployed_version": "1.0.0",
-                "versions": {"1.0.0": ver_body},
+                **pointers,
+                "versions": {vid: {"date_time": "2026-01-01", "match": MATCH} for vid in versions},
             }
         )
-        assert s.current == "1.0.0"
-        assert s.deployed_version == "1.0.0"
+        assert s.current == current
+        assert s.deployed_version == deployed
 
-    def test_versioned_input_without_deployed_leaves_deployed_unset(self):
-        ver_body = {
-            "date_time": "2026-01-01",
-            "header": {"type": "timeseries", "version": "2.0.0"},
-            "match": {"field": "f", "value": "v"},
-            "schema": {},
-        }
-        s = Source.model_validate(
-            {
-                "source": "x",
-                "current": "2.0.0",
-                "versions": {"2.0.0": ver_body},
-            }
-        )
-        assert s.current == "2.0.0"
-        assert s.deployed_version is None
+    @pytest.mark.parametrize(
+        ("pointers", "refusal"),
+        [
+            ({"current": "2.0.0", "deployed_version": "1.0.0"}, r"current version '2\.0\.0'"),
+            ({"current": "1.0.0", "deployed_version": "9.9.9"}, r"deployed_version '9\.9\.9'"),
+        ],
+        ids=["current-missing", "deployed-missing"],
+    )
+    def test_version_pointers_must_name_a_defined_version(self, pointers, refusal):
+        with pytest.raises(ValueError, match=refusal):
+            Source.model_validate(
+                {
+                    "source": "x",
+                    **pointers,
+                    "versions": {"1.0.0": {"date_time": "2026-01-01", "match": MATCH}},
+                }
+            )
 
-    def test_before_validator_passthrough_non_dict(self):
-        with pytest.raises(Exception):
+    def test_before_validator_passes_a_non_dict_to_pydantic(self):
+        with pytest.raises(ValidationError):
             Source.model_validate(42)
 
     def test_empty_versions_rejected(self):
@@ -2325,54 +1701,6 @@ class TestSourceVersioning:
         with pytest.raises(ValueError, match="at least one"):
             Source._validate_versions_and_display_name(src)  # ty: ignore[call-non-callable]  # pydantic leaves the validator callable on the built class
 
-    def test_current_not_in_versions(self):
-        ver_body = {
-            "date_time": "2026-01-01",
-            "header": {"type": "timeseries", "version": "1.0.0"},
-            "match": {"field": "f", "value": "v"},
-            "schema": {},
-        }
-        with pytest.raises(ValueError, match=r"current version '2\.0\.0'"):
-            Source.model_validate(
-                {
-                    "source": "x",
-                    "current": "2.0.0",
-                    "deployed_version": "1.0.0",
-                    "versions": {"1.0.0": ver_body},
-                }
-            )
-
-    def test_deployed_version_not_in_versions(self):
-        ver_body = {
-            "date_time": "2026-01-01",
-            "header": {"type": "timeseries", "version": "1.0.0"},
-            "match": {"field": "f", "value": "v"},
-            "schema": {},
-        }
-        with pytest.raises(ValueError, match=r"deployed_version '9\.9\.9'"):
-            Source.model_validate(
-                {
-                    "source": "x",
-                    "current": "1.0.0",
-                    "deployed_version": "9.9.9",
-                    "versions": {"1.0.0": ver_body},
-                }
-            )
-
     def test_version_lookup_unknown_id(self):
-        s = Source.model_validate({"source": "x", "match": {"field": "f", "value": "v"}})
         with pytest.raises(ValueError, match=r"Source version '9\.9\.9' is not defined"):
-            s.version("9.9.9")
-
-    def test_to_yaml_dict_includes_transform(self):
-        s = Source.model_validate(
-            {
-                "source": "with-xform",
-                "match": {"field": "f", "value": "v"},
-                "transform": {"engine": "vector", "config_file": "/etc/vector/x.yaml"},
-            }
-        )
-        out = s.to_yaml_dict()
-        ver = out["versions"]["1.0.0"]
-        assert ver["transform"]["engine"] == "vector"
-        assert ver["transform"]["config_file"] == "/etc/vector/x.yaml"
+            _source().version("9.9.9")
