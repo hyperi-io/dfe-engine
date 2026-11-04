@@ -12,6 +12,7 @@ from pathlib import Path
 
 from dfe_engine.auth.bootstrap import bootstrap_auth, seeded_account_email
 from dfe_engine.settings import SeedAccount
+from tests.support.case_twins import store_case_twin_group
 from tests.support.present import present
 
 
@@ -167,7 +168,7 @@ def test_a_stored_name_that_is_another_groups_source_id_is_reported_at_boot(
     audit_events: list[dict], tmp_path: Path
 ):
     _, group_store, *_ = bootstrap_auth(tmp_path / "auth")
-    group_store.create(members=[], name="DFE-Admins", roles=[])
+    store_case_twin_group(group_store, name="DFE-Admins", members=[])
     group_store.update(name="dfe-admins", source_id="DFE-Admins", source_provider="entra")
     audit_events.clear()
 

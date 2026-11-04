@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, ValidationError, field_validator, model_v
 from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
-from dfe_engine.auth.store_names import store_key
+from dfe_engine.auth.store_names import case_twin, store_key
 from dfe_engine.names import VALID_NAME
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
 from dfe_engine.yaml_utils import YAMLError, yaml_dump, yaml_load
@@ -379,7 +379,7 @@ class GroupStore:
             source_id: That provider's id for the group.
 
         Raises:
-            GroupExistsError: A group file already holds this name, loadable or not.
+            GroupExistsError: A group file already holds this name in any case, loadable or not.
             ValueError: The name is not one a group can have, or the scope is not
                 ``system`` / ``org:<name>``.
         """
@@ -387,6 +387,8 @@ class GroupStore:
             raise ValueError(f"Invalid group name: {name!r}")
         if self._path(name).exists():
             raise GroupExistsError(f"Group '{name}' already exists")
+        if (twin := case_twin(self._dir, name)) is not None:
+            raise GroupExistsError(f"Group '{twin}' already exists")
         member_list: list[str] = []
         if members:
             seen: set[str] = set()

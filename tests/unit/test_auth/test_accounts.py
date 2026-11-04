@@ -16,6 +16,7 @@ import pytest
 from dfe_engine.auth import accounts as accounts_module
 from dfe_engine.auth.accounts import (
     Account,
+    AccountExistsError,
     AccountStore,
     discard_created,
 )
@@ -85,10 +86,15 @@ class TestCreate:
         assert account.phone == ""
         assert account.name == ""
 
-    def test_create_duplicate_raises(self, store):
-        store.create("alice", "password123")
-        with pytest.raises(ValueError, match="alice"):
-            store.create("alice", "other-password")
+    @pytest.mark.parametrize(
+        ("first", "second"),
+        [("alice", "alice"), ("alice", "Alice"), ("Alice", "ALICE"), ("Bob.Smith", "bob.smith")],
+    )
+    def test_create_duplicate_raises(self, store, first, second):
+        store.create(first, "password123")
+        with pytest.raises(AccountExistsError, match=first):
+            store.create(second, "other-password")
+        assert [a.username for a in store.list()] == [first]
 
     def test_create_rejects_unsafe_name(self, store):
         # Username becomes the {username}.yaml filename stem - path traversal /
