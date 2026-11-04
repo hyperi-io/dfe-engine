@@ -39,7 +39,8 @@ _.org_routes, _.otlp, _.output_topic, _.path_template, _.PATH_TEMPLATE_PLACEHOLD
 _.poll_interval_secs, _.pressure_threshold, _.project_id, _.prometheus_rw, _.raw_output
 _.raw_source_fields, _.recv_buffer_size, _.recv_timeout_ms, _.refresh_interval_secs
 _.refresh_on_error, _.reload_interval_secs, _.remove_routing_fields, _.request_timeout_ms
-_.require_json, _.required_fields, _.retries, _.roll_interval_secs, _.roll_size_bytes, _.schema_cache
+_.require_json, _.required_fields, _.retries, _.roll_interval_secs, _.roll_size_bytes
+_.schema_cache
 _.secret_access_key, _.service_account_key, _.session_timeout_ms, _.skip_verify, _.splunk_hec
 _.strip_at_prefix, _.table_capture_modes, _.table_fields, _.tags_fields, _.tags_output
 _.timeout_ms, _.timestamp_dq, _.timezone_fields, _.topic_fields, _.topic_regex, _.topic_suffixes
