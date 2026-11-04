@@ -106,72 +106,29 @@ def _token_adapter(server: LocalCloudIdentity, *, token: str = "user-token") -> 
 
 
 # ---------------------------------------------------------------------------
-# Constructor
-# ---------------------------------------------------------------------------
-
-
-class TestGoogleAdapterConstructor:
-    def test_stores_provider(self) -> None:
-        provider = _make_provider()
-        adapter = GoogleAdapter(provider)
-        assert adapter._provider is provider
-
-    def test_provider_name_accessible(self) -> None:
-        provider = _make_provider()
-        adapter = GoogleAdapter(provider)
-        assert adapter._provider.type == "google"
-
-    def test_groups_config_accessible(self) -> None:
-        provider = _make_provider(domain="mycompany.com")
-        adapter = GoogleAdapter(provider)
-        assert adapter._provider.groups.domain == "mycompany.com"
-
-    def test_no_service_account_env_set(self) -> None:
-        # Provider with no env var name configured
-        provider = _make_provider(service_account_json_env="")
-        adapter = GoogleAdapter(provider)
-        assert adapter._provider.groups.service_account_json_env == ""
-
-
-# ---------------------------------------------------------------------------
-# _get_service — missing credentials
+# _get_service -- no usable service account
 # ---------------------------------------------------------------------------
 
 
 class TestGetServiceMissingCredentials:
-    def test_returns_none_when_env_var_name_not_configured(self) -> None:
-        provider = _make_provider(service_account_json_env="")
-        adapter = GoogleAdapter(provider)
-        service = adapter._get_service()
-        assert service is None
-
-    def test_returns_none_when_env_var_not_set(self) -> None:
-        # Env var name is configured but the env var itself is absent
-        provider = _make_provider(service_account_json_env="DFE_NONEXISTENT_SA_JSON_XYZ")
-        adapter = GoogleAdapter(provider)
-        # Ensure it's absent
-        os.environ.pop("DFE_NONEXISTENT_SA_JSON_XYZ", None)
-        service = adapter._get_service()
-        assert service is None
-
-    def test_returns_none_when_env_var_contains_invalid_json(
-        self, monkeypatch: pytest.MonkeyPatch
+    @pytest.mark.parametrize(
+        ("env_name", "env_value"),
+        [
+            ("", None),
+            ("DFE_GOOGLE_SA_JSON", None),
+            ("DFE_GOOGLE_SA_JSON", "not-valid-json"),
+            ("DFE_GOOGLE_SA_JSON", '["not", "a", "dict"]'),
+        ],
+        ids=["no-env-name", "env-unset", "invalid-json", "not-an-object"],
+    )
+    def test_builds_no_service(
+        self, monkeypatch: pytest.MonkeyPatch, env_name: str, env_value: str | None
     ) -> None:
-        monkeypatch.setenv("DFE_GOOGLE_SA_JSON", "not-valid-json")
-        provider = _make_provider(service_account_json_env="DFE_GOOGLE_SA_JSON")
-        adapter = GoogleAdapter(provider)
-        service = adapter._get_service()
-        assert service is None
-
-    def test_returns_none_when_env_var_contains_wrong_json_type(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # Valid JSON but not a service account dict
-        monkeypatch.setenv("DFE_GOOGLE_SA_JSON", '["not", "a", "dict"]')
-        provider = _make_provider(service_account_json_env="DFE_GOOGLE_SA_JSON")
-        adapter = GoogleAdapter(provider)
-        service = adapter._get_service()
-        assert service is None
+        monkeypatch.delenv("DFE_GOOGLE_SA_JSON", raising=False)
+        if env_value is not None:
+            monkeypatch.setenv(env_name, env_value)
+        adapter = GoogleAdapter(_make_provider(service_account_json_env=env_name))
+        assert adapter._get_service() is None
 
 
 # ---------------------------------------------------------------------------
@@ -356,23 +313,6 @@ class TestLoginLookupPageLimit:
             if e["event"] == "Google Cloud Identity: group search stopped at the page limit"
         ]
         assert (line["method"], line["pages"]) == (TRANSITIVE, 3)
-
-
-# ---------------------------------------------------------------------------
-# GroupInfo model used by adapter
-# ---------------------------------------------------------------------------
-
-
-class TestGroupInfo:
-    def test_required_fields(self) -> None:
-        group = GroupInfo(id="12345", name="Engineering")
-        assert group.id == "12345"
-        assert group.name == "Engineering"
-        assert group.email == ""
-
-    def test_optional_email(self) -> None:
-        group = GroupInfo(id="12345", name="Engineering", email="eng@example.com")
-        assert group.email == "eng@example.com"
 
 
 # ---------------------------------------------------------------------------

@@ -404,7 +404,13 @@ class OidcRelyingParty:
         """
         provider = self._providers[provider_name]  # KeyError if unknown - caller guards
         client = self._client(provider_name)
-        token = await client.authorize_access_token(request)
+        metadata = await client.load_server_metadata()
+        # Authlib checks aud only through azp unless told, and OIDC Core 3.1.3.7 requires our client_id in aud.
+        claims_options = {
+            "iss": {"values": [metadata.get("issuer") or provider.issuer]},
+            "aud": {"essential": True, "value": client.client_id},
+        }
+        token = await client.authorize_access_token(request, claims_options=claims_options)
         return await self._identity_from_token(
             client=client, provider=provider, provider_name=provider_name, token=token
         )

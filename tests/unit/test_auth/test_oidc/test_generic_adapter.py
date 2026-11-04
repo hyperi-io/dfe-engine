@@ -11,7 +11,10 @@ import pytest
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.adapters import get_adapter
 from dfe_engine.auth.oidc.adapters.base import NoDirectoryApiError
+from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.adapters.generic import GenericAdapter
+from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
+from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.auth.oidc.sync import sync_provider
@@ -61,49 +64,23 @@ class TestGenericAdapterListAllGroups:
 
 
 class TestGenericAdapterTestConnection:
-    async def test_test_connection_returns_success_true(self):
-        adapter = GenericAdapter(_generic_provider())
-        success, message = await adapter.test_connection()
-        assert success is True
-
-    async def test_test_connection_returns_informational_message(self):
-        adapter = GenericAdapter(_generic_provider())
-        success, message = await adapter.test_connection()
-        assert "Generic provider" in message
-        assert "no API to test" in message
-
-    async def test_test_connection_returns_tuple(self):
-        adapter = GenericAdapter(_generic_provider())
-        result = await adapter.test_connection()
-        assert isinstance(result, tuple)
-        assert len(result) == 2
+    async def test_reports_there_is_nothing_to_test(self):
+        result = await GenericAdapter(_generic_provider()).test_connection()
+        assert result == (True, "Generic provider -- no API to test")
 
 
 class TestGetAdapterFactory:
-    def test_generic_type_returns_generic_adapter(self):
-        provider = OIDCProvider(type="generic", issuer="https://sso.example.com")
+    @pytest.mark.parametrize(
+        ("provider_type", "adapter_cls"),
+        [
+            ("generic", GenericAdapter),
+            ("google", GoogleAdapter),
+            ("entra_id", EntraAdapter),
+            ("okta", OktaAdapter),
+        ],
+    )
+    def test_the_type_picks_its_adapter(self, provider_type, adapter_cls):
+        provider = OIDCProvider(type=provider_type, issuer="https://sso.example.com")
         adapter = get_adapter(provider)
-        assert isinstance(adapter, GenericAdapter)
-
-    def test_google_type_returns_adapter(self):
-        provider = OIDCProvider(type="google", issuer="https://accounts.google.com")
-        adapter = get_adapter(provider)
-        assert adapter is not None
-
-    def test_entra_id_type_returns_adapter(self):
-        provider = OIDCProvider(
-            type="entra_id",
-            issuer="https://login.microsoftonline.com/tenant/v2.0",
-        )
-        adapter = get_adapter(provider)
-        assert adapter is not None
-
-    def test_okta_type_returns_adapter(self):
-        provider = OIDCProvider(type="okta", issuer="https://dev-123.okta.com")
-        adapter = get_adapter(provider)
-        assert adapter is not None
-
-    def test_adapter_has_provider_reference(self):
-        provider = OIDCProvider(type="generic", issuer="https://sso.example.com")
-        adapter = get_adapter(provider)
+        assert type(adapter) is adapter_cls
         assert adapter._provider is provider
