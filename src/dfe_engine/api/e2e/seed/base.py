@@ -231,6 +231,19 @@ class Seed:
             logger.info("e2e seed", script=script, account=account)
             return True
         # ------------------------------------------------------------
+        # Apps
+        # ------------------------------------------------------------
+        if script == "seed_searchable_apps":
+            # A transform instance is named for a live source. Write the sources
+            # first, or the next reconcile removes the instances this deploys.
+            from dfe_engine.api.e2e.seed.apps import searchable_instance_names
+
+            for name in searchable_instance_names():
+                self.sources.seed_source(name)
+            apps = self.apps.seed_searchable_apps()
+            logger.info("e2e seed", script=script, apps=apps)
+            return True
+        # ------------------------------------------------------------
         # Organisations
         # ------------------------------------------------------------
         if script == "seed_organisation":
