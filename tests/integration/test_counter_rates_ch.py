@@ -32,11 +32,13 @@ from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
 from dfe_engine.appmgmt import instances
 from dfe_engine.appmgmt.operations import (
+    CPU_SECONDS,
     RECORDS_DELIVERED,
     RECORDS_DLQ,
     RECORDS_PROCESSED,
     RECORDS_RECEIVED,
     OperationalReader,
+    ResourceBucket,
 )
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.gitcrud import GitCrud, default_registry
@@ -497,3 +499,64 @@ def test_an_instance_that_is_not_deployed_is_not_found(ch_client, otel_db, conso
 
     assert resp.status_code == 404, resp.text
     assert resp.json()["code"] == "not_deployed"
+
+
+# -- CPU seconds: a cumulative gauge read as cores used ----------------------
+
+
+def _cpu(ch_client, db: str, base: int, *points: tuple[int, float], pod: str) -> None:
+    """One cumulative ``process_cpu_seconds_total`` gauge reading per ``(age_seconds, value)``."""
+    for age, value in points:
+        ch_client.command(
+            f"INSERT INTO `{db}`.otel_metrics_gauge "
+            "(ServiceName, MetricName, ResourceAttributes, TimeUnix, Value) "
+            "SELECT {service:String}, {metric:String}, "
+            "mapFromArrays(['service.instance.id'], [{pod:String}]), "
+            "toDateTime({base:UInt32} - {age:UInt32}), {value:Float64}",
+            parameters={
+                "service": _SERVICE,
+                "metric": CPU_SECONDS,
+                "pod": pod,
+                "base": base,
+                "age": age,
+                "value": value,
+            },
+        )
+
+
+def _cores(manager_client, db: str) -> list[ResourceBucket]:
+    buckets = OperationalReader(manager_client, db).resource_series(
+        _SERVICE, window_seconds=3600, bucket_seconds=3600, metrics=(CPU_SECONDS,)
+    )
+    return [bucket for bucket in buckets if bucket.metric == CPU_SECONDS]
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        # Two pods exporting in different seconds, each differenced on its own.
+        (
+            [(300, 1000.0), (240, 1030.0), (180, 1060.0)],
+            [(293, 50.0), (233, 170.0)],
+            [0.5, 0.5, 2.0],
+        ),
+        # A restart drops the total: the drop yields no sample, the next interval does.
+        ([(300, 900.0), (240, 3.0), (180, 33.0)], [], [0.5]),
+        # One reading has nothing before it to difference against.
+        ([(300, 1000.0)], [], []),
+    ],
+    ids=["two-pods", "restart", "single-reading"],
+)
+def test_cpu_seconds_read_as_cores_used_per_interval(
+    ch_client, manager_client, otel_db, base, first, second, expected
+):
+    _cpu(ch_client, otel_db, base, *first, pod="pod-a")
+    _cpu(ch_client, otel_db, base, *second, pod="pod-b")
+
+    buckets = _cores(manager_client, otel_db)
+
+    samples = sum(bucket.samples for bucket in buckets)
+    assert samples == len(expected)
+    if expected:
+        assert min(b.minimum for b in buckets) == pytest.approx(min(expected))
+        assert max(b.maximum for b in buckets) == pytest.approx(max(expected))
