@@ -24,7 +24,6 @@ from scalo.logger import logger
 from dfe_engine.auth.accounts import (
     Account,
     AccountStore,
-    DocuStoreAccountStore,
     discard_created,
 )
 from dfe_engine.auth.audit import (
@@ -35,7 +34,7 @@ from dfe_engine.auth.audit import (
     audit_jit_login_refused,
     audit_jit_team_assigned,
 )
-from dfe_engine.auth.groups import DocuStoreGroupStore, Group, GroupStore
+from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.membership import groups_held_by, linked_groups, linked_providers
 from dfe_engine.auth.models import AuthenticationError, Scope, ScopedGrant, platform_grants
 from dfe_engine.auth.protected_accounts import resolve_floor
@@ -133,8 +132,8 @@ class JitProvisioner:
 
     def __init__(
         self,
-        account_store: AccountStore | DocuStoreAccountStore,
-        group_store: GroupStore | DocuStoreGroupStore,
+        account_store: AccountStore,
+        group_store: GroupStore,
         hyperdx_client=None,
         admin_name: str = "",
         source_provider_bindings: dict[str, str] | None = None,

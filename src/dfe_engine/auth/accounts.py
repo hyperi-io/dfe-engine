@@ -33,7 +33,7 @@ import uuid
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import bcrypt
 from pydantic import BaseModel, Field
@@ -43,9 +43,6 @@ from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import store_key
 from dfe_engine.names import VALID_NAME, InvalidNameError
 from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string, yaml_load
-
-if TYPE_CHECKING:
-    from dfe_engine.store.documents import DocuStore
 
 BCRYPT_ROUNDS = 12
 """The bcrypt cost every stored password hash is made at."""
@@ -555,169 +552,12 @@ _UPDATABLE_FIELDS = (
 )
 
 
-class DocuStoreAccountStore:
-    """Document-store-backed account store - the same interface as :class:`AccountStore`.
-
-    Persists one :class:`Account` document per username (keyed and unique-indexed
-    on ``username``) instead of one YAML file. Every domain rule - name
-    validation, bcrypt hashing, the unusable-password sentinel, the protected-name
-    floor, and the timing-safe :meth:`verify_password` - is identical to the YAML
-    store, so the two are drop-in interchangeable behind the same construction seam.
-
-    Attributes:
-        protected: The recovery credentials this store refuses to lock out.
-    """
-
-    def __init__(
-        self,
-        store: DocuStore,
-        *,
-        collection: str = "accounts",
-        admin_name: str = "",
-    ) -> None:
-        self._c = store.typed(collection, Account, key="username")
-        self.protected = resolve_floor(admin_name)
-
-    def create(
-        self,
-        username: str,
-        password: str,
-        *,
-        groups: builtins.list[str] | None = None,
-        email: str = "",
-        phone: str = "",
-        name: str = "",
-        org: str = "",
-        change_required: bool = False,
-    ) -> Account:
-        """Create a new account. Raises AccountExistsError if taken, InvalidNameError if invalid.
-
-        Taken includes by another replica at the same moment: the insert, not a prior
-        lookup, decides.
-        """
-        if not VALID_NAME.match(username):
-            raise InvalidNameError(f"Invalid account name: {username!r}")
-        account = _new_account(
-            username,
-            password,
-            groups=groups,
-            email=email,
-            phone=phone,
-            name=name,
-            org=org,
-            change_required=change_required,
-        )
-        if not self._c.insert(account):
-            raise AccountExistsError(f"Account already exists: {username}")
-        return account
-
-    def put(self, account: Account, *, allow_protected: bool = False) -> Account:
-        """Upsert a complete account verbatim (restore from the durable deploy repo).
-
-        ``allow_protected`` writes a recovery credential the floor would refuse;
-        reserved for the reconcile paths. Raises ProtectedAccountError otherwise.
-        """
-        if not VALID_NAME.match(account.username):
-            raise InvalidNameError(f"Invalid account name: {account.username!r}")
-        if not allow_protected:
-            self.protected.check_account_state(
-                account.username,
-                enabled=account.enabled,
-                blocked=account.blocked,
-                groups=account.groups,
-            )
-        self._c.put(account.username, account)
-        return account
-
-    def get(self, username: str) -> Account | None:
-        """Return the account for *username*, or None if not found."""
-        try:
-            return self._c.get(store_key(username))
-        except KeyError:
-            return None
-
-    def _existing(self, username: str) -> Account:
-        """The account stored under *username*. Raises KeyError where there is none."""
-        account = self.get(username)
-        if account is None:
-            raise KeyError(username)
-        return account
-
-    def list(self) -> builtins.list[Account]:
-        """Return all accounts, sorted by username."""
-        return self._c.list()
-
-    def update(self, username: str, *, allow_protected: bool = False, **fields: object) -> Account:
-        """Update permitted fields on an account. Raises KeyError if missing.
-
-        ``allow_protected`` disables or de-roles a recovery credential -- admin
-        retirement only. Raises ProtectedAccountError otherwise.
-        """
-        account = self._existing(username)
-        if not allow_protected:
-            self.protected.check_account_update(username, fields, account.groups)
-        updates = _access_updates(account, fields)
-        account = account.model_copy(update={**updates, "updated_at": _now()})
-        self._c.put(username, account)
-        return account
-
-    def reset_password(
-        self, username: str, new_password: str, *, change_required: bool = False
-    ) -> None:
-        """Replace the stored hash with a fresh bcrypt hash. Raises KeyError if missing.
-
-        ``change_required`` marks the password as issued, and False clears a pending change.
-        """
-        account = self._existing(username)
-        account = account.model_copy(
-            update=_password_update(account, new_password, change_required)
-        )
-        self._c.put(username, account)
-
-    def end_sessions(self, username: str) -> Account:
-        """End every session of an account. Raises KeyError if it does not exist."""
-        account = self._existing(username)
-        account = account.model_copy(update=_sessions_ended(account))
-        self._c.put(username, account)
-        return account
-
-    def set_attributes(self, username: str, attributes: dict) -> Account:
-        """Full-replace the non-sensitive ``attributes`` blob. Raises KeyError if missing."""
-        account = self._existing(username)
-        account = account.model_copy(update={"attributes": attributes, "updated_at": _now()})
-        self._c.put(username, account)
-        return account
-
-    def delete(self, username: str, *, allow_protected: bool = False) -> None:
-        """Remove an account. Raises KeyError if it does not exist.
-
-        ``allow_protected`` deletes a recovery credential -- the e2e-server store
-        wipe only. Raises ProtectedAccountError otherwise.
-        """
-        # Existence first, so a missing name answers KeyError on both backends.
-        self._existing(username)
-        if not allow_protected:
-            self.protected.check_account_delete(username)
-        self._c.delete(username)
-
-    def verify_password(self, username: str, password: str) -> bool:
-        """Timing-safe password check - identical semantics to the YAML store."""
-        account = self.get(username)
-        if account is None:
-            _checkpw(password, _dummy_hash())
-            return False
-        if not password or not account.password_hash.startswith("$2"):
-            _checkpw(password, _dummy_hash())
-            return False
-        return _checkpw(password, account.password_hash.encode("utf-8"))
-
-
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
 
 
-def discard_created(store: AccountStore | DocuStoreAccountStore, created: Account) -> None:
+def discard_created(store: AccountStore, created: Account) -> None:
     """Remove *created*, an account the caller's own create stored and could not finish.
 
     Only that record goes: an account stored under the name since, with another
@@ -752,7 +592,7 @@ def anonymized_soft_delete_username() -> str:
     return f"{uuid.uuid4()}-deleted"
 
 
-def soft_delete_account(store: AccountStore | DocuStoreAccountStore, username: str) -> Account:
+def soft_delete_account(store: AccountStore, username: str) -> Account:
     """Disable *username* and rename it to an anonymized ``{uuid}-deleted`` id.
 
     Clears contact and subject fields so the record no longer identifies the
