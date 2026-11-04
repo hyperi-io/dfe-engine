@@ -32,6 +32,7 @@ media type and the SCIM error envelope.
 """
 
 import re
+from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
@@ -94,8 +95,12 @@ SCIM_ROOT = "/api/v1/scim/v2"
 
 # members[value eq "alice"] -> "alice" (the value-path filter IdPs use on remove)
 _MEMBER_FILTER_RE = re.compile(r'value\s+eq\s+"([^"]+)"', re.IGNORECASE)
-# userName eq "alice" / displayName eq "Admins" (the only filter form we honour)
-_EQ_FILTER_RE = re.compile(r'^\s*(\w+)\s+eq\s+"([^"]+)"\s*$', re.IGNORECASE)
+# One term of a list filter: userName eq "alice", or members[value eq "alice"]. Case folding
+# is ASCII-only, so a lookalike such as U+017F for "s" cannot spell a keyword.
+_EQ_FILTER_RE = re.compile(r'^\s*(\w+)\s+eq\s+"([^"]+)"\s*$', re.IGNORECASE | re.ASCII)
+_MEMBER_TERM_RE = re.compile(
+    r'^\s*members\[\s*value\s+eq\s+"([^"]+)"\s*\]\s*$', re.IGNORECASE | re.ASCII
+)
 
 
 # -- Response / error helpers ---------------------------------
@@ -167,8 +172,27 @@ async def _parse_body(request: Request):
         return None
 
 
-def _filtered[T](request: Request, items: list[T], attr: str, field: str) -> list[T] | JSONResponse:
-    """Narrow *items* on *field* by one ``<attr> eq "<value>"`` filter, or refuse the filter.
+def _filter_terms(raw: str) -> dict[str, str] | None:
+    """Map each ``eq`` term of an ``and`` filter to its value, or None for any other form."""
+    terms: dict[str, str] = {}
+    for part in re.split(r"\s+and\s+", raw, flags=re.IGNORECASE | re.ASCII):
+        if eq := _EQ_FILTER_RE.match(part):
+            attr, value = eq.group(1).lower(), eq.group(2)
+        elif member := _MEMBER_TERM_RE.match(part):
+            attr, value = "members[value]", member.group(1)
+        else:
+            return None
+        if attr in terms:
+            return None
+        terms[attr] = value
+    return terms
+
+
+type _Forms[T] = dict[frozenset[str], Callable[[T, dict[str, str]], bool]]
+
+
+def _filtered[T](request: Request, items: list[T], forms: _Forms[T]) -> list[T] | JSONResponse:
+    """Narrow *items* by a filter whose attributes are exactly one of *forms*, or refuse it.
 
     An empty or absent filter lists everything. Any other filter answered with the whole list
     lets an IdP matching on another attribute link the wrong resource (RFC 7644 3.4.2.2).
@@ -176,10 +200,30 @@ def _filtered[T](request: Request, items: list[T], attr: str, field: str) -> lis
     raws = request.query_params.getlist("filter")
     if not any(raws):
         return items
-    m = _EQ_FILTER_RE.match(raws[0]) if len(raws) == 1 else None
-    if m is None or m.group(1).lower() != attr.lower():
-        return scim_error(400, f'Only {attr} eq "<value>" filters are supported', "invalidFilter")
-    return [item for item in items if getattr(item, field) == m.group(2)]
+    terms = _filter_terms(raws[0]) if len(raws) == 1 else None
+    match = forms.get(frozenset(terms)) if terms else None
+    if terms is None or match is None:
+        return scim_error(400, "This filter form is not supported", "invalidFilter")
+    return [item for item in items if match(item, terms)]
+
+
+def _ascii_ieq(name: str, value: str) -> bool:
+    """Match *name* ignoring ASCII case, refusing a value only a Unicode fold maps onto it."""
+    return value.isascii() and name.lower() == value.lower()
+
+
+# The forms each list honours. userName and displayName are caseExact false (RFC 7643 8.7.1).
+_USER_FILTERS: _Forms = {
+    frozenset({"username"}): lambda a, t: _ascii_ieq(a.username, t["username"]),
+    frozenset({"externalid"}): lambda a, t: a.external_id == t["externalid"],
+}
+_GROUP_FILTERS: _Forms = {
+    frozenset({"displayname"}): lambda g, t: _ascii_ieq(g.name, t["displayname"]),
+    frozenset({"id"}): lambda g, t: g.name == t["id"],
+    frozenset({"id", "members[value]"}): lambda g, t: (
+        g.name == t["id"] and t["members[value]"] in g.members
+    ),
+}
 
 
 def _page_params(request: Request) -> tuple[int, int]:
@@ -269,10 +313,10 @@ def _scim_last_admin_member_removals(
     dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
 async def list_users(user: CurrentUser, request: Request) -> Response:
-    """List users (SCIM ListResponse). Supports ``userName eq`` filter + paging."""
+    """List users (SCIM ListResponse). Supports ``userName eq``, ``externalId eq`` + paging."""
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    accounts = _filtered(request, store.list(), "userName", "username")
+    accounts = _filtered(request, store.list(), _USER_FILTERS)
     if isinstance(accounts, JSONResponse):
         return accounts
 
@@ -546,9 +590,9 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
     dependencies=[Depends(require_action(scopes_dict["group_read"]))],
 )
 async def list_groups(user: CurrentUser, request: Request) -> Response:
-    """List groups (SCIM ListResponse). Supports ``displayName eq`` filter + paging."""
+    """List groups (SCIM ListResponse). Supports the ``_GROUP_FILTERS`` forms + paging."""
     store = request.app.state.group_store
-    groups = _filtered(request, store.list(), "displayName", "name")
+    groups = _filtered(request, store.list(), _GROUP_FILTERS)
     if isinstance(groups, JSONResponse):
         return groups
 

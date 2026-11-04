@@ -489,7 +489,11 @@ class TestScimGroups:
             json={"schemas": [GROUP_SCHEMA], "displayName": "listable"},
             headers=admin_headers,
         )
-        got = client.get(f"{BASE}/Groups/listable", headers=admin_headers)
+        got = client.get(
+            f"{BASE}/Groups/listable",
+            params={"excludedAttributes": "members"},
+            headers=admin_headers,
+        )
         assert got.status_code == 200
         assert got.json()["displayName"] == "listable"
 
@@ -583,25 +587,62 @@ class TestScimGroups:
 # ── List filters (RFC 7644 section 3.4.2.2) ──────────────────
 
 
-# kind -> (schema, filter attribute, the other kind's attribute, item field, app.state store)
+# kind -> (schema, filter attribute, the other kind's attribute, item field, app.state store,
+# the rest of each created resource, the query params sent with every list call)
 _LISTS = {
-    "Users": (USER_SCHEMA, "userName", "displayName", "username", "account_store"),
-    "Groups": (GROUP_SCHEMA, "displayName", "userName", "name", "group_store"),
+    "Users": (
+        USER_SCHEMA,
+        "userName",
+        "displayName",
+        "username",
+        "account_store",
+        lambda name: {"externalId": f"ext-{name}"},
+        [],
+    ),
+    "Groups": (
+        GROUP_SCHEMA,
+        "displayName",
+        "userName",
+        "name",
+        "group_store",
+        lambda name: {"members": [{"value": f"m-{name}"}]},
+        [("excludedAttributes", "members")],
+    ),
 }
-# case -> (filter templates, the names listed, "all" for the whole store, None for invalidFilter)
+_A, _B, _ALL, _REFUSED = ["flt-a"], ["flt-b"], "all", None
+# case -> (filter templates, then for Users and for Groups: the names listed, _ALL or _REFUSED)
 _FILTERS = {
-    "none": ((), "all"),
-    "empty": (("",), "all"),
-    "eq": (('{attr} eq "flt-a"',), ["flt-a"]),
-    "eq_any_case": (('{ATTR} EQ "flt-b"',), ["flt-b"]),
-    "eq_no_match": (('{attr} eq "flt-none"',), []),
-    "external_id": (('externalId eq "flt-a"',), None),
-    "other_kinds_attr": (('{other} eq "flt-a"',), None),
-    "starts_with": (('{attr} sw "flt"',), None),
-    "compound": (('{attr} eq "flt-a" and active eq true',), None),
-    "unquoted": (("{attr} eq flt-a",), None),
-    "garbage": (("((( not a filter",), None),
-    "repeated": (("((( not a filter", ""), None),
+    "none": ((), _ALL, _ALL),
+    "empty": (("",), _ALL, _ALL),
+    "eq": (('{attr} eq "flt-a"',), _A, _A),
+    "eq_attr_any_case": (('{ATTR} EQ "flt-b"',), _B, _B),
+    "eq_value_any_case": (('{attr} eq "FLT-A"',), _A, _A),
+    "eq_no_match": (('{attr} eq "flt-none"',), [], []),
+    "external_id": (('externalId eq "ext-flt-a"',), _A, _REFUSED),
+    "external_id_case_exact": (('externalId eq "EXT-FLT-A"',), [], _REFUSED),
+    "id": (('id eq "flt-a"',), _REFUSED, _A),
+    "id_case_exact": (('id eq "FLT-A"',), _REFUSED, []),
+    "member_check": (('id eq "flt-a" and members[value eq "m-flt-a"]',), _REFUSED, _A),
+    "member_check_reversed": (('members[ VALUE eq "m-flt-a" ] AND id eq "flt-a"',), _REFUSED, _A),
+    "member_check_not_member": (('id eq "flt-a" and members[value eq "m-flt-b"]',), _REFUSED, []),
+    # U+FB02 case-folds to "fl", U+017F to "s": neither may reach an ASCII name or keyword.
+    "eq_value_unicode_fold": (('{attr} eq "' + chr(0xFB02) + 't-a"',), [], []),
+    "members_unicode_attr": (
+        ('id eq "flt-a" and member' + chr(0x17F) + '[value eq "m-flt-a"]',),
+        _REFUSED,
+        _REFUSED,
+    ),
+    "members_scalar": (('members eq "m-flt-a" and id eq "flt-a"',), _REFUSED, _REFUSED),
+    "members_alone": (('members[value eq "m-flt-a"]',), _REFUSED, _REFUSED),
+    "members_by_name": (('{attr} eq "flt-a" and members[value eq "m-flt-a"]',), _REFUSED, _REFUSED),
+    "same_attr_twice": (('id eq "flt-a" and id eq "flt-b"',), _REFUSED, _REFUSED),
+    "other_kinds_attr": (('{other} eq "flt-a"',), _REFUSED, _REFUSED),
+    "starts_with": (('{attr} sw "flt"',), _REFUSED, _REFUSED),
+    "compound": (('{attr} eq "flt-a" and active eq true',), _REFUSED, _REFUSED),
+    "or": (('{attr} eq "flt-a" or {attr} eq "flt-b"',), _REFUSED, _REFUSED),
+    "unquoted": (("{attr} eq flt-a",), _REFUSED, _REFUSED),
+    "garbage": (("((( not a filter",), _REFUSED, _REFUSED),
+    "repeated": (("((( not a filter", ""), _REFUSED, _REFUSED),
 }
 
 
@@ -609,12 +650,14 @@ _FILTERS = {
 @pytest.mark.parametrize("case", sorted(_FILTERS))
 def test_list_filter(app, client, admin_headers, kind, case):
     """A filter the list cannot honour is refused, never answered with every resource."""
-    schema, attr, other, key, store = _LISTS[kind]
+    schema, attr, other, key, store, rest, extra = _LISTS[kind]
     for name in ("flt-a", "flt-b"):
-        client.post(f"{BASE}/{kind}", json={"schemas": [schema], attr: name}, headers=admin_headers)
-    templates, want = _FILTERS[case]
+        body = {"schemas": [schema], attr: name, **rest(name)}
+        client.post(f"{BASE}/{kind}", json=body, headers=admin_headers)
+    templates, users_want, groups_want = _FILTERS[case]
+    want = users_want if kind == "Users" else groups_want
     fmt = {"attr": attr, "ATTR": attr.upper(), "other": other}
-    params = [("filter", template.format(**fmt)) for template in templates]
+    params = [("filter", template.format(**fmt)) for template in templates] + extra
 
     resp = client.get(f"{BASE}/{kind}", params=params, headers=admin_headers)
 
