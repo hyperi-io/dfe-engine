@@ -19,10 +19,9 @@ from collections.abc import Callable
 
 import pytest
 
-from dfe_engine.hunt_runner import ChCoordinator
-from dfe_engine.hunt_runner.ch_coordinator import Lease
-from dfe_engine.hunt_runner.models import HuntSpec
-from dfe_engine.hunt_runner.runner import HuntRunner
+from dfe_engine.hunts.ch_coordinator import ChCoordinator, Lease
+from dfe_engine.hunts.hunt_spec import HuntSpec
+from dfe_engine.hunts.runner import HuntRunner
 
 
 def _coord(ch_client, db, worker_id, *, now=None, lease_seconds=300):

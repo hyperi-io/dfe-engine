@@ -42,9 +42,6 @@ from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.hunt_runner.run_status import RunStatus, live_runner_count, read_run_status
-from dfe_engine.hunt_runner.spec_loader import interval_seconds_for
-from dfe_engine.hunt_runner.spread import next_due
 from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
 from dfe_engine.hunts.customers import CUSTOMER_TENANT_IDS, hunt_customers
 from dfe_engine.hunts.hunt_config_registry import (
@@ -52,6 +49,9 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
+from dfe_engine.hunts.run_status import RunStatus, live_runner_count, read_run_status
+from dfe_engine.hunts.schedule import next_due
+from dfe_engine.hunts.spec_loader import interval_seconds_for
 from dfe_engine.hunts.validator import HuntValidator
 from dfe_engine.names import HuntName, InvalidNameError, validate_rule_name
 from dfe_engine.orgs.tenant_scope import tenant_ids_by_org
@@ -658,7 +658,7 @@ def trigger_hunt(
             detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
 
-    from dfe_engine.hunt_runner.ch_coordinator import ChCoordinator
+    from dfe_engine.hunts.ch_coordinator import ChCoordinator
 
     fire = int(time.time())
     try:

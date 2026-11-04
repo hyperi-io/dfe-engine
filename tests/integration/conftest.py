@@ -851,7 +851,7 @@ def dfe_db(ch_client):
 
     from dfe_schemas.clickhouse import PlatformProbe
 
-    from dfe_engine.hunt_runner.ch_coordinator import _COORDINATION_IDS
+    from dfe_engine.hunts.ch_coordinator import _COORDINATION_IDS
     from dfe_engine.schema.applier import SchemaApplier
     from dfe_engine.schema.ddl_writer import DDLFileWriter
     from dfe_engine.schema.plan import render_one

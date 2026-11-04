@@ -33,7 +33,6 @@ Hunt YAML format::
 
 from __future__ import annotations
 
-import re
 from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 
@@ -41,27 +40,17 @@ from pydantic import BaseModel, Field, field_validator
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.quoting import column_reference, quote_identifier, quote_literal
+from dfe_engine.hunts.schedule import duration_to_seconds
 from dfe_engine.schema.require import require_objects
 from dfe_engine.settings import default_data_database
 
 # The cooldown table, by manifest id. The engine's schema phase creates it.
 _ALERT_STATE_ID = "data.alert_state"
 
-# -- Duration Parser ----------------------------------------------
-
-_DURATION_RE = re.compile(r"^(\d+)\s*(s|m|h|d)$", re.IGNORECASE)
-_UNITS = {"s": "seconds", "m": "minutes", "h": "hours", "d": "days"}
-
 
 def parse_duration(s: str) -> timedelta:
-    """Parse a duration string like '1h', '30m', '7d' into a timedelta.
-
-    Supported units: s (seconds), m (minutes), h (hours), d (days).
-    """
-    match = _DURATION_RE.match(s.strip())
-    if not match:
-        raise ValueError(f"Invalid duration: '{s}'. Expected format: <number><s|m|h|d>")
-    return timedelta(**{_UNITS[match.group(2).lower()]: int(match.group(1))})
+    """Parse a duration string like '1h', '30m', '7d' into a timedelta."""
+    return timedelta(seconds=duration_to_seconds(s))
 
 
 # -- Alert Grouping Config ---------------------------------------

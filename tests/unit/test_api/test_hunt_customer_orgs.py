@@ -15,10 +15,10 @@ read the org registry, so the engine stores what each name resolves to.
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.hunt_runner import cli
-from dfe_engine.hunt_runner.spec_loader import load_specs
+from dfe_engine.hunts import runner_cli as cli
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleRegistry
+from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.yaml_utils import yaml_load
 
 HUNTS = "/api/v1/hunts"

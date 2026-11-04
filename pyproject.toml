@@ -349,7 +349,7 @@ ignore_names = ["model_config"]
 # daemon first.
 dfe-engine = "dfe_engine.api:run_dev_server"
 dfe = "dfe_engine.cli.auto.main:main"
-dfe-hunt-runner = "dfe_engine.hunt_runner.cli:main"
+dfe-hunt-runner = "dfe_engine.hunts.runner_cli:main"
 dfe-keda-shim = "dfe_engine.keda_shim.cli:main"
 
 [project.entry-points."dfe_engine.services"]

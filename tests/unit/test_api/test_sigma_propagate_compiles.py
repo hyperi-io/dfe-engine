@@ -17,8 +17,8 @@ import pytest
 from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.hunt_runner import cli
-from dfe_engine.hunt_runner.spec_loader import load_specs
+from dfe_engine.hunts import runner_cli as cli
+from dfe_engine.hunts.spec_loader import load_specs
 
 pytestmark = pytest.mark.usefixtures("customer_orgs")
 

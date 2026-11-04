@@ -266,7 +266,7 @@ boundary for both.
 
 ## The hunt runner
 
-`src/dfe_engine/hunt_runner/`. A hunt is a rule query on a schedule that writes
+`src/dfe_engine/hunts/`. A hunt is a rule query on a schedule that writes
 matched rows to a table. One pod proved it cannot service them all, so the runner is
 a pool -- but hunts are never *assigned* to pods. Workers pull due runs from a
 ClickHouse lease table. Add a pod and it just starts pulling. Kill one and its leases
@@ -296,7 +296,7 @@ graph TD
     WM -->|resume incrementally| W1
 ```
 
-The smarts are deterministic, not random. `spread.phase_offset` gives each hunt a
+The smarts are deterministic, not random. `schedule.phase_offset` gives each hunt a
 stable offset inside its interval from a hash of its id, so hunts on the same
 schedule fan out evenly and never stampede ClickHouse at the boundary. `latest_fire`
 names the most recent fire at or before now, and it stays owed until its watermark
