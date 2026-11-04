@@ -3,6 +3,23 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.81](https://github.com/hyperi-io/dfe-engine/compare/v1.22.80...v1.22.81) (2026-11-04)
+
+### Bug Fixes
+
+* **api:** use scalo 2.32.5 API response formats ([#1073](https://github.com/hyperi-io/dfe-engine/issues/1073)) ([db61a4a](https://github.com/hyperi-io/dfe-engine/commit/db61a4a21031ac2e72b3ac1d8fe6f21b8001f7c4)), closes [#958](https://github.com/hyperi-io/dfe-engine/issues/958)
+* **api:** use scalo 2.32.5 API response formats ([#1073](https://github.com/hyperi-io/dfe-engine/issues/1073)) ([2ab313f](https://github.com/hyperi-io/dfe-engine/commit/2ab313fab3c34196f4f645b37afc8b7624d32ef3)), closes [#958](https://github.com/hyperi-io/dfe-engine/issues/958)
+* **auth:** delete the unused document-store backend ([#1066](https://github.com/hyperi-io/dfe-engine/issues/1066)) ([bfb5036](https://github.com/hyperi-io/dfe-engine/commit/bfb50361e5f85d3466d6c232dcd10ca4dad7cb18))
+* **auth:** require the engine's client_id in OIDC token aud ([#1071](https://github.com/hyperi-io/dfe-engine/issues/1071)) ([2d83e8b](https://github.com/hyperi-io/dfe-engine/commit/2d83e8b1c0ce63e1004569c02c3193993765c50c))
+* **deps:** pin dfe-schemas 0.2.23 ([#1068](https://github.com/hyperi-io/dfe-engine/issues/1068)) ([6ce63d3](https://github.com/hyperi-io/dfe-engine/commit/6ce63d3197b2e5feec901200b918755c8510d577))
+* **engine:** remove dead code and shrink the vulture whitelist ([#1065](https://github.com/hyperi-io/dfe-engine/issues/1065)) ([dc16d99](https://github.com/hyperi-io/dfe-engine/commit/dc16d99541e7a0f81ebea5817c73087eaee52bc6))
+* **hunts:** detect rows delayed by replica lag or late commits ([c143cd5](https://github.com/hyperi-io/dfe-engine/commit/c143cd52499ebe2023e952eac3fd8918a344e078))
+* **metrics:** report CPU seconds as cores used ([#1062](https://github.com/hyperi-io/dfe-engine/issues/1062)) ([2afcbb9](https://github.com/hyperi-io/dfe-engine/commit/2afcbb952dc183869531567ba6594de4916c9f21)), closes [#1052](https://github.com/hyperi-io/dfe-engine/issues/1052)
+* **registries:** drop the raw git commit path ([#1075](https://github.com/hyperi-io/dfe-engine/issues/1075)) ([e54efce](https://github.com/hyperi-io/dfe-engine/commit/e54efce863522d0d675f4a5406409e3d6e215f8d))
+* **schema:** one applier reads every CREATE with sqlglot tokens ([#1072](https://github.com/hyperi-io/dfe-engine/issues/1072)) ([e415c21](https://github.com/hyperi-io/dfe-engine/commit/e415c21c2b28c18b62b1b2e7a23f10950385d433))
+* **scim:** reject unsupported list filters ([#1074](https://github.com/hyperi-io/dfe-engine/issues/1074)) ([6472243](https://github.com/hyperi-io/dfe-engine/commit/64722431817bf65525a5804b983ecefed8a7554b))
+* **settings:** table-drive env routes, drop unread fields ([#1077](https://github.com/hyperi-io/dfe-engine/issues/1077)) ([8684233](https://github.com/hyperi-io/dfe-engine/commit/86842335cd1f8ff85b06fd3e1ac5c7e92fab596f))
+
 ## [1.22.80](https://github.com/hyperi-io/dfe-engine/compare/v1.22.79...v1.22.80) (2026-11-03)
 
 ### Bug Fixes
