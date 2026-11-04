@@ -1,6 +1,5 @@
 """Source ClickHouse plan/deploy -- build artifacts, dry-run plans, and deploy execution."""
 
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, TypeVar
@@ -12,15 +11,13 @@ from scalo.logger import logger
 from dfe_engine.clickhouse.statements import ddl_settings
 from dfe_engine.schema.applier import (
     LiveTtl,
-    SchemaApplyError,
-    json_settings_move,
-    read_table_ttl,
-    replace_db,
+    plan_source_table,
+    read_table,
+    settings_move_for,
     table_target,
     ttl_move,
 )
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
-from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
 from dfe_engine.source.models import Source, validate_source_name
 from dfe_engine.source.type_registry import TypeRegistry
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
@@ -313,60 +310,6 @@ def qualify_ddl_statements(statements: list[str], db: str) -> list[str]:
     return [stmt.replace("{db}", db) for stmt in statements if stmt.strip()]
 
 
-def index_changes(
-    client: Any, ddl_gen: Any, db: str, table: str, columns: Sequence[Any], cfg: Any
-) -> list[str]:
-    """The index DDL that brings the existing *columns* of ``db.table`` to what they declare.
-
-    *db* is the database the server holds the table in. The DDL is rendered for ``cfg.db``,
-    which may be the ``{db}`` placeholder the planner fills in afterwards.
-
-    An index a column now asks for is added, one whose type or granularity moved is
-    dropped and added again, and one this generator named for the column that it no
-    longer asks for is dropped. A new index covers the parts written after it; the
-    parts already on disk gain it on their next merge.
-
-    Raises:
-        SchemaApplyError: ClickHouse could not be read.
-    """
-    try:
-        rows = client.query(
-            "SELECT name, type_full, granularity FROM system.data_skipping_indices "
-            "WHERE database = {db:String} AND table = {tbl:String}",
-            parameters={"db": db, "tbl": table},
-        ).result_rows
-    except Exception as exc:
-        raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
-    live = {str(name): (str(kind), int(granularity)) for name, kind, granularity in rows}
-    statements: list[str] = []
-    for col in columns:
-        wanted = {index.name: index for index in ddl_gen.index_definitions(col)}
-        for name in sorted(ddl_gen.managed_index_names(col) & live.keys()):
-            index = wanted.get(name)
-            if index is None or not index.matches(*live[name]):
-                statements.append(ddl_gen.generate_alter_drop_index(table, name, cfg).strip())
-        for name, index in wanted.items():
-            if name not in live or not index.matches(*live[name]):
-                statements.append(ddl_gen.generate_alter_add_index(table, index, cfg).strip())
-    return statements
-
-
-def _list_table_columns(client: Any, db: str, table: str) -> set[str]:
-    """The column names of ``db.table``.
-
-    Raises:
-        SchemaApplyError: ClickHouse could not be read.
-    """
-    try:
-        rows = client.query(
-            "SELECT name FROM system.columns WHERE database = {db:String} AND table = {tbl:String}",
-            parameters={"db": db, "tbl": table},
-        ).result_rows
-    except Exception as exc:
-        raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
-    return {str(row[0]) for row in rows}
-
-
 def _assert_version_on_source(source: Source, version_id: str) -> None:
     if version_id not in source.versions:
         raise ValueError(
@@ -426,18 +369,14 @@ def ttl_change_for_table(
 ) -> TtlChange | None:
     """The TTL move a deploy of *version_id* makes on a table whose TTL is *live*.
 
-    None when the TTL does not move, or when the declared one cannot be placed over
-    the version's columns.
+    None when the TTL does not move.
     """
-    cfg = replace_db(builder.build_ddl_config_for_version(source, version_id), db)
     move = ttl_move(
         target=table_target(db, source.table_name),
-        cfg=cfg,
-        columns=result.columns,
+        wanted=builder.build_ddl_config_for_version(source, version_id).ttl_days,
+        definition=read_table(result.create_table_ddl),
         live=live,
     )
-    if move.skipped:
-        logger.warning(f"{db}.{source.table_name}: TTL left as it is: {move.skipped}")
     if not move.statement:
         return None
     return TtlChange(move=move.move, expires_rows=move.expires_rows, statement=move.statement)
@@ -458,12 +397,8 @@ def settings_change_for_table(
     Raises:
         SchemaApplyError: ClickHouse could not be read.
     """
-    move = json_settings_move(
-        client,
-        builder.ddl_generator,
-        database=db,
-        table=source.table_name,
-        columns=result.columns,
+    move = settings_move_for(
+        client, read_table(result.create_table_ddl), database=db, table=source.table_name
     )
     if not move.statements:
         return None
@@ -481,73 +416,33 @@ def plan_deploy_statements(
 ) -> DeployStatements:
     """DDL statements to apply for *version_id*, using a prior build result.
 
-    An absent table is created. An existing one gains the columns it lacks and,
-    when its live TTL differs from the version's, the ``MODIFY TTL`` or ``REMOVE
-    TTL`` that moves it, after the columns it may be declared over. A JSON table
-    lacking the settings dfe-schemas declares for it then gets the ``MODIFY
-    SETTING`` that adds them. Views follow.
+    The table's statements come from :func:`~dfe_engine.schema.applier.plan_source_table`,
+    or its CREATE alone when there is no client to read the table with. Views follow.
 
     Raises:
         SchemaApplyError: ClickHouse could not be read, so what the table holds is unknown.
     """
-    table = source.table_name
-    table_exists = clickhouse_table_exists(ch_client, db, table) if ch_client is not None else False
-    statements: list[str] = []
+    create = result.create_table_ddl or ""
+    statements: list[str] = [create.strip()] if create.strip() else []
+    table_exists = False
     ttl_change: TtlChange | None = None
-    cfg = builder.build_ddl_config_for_version(source, version_id)
-
-    if not table_exists:
-        if result.create_table_ddl:
-            statements.append(result.create_table_ddl.strip())
-    else:
-        existing = _list_table_columns(ch_client, db, table) if ch_client is not None else set()
-        ddl_gen = builder.ddl_generator
-        for col in result.columns:
-            if col.name in existing:
-                continue
-            add_stmt = ddl_gen.generate_alter_add_column(table, col, cfg)
-            statements.append(add_stmt.strip())
-            for index_stmt in ddl_gen.generate_alter_add_indexes(table, col, cfg):
-                statements.append(index_stmt.strip())
-        kept = [col for col in result.columns if col.name in existing]
-        if ch_client is not None:
-            statements.extend(index_changes(ch_client, ddl_gen, db, table, kept, cfg))
-        ttl_change = ttl_change_for_table(
-            builder,
-            source,
-            version_id,
-            result,
-            db=db,
-            live=read_table_ttl(ch_client, db, table),
+    if ch_client is not None and create:
+        planned = plan_source_table(
+            ch_client,
+            create,
+            database=db,
+            table=source.table_name,
+            ttl_days=builder.build_ddl_config_for_version(source, version_id).ttl_days,
         )
-        if ttl_change is not None:
-            statements.append(ttl_change.statement)
-        settings_change = settings_change_for_table(
-            builder, source, result, db=db, client=ch_client
-        )
-        if settings_change is not None:
-            statements.extend(settings_change.statements)
-
-    for view_ddl in (result.view_ddls or {}).values():
-        statements.append(view_ddl.strip())
-
+        statements, table_exists = list(planned.statements), planned.exists
+        if planned.ttl.statement:
+            ttl_change = TtlChange(
+                move=planned.ttl.move,
+                expires_rows=planned.ttl.expires_rows,
+                statement=planned.ttl.statement,
+            )
+    statements += [view_ddl.strip() for view_ddl in (result.view_ddls or {}).values()]
     return DeployStatements(qualify_ddl_statements(statements, db), table_exists, ttl_change)
-
-
-def deploy_statements_for_build(
-    builder: SchemaBuilderV2,
-    source: Source,
-    version_id: str,
-    result: SchemaBuildResult,
-    *,
-    db: str,
-    ch_client: Any | None = None,
-) -> tuple[list[str], bool]:
-    """The statements and table-exists flag of :func:`plan_deploy_statements`."""
-    planned = plan_deploy_statements(
-        builder, source, version_id, result, db=db, ch_client=ch_client
-    )
-    return planned.statements, planned.table_exists
 
 
 def plan_ready_status(

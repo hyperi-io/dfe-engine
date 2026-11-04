@@ -31,18 +31,18 @@ from typing import Any, Literal, NamedTuple
 from dfe_schemas.clickhouse import parse_engine
 from scalo.logger import logger
 
-from dfe_engine import __version__ as engine_version
 from dfe_engine.gitcrud.retention import with_default_ttl_days
 from dfe_engine.schema.applier import (
     ApplyReport,
     LiveTable,
+    ManifestApplier,
     SchemaApplier,
     SchemaApplyError,
     TableChange,
     live_tables,
+    read_table,
 )
 from dfe_engine.schema.derived_registry import derived_reference_root
-from dfe_engine.schema.manifest_applier import ManifestApplier, declared_ttl_days
 from dfe_engine.schema.plan import build_plan, platform_probe
 from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError
@@ -91,16 +91,14 @@ def default_followers(settings: Any) -> frozenset[str]:
     """
     probe = build_plan(settings=with_default_ttl_days(settings, 1))
     unset = build_plan(settings=with_default_ttl_days(settings, 0))
-    no_own_ttl = {
-        obj.id
-        for obj in unset.tables()
-        if obj.kind == "table" and declared_ttl_days(obj.statements[0]) is None
-    }
-    return frozenset(
-        obj.id
-        for obj in probe.tables()
-        if obj.id in no_own_ttl and declared_ttl_days(obj.statements[0]) is not None
-    )
+    no_own_ttl = {obj.id for obj in unset.tables() if obj.kind == "table" and not _ttl(obj)}
+    return frozenset(obj.id for obj in probe.tables() if obj.id in no_own_ttl and _ttl(obj))
+
+
+def _ttl(rendered: Any) -> bool:
+    """Whether a rendered table declares a TTL of whole days."""
+    ttl = read_table(rendered.statements[0]).ttl
+    return ttl is not None and ttl.days is not None
 
 
 def reconcile_core_ttls(client: Any, *, settings: Any) -> list[str]:
@@ -111,18 +109,12 @@ def reconcile_core_ttls(client: Any, *, settings: Any) -> list[str]:
         is left for the schema phase to create.
 
     Raises:
-        ManifestApplyError: ClickHouse refused a statement or could not be read.
+        SchemaApplyError: ClickHouse refused a statement or could not be read.
         SchemaPlanError: The manifest could not be rendered.
     """
     followers = default_followers(settings)
     plan = build_plan(settings=settings, client=client)
-    applier = ManifestApplier(
-        client,
-        ledger=None,
-        schemas_version=plan.schemas_version,
-        engine_version=engine_version,
-        platform=plan.platform,
-    )
+    applier = ManifestApplier(client, plan.platform, schemas_version=plan.schemas_version)
     altered: list[str] = []
     for rendered in plan.tables():
         if rendered.id not in followers:
@@ -241,7 +233,7 @@ def reconcile_default_ttl(
     """Bring every table that follows the default TTL to it: the core tables, then the sources.
 
     Raises:
-        ManifestApplyError: ClickHouse refused a core-table statement or could not be read.
+        SchemaApplyError: ClickHouse refused a core-table statement or could not be read.
         SchemaPlanError: The manifest could not be rendered.
     """
     core_altered = reconcile_core_ttls(client, settings=settings)
@@ -369,8 +361,6 @@ def _apply_one(tables: SourceTables, source: Source, live: LiveTable | None) -> 
         reason = CLICKHOUSE_REFUSED if isinstance(exc, SchemaApplyError) else str(exc)
         return SourceLiveOutcome(source=source.source, status="failed", table=target, reason=reason)
     not_applied: list[FieldNotApplied] = []
-    if applied.change.ttl_skipped:
-        not_applied.append(FieldNotApplied("ttl_days", applied.change.ttl_skipped))
     if live.variant != parse_engine(applied.config.engine).variant:
         not_applied.append(FieldNotApplied("engine", ENGINE_NEEDS_REBUILD))
     if kept:

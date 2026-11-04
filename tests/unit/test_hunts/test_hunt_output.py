@@ -279,17 +279,17 @@ class TestDetectionColumnsComeFromTheSchemas:
     """The INSERT names the columns dfe-schemas builds the detection table from."""
 
     def test_every_insert_column_is_a_column_of_the_detection_table(self):
-        from dfe_engine.schema.ddl_writer import DDLFileWriter
+        from dfe_engine.schema.applier import read_table
+        from dfe_engine.schema.plan import reference_statement
 
-        table = {col.name for col in DDLFileWriter().detection_table_spec().columns}
+        table = set(read_table(reference_statement("data.detection")).columns)
 
         assert set(HuntResultSchema().insert_columns()) <= table
 
     def test_the_detection_columns_are_the_ones_results_yaml_declares(self):
-        from dfe_engine.schema.ddl_writer import DDLFileWriter
-        from dfe_engine.schema.schema_loader import SchemaLoader
+        from dfe_engine.schema.schema_loader import SchemaLoader, hunt_schema_path
 
-        declared = SchemaLoader.load_columns(DDLFileWriter._resolve_hunt_results_path())
+        declared = SchemaLoader.load_columns(hunt_schema_path("results.yaml"))
 
         assert [dc.name for dc in hunt_detection_columns()] == [col.name for col in declared]
 

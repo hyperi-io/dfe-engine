@@ -33,6 +33,12 @@ from scalo.logger import logger
 
 from dfe_engine import __version__ as engine_version
 from dfe_engine.clickhouse.errors import is_retryable_error, parse_code
+from dfe_engine.schema.applier import (
+    ManifestApplier,
+    ManifestReport,
+    SchemaApplyError,
+    log_report,
+)
 from dfe_engine.schema.ledger import LedgerError, MigrationLedger
 from dfe_engine.schema.lock import (
     SchemaLock,
@@ -40,12 +46,6 @@ from dfe_engine.schema.lock import (
     holder_name,
     is_quorum_refusal,
     lease_seconds,
-)
-from dfe_engine.schema.manifest_applier import (
-    ManifestApplier,
-    ManifestApplyError,
-    ManifestReport,
-    log_report,
 )
 from dfe_engine.schema.plan import (
     LEDGER_ID,
@@ -90,7 +90,7 @@ _STATE_GAUGE = {
 # The state is served to every signed-in caller, so a backend's own error text stays
 # in the log and the state names only the stage that failed.
 _FAILED_STAGES: tuple[tuple[type[Exception], str], ...] = (
-    (ManifestApplyError, "ClickHouse refused or did not answer the manifest apply"),
+    (SchemaApplyError, "ClickHouse refused or did not answer the manifest apply"),
     (SchemaPlanError, "the schema manifest could not be planned"),
     (SchemaLockError, "the schema lock could not be read or written"),
     (LedgerError, "the migration ledger could not be read or written"),
@@ -269,7 +269,7 @@ def _connect(settings: DFESettings, *, wait_seconds: float) -> Any:
                 return client
             except Exception as exc:
                 if time.monotonic() >= deadline:
-                    raise ManifestApplyError(f"ClickHouse did not answer: {exc}") from exc
+                    raise SchemaApplyError(f"ClickHouse did not answer: {exc}") from exc
                 logger.info("waiting for ClickHouse before the schema apply", error=str(exc))
                 time.sleep(min(5.0, max(wait_seconds / 10.0, 1.0)))
 
@@ -289,10 +289,8 @@ def apply_plan(
     """
     applier = ManifestApplier(
         client,
-        ledger=None,
+        plan.platform,
         schemas_version=plan.schemas_version,
-        engine_version=engine_version,
-        platform=plan.platform,
         dry_run=dry_run,
         allow_drift=allow_drift,
     )
@@ -322,7 +320,7 @@ def apply_plan(
         applier.apply(rendered)
 
     applier.flush()
-    return applier.report
+    return applier.manifest
 
 
 def _flush_query_log(client: Any, *, dry_run: bool) -> None:
@@ -553,7 +551,7 @@ def run_bootstrap(
             client, plan, lock, wait=wait, allow_drift=allow_drift, state=state
         )
     except (
-        ManifestApplyError,
+        SchemaApplyError,
         SchemaPlanError,
         SchemaLockError,
         LedgerError,

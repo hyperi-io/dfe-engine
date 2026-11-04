@@ -17,8 +17,6 @@ falling back -- a silently empty table list would let the data plane start
 against a database with nothing in it.
 """
 
-from __future__ import annotations
-
 from pathlib import Path
 from typing import Any
 
@@ -149,27 +147,8 @@ def load_table_config(ref: str, database: str, *, version: str | None = None) ->
         database: The database the table lands in.
         version: Version to load. Defaults to the file's ``current`` marker.
     """
-    return _config(_table_block(ref, version=version)[1], database)
-
-
-def load_table_name(ref: str, *, version: str | None = None) -> str:
-    """The table NAME a ``tables/...`` definition declares.
-
-    The definition is the authority for it. A name restated at a call site is how
-    the engine came to create ``default`` for five releases while dfe-schemas
-    declared ``main`` and both e2e suites asserted it.
-    """
-    return str(_table_block(ref, version=version)[1]["name"])
-
-
-def _table_block(ref: str, *, version: str | None = None) -> tuple[Path, dict[str, Any]]:
-    """The ``table`` block of a definition, with the path for the error message."""
-    path = _table_yaml_path(ref)
-    entry = SchemaLoader.load_version_entry(path, version=version, require_columns=False)
-    table = entry.get("table") or {}
-    if "name" not in table:
-        raise SchemaLoadError(f"Table definition {path} does not name its table")
-    return path, table
+    _, table = _table_entry(ref, version=version, require_columns=False)
+    return _config(table, database)
 
 
 def load_table_spec(ref: str, database: str, *, version: str | None = None) -> TableSpec:
@@ -180,13 +159,22 @@ def load_table_spec(ref: str, database: str, *, version: str | None = None) -> T
         database: The database the table lands in.
         version: Version to load. Defaults to the file's ``current`` marker.
     """
+    entry, table = _table_entry(ref, version=version, require_columns=True)
     path = _table_yaml_path(ref)
-    entry = SchemaLoader.load_version_entry(path, version=version)
-    table = entry.get("table") or {}
-    if "name" not in table:
-        raise SchemaLoadError(f"Table definition {path} does not name its table")
     return TableSpec(
         name=table["name"],
         columns=[_column(raw, path) for raw in entry["columns"]],
         config=_config(table, database),
     )
+
+
+def _table_entry(
+    ref: str, *, version: str | None, require_columns: bool
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A definition's version entry and its ``table`` block, which must name the table."""
+    path = _table_yaml_path(ref)
+    entry = SchemaLoader.load_version_entry(path, version=version, require_columns=require_columns)
+    table = entry.get("table") or {}
+    if "name" not in table:
+        raise SchemaLoadError(f"Table definition {path} does not name its table")
+    return entry, table

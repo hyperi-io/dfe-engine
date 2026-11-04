@@ -308,7 +308,7 @@ class TestSchemasRouter:
             lambda _cfg: mock_manager,
         )
         monkeypatch.setattr(
-            "dfe_engine.source.deployment.clickhouse_table_exists",
+            "dfe_engine.schema.applier.table_exists",
             lambda *_a, **_k: False,
         )
 

@@ -27,7 +27,7 @@ from dfe_schemas.clickhouse import PlatformProbe
 
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
-from dfe_engine.source.deployment import deploy_statements_for_build
+from dfe_engine.source.deployment import plan_deploy_statements
 from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -58,14 +58,14 @@ def _deploy(ch_client, db: str, source: Source) -> list[str]:
     result = builder.build(source)
     assert not result.validation_errors, result.validation_errors
 
-    statements, _ = deploy_statements_for_build(
+    statements, _ = plan_deploy_statements(
         builder,
         source,
         source.runtime_version_id(),
         result,
         db=db,
         ch_client=ch_client,
-    )
+    )[:2]
     assert statements, "the deploy generated no DDL"
     for statement in statements:
         ch_client.command(statement)

@@ -21,7 +21,7 @@ from typer.testing import CliRunner
 from dfe_engine.cli.auto.main import main
 from dfe_engine.cli.auto.schema import schema_app
 from dfe_engine.schema import phase
-from dfe_engine.schema.manifest_applier import ManifestApplyError
+from dfe_engine.schema.applier import SchemaApplyError
 
 
 @pytest.fixture(autouse=True)
@@ -41,7 +41,7 @@ def _apply():
 
 def _refuse_connection(monkeypatch) -> None:
     def refused(*_args, **_kwargs):
-        raise ManifestApplyError("ClickHouse did not answer")
+        raise SchemaApplyError("ClickHouse did not answer")
 
     monkeypatch.setattr(phase, "_connect", refused)
 

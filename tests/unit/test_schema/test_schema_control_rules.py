@@ -257,14 +257,21 @@ def test_the_two_renderers_agree_on_the_landing_table_indexes() -> None:
     definition must carry the same index or one of them is wrong about what the
     schema asked for.
     """
-    from dfe_engine.schema.ddl_writer import DDLFileWriter
+    from dfe_engine.schema.schema_ddl import DDLGenerator
+    from dfe_engine.schema.schema_loader import SchemaLoader
+    from dfe_engine.schema.table_loader import load_table_config
     from dfe_engine.settings import load_settings
+    from dfe_engine.source.type_registry import TypeRegistry
 
     def indexes(statement: str) -> list[str]:
         return [line.strip().rstrip(",") for line in statement.splitlines() if "INDEX " in line]
 
     manifest = build_plan(settings=load_settings()).by_id("data.main").statements[0]
-    generated = DDLFileWriter(database="dfe").generate_default_table()
+    generated = DDLGenerator(TypeRegistry.default()).generate_create_table(
+        "main",
+        SchemaLoader.load_profile("timeseries"),
+        load_table_config("tables/core/main", "dfe"),
+    )
     assert indexes(manifest) == indexes(generated)
 
 

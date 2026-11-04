@@ -27,7 +27,7 @@ from typing import Any
 from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.orgs.available_ids import ORG_ID_COLUMN
 from dfe_engine.orgs.tenant_scope import org_condition
-from dfe_engine.schema.applier import SchemaApplyError
+from dfe_engine.schema.applier import table_exists
 from dfe_engine.schema.models import SchemaColumn as MetaSchemaColumn
 from dfe_engine.source.expression import ExpressionBuilder, ExpressionValidator
 from dfe_engine.source.models import SchemaColumn
@@ -107,21 +107,10 @@ def qualified_table(db: str, source: str) -> str:
 def clickhouse_table_exists(client: Any, db: str, table: str) -> bool:
     """Return whether ``db.table`` is present in ClickHouse.
 
-    Takes the engine's client wrapper or a raw clickhouse-connect client. A server
-    that cannot be read is an error, never an absent table.
-
     Raises:
         SchemaApplyError: ClickHouse could not be read.
     """
-    try:
-        rows = client.query(
-            "SELECT 1 FROM system.tables "
-            "WHERE database = {db:String} AND name = {tbl:String} LIMIT 1",
-            parameters={"db": db, "tbl": table},
-        ).result_rows
-    except Exception as exc:
-        raise SchemaApplyError(f"could not read ClickHouse state: {exc}") from exc
-    return bool(rows)
+    return table_exists(client, db, table)
 
 
 def json_column_path(path: str) -> str:

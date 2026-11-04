@@ -35,8 +35,7 @@ from scalo.logger import logger
 
 from ..clickhouse.quoting import quote_identifier, quote_literal
 from ..orgs.available_ids import ORG_ID_COLUMN
-from ..schema.ddl_writer import DDLFileWriter
-from ..schema.schema_loader import SchemaLoader
+from ..schema.schema_loader import SchemaLoader, hunt_schema_path
 from ..source.type_registry import TypeRegistry
 
 # Common header columns to copy from source -> hunt results.
@@ -84,7 +83,7 @@ def hunt_detection_columns() -> tuple[HuntDetectionColumn, ...]:
     INSERT can never name a column the table lacks.
     """
     registry = TypeRegistry.default()
-    declared = SchemaLoader.load_columns(DDLFileWriter._resolve_hunt_results_path())
+    declared = SchemaLoader.load_columns(hunt_schema_path("results.yaml"))
     columns = []
     for column in declared:
         resolved = registry.resolve(column.type, attributes=list(column.attribute or []))
