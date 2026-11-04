@@ -743,12 +743,7 @@ async def add_meta_schema_version(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="schema_error"
         ) from exc
 
-    description = f"schema: {canonical_path} (add version {new_ver})"
-    saved = registry.notify_schema_file_updated(
-        canonical_path,
-        description=description,
-        created_by=git_author(user),
-    )
+    saved = registry.notify_schema_file_updated(canonical_path)
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
     return meta_schema_version_write_response(saved, path=canonical_path)
 
@@ -806,12 +801,7 @@ async def delete_meta_schema_version(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="schema_error"
         ) from exc
 
-    description = f"schema: {canonical_path} (delete version {version})"
-    registry.notify_schema_file_updated(
-        canonical_path,
-        description=description,
-        created_by=git_author(user),
-    )
+    registry.notify_schema_file_updated(canonical_path)
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
 
 
@@ -869,10 +859,7 @@ async def create_meta_schema(
         ) from exc
 
     try:
-        saved = registry.save_schema(
-            to_save,
-            created_by=git_author(user),
-        )
+        saved = registry.save_schema(to_save)
     except SchemaValidationError as exc:
         raise ProblemError(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
@@ -929,7 +916,6 @@ async def update_meta_schema(
         )
 
     yaml_path = registry._yaml_path(canonical_path)
-    description_parts: list[str] = []
 
     try:
         if body.summary is not None:
@@ -941,11 +927,9 @@ async def update_meta_schema(
                     code="validation_error",
                 )
             SchemaManager.update_version_summary(yaml_path, summary_version, body.summary)
-            description_parts.append(f"update summary for {summary_version}")
 
         if body.current is not None:
             SchemaManager.set_current(yaml_path, body.current)
-            description_parts.append(f"set current to {body.current}")
     except SchemaVersionError as exc:
         raise ProblemError(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
@@ -955,12 +939,7 @@ async def update_meta_schema(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="schema_error"
         ) from exc
 
-    description = f"schema: {canonical_path} ({', '.join(description_parts)})"
-    saved = registry.notify_schema_file_updated(
-        canonical_path,
-        description=description,
-        created_by=git_author(user),
-    )
+    saved = registry.notify_schema_file_updated(canonical_path)
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
     return meta_schema_version_write_response(saved, path=canonical_path)
 
@@ -1059,13 +1038,13 @@ async def import_meta_schema(
 ) -> MetaSchemaImportResult:
     """Import a meta-schema document exported from another deployment.
 
-    A custom document is written through the schema registry, which commits it to
-    git. A core document names a schema dfe-schemas already put here: it is
-    RESOLVED against the local registry at its pinned version and nothing is
-    written, so the read-only definition is never forked.
+    A custom document is written through the schema registry. A core document
+    names a schema dfe-schemas already put here: it is RESOLVED against the local
+    registry at its pinned version and nothing is written, so the read-only
+    definition is never forked.
     """
     try:
-        result = apply_meta_schema_export(registry, body, created_by=git_author(user))
+        result = apply_meta_schema_export(registry, body)
     except ExchangeError as exc:
         raise_exchange_http(exc)
     if result.action == "created":
@@ -1439,12 +1418,7 @@ def _ensure_writable_meta_schema_for_promote(
         fork_data["resource_type"] = "custom"
         yaml_dump(fork_data, dest_yaml)
 
-    description = f"schema: fork {canonical} -> {fork_canonical} for source {source.source}"
-    schema_registry.notify_schema_file_updated(
-        fork_canonical,
-        description=description,
-        created_by=git_author(user),
-    )
+    schema_registry.notify_schema_file_updated(fork_canonical)
     audit_resource_change(user.user_id, "meta_schema", fork_canonical, "created")
 
     fork_meta = schema_registry.get_schema(fork_canonical)
@@ -2018,10 +1992,7 @@ async def promote_field(
             status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
-    description = f"schema: {canonical} (promote {len(new_columns)} JSON field(s))"
-    schema_registry.notify_schema_file_updated(
-        canonical, description=description, created_by=git_author(user)
-    )
+    schema_registry.notify_schema_file_updated(canonical)
     audit_resource_change(user.user_id, "meta_schema", canonical, "updated")
 
     review = ReviewRouting()

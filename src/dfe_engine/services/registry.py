@@ -5,26 +5,20 @@ Storage model:
 - DirectoryConfigStore from scalo provides:
   - In-memory caching with background polling refresh
   - Thread-safe reads via RLock
-  - Optional git-aware writes (auto-commit, branch management, push)
   - Change callbacks for reactive configuration
 - Rust services (loader, receiver, archiver) read these YAML files directly
-- Config history is tracked via git log (when directory is a git repo)
-
-This replaces the previous PostgreSQL + YAML dual-write architecture.
-PostgreSQL is no longer required for service configuration storage.
 """
 
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from pydantic import BaseModel, SecretBytes, SecretStr
 from pydantic_core import to_jsonable_python
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
-from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file, git_repo_relative_path
 from dfe_engine.services.plugins import get_plugin, valid_services
 from dfe_engine.services.templates import profile_overrides
 from dfe_engine.services.validators import ValidationResult, validate_config
@@ -120,8 +114,6 @@ class ServiceConfigRegistry:
         self,
         config_directory: str | Path,
         writable: bool | None = None,
-        git_branch: str | None = None,
-        git_push: bool = False,
         refresh_interval: int = 30,
     ) -> None:
         """Initialize the registry.
@@ -129,8 +121,6 @@ class ServiceConfigRegistry:
         Args:
             config_directory: Path to the YAML config directory.
             writable: Whether writes are allowed. None = auto-detect.
-            git_branch: Git branch for writes. None = current branch.
-            git_push: Auto-push after git commits.
             refresh_interval: Seconds between background cache refresh polls.
         """
         self._config_directory = Path(config_directory).resolve()
@@ -140,8 +130,6 @@ class ServiceConfigRegistry:
             directory=self._config_directory,
             refresh_interval=refresh_interval,
             writable=writable,
-            git_branch=git_branch,
-            git_push=git_push,
         )
         self._store.start()
 
@@ -150,8 +138,6 @@ class ServiceConfigRegistry:
         cls,
         config_directory: str | Path | None = None,
         writable: bool | None = None,
-        git_branch: str | None = None,
-        git_push: bool = False,
         refresh_interval: int = 30,
     ) -> ServiceConfigRegistry:
         """Get singleton registry instance."""
@@ -163,8 +149,6 @@ class ServiceConfigRegistry:
             cls._instance = ServiceConfigRegistry(
                 config_directory=config_directory,
                 writable=writable,
-                git_branch=git_branch,
-                git_push=git_push,
                 refresh_interval=refresh_interval,
             )
         return cls._instance
@@ -248,19 +232,13 @@ class ServiceConfigRegistry:
         service: str,
         config,
         instance: str = "default",
-        created_by: str | None = None,
-        description: str | None = None,
     ) -> None:
         """Save a service configuration to the YAML directory.
-
-        If the directory is a git repo, changes are auto-committed.
 
         Args:
             service: Service name
             config: Configuration model or dict
             instance: Deployment instance name
-            created_by: Username/identity of who made the change
-            description: Description of the change
         """
         # Normalize to dict. For registered services, validate via typed model.
         # For unknown services (schema-less mode), store the raw dict as-is.
@@ -280,15 +258,6 @@ class ServiceConfigRegistry:
         yaml_path = self._config_directory / f"{table}.yaml"
         yaml_dump(config_data, yaml_path)
 
-        # Git commit if the store is git-aware
-        if self._store.is_git:
-            commit_msg = description or f"config: update {service}/{instance}"
-            if created_by:
-                commit_msg = f"{commit_msg} (by {created_by})"
-            commit_file(self._store, yaml_path, commit_msg, author=created_by)
-            if self._store._git_push:
-                self._store._git_push_remote()
-
         # Force cache refresh for this table
         self._store._refresh_all()
 
@@ -296,8 +265,6 @@ class ServiceConfigRegistry:
 
     def delete_config(self, service: str, instance: str = "default") -> None:
         """Delete a service configuration.
-
-        Removes the YAML file and commits the deletion if git-aware.
 
         Args:
             service: Service name (any, including unregistered services)
@@ -310,25 +277,7 @@ class ServiceConfigRegistry:
             logger.warning(f"Config file does not exist: {yaml_path}")
             return
 
-        resolved_path = yaml_path.resolve(strict=False)
-        resolved_path.unlink(missing_ok=True)
-
-        if self._store.is_git and self._store._repo is not None:
-            try:
-                from dulwich import porcelain as git
-
-                rel_path = git_repo_relative_path(self._store._repo.path, resolved_path)
-                git.rm(self._store._repo, paths=[rel_path])
-                git.commit(
-                    self._store._repo,
-                    author=COMMITTER_IDENTITY.encode("utf-8"),
-                    committer=COMMITTER_IDENTITY.encode("utf-8"),
-                    message=f"config: delete {service}/{instance}".encode(),
-                )
-                if self._store._git_push:
-                    self._store._git_push_remote()
-            except Exception as e:
-                logger.error(f"Git delete failed: {e}")
+        yaml_path.unlink(missing_ok=True)
 
         with self._store._lock:
             self._store._cache.pop(table, None)
@@ -395,118 +344,6 @@ class ServiceConfigRegistry:
             )
         return result
 
-    # -------------------------------------------------------------------------
-    # History (git log)
-    # -------------------------------------------------------------------------
-
-    def get_config_history(
-        self, service: str, instance: str = "default", limit: int = 10
-    ) -> list[dict[str, Any]]:
-        """Get configuration change history from git log.
-
-        Only available when the config directory is a git repo.
-        Uses dulwich to walk the commit history.
-
-        Args:
-            service: Service name
-            instance: Deployment instance name
-            limit: Maximum number of history entries
-
-        Returns:
-            List of history entries (commit, message, author, date)
-        """
-        self._validate_service(service)
-
-        if not self._store.is_git or self._store._repo is None:
-            logger.warning("Config history requires a git-backed config directory")
-            return []
-
-        table = self._table_name(service, instance)
-        yaml_file = f"{table}.yaml"
-        repo = self._store._repo
-
-        try:
-            from dulwich.objects import Commit, Tree
-            from dulwich.walk import Walker
-
-            rel_path = yaml_file.encode("utf-8")
-
-            history = []
-            walker = Walker(repo.object_store, [repo.head()])
-
-            for entry in walker:
-                if len(history) >= limit:
-                    break
-
-                commit = entry.commit
-                # Check if this commit touches our file
-                tree = cast(Tree, repo[commit.tree])
-                try:
-                    tree.lookup_path(repo.__getitem__, rel_path)
-                except KeyError:
-                    continue
-
-                # Check if file changed vs parent
-                if commit.parents:
-                    parent = cast(Commit, repo[commit.parents[0]])
-                    parent_tree = cast(Tree, repo[parent.tree])
-                    try:
-                        parent_entry = parent_tree.lookup_path(repo.__getitem__, rel_path)
-                        current_entry = tree.lookup_path(repo.__getitem__, rel_path)
-                        if parent_entry[1] == current_entry[1]:
-                            continue  # File unchanged in this commit
-                    except KeyError:
-                        pass  # File was added in this commit
-
-                author_str = commit.author.decode("utf-8", errors="replace")
-                # Parse "Name <email>" format: keep just the name
-                author_name = author_str.split("<")[0].strip() if "<" in author_str else author_str
-
-                history.append(
-                    {
-                        "commit": commit.id.decode("ascii"),
-                        "message": commit.message.decode("utf-8", errors="replace").strip(),
-                        "author": author_name,
-                        "date": datetime.fromtimestamp(commit.author_time, tz=UTC).isoformat(),
-                    }
-                )
-
-            return history
-
-        except Exception as e:
-            logger.warning(f"Failed to read git history for {yaml_file}: {e}")
-            return []
-
-    # -------------------------------------------------------------------------
-    # YAML Export
-    # -------------------------------------------------------------------------
-
-    # -------------------------------------------------------------------------
-    # Git Operations (passthrough)
-    # -------------------------------------------------------------------------
-
-    @property
-    def is_git(self) -> bool:
-        """Whether the config directory is INSIDE a git repository.
-
-        scalo walks up, so a directory under a gitops checkout answers True
-        without being a repository root itself.
-        """
-        return self._store.is_git
-
-    @property
-    def current_branch(self) -> str | None:
-        """Current git branch name."""
-        return self._store.current_branch
-
-    def list_branches(self) -> list[str]:
-        """List all git branches."""
-        return self._store.list_branches()
-
-    def switch_branch(self, branch: str, create: bool = False) -> None:
-        """Switch to a git branch. Refreshes config cache after switch."""
-        self._store.switch_branch(branch, create=create)
-
     def on_change(self, service: str, instance: str, callback) -> None:
         """Register a callback for when a service config changes.
 
@@ -556,17 +393,6 @@ class ServiceConfigRegistry:
             self._store._refresh_all()
 
         return count
-
-    # -------------------------------------------------------------------------
-    # Helpers
-    # -------------------------------------------------------------------------
-
-    @staticmethod
-    def _validate_service(service: str) -> None:
-        services = valid_services()
-        if service not in services:
-            msg = f"Unknown service: {service}. Valid: {', '.join(sorted(services))}"
-            raise ValueError(msg)
 
     def close(self) -> None:
         """Stop background refresh and cleanup."""

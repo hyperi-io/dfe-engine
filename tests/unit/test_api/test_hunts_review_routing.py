@@ -20,6 +20,7 @@ import pytest
 from dfe_engine.api.deps import _registries
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitcrud.forge import PullRequest
+from dfe_engine.gitcrud.log import read_log
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.hunts.deploy_repo import DeployRepoStore
 from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
@@ -128,25 +129,43 @@ class TestProductionTeamWritesReportReview:
         # main never got the file, so the git-sync sidecar does not serve it
         assert not (deploy_repo.repo_path / "config" / "hunts" / "windows_hunt.yaml").exists()
 
-    def test_a_hunt_delete_says_review_required_while_the_runner_still_has_it(
-        self, client, admin_headers, deploy_repo
+    @pytest.mark.parametrize(
+        ("route", "body", "stored"),
+        [
+            pytest.param(
+                "/api/v1/hunts",
+                {"name": "windows_hunt", **_HUNT},
+                "config/hunts/windows_hunt.yaml",
+                id="hunt",
+            ),
+            pytest.param("/api/v1/rules", _rule_payload(), "config/rules/certutil.yaml", id="rule"),
+        ],
+    )
+    @pytest.mark.parametrize("team", [False, True], ids=["dev_solo", "production_team"])
+    def test_a_delete_through_the_api_is_a_governed_commit(
+        self, client, admin_headers, deploy_repo, route, body, stored, team
     ):
+        """Dev commits the delete to main under the standard, production+team to a review branch."""
         _rebind(deploy_repo, environment="dev", mode="solo")
-        assert (
-            client.post(
-                "/api/v1/hunts", json={"name": "windows_hunt", **_HUNT}, headers=admin_headers
-            ).status_code
-            == 201
-        )
-
+        assert client.post(route, json=body, headers=admin_headers).status_code == 201
+        main_before = deploy_repo.head_revision()
         forge = _RecordingForge(url="http://forge/pr/43")
-        _rebind(deploy_repo, environment="production", mode="team", forge=forge)
-        resp = client.delete("/api/v1/hunts/windows_hunt", headers=admin_headers)
+        if team:
+            _rebind(deploy_repo, environment="production", mode="team", forge=forge)
+
+        resp = client.delete(f"{route}/{body['name']}", headers=admin_headers)
 
         assert resp.status_code == 204
-        assert resp.headers["X-DFE-Review-Required"] == "true"
-        assert resp.headers["X-DFE-PR-Url"] == "http://forge/pr/43"
-        assert (deploy_repo.repo_path / "config" / "hunts" / "windows_hunt.yaml").is_file()
+        assert (deploy_repo.repo_path / stored).is_file() is team
+        if team:
+            assert resp.headers["X-DFE-Review-Required"] == "true"
+            assert resp.headers["X-DFE-PR-Url"] == "http://forge/pr/43"
+            assert deploy_repo.head_revision() == main_before
+            return
+        assert "X-DFE-Review-Required" not in resp.headers
+        newest = read_log(deploy_repo, limit=1)[0][0]
+        assert (newest.ctype, newest.scope, newest.summary) == ("hunt", body["name"], "delete")
+        assert newest.conforming is True
 
     def test_a_rule_create_says_review_required(self, client, admin_headers, deploy_repo):
         forge = _RecordingForge(url="http://forge/pr/44")
@@ -158,21 +177,6 @@ class TestProductionTeamWritesReportReview:
         assert resp.headers["X-DFE-Review-Required"] == "true"
         assert resp.headers["X-DFE-PR-Url"] == "http://forge/pr/44"
         assert not (deploy_repo.repo_path / "config" / "rules" / "certutil.yaml").exists()
-
-    def test_a_rule_delete_says_review_required(self, client, admin_headers, deploy_repo):
-        _rebind(deploy_repo, environment="dev", mode="solo")
-        assert (
-            client.post("/api/v1/rules", json=_rule_payload(), headers=admin_headers).status_code
-            == 201
-        )
-
-        forge = _RecordingForge(url="http://forge/pr/45")
-        _rebind(deploy_repo, environment="production", mode="team", forge=forge)
-        resp = client.delete("/api/v1/rules/certutil", headers=admin_headers)
-
-        assert resp.status_code == 204
-        assert resp.headers["X-DFE-Review-Required"] == "true"
-        assert (deploy_repo.repo_path / "config" / "rules" / "certutil.yaml").is_file()
 
     def test_linking_an_alert_destination_to_a_hunt_says_review_required(
         self, client, admin_headers, deploy_repo

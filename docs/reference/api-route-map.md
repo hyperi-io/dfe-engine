@@ -12,9 +12,9 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 9 | Folded into the operation **New** names |
 | unchanged | 41 | Same method and path |
 | frozen | 54 | Kept as it is |
-| decide | 129 | Not placed yet: see its question |
+| decide | 128 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 320 | |
+| total | 319 | |
 
 ## Questions
 
@@ -25,10 +25,10 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | [compute-helpers](#compute-helpers) | 10 |
 | [detection-rules](#detection-rules) | 7 |
 | [hunts-orgs](#hunts-orgs) | 7 |
-| [services-overlap](#services-overlap) | 7 |
 | [synthetic-data](#synthetic-data) | 7 |
 | [queries](#queries) | 6 |
 | [repository](#repository) | 6 |
+| [services-overlap](#services-overlap) | 6 |
 | [alert-destinations](#alert-destinations) | 5 |
 | [derived-schemas](#derived-schemas) | 5 |
 | [fieldmap-defaults](#fieldmap-defaults) | 4 |
@@ -390,20 +390,6 @@ A hunt can target several customer orgs, so `orgs/{org}/hunts` cannot own every 
 | `PUT /api/v1/hunts/{name}` | - | - | - | - | decide | ui 4 |  |
 | `POST /api/v1/hunts/{name}/run` | - | - | - | - | decide | ui 2 |  |
 
-### services-overlap
-
-ServiceConfigRegistry overlaps the apps router's instance config: merge into `deployment/apps/{app}/instances/{instance}`, or retire.
-
-| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
-|---|---|---|---|---|---|---|---|
-| `GET /api/v1/services` | - | - | - | - | decide | infra 1 |  |
-| `POST /api/v1/services/seed` | - | - | - | - | decide | 0 |  |
-| `DELETE /api/v1/services/{service}/{instance}` | - | - | - | - | decide | 0 |  |
-| `GET /api/v1/services/{service}/{instance}` | - | - | - | - | decide | 0 |  |
-| `PUT /api/v1/services/{service}/{instance}` | - | - | - | - | decide | 0 |  |
-| `GET /api/v1/services/{service}/{instance}/history` | - | - | - | - | decide | 0 |  |
-| `POST /api/v1/services/{service}/{instance}/validate` | - | - | - | - | decide | 0 |  |
-
 ### synthetic-data
 
 No root holds synthetic data.
@@ -443,6 +429,19 @@ Console preferences and small objects scoped system, org or user: no root holds 
 | `PUT /api/v1/repository/objects/{scope}/{scope_id}/{namespace}/{key}` | - | - | - | - | decide | ui 2 |  |
 | `GET /api/v1/repository/preferences` | - | - | - | - | decide | ui 2 |  |
 | `PATCH /api/v1/repository/preferences` | - | - | - | - | decide | ui 2 |  |
+
+### services-overlap
+
+ServiceConfigRegistry overlaps the apps router's instance config: merge into `deployment/apps/{app}/instances/{instance}`, or retire.
+
+| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
+|---|---|---|---|---|---|---|---|
+| `GET /api/v1/services` | - | - | - | - | decide | infra 1 |  |
+| `POST /api/v1/services/seed` | - | - | - | - | decide | 0 |  |
+| `DELETE /api/v1/services/{service}/{instance}` | - | - | - | - | decide | 0 |  |
+| `GET /api/v1/services/{service}/{instance}` | - | - | - | - | decide | 0 |  |
+| `PUT /api/v1/services/{service}/{instance}` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/services/{service}/{instance}/validate` | - | - | - | - | decide | 0 |  |
 
 ### alert-destinations
 

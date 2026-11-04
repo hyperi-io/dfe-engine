@@ -315,9 +315,7 @@ def create_rule(
     result = service.create_rule(svc_request, body.name, tenant_ids=fence)
     _refuse_uncompilable(result)
     _refuse_matches_everything(result)
-    outcome = registry.save(
-        result.rule, created_by=git_author(user), description=f"rule: create {body.name}"
-    )
+    outcome = registry.save(result.rule, created_by=git_author(user))
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", body.name, "created", review_audit_detail(outcome))
     return _build_create_response(result)
@@ -389,11 +387,7 @@ def _create_rule_from_sql(
     result = service.create_rule(svc_request, rule_id, tenant_ids=fence)
     _refuse_uncompilable(result)
     _refuse_matches_everything(result)
-    outcome = registry.save(
-        result.rule,
-        created_by=git_author(user),
-        description=f"rule: create {rule_id} (from hyperdx view)",
-    )
+    outcome = registry.save(result.rule, created_by=git_author(user))
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", rule_id, "created", review_audit_detail(outcome))
     return RuleFromHyperdxResponse(
@@ -511,9 +505,7 @@ def update_rule(
     updated = result.rule.model_copy(
         update={"created_at": existing.created_at, "name": effective_display},
     )
-    outcome = registry.save(
-        updated, created_by=git_author(user), description=f"rule: update {name}"
-    )
+    outcome = registry.save(updated, created_by=git_author(user))
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", name, "updated", review_audit_detail(outcome))
     return _build_create_response(result.model_copy(update={"rule": updated}))

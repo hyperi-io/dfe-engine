@@ -246,7 +246,6 @@ routes = [
   { old = "DELETE /api/v1/services/{service}/{instance}", status = "decide", note = "services-overlap" },
   { old = "GET /api/v1/services/{service}/{instance}", status = "decide", note = "services-overlap" },
   { old = "PUT /api/v1/services/{service}/{instance}", status = "decide", note = "services-overlap" },
-  { old = "GET /api/v1/services/{service}/{instance}/history", status = "decide", note = "services-overlap" },
   { old = "POST /api/v1/services/{service}/{instance}/validate", status = "decide", note = "services-overlap" },
   { old = "GET /api/v1/sigma/bindings", status = "frozen", note = "sigma", hidden = true },
   { old = "DELETE /api/v1/sigma/bindings/{rule_id}", status = "frozen", note = "sigma", hidden = true },

@@ -3623,9 +3623,9 @@ def import_source(
     """Import a source bundle exported from another deployment.
 
     The bundle's meta-schema definitions are written first, then the source, both
-    through the registries that commit to git. A definition marked
-    ``resource_type: core`` is resolved against what dfe-schemas already put here
-    and never written, so the read-only schema is not forked.
+    through their registries. A definition marked ``resource_type: core`` is
+    resolved against what dfe-schemas already put here and never written, so the
+    read-only schema is not forked.
 
     Every check runs before the first write: a bundle applied halfway would leave
     the source's schema pins with no definitions behind them. A schema pin, or a
