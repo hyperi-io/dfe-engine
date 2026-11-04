@@ -165,7 +165,7 @@ class QueryShim:
         db = self._db(str(cfg.get("database", "data")))
         if cfg.get("builtin") == "hunt_backlog":
             # ONE SQL source of truth for the due-count (no drift vs a copied string).
-            from dfe_engine.hunt_runner.schedule import due_query
+            from dfe_engine.hunts.schedule import due_query
 
             return due_query(db), {}
         sql = scaling_pressure.apply(str(cfg["sql"]).replace("__DB__", db))

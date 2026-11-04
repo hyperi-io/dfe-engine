@@ -115,7 +115,7 @@ Full system map, invariants, and the docs tree:
 | Governed gitops CRUD | `gitcrud/`, `gitops/`, `governance/` | [control-plane/governed-ops-design.md](docs/control-plane/governed-ops-design.md) |
 | Sources, schemas, DDL | `source/`, `schema/`, `fieldmap/`, `cel/`, `sigma/` | [data-plane/](docs/data-plane/README.md) |
 | Query API | `query/` | [data-plane/query-api.md](docs/data-plane/query-api.md) |
-| Hunts | `hunts/`, `hunt_runner/`, `keda_shim/` | [data-plane/hunt-runner-scaling.md](docs/data-plane/hunt-runner-scaling.md) |
+| Hunts | `hunts/`, `keda_shim/` | [data-plane/hunt-runner-scaling.md](docs/data-plane/hunt-runner-scaling.md) |
 | Deployment seam (the published chart is assembled from the contract) | `deployment_contract.py` | [deployment/](docs/deployment/README.md) |
 
 ## Configuration

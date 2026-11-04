@@ -26,9 +26,12 @@ import uuid
 import pytest
 from common.hunt_files import write_hunt, write_rule
 
-from dfe_engine.hunt_runner import ChCoordinator, HuntRunner, HuntWorker, load_specs
-from dfe_engine.hunt_runner.spread import current_fire
+from dfe_engine.hunts.ch_coordinator import ChCoordinator
 from dfe_engine.hunts.rule_guard import preview_settings, preview_sql
+from dfe_engine.hunts.runner import HuntRunner
+from dfe_engine.hunts.schedule import current_fire
+from dfe_engine.hunts.spec_loader import load_specs
+from dfe_engine.hunts.worker import HuntWorker
 from dfe_engine.settings import DetectionGuardSettings
 
 _INTERVAL = 60  # "* * * * *", the cron write_hunt gives every hunt

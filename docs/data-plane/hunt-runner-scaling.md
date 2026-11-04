@@ -51,7 +51,7 @@ waking KEDA, without a DELETE.
 KEDA runs `schedule.due_query(db)` against ClickHouse (via the fail-safe
 `dfe-keda-shim`'s `/keda/hunt-backlog` endpoint - see "KEDA ScaledObject"
 below) - the count of hunts that are due-and-unclaimed. It uses the EXACT
-arithmetic the worker uses (`spread.latest_fire`):
+arithmetic the worker uses (`schedule.latest_fire`):
 
 ```text
 boundary = intDiv(now(), interval) * interval      -- start of this interval
@@ -81,15 +81,15 @@ Autoscaling (when the BETA is enabled) is only safe if KEDA's view of "due"
 never diverges from a worker's. It cannot, because both compute the same
 thing from the same inputs:
 
-1. **Parity, proven.** `tests/hunt_runner/test_schedule.py` asserts the scaler
-   predicate equals `runner.tick`'s own gate (via `spread.latest_fire` +
+1. **Parity, proven.** `tests/unit/test_hunts/test_schedule.py` asserts the scaler
+   predicate equals `runner.tick`'s own gate (via `schedule.latest_fire` +
    the watermark + lease checks) across a full matrix of (hunt_id, interval, now,
    watermark, lease). `tests/integration/test_hunt_schedule_scaler.py` then proves
    the SQL string implements that predicate against real ClickHouse - counting
    exactly the runnable hunts, excluding tombstoned / future-watermark / leased
    hunts, and returning 0 when every hunt is caught up.
 2. **Single source of truth for the offset.** The materialiser computes
-   `phase_offset` with the same `spread.phase_offset` the worker uses, so the two
+   `phase_offset` with the same `schedule.phase_offset` the worker uses, so the two
    can never drift. Change the offset algorithm once and both move together.
 3. **Gate on the signal, not a timer.** KEDA polls the backlog query (via the
    shim - a real readiness signal), it does not race a clock. Worst-case wake
@@ -177,7 +177,7 @@ shim comes from `dfe-infra helm/charts/dfe-extras/templates/engine-keda-shim.yam
 on the same values. KEDA's `metrics-api` scaler polls the shim over HTTP, and the
 shim runs `schedule.due_query(db)` against ClickHouse - the SAME SQL the worker
 gate uses (see "The scaler query" above, imported directly from
-`dfe_engine.hunt_runner.schedule.due_query`, so it cannot drift) - and hands
+`dfe_engine.hunts.schedule.due_query`, so it cannot drift) - and hands
 back one integer.
 
 ```mermaid

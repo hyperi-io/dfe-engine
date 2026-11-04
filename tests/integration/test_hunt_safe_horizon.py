@@ -26,16 +26,18 @@ import pytest
 from common.hunt_files import write_hunt, write_rule
 from dfe_schemas.clickhouse import PlatformProbe
 
-from dfe_engine.hunt_runner import ChCoordinator, HuntRunner, HuntWorker, load_specs
-from dfe_engine.hunt_runner.ch_coordinator import _COORDINATION_IDS
-from dfe_engine.hunt_runner.delivery import MatchNotifier
-from dfe_engine.hunt_runner.metrics import HuntRunnerMetrics
-from dfe_engine.hunt_runner.spread import latest_fire
+from dfe_engine.hunts.ch_coordinator import _COORDINATION_IDS, ChCoordinator
+from dfe_engine.hunts.delivery import MatchNotifier
+from dfe_engine.hunts.runner import HuntRunner
+from dfe_engine.hunts.runner_metrics import HuntRunnerMetrics
+from dfe_engine.hunts.schedule import latest_fire
+from dfe_engine.hunts.spec_loader import load_specs
+from dfe_engine.hunts.worker import HuntWorker
 from dfe_engine.schema.applier import SchemaApplier
 from dfe_engine.schema.ddl_writer import DDLFileWriter
 from dfe_engine.schema.plan import render_one
-from tests.hunt_runner.conftest import RecordingManager
 from tests.support.clickhouse_cleanup import drop_database_and_policies
+from tests.support.recording_metrics import RecordingManager
 
 _INTERVAL = 60  # write_hunt's "* * * * *"
 

@@ -21,9 +21,9 @@ from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitcrud.log import read_log
 from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.hunt_runner.spec_loader import load_specs
 from dfe_engine.hunts.deploy_repo import DeployRepoStore
 from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.yaml_utils import yaml_load
 
 ORGS = "/api/v1/orgs"
