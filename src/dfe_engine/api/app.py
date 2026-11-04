@@ -374,37 +374,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     auth_dir = Path(auth_dir_str)
 
-    # One central backend for local users AND groups: 'auto' (document store when a
-    # reachable URI is configured, else yaml), 'document' (forced), or 'yaml'. The
-    # document store is engine-wide and lifespan-owned so consumers share it.
-    from dfe_engine.auth.store_backend import resolve_store_backend
-
-    # A document store comes back exactly when the resolved backend is 'document'.
-    _, doc_store = resolve_store_backend(
-        settings.auth.store_backend,
-        settings.auth.accounts_store.uri,
-        settings.auth.accounts_store.database,
-    )
-    app.state.document_store = doc_store
     from dfe_engine.auth.groups import GroupMetrics
 
     group_metrics = GroupMetrics(app.state.metrics_manager)
-    injected_account_store = None
-    injected_group_store = None
-    if doc_store is not None:
-        from dfe_engine.auth.accounts import DocuStoreAccountStore
-        from dfe_engine.auth.groups import DocuStoreGroupStore
-
-        # The admin name the bootstrap seeds, so the protected-name floor moves
-        # with a renamed admin on this backend too.
-        injected_account_store = DocuStoreAccountStore(
-            doc_store,
-            collection=settings.auth.accounts_store.collection,
-            admin_name=settings.auth.local.admin_name,
-        )
-        injected_group_store = DocuStoreGroupStore(
-            doc_store, admin_name=settings.auth.local.admin_name, metrics=group_metrics
-        )
 
     # Refuse to start on the shipped admin password outside a dev posture, unless
     # the operator has retired the admin -- then an absent password is the point.
@@ -424,8 +396,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         auth_dir,
         default_admin_password=settings.auth.local.admin_password,
         default_admin_name=settings.auth.local.admin_name,
-        account_store=injected_account_store,
-        group_store=injected_group_store,
         group_metrics=group_metrics,
         gitcrud=gitcrud,
         seed_accounts=settings.auth.local.seed_accounts,
@@ -440,25 +410,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     app.state.auth_provider = LocalAuthProvider(account_store, group_store)
 
     # Sensitive-attribute stores: a SEPARATE keyed store per entity kind, never
-    # inline on the account/group model (a broad read would leak them). Backend
-    # follows the account/group split - one document collection each in document
-    # mode, else one YAML dir each under auth_dir.
-    from dfe_engine.auth.attributes import AttributeStore, DocuStoreAttributeStore
+    # inline on the account/group model (a broad read would leak them).
+    from dfe_engine.auth.attributes import AttributeStore
 
-    if doc_store is not None:
-        app.state.account_sensitive_attributes = DocuStoreAttributeStore(
-            doc_store, collection="sensitive_account_attributes"
-        )
-        app.state.group_sensitive_attributes = DocuStoreAttributeStore(
-            doc_store, collection="sensitive_group_attributes"
-        )
-    else:
-        app.state.account_sensitive_attributes = AttributeStore(
-            auth_dir / "sensitive-account-attributes"
-        )
-        app.state.group_sensitive_attributes = AttributeStore(
-            auth_dir / "sensitive-group-attributes"
-        )
+    app.state.account_sensitive_attributes = AttributeStore(
+        auth_dir / "sensitive-account-attributes"
+    )
+    app.state.group_sensitive_attributes = AttributeStore(auth_dir / "sensitive-group-attributes")
 
     from dfe_engine.secrets import build_secrets, warn_on_aws_managed_key
 
@@ -736,9 +694,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         import asyncio
 
         await asyncio.gather(*autostart_tasks, return_exceptions=True)
-    doc = getattr(app.state, "document_store", None)
-    if doc:
-        doc.close()
     shutdown_registries()
     logger.info("DFE Engine API stopped")
 

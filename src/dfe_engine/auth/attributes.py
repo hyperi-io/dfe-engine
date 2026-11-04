@@ -14,11 +14,8 @@ them. Sensitive attributes must NEVER ride inline for exactly that reason -- a w
 read would leak them. They live here instead: one plain dict per entity id, in a
 SEPARATE store that is only ever read deliberately.
 
-Two backends mirror the account-store split -- :class:`AttributeStore` (one YAML
-file per entity) and :class:`DocuStoreAttributeStore` (one document per entity) --
-so the two are drop-in interchangeable behind the same construction seam. Both are
-generic over the entity kind: instantiate one per kind later (e.g. collections
-``sensitive_account_attributes`` / ``sensitive_group_attributes``).
+:class:`AttributeStore` keeps one YAML file per entity and is generic over the
+entity kind: instantiate one per kind (accounts, groups).
 
 Usage::
 
@@ -32,15 +29,9 @@ Usage::
 """
 
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-from pydantic import BaseModel, Field
 
 from dfe_engine.names import VALID_NAME
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
-
-if TYPE_CHECKING:
-    from dfe_engine.store.documents import DocuStore
 
 MAX_ATTRIBUTE_DEPTH = 64
 """Deepest an attributes blob may nest; the YAML writer recurses once per level."""
@@ -130,35 +121,3 @@ class AttributeStore:
         if not VALID_NAME.match(entity_id):
             raise ValueError(f"Invalid entity id: {entity_id!r}")
         return self._dir / f"{entity_id}.yaml"
-
-
-class _EntityAttributes(BaseModel):
-    """One entity's sensitive attributes, keyed on ``entity_id`` in the document store."""
-
-    entity_id: str
-    attributes: dict = Field(default_factory=dict)
-
-
-class DocuStoreAttributeStore:
-    """Document-store-backed sensitive-attribute store - the same interface as :class:`AttributeStore`.
-
-    Persists one :class:`_EntityAttributes` document per entity id (keyed and
-    unique-indexed on ``entity_id``) instead of one YAML file. A missing document
-    reads back as an empty dict, so the two backends are drop-in interchangeable.
-    """
-
-    def __init__(self, store: DocuStore, *, collection: str) -> None:
-        self._c = store.typed(collection, _EntityAttributes, key="entity_id")
-
-    def get(self, entity_id: str) -> dict:
-        """Return the sensitive attributes for *entity_id*, or an empty dict if absent."""
-        doc = self._c.get(entity_id)
-        return doc.attributes if doc is not None else {}
-
-    def put(self, entity_id: str, attributes: dict) -> None:
-        """Full-replace the sensitive attributes for *entity_id*."""
-        self._c.put(entity_id, _EntityAttributes(entity_id=entity_id, attributes=dict(attributes)))
-
-    def delete(self, entity_id: str) -> None:
-        """Remove the stored attributes for *entity_id* (no-op if absent)."""
-        self._c.delete(entity_id)

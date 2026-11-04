@@ -17,7 +17,6 @@ from dfe_engine.auth import accounts as accounts_module
 from dfe_engine.auth.accounts import (
     Account,
     AccountStore,
-    DocuStoreAccountStore,
     discard_created,
 )
 from tests.support.present import present
@@ -287,10 +286,9 @@ class TestANameThatDiffersOnlyInCase:
 
 
 def test_the_stores_annotations_can_be_read():
-    """Both stores define list(), which a bare list[...] in their signatures would name."""
+    """The store defines list(), which a bare list[...] in its signatures would name."""
     assert AccountStore.list.__annotations__["return"] == list[Account]
     assert AccountStore.create.__annotations__["groups"] == list[str] | None
-    assert DocuStoreAccountStore.list.__annotations__["return"] == list[Account]
 
 
 # ---------------------------------------------------------------------------

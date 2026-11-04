@@ -15,8 +15,8 @@ from typing import TYPE_CHECKING
 from scalo.logger import logger
 
 from dfe_engine.api.e2e.seed.metrics import SeedMetrics
-from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
-from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
+from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.groups import GroupStore
 from dfe_engine.orgs.registry import OrgRegistry
 
 if TYPE_CHECKING:
@@ -59,8 +59,8 @@ class Seed:
     def __init__(
         self,
         *,
-        account_store: AccountStore | DocuStoreAccountStore,
-        group_store: GroupStore | DocuStoreGroupStore,
+        account_store: AccountStore,
+        group_store: GroupStore,
         org_registry: OrgRegistry,
         env: str | None = None,
         gitcrud: GitCrud | None = None,

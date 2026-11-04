@@ -54,7 +54,7 @@ from dfe_engine.yaml_utils import yaml_load_string
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
+    from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.gitcrud.engine import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
     from dfe_engine.gitops.repo import PublishResult
@@ -117,8 +117,7 @@ class AccountGitState(BaseModel):
 
 # The git-disabled deployment: the live store is a plain file share, so it is
 # already durable and there is nothing to merge. Also the state for a regular
-# account, whose durability is its own store (document store/yaml), not git -- so
-# it is not committed to git, but is durable (merged) in its own store.
+# account, whose durability is its own YAML store, not git.
 _FILE_SHARE_STATE = AccountGitState(
     enabled=False, auto_merge=False, committed=False, merged=True, pending=None
 )
@@ -132,7 +131,7 @@ def not_git_backed_state() -> AccountGitState:
 def is_local_admin(username: str, admin_name: str) -> bool:
     """True for the local admin, the one account whose whole doc the deploy repo carries.
 
-    Regular users and groups live in the resolved store (document store/yaml).
+    Regular users and groups live in the YAML stores.
     ``breakglass`` is git-backed too, but only as a hash in the governance settings,
     so it is not this. ``admin_name`` is the configured name
     (``settings.auth.local.admin_name``, empty string for the default) and is
@@ -346,7 +345,7 @@ def state_from_outcome(gc: GitCrud | None, outcome: WriteOutcome | None) -> Acco
 
 def steady_state(
     gc: GitCrud | None,
-    account_store: AccountStore | DocuStoreAccountStore | None,
+    account_store: AccountStore | None,
     username: str,
     *,
     environment: str,
@@ -384,7 +383,7 @@ def _account_rel(gc: GitCrud, username: str) -> str:
 
 def remote_state(
     gc: GitCrud | None,
-    account_store: AccountStore | DocuStoreAccountStore | None,
+    account_store: AccountStore | None,
     username: str,
     *,
     environment: str,
@@ -419,7 +418,7 @@ def remote_state(
 
 def breakglass_state(
     gc: GitCrud | None,
-    account_store: AccountStore | DocuStoreAccountStore | None,
+    account_store: AccountStore | None,
     *,
     environment: str,
     mode: str,
@@ -449,7 +448,7 @@ def breakglass_state(
 
 def hydrate_from_deploy_repo(
     gc: GitCrud | None,
-    account_store: AccountStore | DocuStoreAccountStore,
+    account_store: AccountStore,
 ) -> int:
     """Restore the live store from the deploy repo on boot. Returns the count restored.
 

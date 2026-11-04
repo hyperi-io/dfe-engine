@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 
 from dfe_engine.appmgmt import instances
-from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
+from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.bootstrap import bootstrap_auth
-from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
+from dfe_engine.auth.groups import GroupStore
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitops.repo import GitopsRepo
@@ -24,7 +24,7 @@ from tests.support.present import present
 
 def _stores(
     tmp_path: Path,
-) -> tuple[AccountStore | DocuStoreAccountStore, GroupStore | DocuStoreGroupStore, OrgRegistry]:
+) -> tuple[AccountStore, GroupStore, OrgRegistry]:
     """Stores as the running app hands them to the seeders.
 
     ``api/app.py``'s lifespan always runs ``bootstrap_auth`` before the e2e
