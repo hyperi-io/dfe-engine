@@ -7,6 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The command tree built from the LIVE engine spec, its mounted commands and the entry point."""
 
+import click
 import pytest
 from typer.testing import CliRunner
 
@@ -42,8 +43,12 @@ def test_hidden_operations_have_no_command(cli):
 
 
 def test_path_parameters_are_arguments(cli):
-    usage = CliRunner().invoke(cli.app(["orgs", "get", "--help"]), ["orgs", "get", "--help"]).stdout
-    assert "Example: dfe orgs get <name>" in usage
+    args = ["orgs", "get", "--help"]
+    # CI forces colour and its width wraps lines, so compare the plain text at a fixed width.
+    usage = (
+        CliRunner().invoke(cli.app(args), args, env={"COLUMNS": "200", "FORCE_COLOR": "1"}).stdout
+    )
+    assert "Example: dfe orgs get <name>" in click.unstyle(usage)
 
 
 @pytest.mark.parametrize(
