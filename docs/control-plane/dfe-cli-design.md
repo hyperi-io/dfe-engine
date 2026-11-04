@@ -26,7 +26,7 @@ bundled-installer machinery under `backends/`/`exe/`/`macpkg/`/`docker/`, and th
   the standing "CLI is a wrapper over the API" rule. It runs WHERE the engine libs
   and the gitops repo live (CI, or on the engine host when the API is down).
 - **`dfe`** - the remote HTTP client this document designed. It now ships
-  from this repo (`cli/auto/`, click-based, generated from the OpenAPI spec).
+  from this repo (`cli/auto/`, scalo's `SpecCli` over the OpenAPI spec).
 
 Keep them distinct binaries. `dfe` talks to an engine over HTTP; `dfe-engine` IS the
 engine (and its in-process break-glass path). Everything below is `dfe`.
@@ -130,8 +130,8 @@ ships the equivalent: `openapi-spec/openapi.json` (74 operations, 23 routers). T
   An older CLI against a newer engine still works for the operations it knows; new
   operations appear when the CLI is regenerated/updated.
 
-Implementation: a small generator reads `openapi.json` and emits a click tree
-(`cli/auto/build.py`). The HTTP layer MUST be scalo's
+Implementation: scalo's `SpecCli` reads `openapi.json` and builds the Typer tree
+(`cli/auto/app.py`). The HTTP layer MUST be scalo's
 `HttpClient`/`AsyncHttpClient` (library policy - never raw httpx). Auth, retries,
 pagination, and output live in the shared client core; the generated tree is thin.
 

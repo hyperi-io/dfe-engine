@@ -27,8 +27,12 @@
           }
         },
         "security": [],
-        "x-cli": {
-          "enabled": false
+        "x-scalo": {
+          "cli": {
+            "hidden": true,
+            "aliases": [],
+            "positional": []
+          }
         }
       }
     },
@@ -73,8 +77,12 @@
           }
         },
         "security": [],
-        "x-cli": {
-          "enabled": false
+        "x-scalo": {
+          "cli": {
+            "hidden": true,
+            "aliases": [],
+            "positional": []
+          }
         }
       }
     }

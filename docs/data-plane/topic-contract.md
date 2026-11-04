@@ -36,7 +36,7 @@ this a governed surface rather than a broker admin shell.
 RBAC follows the source scopes: `source:read` to look, `source:deploy` to ensure
 or converge, `source:delete` to remove. The right to deploy a source is the right
 to make its topics exist. The CLI is generated from the same spec, so
-`dfe kafka topics list|ensure|update|remove` is the same surface over HTTP.
+`dfe kafka topics-cmd` (the list) and `dfe kafka topics ensure|update|remove` are the same surface over HTTP.
 
 A deployment that runs no bus answers 503 rather than an empty list, so "no topics
 needed" and "not this deployment's job" are never confused.

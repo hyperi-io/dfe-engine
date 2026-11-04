@@ -42,16 +42,17 @@ import json
 import os
 import stat
 import tempfile
+from typing import Annotated, Literal
 
-import click
+import typer
+
+from dfe_engine.cli.auto.exit import fail
 
 
 def _emitters():
-    """Lazy-import the scalo tool-config emitters.
+    """Lazy-import the scalo tool-config emitters, which need scalo's ``kafka`` extra.
 
-    They ship in ``scalo.kafka.toolconfig`` (scalo-py). Until dfe-engine's scalo
-    pin bumps to the version carrying them, this raises a clean, actionable error
-    rather than an ImportError traceback.
+    Without it this fails with a clean, actionable error rather than an ImportError traceback.
     """
     try:
         from scalo.kafka.toolconfig import (
@@ -60,12 +61,8 @@ def _emitters():
             emit_kcat,
             emit_librdkafka_properties,
         )
-    except ImportError as exc:  # pragma: no cover - exercised once scalo lags
-        raise click.ClickException(
-            "dfe kafka client-config needs scalo.kafka.toolconfig (scalo with the "
-            "Kafka provider abstraction). Bump the scalo pin once scalo-py has "
-            "published, then re-run."
-        ) from exc
+    except ImportError as exc:
+        fail(f"dfe kafka client-config needs scalo.kafka.toolconfig ({exc}): install scalo[kafka].")
     return Connection, emit_librdkafka_properties, emit_kcat, emit_kafbat_cluster
 
 
@@ -77,45 +74,42 @@ def _write_600(body: str, path: str) -> str:
     return path
 
 
-@click.group(name="kafka", no_args_is_help=True)
-def kafka_group() -> None:
-    """Kafka provider tooling: emit client config."""
-
-
-@kafka_group.command("client-config")
-@click.option(
-    "--provider",
-    required=True,
-    help="Provider: strimzi / redpanda / redpanda-cloud / confluent-cloud / msk / plaintext.",
-)
-@click.option(
-    "--tool",
-    type=click.Choice(["properties", "kcat", "kafbat"]),
-    default="properties",
-    help="Output shape: librdkafka .properties (default), kcat -F file (same), or kafbat-ui JSON.",
-)
-@click.option("--bootstrap", default=None, help="Bootstrap servers (else from settings/.env).")
-@click.option("--username", default=None, help="SASL username (else from settings/.env).")
-@click.option("--password", default=None, help="SASL password (else from settings/.env).")
-@click.option("--schema-registry-url", default=None, help="Schema registry URL (kafbat only).")
-@click.option(
-    "--out", default=None, metavar="FILE", help="Write to FILE (chmod 0600) instead of stdout."
-)
-@click.option(
-    "--eval",
-    "eval_",
-    is_flag=True,
-    help='Print `export KCAT_CONFIG=<0600 temp file>` for `eval "$(...)"` so kcat just works.',
-)
-def client_config_cmd(
-    provider: str,
-    tool: str,
-    bootstrap: str | None,
-    username: str | None,
-    password: str | None,
-    schema_registry_url: str | None,
-    out: str | None,
-    eval_: bool,
+def client_config(
+    provider: Annotated[
+        str,
+        typer.Option(
+            help="Provider: strimzi / redpanda / redpanda-cloud / confluent-cloud / msk / plaintext."
+        ),
+    ],
+    tool: Annotated[
+        Literal["properties", "kcat", "kafbat"],
+        typer.Option(
+            help="Output shape: librdkafka .properties (default), kcat -F file (same), or kafbat-ui JSON."
+        ),
+    ] = "properties",
+    bootstrap: Annotated[
+        str | None, typer.Option(help="Bootstrap servers (else from settings/.env).")
+    ] = None,
+    username: Annotated[
+        str | None, typer.Option(help="SASL username (else from settings/.env).")
+    ] = None,
+    password: Annotated[
+        str | None, typer.Option(help="SASL password (else from settings/.env).")
+    ] = None,
+    schema_registry_url: Annotated[
+        str | None, typer.Option(help="Schema registry URL (kafbat only).")
+    ] = None,
+    out: Annotated[
+        str | None,
+        typer.Option(metavar="FILE", help="Write to FILE (chmod 0600) instead of stdout."),
+    ] = None,
+    eval_: Annotated[
+        bool,
+        typer.Option(
+            "--eval",
+            help='Print `export KCAT_CONFIG=<0600 temp file>` for `eval "$(...)"` so kcat just works.',
+        ),
+    ] = False,
 ) -> None:
     """Emit ready-to-use client config for PROVIDER (kcat / confluent / librdkafka)."""
     from dfe_engine.settings import get_settings
@@ -135,7 +129,7 @@ def client_config_cmd(
 
     if tool == "kafbat":
         # kafbat-ui cluster config (a dict) - JSON, for pasting into a clusters list.
-        click.echo(json.dumps(emit_kafbat(provider, conn), indent=2))
+        typer.echo(json.dumps(emit_kafbat(provider, conn), indent=2))
         return
 
     body = emit_kcat(provider, conn)  # kcat + properties are the same librdkafka body
@@ -145,29 +139,13 @@ def client_config_cmd(
         os.close(fd)
         _write_600(body, path)
         # Eval-able: sets KCAT_CONFIG so a bare `kcat -t <topic>` reads this config.
-        click.echo(f"export KCAT_CONFIG={path}")
-        click.echo(f"# eval this, then: kcat -t <topic> -C   (config at {path}, 0600)", err=True)
+        typer.echo(f"export KCAT_CONFIG={path}")
+        typer.echo(f"# eval this, then: kcat -t <topic> -C   (config at {path}, 0600)", err=True)
         return
 
     if out:
         _write_600(body, out)
-        click.echo(f"wrote {out} (0600). Now: kcat -F {out} -t <topic> -C", err=True)
+        typer.echo(f"wrote {out} (0600). Now: kcat -F {out} -t <topic> -C", err=True)
         return
 
-    click.echo(body, nl=False)
-
-
-def attach_kafka(root: click.Group) -> None:
-    """Mount the local ``kafka`` commands beside whatever the spec generated.
-
-    ``dfe kafka topics`` comes from the API spec, so this must ADD to that group
-    rather than replace it: a plain ``add_command`` would drop the whole governed
-    topic surface on the floor. A name the generated group already holds is left
-    alone - the governed route wins over a local duplicate.
-    """
-    generated = root.commands.get(kafka_group.name)
-    if isinstance(generated, click.Group):
-        for name, command in kafka_group.commands.items():
-            generated.commands.setdefault(name, command)
-        return
-    root.add_command(kafka_group)
+    typer.echo(body, nl=False)

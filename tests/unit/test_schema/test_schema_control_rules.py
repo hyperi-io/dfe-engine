@@ -109,7 +109,7 @@ DYNAMIC_OBJECTS = frozenset(
 
 
 def _python_files() -> list[Path]:
-    return sorted(path for path in SRC.rglob("*.py") if "cli/auto/vendor" not in path.as_posix())
+    return sorted(SRC.rglob("*.py"))
 
 
 def _docstring_nodes(tree: ast.AST) -> set[int]:

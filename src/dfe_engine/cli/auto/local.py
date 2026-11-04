@@ -40,10 +40,12 @@ import functools
 import getpass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-import click
+import typer
 
+from dfe_engine.cli.auto.exit import fail
+from dfe_engine.cli.ch_cloud import ch_cloud_app
 from dfe_engine.gitcrud import (
     GitCrud,
     ResourceNotFoundError,
@@ -84,9 +86,7 @@ def _resolve_repo_path(repo: str | None) -> str:
     """The clone path to operate on: ``--repo`` override, else configured local_path."""
     local = repo or _gitops().local_path
     if not local:
-        raise click.ClickException(
-            "no gitops clone path: pass --repo <path> or set DFE_ENGINE_GITOPS_LOCAL_PATH."
-        )
+        fail("no gitops clone path: pass --repo <path> or set DFE_ENGINE_GITOPS_LOCAL_PATH.")
     return local
 
 
@@ -175,23 +175,23 @@ def _resolve_reason(reason: str | None, *, allow_prompt: bool) -> str:
         return reason.strip()
     if allow_prompt:
         try:
-            entered = click.prompt("Break-glass reason (required)", default="", show_default=False)
-        except click.Abort:
+            entered = typer.prompt("Break-glass reason (required)", default="", show_default=False)
+        except typer.Abort:
             entered = ""
         if entered and entered.strip():
             return entered.strip()
-    raise click.ClickException("a break-glass reason is required: pass --reason '<why>'.")
+    fail("a break-glass reason is required: pass --reason '<why>'.")
 
 
 def _guard(*, repo_path: Path, diff_text: str, yes: bool) -> None:
     """Print the target header + diff, then a default y/N confirm (skipped by --yes)."""
     gs = _gitops()
-    click.echo(f"writing to {repo_path} (remote {gs.repo_url or '(none)'}, branch {gs.branch})")
-    click.echo(diff_text)
+    typer.echo(f"writing to {repo_path} (remote {gs.repo_url or '(none)'}, branch {gs.branch})")
+    typer.echo(diff_text)
     if yes:
         return
-    if not click.confirm("Proceed with this break-glass write?", default=False):
-        raise click.Abort()
+    if not typer.confirm("Proceed with this break-glass write?", default=False):
+        raise typer.Abort()
 
 
 def _keda_by_default(cls: str, name: str) -> bool:
@@ -203,7 +203,7 @@ def _keda_by_default(cls: str, name: str) -> bool:
     try:
         from dfe_engine.appmgmt.scaling import keda_by_default
     except ManifestError as exc:
-        click.echo(f"safety: app manifest unreadable ({exc}); KEDA assumed on", err=True)
+        typer.echo(f"safety: app manifest unreadable ({exc}); KEDA assumed on", err=True)
         return True
     return keda_by_default(cls, name)
 
@@ -225,13 +225,13 @@ def _safety_warn(cls: str, name: str, before: dict, after: dict, *, yes: bool) -
     try:
         kept = validate_result(before, after, keda_by_default=_keda_by_default(cls, name))
     except CommitPolicyError as exc:
-        click.echo(f"safety: {exc}", err=True)
-        click.echo("  (the daemon's API would reject this; break-glass can override it)", err=True)
-        if not yes and not click.confirm("Override this safety guard?", default=False):
-            raise click.Abort() from exc
+        typer.echo(f"safety: {exc}", err=True)
+        typer.echo("  (the daemon's API would reject this; break-glass can override it)", err=True)
+        if not yes and not typer.confirm("Override this safety guard?", default=False):
+            raise typer.Abort() from exc
         return
     for violation in kept:
-        click.echo(
+        typer.echo(
             f"safety: {cls}/{name} already breaks a rule, left as it is: {violation}", err=True
         )
 
@@ -254,7 +254,7 @@ def _do_push(repo_path: str) -> None:
     """
     gs = _gitops()
     if not gs.repo_url:
-        click.echo("no remote configured (DFE_ENGINE_GITOPS_REPO_URL unset); nothing pushed.")
+        typer.echo("no remote configured (DFE_ENGINE_GITOPS_REPO_URL unset); nothing pushed.")
         return
     repo = GitopsRepo(
         local_path=repo_path,
@@ -273,16 +273,16 @@ def _do_push(repo_path: str) -> None:
     try:
         result = repo.push_local_commits()
     except GitopsDivergedError as exc:
-        raise click.ClickException(
+        fail(
             f"{exc}. Nothing was pushed and the local commits are kept: bring {gs.branch} "
             "from the remote into this clone with git, then run `dfe local push` again."
-        ) from exc
+        )
     except GitopsRemoteError as exc:
-        raise click.ClickException(f"push to {gs.repo_url} failed: {exc}") from exc
+        fail(f"push to {gs.repo_url} failed: {exc}")
     if result.pushed:
-        click.echo(f"pushed to {gs.repo_url} ({gs.branch}).")
+        typer.echo(f"pushed to {gs.repo_url} ({gs.branch}).")
     else:
-        click.echo("nothing to push (local branch not ahead of remote).")
+        typer.echo("nothing to push (local branch not ahead of remote).")
 
 
 _UNPUSHED_WARNING = (
@@ -298,13 +298,13 @@ def _maybe_push(repo_path: Path, *, push: bool | None, yes: bool) -> None:
     the commit local (safe default - publishing stays a deliberate act).
     """
     if push is False:
-        click.echo(f"committed locally; not pushed (--no-push). {_UNPUSHED_WARNING}")
+        typer.echo(f"committed locally; not pushed (--no-push). {_UNPUSHED_WARNING}")
         return
     do = push is True
     if push is None and not yes:
-        do = click.confirm("Push to the remote now?", default=False)
+        do = typer.confirm("Push to the remote now?", default=False)
     if not do:
-        click.echo(f"committed locally; not pushed. {_UNPUSHED_WARNING}")
+        typer.echo(f"committed locally; not pushed. {_UNPUSHED_WARNING}")
         return
     _do_push(str(repo_path))
 
@@ -319,37 +319,27 @@ def _finish_write(crud: GitCrud, *, push: bool | None, yes: bool) -> None:
     crud.repo.consolidate_if_due()
 
 
-# --- shared option decorators ------------------------------------------------
+# --- shared options ----------------------------------------------------------
 
-
-def _repo_option(f):
-    return click.option(
-        "--repo",
-        default=None,
-        metavar="PATH",
-        help="Gitops clone path (default: configured DFE_ENGINE_GITOPS_LOCAL_PATH).",
-    )(f)
-
-
-def _write_options(f):
-    """The five options every break-glass WRITE shares."""
-    f = _repo_option(f)
-    f = click.option(
-        "--actor", default=None, help="Operator identity for the audit trailer (default: OS user)."
-    )(f)
-    f = click.option(
-        "--reason", default=None, help="REQUIRED break-glass reason (prompted if omitted)."
-    )(f)
-    f = click.option(
-        "--yes", "-y", is_flag=True, help="Skip the confirm prompt (CI). Requires --reason."
-    )(f)
-    f = click.option(
-        "--push/--no-push",
-        "push",
-        default=None,
-        help="Push after the local commit (default: prompt).",
-    )(f)
-    return f
+Repo = Annotated[
+    str | None,
+    typer.Option(
+        metavar="PATH", help="Gitops clone path (default: configured DFE_ENGINE_GITOPS_LOCAL_PATH)."
+    ),
+]
+Actor = Annotated[
+    str | None, typer.Option(help="Operator identity for the audit trailer (default: OS user).")
+]
+Reason = Annotated[
+    str | None, typer.Option(help="REQUIRED break-glass reason (prompted if omitted).")
+]
+Yes = Annotated[
+    bool, typer.Option("--yes", "-y", help="Skip the confirm prompt (CI). Requires --reason.")
+]
+Push = Annotated[
+    bool | None,
+    typer.Option("--push/--no-push", help="Push after the local commit (default: prompt)."),
+]
 
 
 def _friendly(fn):
@@ -365,7 +355,7 @@ def _friendly(fn):
             VersionConflictError,
             ValueError,
         ) as exc:
-            raise click.ClickException(str(exc)) from exc
+            fail(str(exc))
 
     return wrapper
 
@@ -383,9 +373,10 @@ def _parse_value(value: str) -> object:
 # --- the command group -------------------------------------------------------
 
 
-@click.group(name="local", no_args_is_help=True)
-def local_group() -> None:
-    """Break-glass direct gitops CRUD for when the dfe-engine daemon is DEAD.
+local_app = typer.Typer(
+    no_args_is_help=True,
+    rich_markup_mode=None,
+    help="""Break-glass direct gitops CRUD for when the dfe-engine daemon is DEAD.
 
     Writes DIRECTLY to the local deploy-repo clone via the same GitCrud engine the
     API uses; every write is marked [BREAK-GLASS] and needs a --reason. Headline
@@ -396,39 +387,35 @@ def local_group() -> None:
     Read first (classes/ls/get/log/versions/status), fix (set/unset/rm/revert/
     restore), then publish (push). Authority here is git access to the clone, not
     RBAC - the daemon that enforces RBAC is down.
-    """
+    """,
+)
 
 
-@local_group.command("classes")
-@_repo_option
+@local_app.command("classes")
 @_friendly
-def classes_cmd(repo: str | None) -> None:
+def classes_cmd(repo: Repo = None) -> None:
     """List the resource classes GitCrud can address (helmvars, governance, ...)."""
     crud = _build_crud(repo)
     for c in crud.registry.all():
         tag = " (versioned)" if c.versioned else ""
-        click.echo(f"{c.name:18} {c.directory}{tag}")
+        typer.echo(f"{c.name:18} {c.directory}{tag}")
 
 
-@local_group.command("ls")
-@click.argument("cls")
-@_repo_option
+@local_app.command("ls")
 @_friendly
-def ls_cmd(cls: str, repo: str | None) -> None:
+def ls_cmd(cls: str, repo: Repo = None) -> None:
     """List resources in a class, e.g. `dfe local ls helmvars`."""
     names = _build_crud(repo).list(cls)
     if not names:
-        click.echo("(none)")
+        typer.echo("(none)")
         return
     for n in names:
-        click.echo(n)
+        typer.echo(n)
 
 
-@local_group.command("grep")
-@click.argument("term")
-@_repo_option
+@local_app.command("grep")
 @_friendly
-def grep_cmd(term: str, repo: str | None) -> None:
+def grep_cmd(term: str, repo: Repo = None) -> None:
     """Search the gitops repo's YAML for TERM, e.g. find every keda.maxReplicaCount dial."""
     root = Path(_resolve_repo_path(repo))
     hits = 0
@@ -438,42 +425,46 @@ def grep_cmd(term: str, repo: str | None) -> None:
                 continue
             for i, line in enumerate(f.read_text(errors="replace").splitlines(), start=1):
                 if term in line:
-                    click.echo(f"{f.relative_to(root)}:{i}: {line.strip()}")
+                    typer.echo(f"{f.relative_to(root)}:{i}: {line.strip()}")
                     hits += 1
     if not hits:
-        click.echo(f"no match for {term!r}")
+        typer.echo(f"no match for {term!r}")
 
 
-@local_group.command("get")
-@click.argument("cls")
-@click.argument("name")
-@click.option("--path", default=None, help="Dot-path of a single key, e.g. keda.maxReplicaCount.")
-@_repo_option
+@local_app.command("get")
 @_friendly
-def get_cmd(cls: str, name: str, path: str | None, repo: str | None) -> None:
+def get_cmd(
+    cls: str,
+    name: str,
+    path: Annotated[
+        str | None, typer.Option(help="Dot-path of a single key, e.g. keda.maxReplicaCount.")
+    ] = None,
+    repo: Repo = None,
+) -> None:
     """Show a resource doc, or one key with --path (e.g. keda.maxReplicaCount)."""
     doc = _build_crud(repo).get(cls, name)
     if path is None:
-        click.echo(yaml_dump_string(doc), nl=False)
+        typer.echo(yaml_dump_string(doc), nl=False)
         return
     value = get_path(doc, path, _MISSING)
     if value is _MISSING:
-        raise click.ClickException(f"no such path {path!r} in {cls}/{name}")
+        fail(f"no such path {path!r} in {cls}/{name}")
     if isinstance(value, (dict, list)):
-        click.echo(yaml_dump_string(value), nl=False)
+        typer.echo(yaml_dump_string(value), nl=False)
     else:
-        click.echo(str(value))
+        typer.echo(str(value))
 
 
-@local_group.command("log")
-@click.option("--limit", default=50, help="Max entries to show (newest first).")
-@_repo_option
+@local_app.command("log")
 @_friendly
-def log_cmd(limit: int, repo: str | None) -> None:
+def log_cmd(
+    limit: Annotated[int, typer.Option(help="Max entries to show (newest first).")] = 50,
+    repo: Repo = None,
+) -> None:
     """Show the gitcrud audit log, flagging break-glass commits with !! BREAK-GLASS."""
     entries, _ = read_log(_build_crud(repo), limit=limit)
     if not entries:
-        click.echo("no gitcrud history yet.")
+        typer.echo("no gitcrud history yet.")
         return
     for e in entries:
         # A break-glass commit is exactly one carrying DFE-Break-Glass: true; read_log
@@ -481,53 +472,49 @@ def log_cmd(limit: int, repo: str | None) -> None:
         # which is written atomically with that trailer - so the prefix flags them.
         flag = "!! BREAK-GLASS " if e.summary.startswith(BREAK_GLASS_PREFIX) else ""
         when = datetime.fromtimestamp(e.timestamp, tz=UTC).strftime("%Y-%m-%d %H:%M")
-        click.echo(f"{e.sha[:7]} {when} {e.actor:14} {flag}{e.summary}")
+        typer.echo(f"{e.sha[:7]} {when} {e.actor:14} {flag}{e.summary}")
 
 
-@local_group.command("versions")
-@click.argument("cls")
-@click.argument("name")
-@_repo_option
+@local_app.command("versions")
 @_friendly
-def versions_cmd(cls: str, name: str, repo: str | None) -> None:
+def versions_cmd(cls: str, name: str, repo: Repo = None) -> None:
     """List published versions of a versioned resource (e.g. ch_tiers)."""
     versions = VersionedDoc(_build_crud(repo)).list_versions(cls, name)
     if not versions:
-        click.echo("(no published versions)")
+        typer.echo("(no published versions)")
         return
     for v in versions:
-        click.echo(str(v))
+        typer.echo(str(v))
 
 
-@local_group.command("status")
-@_repo_option
+@local_app.command("status")
 @_friendly
-def status_cmd(repo: str | None) -> None:
+def status_cmd(repo: Repo = None) -> None:
     """Show working-tree changes + unpushed-commit count for the clone."""
     from dulwich import porcelain
 
     repo_path = _resolve_repo_path(repo)
     gs = _gitops()
     crud = _build_crud(repo)
-    click.echo(f"repo: {repo_path}")
-    click.echo(f"branch: {gs.branch}  head: {crud.head_revision() or '(none)'}")
+    typer.echo(f"repo: {repo_path}")
+    typer.echo(f"branch: {gs.branch}  head: {crud.head_revision() or '(none)'}")
 
     st = porcelain.status(repo_path)
     staged = [*st.staged["add"], *st.staged["modify"], *st.staged["delete"]]
     dirty = staged or st.unstaged or st.untracked
     if not dirty:
-        click.echo("working tree: clean")
+        typer.echo("working tree: clean")
     else:
-        click.echo(
+        typer.echo(
             f"working tree: {len(staged)} staged, "
             f"{len(st.unstaged)} modified, {len(st.untracked)} untracked"
         )
 
     ahead = _count_unpushed(repo_path, gs)
     if ahead is None:
-        click.echo("unpushed: unknown (no remote or remote unreachable)")
+        typer.echo("unpushed: unknown (no remote or remote unreachable)")
     else:
-        click.echo(f"unpushed commits: {ahead}")
+        typer.echo(f"unpushed commits: {ahead}")
 
 
 def _count_unpushed(repo_path: str, gs) -> int | None:
@@ -557,23 +544,18 @@ def _count_unpushed(repo_path: str, gs) -> int | None:
         return None
 
 
-@local_group.command("set")
-@click.argument("cls")
-@click.argument("name")
-@click.argument("path")
-@click.argument("value")
-@_write_options
+@local_app.command("set")
 @_friendly
 def set_cmd(
     cls: str,
     name: str,
     path: str,
     value: str,
-    repo: str | None,
-    actor: str | None,
-    reason: str | None,
-    yes: bool,
-    push: bool | None,
+    repo: Repo = None,
+    actor: Actor = None,
+    reason: Reason = None,
+    yes: Yes = False,
+    push: Push = None,
 ) -> None:
     """Set a dot-path via GitCrud.set_key, e.g. scale a rogue pod's keda dial to 0.
 
@@ -593,25 +575,21 @@ def set_cmd(
     _guard(repo_path=crud.repo_path, diff_text=_yaml_diff(before, after), yes=yes)
     msg = _bg_message_for_class(crud, cls, name, f"set {path}", actor, reason)
     result = crud.set_key(cls, name, path, val, actor, message=msg)
-    click.echo(f"committed {result.commit_sha or '(unchanged)'}")
+    typer.echo(f"committed {result.commit_sha or '(unchanged)'}")
     _finish_write(crud, push=push, yes=yes)
 
 
-@local_group.command("unset")
-@click.argument("cls")
-@click.argument("name")
-@click.argument("path")
-@_write_options
+@local_app.command("unset")
 @_friendly
 def unset_cmd(
     cls: str,
     name: str,
     path: str,
-    repo: str | None,
-    actor: str | None,
-    reason: str | None,
-    yes: bool,
-    push: bool | None,
+    repo: Repo = None,
+    actor: Actor = None,
+    reason: Reason = None,
+    yes: Yes = False,
+    push: Push = None,
 ) -> None:
     """Remove a dot-path via GitCrud.delete_key (revert a helm var to its default)."""
     crud = _build_crud(repo)
@@ -624,23 +602,20 @@ def unset_cmd(
     _guard(repo_path=crud.repo_path, diff_text=_yaml_diff(before, after), yes=yes)
     msg = _bg_message_for_class(crud, cls, name, f"unset {path}", actor, reason)
     result = crud.delete_key(cls, name, path, actor, message=msg)
-    click.echo(f"committed {result.commit_sha or '(unchanged)'}")
+    typer.echo(f"committed {result.commit_sha or '(unchanged)'}")
     _finish_write(crud, push=push, yes=yes)
 
 
-@local_group.command("rm")
-@click.argument("cls")
-@click.argument("name")
-@_write_options
+@local_app.command("rm")
 @_friendly
 def rm_cmd(
     cls: str,
     name: str,
-    repo: str | None,
-    actor: str | None,
-    reason: str | None,
-    yes: bool,
-    push: bool | None,
+    repo: Repo = None,
+    actor: Actor = None,
+    reason: Reason = None,
+    yes: Yes = False,
+    push: Push = None,
 ) -> None:
     """Delete a whole resource via GitCrud.delete (e.g. remove a helm overlay)."""
     crud = _build_crud(repo)
@@ -650,21 +625,19 @@ def rm_cmd(
     _guard(repo_path=crud.repo_path, diff_text=_yaml_diff(before, {}), yes=yes)
     msg = _bg_message_for_class(crud, cls, name, "delete", actor, reason)
     result = crud.delete(cls, name, actor, message=msg)
-    click.echo(f"committed {result.commit_sha or '(unchanged)'}")
+    typer.echo(f"committed {result.commit_sha or '(unchanged)'}")
     _finish_write(crud, push=push, yes=yes)
 
 
-@local_group.command("revert")
-@click.argument("sha")
-@_write_options
+@local_app.command("revert")
 @_friendly
 def revert_cmd(
     sha: str,
-    repo: str | None,
-    actor: str | None,
-    reason: str | None,
-    yes: bool,
-    push: bool | None,
+    repo: Repo = None,
+    actor: Actor = None,
+    reason: Reason = None,
+    yes: Yes = False,
+    push: Push = None,
 ) -> None:
     """Create a revert-commit that undoes an earlier commit's file changes.
 
@@ -683,10 +656,10 @@ def revert_cmd(
     with Repo(str(repo_path)) as r:
         try:
             commit = r[sha.encode()]
-        except KeyError as exc:
-            raise click.ClickException(f"unknown commit: {sha}") from exc
+        except KeyError:
+            fail(f"unknown commit: {sha}")
         if not isinstance(commit, Commit):
-            raise click.ClickException(f"not a commit: {sha}")
+            fail(f"not a commit: {sha}")
         commit_tree = commit.tree
         parent = r[commit.parents[0]] if commit.parents else None
         parent_tree = parent.tree if isinstance(parent, Commit) else None
@@ -702,7 +675,7 @@ def revert_cmd(
                 p = ch.old.path.decode()
                 blob = r[ch.old.sha]
                 if not isinstance(blob, Blob):
-                    raise click.ClickException(f"cannot revert {p}: it is not a file")
+                    fail(f"cannot revert {p}: it is not a file")
                 artifacts[p] = blob.data.decode("utf-8")
                 old_paths.add(p)
         for ch in changes:
@@ -713,14 +686,14 @@ def revert_cmd(
         diff_text = _revert_diff(r, commit_tree, artifacts, deletions)
 
     if not artifacts and not deletions:
-        click.echo("nothing to revert (commit changed no files).")
+        typer.echo("nothing to revert (commit changed no files).")
         return
     reason = _resolve_reason(reason, allow_prompt=not yes)
     _guard(repo_path=repo_path, diff_text=diff_text, yes=yes)
     short = sha[:7]
     msg = _break_glass_message("ops", short, f"revert {short}", actor, reason)
     result = crud.repo.publish(artifacts, msg, deletions=deletions)
-    click.echo(f"committed {result.commit_sha or '(unchanged)'}")
+    typer.echo(f"committed {result.commit_sha or '(unchanged)'}")
     _finish_write(crud, push=push, yes=yes)
 
 
@@ -764,21 +737,17 @@ def _revert_diff(r, commit_tree, artifacts: dict[str, str], deletions: list[str]
     return "\n".join(x for x in parts if x) or "(no textual change)"
 
 
-@local_group.command("restore")
-@click.argument("cls")
-@click.argument("name")
-@click.argument("version", type=int)
-@_write_options
+@local_app.command("restore")
 @_friendly
 def restore_cmd(
     cls: str,
     name: str,
     version: int,
-    repo: str | None,
-    actor: str | None,
-    reason: str | None,
-    yes: bool,
-    push: bool | None,
+    repo: Repo = None,
+    actor: Actor = None,
+    reason: Reason = None,
+    yes: Yes = False,
+    push: Push = None,
 ) -> None:
     """Roll a versioned resource back to an earlier published version.
 
@@ -790,7 +759,7 @@ def restore_cmd(
     actor = _resolve_actor(actor)
     versions = VersionedDoc(crud).list_versions(cls, name)  # ValueError if not versioned
     if version not in versions:
-        raise click.ClickException(f"{cls}/{name}: no version {version} (have {versions})")
+        fail(f"{cls}/{name}: no version {version} (have {versions})")
     before = crud.get(cls, name)
     after = copy.deepcopy(before)
     after["current"] = int(version)
@@ -800,43 +769,17 @@ def restore_cmd(
     _guard(repo_path=crud.repo_path, diff_text=_yaml_diff(before, after), yes=yes)
     msg = _bg_message_for_class(crud, cls, name, f"restore v{version}", actor, reason)
     result = crud.put(cls, name, after, actor, message=msg)
-    click.echo(f"committed {result.commit_sha or '(unchanged)'}")
+    typer.echo(f"committed {result.commit_sha or '(unchanged)'}")
     _finish_write(crud, push=push, yes=yes)
 
 
-@local_group.command("push")
-@_repo_option
+@local_app.command("push")
 @_friendly
-def push_cmd(repo: str | None) -> None:
+def push_cmd(repo: Repo = None) -> None:
     """Push the clone's local (break-glass) commits to the configured remote."""
     _do_push(_resolve_repo_path(repo))
 
 
-# --- ch-cloud (mounted scalo Typer) + root mounting --------------------------
+# --- ch-cloud ----------------------------------------------------------------
 
-
-def _mount_ch_cloud() -> None:
-    """Mount the ch-cloud lifecycle Typer under ``dfe local ch-cloud``.
-
-    ch_cloud_app is a scalo Typer; typer.main.get_command bridges it to a click
-    command so it slots straight under this click group (it also runs daemon-free,
-    the same break-glass posture as the rest of this group). Guarded so a bridge/
-    import hiccup can never stop the core break-glass commands loading.
-    """
-    try:
-        import typer.main
-
-        from dfe_engine.cli.ch_cloud import ch_cloud_app
-
-        # typer returns a command from its vendored click copy, which click mounts by duck typing.
-        local_group.add_command(typer.main.get_command(ch_cloud_app), name="ch-cloud")  # ty: ignore[invalid-argument-type]
-    except Exception as exc:  # ch-cloud is optional; never break the core group
-        click.echo(f"dfe local ch-cloud is unavailable: {exc}", err=True)
-
-
-_mount_ch_cloud()
-
-
-def attach_local(root: click.Group) -> None:
-    """Mount the ``local`` break-glass group onto the root ``dfe`` command."""
-    root.add_command(local_group)
+local_app.add_typer(ch_cloud_app, name="ch-cloud")

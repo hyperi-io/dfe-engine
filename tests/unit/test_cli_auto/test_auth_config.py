@@ -1,16 +1,14 @@
 """login/logout/auth/config built-ins + credential resolution."""
 
-from __future__ import annotations
-
 import json
 import stat
 
-from dfe_engine.cli.auto.config import Credential, Store
+from scalo.cli.openapi import Credential, Store
 
 
 def test_credentials_file_is_0600_at_creation(tmp_path):
     # The FIRST write must land the file already at 0600 (never briefly wider).
-    store = Store(home=tmp_path / "home")
+    store = Store(tmp_path / "home")
     store.save_credential(Credential(account="alice", token="tok"))
     path = store.credentials_file
     assert path.exists()
@@ -21,13 +19,11 @@ def test_credentials_file_is_0600_at_creation(tmp_path):
 
 
 def test_login_bad_credentials_friendly_error(harness):
-    # Wrong password -> 401 rendered as a friendly Error line + API exit code,
-    # not a raw httpx traceback (exit 1).
     result = harness.invoke(
         ["login", "--url", "http://test", "--username", "admin", "--password", "WRONG"]
     )
-    assert result.exit_code == 254, result.output
-    assert "Error (" in result.output
+    assert result.exit_code == 4, result.output
+    assert "unauthorized" in result.output
     # No credential was stored for the failed login.
     assert harness.store.list_accounts() == []
 
@@ -125,16 +121,14 @@ def test_print_access_token(harness):
 
 
 def test_credential_host_mismatch_warns(harness):
-    """Sending a stored credential to a --url whose host differs from the profile
+    """Sending a stored credential to a --endpoint-url whose host differs from the profile
     URL host emits a stderr warning (warn-only - the call still proceeds). This is
-    the credential-exfil guard: a poisoned DFE_ENGINE_API_URL / stray --url would otherwise
+    the credential-exfil guard: a poisoned DFE_ENGINE_API_URL / stray --endpoint-url would otherwise
     ship the active token to another origin silently."""
     harness.invoke(["login", "--url", "http://test", "--api-key", harness.admin_api_key])
-    result = harness.invoke(["--url", "http://evil.example", "orgs", "list"])
+    result = harness.invoke(["--endpoint-url", "http://evil.example", "orgs", "list"])
     assert result.exit_code == 0, result.output  # warn-only, does not block
-    assert "warning: sending" in result.output
-    assert "evil.example" in result.output
-    assert "differs from the profile URL host test" in result.output
+    assert "credentials to evil.example, not the profile's test" in result.output
 
 
 def test_credential_same_host_no_warning(harness):
