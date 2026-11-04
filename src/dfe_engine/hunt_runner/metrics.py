@@ -43,6 +43,7 @@ SAFE_HORIZON_DEFERRALS = "hunt_safe_horizon_deferrals_total"
 SAFE_HORIZON_DEFERRALS_PER_FIRE = "hunt_safe_horizon_deferrals_per_fire"
 SAFE_HORIZON_CAP_REACHED = "hunt_safe_horizon_cap_reached_total"
 SAFE_HORIZON_CAP_TARGET_LAG = "hunt_safe_horizon_cap_ran_with_target_lag_total"
+SAFE_HORIZON_UNREADABLE = "hunt_safe_horizon_unreadable_total"
 SAFE_HORIZON_SECONDS_BEHIND = "hunt_safe_horizon_seconds_behind"
 SAFE_HORIZON_QUERY_DURATION = "hunt_safe_horizon_query_duration_seconds"
 OVERLAP_ROWS_REREAD = "hunt_overlap_rows_reread_total"
@@ -124,6 +125,11 @@ class HuntRunnerMetrics:
             SAFE_HORIZON_CAP_TARGET_LAG,
             "Fires the deferral cap let run while their detection table lagged, so the "
             "dedupe may have let a duplicate through",
+            ["hunt_id"],
+        )
+        self._unreadable = manager.counter(
+            SAFE_HORIZON_UNREADABLE,
+            "Safe horizon reads that failed, so the fire was held as if the replica lagged",
             ["hunt_id"],
         )
         self._seconds_behind = manager.histogram(
@@ -275,6 +281,12 @@ class HuntRunnerMetrics:
             return
         self._cap_target_lag.labels(hunt_id=hunt_id).inc()
 
+    def safe_horizon_unreadable(self, hunt_id: str) -> None:
+        """Record a safe horizon read that failed, which holds the fire as unknown lag."""
+        if self._manager is None:
+            return
+        self._unreadable.labels(hunt_id=hunt_id).inc()
+
     def overlap_reread(self, hunt_id: str, *, rows: int, duplicates: int) -> None:
         """Record the rows a fire re-read in its overlap and the detections it skipped."""
         if self._manager is None:
@@ -344,6 +356,7 @@ __all__ = [
     "SAFE_HORIZON_DEFERRALS_PER_FIRE",
     "SAFE_HORIZON_QUERY_DURATION",
     "SAFE_HORIZON_SECONDS_BEHIND",
+    "SAFE_HORIZON_UNREADABLE",
     "TICK_DURATION",
     "HuntRunnerMetrics",
     "create",

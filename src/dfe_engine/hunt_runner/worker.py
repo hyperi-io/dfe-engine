@@ -44,6 +44,7 @@ that replica's detection table lags can write and notify a duplicate, which
 
 import json
 import time
+from collections.abc import Callable
 from typing import Any
 
 from clickhouse_connect.driver.exceptions import ClickHouseError
@@ -145,16 +146,20 @@ class HuntWorker:
         safe_horizon: bool = True,
         max_deferral_seconds: int = SAFE_HORIZON_MAX_DEFERRAL_SECONDS,
         commit_allowance_seconds: int = SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self._ch = ch
+        # Times a hold when the server's own clock could not be read with the horizon.
+        self._clock = clock
         self._overlap = overlap_seconds
         self._safe_horizon = safe_horizon
         self._max_deferral = max_deferral_seconds
         self._commit_allowance = commit_allowance_seconds
         # Polls each hunt has been held for, for the per-fire count.
         self._deferrals: dict[str, int] = {}
-        # The fire each hunt was last let go for, and the safe horizon when the cap let it go.
-        self._released: dict[str, tuple[int, int | None]] = {}
+        # The fire each hunt was last let go for, and where the cap left it short: the
+        # horizon, or the window's own start when the horizon could not be read.
+        self._released: dict[str, tuple[int, int | None, bool]] = {}
         # None sends nothing: the unit suite and a runner with no destinations configured.
         self._notifier = notifier
         self._coord = coordinator
@@ -171,8 +176,9 @@ class HuntWorker:
         A fire is held while the horizon is short of it, until the hunt has been held
         for ``max_deferral_seconds``, cut to its interval, counted from the first poll
         it was held across every fire since. Past that it runs, and the next fire
-        re-reads from the horizon it ran short of. A horizon that cannot be read holds
-        nothing.
+        re-reads from the horizon it ran short of. A horizon that cannot be read counts
+        as unknown lag: the fire is held the same way, timed on the local clock, and
+        one the cap lets run leaves the next fire re-reading its whole window.
 
         Args:
             spec: The hunt that is due.
@@ -184,7 +190,9 @@ class HuntWorker:
         tables = _safe_horizon_tables(spec)
         if not self._safe_horizon or not tables:
             return False
+        hunt = spec.hunt_id
         began = time.monotonic()
+        reading = None
         try:
             reading = read_safe_horizon(
                 self._ch,
@@ -194,26 +202,27 @@ class HuntWorker:
             )
         except ClickHouseError as exc:
             logger.warning(
-                "hunt safe horizon unreadable, so the fire runs and the overlap covers it",
-                hunt_id=spec.hunt_id,
+                "hunt safe horizon unreadable, so the fire is held as if the replica lagged",
+                hunt_id=hunt,
                 fire=fire,
                 error=str(exc),
             )
-            return False
+            self._metrics.safe_horizon_unreadable(hunt)
         finally:
             self._metrics.safe_horizon_read(time.monotonic() - began)
-        behind = reading.seconds_behind(fire)
-        self._metrics.safe_horizon_checked(spec.hunt_id, behind)
-        hunt = spec.hunt_id
-        if behind == 0:
-            self._release(hunt, fire, short_of=None)
-            return False
+        if reading is not None:
+            behind = reading.seconds_behind(fire)
+            self._metrics.safe_horizon_checked(hunt, behind)
+            if behind == 0:
+                self._release(hunt, fire, short_of=None)
+                return False
+        now = reading.now if reading is not None else int(self._clock())
         since = self._coord.get_safe_horizon_mark(hunt, DEFERRED_SINCE)
         if since is None:
-            since = reading.now
+            since = now
             self._coord.set_safe_horizon_mark(hunt, DEFERRED_SINCE, since)
         cap = min(self._max_deferral, spec.interval_seconds)
-        if reading.now - since < cap:
+        if now - since < cap:
             self._deferrals[hunt] = self._deferrals.get(hunt, 0) + 1
             self._metrics.safe_horizon_deferred(hunt)
             return True
@@ -222,21 +231,27 @@ class HuntWorker:
             "fire re-reads from that horizon",
             hunt_id=hunt,
             fire=fire,
-            safe_horizon_seconds_behind=behind,
+            safe_horizon_seconds_behind=None if reading is None else reading.seconds_behind(fire),
             deferral_cap_seconds=cap,
-            held_seconds=reading.now - since,
+            held_seconds=now - since,
         )
+        if reading is None:
+            self._release(hunt, fire, short_of=None, unreadable=True)
+            return False
         if reading.target_delay_seconds > 0:
             # The dedupe reads this replica's detections, so a lagging copy can let a duplicate through.
             self._metrics.safe_horizon_cap_ran_with_target_lag(hunt)
         self._release(hunt, fire, short_of=reading.horizon)
         return False
 
-    def _release(self, hunt: str, fire: int, *, short_of: int | None) -> None:
-        """Record a fire let run, how many polls it waited, and the horizon the cap left it short of."""
+    def _release(
+        self, hunt: str, fire: int, *, short_of: int | None, unreadable: bool = False
+    ) -> None:
+        """Record a fire let run, how many polls it waited, and where the cap left it short."""
         deferrals = self._deferrals.pop(hunt, 0)
-        self._metrics.safe_horizon_released(hunt, deferrals=deferrals, capped=short_of is not None)
-        self._released[hunt] = (fire, short_of)
+        capped = short_of is not None or unreadable
+        self._metrics.safe_horizon_released(hunt, deferrals=deferrals, capped=capped)
+        self._released[hunt] = (fire, short_of, unreadable)
 
     @staticmethod
     def _seen(spec: HuntSpec, statement: HuntStatement, start: int, end: int) -> str:
@@ -417,7 +432,9 @@ class HuntWorker:
         # The marks land before the watermark, so a crash between them keeps the
         # re-read range, and a failed mark write leaves the fire due to retry.
         if released is not None:
-            self._settle_safe_horizon(spec.hunt_id, released[1], safe_from, dedupes=dedupes)
+            # A horizon the cap could not read leaves this fire's whole window to re-read.
+            short_of = complete if released[2] else released[1]
+            self._settle_safe_horizon(spec.hunt_id, short_of, safe_from, dedupes=dedupes)
         self._coord.set_watermark(spec.hunt_id, end)
         self._coord.record_run(spec.hunt_id, scheduled_start, written)
         # The ONE line a fire leaves behind: without it a hunt that stops finding

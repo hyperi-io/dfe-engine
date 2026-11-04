@@ -173,11 +173,43 @@ def test_a_fire_with_no_safe_horizon_to_read_reads_nothing(spec, kwargs):
     assert ch.queries == []
 
 
-def test_an_unreadable_safe_horizon_holds_nothing():
-    assert (
-        _worker(_Ch(now=1000, delay=900, broken=True)).hold_for_safe_horizon(RULES_HUNT, 1000)
-        is False
+@pytest.mark.parametrize(
+    ("recovers_at", "safe_from", "next_read_start"),
+    [
+        pytest.param(None, 400, 280, id="unreadable_to_the_cap_re_reads_the_whole_window"),
+        pytest.param(1120, None, 880, id="readable_again_before_the_cap"),
+    ],
+)
+def test_an_unreadable_safe_horizon_holds_the_fire_as_unknown_lag(
+    manager, recovers_at, safe_from, next_read_start
+):
+    """A row at 820, missing while the read fails and replicated at 1050, is still caught."""
+    ch = _Ch(now=1000, broken=True)
+    coord = _Coordinator(400)
+    worker = _worker(
+        ch,
+        manager=manager,
+        coord=coord,
+        overlap_seconds=120,
+        max_deferral_seconds=300,
+        clock=lambda: ch.now,
     )
+
+    while worker.hold_for_safe_horizon(RULES_HUNT, 1000):
+        ch.now += 60
+        if recovers_at is not None and ch.now >= recovers_at:
+            ch.broken = False
+    worker.run(RULES_HUNT, 1000)
+    assert coord.watermark == 1000
+    assert (coord.marks.get("safe_from") or None) == safe_from
+    assert len(manager.observed("hunt_safe_horizon_unreadable_total")) >= 1
+
+    ch.commands.clear()
+    ch.now, ch.broken = 1600, False
+    assert not worker.hold_for_safe_horizon(RULES_HUNT, 1600)
+    worker.run(RULES_HUNT, 1600)
+    [sql] = ch.commands
+    assert f"_timestamp_load >= toDateTime64({next_read_start}, 3)" in sql
 
 
 def test_deferrals_are_counted_per_poll_and_per_fire(manager):
