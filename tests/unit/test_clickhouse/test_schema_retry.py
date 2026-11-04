@@ -15,8 +15,8 @@ from clickhouse_connect.driver.exceptions import DatabaseError
 
 from dfe_engine.clickhouse.bootstrap import SchemaRetry
 from dfe_engine.schema import phase
+from dfe_engine.schema.applier import SchemaApplyError
 from dfe_engine.schema.lock import SchemaLockError, SchemaLockQuorumError
-from dfe_engine.schema.manifest_applier import ManifestApplyError
 from dfe_engine.schema.phase import (
     STATE_CONVERGED,
     STATE_FAILED,
@@ -52,7 +52,7 @@ class TestWhatAnotherPassCanClear:
         [
             _caused_by(SchemaLockError("could not write the lease"), DatabaseError(MEMORY_LIMIT)),
             _caused_by(
-                ManifestApplyError("ClickHouse did not answer"),
+                SchemaApplyError("ClickHouse did not answer"),
                 ConnectionRefusedError(111, "Connection refused"),
             ),
             DatabaseError("Code: 202. DB::Exception: Too many simultaneous queries"),
@@ -67,7 +67,7 @@ class TestWhatAnotherPassCanClear:
         [
             SchemaPlanError("the manifest names a table twice"),
             _caused_by(
-                ManifestApplyError("refused"),
+                SchemaApplyError("refused"),
                 DatabaseError("Code: 62. DB::Exception: Syntax error"),
             ),
         ],
@@ -107,7 +107,7 @@ class TestWhatAnotherPassCanClear:
 
     def test_the_pass_records_a_transient_failure(self, monkeypatch):
         def refused(settings, *, wait_seconds):
-            raise ManifestApplyError("ClickHouse did not answer") from ConnectionRefusedError(
+            raise SchemaApplyError("ClickHouse did not answer") from ConnectionRefusedError(
                 111, "Connection refused"
             )
 

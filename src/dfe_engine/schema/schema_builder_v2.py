@@ -1,7 +1,6 @@
-"""Schema Builder v2 -- Orchestrates schema YAML -> DDL pipeline.
+"""Schema builder -- a Source's schema YAML to its CREATE TABLE and view DDL.
 
-Replaces the dfe_package.yaml-based SchemaBuilder in schema_builder.py.
-Accepts a Source model and produces DDL using the v2 schema pipeline:
+Accepts a Source model and produces DDL through one pipeline:
 
     Source -> SchemaLoader (YAML) -> DDLGenerator (DDL)
 
@@ -176,11 +175,6 @@ class SchemaBuilderV2:
         self._default_header_type = default_header_type or DEFAULT_HEADER_TYPE
         self._default_header_version = default_header_version or DEFAULT_HEADER_VERSION
 
-    @property
-    def ddl_generator(self) -> DDLGenerator:
-        """The generator this builder renders with, for its platform."""
-        return self._ddl_gen
-
     # -- Main entry points -------------------------------------------
 
     def build(self, source: Source) -> SchemaBuildResult:
@@ -260,38 +254,6 @@ class SchemaBuilderV2:
         """True when the snapshot references at least one schema YAML file."""
         cfg = snap.effective_schema()
         return bool(cfg.meta_schema or cfg.derived_schema or cfg.additional_fields)
-
-    def build_ddl_only(
-        self,
-        columns: list[SchemaColumn],
-        table_name: str,
-        config: DDLConfig | None = None,
-    ) -> str:
-        """Generate DDL from pre-composed columns (skip Source loading).
-
-        Useful when columns are already assembled (e.g. in tests).
-        """
-        return self._ddl_gen.generate_create_table(table_name, columns, config)
-
-    def generate_alter_add(
-        self,
-        source: Source,
-        column: SchemaColumn,
-        *,
-        after: str | None = None,
-    ) -> str:
-        """Generate ALTER TABLE ADD COLUMN for a Source."""
-        cfg = self._build_ddl_config(source)
-        return self._ddl_gen.generate_alter_add_column(source.table_name, column, cfg, after=after)
-
-    def generate_alter_modify(
-        self,
-        source: Source,
-        column: SchemaColumn,
-    ) -> str:
-        """Generate ALTER TABLE MODIFY COLUMN for a Source."""
-        cfg = self._build_ddl_config(source)
-        return self._ddl_gen.generate_alter_modify_column(source.table_name, column, cfg)
 
     def build_ddl_config_for_version(self, source: Source, version_id: str) -> DDLConfig:
         """DDL config for a specific source version snapshot."""
@@ -465,10 +427,6 @@ class SchemaBuilderV2:
         return resolve_derived_reference(path_str, self._derived_base_dir, self._schemas_base_dir)
 
     # -- Internal: DDL config ----------------------------------------
-
-    def _build_ddl_config(self, source: Source) -> DDLConfig:
-        """Build DDLConfig from the deployed source version."""
-        return self._build_ddl_config_for_snapshot(source.version())
 
     def _build_ddl_config_for_snapshot(self, snap: SourceVersion) -> DDLConfig:
         """Build DDLConfig from a source version snapshot."""

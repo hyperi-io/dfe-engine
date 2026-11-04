@@ -34,7 +34,6 @@ from dfe_engine.hunts.schedule import latest_fire
 from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.hunts.worker import HuntWorker
 from dfe_engine.schema.applier import SchemaApplier
-from dfe_engine.schema.ddl_writer import DDLFileWriter
 from dfe_engine.schema.plan import render_one
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 from tests.support.recording_metrics import RecordingManager
@@ -66,12 +65,8 @@ def cluster(three_replicas):
     writer, _, reader = (clickhouse_connect.get_client(**p) for p in three_replicas)
     db = f"dfe_lag_{uuid.uuid4().hex[:8]}"
     platform = PlatformProbe(writer).platform
-    applier = SchemaApplier(writer, platform)
-    applier.ensure_database(db)
-    ddl = DDLFileWriter(platform=platform, database=db)
-    for spec in (ddl.default_table_spec(), ddl.detection_table_spec()):
-        applier.ensure_table(db, spec.name, spec.columns, spec.config)
-    for object_id in _COORDINATION_IDS:
+    SchemaApplier(writer, platform).ensure_database(db)
+    for object_id in ("data.main", "data.detection", *_COORDINATION_IDS):
         for statement in render_one(object_id, data_database=db, platform=platform).statements:
             writer.command(statement)
     reader.command(f"SYSTEM SYNC DATABASE REPLICA `{db}`")

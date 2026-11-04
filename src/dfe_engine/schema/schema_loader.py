@@ -154,6 +154,26 @@ def _resolve_subdir(name: str) -> Path:
     )
 
 
+def hunt_schema_path(filename: str, schemas_root: Path | None = None) -> Path:
+    """A file under the dfe-schemas ``hunts/`` directory.
+
+    Raises:
+        FileNotFoundError: No dfe-schemas tree resolved, or it carries no such file.
+    """
+    schemas_root = schemas_root or _resolve_schemas_root()
+    if schemas_root is None:
+        raise FileNotFoundError(
+            f"hunts/{filename} was not found: no dfe-schemas tree resolved. Set "
+            "DFE_ENGINE_SCHEMAS_DIR, or install the dfe-schemas package"
+        )
+    candidate = schemas_root / "hunts" / filename
+    if not candidate.exists():
+        raise FileNotFoundError(
+            f"{str(candidate)!r} was not found. Ensure the dfe-schemas package is installed"
+        )
+    return candidate
+
+
 def _resolve_profiles_dir() -> Path:
     """Resolve the common-header profiles directory: DFE_ENGINE_SCHEMAS_DIR, then the resolved schemas root."""
     return _resolve_subdir(_COMMON_HEADER_SUBDIR)
@@ -545,24 +565,6 @@ class SchemaLoader:
         return result
 
     @staticmethod
-    def load_profile_exclude(source: str | Path, version: str | None = None) -> list[str]:
-        """Read a version's ``profile_exclude`` - header columns it drops.
-
-        A schema composed onto a common header can declare columns of that
-        header it does not want (``hunts/results.yaml`` drops ``_raw`` and
-        ``_tags``). Returns an empty list when the field is absent.
-
-        Raises:
-            SchemaLoadError: If file missing or unparseable.
-        """
-        meta = SchemaLoader.load_version_metadata(source)
-        versions = meta.get("versions") or {}
-        entry = versions.get(version or meta.get("current")) or {}
-        if not isinstance(entry, dict):
-            return []
-        return list(entry.get("profile_exclude") or [])
-
-    @staticmethod
     def load_profile(
         profile_name: str,
         profiles_dir: str | Path | None = None,
@@ -746,8 +748,6 @@ class SchemaLoader:
     def compose(
         profile_columns: list[SchemaColumn],
         source_columns: list[SchemaColumn],
-        *,
-        exclude: list[str] | None = None,
     ) -> list[SchemaColumn]:
         """Compose a full schema: profile header + source-specific columns.
 
@@ -757,17 +757,10 @@ class SchemaLoader:
         Args:
             profile_columns: Common header columns from the profile.
             source_columns: Source-specific schema columns.
-            exclude: Header column names to drop (the schema's
-                ``profile_exclude``). A name the profile does not have is
-                ignored - a schema must compose onto any profile.
 
         Returns:
             Complete ordered list of SchemaColumn models.
         """
-        if exclude:
-            dropped = set(exclude)
-            profile_columns = [col for col in profile_columns if col.name not in dropped]
-
         profile_names = {col.name for col in profile_columns}
         duplicates = [col.name for col in source_columns if col.name in profile_names]
 

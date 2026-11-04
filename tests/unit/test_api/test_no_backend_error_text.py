@@ -60,7 +60,6 @@ from dfe_engine.sampling.models import SampleBackend, SampleRequest
 from dfe_engine.sampling.service import Sampler
 from dfe_engine.schema import phase
 from dfe_engine.schema.applier import SchemaApplyError
-from dfe_engine.schema.manifest_applier import ManifestApplyError
 from dfe_engine.schema.retention import CLICKHOUSE_REFUSED, apply_pinned_defaults
 from dfe_engine.services.schema.json_promotion_service import JsonPromotionError
 from dfe_engine.settings import SourceSettings
@@ -252,7 +251,7 @@ class TestSystem:
         self, api_settings, client, viewer_headers, monkeypatch, audit_events
     ):
         def _no_answer(*_args, **_kwargs):
-            raise _chained(ManifestApplyError, "ClickHouse did not answer")
+            raise _chained(SchemaApplyError, "ClickHouse did not answer")
 
         monkeypatch.setattr(phase, "_connect", _no_answer)
         bootstrap = api_settings.model_copy(

@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_schema/test_applier_ttl.py
-#  Purpose:      SchemaApplier reconciles a table's TTL, not only its columns
+#  Purpose:      The applier reads CREATE and engine_full text and moves a table TTL
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -12,8 +12,6 @@ A fake client stands in for ClickHouse: it answers the ``system.*`` reads the
 applier makes and records every statement it is told to run.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,11 +22,14 @@ from dfe_engine.schema.applier import (
     LiveTable,
     LiveTtl,
     SchemaApplier,
+    SchemaApplyError,
+    read_table,
     ttl_from_engine_full,
     ttl_move,
 )
-from dfe_engine.schema.schema_ddl import DDLConfig
+from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerationError, DDLGenerator
 from dfe_engine.source.models import SchemaColumn
+from dfe_engine.source.type_registry import TypeRegistry
 
 DB = "dfe"
 TABLE = "main"
@@ -57,11 +58,16 @@ class _FakeClient:
     live_ttl_days: int | None
     statements: list[str] = field(default_factory=list)
 
+    def engine_full(self) -> str:
+        return _engine_full(self.live_ttl_days)
+
     def query(self, sql: str, parameters: dict[str, Any] | None = None) -> _Result:
         if "engine_full" in sql:
-            return _Result([[_engine_full(self.live_ttl_days)]])
+            return _Result([["", "", self.engine_full()]])
         if "system.columns" in sql:
-            return _Result([(name,) for name in self.columns])
+            return _Result([(name, "String") for name in self.columns])
+        if "data_skipping_indices" in sql:
+            return _Result([])
         return _Result([[1]])
 
     def command(self, sql: str, settings: dict[str, Any] | None = None) -> None:
@@ -73,6 +79,14 @@ def _columns() -> list[SchemaColumn]:
         SchemaColumn(name="_timestamp_load", type="timestamp", order=0),
         SchemaColumn(name="message", type="text"),
     ]
+
+
+def _definition(ttl_days: int):
+    """The CREATE a table keeping *ttl_days* renders, read."""
+    create = DDLGenerator(TypeRegistry.default()).generate_create_table(
+        TABLE, _columns(), DDLConfig(db=DB, ttl_days=ttl_days, projection_order_by=None)
+    )
+    return read_table(create)
 
 
 def _apply(client: _FakeClient, *, wanted: int | None, dry_run: bool = False):
@@ -163,29 +177,14 @@ def test_a_shorter_ttl_is_still_applied():
     assert change.ttl == "90 -> 30"
 
 
-def test_a_ttl_over_an_absent_column_is_skipped_not_raised():
+def test_a_ttl_over_an_absent_column_is_refused_before_anything_runs():
     client = _FakeClient(columns=["_timestamp_load", "message"], live_ttl_days=None)
     applier = SchemaApplier(client, Platform.SELF_HOSTED)
+    cfg = DDLConfig(db=DB, ttl_days=90, ttl_columns=["gone"], projection_order_by=None)
 
-    change = applier.ensure_table(
-        DB,
-        TABLE,
-        _columns(),
-        DDLConfig(db=DB, ttl_days=90, ttl_columns=["gone"], projection_order_by=None),
-    )
-
+    with pytest.raises(DDLGenerationError, match="gone"):
+        applier.ensure_table(DB, TABLE, _columns(), cfg)
     assert client.statements == []
-    assert change.action == "unchanged"
-    assert change.ttl == ""
-    assert "gone" in change.ttl_skipped
-
-
-def test_a_ttl_already_in_place_is_not_reported_as_skipped():
-    client = _FakeClient(columns=["_timestamp_load", "message"], live_ttl_days=90)
-
-    _, change = _apply(client, wanted=90)
-
-    assert change.ttl_skipped == ""
 
 
 @pytest.mark.parametrize(
@@ -203,10 +202,8 @@ def test_a_live_engine_compares_without_its_replicated_or_shared_prefix(engine: 
 
 def test_a_ttl_in_hours_is_not_read_as_no_ttl_and_a_declared_zero_removes_it():
     class _HourTtlClient(_FakeClient):
-        def query(self, sql: str, parameters: dict[str, Any] | None = None) -> _Result:
-            if "engine_full" in sql:
-                return _Result([["MergeTree ORDER BY x TTL x + toIntervalHour(6) SETTINGS a = 1"]])
-            return super().query(sql, parameters)
+        def engine_full(self) -> str:
+            return "MergeTree ORDER BY x TTL x + toIntervalHour(6) SETTINGS a = 1"
 
     client = _HourTtlClient(columns=["_timestamp_load", "message"], live_ttl_days=None)
 
@@ -229,12 +226,7 @@ def test_a_ttl_in_hours_is_not_read_as_no_ttl_and_a_declared_zero_removes_it():
 def test_a_move_that_deletes_rows_kept_today_is_marked(
     live: LiveTtl | None, wanted: int, expires: bool
 ):
-    move = ttl_move(
-        target="`dfe`.`t`",
-        cfg=DDLConfig(db=DB, ttl_days=wanted),
-        columns=_columns(),
-        live=live,
-    )
+    move = ttl_move(target="`dfe`.`t`", wanted=wanted, definition=_definition(wanted), live=live)
 
     assert "MODIFY TTL _timestamp_load + INTERVAL" in move.statement
     assert move.expires_rows is expires
@@ -242,10 +234,7 @@ def test_a_move_that_deletes_rows_kept_today_is_marked(
 
 def test_removing_a_ttl_never_expires_rows():
     move = ttl_move(
-        target="`dfe`.`t`",
-        cfg=DDLConfig(db=DB, ttl_days=0),
-        columns=_columns(),
-        live=LiveTtl(30, "day"),
+        target="`dfe`.`t`", wanted=0, definition=_definition(0), live=LiveTtl(30, "day")
     )
 
     assert move.statement == "ALTER TABLE `dfe`.`t` REMOVE TTL"
@@ -305,3 +294,60 @@ def test_live_ttl_parsing(engine_full: str, expected: LiveTtl | None, days: int 
 
     assert live == expected
     assert (None if live is None else live.days) == days
+
+
+_CREATE = (
+    "CREATE TABLE IF NOT EXISTS `{db}`.`t` (\n"
+    "    `a.b` LowCardinality(String) DEFAULT 'TTL' COMMENT 'it''s, SETTINGS' CODEC(Delta(8), ZSTD(1)),\n"
+    "    `ts` DateTime64(3),\n"
+    "    INDEX `idx_a.b` mapKeys(`a.b`) TYPE text(tokenizer = array) GRANULARITY 1\n"
+    ") ENGINE = ReplicatedMergeTree ORDER BY (`ts`) TTL `ts` + INTERVAL 2 WEEK\n"
+    "SETTINGS index_granularity = 2048, storage_policy = 'a,b' COMMENT 'ORDER BY x';"
+)
+
+
+# Bare column names that spell a clause or column keyword.
+_KEYWORD_NAMES = (
+    "CREATE TABLE t (`ttl` DateTime, `comment` String, `x` Tuple(default String, codec String))\n"
+    "ENGINE = MergeTree ORDER BY ttl TTL ttl + INTERVAL 30 DAY DELETE WHERE ttl >= 0\n"
+    "SETTINGS index_granularity = 8192"
+)
+
+
+@pytest.mark.parametrize(
+    ("statement", "read", "expected"),
+    [
+        pytest.param(_CREATE, lambda d: list(d.columns), ["a.b", "ts"], id="columns_in_order"),
+        pytest.param(_CREATE, lambda d: d.types["a.b"], "LowCardinality(String)", id="type_alone"),
+        pytest.param(_CREATE, lambda d: d.codecs, {"a.b": ("DELTA", "ZSTD")}, id="codec_families"),
+        pytest.param(_CREATE, lambda d: "a.b" in d.indexes[0].columns, True, id="index_column"),
+        pytest.param(
+            _CREATE, lambda d: d.indexes[0].granularity, None, id="text_index_granularity"
+        ),
+        pytest.param(_CREATE, lambda d: d.clauses["ORDER BY"], "(`ts`)", id="no_clause_in_strings"),
+        pytest.param(_CREATE, lambda d: d.ttl.days, 14, id="ttl_in_weeks"),
+        pytest.param(_CREATE, lambda d: d.settings["storage_policy"], "'a,b'", id="quoted_setting"),
+        pytest.param(
+            _KEYWORD_NAMES,
+            lambda d: d.clauses["TTL"],
+            "ttl + INTERVAL 30 DAY DELETE WHERE ttl >= 0",
+            id="ttl_column_named_ttl",
+        ),
+        pytest.param(_KEYWORD_NAMES, lambda d: d.clauses["ORDER BY"], "ttl", id="order_by_ttl"),
+        pytest.param(
+            _KEYWORD_NAMES,
+            lambda d: d.types["x"],
+            "Tuple(default String, codec String)",
+            id="tuple_fields_named_like_clauses",
+        ),
+        pytest.param(_KEYWORD_NAMES, lambda d: d.codecs, {}, id="no_codec_inside_a_type"),
+    ],
+)
+def test_a_create_reads_as_it_declares(statement, read, expected):
+    assert read(read_table(statement)) == expected
+
+
+@pytest.mark.parametrize("statement", ["CREATE VIEW v AS SELECT 1", "", "CREATE TABLE t 'open"])
+def test_a_statement_with_no_column_body_is_refused(statement: str):
+    with pytest.raises(SchemaApplyError):
+        read_table(statement)

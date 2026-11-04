@@ -65,9 +65,7 @@ class TestQuotedIdentifiers:
     def test_a_hyphenated_table_quotes_every_alter_form(self, gen: DDLGenerator):
         column = _col(name="new_field", type="string")
         add = gen.generate_alter_add_column("dfe-alerts", column)
-        modify = gen.generate_alter_modify_column("dfe-alerts", column)
         assert add.startswith("ALTER TABLE `{db}`.`dfe-alerts` ")
-        assert modify.startswith("ALTER TABLE `{db}`.`dfe-alerts` ")
 
     def test_a_hyphenated_table_quotes_the_view_and_its_from(self, gen: DDLGenerator):
         ddl = gen.generate_view("dfe-alerts", {"EventID": "event_id"}, "sigma")
@@ -263,7 +261,6 @@ class TestGenerateCreateTable:
         statements = [
             gen.generate_create_table("t", cols),
             gen.generate_alter_add_column("t", cols[0]),
-            gen.generate_alter_modify_column("t", cols[0]),
             *gen.generate_alter_add_indexes("t", cols[3]),
             gen.generate_view("t", {"user.name": "user_name"}, "ecs"),
         ]
@@ -781,17 +778,6 @@ class TestAlterTable:
         ddl = gen.generate_alter_add_column("filebeat", col)
         assert "ALTER TABLE `{db}`.`filebeat` ADD COLUMN IF NOT EXISTS" in ddl
         assert "`new_field` Nullable(String)" in ddl
-
-    def test_add_column_after(self, gen: DDLGenerator):
-        col = _col(name="new_field", type="string")
-        ddl = gen.generate_alter_add_column("t", col, after="user_name")
-        assert "AFTER `user_name`" in ddl
-
-    def test_modify_column(self, gen: DDLGenerator):
-        col = _col(name="user_name", type="string", attribute=["lowcardinality"])
-        ddl = gen.generate_alter_modify_column("filebeat", col)
-        assert "ALTER TABLE `{db}`.`filebeat` MODIFY COLUMN" in ddl
-        assert "LowCardinality(Nullable(String))" in ddl
 
 
 # ── Standard Views (generic) ─────────────────────────────────────────

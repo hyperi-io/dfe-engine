@@ -16,12 +16,12 @@ None -- a TypeError that said nothing about what was missing.
 import pytest
 
 from dfe_engine.bootstrap import _seed_stamp, ensure_storage
-from dfe_engine.schema.ddl_writer import DDLFileWriter
 from dfe_engine.schema.schema_loader import (
     SEED_DIR_ENV_VAR,
     SchemaLoadError,
     _resolve_package_schemas_root,
     _resolve_schemas_root,
+    hunt_schema_path,
     resolve_registry_path,
 )
 from dfe_engine.settings import DFESettings, SchemasSettings
@@ -220,7 +220,7 @@ def test_nothing_resolvable_returns_none():
 def test_an_unresolved_root_says_so_instead_of_a_type_error():
     """What the Job actually hit: `NoneType / str` told nobody anything."""
     with pytest.raises(FileNotFoundError, match="no dfe-schemas tree resolved"):
-        DDLFileWriter._resolve_hunt_results_path()
+        hunt_schema_path("results.yaml")
 
 
 def test_the_real_package_ships_every_registry():
@@ -282,4 +282,4 @@ def test_a_resolvable_root_missing_the_file_names_the_path(tmp_path):
     (root / "hunts").mkdir()
 
     with pytest.raises(FileNotFoundError, match=r"detection_checkpoint\.yaml"):
-        DDLFileWriter._resolve_hunt_detection_checkpoint_path(root)
+        hunt_schema_path("detection_checkpoint.yaml", root)
