@@ -683,24 +683,24 @@ class ReplicaPair:
         return params
 
 
-@pytest.fixture
-def two_replicas(request):
-    """Two ClickHouse replicas of one shard on their own docker network, sharing one Keeper.
+@contextmanager
+def _replica_set(
+    request, aliases: tuple[str, ...]
+) -> Iterator[tuple[list[dict], list[str], list[str], str]]:
+    """Start one replica per alias on their own docker network, sharing the first one's Keeper.
 
-    Replica 1 runs Keeper embedded and replica 2 connects to it, and both declare
-    the ``{cluster}`` macro over a ``remote_servers`` cluster naming the pair, which
-    is the shape a DFE cluster deployment has. SQL users and roles live in Keeper
-    unless the test parametrises this fixture indirectly with False. Yields a
-    :class:`ReplicaPair`, and removes both containers and the network on teardown.
+    Yields ``(params, names, docker, spec)`` and removes every container and the network
+    on exit. SQL users and roles live in Keeper unless the test parametrises its fixture
+    indirectly with False.
     """
     clickhouse_connect = pytest.importorskip("clickhouse_connect")
     replicated_access = getattr(request, "param", True)
-    spec = _docker_spec("a two-replica cluster")
+    what = f"a {len(aliases)}-replica cluster"
+    spec = _docker_spec(what)
     docker = _docker_prefix(spec)
     image = dockerhub_image(os.environ.get("DFE_TEST_CH_IMAGE", _DEFAULT_IMAGE))
     test = request.node.nodeid
     network = _container_name(test, "net")
-    aliases = ("chr1", "chr2")
     names = [_container_name(test, f"clickhouse-{alias}") for alias in aliases]
 
     def teardown() -> None:
@@ -713,7 +713,7 @@ def two_replicas(request):
 
     teardown()
     params: list[dict] = []
-    # One identity for both replicas, as a deployment's replicas share one.
+    # One identity for every replica, as a deployment's replicas share one.
     identity = keeper_identity()
     try:
         _run([*docker, "network", "create", "--label", _SUITE_LABEL, network], timeout=60)
@@ -749,17 +749,33 @@ def two_replicas(request):
             params.append(_published_params(docker, name, spec))
             if index == 0:
                 # Replicated access storage refuses to boot without Keeper (exit 231),
-                # so replica 2 starts only once replica 1's Keeper answers.
+                # so the other replicas start only once replica 1's Keeper answers.
                 _connect_when_ready(clickhouse_connect, params[0], attempts=90).close()
         for replica in params:
             _connect_when_ready(clickhouse_connect, replica, attempts=90).close()
     except (subprocess.SubprocessError, FileNotFoundError, ValueError, IndexError) as exc:
         teardown()
-        _unavailable(f"docker host '{spec}' cannot start a two-replica ClickHouse: {exc}")
+        _unavailable(f"docker host '{spec}' cannot start {what}: {exc}")
     except Exception as exc:
         teardown()
-        _unavailable(f"the two-replica ClickHouse did not come up: {exc}")
+        _unavailable(f"{what} did not come up: {exc}")
     try:
+        yield params, names, docker, spec
+    finally:
+        teardown()
+
+
+@pytest.fixture
+def two_replicas(request):
+    """Two ClickHouse replicas of one shard on their own docker network, sharing one Keeper.
+
+    Replica 1 runs Keeper embedded and replica 2 connects to it, and both declare
+    the ``{cluster}`` macro over a ``remote_servers`` cluster naming the pair, which
+    is the shape a DFE cluster deployment has. SQL users and roles live in Keeper
+    unless the test parametrises this fixture indirectly with False. Yields a
+    :class:`ReplicaPair`, and removes both containers and the network on teardown.
+    """
+    with _replica_set(request, ("chr1", "chr2")) as (params, names, docker, spec):
         yield ReplicaPair(
             first=params[0],
             second=params[1],
@@ -767,8 +783,16 @@ def two_replicas(request):
             second_name=names[1],
             spec=spec,
         )
-    finally:
-        teardown()
+
+
+@pytest.fixture
+def three_replicas(request) -> Iterator[list[dict]]:
+    """Three ClickHouse replicas of one shard sharing one Keeper, as :func:`two_replicas` builds.
+
+    Yields each replica's connection params, Keeper's replica first.
+    """
+    with _replica_set(request, ("chr1", "chr2", "chr3")) as (params, _names, _docker, _spec):
+        yield params
 
 
 @pytest.fixture

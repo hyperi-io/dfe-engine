@@ -14,6 +14,9 @@ hunt is assigned to a pod; add a pod and it just competes for claims; kill one a
 its lease expires and is reclaimed. The daemon loop is a thin ``while: tick(); sleep``
 wrapper around this.
 
+A due fire the safe horizon has not reached yet is skipped before its claim and
+stays due, so the next poll checks again. It is neither a failure nor a back-off.
+
 An operator's run-now arrives the same way: the API writes a fire into hunt_run and
 the next tick picks it up. Nothing pushes at the runner, so a run-now needs no
 listener and behaves like any other fire once claimed.
@@ -307,6 +310,9 @@ class HuntRunner:
                 continue
             if self._failures.held(spec.hunt_id, now, requested.get(spec.hunt_id)):
                 self._metrics.fire_held(spec.hunt_id)
+                continue
+            if self._worker.hold_for_safe_horizon(spec, fire):
+                # Still due, so the next poll checks the horizon again: no claim, no back-off.
                 continue
             # The lease is timed from now, not the tick's start: earlier hunts in this
             # tick may have run for minutes, and a lease dated then is already short.

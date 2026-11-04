@@ -207,7 +207,14 @@ class _LosingCoordinator(_RecordingCoordinator):
         return False
 
 
-class _CountingWorker:
+class _Worker:
+    """A worker the safe horizon never holds, as one with no replicated table reads."""
+
+    def hold_for_safe_horizon(self, spec, fire: int) -> bool:
+        return False
+
+
+class _CountingWorker(_Worker):
     """A worker that runs nothing and only counts."""
 
     def __init__(self) -> None:
@@ -265,7 +272,7 @@ def test_a_failed_beat_does_not_cost_the_runs():
     assert worker.runs == 1
 
 
-class _FailingWorker:
+class _FailingWorker(_Worker):
     """A worker whose hunt raises, as a bad statement or a dropped table would."""
 
     def run(self, spec, fire: int) -> None:
@@ -380,7 +387,7 @@ POLL = 15
 MISSING_TABLE = "Code: 60. DB::Exception: Table dfe.firewall does not exist. (UNKNOWN_TABLE)"
 
 
-class _TableWorker:
+class _TableWorker(_Worker):
     """A worker whose hunt reads a table that exists only once ``table_exists`` is set."""
 
     def __init__(self, *, table_exists: bool = False, error: str = MISSING_TABLE) -> None:
@@ -587,7 +594,7 @@ def test_a_hunt_that_leaves_the_specs_is_forgotten():
     assert failures.retry_at("h") is None
 
 
-class _NamingWorker:
+class _NamingWorker(_Worker):
     """A worker that records which hunt each run was for, and can fail every run."""
 
     def __init__(self, *, fails: bool = False) -> None:

@@ -252,6 +252,9 @@ class _LongWorker:
         self._peer = peer
         self.peer_claimed: list[bool] = []
 
+    def hold_for_safe_horizon(self, spec: HuntSpec, fire: int) -> bool:
+        return False
+
     def run(self, spec: HuntSpec, fire: int) -> None:
         # The runner's own client, as a hunt statement uses it, while the lease is renewed.
         self._client.command("SELECT sleep(3)")
@@ -269,7 +272,7 @@ def test_a_run_longer_than_its_lease_keeps_the_hunt_from_peers(ch_params, ch_cli
     peer = ChCoordinator(ch_client, database=dfe_db, worker_id="peer", settle_seconds=0.0)
     worker = _LongWorker(client, peer)
     spec = HuntSpec(hunt_id="long", interval_seconds=60, queries=["SELECT 1"])
-    runner = HuntRunner(holder, worker, {"long": spec})  # ty: ignore[invalid-argument-type]  # a worker carrying only run()
+    runner = HuntRunner(holder, worker, {"long": spec})  # ty: ignore[invalid-argument-type]  # a worker carrying only run() and the hold
 
     assert runner.tick(int(time.time())) == 1
 

@@ -48,7 +48,9 @@ holds the watermark until every rule compiles.
 Every statement reads only the rows whose ``_org_id`` is one of the tenant ids
 the hunt's ``customers`` resolved to (:mod:`~dfe_engine.hunts.customers`), as its
 own conjunct beside the window and the rule, so a hunt for one tenant never writes
-another's matches. A hunt naming no customer, or one the engine did not resolve,
+another's matches. A further conjunct, filled by the runner, leaves out the source
+rows the rule has already detected, so a window re-read in the overlap writes no
+detection twice. A hunt naming no customer, or one the engine did not resolve,
 compiles to nothing. A rule whose brackets do not balance, or that reads another
 table, is dropped, since either would reach rows past that conjunct. The one table
 a rule may read is a lookup database's, which ``hunts.lookup_databases`` lists as
@@ -79,6 +81,8 @@ from dfe_engine.yaml_utils import yaml_load
 from .models import HuntStatement
 
 WINDOW_TOKEN = "{window}"  # noqa: S105, RUF100 - a SQL template placeholder
+# The runner fills it with the conjunct leaving out source rows this rule already detected.
+UNSEEN_TOKEN = "{unseen}"  # noqa: S105, RUF100 - a SQL template placeholder
 
 # The summary row's matched_uuid: no source record, so it can never be taken for a match.
 NIL_UUID = "00000000-0000-0000-0000-000000000000"
@@ -172,6 +176,7 @@ def _count_sql(source_db: str, source_table: str, where: str, tenant_condition: 
         where,
         WINDOW_TOKEN,
         tenant_condition=tenant_condition,
+        unseen_condition=UNSEEN_TOKEN,
     )
     return (
         f"SELECT\n"
@@ -321,6 +326,7 @@ def compile_hunt_queries(
             severity=severity,
             timestamp_placeholder=WINDOW_TOKEN,
             tenant_condition=fence,
+            unseen_condition=UNSEEN_TOKEN,
         )
         statements.append(
             HuntStatement(
@@ -336,6 +342,8 @@ def compile_hunt_queries(
                     "dfe_hunt_name": hunt_id,
                     "dfe_severity": severity,
                 },
+                source=(source_db, source_table),
+                target=(target_db, target_table),
             )
         )
     refused = Counter(str(entry["rule_name"]) for entry in entries)

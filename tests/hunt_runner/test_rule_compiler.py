@@ -69,7 +69,7 @@ def test_one_rule_becomes_one_windowed_insert(tmp_path: Path):
     assert statement.startswith("INSERT INTO `dfe`.`detection`")
     assert "FROM `dfe`.`main`" in statement
     assert (
-        "WHERE {window} AND _org_id IN ('acme') AND (\nprocess_name = 'certutil.exe'\n    )"
+        "WHERE {window} AND _org_id IN ('acme') AND {unseen} AND (\nprocess_name = 'certutil.exe'\n    )"
         in statement
     )
     assert "'certutil' AS rule_id" in statement
@@ -105,7 +105,7 @@ def test_the_rule_runs_in_a_subquery_where_no_label_is_in_scope(tmp_path: Path):
     assert inner == (
         "    SELECT _timestamp_load, _timestamp, _org_id, _uuid, _json\n"
         "    FROM `acme`.`aws-guardduty`\n"
-        "    WHERE {window} AND _org_id IN ('acme') AND (\n"
+        "    WHERE {window} AND _org_id IN ('acme') AND {unseen} AND (\n"
         "severity >= 7\n"
         "    )\n"
         ")\n"
@@ -228,12 +228,12 @@ def test_a_rule_with_only_sql_is_put_through_the_rewriter(tmp_path: Path):
     [
         pytest.param(
             "ServiceName = 'dfe-loader' AND {timestamp_condition}",
-            "WHERE {window} AND _org_id IN ('acme') AND (\nServiceName = 'dfe-loader'\n    )",
+            "WHERE {window} AND _org_id IN ('acme') AND {unseen} AND (\nServiceName = 'dfe-loader'\n    )",
             id="trailing",
         ),
         pytest.param(
             "{timestamp_condition} AND (action = 'delete')",
-            "WHERE {window} AND _org_id IN ('acme') AND (\n(action = 'delete')\n    )",
+            "WHERE {window} AND _org_id IN ('acme') AND {unseen} AND (\n(action = 'delete')\n    )",
             id="leading-sigma",
         ),
     ],
@@ -447,7 +447,7 @@ def test_every_compiled_rule_is_capped_at_the_shipped_default(tmp_path: Path):
     assert statement.rule_id == "flood"
     # The LIMIT closes the statement, after the subquery the rule runs in.
     assert statement.sql.endswith(
-        "WHERE {window} AND _org_id IN ('acme') AND (\n_json.kind = 'flood'\n    )\n)\nLIMIT 1000"
+        "WHERE {window} AND _org_id IN ('acme') AND {unseen} AND (\n_json.kind = 'flood'\n    )\n)\nLIMIT 1000"
     )
 
 
@@ -475,7 +475,7 @@ def test_the_count_reads_the_same_window_and_rule_without_a_limit(tmp_path: Path
     assert inner == (
         "    SELECT _timestamp_load, _timestamp, _org_id\n"
         "    FROM `acme`.`main`\n"
-        "    WHERE {window} AND _org_id IN ('acme') AND (\n"
+        "    WHERE {window} AND _org_id IN ('acme') AND {unseen} AND (\n"
         "_json.kind = 'flood'\n"
         "    )\n"
         ")"
