@@ -29163,14 +29163,6 @@
             }
           }
         },
-        "x-cli": {
-          "enabled": false
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
         "x-scalo": {
           "group": "config",
           "resource": "config",
@@ -29180,11 +29172,16 @@
           "verb": "client",
           "read_only": true,
           "cli": {
-            "hidden": false,
+            "hidden": true,
             "aliases": [],
             "positional": []
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/hyperdx/connection": {
@@ -29350,14 +29347,6 @@
             }
           }
         },
-        "x-cli": {
-          "enabled": false
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
         "x-scalo": {
           "group": "repository",
           "resource": "preferences",
@@ -29368,11 +29357,16 @@
           "verb": "list",
           "read_only": true,
           "cli": {
-            "hidden": false,
+            "hidden": true,
             "aliases": [],
             "positional": []
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       },
       "patch": {
         "tags": [
@@ -29454,14 +29448,6 @@
             }
           }
         },
-        "x-cli": {
-          "enabled": false
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
         "x-scalo": {
           "group": "repository",
           "resource": "preferences",
@@ -29472,11 +29458,16 @@
           "verb": "patch",
           "read_only": false,
           "cli": {
-            "hidden": false,
+            "hidden": true,
             "aliases": [],
             "positional": []
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
     "/api/v1/repository/objects/{scope}/{scope_id}/{namespace}": {
@@ -29568,9 +29559,6 @@
             }
           }
         },
-        "x-cli": {
-          "enabled": false
-        },
         "x-scalo": {
           "group": "repository",
           "resource": "objects",
@@ -29581,7 +29569,7 @@
           "verb": "list",
           "read_only": true,
           "cli": {
-            "hidden": false,
+            "hidden": true,
             "aliases": [],
             "positional": []
           }
@@ -29685,14 +29673,6 @@
             }
           }
         },
-        "x-cli": {
-          "enabled": false
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
         "x-scalo": {
           "group": "repository",
           "resource": "objects",
@@ -29703,11 +29683,16 @@
           "verb": "get",
           "read_only": true,
           "cli": {
-            "hidden": false,
+            "hidden": true,
             "aliases": [],
             "positional": []
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       },
       "put": {
         "tags": [
@@ -29818,14 +29803,6 @@
             }
           }
         },
-        "x-cli": {
-          "enabled": false
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
         "x-scalo": {
           "group": "repository",
           "resource": "objects",
@@ -29836,11 +29813,16 @@
           "verb": "apply",
           "read_only": false,
           "cli": {
-            "hidden": false,
+            "hidden": true,
             "aliases": [],
             "positional": []
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       },
       "delete": {
         "tags": [
@@ -29928,14 +29910,6 @@
             }
           }
         },
-        "x-cli": {
-          "enabled": false
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
         "x-scalo": {
           "group": "repository",
           "resource": "objects",
@@ -29946,11 +29920,16 @@
           "verb": "delete",
           "read_only": false,
           "cli": {
-            "hidden": false,
+            "hidden": true,
             "aliases": [],
             "positional": []
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     }
   },

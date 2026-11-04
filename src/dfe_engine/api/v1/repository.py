@@ -27,11 +27,11 @@ from typing import Any, Literal
 from fastapi import APIRouter, Body, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from scalo.api import scalo_extra
+from scalo.api import CliHints, scalo_extra
 from scalo.logger import logger
 
 from dfe_engine.api import body_limits
-from dfe_engine.api.cli_exposure import CLI_HIDDEN
+from dfe_engine.api.conventions import CLI_HIDDEN
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
@@ -305,7 +305,7 @@ async def patch_preferences(
 @router.get(
     "/objects/{scope}/{scope_id}/{namespace}",
     response_model=list[ObjectEntry],
-    openapi_extra={**CLI_HIDDEN, **scalo_extra(verb="list")},
+    openapi_extra=scalo_extra(verb="list", cli=CliHints(hidden=True)),
 )
 async def list_objects(
     scope: RepositoryScope,

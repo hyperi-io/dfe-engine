@@ -23,12 +23,12 @@ column type change and a TTL change. A changed ORDER BY or PARTITION BY stays
 refused: ClickHouse has no operation for it and the table has to be rebuilt.
 """
 
-from __future__ import annotations
-
 import json
-from typing import Any
+from typing import Annotated, Any
 
-import click
+import typer
+
+from dfe_engine.cli.auto.exit import fail
 
 
 def _settings() -> Any:
@@ -46,14 +46,15 @@ def _client(settings: Any) -> Any:
     ).get_clickhouse_client()
 
 
-@click.group("schema")
-def schema_group() -> None:
-    """Plan, apply and read the DFE ClickHouse schema."""
+schema_app = typer.Typer(
+    help="Plan, apply and read the DFE ClickHouse schema.", no_args_is_help=True
+)
 
 
-@schema_group.command("plan")
-@click.option("--json", "as_json", is_flag=True, help="Emit the plan as JSON.")
-def plan_cmd(as_json: bool) -> None:
+@schema_app.command("plan")
+def plan_cmd(
+    as_json: Annotated[bool, typer.Option("--json", help="Emit the plan as JSON.")] = False,
+) -> None:
     """Report what an apply would do. Changes nothing."""
     from dfe_engine.schema.phase import apply_plan
     from dfe_engine.schema.plan import build_plan
@@ -64,10 +65,10 @@ def plan_cmd(as_json: bool) -> None:
         plan = build_plan(settings=settings, client=client)
         report = apply_plan(client, plan, dry_run=True)
     except Exception as exc:
-        raise click.ClickException(str(exc)) from exc
+        fail(str(exc))
 
     if as_json:
-        click.echo(
+        typer.echo(
             json.dumps(
                 {
                     "schemas_version": plan.schemas_version,
@@ -84,22 +85,24 @@ def plan_cmd(as_json: bool) -> None:
             )
         )
         return
-    click.echo(f"dfe-schemas {plan.schemas_version}, platform {plan.platform}")
+    typer.echo(f"dfe-schemas {plan.schemas_version}, platform {plan.platform}")
     for outcome in report.outcomes:
-        click.echo(outcome.describe())
+        typer.echo(outcome.describe())
     for refusal in plan.refused:
-        click.echo(f"overlay refused {refusal}")
-    click.echo(report.summary())
+        typer.echo(f"overlay refused {refusal}")
+    typer.echo(report.summary())
 
 
-@schema_group.command("apply")
-@click.option(
-    "--allow-drift",
-    is_flag=True,
-    help="Also apply the changes the boot phase refuses: a column type, and a TTL.",
-)
-@click.option("--json", "as_json", is_flag=True, help="Emit the outcome as JSON.")
-def apply_cmd(allow_drift: bool, as_json: bool) -> None:
+@schema_app.command("apply")
+def apply_cmd(
+    allow_drift: Annotated[
+        bool,
+        typer.Option(
+            help="Also apply the changes the boot phase refuses: a column type, and a TTL."
+        ),
+    ] = False,
+    as_json: Annotated[bool, typer.Option("--json", help="Emit the outcome as JSON.")] = False,
+) -> None:
     """Run the boot phase by hand, under the same lease.
 
     Exits 1 when the pass failed or another applier held the lease for the whole
@@ -110,33 +113,34 @@ def apply_cmd(allow_drift: bool, as_json: bool) -> None:
 
     state = run_bootstrap(settings=_settings(), allow_drift=allow_drift, metrics=metrics.create())
     if as_json:
-        click.echo(json.dumps(state.as_dict(), indent=2))
+        typer.echo(json.dumps(state.as_dict(), indent=2))
     else:
-        click.echo(f"state {state.state}, dfe-schemas {state.schemas_version}")
+        typer.echo(f"state {state.state}, dfe-schemas {state.schemas_version}")
         for count, value in state.counts.items():
-            click.echo(f"  {count}: {value}")
+            typer.echo(f"  {count}: {value}")
         for refusal in state.refused:
-            click.echo(f"refused {refusal}")
+            typer.echo(f"refused {refusal}")
         # Topic drift is reported, never applied, so it does not gate the exit
         # code -- but it has to reach the human branch or a deployment that
         # adopted a foreign topic shape reads as converged with nothing to see.
         for drift in state.topics_drift:
-            click.echo(f"topic drift {drift}")
+            typer.echo(f"topic drift {drift}")
         for created in state.topics_created:
-            click.echo(f"topic created {created}")
+            typer.echo(f"topic created {created}")
         if state.topics_skipped:
-            click.echo(f"topics skipped: {state.topics_skipped}")
+            typer.echo(f"topics skipped: {state.topics_skipped}")
         if state.error:
-            click.echo(f"error: {state.error}", err=True)
+            typer.echo(f"error: {state.error}", err=True)
     if not state.ready:
-        raise click.exceptions.Exit(1)
+        raise typer.Exit(1)
     if state.refused:
-        raise click.exceptions.Exit(2)
+        raise typer.Exit(2)
 
 
-@schema_group.command("status")
-@click.option("--json", "as_json", is_flag=True, help="Emit the ledger as JSON.")
-def status_cmd(as_json: bool) -> None:
+@schema_app.command("status")
+def status_cmd(
+    as_json: Annotated[bool, typer.Option("--json", help="Emit the ledger as JSON.")] = False,
+) -> None:
     """Which dfe-schemas release each object on this cluster came from."""
     from dfe_engine.schema.ledger import MigrationLedger
     from dfe_engine.schema.plan import LEDGER_ID, build_plan
@@ -152,7 +156,7 @@ def status_cmd(as_json: bool) -> None:
             table=ledger_object.name,
         ).checksums()
     except Exception as exc:
-        raise click.ClickException(str(exc)) from exc
+        fail(str(exc))
 
     recorded = [
         {
@@ -167,18 +171,13 @@ def status_cmd(as_json: bool) -> None:
         for row in sorted(rows.values(), key=lambda entry: (entry.database, entry.object))
     ]
     if as_json:
-        click.echo(json.dumps(recorded, indent=2))
+        typer.echo(json.dumps(recorded, indent=2))
         return
     if not recorded:
-        click.echo("the ledger is empty; the schema phase has not applied here")
+        typer.echo("the ledger is empty; the schema phase has not applied here")
         return
     for row in recorded:
-        click.echo(
+        typer.echo(
             f"{row['object']}  {row['kind']}  dfe-schemas {row['schemas_version']}  "
             f"{row['platform']}  {row['checksum'][:12]}"
         )
-
-
-def attach_schema(root: click.Group) -> None:
-    """Mount the ``schema`` group onto the root ``dfe`` command."""
-    root.add_command(schema_group)

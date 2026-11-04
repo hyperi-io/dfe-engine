@@ -18,7 +18,7 @@ else names an operation.
 from collections.abc import Sequence
 
 from fastapi.routing import APIRoute, iter_route_contexts
-from scalo.api import Hierarchy
+from scalo.api import CliHints, Hierarchy, scalo_extra
 from starlette.routing import BaseRoute
 
 # The root resources of the hierarchy the API moves to.
@@ -75,6 +75,10 @@ HIERARCHY = Hierarchy(
     plurals=PLURALS,
     tool_prefix="dfe_",
 )
+
+# `openapi_extra` for an operation the generated `dfe` CLI leaves out: machine and scaler
+# endpoints, UI-only surfaces, and the flows `dfe login` handles itself.
+CLI_HIDDEN = scalo_extra(cli=CliHints(hidden=True))
 
 # Routers whose shape a protocol fixes: token issue, OIDC, SCIM (RFC 7644), JWKS, the e2e helpers.
 PROTOCOL_ROUTERS = (

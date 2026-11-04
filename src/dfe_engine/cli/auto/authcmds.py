@@ -1,314 +1,221 @@
 #  Project:      dfe-engine
 #  File:         cli/auto/authcmds.py
-#  Purpose:      Hand-written login/logout/auth/config built-in command groups
+#  Purpose:      Hand-written login/logout/auth/config commands over scalo's profile store
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Built-in (non-generated) command groups: ``login``/``logout``/``auth``/``config``.
+"""The credential and configuration commands that have no OpenAPI operation.
 
-These are the credential + configuration surface that has no OpenAPI operation of
-its own (login/refresh are ``x-cli`` hidden precisely because the CLI handles them
-here - it stores the returned JWT in the credential file). Everything else in the
-tree is generated from the spec.
+``login`` stores the credential the later commands send. ``auth list`` and
+``auth print-access-token`` sit beside the generated ``auth`` operations, and
+``config`` reads and writes the profile files.
 """
 
-import click
-import httpx
-import httpx2
+from typing import Annotated
 
-from .build import HelpGroup
-from .config import Credential, Store
-from .errors import HTTP_ERRORS, DfeConfigError, handle
-
-
-def _store(ctx: click.Context) -> Store:
-    return ctx.obj.store
+import typer
+from scalo.cli.openapi import Credential, Invocation, SpecCli, invocation
+from scalo.cli.openapi.client import Client
+from scalo.cli.openapi.errors import ApiError, CliConfigError
+from scalo.cli.openapi.transport import Response, TransportError
 
 
-def _handle_http(ctx: click.Context, exc: httpx.HTTPError | httpx2.HTTPError) -> None:
-    """Render an HTTP failure from a built-in the same way generated commands do.
-
-    The hand-written built-ins bypass the generated ``_make_callback`` wrapper, so
-    without this a bad-credentials login re-raises a raw ``HTTPStatusError``
-    (traceback, exit 1). Route it through ``errors.handle`` for the friendly
-    ``Error (401): ...`` line + the right taxonomy exit code.
-    """
-    opts = ctx.obj
-    emit = opts.emit if opts.out_stream is not None else None
-    code = handle(exc, debug=opts.debug, emit=emit)
-    ctx.exit(code)
-
-
-def _emit(ctx: click.Context, message: str) -> None:
-    """Write built-in command output through the (injectable) sink.
-
-    Routes via ``GlobalOptions.emit`` so output is captured deterministically in
-    tests and lands on the terminal in normal use - the same path the generated
-    commands take.
-    """
-    ctx.obj.emit(message)
+def _send(
+    run: Invocation,
+    url: str,
+    method: str,
+    path: str,
+    credential: Credential | None = None,
+    body: object = None,
+) -> Response:
+    """One request to ``url``, raising ``ApiError`` on a non-2xx answer."""
+    cli = run.cli
+    client = Client(
+        url, credential, cli.transport, api_key_header=cli.api_key_header, timeout=cli.timeout
+    )
+    reply = client.send(method, path, body=body)
+    if not reply.ok:
+        raise ApiError(reply)
+    return reply
 
 
-# -- login / logout ----------------------------------------------------------
+def _whoami(run: Invocation, url: str, api_key: str) -> str | None:
+    """The account an API key belongs to, ``None`` when the engine will not say."""
+    try:
+        reply = _send(run, url, "GET", "/api/v1/auth/me", Credential(account="?", api_key=api_key))
+        return (reply.json() or {}).get("user_id")
+    except ApiError, TransportError, ValueError:
+        return None
 
 
-@click.command()
-@click.option("--url", help="Engine base URL, e.g. https://engine.example:8000")
-@click.option("--api-key", help="Authenticate with a static API key.")
-@click.option("--username", "-u", help="Username for password login.")
-@click.option("--password", "-p", help="Password for password login.")
-@click.option("--configuration", help="Named configuration (profile) to write to.")
-@click.pass_context
 def login(
-    ctx: click.Context,
-    url: str | None,
-    api_key: str | None,
-    username: str | None,
-    password: str | None,
-    configuration: str | None,
+    url: Annotated[
+        str | None, typer.Option(help="Engine base URL, e.g. https://engine.example:8000")
+    ] = None,
+    api_key: Annotated[str | None, typer.Option(help="Authenticate with a static API key.")] = None,
+    username: Annotated[
+        str | None, typer.Option("--username", "-u", help="Username for password login.")
+    ] = None,
+    password: Annotated[
+        str | None, typer.Option("--password", "-p", help="Password for password login.")
+    ] = None,
+    profile: Annotated[
+        str | None, typer.Option(help="Named configuration (profile) to write to.")
+    ] = None,
 ) -> None:
     """Authenticate and store credentials for later commands.
 
     Either pass --api-key, or --username/--password to exchange for a JWT. With no
     new credentials but a valid stored one, just re-activates the profile.
     """
-    store = _store(ctx)
-    profile = configuration or store.active_profile()
-
+    run = invocation()
+    store = run.store
+    name = profile or run.profile or store.active_profile()
     if url:
-        store.set_value("url", url, profile)
-    effective_url = url or store.get_value("url", profile)
-    if not effective_url:
-        raise DfeConfigError("--url is required for the first login to a profile.")
+        store.set_value("url", url, name)
+    target = url or store.get_value("url", name)
+    if not target:
+        raise CliConfigError("--url is required for the first login to a profile.")
 
-    account: str | None = None
     credential: Credential | None = None
-
-    try:
-        if api_key:
-            # Resolve the account label from /auth/me when possible; fall back to a
-            # generic label so the credential is still keyable.
-            account = _whoami(ctx, effective_url, Credential(account="?", api_key=api_key))
-            account = account or username or "api-key"
-            credential = Credential(account=account, api_key=api_key)
-        elif username and password:
-            token = _password_login(ctx, effective_url, username, password)
-            account = username
-            credential = Credential(account=account, token=token)
-        else:
-            # No new creds: re-activate an existing one (gcloud shortcut).
-            account = store.get_value("account", profile)
-            if not account or store.get_credential(account) is None:
-                raise DfeConfigError(
-                    "No stored credentials for this profile. Pass --api-key or "
-                    "--username/--password."
-                )
-    except HTTP_ERRORS as exc:
-        # e.g. bad password -> 401. Render friendly + right exit code (not a raw
-        # traceback), the same way the generated commands do.
-        _handle_http(ctx, exc)
+    if api_key:
+        account = _whoami(run, target, api_key) or username or "api-key"
+        credential = Credential(account=account, api_key=api_key)
+    elif username and password:
+        reply = _send(
+            run,
+            target,
+            "POST",
+            "/api/v1/auth/login",
+            body={"username": username, "password": password},
+        )
+        account = username
+        credential = Credential(account=account, token=reply.json()["access_token"])
+    else:
+        account = store.get_value("account", name)
+        if not account or store.get_credential(account) is None:
+            raise CliConfigError(
+                "No stored credentials for this profile. Pass --api-key or --username/--password."
+            )
 
     if credential is not None:
         store.save_credential(credential)
-        store.set_value("account", credential.account, profile)
-    store.set_active_profile(profile)
+        store.set_value("account", credential.account, name)
+    store.set_active_profile(name)
+    typer.echo(f"You are now logged in as {account}. Active endpoint: {target}")
 
-    _emit(ctx, f"You are now logged in as {account}. Active endpoint: {effective_url}")
 
-
-@click.command()
-@click.option("--configuration", help="Named configuration (profile) to clear.")
-@click.pass_context
-def logout(ctx: click.Context, configuration: str | None) -> None:
+def logout(
+    profile: Annotated[
+        str | None, typer.Option(help="Named configuration (profile) to clear.")
+    ] = None,
+) -> None:
     """Clear the stored credential + active account for a profile."""
-    store = _store(ctx)
-    profile = configuration or store.active_profile()
-    account = store.get_value("account", profile)
+    run = invocation()
+    name = profile or run.profile or run.store.active_profile()
+    account = run.store.get_value("account", name)
     if account:
-        store.delete_credential(account)
-        store.set_value("account", "", profile)
-        _emit(ctx, f"Logged out {account}.")
+        run.store.delete_credential(account)
+        run.store.set_value("account", "", name)
+        typer.echo(f"Logged out {account}.")
     else:
-        _emit(ctx, "No active account to log out.")
-    ctx.invoke(auth_list)
+        typer.echo("No active account to log out.")
+    auth_list()
 
 
-def _password_login(ctx: click.Context, url: str, username: str, password: str) -> str:
-    """POST /api/v1/auth/login and return the access token."""
-    # retries=0: the login POST is non-idempotent - never auto-retry it.
-    client = ctx.obj.client_for(url, None, retries=0)
-    try:
-        response = client.raw(
-            "POST",
-            "/api/v1/auth/login",
-            json={"username": username, "password": password},
-        )
-        return response.json()["access_token"]
-    finally:
-        client.close()
-
-
-def _whoami(ctx: click.Context, url: str, credential: Credential) -> str | None:
-    """GET /api/v1/auth/me and return the user_id, or None on any failure."""
-    client = ctx.obj.client_for(url, credential)
-    try:
-        headers = (
-            {"X-API-Key": credential.api_key}
-            if credential.is_api_key
-            else {"Authorization": f"Bearer {credential.token}"}
-        )
-        response = client.raw("GET", "/api/v1/auth/me", headers=headers)
-        return response.json().get("user_id")
-    except Exception:
-        return None
-    finally:
-        client.close()
-
-
-# -- auth group --------------------------------------------------------------
-
-
-@click.group("auth", cls=HelpGroup, no_args_is_help=True)
-def auth_group() -> None:
-    """Inspect stored credentials + profiles."""
-
-
-@auth_group.command("list")
-@click.pass_context
-def auth_list(ctx: click.Context) -> None:
+def auth_list() -> None:
     """List configured accounts, marking the active one."""
-    store = _store(ctx)
-    active_profile = store.active_profile()
-    active_account = store.get_value("account", active_profile)
+    store = invocation().store
+    active = store.get_value("account", store.active_profile())
     accounts = store.list_accounts()
     if not accounts:
-        _emit(ctx, "No credentials stored. Run `dfe login ...`.")
-        return
+        typer.echo("No credentials stored. Run `dfe login ...`.")
     for account in accounts:
-        marker = " (active)" if account == active_account else ""
-        _emit(ctx, f"{account}{marker}")
+        typer.echo(f"{account}{' (active)' if account == active else ''}")
 
 
-@auth_group.command("print-access-token")
-@click.pass_context
-def auth_print_token(ctx: click.Context) -> None:
+def print_access_token() -> None:
     """Print the active token to stdout (for scripts)."""
-    store = _store(ctx)
-    profile = ctx.obj.configuration or store.active_profile()
-    account = store.get_value("account", profile)
+    run = invocation()
+    account = run.store.get_value("account", run.profile or run.store.active_profile())
     if not account:
-        raise DfeConfigError("No active account.")
-    credential = store.get_credential(account)
+        raise CliConfigError("No active account.")
+    credential = run.store.get_credential(account)
     if credential is None or credential.value is None:
-        raise DfeConfigError("No stored token for the active account.")
-    _emit(ctx, credential.value or "")
+        raise CliConfigError("No stored token for the active account.")
+    typer.echo(credential.value)
 
 
-# -- config group ------------------------------------------------------------
+config_app = typer.Typer(
+    help="Read and write CLI configuration (INI-backed profiles).", no_args_is_help=True
+)
+configurations_app = typer.Typer(
+    help="Manage named configurations (profiles).", no_args_is_help=True
+)
+config_app.add_typer(configurations_app, name="configurations")
 
 
-@click.group("config", cls=HelpGroup, no_args_is_help=True)
-def config_group() -> None:
-    """Read and write CLI configuration (INI-backed profiles)."""
-
-
-@config_group.command("set")
-@click.argument("key")
-@click.argument("value")
-@click.pass_context
-def config_set(ctx: click.Context, key: str, value: str) -> None:
+@config_app.command("set")
+def config_set(key: str, value: str) -> None:
     """Set a config KEY to VALUE in the active profile."""
-    _store(ctx).set_value(key, value)
-    _emit(ctx, f"Set {key}.")
+    invocation().store.set_value(key, value)
+    typer.echo(f"Set {key}.")
 
 
-@config_group.command("get")
-@click.argument("key")
-@click.pass_context
-def config_get(ctx: click.Context, key: str) -> None:
+@config_app.command("get")
+def config_get(key: str) -> None:
     """Print a single config KEY from the active profile."""
-    value = _store(ctx).get_value(key)
+    value = invocation().store.get_value(key)
     if value is None:
-        raise DfeConfigError(f"'{key}' is not set.")
-    _emit(ctx, value)
+        invocation().fail(CliConfigError(f"'{key}' is not set."))
+    typer.echo(value)
 
 
-@config_group.command("list")
-@click.pass_context
-def config_list(ctx: click.Context) -> None:
+@config_app.command("list")
+def config_list() -> None:
     """Print all config keys for the active profile."""
-    store = _store(ctx)
-    items = store.profile_items()
-    _emit(ctx, f"[{store.active_profile()}]")
-    for key, value in items.items():
-        _emit(ctx, f"{key} = {value}")
+    store = invocation().store
+    typer.echo(f"[{store.active_profile()}]")
+    for key, value in store.profile_items().items():
+        typer.echo(f"{key} = {value}")
 
 
-@config_group.group("configurations", cls=HelpGroup, no_args_is_help=True)
-def configurations_group() -> None:
-    """Manage named configurations (profiles)."""
-
-
-@configurations_group.command("list")
-@click.pass_context
-def configurations_list(ctx: click.Context) -> None:
+@configurations_app.command("list")
+def configurations_list() -> None:
     """List named configurations, marking the active one."""
-    store = _store(ctx)
+    store = invocation().store
     active = store.active_profile()
-    names = store.list_profiles() or [active]
-    for name in names:
-        marker = " (active)" if name == active else ""
-        _emit(ctx, f"{name}{marker}")
+    for name in store.list_profiles() or [active]:
+        typer.echo(f"{name}{' (active)' if name == active else ''}")
 
 
-@configurations_group.command("activate")
-@click.argument("name")
-@click.pass_context
-def configurations_activate(ctx: click.Context, name: str) -> None:
+@configurations_app.command("activate")
+def configurations_activate(name: str) -> None:
     """Make NAME the active configuration."""
-    _store(ctx).set_active_profile(name)
-    _emit(ctx, f"Activated configuration [{name}].")
+    invocation().store.set_active_profile(name)
+    typer.echo(f"Activated configuration [{name}].")
 
 
-@configurations_group.command("create")
-@click.argument("name")
-@click.pass_context
-def configurations_create(ctx: click.Context, name: str) -> None:
+@configurations_app.command("create")
+def configurations_create(name: str) -> None:
     """Create a new (empty) named configuration."""
-    _store(ctx).create_profile(name)
-    _emit(ctx, f"Created configuration [{name}].")
+    invocation().store.create_profile(name)
+    typer.echo(f"Created configuration [{name}].")
 
 
-@configurations_group.command("delete")
-@click.argument("name")
-@click.pass_context
-def configurations_delete(ctx: click.Context, name: str) -> None:
+@configurations_app.command("delete")
+def configurations_delete(name: str) -> None:
     """Delete a named configuration."""
-    _store(ctx).delete_profile(name)
-    _emit(ctx, f"Deleted configuration [{name}].")
+    invocation().store.delete_profile(name)
+    typer.echo(f"Deleted configuration [{name}].")
 
 
-def _merge_group(root: click.Group, builtin: click.Group) -> None:
-    """Merge a built-in group's commands into any same-named generated group.
-
-    The spec already produces an ``auth`` group (accounts/groups/roles/...); the
-    built-in ``auth list``/``print-access-token`` must live ALONGSIDE those, not
-    replace them. If no generated group exists (e.g. ``config`` has no exposed API
-    operations) the built-in group is mounted whole.
-    """
-    existing = root.commands.get(builtin.name)
-    if isinstance(existing, click.Group):
-        for name, command in builtin.commands.items():
-            existing.add_command(command, name)
-    else:
-        root.add_command(builtin)
-
-
-def attach_builtins(root: click.Group) -> None:
-    """Mount the hand-written groups onto the root (merging where names collide)."""
-    root.add_command(login)
-    root.add_command(logout)
-    _merge_group(root, auth_group)
-    _merge_group(root, config_group)
+def attach_builtins(cli: SpecCli) -> None:
+    """Mount the hand-written commands onto the generated tree."""
+    cli.command("login")(login)
+    cli.command("logout")(logout)
+    cli.command("auth", "list")(auth_list)
+    cli.command("auth", "print-access-token")(print_access_token)
+    cli.add_typer(config_app, "config")
