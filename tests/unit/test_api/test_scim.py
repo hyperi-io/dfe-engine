@@ -255,34 +255,6 @@ class TestScimUsers:
         assert resp.status_code == 404
         assert resp.json()["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:Error"]
 
-    def test_list_users(self, client, admin_headers):
-        client.post(
-            f"{BASE}/Users",
-            json={"schemas": [USER_SCHEMA], "userName": "scim-list-1"},
-            headers=admin_headers,
-        )
-        resp = client.get(f"{BASE}/Users", headers=admin_headers)
-        assert resp.status_code == 200
-        body = resp.json()
-        assert LIST_SCHEMA in body["schemas"]
-        names = {u["userName"] for u in body["Resources"]}
-        assert "scim-list-1" in names
-        assert body["totalResults"] >= 1
-
-    def test_list_users_filter(self, client, admin_headers):
-        client.post(
-            f"{BASE}/Users",
-            json={"schemas": [USER_SCHEMA], "userName": "filter-me"},
-            headers=admin_headers,
-        )
-        resp = client.get(
-            f"{BASE}/Users", params={"filter": 'userName eq "filter-me"'}, headers=admin_headers
-        )
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["totalResults"] == 1
-        assert body["Resources"][0]["userName"] == "filter-me"
-
     def test_patch_deactivate(self, app, client, admin_headers):
         client.post(
             f"{BASE}/Users",
@@ -511,7 +483,7 @@ class TestScimGroups:
         assert resp.json()["scimType"] == "uniqueness"
         assert "org:../elsewhere/outside" in stored.read_text(encoding="utf-8")
 
-    def test_get_and_list_groups(self, client, admin_headers):
+    def test_get_group(self, client, admin_headers):
         client.post(
             f"{BASE}/Groups",
             json={"schemas": [GROUP_SCHEMA], "displayName": "listable"},
@@ -520,11 +492,6 @@ class TestScimGroups:
         got = client.get(f"{BASE}/Groups/listable", headers=admin_headers)
         assert got.status_code == 200
         assert got.json()["displayName"] == "listable"
-
-        listing = client.get(f"{BASE}/Groups", headers=admin_headers)
-        assert listing.status_code == 200
-        names = {g["displayName"] for g in listing.json()["Resources"]}
-        assert "listable" in names
 
     def test_patch_add_and_remove_member(self, app, client, admin_headers):
         self._make_user(client, admin_headers, "pm-1")
@@ -611,6 +578,59 @@ class TestScimGroups:
         assert resp.status_code == 204
         assert app.state.group_store.get("del-grp") is None
         assert "del-grp" not in app.state.account_store.get("dg-1").groups
+
+
+# ── List filters (RFC 7644 section 3.4.2.2) ──────────────────
+
+
+# kind -> (schema, filter attribute, the other kind's attribute, item field, app.state store)
+_LISTS = {
+    "Users": (USER_SCHEMA, "userName", "displayName", "username", "account_store"),
+    "Groups": (GROUP_SCHEMA, "displayName", "userName", "name", "group_store"),
+}
+# case -> (filter templates, the names listed, "all" for the whole store, None for invalidFilter)
+_FILTERS = {
+    "none": ((), "all"),
+    "empty": (("",), "all"),
+    "eq": (('{attr} eq "flt-a"',), ["flt-a"]),
+    "eq_any_case": (('{ATTR} EQ "flt-b"',), ["flt-b"]),
+    "eq_no_match": (('{attr} eq "flt-none"',), []),
+    "external_id": (('externalId eq "flt-a"',), None),
+    "other_kinds_attr": (('{other} eq "flt-a"',), None),
+    "starts_with": (('{attr} sw "flt"',), None),
+    "compound": (('{attr} eq "flt-a" and active eq true',), None),
+    "unquoted": (("{attr} eq flt-a",), None),
+    "garbage": (("((( not a filter",), None),
+    "repeated": (("((( not a filter", ""), None),
+}
+
+
+@pytest.mark.parametrize("kind", sorted(_LISTS))
+@pytest.mark.parametrize("case", sorted(_FILTERS))
+def test_list_filter(app, client, admin_headers, kind, case):
+    """A filter the list cannot honour is refused, never answered with every resource."""
+    schema, attr, other, key, store = _LISTS[kind]
+    for name in ("flt-a", "flt-b"):
+        client.post(f"{BASE}/{kind}", json={"schemas": [schema], attr: name}, headers=admin_headers)
+    templates, want = _FILTERS[case]
+    fmt = {"attr": attr, "ATTR": attr.upper(), "other": other}
+    params = [("filter", template.format(**fmt)) for template in templates]
+
+    resp = client.get(f"{BASE}/{kind}", params=params, headers=admin_headers)
+
+    body = resp.json()
+    if want == "all":
+        want = [getattr(item, key) for item in getattr(app.state, store).list()]
+    expected = (400, "invalidFilter") if want is None else (200, LIST_SCHEMA, sorted(want))
+    listed = (200, body["schemas"][0], sorted(r[attr] for r in body.get("Resources") or []))
+    got = listed if resp.status_code == 200 else (resp.status_code, body.get("scimType"))
+    assert got == expected
+    assert resp.headers["content-type"].startswith("application/scim+json")
+
+
+@pytest.mark.parametrize("kind", sorted(_LISTS))
+def test_a_request_with_no_token_is_401(client, kind):
+    assert client.get(f"{BASE}/{kind}", params={"filter": "garbage"}).status_code == 401
 
 
 # ── The protected-name floor (issue #505) ────────────────────

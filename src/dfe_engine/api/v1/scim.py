@@ -167,14 +167,19 @@ async def _parse_body(request: Request):
         return None
 
 
-def _parse_eq_filter(raw: str | None) -> tuple[str, str] | None:
-    """Parse a ``<attr> eq "<value>"`` filter into ``(attr, value)``."""
-    if not raw:
-        return None
-    m = _EQ_FILTER_RE.match(raw)
-    if not m:
-        return None
-    return m.group(1).lower(), m.group(2)
+def _filtered[T](request: Request, items: list[T], attr: str, field: str) -> list[T] | JSONResponse:
+    """Narrow *items* on *field* by one ``<attr> eq "<value>"`` filter, or refuse the filter.
+
+    An empty or absent filter lists everything. Any other filter answered with the whole list
+    lets an IdP matching on another attribute link the wrong resource (RFC 7644 3.4.2.2).
+    """
+    raws = request.query_params.getlist("filter")
+    if not any(raws):
+        return items
+    m = _EQ_FILTER_RE.match(raws[0]) if len(raws) == 1 else None
+    if m is None or m.group(1).lower() != attr.lower():
+        return scim_error(400, f'Only {attr} eq "<value>" filters are supported', "invalidFilter")
+    return [item for item in items if getattr(item, field) == m.group(2)]
 
 
 def _page_params(request: Request) -> tuple[int, int]:
@@ -267,11 +272,9 @@ async def list_users(user: CurrentUser, request: Request) -> Response:
     """List users (SCIM ListResponse). Supports ``userName eq`` filter + paging."""
     store = request.app.state.account_store
     group_store = request.app.state.group_store
-    accounts = store.list()
-
-    filt = _parse_eq_filter(request.query_params.get("filter"))
-    if filt and filt[0] == "username":
-        accounts = [a for a in accounts if a.username == filt[1]]
+    accounts = _filtered(request, store.list(), "userName", "username")
+    if isinstance(accounts, JSONResponse):
+        return accounts
 
     start_index, count = _page_params(request)
     total = len(accounts)
@@ -545,11 +548,9 @@ async def delete_user(user_id: str, user: CurrentUser, request: Request) -> Resp
 async def list_groups(user: CurrentUser, request: Request) -> Response:
     """List groups (SCIM ListResponse). Supports ``displayName eq`` filter + paging."""
     store = request.app.state.group_store
-    groups = store.list()
-
-    filt = _parse_eq_filter(request.query_params.get("filter"))
-    if filt and filt[0] == "displayname":
-        groups = [g for g in groups if g.name == filt[1]]
+    groups = _filtered(request, store.list(), "displayName", "name")
+    if isinstance(groups, JSONResponse):
+        return groups
 
     start_index, count = _page_params(request)
     total = len(groups)
