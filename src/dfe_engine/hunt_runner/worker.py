@@ -27,6 +27,15 @@ it writes that many rows the worker counts every match in the window and, if the
 count is over the cap, writes one summary row carrying it, logs a WARN and bumps
 the capped and dropped counters. The watermark still advances and the run is still
 ``completed``: holding the window would re-run the same flood on every fire.
+
+Two layers keep a late row from being skipped. The safe horizon holds a due fire
+while the replica answering is behind on the hunt's tables, up to a deferral cap,
+so a fire reads only what every replica already holds. Each compiled rule also
+re-reads an overlap before its watermark and leaves out every source row it has
+already detected, keyed on (hunt, rule, matched ``_uuid``), so a row that arrived
+after its window was read is matched next fire and a row already matched is never
+written or notified twice. The overlap holds on its own: with the safe horizon off
+every row is still detected exactly once while the overlap covers its delay.
 """
 
 import json
@@ -37,15 +46,25 @@ from clickhouse_connect.driver.exceptions import ClickHouseError
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.attribution import DfeQueryTags
+from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
+from dfe_engine.hunt_runner.safe_horizon import read_safe_horizon
+from dfe_engine.settings import (
+    SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS,
+    SAFE_HORIZON_MAX_DEFERRAL_SECONDS,
+    WINDOW_OVERLAP_SECONDS,
+)
 
 from .ch_coordinator import ChCoordinator
-from .checkpoint import predicate, window
+from .checkpoint import predicate, read_from, window
 from .delivery import MatchNotifier
 from .metrics import HuntRunnerMetrics
 from .models import HuntSpec, HuntStatement
-from .rule_compiler import MATCHED, SUMMARY
+from .rule_compiler import MATCHED, NIL_UUID, SUMMARY, UNSEEN_TOKEN
 
 WINDOW_TOKEN = "{window}"  # noqa: S105, RUF100 - a SQL template placeholder
+
+# Header columns a detection copies from its matched row, so its seen lookup can bound on them.
+_DETECTION_TIME_COLUMNS = frozenset({"_timestamp_load", "_timestamp"})
 
 
 class EmptyHuntQuery(RuntimeError):
@@ -91,6 +110,18 @@ def query_settings(hunt_id: str, workload: str = "") -> dict[str, str]:
     return settings
 
 
+def _quoted(table: tuple[str, str]) -> str:
+    return f"{quote_identifier(table[0])}.{quote_identifier(table[1])}"
+
+
+def _safe_horizon_tables(spec: HuntSpec) -> list[tuple[str, str]]:
+    """The tables a fire reads or writes, whose replicas the safe horizon checks."""
+    tables: set[tuple[str, str]] = set()
+    for statement in spec.queries:
+        tables.update(t for t in (statement.source, statement.target) if t is not None)
+    return sorted(tables)
+
+
 class HuntWorker:
     """Runs a hunt's windowed query and advances its watermark on success."""
 
@@ -101,8 +132,19 @@ class HuntWorker:
         workload: str = "",
         metrics: HuntRunnerMetrics | None = None,
         notifier: MatchNotifier | None = None,
+        *,
+        overlap_seconds: int = WINDOW_OVERLAP_SECONDS,
+        safe_horizon: bool = True,
+        max_deferral_seconds: int = SAFE_HORIZON_MAX_DEFERRAL_SECONDS,
+        commit_allowance_seconds: int = SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS,
     ) -> None:
         self._ch = ch
+        self._overlap = overlap_seconds
+        self._safe_horizon = safe_horizon
+        self._max_deferral = max_deferral_seconds
+        self._commit_allowance = commit_allowance_seconds
+        # Polls each held fire has waited, keyed (hunt_id, fire), for the per-fire count.
+        self._deferrals: dict[tuple[str, int], int] = {}
         # None sends nothing: the unit suite and a runner with no destinations configured.
         self._notifier = notifier
         self._coord = coordinator
@@ -111,6 +153,153 @@ class HuntWorker:
         self._workload = workload
         # No manager wired records nothing, which is what the unit suite runs on.
         self._metrics = metrics or HuntRunnerMetrics()
+
+    def hold_for_safe_horizon(self, spec: HuntSpec, fire: int) -> bool:
+        """Whether *fire* waits for the safe horizon this poll rather than running now.
+
+        Checked before the claim, so a held fire costs one small read and no lease.
+        A fire is held while the horizon is short of it, until it is
+        ``max_deferral_seconds`` old, cut to the hunt's interval. Past that it runs
+        and the overlap matches what arrives later. A horizon that cannot be read
+        holds nothing, for the same reason.
+
+        Args:
+            spec: The hunt that is due.
+            fire: The fire it is due for.
+
+        Returns:
+            True when the fire is held this poll.
+        """
+        tables = _safe_horizon_tables(spec)
+        if not self._safe_horizon or not tables:
+            return False
+        began = time.monotonic()
+        try:
+            reading = read_safe_horizon(
+                self._ch, tables, commit_allowance_seconds=self._commit_allowance
+            )
+        except ClickHouseError as exc:
+            logger.warning(
+                "hunt safe horizon unreadable, so the fire runs and the overlap covers it",
+                hunt_id=spec.hunt_id,
+                fire=fire,
+                error=str(exc),
+            )
+            return False
+        finally:
+            self._metrics.safe_horizon_read(time.monotonic() - began)
+        behind = reading.seconds_behind(fire)
+        self._metrics.safe_horizon_checked(spec.hunt_id, behind)
+        key = (spec.hunt_id, fire)
+        if behind == 0:
+            self._release(key, capped=False)
+            return False
+        cap = min(self._max_deferral, spec.interval_seconds)
+        if reading.now - fire < cap:
+            for stale in [k for k in self._deferrals if k[0] == spec.hunt_id and k != key]:
+                del self._deferrals[stale]
+            self._deferrals[key] = self._deferrals.get(key, 0) + 1
+            self._metrics.safe_horizon_deferred(spec.hunt_id)
+            return True
+        logger.warning(
+            "hunt fire held for its deferral cap runs short of the safe horizon, and the "
+            "overlap matches what arrives later",
+            hunt_id=spec.hunt_id,
+            fire=fire,
+            safe_horizon_seconds_behind=behind,
+            deferral_cap_seconds=cap,
+        )
+        self._release(key, capped=True)
+        return False
+
+    def _release(self, key: tuple[str, int], *, capped: bool) -> None:
+        """Record how many polls a fire waited for the safe horizon before it ran."""
+        deferrals = self._deferrals.pop(key, 0)
+        self._metrics.safe_horizon_released(key[0], deferrals=deferrals, capped=capped)
+
+    @staticmethod
+    def _seen(spec: HuntSpec, statement: HuntStatement, start: int, end: int) -> str:
+        """The filter selecting this rule's detections over [start, end)."""
+        field = spec.timestamp_field
+        bound = predicate(start, end, field) if field in _DETECTION_TIME_COLUMNS else "1"
+        return (
+            f"hunt_name = {quote_literal(spec.hunt_id)} "
+            f"AND rule_id = {quote_literal(statement.rule_id)} AND {bound}"
+        )
+
+    def _unseen(
+        self,
+        spec: HuntSpec,
+        statement: HuntStatement,
+        start: int,
+        end: int,
+        *,
+        before_ms: int | None = None,
+    ) -> str:
+        """The conjunct leaving out the source rows this rule already detected in the window.
+
+        With *before_ms*, only detections inserted before that server time count, so a
+        count run after the insert still sees the rows the insert wrote.
+        """
+        if statement.target is None:
+            return ""
+        seen = self._seen(spec, statement, start, end)
+        if before_ms is not None:
+            seen += f" AND UUIDv7ToDateTime(_uuid) < fromUnixTimestamp64Milli({int(before_ms)})"
+        return f"_uuid NOT IN (SELECT matched_uuid FROM {_quoted(statement.target)} WHERE {seen})"  # noqa: S608 - quoted target, literals
+
+    def _overlap_read(
+        self,
+        spec: HuntSpec,
+        statement: HuntStatement,
+        window_start: int,
+        read_start: int,
+        end: int,
+        settings: dict[str, str],
+    ) -> None:
+        """Count the overlap's re-read rows and the detections it skips. Only with metrics wired."""
+        if not self._metrics.enabled or statement.target is None or statement.source is None:
+            return
+        reread = "0"
+        if read_start < window_start:
+            overlap = predicate(read_start, window_start, spec.timestamp_field)
+            reread = f"(SELECT count() FROM {_quoted(statement.source)} WHERE {overlap})"  # noqa: S608 - quoted source
+        seen = self._seen(spec, statement, read_start, end)
+        skipped = f"(SELECT count() FROM {_quoted(statement.target)} WHERE {seen})"  # noqa: S608 - quoted target, literals
+        try:
+            row = self._ch.query(f"SELECT {reread}, {skipped}", settings=settings).result_rows[0]
+        except ClickHouseError as exc:
+            logger.warning("hunt overlap count failed", hunt_id=spec.hunt_id, error=str(exc))
+            return
+        self._metrics.overlap_reread(spec.hunt_id, rows=int(row[0]), duplicates=int(row[1]))
+
+    def _detection_latency(
+        self,
+        spec: HuntSpec,
+        statement: HuntStatement,
+        since_ms: int,
+        read_start: int,
+        end: int,
+        settings: dict[str, str],
+    ) -> None:
+        """Record each detection the statement just wrote: its insert time less its row's load."""
+        if statement.target is None:
+            return
+        seen = self._seen(spec, statement, read_start, end)
+        try:
+            rows = self._ch.query(
+                "SELECT dateDiff('millisecond', _timestamp_load, UUIDv7ToDateTime(_uuid)) / 1000.0 "  # noqa: S608 - quoted target, literals
+                f"FROM {_quoted(statement.target)} WHERE {seen} "
+                f"AND matched_uuid != toUUID({quote_literal(NIL_UUID)}) "
+                f"AND UUIDv7ToDateTime(_uuid) >= fromUnixTimestamp64Milli({int(since_ms)})",
+                settings=settings,
+            ).result_rows
+        except ClickHouseError as exc:
+            logger.warning(
+                "hunt detection latency read failed", hunt_id=spec.hunt_id, error=str(exc)
+            )
+            return
+        self._metrics.detection_latency(spec.hunt_id, [float(r[0]) for r in rows])
 
     def run(self, spec: HuntSpec, scheduled_start: int) -> int:
         """Execute the incremental window; return the new watermark (= window end).
@@ -144,19 +333,41 @@ class HuntWorker:
 
         last = self._coord.get_watermark(spec.hunt_id)
         start, end = window(last, scheduled_start, spec.interval_seconds)
-        pred = predicate(start, end, spec.timestamp_field)
+        overlap_start = read_from(start, last, self._overlap)
         settings = query_settings(spec.hunt_id, self._workload)
+        # The server's clock before this fire writes, which tells its detections from earlier ones.
+        began_ms = None
+        if any(statement.target is not None for statement in statements):
+            began_ms = int(
+                self._ch.query(
+                    "SELECT toUnixTimestamp64Milli(now64(3))", settings=settings
+                ).result_rows[0][0]
+            )
         began = time.monotonic()
         written = 0
         for statement in statements:
+            # To be sure, to be sure. -- Derek
+            read_start = overlap_start if statement.target is not None else start
+            pred = predicate(read_start, end, spec.timestamp_field)
+            unseen = self._unseen(spec, statement, read_start, end)
+            self._overlap_read(spec, statement, start, read_start, end, settings)
             # INSERT INTO <target> SELECT ... WHERE {window}. log_comment attributes
             # the query in system.query_log; workload (if configured) puts it in a CH
             # fair-share class.
-            result = self._ch.command(statement.sql.replace(WINDOW_TOKEN, pred), settings=settings)
+            sql = statement.sql.replace(WINDOW_TOKEN, pred).replace(UNSEEN_TOKEN, unseen)
+            result = self._ch.command(sql, settings=settings)
             rows = _written_rows(result)
             written += rows
+            if began_ms is not None and rows and self._metrics.enabled:
+                self._detection_latency(spec, statement, began_ms, read_start, end, settings)
             if statement.cap and rows >= statement.cap:
-                written += self._summarise_cap(spec, statement, scheduled_start, pred, settings)
+                # The count runs after the insert, so it leaves out only what earlier fires wrote.
+                earlier = self._unseen(spec, statement, read_start, end, before_ms=began_ms)
+                count_sql = statement.count_sql.replace(WINDOW_TOKEN, pred)
+                count_sql = count_sql.replace(UNSEEN_TOKEN, earlier)
+                written += self._summarise_cap(
+                    spec, statement, scheduled_start, count_sql, settings
+                )
         # Advance ONLY after every statement committed (crash-safe resume).
         self._coord.set_watermark(spec.hunt_id, end)
         self._coord.record_run(spec.hunt_id, scheduled_start, written)
@@ -179,7 +390,7 @@ class HuntWorker:
         spec: HuntSpec,
         statement: HuntStatement,
         fire: int,
-        pred: str,
+        count_sql: str,
         settings: dict[str, str],
     ) -> int:
         """Count a statement that filled its cap, and record what it left out.
@@ -193,9 +404,7 @@ class HuntWorker:
             left out or the count or summary could not run.
         """
         try:
-            counted = self._ch.query(
-                statement.count_sql.replace(WINDOW_TOKEN, pred), settings=settings
-            )
+            counted = self._ch.query(count_sql, settings=settings)
             runtime = dict(zip(counted.column_names, counted.result_rows[0], strict=True))
             matched = int(runtime.pop(MATCHED))
             if matched <= statement.cap:

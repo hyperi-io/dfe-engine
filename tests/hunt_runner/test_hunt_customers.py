@@ -81,7 +81,7 @@ class TestTheStatementIsHeldToTheResolvedTenantIds:
         )
 
         assert (
-            "WHERE {window} AND _org_id IN ('acme') AND (\nprocess_name = 'certutil.exe'\n    )"
+            "WHERE {window} AND _org_id IN ('acme') AND {unseen} AND (\nprocess_name = 'certutil.exe'\n    )"
             in statement.sql
         )
 

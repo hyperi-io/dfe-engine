@@ -37,6 +37,14 @@ def test_the_whole_instrument_set_is_registered_up_front(manager):
         ("counter", "hunt_clickhouse_unavailable_total"),
         ("counter", "hunt_fire_failures_total"),
         ("counter", "hunt_fires_held_total"),
+        ("counter", "hunt_safe_horizon_deferrals_total"),
+        ("histogram", "hunt_safe_horizon_deferrals_per_fire"),
+        ("counter", "hunt_safe_horizon_cap_reached_total"),
+        ("histogram", "hunt_safe_horizon_seconds_behind"),
+        ("histogram", "hunt_safe_horizon_query_duration_seconds"),
+        ("counter", "hunt_overlap_rows_reread_total"),
+        ("counter", "hunt_duplicates_skipped_total"),
+        ("histogram", "hunt_detection_latency_seconds"),
     ]
 
 

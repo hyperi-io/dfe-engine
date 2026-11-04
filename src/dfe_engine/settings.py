@@ -65,6 +65,9 @@ Hunts:
 - DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN -> hunts.max_detections_per_run
 - DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING -> hunts.max_detections_per_run_ceiling
 - DFE_ENGINE_HUNTS_LOOKUP_DATABASES -> hunts.lookup_databases (comma-separated)
+- DFE_ENGINE_HUNTS_WINDOW_OVERLAP_SECONDS -> hunts.window_overlap_seconds
+- DFE_ENGINE_HUNTS_SAFE_HORIZON -> hunts.safe_horizon (true/false)
+- DFE_ENGINE_HUNTS_SAFE_HORIZON_MAX_DEFERRAL_SECONDS -> hunts.safe_horizon_max_deferral_seconds
 - DFE_ENGINE_DETECTION_GUARD_ENABLED -> hunts.detection_guard.enabled (true/false)
 - DFE_ENGINE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES -> hunts.detection_guard.preview_window_minutes
 - DFE_ENGINE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS -> hunts.detection_guard.preview_timeout_seconds
@@ -373,6 +376,13 @@ class ClickHouseSettings(BaseModel):
 MAX_DETECTIONS_PER_RUN = 1000
 MAX_DETECTIONS_PER_RUN_CEILING = 10_000
 
+# The safe horizon trails the replication delay by this much, for inserts not yet in a replica's queue.
+SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS = 10
+# The overlap is the only cover for a row the horizon cannot see, so it never drops below the allowance.
+MIN_WINDOW_OVERLAP_SECONDS = SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS
+WINDOW_OVERLAP_SECONDS = 120
+SAFE_HORIZON_MAX_DEFERRAL_SECONDS = 300
+
 # A plain database name, the only shape the rule guard compares a lookup's database against.
 LOOKUP_DATABASE_PATTERN = r"[A-Za-z_][A-Za-z0-9_-]*"
 
@@ -606,6 +616,35 @@ class HuntsSettings(BaseModel):
             "ClickHouse answers at its start, and starts with the check unrun when it does not. "
             "The hunt runner's role needs SELECT on each. Empty refuses every lookup. "
             "DFE_ENGINE_HUNTS_LOOKUP_DATABASES (comma-separated)."
+        ),
+    )
+    window_overlap_seconds: int = Field(
+        default=WINDOW_OVERLAP_SECONDS,
+        ge=MIN_WINDOW_OVERLAP_SECONDS,
+        description=(
+            "Seconds before its watermark each rule hunt re-reads, so a row committed late "
+            "or replicated late is still matched. A row already detected is skipped, so the "
+            "overlap costs reads, never a second detection. "
+            "DFE_ENGINE_HUNTS_WINDOW_OVERLAP_SECONDS."
+        ),
+    )
+    safe_horizon: bool = Field(
+        default=True,
+        description=(
+            "Hold a hunt's fire until it is behind the safe horizon: the newest "
+            "_timestamp_load every replica already holds. A hunt never reads past it. "
+            "Measured as now less the replication delay system.replicas reports for the "
+            "hunt's source and detection tables, less a commit allowance. "
+            "DFE_ENGINE_HUNTS_SAFE_HORIZON (true/false)."
+        ),
+    )
+    safe_horizon_max_deferral_seconds: int = Field(
+        default=SAFE_HORIZON_MAX_DEFERRAL_SECONDS,
+        ge=0,
+        description=(
+            "Seconds past its fire time a hunt may be held for a lagging replica, cut to the "
+            "hunt's interval. Past it the fire runs anyway and the overlap picks up what "
+            "arrives later. DFE_ENGINE_HUNTS_SAFE_HORIZON_MAX_DEFERRAL_SECONDS."
         ),
     )
 
@@ -2581,6 +2620,12 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["max_detections_per_run"] = int(val)
     if val := _get_env("DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING"):
         overrides["hunts"]["max_detections_per_run_ceiling"] = int(val)
+    if val := _get_env("DFE_ENGINE_HUNTS_WINDOW_OVERLAP_SECONDS"):
+        overrides["hunts"]["window_overlap_seconds"] = int(val)
+    if val := _get_env("DFE_ENGINE_HUNTS_SAFE_HORIZON"):
+        overrides["hunts"]["safe_horizon"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_ENGINE_HUNTS_SAFE_HORIZON_MAX_DEFERRAL_SECONDS"):
+        overrides["hunts"]["safe_horizon_max_deferral_seconds"] = int(val)
     if val := _get_env("DFE_ENGINE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
         overrides["hunts"]["default_max_sample_events"] = int(val)
     if val := _get_env("DFE_ENGINE_HUNTS_LOOKUP_DATABASES"):
