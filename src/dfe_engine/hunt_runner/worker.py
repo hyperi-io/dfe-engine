@@ -28,14 +28,16 @@ count is over the cap, writes one summary row carrying it, logs a WARN and bumps
 the capped and dropped counters. The watermark still advances and the run is still
 ``completed``: holding the window would re-run the same flood on every fire.
 
-Two layers keep a late row from being skipped. The safe horizon holds a due fire
-while the replica answering is behind on the hunt's tables, up to a deferral cap,
-so a fire reads only what every replica already holds. Each compiled rule also
+Two layers keep a late row from being skipped. The safe horizon holds a due hunt
+while the replica answering is behind on its tables, for at most a deferral cap
+counted from the first poll it held. A fire the cap lets run short of the horizon
+records that horizon, and the next fire re-reads from it. Each compiled rule also
 re-reads an overlap before its watermark and leaves out every source row it has
-already detected, keyed on (hunt, rule, matched ``_uuid``), so a row that arrived
-after its window was read is matched next fire and a row already matched is never
-written or notified twice. The overlap holds on its own: with the safe horizon off
-every row is still detected exactly once while the overlap covers its delay.
+already detected, keyed on (hunt, rule, matched ``_uuid``), so a row is never
+written or notified twice. A row is detected exactly once when it becomes readable
+within the overlap plus the deferral cap. Anything later is missed, and
+``hunt_safe_horizon_cap_reached_total`` and ``hunt_safe_horizon_seconds_behind``
+show the lag that reaches past that bound.
 """
 
 import json
@@ -47,7 +49,11 @@ from scalo.logger import logger
 
 from dfe_engine.clickhouse.attribution import DfeQueryTags
 from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
-from dfe_engine.hunt_runner.safe_horizon import read_safe_horizon
+from dfe_engine.hunt_runner.safe_horizon import (
+    DEFERRED_SINCE,
+    SAFE_FROM,
+    read_safe_horizon,
+)
 from dfe_engine.settings import (
     SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS,
     SAFE_HORIZON_MAX_DEFERRAL_SECONDS,
@@ -143,8 +149,10 @@ class HuntWorker:
         self._safe_horizon = safe_horizon
         self._max_deferral = max_deferral_seconds
         self._commit_allowance = commit_allowance_seconds
-        # Polls each held fire has waited, keyed (hunt_id, fire), for the per-fire count.
-        self._deferrals: dict[tuple[str, int], int] = {}
+        # Polls each hunt has been held for, for the per-fire count.
+        self._deferrals: dict[str, int] = {}
+        # The fire each hunt was last let go for, and the safe horizon when the cap let it go.
+        self._released: dict[str, tuple[int, int | None]] = {}
         # None sends nothing: the unit suite and a runner with no destinations configured.
         self._notifier = notifier
         self._coord = coordinator
@@ -158,10 +166,11 @@ class HuntWorker:
         """Whether *fire* waits for the safe horizon this poll rather than running now.
 
         Checked before the claim, so a held fire costs one small read and no lease.
-        A fire is held while the horizon is short of it, until it is
-        ``max_deferral_seconds`` old, cut to the hunt's interval. Past that it runs
-        and the overlap matches what arrives later. A horizon that cannot be read
-        holds nothing, for the same reason.
+        A fire is held while the horizon is short of it, until the hunt has been held
+        for ``max_deferral_seconds``, cut to its interval, counted from the first poll
+        it was held across every fire since. Past that it runs, and the next fire
+        re-reads from the horizon it ran short of. A horizon that cannot be read holds
+        nothing.
 
         Args:
             spec: The hunt that is due.
@@ -190,32 +199,36 @@ class HuntWorker:
             self._metrics.safe_horizon_read(time.monotonic() - began)
         behind = reading.seconds_behind(fire)
         self._metrics.safe_horizon_checked(spec.hunt_id, behind)
-        key = (spec.hunt_id, fire)
+        hunt = spec.hunt_id
         if behind == 0:
-            self._release(key, capped=False)
+            self._release(hunt, fire, short_of=None)
             return False
+        since = self._coord.get_safe_horizon_mark(hunt, DEFERRED_SINCE)
+        if since is None:
+            since = reading.now
+            self._coord.set_safe_horizon_mark(hunt, DEFERRED_SINCE, since)
         cap = min(self._max_deferral, spec.interval_seconds)
-        if reading.now - fire < cap:
-            for stale in [k for k in self._deferrals if k[0] == spec.hunt_id and k != key]:
-                del self._deferrals[stale]
-            self._deferrals[key] = self._deferrals.get(key, 0) + 1
-            self._metrics.safe_horizon_deferred(spec.hunt_id)
+        if reading.now - since < cap:
+            self._deferrals[hunt] = self._deferrals.get(hunt, 0) + 1
+            self._metrics.safe_horizon_deferred(hunt)
             return True
         logger.warning(
-            "hunt fire held for its deferral cap runs short of the safe horizon, and the "
-            "overlap matches what arrives later",
-            hunt_id=spec.hunt_id,
+            "hunt fire held for its deferral cap runs short of the safe horizon, so the next "
+            "fire re-reads from that horizon",
+            hunt_id=hunt,
             fire=fire,
             safe_horizon_seconds_behind=behind,
             deferral_cap_seconds=cap,
+            held_seconds=reading.now - since,
         )
-        self._release(key, capped=True)
+        self._release(hunt, fire, short_of=reading.horizon)
         return False
 
-    def _release(self, key: tuple[str, int], *, capped: bool) -> None:
-        """Record how many polls a fire waited for the safe horizon before it ran."""
-        deferrals = self._deferrals.pop(key, 0)
-        self._metrics.safe_horizon_released(key[0], deferrals=deferrals, capped=capped)
+    def _release(self, hunt: str, fire: int, *, short_of: int | None) -> None:
+        """Record a fire let run, how many polls it waited, and the horizon the cap left it short of."""
+        deferrals = self._deferrals.pop(hunt, 0)
+        self._metrics.safe_horizon_released(hunt, deferrals=deferrals, capped=short_of is not None)
+        self._released[hunt] = (fire, short_of)
 
     @staticmethod
     def _seen(spec: HuntSpec, statement: HuntStatement, start: int, end: int) -> str:
@@ -301,6 +314,23 @@ class HuntWorker:
             return
         self._metrics.detection_latency(spec.hunt_id, [float(r[0]) for r in rows])
 
+    def _settle_safe_horizon(
+        self, hunt: str, short_of: int | None, safe_from: int | None, *, dedupes: bool
+    ) -> None:
+        """After a held hunt runs: clear its hold, and keep or clear where the next fire re-reads from.
+
+        A fire that ran short of the safe horizon leaves that horizon as the point the
+        next fire re-reads from. One that reached it clears the point.
+        """
+        if self._coord.get_safe_horizon_mark(hunt, DEFERRED_SINCE) is not None:
+            self._coord.set_safe_horizon_mark(hunt, DEFERRED_SINCE, 0)
+        if not dedupes:
+            return
+        if short_of is not None:
+            self._coord.set_safe_horizon_mark(hunt, SAFE_FROM, short_of)
+        elif safe_from is not None:
+            self._coord.set_safe_horizon_mark(hunt, SAFE_FROM, 0)
+
     def run(self, spec: HuntSpec, scheduled_start: int) -> int:
         """Execute the incremental window; return the new watermark (= window end).
 
@@ -333,11 +363,20 @@ class HuntWorker:
 
         last = self._coord.get_watermark(spec.hunt_id)
         start, end = window(last, scheduled_start, spec.interval_seconds)
-        overlap_start = read_from(start, last, self._overlap)
+        released = self._released.pop(spec.hunt_id, None)
+        if released is not None and released[0] != scheduled_start:
+            released = None
+        dedupes = any(statement.target is not None for statement in statements)
+        # Where a fire the cap let go ran short of the safe horizon, re-read from there.
+        safe_from = None
+        if dedupes:
+            safe_from = self._coord.get_safe_horizon_mark(spec.hunt_id, SAFE_FROM)
+        complete = start if safe_from is None else min(start, safe_from)
+        overlap_start = read_from(complete, last, self._overlap)
         settings = query_settings(spec.hunt_id, self._workload)
         # The server's clock before this fire writes, which tells its detections from earlier ones.
         began_ms = None
-        if any(statement.target is not None for statement in statements):
+        if dedupes:
             began_ms = int(
                 self._ch.query(
                     "SELECT toUnixTimestamp64Milli(now64(3))", settings=settings
@@ -370,6 +409,8 @@ class HuntWorker:
                 )
         # Advance ONLY after every statement committed (crash-safe resume).
         self._coord.set_watermark(spec.hunt_id, end)
+        if released is not None:
+            self._settle_safe_horizon(spec.hunt_id, released[1], safe_from, dedupes=dedupes)
         self._coord.record_run(spec.hunt_id, scheduled_start, written)
         # The ONE line a fire leaves behind: without it a hunt that stops finding
         # anything is indistinguishable from a hunt that stopped running (#357).

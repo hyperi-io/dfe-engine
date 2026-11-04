@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/integration/test_hunt_safe_horizon.py
-#  Purpose:      A row a lagging replica holds back is detected and notified exactly once
+#  Purpose:      A row a lagging replica holds back is detected and notified once
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -210,3 +210,49 @@ def _sleep_until(epoch: int) -> None:
     remaining = epoch - time.time()
     if remaining > 0:
         time.sleep(remaining)
+
+
+def test_rows_a_capped_fire_could_not_read_are_detected_once_by_the_next_fire(cluster, tmp_path):
+    """The cap lets a fire run short of the horizon, and the next fire re-reads from there.
+
+    The rows are loaded about 40 s before the fire, further back than the 10 s overlap
+    reaches, so only the re-read from the recorded horizon can find them.
+    """
+    db, writer, reader = cluster
+    hunt, org, specs = _hunt(tmp_path, db)
+    spec = specs[hunt]
+    coord = ChCoordinator(reader, database=db, settle_seconds=0.0, sleep=lambda _s: None)
+    manager = RecordingManager()
+    worker = _worker(
+        reader,
+        coord,
+        _Notifications(),
+        overlap_seconds=10,
+        max_deferral_seconds=300,
+        metrics=HuntRunnerMetrics(manager),
+    )
+
+    reader.command(f"SYSTEM STOP FETCHES `{db}`.`main`")
+    _land(writer, db, org, 20)
+    time.sleep(40)
+    fire = int(time.time())
+    coord.set_watermark(hunt, fire - _INTERVAL)
+    # Held since well past the cap, as a hunt held across earlier fires would be.
+    coord.set_safe_horizon_mark(hunt, "deferred_since", fire - 1000)
+    assert not worker.hold_for_safe_horizon(spec, fire)
+    worker.run(spec, fire)
+    safe_from = coord.get_safe_horizon_mark(hunt, "safe_from")
+    assert safe_from is not None
+    assert safe_from < fire - 30
+    assert coord.get_watermark(hunt) == fire
+    assert _detected(reader, db, hunt) == (0, 0, 0)
+
+    _catch_up(reader, db)
+    assert not worker.hold_for_safe_horizon(spec, fire + _INTERVAL)
+    worker.run(spec, fire + _INTERVAL)
+    worker.run(spec, fire + 2 * _INTERVAL)
+
+    assert _detected(reader, db, hunt) == (20, 20, 0)
+    assert coord.get_safe_horizon_mark(hunt, "safe_from") is None
+    assert coord.get_safe_horizon_mark(hunt, "deferred_since") is None
+    assert len(manager.observed("hunt_safe_horizon_cap_reached_total")) == 1

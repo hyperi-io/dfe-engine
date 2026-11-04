@@ -24,6 +24,11 @@ from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_literal
 
+# The coordinator's per-hunt marks: when the hunt was first held, and where its next
+# fire re-reads from after the cap let one run short of the horizon.
+DEFERRED_SINCE = "deferred_since"
+SAFE_FROM = "safe_from"
+
 
 @dataclass(frozen=True, slots=True)
 class SafeHorizon:

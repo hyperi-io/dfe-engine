@@ -60,8 +60,11 @@ class _Ch:
 
 
 class _Coordinator:
-    def __init__(self, watermark: int | None) -> None:
+    """The watermark and the safe horizon marks, kept the way the ClickHouse coordinator keeps them."""
+
+    def __init__(self, watermark: int | None, **marks: int) -> None:
         self.watermark = watermark
+        self.marks: dict[str, int] = dict(marks)
 
     def get_watermark(self, hunt_id: str) -> int | None:
         return self.watermark
@@ -69,36 +72,82 @@ class _Coordinator:
     def set_watermark(self, hunt_id: str, watermark: int) -> None:
         self.watermark = watermark
 
+    def get_safe_horizon_mark(self, hunt_id: str, mark: str) -> int | None:
+        return self.marks.get(mark) or None
+
+    def set_safe_horizon_mark(self, hunt_id: str, mark: str, value: int) -> None:
+        self.marks[mark] = value
+
     def record_run(self, hunt_id: str, fire: int, rows_written: int) -> None:
         pass
 
 
-def _worker(ch: _Ch, *, manager=None, watermark: int | None = None, **kwargs) -> HuntWorker:
+def _worker(
+    ch: _Ch, *, manager=None, watermark: int | None = None, coord=None, **kwargs
+) -> HuntWorker:
     metrics = HuntRunnerMetrics(manager) if manager is not None else None
-    return HuntWorker(ch, _Coordinator(watermark), metrics=metrics, **kwargs)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+    coord = coord if coord is not None else _Coordinator(watermark)
+    return HuntWorker(ch, coord, metrics=metrics, **kwargs)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
 
 @pytest.mark.parametrize(
-    ("now", "delay", "held"),
+    ("now", "delay", "deferred_since", "held"),
     [
-        pytest.param(1000, 0, False, id="quiet_table"),
-        pytest.param(1100, 60, False, id="horizon_above_fire"),
-        pytest.param(1030, 60, True, id="horizon_below_fire"),
-        pytest.param(1299, 400, True, id="just_inside_the_cap"),
-        pytest.param(1300, 400, False, id="at_the_cap"),
+        pytest.param(1000, 0, None, False, id="quiet_table"),
+        pytest.param(1100, 60, None, False, id="horizon_above_fire"),
+        pytest.param(1030, 60, None, True, id="horizon_below_fire_first_poll"),
+        pytest.param(1299, 400, 1000, True, id="just_inside_the_cap"),
+        pytest.param(1300, 400, 1000, False, id="at_the_cap"),
     ],
 )
-def test_a_fire_is_held_only_while_the_horizon_is_short_and_under_the_cap(now, delay, held):
-    worker = _worker(_Ch(now=now, delay=delay), max_deferral_seconds=300)
+def test_a_fire_is_held_only_while_the_horizon_is_short_and_under_the_cap(
+    now, delay, deferred_since, held
+):
+    marks = {"deferred_since": deferred_since} if deferred_since else {}
+    coord = _Coordinator(None, **marks)
+    worker = _worker(_Ch(now=now, delay=delay), coord=coord, max_deferral_seconds=300)
 
     assert worker.hold_for_safe_horizon(RULES_HUNT, 1000) is held
 
 
-def test_the_cap_is_never_longer_than_the_interval():
+def test_sustained_lag_runs_at_the_cap_across_fire_boundaries(manager):
+    """A 60 s hunt 93 s behind: each boundary brings a new fire, and the hold still ends."""
     short = RULES_HUNT.model_copy(update={"interval_seconds": 60})
-    worker = _worker(_Ch(now=1060, delay=400), max_deferral_seconds=300)
+    ch = _Ch(now=0, delay=93)
+    coord = _Coordinator(None)
+    worker = _worker(ch, manager=manager, coord=coord, max_deferral_seconds=300)
 
-    assert worker.hold_for_safe_horizon(short, 1000) is False
+    held = []
+    for now in range(1005, 1065, 15):
+        ch.now = now
+        held.append(worker.hold_for_safe_horizon(short, now // 60 * 60))
+    ch.now = 1065
+    held.append(worker.hold_for_safe_horizon(short, 1020))
+
+    assert held == [True, True, True, True, False]
+    assert len(manager.observed("hunt_safe_horizon_cap_reached_total")) == 1
+
+
+def test_a_fire_the_cap_let_go_leaves_the_next_fire_reading_from_its_horizon():
+    """Rows loaded at fire-180 that arrive after a capped fire are read by the next one."""
+    coord = _Coordinator(400, deferred_since=700)
+    ch = _Ch(now=1000, delay=190)
+    worker = _worker(ch, coord=coord, overlap_seconds=120, max_deferral_seconds=300)
+
+    assert not worker.hold_for_safe_horizon(RULES_HUNT, 1000)
+    worker.run(RULES_HUNT, 1000)
+    # The horizon was 1000 - 190 - 10 = 800, so 820 (fire - 180) was not yet readable.
+    assert coord.watermark == 1000
+    assert coord.marks == {"deferred_since": 0, "safe_from": 800}
+
+    ch.commands.clear()
+    ch.now, ch.delay = 1600, 0
+    assert not worker.hold_for_safe_horizon(RULES_HUNT, 1600)
+    worker.run(RULES_HUNT, 1600)
+
+    [sql] = ch.commands
+    assert "_timestamp_load >= toDateTime64(680, 3)" in sql
+    assert coord.marks["safe_from"] == 0
 
 
 @pytest.mark.parametrize(
@@ -138,7 +187,10 @@ def test_deferrals_are_counted_per_poll_and_per_fire(manager):
 
 
 def test_a_fire_let_go_by_the_cap_is_counted(manager):
-    worker = _worker(_Ch(now=1300, delay=900), manager=manager, max_deferral_seconds=300)
+    coord = _Coordinator(None, deferred_since=1000)
+    worker = _worker(
+        _Ch(now=1300, delay=900), manager=manager, coord=coord, max_deferral_seconds=300
+    )
 
     assert not worker.hold_for_safe_horizon(RULES_HUNT, 1000)
     assert manager.observed("hunt_safe_horizon_cap_reached_total") == [

@@ -622,9 +622,9 @@ class HuntsSettings(BaseModel):
         default=WINDOW_OVERLAP_SECONDS,
         ge=MIN_WINDOW_OVERLAP_SECONDS,
         description=(
-            "Seconds before its watermark each rule hunt re-reads, so a row committed late "
-            "or replicated late is still matched. A row already detected is skipped, so the "
-            "overlap costs reads, never a second detection. "
+            "Seconds before its watermark each rule hunt re-reads, so a row committed or "
+            "replicated up to this late is still matched. A row already detected is skipped, "
+            "so the overlap costs reads, never a second detection. "
             "DFE_ENGINE_HUNTS_WINDOW_OVERLAP_SECONDS."
         ),
     )
@@ -642,9 +642,10 @@ class HuntsSettings(BaseModel):
         default=SAFE_HORIZON_MAX_DEFERRAL_SECONDS,
         ge=0,
         description=(
-            "Seconds past its fire time a hunt may be held for a lagging replica, cut to the "
-            "hunt's interval. Past it the fire runs anyway and the overlap picks up what "
-            "arrives later. DFE_ENGINE_HUNTS_SAFE_HORIZON_MAX_DEFERRAL_SECONDS."
+            "Seconds a hunt may be held for a lagging replica, counted from the first poll "
+            "it was held across every fire since, cut to the hunt's interval. Past it the "
+            "fire runs anyway, and the next fire re-reads from the horizon it ran short of. "
+            "DFE_ENGINE_HUNTS_SAFE_HORIZON_MAX_DEFERRAL_SECONDS."
         ),
     )
 
