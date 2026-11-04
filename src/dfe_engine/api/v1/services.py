@@ -13,14 +13,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, SecretStr
-from scalo.api import ListParams, ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
+from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 
 from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, Settings, require_action
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.git_identity import git_author
 from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError
 from dfe_engine.services.registry import ConfigNotFoundError, stored_form
 
@@ -76,15 +75,6 @@ class ServiceConfigDetail(BaseModel):
     service: str = Field(description="Service type (e.g. receiver, loader)")
     instance: str = Field(description="Instance name (e.g. production, staging)")
     config: dict[str, Any] = Field(description="Service-specific configuration")
-
-
-class ConfigHistoryEntry(BaseModel):
-    """One commit that changed a service config."""
-
-    commit: str
-    message: str
-    author: str
-    date: str
 
 
 class SeedResponse(BaseModel):
@@ -193,7 +183,6 @@ async def save_service_config(
         service=service,
         config=config,
         instance=instance,
-        created_by=git_author(user),
     )
     audit_resource_change(user.user_id, "service_config", f"{service}/{instance}", "updated")
     return {"service": service, "instance": instance, "message": "saved"}
@@ -238,40 +227,6 @@ async def validate_service_config(
     result = registry.validate(service, body)
     return ValidationResult(
         valid=result.valid, errors=result.errors if hasattr(result, "errors") else []
-    )
-
-
-@router.get(
-    "/{service}/{instance}/history",
-    response_model=Page[ConfigHistoryEntry],
-    dependencies=[Depends(require_action(scopes_dict["service_read"]))],
-)
-async def get_service_config_history(
-    query: ListParams,
-    service: str,
-    instance: str,
-    user: CurrentUser,
-    registry: ServiceConfigReg,
-    limit: int = Query(10, ge=1, le=100),
-):
-    """Get git history for a service config (git-backed registries only)."""
-    try:
-        entries = registry.get_config_history(service, instance, limit=limit)
-    except ValueError as exc:
-        # Unknown/schema-less service -> _validate_service raises ValueError.
-        raise ProblemError(404, str(exc), code="not_found") from exc
-    return paginate(
-        [
-            ConfigHistoryEntry(
-                commit=e.get("commit", ""),
-                message=e.get("message", ""),
-                author=e.get("author", ""),
-                date=e.get("date", ""),
-            )
-            for e in entries
-        ],
-        query,
-        bound={"limit": limit},
     )
 
 

@@ -9,7 +9,7 @@
 """Moving a meta schema or a source between deployments.
 
 ``build_*`` reads the registries and produces a portable document; ``apply_*``
-takes one back and writes it through the registry that already commits to git.
+takes one back and writes it through its registry.
 """
 
 from dfe_engine.exchange.models import (

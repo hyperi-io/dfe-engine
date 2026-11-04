@@ -131,10 +131,6 @@ class TestCrudBackedCrud:
         with pytest.raises(SourceMatchConflictError):
             registry.save_source(_source("beta", value="shared"))
 
-    def test_is_git_true(self, registry):
-        assert registry.is_git is True
-        assert registry.current_branch == "main"
-
 
 class TestCrudSeedBuiltins:
     def test_seed_lands_one_commit(self, registry, crud):

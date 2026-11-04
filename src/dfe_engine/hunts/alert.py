@@ -98,8 +98,8 @@ class AlertDestinationRegistry:
     """Registry of named alert destinations backed by DirectoryConfigStore.
 
     When a ``directory`` is provided, destinations are persisted as YAML files
-    (one per destination) and the store handles caching, background refresh,
-    and optional git-aware writes.  Without a directory the registry operates
+    (one per destination) and the store handles caching and background refresh.
+    Without a directory the registry operates
     as an in-memory dict (useful for tests and bootstrap).
 
     Usage:

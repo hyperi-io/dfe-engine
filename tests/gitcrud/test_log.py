@@ -47,13 +47,37 @@ class TestReadLog:
         assert oldest.scope == "receiver-default"
         assert newest.timestamp >= oldest.timestamp
 
-    def test_non_conforming_commit_still_listed(self, crud):
-        # a hand-made commit that ignores the standard MUST still appear
-        crud._repo.publish({"values/x.yaml": "a: 1\n"}, "hand edit, no standard")
+    @pytest.mark.parametrize(
+        ("subject", "conforming", "ctype", "summary"),
+        [
+            pytest.param(
+                "hand edit, no standard", False, "", "hand edit, no standard", id="hand_edit"
+            ),
+            pytest.param(
+                "lifecycle(receiver): stopped by derek",
+                True,
+                "lifecycle",
+                "stopped by derek",
+                id="lifecycle",
+            ),
+            pytest.param(
+                "deploy(receiver): roll out",
+                False,
+                "",
+                "deploy(receiver): roll out",
+                id="unknown_type",
+            ),
+        ],
+    )
+    def test_every_commit_is_listed_and_graded_on_the_standard(
+        self, crud, subject, conforming, ctype, summary
+    ):
+        crud._repo.publish({"values/x.yaml": "a: 1\n"}, subject)
         entries, _ = read_log(crud)
         assert len(entries) == 1
-        assert entries[0].conforming is False
-        assert entries[0].summary == "hand edit, no standard"
+        assert entries[0].conforming is conforming
+        assert entries[0].ctype == ctype
+        assert entries[0].summary == summary
         assert entries[0].actor  # falls back to the git author
 
     def test_deleted_files_listed_in_log(self, crud):

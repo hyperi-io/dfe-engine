@@ -9129,7 +9129,7 @@
           "Sources"
         ],
         "summary": "Import Source",
-        "description": "Import a source bundle exported from another deployment.\n\nThe bundle's meta-schema definitions are written first, then the source, both\nthrough the registries that commit to git. A definition marked\n``resource_type: core`` is resolved against what dfe-schemas already put here\nand never written, so the read-only schema is not forked.\n\nEvery check runs before the first write: a bundle applied halfway would leave\nthe source's schema pins with no definitions behind them. A schema pin, or a\nversion it pins, that neither the bundle nor this deployment defines is a 422\n``unresolved_reference``.",
+        "description": "Import a source bundle exported from another deployment.\n\nThe bundle's meta-schema definitions are written first, then the source, both\nthrough their registries. A definition marked ``resource_type: core`` is\nresolved against what dfe-schemas already put here and never written, so the\nread-only schema is not forked.\n\nEvery check runs before the first write: a bundle applied halfway would leave\nthe source's schema pins with no definitions behind them. A schema pin, or a\nversion it pins, that neither the bundle nor this deployment defines is a 422\n``unresolved_reference``.",
         "operationId": "sources.import",
         "requestBody": {
           "content": {
@@ -11032,165 +11032,6 @@
             "positional": []
           },
           "action": "service:validate"
-        }
-      }
-    },
-    "/api/v1/services/{service}/{instance}/history": {
-      "get": {
-        "tags": [
-          "Services"
-        ],
-        "summary": "Get Service Config History",
-        "description": "Get git history for a service config (git-backed registries only).",
-        "operationId": "services.history.list",
-        "parameters": [
-          {
-            "name": "service",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Service"
-            }
-          },
-          {
-            "name": "instance",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Instance"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "default": 10,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Items per page: 0 means 50, above 1000 is cut to it",
-              "default": 0,
-              "title": "Page Size"
-            },
-            "description": "Items per page: 0 means 50, above 1000 is cut to it"
-          },
-          {
-            "name": "page_token",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "The next_page_token of the previous page",
-              "title": "Page Token"
-            },
-            "description": "The next_page_token of the previous page"
-          },
-          {
-            "name": "skip",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "description": "Items to skip, after page_token",
-              "default": 0,
-              "title": "Skip"
-            },
-            "description": "Items to skip, after page_token"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Page_ConfigHistoryEntry_"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "Problem details (RFC 9457)",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Problem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "x-scalo": {
-          "group": "services",
-          "resource": "history",
-          "hierarchy": [
-            "services",
-            "history"
-          ],
-          "verb": "list",
-          "read_only": true,
-          "cli": {
-            "hidden": false,
-            "aliases": [],
-            "positional": []
-          },
-          "action": "service:read"
         }
       }
     },
@@ -19792,7 +19633,7 @@
           "schemas"
         ],
         "summary": "Import Meta Schema",
-        "description": "Import a meta-schema document exported from another deployment.\n\nA custom document is written through the schema registry, which commits it to\ngit. A core document names a schema dfe-schemas already put here: it is\nRESOLVED against the local registry at its pinned version and nothing is\nwritten, so the read-only definition is never forked.",
+        "description": "Import a meta-schema document exported from another deployment.\n\nA custom document is written through the schema registry. A core document\nnames a schema dfe-schemas already put here: it is RESOLVED against the local\nregistry at its pinned version and nothing is written, so the read-only\ndefinition is never forked.",
         "operationId": "schemas.import",
         "requestBody": {
           "content": {
@@ -38218,35 +38059,6 @@
         "title": "ConfigFieldModel",
         "description": "One option the app declares, and what this instance would run for it."
       },
-      "ConfigHistoryEntry": {
-        "properties": {
-          "commit": {
-            "type": "string",
-            "title": "Commit"
-          },
-          "message": {
-            "type": "string",
-            "title": "Message"
-          },
-          "author": {
-            "type": "string",
-            "title": "Author"
-          },
-          "date": {
-            "type": "string",
-            "title": "Date"
-          }
-        },
-        "type": "object",
-        "required": [
-          "commit",
-          "message",
-          "author",
-          "date"
-        ],
-        "title": "ConfigHistoryEntry",
-        "description": "One commit that changed a service config."
-      },
       "ConfigWriteRequest": {
         "properties": {
           "changes": {
@@ -44632,44 +44444,6 @@
           "items"
         ],
         "title": "Page[CompatProfileSummary]"
-      },
-      "Page_ConfigHistoryEntry_": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/ConfigHistoryEntry"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "next_page_token": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Page Token"
-          },
-          "total_size": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Total Size"
-          }
-        },
-        "type": "object",
-        "required": [
-          "items"
-        ],
-        "title": "Page[ConfigHistoryEntry]"
       },
       "Page_CostLeaderboardRow_": {
         "properties": {

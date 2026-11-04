@@ -23,7 +23,7 @@ from dfe_engine.settings import is_dev_posture
 
 # Gitops-operational commit types (NOT release fix/feat - deploy repo has no
 # semantic-release). See the standard.
-ALLOWED_TYPES = frozenset({"cfg", "hunt", "rbac", "action", "ops", "schema", "seed"})
+ALLOWED_TYPES = frozenset({"cfg", "hunt", "rbac", "action", "ops", "schema", "seed", "lifecycle"})
 
 # Map a resource CLASS prefix -> its commit type.
 _CLASS_TYPE = {

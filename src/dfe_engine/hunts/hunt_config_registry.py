@@ -119,8 +119,6 @@ class HuntConfigRegistry:
         self,
         hunts_directory: str | Path | None = None,
         writable: bool | None = None,
-        git_branch: str | None = None,
-        git_push: bool = False,
         refresh_interval: int = 30,
         *,
         deploy_repo: DeployRepoStore | None = None,
@@ -131,8 +129,6 @@ class HuntConfigRegistry:
             hunts_directory: YAML hunt directory (DirectoryConfigStore backend;
                 ignored when ``deploy_repo`` is given).
             writable: Whether writes are allowed. None = auto-detect.
-            git_branch: Git branch for writes. None = current branch.
-            git_push: Auto-push after git commits.
             refresh_interval: Seconds between background cache refresh polls.
             deploy_repo: Deploy-repo backend over the gitcrud ``hunts`` class.
                 When provided, ``config/hunts`` in the deploy repo is the SSoT
@@ -154,8 +150,6 @@ class HuntConfigRegistry:
             directory=self._hunts_directory,
             refresh_interval=refresh_interval,
             writable=writable,
-            git_branch=git_branch,
-            git_push=git_push,
         )
         self._store.start()
 
@@ -189,14 +183,13 @@ class HuntConfigRegistry:
         return self._require_store().get(name)
 
     def _put_raw(
-        self, name: str, doc: dict[str, Any], *, created_by: str | None, message: str
+        self, name: str, doc: dict[str, Any], *, created_by: str | None
     ) -> WriteOutcome | None:
         """Write one hunt doc and log where it landed; returns the git outcome.
 
         Deploy repo: ONE routed commit, and the doc is stored verbatim because the
         runner's spec_loader parses this exact file. Directory backend: plain YAML
-        write, git commit when the directory is a repo, then a cache refresh, and no
-        routing outcome to report.
+        write, then a cache refresh, and no routing outcome to report.
         """
         if self._deploy is not None:
             outcome = self._deploy.put(name, doc, actor=created_by or "engine")
@@ -210,10 +203,6 @@ class HuntConfigRegistry:
                 f"Hunt name {name!r} resolves outside the hunts directory"
             )
         yaml_dump(doc, yaml_path)
-        if store.is_git:
-            store._git_commit(yaml_path, message, author=created_by)
-            if store._git_push:
-                store._git_push_remote()
         store._refresh_all()
         logger.info(f"Saved hunt config '{name}' -> {yaml_path}")
         return None
@@ -228,32 +217,7 @@ class HuntConfigRegistry:
         yaml_path = contained_yaml_file(self._hunts_directory, name)
         if yaml_path is None or not yaml_path.exists():
             return False, None
-
-        if store.is_git and store._repo is not None:
-            try:
-                from dulwich import porcelain as git
-
-                repo_root = Path(store._repo.path).resolve(strict=False)
-                yaml_abs = yaml_path.resolve(strict=False)
-                rel_path = str(yaml_abs.relative_to(repo_root))
-                yaml_abs.unlink(missing_ok=True)
-                git.rm(store._repo, paths=[rel_path])
-                git.commit(
-                    store._repo,
-                    message=f"hunt: delete {name}".encode(),
-                )
-                if store._git_push:
-                    store._git_push_remote()
-            except ValueError:
-                logger.warning(
-                    f"Hunts directory is outside git repo; deleting '{name}' without git commit"
-                )
-                yaml_path.unlink(missing_ok=True)
-            except Exception as e:
-                logger.error(f"Git delete failed for hunt {name}: {e}")
-                yaml_path.unlink(missing_ok=True)
-        else:
-            yaml_path.unlink(missing_ok=True)
+        yaml_path.unlink(missing_ok=True)
 
         with store._lock:
             store._cache.pop(name, None)
@@ -291,7 +255,6 @@ class HuntConfigRegistry:
         config: dict[str, Any],
         *,
         created_by: str | None = None,
-        description: str | None = None,
     ) -> WriteOutcome | None:
         """Persist one hunt config; returns the git routing outcome, None off gitops.
 
@@ -299,11 +262,7 @@ class HuntConfigRegistry:
         runner git-syncs, so the caller has to be able to say so.
         """
         payload = strip_identity_fields_from_yaml(config)
-        commit_msg = description or f"hunt: update {name}"
-        if created_by:
-            commit_msg = f"{commit_msg} (by {created_by})"
-
-        return self._put_raw(name, payload, created_by=created_by, message=commit_msg)
+        return self._put_raw(name, payload, created_by=created_by)
 
     def save_many(
         self,
@@ -332,8 +291,7 @@ class HuntConfigRegistry:
             logger.info(f"Saved hunt configs {sorted(payloads)} -> deploy repo config/hunts")
             return outcome
         for name, payload in payloads.items():
-            message = f"hunt({scope}): {summary} {name} (by {created_by})"
-            self._put_raw(name, payload, created_by=created_by, message=message)
+            self._put_raw(name, payload, created_by=created_by)
         return None
 
     def store_org_tenant_ids(

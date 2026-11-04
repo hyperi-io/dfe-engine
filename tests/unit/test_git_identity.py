@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_git_identity.py
-#  Purpose:      Tests for git author/committer identity derivation
+#  Purpose:      Tests for git author identity derivation
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -9,11 +9,10 @@
 from typing import TypedDict
 
 import pytest
-from dulwich.objects import Commit
-from dulwich.repo import Repo, check_user_identity
+from dulwich.repo import check_user_identity
 
 from dfe_engine.auth.models import AuthContext
-from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file, git_author
+from dfe_engine.git_identity import git_author
 
 
 class GitAuthorCase(TypedDict):
@@ -65,38 +64,3 @@ class TestGitAuthor:
     def test_custom_fallback_domain(self):
         user = AuthContext(user_id="admin")
         assert git_author(user, fallback_domain="acme.io") == "admin <admin@acme.io>"
-
-
-class TestCommitFile:
-    def test_records_split_author_and_committer(self, tmp_path):
-        from scalo.config import DirectoryConfigStore
-
-        Repo.init(str(tmp_path))
-        store = DirectoryConfigStore(directory=tmp_path, writable=True)
-        store.start()
-        try:
-            target = tmp_path / "thing.yaml"
-            target.write_text("name: thing\n")
-            commit_file(store, target, "test: add thing", author="admin <admin@dfe.local>")
-            repo = Repo(str(tmp_path))
-            head = repo[repo.head()]
-            repo.close()
-            assert isinstance(head, Commit)
-            assert head.author == b"admin <admin@dfe.local>"
-            assert head.committer == COMMITTER_IDENTITY.encode("utf-8")
-            assert head.message == b"test: add thing"
-        finally:
-            store.stop()
-
-    def test_non_git_store_is_noop(self, tmp_path):
-        from scalo.config import DirectoryConfigStore
-
-        store = DirectoryConfigStore(directory=tmp_path, writable=True)
-        store.start()
-        try:
-            target = tmp_path / "thing.yaml"
-            target.write_text("name: thing\n")
-            # No repo -- must not raise.
-            commit_file(store, target, "test: add thing", author="admin <admin@dfe.local>")
-        finally:
-            store.stop()

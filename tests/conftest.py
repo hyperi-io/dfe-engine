@@ -20,12 +20,9 @@ Run examples:
 """
 
 import os
-import tempfile
 from pathlib import Path
 
 import pytest
-from dulwich.errors import NotGitRepository
-from dulwich.repo import Repo
 from scalo.logger import logger
 
 # Shared RBAC test fixtures (client_as + the canonical fixture identities).
@@ -160,41 +157,15 @@ except ImportError:  # stamina ships with scalo[http]; skip if absent
     pass
 
 
-def _enclosing_repository(path: Path) -> Path | None:
-    """Return the repository a DirectoryConfigStore under ``path`` would commit to."""
-    try:
-        with Repo.discover(str(path.resolve())) as repo:
-            return Path(repo.path)
-    except NotGitRepository:
-        return None
-
-
 def pytest_configure(config: pytest.Config) -> None:
-    """Cap the HTTP client loggers, and refuse a run whose temp roots sit inside a git repository.
+    """Cap the HTTP client loggers.
 
     ``log_cli_level`` prints INFO, so without the engine's cap every request URL a
     test sends, a user's login in a directory lookup included, lands in the run's log.
-
-    scalo's DirectoryConfigStore walks up to the nearest repository, so every
-    registry write under such a root commits onto that repository's branch.
     """
     from dfe_engine.api import cap_http_client_loggers
 
     cap_http_client_loggers()
-    basetemp = config.option.basetemp
-    pytest_root = os.environ.get("PYTEST_DEBUG_TEMPROOT") or tempfile.gettempdir()
-    roots = [
-        ("--basetemp", basetemp) if basetemp else ("the pytest temp root", pytest_root),
-        ("TMPDIR", tempfile.gettempdir()),
-    ]
-    for label, root in roots:
-        repository = _enclosing_repository(Path(root))
-        if repository is not None:
-            raise pytest.UsageError(
-                f"{label} {root} is inside the git repository at {repository}, so every "
-                "registry write under it would commit onto that repository's branch. "
-                "Point --basetemp and TMPDIR outside any git checkout."
-            )
 
 
 def pytest_collection_modifyitems(config, items):

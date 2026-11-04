@@ -8,9 +8,8 @@
 
 """Meta-schema export and import.
 
-Export reads the registry; import writes back through ``SchemaRegistry``, which
-commits every change to git. A ``resource_type: core`` schema is only ever
-RESOLVED on import -- the definition ships with dfe-schemas, so writing a copy
+Export reads the registry, and import writes back through ``SchemaRegistry``. A
+``resource_type: core`` schema is only ever RESOLVED on import -- the definition ships with dfe-schemas, so writing a copy
 would fork it and stop the deployment tracking upstream.
 """
 
@@ -101,19 +100,16 @@ def apply_meta_schema_export(
     registry: SchemaRegistry,
     document: MetaSchemaExport,
     *,
-    created_by: str | None = None,
     dry_run: bool = False,
 ) -> MetaSchemaImportResult:
     """Apply one meta-schema document to this deployment.
 
     A core document is resolved against what dfe-schemas already put here and
-    never written. A custom document is saved through ``SchemaRegistry``, which
-    is the path that commits to git.
+    never written. A custom document is saved through ``SchemaRegistry``.
 
     Args:
         registry: Schema registry to write through.
         document: The exchange document.
-        created_by: Git author for the commit.
         dry_run: Run every check and report the outcome, writing nothing.
 
     Returns:
@@ -162,11 +158,7 @@ def apply_meta_schema_export(
         return result
 
     try:
-        registry.save_schema(
-            meta,
-            created_by=created_by,
-            description=f"schema: import {canonical}",
-        )
+        registry.save_schema(meta)
     except SchemaValidationError as exc:
         raise ExchangeError(str(exc)) from exc
     logger.info("meta schema imported", path=canonical, version=meta.current)

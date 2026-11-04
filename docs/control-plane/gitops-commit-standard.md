@@ -47,7 +47,7 @@ Subject: `type(scope): summary` - ASCII only, <= 50 chars, imperative.
 
 - **types** (gitops-operational, NOT release types): `cfg` (config/helm-var change),
   `hunt`, `rbac`, `action` (a defined-action invocation), `ops` (restart/scale/
-  rollback), `schema`, `seed`.
+  rollback), `schema`, `seed`, `lifecycle` (a service set running, paused or stopped).
 - **scope** = the resource class + instance, e.g. `cfg(receiver-default)`,
   `hunt(bruteforce)`, `rbac(group:soc-ro)`, `action(scale-receiver)`.
 - Body wrap 72; explains WHY when non-obvious.
