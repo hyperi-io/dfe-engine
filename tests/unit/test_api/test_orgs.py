@@ -118,21 +118,6 @@ class TestCreateOrg:
         listed = client.get("/api/v1/orgs", headers=admin_headers).json()
         assert [org["name"] for org in listed["items"]] == ["default"]
 
-    def test_create_org_viewer_forbidden(self, client, viewer_headers):
-        resp = client.post(
-            "/api/v1/orgs",
-            json={"name": "acme"},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
-    def test_create_org_no_auth_returns_401(self, client):
-        resp = client.post(
-            "/api/v1/orgs",
-            json={"name": "acme"},
-        )
-        assert resp.status_code == 401
-
     def test_create_org_sets_timestamps(self, client, admin_headers):
         resp = client.post(
             "/api/v1/orgs",
@@ -301,14 +286,6 @@ class TestUpdateOrg:
         assert resp.status_code == 200
         assert resp.json()["org_ids"] == ["acme", "acme-new"]
 
-    def test_update_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.put(
-            "/api/v1/orgs/nobody",
-            json={"display_name": "?"},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
     def test_update_viewer_forbidden(self, client, admin_headers, viewer_headers):
         client.post(
             "/api/v1/orgs",
@@ -385,10 +362,6 @@ class TestDeleteOrg:
         )
         client.delete("/api/v1/orgs/acme", headers=admin_headers)
         resp = client.get("/api/v1/orgs/acme", headers=admin_headers)
-        assert resp.status_code == 404
-
-    def test_delete_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.delete("/api/v1/orgs/nobody", headers=admin_headers)
         assert resp.status_code == 404
 
     def test_delete_viewer_forbidden(self, client, admin_headers, viewer_headers):

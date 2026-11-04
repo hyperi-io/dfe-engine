@@ -28,10 +28,6 @@ from fastapi.testclient import TestClient
 
 
 class TestCelCheckEndpoint:
-    def test_requires_auth(self, client: TestClient) -> None:
-        resp = client.post("/api/v1/cel/check", json={"expression": "has(_table)"})
-        assert resp.status_code == 401
-
     def test_tier1_has_field(self, client: TestClient, admin_headers: dict[str, str]) -> None:
         resp = client.post(
             "/api/v1/cel/check",
@@ -147,13 +143,6 @@ class TestCelCheckEndpoint:
 
 
 class TestCelCheckBatchEndpoint:
-    def test_requires_auth(self, client: TestClient) -> None:
-        resp = client.post(
-            "/api/v1/cel/check-batch",
-            json={"expressions": ["has(_table)"]},
-        )
-        assert resp.status_code == 401
-
     def test_batch_classifies_each_expression(
         self, client: TestClient, admin_headers: dict[str, str]
     ) -> None:

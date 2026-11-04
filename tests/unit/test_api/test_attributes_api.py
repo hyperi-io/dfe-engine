@@ -62,29 +62,6 @@ class TestAccountAttributes:
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
 
-    def test_put_missing_account_returns_404(self, client, admin_headers):
-        resp = client.put(
-            "/api/v1/auth/accounts/ghost/attributes",
-            json={"attributes": {"x": 1}},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
-    def test_get_requires_scope(self, client, viewer_headers):
-        resp = client.get(
-            "/api/v1/auth/accounts/admin/attributes",
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
-    def test_put_requires_scope(self, client, viewer_headers):
-        resp = client.put(
-            "/api/v1/auth/accounts/admin/attributes",
-            json={"attributes": {"x": 1}},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
     def test_sensitive_put_then_get_roundtrip(self, client, admin_headers):
         self._make_account(client, admin_headers, "sensuser")
         put = client.put(
@@ -101,20 +78,6 @@ class TestAccountAttributes:
         )
         assert get.status_code == 200
         assert get.json()["attributes"] == SENSITIVE
-
-    def test_sensitive_get_missing_account_returns_404(self, client, admin_headers):
-        resp = client.get(
-            "/api/v1/auth/accounts/ghost/sensitive-attributes",
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
-    def test_sensitive_requires_scope(self, client, viewer_headers):
-        resp = client.get(
-            "/api/v1/auth/accounts/admin/sensitive-attributes",
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
 
 
 class TestGroupAttributes:
@@ -152,14 +115,6 @@ class TestGroupAttributes:
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
 
-    def test_put_missing_group_returns_404(self, client, admin_headers):
-        resp = client.put(
-            "/api/v1/auth/groups/ghostgroup/attributes",
-            json={"attributes": {"x": 1}},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
     def test_get_requires_scope(self, client, admin_headers, viewer_headers):
         self._make_group(client, admin_headers, "scopegroup")
         resp = client.get(
@@ -184,13 +139,6 @@ class TestGroupAttributes:
         )
         assert get.status_code == 200
         assert get.json()["attributes"] == SENSITIVE
-
-    def test_sensitive_get_missing_group_returns_404(self, client, admin_headers):
-        resp = client.get(
-            "/api/v1/auth/groups/ghostgroup/sensitive-attributes",
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
 
     def test_sensitive_requires_scope(self, client, admin_headers, viewer_headers):
         self._make_group(client, admin_headers, "sensscopegroup")

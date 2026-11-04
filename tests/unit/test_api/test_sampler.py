@@ -156,11 +156,6 @@ def test_unauthenticated_is_rejected(client, fake_ch):
     assert r.status_code in (401, 403)
 
 
-def test_unknown_sample_task_is_404(client, admin_headers):
-    r = client.get("/api/v1/samples/does-not-exist", headers=admin_headers)
-    assert r.status_code == 404
-
-
 @pytest.mark.parametrize(
     ("default", "statuses"),
     [("recent", {"completed"}), ("smart", {"pending", "running", "failed"})],

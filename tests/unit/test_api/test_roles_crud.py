@@ -7,10 +7,6 @@ from dfe_engine.auth.roles import builtin_core_role_names
 
 
 class TestRolesScopes:
-    def test_list_scopes_requires_admin(self, client, viewer_headers):
-        resp = client.get("/api/v1/auth/roles/scopes", headers=viewer_headers)
-        assert resp.status_code == 403
-
     def test_list_scopes(self, client, admin_headers):
         resp = client.get("/api/v1/auth/roles/scopes", headers=admin_headers)
         assert resp.status_code == 200

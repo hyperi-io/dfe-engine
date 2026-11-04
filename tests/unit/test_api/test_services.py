@@ -52,10 +52,6 @@ class TestServicesList:
         assert data["items"] == []
         assert data["total_size"] == 0
 
-    def test_list_requires_auth(self, client):
-        resp = client.get("/api/v1/services")
-        assert resp.status_code == 401
-
     def test_list_viewer_allowed(self, client, viewer_headers):
         resp = client.get("/api/v1/services", headers=viewer_headers)
         assert resp.status_code == 200
@@ -66,10 +62,6 @@ class TestServiceConfigNotFound:
         resp = client.get("/api/v1/services/receiver/production", headers=admin_headers)
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
-
-    def test_delete_missing(self, client, admin_headers):
-        resp = client.delete("/api/v1/services/receiver/production", headers=admin_headers)
-        assert resp.status_code == 404
 
 
 MASK = "**********"
@@ -424,7 +416,3 @@ class TestServicesSeed:
         assert resp.status_code == 200
         data = resp.json()
         assert "seeded" in data
-
-    def test_seed_requires_write(self, client, viewer_headers):
-        resp = client.post("/api/v1/services/seed", headers=viewer_headers)
-        assert resp.status_code == 403

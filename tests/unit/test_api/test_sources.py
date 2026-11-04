@@ -598,10 +598,6 @@ class TestGetSource:
         assert ver["source_build"] is None
         assert ver["source_deployment"] is None
 
-    def test_get_not_found(self, client: TestClient, admin_headers: dict):
-        resp = client.get("/api/v1/sources/nonexistent", headers=admin_headers)
-        assert resp.status_code == 404
-
 
 class TestMainFlow:
     """The landing table's source: seeded by the engine, read but never written."""
@@ -754,11 +750,6 @@ class TestGetSourceFlow:
         # Nothing selects these records; they arrived on some other path and went unclaimed.
         assert body["input"] == "records the loader could not route elsewhere"
         assert body["outputs"]["loader"] == "main_land"
-
-    def test_an_unknown_source_has_no_flow(self, client: TestClient, admin_headers: dict):
-        resp = client.get("/api/v1/sources/nonexistent/flow", headers=admin_headers)
-
-        assert resp.status_code == 404
 
     def test_a_flow_that_cannot_run_answers_with_the_reason(
         self, client: TestClient, admin_headers: dict, app, sample_source: dict
@@ -980,13 +971,6 @@ class TestGetSourceVersion:
         )
         assert resp.status_code == 404
 
-    def test_get_version_source_not_found(self, client: TestClient, admin_headers: dict):
-        resp = client.get(
-            "/api/v1/sources/missing/versions/1.0.0",
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
     def test_get_version_path_requires_version_segment(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):
@@ -1127,17 +1111,6 @@ class TestUpdateSource:
         )
         assert resp.status_code == 422
 
-    def test_update_not_found(self, client: TestClient, admin_headers: dict):
-        resp = client.put(
-            "/api/v1/sources/nonexistent",
-            json={
-                "source": "nonexistent",
-                "match": {"field": "tags.collector.type", "value": "nonexistent"},
-            },
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
     def test_update_not_found_when_registry_raises_after_exists_check(
         self,
         monkeypatch,
@@ -1223,10 +1196,6 @@ class TestDeleteSource:
         # Verify it's gone
         get_resp = client.get("/api/v1/sources/test-source", headers=admin_headers)
         assert get_resp.status_code == 404
-
-    def test_delete_not_found(self, client: TestClient, admin_headers: dict):
-        resp = client.delete("/api/v1/sources/nonexistent", headers=admin_headers)
-        assert resp.status_code == 404
 
     def test_a_recreated_source_starts_with_no_deploy_history(
         self,

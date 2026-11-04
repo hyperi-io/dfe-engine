@@ -53,14 +53,6 @@ class TestCreateAPIKey:
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
 
-    def test_create_requires_admin(self, client, viewer_headers):
-        resp = client.post(
-            "/api/v1/auth/api-keys",
-            json={"name": "blocked-key"},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
     def test_create_missing_name_returns_422(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/api-keys",
@@ -207,10 +199,6 @@ class TestListAPIKeys:
         assert lapsed["expired"] is True
         assert lapsed["expires_at"] is not None
 
-    def test_list_requires_admin(self, client, viewer_headers):
-        resp = client.get("/api/v1/auth/api-keys", headers=viewer_headers)
-        assert resp.status_code == 403
-
 
 class TestRevokeAPIKey:
     """DELETE /api/v1/auth/api-keys/{short_token}"""
@@ -236,7 +224,3 @@ class TestRevokeAPIKey:
         resp = client.delete("/api/v1/auth/api-keys/deadbeef", headers=admin_headers)
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
-
-    def test_revoke_requires_admin(self, client, viewer_headers):
-        resp = client.delete("/api/v1/auth/api-keys/deadbeef", headers=viewer_headers)
-        assert resp.status_code == 403

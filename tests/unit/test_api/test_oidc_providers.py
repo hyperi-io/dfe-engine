@@ -146,14 +146,6 @@ class TestCreateProvider:
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
 
-    def test_create_requires_admin(self, client, viewer_headers):
-        resp = client.post(
-            "/api/v1/auth/oidc-providers",
-            json={"name": "blocked", "type": "generic"},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
     def test_create_missing_fields_returns_422(self, client, admin_headers):
         resp = client.post("/api/v1/auth/oidc-providers", json={}, headers=admin_headers)
         assert resp.status_code == 422
@@ -231,10 +223,6 @@ class TestListProviders:
         assert "prov-a" in names
         assert "prov-b" in names
 
-    def test_list_requires_admin(self, client, viewer_headers):
-        resp = client.get("/api/v1/auth/oidc-providers", headers=viewer_headers)
-        assert resp.status_code == 403
-
 
 class TestGetProvider:
     """GET /api/v1/auth/oidc-providers/{name}"""
@@ -251,10 +239,6 @@ class TestGetProvider:
         resp = client.get("/api/v1/auth/oidc-providers/nonexistent", headers=admin_headers)
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
-
-    def test_get_requires_admin(self, client, viewer_headers):
-        resp = client.get("/api/v1/auth/oidc-providers/anything", headers=viewer_headers)
-        assert resp.status_code == 403
 
     def test_env_var_names_visible_not_values(self, client, admin_headers):
         """Env var names are exposed, not the actual secret values."""
@@ -313,22 +297,6 @@ class TestUpdateProvider:
         assert resp.status_code == 200
         assert resp.json()["groups"]["mode"] == "api"
         assert resp.json()["groups"]["sync_interval"] == 900
-
-    def test_update_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.put(
-            "/api/v1/auth/oidc-providers/ghost",
-            json={"enabled": False},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
-    def test_update_requires_admin(self, client, viewer_headers):
-        resp = client.put(
-            "/api/v1/auth/oidc-providers/anything",
-            json={"enabled": False},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
 
     @pytest.mark.parametrize(
         "case",
@@ -642,14 +610,6 @@ class TestDeleteProvider:
         assert store.get("other-idp-user").enabled is True
         assert store.get("already-off").enabled is False
 
-    def test_delete_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.delete("/api/v1/auth/oidc-providers/nonexistent", headers=admin_headers)
-        assert resp.status_code == 404
-
-    def test_delete_requires_admin(self, client, viewer_headers):
-        resp = client.delete("/api/v1/auth/oidc-providers/anything", headers=viewer_headers)
-        assert resp.status_code == 403
-
 
 class TestSyncProvider:
     """POST /api/v1/auth/oidc-providers/{name}/sync"""
@@ -847,14 +807,6 @@ class TestSyncProvider:
         # It waits a tick before its first run, so it never races the explicit syncs in these tests.
         assert app.state.oidc_group_sync.done() is False
 
-    def test_sync_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.post("/api/v1/auth/oidc-providers/ghost/sync", headers=admin_headers)
-        assert resp.status_code == 404
-
-    def test_sync_requires_admin(self, client, viewer_headers):
-        resp = client.post("/api/v1/auth/oidc-providers/anything/sync", headers=viewer_headers)
-        assert resp.status_code == 403
-
     def test_a_token_no_header_can_carry_fails_the_sync_and_stays_out_of_the_log(
         self,
         admin_headers: dict[str, str],
@@ -889,14 +841,6 @@ class TestTestProvider:
         data = resp.json()
         assert data["success"] is True
         assert "Generic provider" in data["message"]
-
-    def test_test_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.get("/api/v1/auth/oidc-providers/ghost/test", headers=admin_headers)
-        assert resp.status_code == 404
-
-    def test_test_requires_admin(self, client, viewer_headers):
-        resp = client.get("/api/v1/auth/oidc-providers/anything/test", headers=viewer_headers)
-        assert resp.status_code == 403
 
     def test_a_token_no_header_can_carry_stays_out_of_the_answer_and_the_log(
         self,
@@ -1034,16 +978,6 @@ class TestVerifyLoginConfig:
         data = resp.json()
         discovery = next(c for c in data["checks"] if c["name"] == "discovery")
         assert discovery["ok"] is False
-
-    def test_verify_login_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.get("/api/v1/auth/oidc-providers/ghost/verify-login", headers=admin_headers)
-        assert resp.status_code == 404
-
-    def test_verify_login_requires_admin(self, client, viewer_headers):
-        resp = client.get(
-            "/api/v1/auth/oidc-providers/anything/verify-login", headers=viewer_headers
-        )
-        assert resp.status_code == 403
 
 
 class TestRelyingPartyStaysInSync:

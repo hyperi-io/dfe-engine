@@ -16,79 +16,34 @@ from dfe_engine.query.catalog import (
 # =============================================================================
 
 
-class TestMapClickHouseType:
-    """Tests for ClickHouse → Python/TypeScript/HTML type mapping."""
+# ClickHouse type -> (Python, TypeScript, HTML input). A type the map lacks falls back to string.
+CLICKHOUSE_TYPES = [
+    ("String", ("string", "string", "text")),
+    ("UInt64", ("integer", "number", "number")),
+    ("UInt32", ("integer", "number", "number")),
+    ("UInt8", ("integer", "number", "number")),
+    ("Int32", ("integer", "number", "number")),
+    ("Int64", ("integer", "number", "number")),
+    ("Float32", ("float", "number", "number")),
+    ("Float64", ("float", "number", "number")),
+    ("Decimal(10,2)", ("float", "number", "number")),
+    ("DateTime", ("datetime", "string", "datetime-local")),
+    ("DateTime64(3)", ("datetime", "string", "datetime-local")),
+    ("Date", ("date", "string", "date")),
+    ("Date32", ("date", "string", "date")),
+    ("UUID", ("uuid", "string", "text")),
+    ("Bool", ("boolean", "boolean", "checkbox")),
+    ("Array(String)", ("array", "string[]", "multiselect")),
+    ("Array(UInt64)", ("array", "number[]", "multiselect")),
+    ("LowCardinality(String)", ("string", "string", "text")),
+]
 
-    def test_string(self):
-        assert map_clickhouse_type("String") == ("string", "string", "text")
 
-    def test_uint64(self):
-        assert map_clickhouse_type("UInt64") == ("integer", "number", "number")
-
-    def test_uint32(self):
-        assert map_clickhouse_type("UInt32") == ("integer", "number", "number")
-
-    def test_uint8(self):
-        assert map_clickhouse_type("UInt8") == ("integer", "number", "number")
-
-    def test_int32(self):
-        assert map_clickhouse_type("Int32") == ("integer", "number", "number")
-
-    def test_int64(self):
-        assert map_clickhouse_type("Int64") == ("integer", "number", "number")
-
-    def test_float32(self):
-        assert map_clickhouse_type("Float32") == ("float", "number", "number")
-
-    def test_float64(self):
-        assert map_clickhouse_type("Float64") == ("float", "number", "number")
-
-    def test_decimal(self):
-        assert map_clickhouse_type("Decimal(10,2)") == ("float", "number", "number")
-
-    def test_datetime(self):
-        assert map_clickhouse_type("DateTime") == ("datetime", "string", "datetime-local")
-
-    def test_datetime64(self):
-        assert map_clickhouse_type("DateTime64(3)") == (
-            "datetime",
-            "string",
-            "datetime-local",
-        )
-
-    def test_date(self):
-        assert map_clickhouse_type("Date") == ("date", "string", "date")
-
-    def test_date32(self):
-        assert map_clickhouse_type("Date32") == ("date", "string", "date")
-
-    def test_uuid(self):
-        assert map_clickhouse_type("UUID") == ("uuid", "string", "text")
-
-    def test_bool(self):
-        assert map_clickhouse_type("Bool") == ("boolean", "boolean", "checkbox")
-
-    def test_array_string(self):
-        assert map_clickhouse_type("Array(String)") == (
-            "array",
-            "string[]",
-            "multiselect",
-        )
-
-    def test_array_uint64(self):
-        assert map_clickhouse_type("Array(UInt64)") == (
-            "array",
-            "number[]",
-            "multiselect",
-        )
-
-    def test_unknown_type_fallback(self):
-        """Unknown types should fall back to string."""
-        assert map_clickhouse_type("LowCardinality(String)") == (
-            "string",
-            "string",
-            "text",
-        )
+@pytest.mark.parametrize(
+    ("clickhouse_type", "mapped"), CLICKHOUSE_TYPES, ids=[t for t, _ in CLICKHOUSE_TYPES]
+)
+def test_a_clickhouse_type_maps_to_its_python_typescript_and_html_types(clickhouse_type, mapped):
+    assert map_clickhouse_type(clickhouse_type) == mapped
 
 
 # =============================================================================
