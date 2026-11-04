@@ -91,6 +91,8 @@ LABEL org.opencontainers.image.created="${OCI_CREATED}"
 
 # Copy the uv-built virtualenv from the builder and put it on PATH.
 COPY --from=builder /app /app
+# LGPL-3.0 section 4(a) asks for a notice with each copy of the image.
+COPY LICENSE NOTICE /app/
 ENV PATH="/app/.venv/bin:$PATH"
 
 # Runtime WORKDIR (#106): without it CWD is / and any relative default path

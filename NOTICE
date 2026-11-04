@@ -1,0 +1,14 @@
+dfe-engine
+Copyright (c) 2026 HYPERI PTY LIMITED. Licensed under BUSL-1.1, see LICENSE.
+
+This product uses the following libraries under the GNU Lesser General Public
+License. Each is installed unmodified as a separate Python package and can be
+replaced with a modified version of it.
+
+  pySigma -- https://pypi.org/project/pySigma/ -- LGPL-2.1-only
+  The licence text ships with the package, in pysigma-<version>.dist-info/licenses/LICENSE.
+
+  pysigma-backend-clickhouse -- https://pypi.org/project/pysigma-backend-clickhouse/ -- LGPL-3.0
+  The licence text ships with the package, in
+  pysigma_backend_clickhouse-<version>.dist-info/licenses/LICENSE.md.
+  The GNU GPL v3.0 it refers to is at https://www.gnu.org/licenses/gpl-3.0.txt.
