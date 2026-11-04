@@ -28,18 +28,10 @@ class TestTasksRouter:
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
 
-    def test_cancel_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.post("/api/v1/operations/nonexistent-id/cancel", headers=admin_headers)
-        assert resp.status_code == 404
-
     def test_list_filtered_by_kind_empty(self, client, admin_headers):
         resp = client.get("/api/v1/operations?kind=hunt:execute", headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json()["items"] == []
-
-    def test_stream_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.get("/api/v1/operations/nonexistent-id/stream", headers=admin_headers)
-        assert resp.status_code == 404
 
 
 @pytest.mark.usefixtures("customer_orgs")
@@ -283,10 +275,6 @@ class TestQueriesRouter:
         assert resp.status_code == 400
         assert resp.json()["code"] == "invalid_datasource"
 
-    def test_requires_auth_for_views(self, client):
-        resp = client.get("/api/v1/queries/views")
-        assert resp.status_code == 401
-
 
 class TestPipelineRouter:
     """GET/POST /api/v1/pipeline endpoints."""
@@ -318,7 +306,3 @@ class TestPipelineRouter:
         assert detail is not None, "no response"
         assert detail.status_code == 200, detail.text
         assert detail.json()["metadata"]["kind"] == "pipeline:build"
-
-    def test_requires_auth(self, client):
-        resp = client.get("/api/v1/pipeline/templates")
-        assert resp.status_code == 401

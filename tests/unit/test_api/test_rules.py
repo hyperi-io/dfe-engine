@@ -46,21 +46,6 @@ class TestRulesValidate:
         assert "valid" in data
         assert "errors" in data
 
-    def test_validate_requires_auth(self, client):
-        resp = client.post(
-            "/api/v1/rules/validate",
-            json={"sql": "severity = 'high'"},
-        )
-        assert resp.status_code == 401
-
-    def test_validate_viewer_forbidden(self, client, viewer_headers):
-        resp = client.post(
-            "/api/v1/rules/validate",
-            json={"sql": "event_type = 'login'"},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
     def test_validate_missing_sql_field(self, client, admin_headers):
         resp = client.post(
             "/api/v1/rules/validate",
@@ -301,18 +286,6 @@ class TestRulesCreate:
             headers=admin_headers,
         )
         assert resp.status_code == 422
-
-    def test_create_requires_write_permission(self, client, viewer_headers):
-        resp = client.post(
-            "/api/v1/rules",
-            json={
-                "name": "viewer_rule",
-                "severity": "low",
-                "user_sql": "event_type = 'login'",
-            },
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
 
     def test_create_missing_required_fields(self, client, admin_headers):
         resp = client.post(

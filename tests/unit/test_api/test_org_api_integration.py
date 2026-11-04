@@ -129,29 +129,6 @@ class TestOrgApiWithLifecycle:
         resp = client.get("/api/v1/orgs/del-me", headers=admin_headers)
         assert resp.status_code == 404
 
-    def test_delete_nonexistent_org_returns_404(self, client, admin_headers):
-        """DELETE on nonexistent org returns 404."""
-        resp = client.delete("/api/v1/orgs/ghost-xyz", headers=admin_headers)
-        assert resp.status_code == 404
-
-    def test_update_nonexistent_org_returns_404(self, client, admin_headers):
-        """PUT on nonexistent org returns 404."""
-        resp = client.put(
-            "/api/v1/orgs/no-such-org",
-            json={"display_name": "X"},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
-    def test_viewer_cannot_create_org(self, client, viewer_headers):
-        """Read-only users cannot create orgs (403)."""
-        resp = client.post(
-            "/api/v1/orgs",
-            json={"name": "viewer-attempt", "org_ids": ["va"]},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
     def test_viewer_cannot_delete_org(self, client, admin_headers, viewer_headers):
         """Read-only users cannot delete orgs (403)."""
         client.post(

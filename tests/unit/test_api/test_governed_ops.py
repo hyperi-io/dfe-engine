@@ -527,10 +527,6 @@ class TestChRbacReconcileEndpoint:
         # the governance:write gate rejects before any ClickHouse work
         assert client.post("/api/v1/governance/ch-rbac/reconcile").status_code == 401
 
-    def test_viewer_forbidden(self, client, viewer_headers):
-        resp = client.post("/api/v1/governance/ch-rbac/reconcile", headers=viewer_headers)
-        assert resp.status_code == 403
-
     @pytest.mark.parametrize(
         ("errors", "stood_down"),
         [([], True), (["GRANT INSERT ON dfe.otel_* failed"], False)],

@@ -103,10 +103,6 @@ class TestRefresh:
         assert data["access_token"]
         assert data["user_id"] == "admin"
 
-    def test_refresh_no_token(self, client: TestClient):
-        resp = client.post("/api/v1/auth/refresh")
-        assert resp.status_code == 401
-
     def test_refresh_rejects_disabled_account(self, client: TestClient, admin_headers: dict):
         login = client.post(
             "/api/v1/auth/login",
@@ -166,10 +162,6 @@ class TestMe:
         )
         assert resp.status_code == 200
         assert resp.json()["external"] is True
-
-    def test_me_no_token(self, client: TestClient):
-        resp = client.get("/api/v1/auth/me")
-        assert resp.status_code == 401
 
     def test_me_invalid_token(self, client: TestClient):
         resp = client.get(

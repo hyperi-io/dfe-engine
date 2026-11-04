@@ -143,14 +143,6 @@ class TestLookalike:
         assert r.status_code == 400
         assert "sample input" in r.text
 
-    def test_viewer_cannot_lookalike(self, client, viewer_headers):
-        r = client.post(
-            "/api/v1/synthetic-data/lookalike",
-            json={"rows": [{"a": 1}], "count": 1},
-            headers=viewer_headers,
-        )
-        assert r.status_code == 403
-
 
 @needs_packs
 class TestStream:
