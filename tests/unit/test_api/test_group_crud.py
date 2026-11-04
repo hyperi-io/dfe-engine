@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.settings import DFESettings
+from tests.support.case_twins import store_case_twin_group
 from tests.unit.test_api.group_crud_cases import (
     ADMINS_SOURCE_ID,
     GROUP_DELETE_ROUTE_CASES,
@@ -1011,7 +1012,7 @@ class TestAMembershipWriteLeavesAnIdpAccountsOwnList:
         case: IdpMemberWriteCase,
     ):
         for name in case["stored_groups"]:
-            app.state.group_store.create(members=[], name=name, roles=[])
+            store_case_twin_group(app.state.group_store, name=name, members=[])
 
         resp = client.request(
             headers=callers[case["caller"]],
@@ -1032,7 +1033,7 @@ class TestAMembershipWriteLeavesAnIdpAccountsOwnList:
     def test_a_removal_leaves_the_idp_assertion(
         self, app: FastAPI, callers: dict[str, dict[str, str]], client: TestClient
     ):
-        app.state.group_store.create(members=[IDP_ACCOUNT], name=ADMINS_SOURCE_ID, roles=[])
+        store_case_twin_group(app.state.group_store, name=ADMINS_SOURCE_ID, members=[IDP_ACCOUNT])
         app.state.account_store.update(groups=[ADMINS_SOURCE_ID], username=IDP_ACCOUNT)
 
         resp = client.delete(

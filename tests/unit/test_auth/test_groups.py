@@ -220,11 +220,15 @@ class TestGroupStoreCreate:
         store.create("ops", roles=["operator"])
         assert (groups_dir / "ops.yaml").exists()
 
-    def test_create_duplicate_raises_value_error(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("first", "second"), [("admins", "admins"), ("admins", "Admins"), ("Ops", "OPS")]
+    )
+    def test_create_duplicate_raises_value_error(self, tmp_path, first, second):
         store = GroupStore(tmp_path / "groups")
-        store.create("admins", roles=["admin"])
-        with pytest.raises(ValueError, match="admins"):
-            store.create("admins", roles=["viewer"])
+        store.create(first, roles=["admin"])
+        with pytest.raises(ValueError, match=first):
+            store.create(second, roles=["viewer"])
+        assert [g.name for g in store.list()] == [first]
 
     def test_create_rejects_unsafe_name(self, tmp_path):
         # Group name becomes the {name}.yaml filename stem - reject traversal /

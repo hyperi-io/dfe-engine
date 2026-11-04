@@ -372,6 +372,15 @@ def _upsert_groups(
                 metrics.skipped("name_taken")
                 skips["name_taken"] += 1
                 continue
+            if any(group.name.lower() == group_name for group in known):
+                logger.warning(
+                    "OIDC group sync skipped a group whose name another group holds in another case",
+                    group=group_name,
+                    provider=provider_name,
+                )
+                metrics.skipped("name_taken")
+                skips["name_taken"] += 1
+                continue
             try:
                 created_group = group_store.create(
                     description=group_info.description,

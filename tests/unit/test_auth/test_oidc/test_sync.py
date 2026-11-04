@@ -638,6 +638,32 @@ class TestSyncNeverCreatesAGroupCrossingTheNamespaces:
             [case["stored_name"]],
         )
 
+    async def test_a_case_twin_of_a_stored_group_is_skipped_as_name_taken(
+        self,
+        api_provider: OIDCProvider,
+        registries: tuple[OIDCProviderRegistry, GroupStore],
+    ):
+        provider_registry, group_store = registries
+        provider_registry.create(name="test-sso", provider=api_provider)
+        group_store.create(members=[], name="SOC-Team", roles=["admin"])
+        manager = create_metrics("test", backend="prometheus", enable_auto_update=False)
+        groups = [GroupInfo(email="", id="g-1", name="soc-team")]
+
+        result = await sync_provider(
+            adapter=graph_directory(api_provider, groups),
+            group_store=group_store,
+            metrics=SyncMetrics(manager),
+            provider_name="test-sso",
+            provider_registry=provider_registry,
+        )
+
+        stored = [group.name for group in group_store.list()]
+        assert (result["created"], _sync_skips(manager), stored) == (
+            0,
+            {"name_taken": 1.0},
+            ["SOC-Team"],
+        )
+
 
 class TestSyncOverAGroupFileThatDoesNotLoad:
     """One unloadable file holding a synced group's name must not abort the whole sync."""

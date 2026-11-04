@@ -21,6 +21,7 @@ from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.breakglass import GROUP as BREAKGLASS_GROUP
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.settings import DFESettings
+from tests.support.case_twins import store_case_twin_group
 
 ACCOUNTS = "/api/v1/auth/accounts"
 KEYS = "/api/v1/auth/api-keys"
@@ -112,7 +113,7 @@ class TestAnAccountsGroupsNeedTheirRoles:
         app.state.group_store.update(
             name="dfe-admins", source_id="DFE-Admins", source_provider="entra"
         )
-        app.state.group_store.create(members=[], name="DFE-Admins", roles=[])
+        store_case_twin_group(app.state.group_store, name="DFE-Admins", members=[])
         app.state.account_store.create(
             groups=["dfe-viewers"], password="", username="jane-corp-com"
         )
@@ -130,7 +131,7 @@ class TestAnAccountsGroupsNeedTheirRoles:
     def test_a_roleless_group_is_accepted_for_an_idp_account(
         self, app: FastAPI, client: TestClient, mgr: dict[str, str]
     ):
-        app.state.group_store.create(members=[], name="DFE-Admins", roles=[])
+        store_case_twin_group(app.state.group_store, name="DFE-Admins", members=[])
         app.state.account_store.create(
             groups=["dfe-viewers"], password="", username="jane-corp-com"
         )
