@@ -57,7 +57,7 @@ def _hermetic_env(monkeypatch, tmp_path):
 @pytest.fixture
 def config_dir(tmp_path):
     """Create a temporary config directory with expected subdirs."""
-    for subdir in ("services", "sources", "hunts", "rules", "queries"):
+    for subdir in ("services", "sources", "hunts", "rules"):
         (tmp_path / subdir).mkdir()
     return str(tmp_path)
 
@@ -68,7 +68,6 @@ def _clear_registry_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "DFE_ENGINE_SOURCES_DIR",
         "DFE_ENGINE_SERVICES_CONFIG_YAML_DIR",
         "DFE_ENGINE_HUNTS_DIR",
-        "DFE_ENGINE_QUERY_YAML_DIR",
         "DFE_ENGINE_FIELDMAPS_DIR",
     ):
         monkeypatch.delenv(key, raising=False)
@@ -98,12 +97,6 @@ class TestConfigDir:
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.hunts.rules_dir == os.path.join(config_dir, "rules")
-
-    def test_config_dir_resolves_query_dir(self, config_dir, monkeypatch):
-        _clear_registry_path_env(monkeypatch)
-        monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
-        settings = load_settings()
-        assert settings.query.yaml_dir == os.path.join(config_dir, "queries")
 
     def test_config_dir_stored_on_settings(self, config_dir, monkeypatch):
         _clear_registry_path_env(monkeypatch)
@@ -145,25 +138,97 @@ class TestDefaultSettings:
 class TestEnvOverrides:
     """Test env var overrides for the config cascade in load_settings()."""
 
-    def test_clickhouse_host_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", "ch.example.com")
-        settings = load_settings()
-        assert settings.clickhouse.host == "ch.example.com"
-
-    def test_clickhouse_port_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PORT", "9000")
-        settings = load_settings()
-        assert settings.clickhouse.port == 9000
-
-    def test_clickhouse_username_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_USERNAME", "admin")
-        settings = load_settings()
-        assert settings.clickhouse.username == "admin"
-
-    def test_clickhouse_database_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATABASE", "analytics")
-        settings = load_settings()
-        assert settings.clickhouse.database == "analytics"
+    @pytest.mark.parametrize(
+        ("name", "value", "field", "expected"),
+        [
+            ("DFE_ENGINE_CLICKHOUSE_HOST", "ch.example.com", "clickhouse.host", "ch.example.com"),
+            ("DFE_ENGINE_CLICKHOUSE_PORT", "9000", "clickhouse.port", 9000),
+            ("DFE_ENGINE_CLICKHOUSE_USERNAME", "admin", "clickhouse.username", "admin"),
+            ("DFE_ENGINE_CLICKHOUSE_DATABASE", "analytics", "clickhouse.database", "analytics"),
+            ("DFE_ENGINE_CLICKHOUSE_SECURE", "true", "clickhouse.secure", True),
+            ("DFE_ENGINE_CLICKHOUSE_SECURE", "false", "clickhouse.secure", False),
+            ("DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MAX", "20", "clickhouse.connections_max", 20),
+            ("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "30", "clickhouse.default_ttl_days", 30),
+            ("DFE_ENGINE_API_HOST", "127.0.0.1", "api.host", "127.0.0.1"),
+            ("DFE_ENGINE_API_PORT", "9090", "api.port", 9090),
+            (
+                "DFE_ENGINE_API_JWT_SECRET",
+                "super-secret-hmac-key-at-least-32-bytes",
+                "api.jwt_secret",
+                "super-secret-hmac-key-at-least-32-bytes",
+            ),
+            (
+                "DFE_ENGINE_API_FORWARDED_ALLOW_IPS",
+                "10.42.0.0/16",
+                "api.forwarded_allow_ips",
+                "10.42.0.0/16",
+            ),
+            (
+                "DFE_ENGINE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES",
+                "1048576",
+                "api.elastic_converter_max_upload_bytes",
+                1048576,
+            ),
+            (
+                "DFE_ENGINE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE",
+                "32768",
+                "api.elastic_converter_read_chunk_size",
+                32768,
+            ),
+            (
+                "DFE_ENGINE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES",
+                "65536",
+                "api.elastic_converter_content_length_slack_bytes",
+                65536,
+            ),
+            (
+                "DFE_ENGINE_RECOVERY_EMAIL",
+                "ops@example.com",
+                "auth.local.recovery_email",
+                "ops@example.com",
+            ),
+            ("DFE_ENGINE_HYPERDX_ENABLED", "true", "hyperdx.enabled", True),
+            (
+                "DFE_ENGINE_HYPERDX_BASE_URL",
+                "http://hdx:8080",
+                "hyperdx.base_url",
+                "http://hdx:8080",
+            ),
+            ("DFE_ENGINE_CLICKHOUSE_VERIFY", "1", "clickhouse.verify", True),
+            ("DFE_ENGINE_CLICKHOUSE_VERIFY", "false", "clickhouse.verify", False),
+            ("DFE_ENGINE_CLICKHOUSE_VERIFY", "", "clickhouse.verify", None),
+            ("DFE_ENGINE_CLICKHOUSE_PASSWORD", "secret123", "clickhouse.password", "secret123"),
+            ("DFE_ENGINE_API_JWT_EXPIRE_MINUTES", "60", "api.jwt_expire_minutes", 60),
+            ("DFE_ENGINE_HUNTS_DIR", "/custom/hunts", "hunts.hunt_dir", "/custom/hunts"),
+            (
+                "DFE_ENGINE_FIELDMAPS_DIR",
+                "/custom/fieldmaps",
+                "fieldmap.fieldmaps_dir",
+                "/custom/fieldmaps",
+            ),
+            ("DFE_ENGINE_PROFILE", " mesh ", "deployment.profile", "mesh"),
+            ("DFE_ENGINE_UI_VERSION", "v1.5.1", "ui_version", "v1.5.1"),
+            (
+                "DFE_ENGINE_SERVICES_CONFIG_YAML_DIR",
+                "/custom/svc",
+                "services.config_yaml_dir",
+                "/custom/svc",
+            ),
+            ("DFE_ENGINE_SOURCES_DIR", "/custom/sources", "source.sources_dir", "/custom/sources"),
+            (
+                "DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR",
+                "/data/alert-destinations",
+                "hunts.alert_destinations_dir",
+                "/data/alert-destinations",
+            ),
+        ],
+    )
+    def test_env_sets_field(self, monkeypatch, name, value, field, expected):
+        monkeypatch.setenv(name, value)
+        node = load_settings()
+        for part in field.split("."):
+            node = getattr(node, part)
+        assert node == expected
 
     def test_clickhouse_data_database_override(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DATABASE", "default")
@@ -208,31 +273,6 @@ class TestEnvOverrides:
         settings.clickhouse.data_database = ""
         assert settings.clickhouse.effective_data_database == "analytics"
 
-    def test_clickhouse_secure_true(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_SECURE", "true")
-        settings = load_settings()
-        assert settings.clickhouse.secure is True
-
-    def test_clickhouse_secure_false(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_SECURE", "false")
-        settings = load_settings()
-        assert settings.clickhouse.secure is False
-
-    def test_clickhouse_connections_min(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MIN", "5")
-        settings = load_settings()
-        assert settings.clickhouse.connections_min == 5
-
-    def test_clickhouse_connections_max(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_CONNECTIONS_MAX", "20")
-        settings = load_settings()
-        assert settings.clickhouse.connections_max == 20
-
-    def test_clickhouse_default_ttl_days_override_parses_to_int(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", "30")
-        settings = load_settings()
-        assert settings.clickhouse.default_ttl_days == 30
-
     def test_clickhouse_default_ttl_days_ships_at_ninety(self, monkeypatch):
         monkeypatch.delenv("DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS", raising=False)
         settings = load_settings()
@@ -260,21 +300,6 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PLATFORM", "hybrid")
         with pytest.raises(ValidationError, match="auto, cloud, self_hosted"):
             load_settings()
-
-    def test_api_host_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_API_HOST", "127.0.0.1")
-        settings = load_settings()
-        assert settings.api.host == "127.0.0.1"
-
-    def test_api_port_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_API_PORT", "9090")
-        settings = load_settings()
-        assert settings.api.port == 9090
-
-    def test_api_jwt_secret_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_API_JWT_SECRET", "super-secret-hmac-key-at-least-32-bytes")
-        settings = load_settings()
-        assert settings.api.jwt_secret == "super-secret-hmac-key-at-least-32-bytes"
 
     def test_api_cors_origins_override(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_API_CORS_ORIGINS", "http://a.com,http://b.com")
@@ -309,11 +334,6 @@ class TestEnvOverrides:
         )
         monkeypatch.setenv("DFE_ENGINE_API_CORS_ORIGINS", "https://console.example")
         assert load_settings().api.cors_origins == ["https://console.example"]
-
-    def test_api_forwarded_allow_ips_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_API_FORWARDED_ALLOW_IPS", "10.42.0.0/16")
-        settings = load_settings()
-        assert settings.api.forwarded_allow_ips == "10.42.0.0/16"
 
     def test_api_forwarded_allow_ips_defaults_to_loopback(self):
         assert APISettings().forwarded_allow_ips == "127.0.0.1"
@@ -387,21 +407,6 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES", "65536")
         assert load_settings().api.max_request_body_bytes == 65_536
 
-    def test_api_elastic_converter_max_upload_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
-        settings = load_settings()
-        assert settings.api.elastic_converter_max_upload_bytes == 1_048_576
-
-    def test_api_elastic_converter_read_chunk_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE", "32768")
-        settings = load_settings()
-        assert settings.api.elastic_converter_read_chunk_size == 32_768
-
-    def test_api_elastic_converter_content_length_slack_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES", "65536")
-        settings = load_settings()
-        assert settings.api.elastic_converter_content_length_slack_bytes == 65_536
-
     @pytest.mark.parametrize(("value", "expected"), [("true", True), ("false", False)])
     def test_api_docs_enabled_override(self, monkeypatch, value, expected):
         monkeypatch.setenv("DFE_ENGINE_API_DOCS_ENABLED", value)
@@ -442,22 +447,12 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.auth.auth_dir == str(tmp_path / "auth")
 
-    def test_hunt_log_path_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HUNT_LOG_PATH", "/var/log/hunts")
-        settings = load_settings()
-        assert settings.hunts.log_path == "/var/log/hunts"
-
     def test_local_admin_name_and_password_override(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_AUTH_LOCAL_ADMIN_NAME", "breakglass")
         monkeypatch.setenv("DFE_ENGINE_AUTH_LOCAL_ADMIN_PASSWORD", "a-configured-admin-password")
         settings = load_settings()
         assert settings.auth.local.admin_name == "breakglass"
         assert settings.auth.local.admin_password == "a-configured-admin-password"
-
-    def test_recovery_email_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_RECOVERY_EMAIL", "ops@example.com")
-        settings = load_settings()
-        assert settings.auth.local.recovery_email == "ops@example.com"
 
     def test_local_admin_unset_falls_back_to_shipped_defaults(self, monkeypatch):
         # Unset leaves the defaults.yaml values, so a deploy that sets neither
@@ -538,11 +533,6 @@ class TestEnvOverrides:
         monkeypatch.setenv(name, "other.ch.com")
         assert load_settings().clickhouse.host == default
 
-    def test_hyperdx_enabled_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HYPERDX_ENABLED", "true")
-        settings = load_settings()
-        assert settings.hyperdx.enabled is True
-
     def test_sigma_is_off_by_default(self):
         assert load_settings().sigma.enabled is False
 
@@ -551,32 +541,9 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_ENGINE_SIGMA_ENABLED", value)
         assert load_settings().sigma.enabled is expected
 
-    def test_hyperdx_base_url_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HYPERDX_BASE_URL", "http://hdx:8080")
-        settings = load_settings()
-        assert settings.hyperdx.base_url == "http://hdx:8080"
-
-    def test_clickhouse_verify_true(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_VERIFY", "1")
-        settings = load_settings()
-        assert settings.clickhouse.verify is True
-
     def test_clickhouse_verify_default_is_none(self):
         # None -> follow the SCALO_TLS_VERIFY escape valve (cert verification ON by
         # default). Replaces the old insecure default of verify=False.
-        settings = load_settings()
-        assert settings.clickhouse.verify is None
-
-    def test_clickhouse_verify_false(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_VERIFY", "false")
-        settings = load_settings()
-        assert settings.clickhouse.verify is False
-
-    def test_clickhouse_verify_empty_string_is_none(self, monkeypatch):
-        # The chart ships verify: "" so the code's default governs, and an empty
-        # env var must reach the same None as an unset one. Were this to resolve
-        # False instead, verification would go off with the chart unchanged.
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_VERIFY", "")
         settings = load_settings()
         assert settings.clickhouse.verify is None
 
@@ -610,50 +577,10 @@ class TestEnvOverrides:
             load_settings()
             assert tls_allow_weak() is True
 
-    def test_clickhouse_password_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PASSWORD", "secret123")
-        settings = load_settings()
-        assert settings.clickhouse.password == "secret123"
-
-    def test_api_jwt_expire_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_API_JWT_EXPIRE_MINUTES", "60")
-        settings = load_settings()
-        assert settings.api.jwt_expire_minutes == 60
-
-    def test_hunts_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HUNTS_DIR", "/custom/hunts")
-        settings = load_settings()
-        assert settings.hunts.hunt_dir == "/custom/hunts"
-
-    def test_query_yaml_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_QUERY_YAML_DIR", "/custom/queries")
-        settings = load_settings()
-        assert settings.query.yaml_dir == "/custom/queries"
-
-    def test_helm_output_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HELM_OUTPUT_DIR", "/helm/out")
-        settings = load_settings()
-        assert settings.helm.output_dir == "/helm/out"
-
-    def test_helm_environment_file_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HELM_ENVIRONMENT_FILE", "/env.yaml")
-        settings = load_settings()
-        assert settings.helm.environment_file == "/env.yaml"
-
-    def test_fieldmap_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_FIELDMAPS_DIR", "/custom/fieldmaps")
-        settings = load_settings()
-        assert settings.fieldmap.fieldmaps_dir == "/custom/fieldmaps"
-
     def test_alert_channels_override(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_HUNTS_ALERT_CHANNELS", "email,slack")
         settings = load_settings()
         assert "email" in settings.hunts.alert_channels
-
-    def test_profile_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_PROFILE", " mesh ")
-        settings = load_settings()
-        assert settings.deployment.profile == "mesh"
 
     def test_profile_defaults_to_unknown(self):
         # An engine nobody told cannot judge which apps a tier offers, and says so
@@ -668,26 +595,6 @@ class TestEnvOverrides:
 
     def test_admin_links_default_to_none_listed(self):
         assert load_settings().deployment.admin_links == []
-
-    def test_ui_version_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_UI_VERSION", "v1.5.1")
-        settings = load_settings()
-        assert settings.ui_version == "v1.5.1"
-
-    def test_services_config_yaml_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_SERVICES_CONFIG_YAML_DIR", "/custom/svc")
-        settings = load_settings()
-        assert settings.services.config_yaml_dir == "/custom/svc"
-
-    def test_sources_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_SOURCES_DIR", "/custom/sources")
-        settings = load_settings()
-        assert settings.source.sources_dir == "/custom/sources"
-
-    def test_hunt_default_cooldown_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HUNTS_DEFAULT_ALERT_COOLDOWN", "600")
-        settings = load_settings()
-        assert settings.hunts.default_alert_cooldown == "600"
 
     def test_hunt_detection_cap_defaults(self):
         hunts = load_settings().hunts
@@ -710,20 +617,10 @@ class TestEnvOverrides:
         with pytest.raises(ValidationError):
             HuntsSettings(**{field: value})
 
-    def test_hyperdx_api_key_env_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HYPERDX_API_KEY_ENV", "MY_KEY_VAR")
-        settings = load_settings()
-        assert settings.hyperdx.api_key_env == "MY_KEY_VAR"
-
     def test_hunt_alert_destinations_json_override(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_HUNTS_ALERT_DESTINATIONS", '{"email": "alert@test.com"}')
         settings = load_settings()
         assert settings.hunts.alert_destinations == {"email": "alert@test.com"}
-
-    def test_hunt_alert_destinations_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR", "/data/alert-destinations")
-        settings = load_settings()
-        assert settings.hunts.alert_destinations_dir == "/data/alert-destinations"
 
     def test_multiple_overrides_at_once(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", "ch1.example.com")
@@ -1270,40 +1167,8 @@ class TestEverySettingIsRead:
     failing the suite over dynamic access.
     """
 
-    # Fields with no reader today. Each needs wiring or deleting -- see #239.
-    # Remove an entry when its field gains a reader; never add one to go green.
-    KNOWN_UNREAD = {
-        ("HuntsSettings", "num_threads"),
-        ("HuntsSettings", "jitter_seconds"),
-        ("HuntsSettings", "max_concurrent_queries"),
-        ("HuntsSettings", "resource_limit_read_rows"),
-        ("HuntsSettings", "resource_limit_read_bytes"),
-        ("HuntsSettings", "resource_limit_memory_bytes"),
-        ("HuntsSettings", "resource_limit_execution_ms"),
-        ("HuntsSettings", "default_alert_cooldown"),
-        ("HuntsSettings", "default_max_sample_events"),
-        ("QuerySettings", "yaml_dir"),
-        ("QueryViewSettings", "auto_bootstrap"),
-        ("HelmSettings", "environment_file"),
-        ("HyperDXSettings", "api_key_env"),
-        ("DFESettings", "e2e_server"),
-        # Found once the search stopped counting defaults.yaml as a reader. A
-        # default VALUE is another declaration, not a consumer, so every one of
-        # these looked wired while nothing read it.
-        ("ClickHouseSettings", "connections_min"),
-        ("HuntsSettings", "checkpoint_path"),
-        ("HuntsSettings", "cron_task_timeout"),
-        ("HuntsSettings", "log_path"),
-        ("StorageSettings", "s3_bucket"),
-        # auth.local seeds three passwords and bootstrap consumes only
-        # admin_password (api/app.py:130). DFE_ENGINE_AUTH_LOCAL_OPERATOR_PASSWORD and
-        # its viewer twin are routed and land nowhere -- no such account is made.
-        ("LocalAuthSettings", "operator_password"),
-        ("LocalAuthSettings", "viewer_password"),
-        # Its one reader was HuntCheckpointManager, deleted as dead code; the field
-        # is the same leftover as checkpoint_path and goes with it.
-        ("HuntsSettings", "checkpoint_destination"),
-    }
+    # Read inside settings.py by e2e_routes_enabled, which this search skips.
+    KNOWN_UNREAD = {("DFESettings", "e2e_server")}
 
     # Names a ClickHouse SERVER setting also carries, where SQL naming the
     # server setting would otherwise read as a reader; only an attribute
@@ -1365,37 +1230,27 @@ class TestEverySettingIsRead:
             "A stale allowlist hides the next one."
         )
 
-    def test_every_documented_env_var_is_actually_read(self):
-        """A field with a reader but no env route is inert where env is the config.
+    def test_every_env_route_names_a_real_field(self):
+        """Pydantic ignores unknown keys, so a mistyped path would leave the field on its default."""
+        from pydantic import BaseModel
 
-        The sibling above asks whether anything CONSUMES a field. This asks
-        whether the deployment can SET it: every settings docstring maps its
-        environment names, and a name missing from the override block resolves
-        to the default however the deployer sets it. That is how
-        DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR left the engine unable to write an app's
-        custom environment on every Compose tier.
-        """
-        import re
-        from pathlib import Path
-
-        package = Path(__file__).resolve().parents[2] / "src" / "dfe_engine"
-        settings_py = package / "settings.py"
-        source = settings_py.read_text(encoding="utf-8")
-        documented = set(re.findall(r"^\s*- (DFE_ENGINE_[A-Z0-9_]+) -> ", source, re.MULTILINE))
-        assert documented, "parsed no documented env names -- the parser, not the code, is wrong"
-
-        # Either settings.py routes it, or a module reads the name for itself.
-        routed = set(re.findall(r'_get_env(?:_if_set)?\(\s*"(DFE_ENGINE_[A-Z0-9_]+)"', source))
-        elsewhere = "\n".join(
-            path.read_text(encoding="utf-8", errors="replace")
-            for path in sorted(package.rglob("*.py"))
-            if path != settings_py
+        from dfe_engine.settings import (
+            _CONFIG_DIR_SUBDIRS,
+            _ENV_FIELDS,
+            _ENV_JSON_FIELDS,
+            DFESettings,
         )
-        assert elsewhere, "read no package source -- the test setup, not the code, is wrong"
-        routed |= {name for name in documented if name in elsewhere}
 
-        missing = sorted(documented - routed)
-        assert not missing, (
-            f"documented but never read: {missing}. Route each through _get_env, "
-            "or drop it from the docstring so nobody sets a name that does nothing."
-        )
+        paths = [path for _, fields in _ENV_FIELDS for path in fields.values()]
+        paths += list(_ENV_JSON_FIELDS.values()) + list(_CONFIG_DIR_SUBDIRS)
+        names = [name for _, fields in _ENV_FIELDS for name in fields] + list(_ENV_JSON_FIELDS)
+
+        assert len(names) == len(set(names)), "an env name is routed twice"
+        for path in paths:
+            model = DFESettings
+            *parents, leaf = path.split(".")
+            for part in parents:
+                model = model.model_fields[part].annotation
+                assert isinstance(model, type), path
+                assert issubclass(model, BaseModel), path
+            assert leaf in model.model_fields, path

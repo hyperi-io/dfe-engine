@@ -137,8 +137,6 @@ e2e-server:
 	export DFE_ENGINE_SCHEMAS_DIR="$(E2E_WORKSPACE)/schemas"; \
 	export DFE_ENGINE_SECRETS_PATH="$(E2E_WORKSPACE)/secrets"; \
 	export DFE_ENGINE_STORAGE_PATH="$(E2E_WORKSPACE)/artifacts"; \
-	export DFE_ENGINE_HUNT_LOG_PATH="$(E2E_WORKSPACE)/hunt-log"; \
-	export DFE_ENGINE_HUNTS_CHECKPOINT_PATH="$(E2E_WORKSPACE)/hunt-checkpoints"; \
 	export DFE_ENGINE_GITOPS_LOCAL_PATH="$(E2E_WORKSPACE)/deploy-repo"; \
 	export DFE_ENGINE_CLICKHOUSE_DATA_DATABASE="$(E2E_CH_DATA_DB)"; \
 	export DFE_ENGINE_E2E_SERVER=true; \
