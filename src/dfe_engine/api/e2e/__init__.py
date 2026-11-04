@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
-from dfe_engine.api.cli_exposure import CLI_HIDDEN
+from dfe_engine.api.conventions import CLI_HIDDEN
 from dfe_engine.api.deps import get_hunt_config_registry_optional, get_source_registry_optional
 from dfe_engine.api.e2e.seed import Seed
 from dfe_engine.api.write_turn import WRITE_TURN

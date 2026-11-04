@@ -20,13 +20,13 @@ import os
 from pathlib import Path
 
 import pytest
-from click.testing import CliRunner
 from dulwich import porcelain
 from dulwich.objects import Commit
 from dulwich.refs import Ref
 from dulwich.repo import Repo
+from typer.testing import CliRunner
 
-from dfe_engine.cli.auto.local import local_group
+from dfe_engine.cli.auto.local import local_app
 from dfe_engine.settings import reset_settings
 
 _HELM = "keda:\n  minReplicas: 1\n  maxReplicas: 5\nother: keep\n"
@@ -113,7 +113,7 @@ def repo_keda_disabled(tmp_path: Path) -> Path:
 
 
 def _run(repo: Path, args: list[str], **kwargs):
-    return CliRunner().invoke(local_group, [*args, "--repo", str(repo)], **kwargs)
+    return CliRunner().invoke(local_app, [*args, "--repo", str(repo)], **kwargs)
 
 
 def _head_message(repo: Path) -> str:
@@ -576,4 +576,4 @@ def test_a_write_consolidates_the_clones_packs_once_they_are_due(repo: Path, mon
 
 
 def test_ch_cloud_is_mounted():
-    assert "ch-cloud" in local_group.commands
+    assert "ch-cloud" in [group.name for group in local_app.registered_groups]

@@ -17,7 +17,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from dfe_engine.api.cli_exposure import CLI_HIDDEN
+from dfe_engine.api.conventions import CLI_HIDDEN
 from dfe_engine.api.deps import CurrentUser
 
 router = APIRouter(prefix="/config", tags=["Client Config"])

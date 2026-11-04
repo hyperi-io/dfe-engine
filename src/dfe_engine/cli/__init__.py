@@ -8,7 +8,7 @@
 
 """dfe-engine CLI package.
 
-The human CLI is ``dfe`` - auto-generated from the daemon's OpenAPI spec plus a
+The human CLI is ``dfe`` - scalo's ``SpecCli`` over the daemon's OpenAPI spec plus a
 ``dfe local`` break-glass group, under ``cli/auto/``. The daemon is
 ``dfe-engine``. This package init is intentionally empty: the old hand-written
 per-resource offline commands (accounts/groups/api-keys/oidc CRUD) were removed
