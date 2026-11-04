@@ -24,6 +24,7 @@ one-shot ``materialise`` command and the unit suite run in, and it is why the
 runner's own tests need no metrics backend.
 """
 
+from collections.abc import Iterable
 from typing import Any
 
 RUNS = "hunt_runs_total"
@@ -38,6 +39,16 @@ DETECTIONS_DROPPED = "hunt_detections_dropped_total"
 CLICKHOUSE_UNAVAILABLE = "hunt_clickhouse_unavailable_total"
 FIRE_FAILURES = "hunt_fire_failures_total"
 FIRES_HELD = "hunt_fires_held_total"
+SAFE_HORIZON_DEFERRALS = "hunt_safe_horizon_deferrals_total"
+SAFE_HORIZON_DEFERRALS_PER_FIRE = "hunt_safe_horizon_deferrals_per_fire"
+SAFE_HORIZON_CAP_REACHED = "hunt_safe_horizon_cap_reached_total"
+SAFE_HORIZON_CAP_TARGET_LAG = "hunt_safe_horizon_cap_ran_with_target_lag_total"
+SAFE_HORIZON_UNREADABLE = "hunt_safe_horizon_unreadable_total"
+SAFE_HORIZON_SECONDS_BEHIND = "hunt_safe_horizon_seconds_behind"
+SAFE_HORIZON_QUERY_DURATION = "hunt_safe_horizon_query_duration_seconds"
+OVERLAP_ROWS_REREAD = "hunt_overlap_rows_reread_total"
+DUPLICATES_SKIPPED = "hunt_duplicates_skipped_total"
+DETECTION_LATENCY = "hunt_detection_latency_seconds"
 
 
 class HuntRunnerMetrics:
@@ -93,6 +104,55 @@ class HuntRunnerMetrics:
         self._fires_held = manager.counter(
             FIRES_HELD,
             "Due fires not attempted because the hunt is waiting out a back-off after failing",
+            ["hunt_id"],
+        )
+        self._deferrals = manager.counter(
+            SAFE_HORIZON_DEFERRALS,
+            "Polls that held a due fire because the safe horizon had not reached it",
+            ["hunt_id"],
+        )
+        self._deferrals_per_fire = manager.histogram(
+            SAFE_HORIZON_DEFERRALS_PER_FIRE,
+            "Polls a fire was held for the safe horizon before it ran",
+            ["hunt_id"],
+        )
+        self._cap_reached = manager.counter(
+            SAFE_HORIZON_CAP_REACHED,
+            "Fires run short of the safe horizon because they were held for the deferral cap",
+            ["hunt_id"],
+        )
+        self._cap_target_lag = manager.counter(
+            SAFE_HORIZON_CAP_TARGET_LAG,
+            "Fires the deferral cap let run while their detection table lagged, so the "
+            "dedupe may have let a duplicate through",
+            ["hunt_id"],
+        )
+        self._unreadable = manager.counter(
+            SAFE_HORIZON_UNREADABLE,
+            "Safe horizon reads that failed, so the fire was held as if the replica lagged",
+            ["hunt_id"],
+        )
+        self._seconds_behind = manager.histogram(
+            SAFE_HORIZON_SECONDS_BEHIND,
+            "Seconds the safe horizon was short of a due fire, 0 when it had reached it",
+            ["hunt_id"],
+        )
+        self._horizon_duration = manager.histogram(
+            SAFE_HORIZON_QUERY_DURATION, "Seconds one safe horizon read took"
+        )
+        self._reread = manager.counter(
+            OVERLAP_ROWS_REREAD,
+            "Source rows a fire re-read in the overlap before its watermark",
+            ["hunt_id"],
+        )
+        self._duplicates = manager.counter(
+            DUPLICATES_SKIPPED,
+            "Detections already recorded in a fire's read window, which it skipped",
+            ["hunt_id"],
+        )
+        self._latency = manager.histogram(
+            DETECTION_LATENCY,
+            "Seconds from a matched row's _timestamp_load to its detection's insert",
             ["hunt_id"],
         )
 
@@ -189,6 +249,59 @@ class HuntRunnerMetrics:
             return
         self._fires_held.labels(hunt_id=hunt_id).inc()
 
+    def safe_horizon_read(self, duration_seconds: float) -> None:
+        """Record how long one safe horizon read took."""
+        if self._manager is None:
+            return
+        self._horizon_duration.observe(duration_seconds)
+
+    def safe_horizon_checked(self, hunt_id: str, seconds_behind: int) -> None:
+        """Record how far the safe horizon was short of a due fire."""
+        if self._manager is None:
+            return
+        self._seconds_behind.labels(hunt_id=hunt_id).observe(seconds_behind)
+
+    def safe_horizon_deferred(self, hunt_id: str) -> None:
+        """Record a poll that held a due fire for the safe horizon."""
+        if self._manager is None:
+            return
+        self._deferrals.labels(hunt_id=hunt_id).inc()
+
+    def safe_horizon_released(self, hunt_id: str, *, deferrals: int, capped: bool) -> None:
+        """Record a held fire let run, after how many polls, and whether the cap let it go."""
+        if self._manager is None:
+            return
+        self._deferrals_per_fire.labels(hunt_id=hunt_id).observe(deferrals)
+        if capped:
+            self._cap_reached.labels(hunt_id=hunt_id).inc()
+
+    def safe_horizon_cap_ran_with_target_lag(self, hunt_id: str) -> None:
+        """Record a capped fire run while its detection table lagged on the answering replica."""
+        if self._manager is None:
+            return
+        self._cap_target_lag.labels(hunt_id=hunt_id).inc()
+
+    def safe_horizon_unreadable(self, hunt_id: str) -> None:
+        """Record a safe horizon read that failed, which holds the fire as unknown lag."""
+        if self._manager is None:
+            return
+        self._unreadable.labels(hunt_id=hunt_id).inc()
+
+    def overlap_reread(self, hunt_id: str, *, rows: int, duplicates: int) -> None:
+        """Record the rows a fire re-read in its overlap and the detections it skipped."""
+        if self._manager is None:
+            return
+        self._reread.labels(hunt_id=hunt_id).inc(rows)
+        self._duplicates.labels(hunt_id=hunt_id).inc(duplicates)
+
+    def detection_latency(self, hunt_id: str, seconds: Iterable[float]) -> None:
+        """Record each new detection's delay from its matched row's load to its insert."""
+        if self._manager is None:
+            return
+        histogram = self._latency.labels(hunt_id=hunt_id)
+        for value in seconds:
+            histogram.observe(value)
+
 
 def create(app_name: str = "dfe-hunt-runner") -> HuntRunnerMetrics:
     """Build the instrument set on scalo's metrics backend.
@@ -228,12 +341,22 @@ __all__ = [
     "CLICKHOUSE_UNAVAILABLE",
     "DETECTIONS_CAPPED",
     "DETECTIONS_DROPPED",
+    "DETECTION_LATENCY",
+    "DUPLICATES_SKIPPED",
     "FIRES_HELD",
     "FIRE_FAILURES",
+    "OVERLAP_ROWS_REREAD",
     "OVERRUNS",
     "ROWS_WRITTEN",
     "RUNS",
     "RUN_DURATION",
+    "SAFE_HORIZON_CAP_REACHED",
+    "SAFE_HORIZON_CAP_TARGET_LAG",
+    "SAFE_HORIZON_DEFERRALS",
+    "SAFE_HORIZON_DEFERRALS_PER_FIRE",
+    "SAFE_HORIZON_QUERY_DURATION",
+    "SAFE_HORIZON_SECONDS_BEHIND",
+    "SAFE_HORIZON_UNREADABLE",
     "TICK_DURATION",
     "HuntRunnerMetrics",
     "create",

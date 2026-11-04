@@ -241,7 +241,15 @@ def run(
         user=settings.clickhouse.username,
     )
     db = settings.clickhouse.effective_data_database
-    worker = HuntWorker(ch, coord, metrics=obs, notifier=_match_notifier(settings))
+    worker = HuntWorker(
+        ch,
+        coord,
+        metrics=obs,
+        notifier=_match_notifier(settings),
+        overlap_seconds=settings.hunts.window_overlap_seconds,
+        safe_horizon=settings.hunts.safe_horizon,
+        max_deferral_seconds=settings.hunts.safe_horizon_max_deferral_seconds,
+    )
     hunt_dir = settings.hunts.hunt_dir
     sources = _spec_sources(settings, db)
     # Outlives each rebuild below, so a reload does not restart a failing hunt's back-off.

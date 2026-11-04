@@ -135,6 +135,7 @@ def matching_rows(
     timestamp_placeholder: str,
     *,
     tenant_condition: str = "",
+    unseen_condition: str = "",
 ) -> str:
     """Build the subquery yielding ``columns`` of the source rows the window and rule match.
 
@@ -151,6 +152,8 @@ def matching_rows(
         timestamp_placeholder: The time-window condition, or the placeholder the
             runner fills with one.
         tenant_condition: The orgs the read is held to, its own conjunct, or empty.
+        unseen_condition: The conjunct leaving out rows already detected, or the
+            placeholder the runner fills with one. Empty reads every match.
 
     Returns:
         The parenthesised subquery, to follow ``FROM``.
@@ -158,6 +161,8 @@ def matching_rows(
     where_parts = [timestamp_placeholder]
     if tenant_condition:
         where_parts.append(tenant_condition)
+    if unseen_condition:
+        where_parts.append(unseen_condition)
     if where_clause.strip():
         # On its own lines, so a rule ending in a line comment cannot comment out the bracket.
         where_parts.append(f"(\n{where_clause.strip()}\n    )")
@@ -301,6 +306,7 @@ class HuntResultSchema:
         severity: str,
         timestamp_placeholder: str = "{timestamp_condition}",
         tenant_condition: str = "",
+        unseen_condition: str = "",
     ) -> str:
         """Build a complete INSERT INTO ... SELECT statement.
 
@@ -322,6 +328,7 @@ class HuntResultSchema:
             severity: Detection severity level.
             timestamp_placeholder: Placeholder for checkpoint time bounds.
             tenant_condition: The orgs the statement may read, ANDed beside the rule.
+            unseen_condition: The conjunct leaving out rows already detected, or empty.
 
         Returns:
             Complete SQL statement string.
@@ -342,6 +349,7 @@ class HuntResultSchema:
             where_clause,
             timestamp_placeholder,
             tenant_condition=tenant_condition,
+            unseen_condition=unseen_condition,
         )
 
         # Target is hunt configuration text, so it can only ever name a table.

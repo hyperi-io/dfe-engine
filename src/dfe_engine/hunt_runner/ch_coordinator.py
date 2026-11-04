@@ -345,6 +345,19 @@ class ChCoordinator:
             database=self._db,
         )
 
+    def get_safe_horizon_mark(self, hunt_id: str, mark: str) -> int | None:
+        """A safe horizon mark for the hunt (``deferred_since`` or ``safe_from``), or None.
+
+        Kept in hunt_watermark under ``<hunt_id>#<mark>``. A hunt id never holds ``#``,
+        and every reader of that table looks up a hunt's own id, so a mark is never
+        taken for a watermark. 0 is a cleared mark.
+        """
+        return self.get_watermark(f"{hunt_id}#{mark}") or None
+
+    def set_safe_horizon_mark(self, hunt_id: str, mark: str, value: int) -> None:
+        """Set a safe horizon mark for the hunt, or clear it with 0."""
+        self.set_watermark(f"{hunt_id}#{mark}", value)
+
     # ---- state (UI overrun signal) ------------------------------------
 
     def get_state(self, hunt_id: str) -> HuntStateRow | None:

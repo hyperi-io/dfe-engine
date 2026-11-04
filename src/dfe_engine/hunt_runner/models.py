@@ -23,13 +23,19 @@ class HuntStatement(BaseModel):
     ``query`` hunt is its own SQL, so it has no cap (``cap`` 0) and neither of them.
 
     Attributes:
-        sql: The INSERT ... SELECT, carrying a ``{window}`` placeholder.
+        sql: The INSERT ... SELECT, carrying a ``{window}`` placeholder, and an
+            ``{unseen}`` one when it has a target.
         rule_id: The rule it was compiled from; empty for a direct query.
         cap: Detection rows the statement may write in one run; 0 is uncapped.
         count_sql: SELECT of the true match count, carrying ``{window}``. Its column
             names are the runtime parameters ``summary_sql`` binds.
         summary_sql: INSERT of the one summary row, fully parameterised.
         summary_params: The compile-time parameters ``summary_sql`` binds.
+        source: The (database, table) a compiled rule reads, which the safe horizon
+            checks. None for a direct query.
+        target: The (database, table) a compiled rule writes its detections to. A
+            statement with one carries an ``{unseen}`` placeholder, so it reads the
+            overlap and skips what it already detected. None for a direct query.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -40,6 +46,8 @@ class HuntStatement(BaseModel):
     count_sql: str = ""
     summary_sql: str = ""
     summary_params: dict[str, str] = {}
+    source: tuple[str, str] | None = None
+    target: tuple[str, str] | None = None
 
 
 class HuntSpec(BaseModel):
