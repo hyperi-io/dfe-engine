@@ -92,7 +92,7 @@ def test_a_rule_file_the_runner_cannot_read_is_refused(
     resp = _create_hunt(client, admin_headers, "broken")
 
     assert resp.status_code == 422, resp.text
-    assert "broken.yaml" in resp.json()["message"]
+    assert "broken.yaml" in resp.json()["detail"]
 
 
 def test_under_gitops_the_hunt_checks_the_deploy_repos_rules(

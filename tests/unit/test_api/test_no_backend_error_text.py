@@ -21,6 +21,7 @@ import pytest
 from clickhouse_connect.driver.exceptions import DatabaseError
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from scalo.api import ProblemError
 from scalo.resilience import ServiceUnavailable
 
 from dfe_engine.api.deps import get_clickhouse_client
@@ -118,7 +119,7 @@ class TestCentralHandlers:
         resp = self._client().get("/dead")
 
         assert resp.status_code == 503
-        assert resp.json()["message"] == SERVICE_UNAVAILABLE_MESSAGE
+        assert resp.json()["detail"] == SERVICE_UNAVAILABLE_MESSAGE
         assert_hidden(resp.text)
         assert_logged(audit_events)
 
@@ -126,7 +127,7 @@ class TestCentralHandlers:
         resp = self._client().get("/gitops")
 
         assert resp.status_code == 503
-        assert resp.json()["message"] == GITOPS_UNAVAILABLE_MESSAGE
+        assert resp.json()["detail"] == GITOPS_UNAVAILABLE_MESSAGE
         assert resp.headers["Retry-After"]
         assert_hidden(resp.text)
         assert_logged(audit_events)
@@ -219,7 +220,7 @@ class TestSystem:
         for resp in (put, patch):
             assert resp.status_code == 502, resp.text
             assert resp.json()["code"] == "reconcile_failed"
-            assert "override stored" in resp.json()["message"]
+            assert "override stored" in resp.json()["detail"]
             assert_hidden(resp.text)
         assert_logged(audit_events)
 
@@ -231,20 +232,20 @@ class TestSystem:
         monkeypatch.setattr(system_module, "live_tables", _unreadable)
         settings = SimpleNamespace(clickhouse=SimpleNamespace(effective_data_database="dfe"))
 
-        with pytest.raises(system_module.HTTPException) as raised:
+        with pytest.raises(ProblemError) as raised:
             system_module._deployed_tables(settings, [SimpleNamespace(deployed_version="1")])  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the fields this path reads
 
-        assert raised.value.status_code == 503
-        assert_hidden(str(raised.value.detail))
+        assert raised.value.status == 503
+        assert_hidden(raised.value.problem.model_dump_json())
         assert_logged(audit_events)
 
     def test_a_cloud_api_failure_hides_its_text_and_keeps_the_engines(self, audit_events):
         transport = system_module._cloud_error(_chained(CloudServiceError, "GET /services failed"))
         refusal = system_module._cloud_error(CloudServiceError("CH Cloud service 'dev' not found"))
 
-        assert transport.status_code == 502
-        assert_hidden(str(transport.detail))
-        assert refusal.detail["message"] == "CH Cloud service 'dev' not found"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
+        assert transport.status == 502
+        assert_hidden(transport.problem.model_dump_json())
+        assert refusal.problem.detail == "CH Cloud service 'dev' not found"
         assert_logged(audit_events)
 
     def test_a_failed_schema_pass_names_the_stage_not_clickhouses_text(
@@ -391,9 +392,9 @@ class TestSources:
             SchemaApplyError(f"could not read ClickHouse state: {SENTINEL}"), "acme"
         )
 
-        assert raised.status_code == 503
-        assert raised.detail["code"] == "clickhouse_unavailable"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
-        assert_hidden(str(raised.detail))
+        assert raised.status == 503
+        assert raised.problem.code == "clickhouse_unavailable"
+        assert_hidden(raised.problem.model_dump_json())
         assert_logged(audit_events)
 
     def test_a_bulk_failure_keeps_a_refusal_and_hides_the_repos_text(self, audit_events):
@@ -428,9 +429,9 @@ class TestSources:
     def test_unreadable_telemetry_is_503_without_clickhouses_text(self, audit_events):
         raised = metrics_unavailable(MetricsUnavailableError(f"otel query 'up' failed: {SENTINEL}"))
 
-        assert raised.status_code == 503
-        assert raised.detail["code"] == "metrics_unavailable"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
-        assert_hidden(str(raised.detail))
+        assert raised.status == 503
+        assert raised.problem.code == "metrics_unavailable"
+        assert_hidden(raised.problem.model_dump_json())
         assert_logged(audit_events)
 
 
@@ -440,8 +441,8 @@ class TestSchemas:
             _chained(JsonPromotionError, "JSON path discovery failed"), "discovery_failed", "acme"
         )
 
-        assert raised.status_code == 422
-        assert_hidden(str(raised.detail))
+        assert raised.status == 422
+        assert_hidden(raised.problem.model_dump_json())
         assert_logged(audit_events)
 
     def test_a_refused_json_path_keeps_the_engines_message(self):
@@ -449,7 +450,7 @@ class TestSchemas:
             JsonPromotionError("Illegal JSON path: 'a b'"), "discovery_failed", "acme"
         )
 
-        assert raised.detail["message"] == "Illegal JSON path: 'a b'"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
+        assert raised.problem.detail == "Illegal JSON path: 'a b'"
 
 
 class TestSampler:

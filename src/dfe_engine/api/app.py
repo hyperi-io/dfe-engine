@@ -856,11 +856,6 @@ def create_app(
 
         app.add_middleware(HttpServerMetricsMiddleware, metrics=metrics_manager)
 
-    # Exception handlers
-    from dfe_engine.api.errors import install_exception_handlers
-
-    install_exception_handlers(app)
-
     # API routes
     from dfe_engine.api.v1 import build_v1_router
 
@@ -896,7 +891,8 @@ def create_app(
 
     # Custom OpenAPI schema with Bearer auth
     from dfe_engine.api.deps import guarded_operations
-    from dfe_engine.api.errors import declare_auth_errors
+    from dfe_engine.api.errors import declare_auth_errors, install_exception_handlers
+    from dfe_engine.auth.rbac_scopes import scopes_dict
 
     def custom_openapi():
         if app.openapi_schema:
@@ -908,7 +904,14 @@ def create_app(
             routes=app.routes,
             tags=app.openapi_tags,
         )
-        schema.setdefault("components", {})["securitySchemes"] = {
+        components = schema.setdefault("components", {})
+        # The console generates its scope constants from this, with the API types.
+        components.setdefault("schemas", {})["RbacScope"] = {
+            "type": "string",
+            "enum": list(scopes_dict.values()),
+            "x-enumNames": list(scopes_dict),
+        }
+        components["securitySchemes"] = {
             "BearerAuth": {
                 "type": "http",
                 "scheme": "bearer",
@@ -930,8 +933,9 @@ def create_app(
         return app.openapi_schema
 
     app.openapi = custom_openapi  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
-    # Wraps custom_openapi, so it must follow it. Errors keep the ErrorResponse envelope dfe-ui parses.
-    install(app, HIERARCHY, problem_handlers=False)
+    # Wraps custom_openapi, so it must follow it, and the engine's handlers follow scalo's.
+    install(app, HIERARCHY, catch_unhandled=False)
+    install_exception_handlers(app)
 
     if e2e_docs:
         from dfe_engine.api.e2e_docs import install_e2e_swagger

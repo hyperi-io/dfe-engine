@@ -14,8 +14,9 @@ POST /api/v1/transforms/test     -> Run a compiled WASM against sample records
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+from scalo.api import ProblemError
 from scalo.crypto import ssl_context
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
@@ -28,6 +29,17 @@ Language = Literal["rust", "go", "assemblyscript"]
 
 
 # -- Request / response models ---------------------------------
+
+
+def _upstream_problem(resp: httpx.Response, code: str, message: str) -> ProblemError:
+    """The service's own error ``code`` and ``message`` when its JSON body has them, else these."""
+    is_json = resp.headers.get("content-type", "").startswith("application/json")
+    body = resp.json() if is_json else {}
+    error = body.get("error", body) if isinstance(body, dict) else {}
+    if not isinstance(error, dict):
+        error = {}
+    detail = str(error.get("message", message))
+    return ProblemError(resp.status_code, detail, code=str(error.get("code", code)))
 
 
 class CompileRequest(BaseModel):
@@ -109,30 +121,12 @@ async def compile_transform(
                 json={"language": request.language, "files": request.files},
             )
         except httpx.ConnectError as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "COMPILER_UNAVAILABLE",
-                    "message": "Compilation service is unavailable",
-                },
+            raise ProblemError(
+                503, "Compilation service is unavailable", code="COMPILER_UNAVAILABLE"
             ) from exc
 
-    if resp.status_code == 422:
-        body = resp.json()
-        raise HTTPException(status_code=422, detail=body.get("error", body))
-
     if not resp.is_success:
-        body = (
-            resp.json()
-            if resp.headers.get("content-type", "").startswith("application/json")
-            else {}
-        )
-        raise HTTPException(
-            status_code=resp.status_code,
-            detail=body.get(
-                "error", {"code": "COMPILATION_FAILED", "message": "Compilation failed"}
-            ),
-        )
+        raise _upstream_problem(resp, "COMPILATION_FAILED", "Compilation failed")
 
     data = resp.json()
     audit_resource_change(user.user_id, "transform", request.language, "compiled")
@@ -173,24 +167,12 @@ async def test_transform(
                 },
             )
         except httpx.ConnectError as exc:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "TRANSFORM_HOST_UNAVAILABLE",
-                    "message": "Transform host is unavailable",
-                },
+            raise ProblemError(
+                503, "Transform host is unavailable", code="TRANSFORM_HOST_UNAVAILABLE"
             ) from exc
 
     if not resp.is_success:
-        body = (
-            resp.json()
-            if resp.headers.get("content-type", "").startswith("application/json")
-            else {}
-        )
-        raise HTTPException(
-            status_code=resp.status_code,
-            detail=body.get("error", {"code": "TEST_FAILED", "message": "Transform test failed"}),
-        )
+        raise _upstream_problem(resp, "TEST_FAILED", "Transform test failed")
 
     data = resp.json()
     audit_resource_change(user.user_id, "transform", "wasm", "tested")

@@ -619,9 +619,9 @@ class TestStage1:
     """A schema arrives pre-supplied, and a field grows into one."""
 
     def test_1_1_a_pre_supplied_meta_schema_ships_read_only(self, engine: EngineAPI) -> None:
-        # per_page=-1 returns every item in one page, so the assertion below does
+        # page_size=1000 returns every item in one page, so the assertion below does
         # not depend on how many schemas this deployment ships.
-        listed = engine.json("GET", "/schemas?per_page=-1")["items"]
+        listed = engine.json("GET", "/schemas?page_size=1000")["items"]
         by_name = {str(s["name"]): s for s in listed}
         assert SHIPPED_SCHEMA in by_name, (
             f"{SHIPPED_SCHEMA} is not shipped; this deployment carries {sorted(by_name)[:8]}"
@@ -634,8 +634,8 @@ class TestStage1:
 
         version = str(entry["current"])
         columns_path = f"/schemas/definitions/{SHIPPED_SCHEMA}/versions/columns"
-        definition = engine.json("GET", f"{columns_path}?version={version}&per_page=-1")
-        columns = {str(c["name"]) for c in definition["version"]["columns"]["items"]}
+        definition = engine.json("GET", f"{columns_path}?version={version}&page_size=1000")
+        columns = {str(c["name"]) for c in definition["items"]}
         assert PARSED_COLUMN in columns, (
             f"{SHIPPED_SCHEMA} {version} names {len(columns)} column(s) and {PARSED_COLUMN} is "
             "not among them, so the shipped schema does not declare what the transform fills"
@@ -674,8 +674,8 @@ class TestStage1:
         )
 
         columns_path = f"/schemas/definitions/{ROUNDTRIP_TARGET}/versions/columns"
-        read = engine.json("GET", f"{columns_path}?version={ROUNDTRIP_VERSION}&per_page=-1")
-        got = _column_signatures(read["version"]["columns"]["items"])
+        read = engine.json("GET", f"{columns_path}?version={ROUNDTRIP_VERSION}&page_size=1000")
+        got = _column_signatures(read["items"])
 
         assert len(got) == len(sent), f"{len(sent)} columns exported and {len(got)} imported"
         lost = [signature for signature in sent if signature not in got]

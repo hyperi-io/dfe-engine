@@ -591,11 +591,11 @@ class TestSampleRows:
         body = resp.json()
         assert body["code"] == "match_not_sampleable"
         # The console shows the message as written.
-        assert body["message"] == (
+        assert body["detail"] == (
             "Preview is not available for grouped, negated or CEL matches until the source "
             "is deployed and its own table can be read."
         )
-        assert body["context"] == {"source": "cisco-ios", "match": expected}
+        assert body.items() >= {"source": "cisco-ios", "match": expected}.items()
 
 
 class TestPromoteField:
@@ -684,10 +684,10 @@ class TestPromoteField:
         _promote(client, admin_headers, {"json_path": "user.email", "data_type": "string"})
         resp = client.get(
             f"/api/v1/schemas/definitions/{SCHEMA_PATH}/versions/columns",
-            params={"version": "1.1.0", "per_page": -1},
+            params={"version": "1.1.0", "page_size": 1000},
             headers=admin_headers,
         )
-        columns = {c["name"]: c for c in resp.json()["version"]["columns"]["items"]}
+        columns = {c["name"]: c for c in resp.json()["items"]}
         assert columns["user_email"]["expr"] == "@source: user.email"
         assert columns["user_email"]["type"] == "string"
         assert columns["user_email"]["_field_type"] == "promoted"
@@ -701,10 +701,10 @@ class TestPromoteField:
         _promote(client, admin_headers, {"json_path": "user.email", "data_type": "string"})
         resp = client.get(
             f"/api/v1/schemas/definitions/{SCHEMA_PATH}/versions/columns",
-            params={"version": "1.1.0", "per_page": -1},
+            params={"version": "1.1.0", "page_size": 1000},
             headers=admin_headers,
         )
-        columns = {c["name"]: c for c in resp.json()["version"]["columns"]["items"]}
+        columns = {c["name"]: c for c in resp.json()["items"]}
         assert preview.json()["diff"]["copy_directives"] == [columns["user_email"]["expr"]]
 
     def test_dry_run_new_columns_match_json_paths_draft(
@@ -775,7 +775,7 @@ class TestPromoteField:
         assert resp.status_code == 422
         body = resp.json()
         assert body["code"] == "promotion_failed"
-        statuses = {r["json_path"]: r["status"] for r in body["context"]["results"]}
+        statuses = {r["json_path"]: r["status"] for r in body["results"]}
         assert statuses == {"user.id": "ok", "user.email": "error"}
         # Still only the two versions from the first promotion.
         assert _schema_versions(client, admin_headers, "1.1.0") == ["1.0.0", "1.1.0"]
@@ -937,7 +937,7 @@ class TestPromoteFieldOnLandingSource:
         assert resp.status_code == 409
         body = resp.json()
         assert body["code"] == "conflict"
-        assert f"cannot promote a field on source {landing!r}" in body["message"]
+        assert f"cannot promote a field on source {landing!r}" in body["detail"]
         assert _schema_versions(client, admin_headers, "1.0.0") == ["1.0.0"]
         src = client.get(f"/api/v1/sources/{landing}", headers=admin_headers).json()
         assert src["resource_type"] == "core"

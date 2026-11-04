@@ -19,12 +19,14 @@ import sys
 from typing import Any, Literal
 
 from dfe_schemas import __version__ as schemas_version
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from scalo.api import ListParams, Page, ProblemError, paginate, scalo_extra
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine import __version__
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
@@ -33,8 +35,7 @@ from dfe_engine.api.deps import (
     get_interactive_clickhouse_client,
     require_action,
 )
-from dfe_engine.api.errors import ErrorResponse, backend_failure, engine_message
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
+from dfe_engine.api.errors import backend_failure, engine_message
 from dfe_engine.api.review import (
     ReviewFields,
     review_fields,
@@ -92,14 +93,11 @@ def _gitcrud(request: Request) -> GitCrud:
     """The deploy repo, or 503. For writers, which have nowhere else to commit."""
     gc = _optional_gitcrud(request)
     if gc is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
+        raise ProblemError(503, "gitops is not enabled", code="not_configured")
     return gc
 
 
-def _ttl_reconcile_failed(exc: Exception) -> HTTPException:
+def _ttl_reconcile_failed(exc: Exception) -> ProblemError:
     """The 502 for a stored TTL override that ClickHouse did not take."""
     return backend_failure(
         502,
@@ -111,14 +109,14 @@ def _ttl_reconcile_failed(exc: Exception) -> HTTPException:
     )
 
 
-def _cloud_error(exc: Exception) -> HTTPException:
+def _cloud_error(exc: Exception) -> ProblemError:
     """The 502 for a ClickHouse Cloud management-API failure."""
     message = engine_message(
         exc,
         "the ClickHouse Cloud management API call failed; the engine log has the reason",
         event="ClickHouse Cloud management API call failed",
     )
-    return HTTPException(status_code=502, detail={"code": "cloud_error", "message": message})
+    return ProblemError(502, message, code="cloud_error")
 
 
 # -- Response models ------------------------------------------
@@ -423,7 +421,7 @@ async def get_deployment(
     return await run_blocking(functools.partial(deployment_facts, request, settings))
 
 
-@router.get("/version", response_model=VersionResponse)
+@router.get("/version", response_model=VersionResponse, openapi_extra=scalo_extra(verb="version"))
 async def get_version(user: CurrentUser, request: Request, settings: Settings) -> VersionResponse:
     """What this deployment runs.
 
@@ -442,7 +440,9 @@ async def get_version(user: CurrentUser, request: Request, settings: Settings) -
     )
 
 
-@router.get("/schema", response_model=SchemaStatusResponse)
+@router.get(
+    "/schema", response_model=SchemaStatusResponse, openapi_extra=scalo_extra(verb="schema")
+)
 async def get_schema_status(user: CurrentUser, settings: Settings) -> SchemaStatusResponse:
     """What the last schema bootstrap pass did, object by object.
 
@@ -459,6 +459,7 @@ async def get_schema_status(user: CurrentUser, settings: Settings) -> SchemaStat
 
 @router.get(
     "/status",
+    openapi_extra=scalo_extra(verb="status"),
     response_model=SystemStatusResponse,
     dependencies=[Depends(require_action(scopes_dict["system_read"]))],
 )
@@ -483,6 +484,7 @@ async def get_system_status(user: CurrentUser) -> SystemStatusResponse:
 
 @router.get(
     "/settings",
+    openapi_extra=scalo_extra(verb="settings"),
     response_model=SettingsSummary,
     dependencies=[Depends(require_action(scopes_dict["system_read"]))],
 )
@@ -599,14 +601,12 @@ def get_retention(user: CurrentUser, request: Request, settings: Settings) -> Re
     dependencies=[Depends(require_action(scopes_dict["system_write"])), WRITE_TURN],
     responses={
         502: {
-            "model": ErrorResponse,
             "description": (
                 "reconcile_failed: the value is stored, and applying it to ClickHouse "
                 "failed; sending the same value again applies it"
             ),
         },
         503: {
-            "model": ErrorResponse,
             "description": "not_configured: gitops is off, so there is nowhere to store the value",
         },
     },
@@ -801,18 +801,15 @@ def get_defaults(user: CurrentUser, request: Request, settings: Settings) -> Sys
     dependencies=[Depends(require_action(scopes_dict["system_write"])), WRITE_TURN],
     responses={
         422: {
-            "model": ErrorResponse,
             "description": "validation_error: a named value cannot be stored",
         },
         502: {
-            "model": ErrorResponse,
             "description": (
                 "reconcile_failed: ttl_days is stored, and applying it to ClickHouse failed; "
                 "sending the same value again applies it"
             ),
         },
         503: {
-            "model": ErrorResponse,
             "description": "not_configured: gitops is off, so there is nowhere to store the value",
         },
     },
@@ -846,10 +843,7 @@ def patch_defaults(
             engine=body.engine if "engine" in named else UNSET,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(422, str(exc), code="validation_error") from exc
     if named:
         audit_resource_change(
             user.user_id,
@@ -995,9 +989,8 @@ class ApplyDefaultsResponse(ReviewFields):
     response_model=ApplyDefaultsResponse,
     dependencies=[Depends(require_action(scopes_dict["source_write"])), WRITE_TURN],
     responses={
-        404: {"model": ErrorResponse, "description": "not_found: a named source does not exist"},
+        404: {"description": "not_found: a named source does not exist"},
         409: {
-            "model": ErrorResponse,
             "description": "conflict: a named source is engine-owned and cannot be edited",
         },
     },
@@ -1039,18 +1032,13 @@ def apply_defaults(
         try:
             source = registry.get_source(name)
         except SourceNotFoundError:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "not_found", "message": f"Source {name!r} not found"},
-            ) from None
+            raise ProblemError(404, f"Source {name!r} not found", code="not_found") from None
         if registry.is_core(name):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "conflict",
-                    "message": str(SourceCoreResourceError(action="modify", source=name)),
-                    "source": name,
-                },
+            raise ProblemError(
+                409,
+                str(SourceCoreResourceError(action="modify", source=name)),
+                code="conflict",
+                source=name,
             ) from None
         loaded.append(source)
 
@@ -1208,11 +1196,11 @@ def _deployed_tables(settings: Any, sources: list[Source]) -> dict[str, LiveTabl
 
 @router.get(
     "/defaults/drift",
-    response_model=PaginatedResponse[SourceDefaultDrift],
+    openapi_extra=scalo_extra(verb="drift"),
+    response_model=Page[SourceDefaultDrift],
     dependencies=[Depends(require_action(scopes_dict["system_read"]))],
     responses={
         503: {
-            "model": ErrorResponse,
             "description": (
                 "clickhouse_unavailable: a source is deployed and its table could not be read"
             ),
@@ -1224,12 +1212,12 @@ def get_default_drift(
     request: Request,
     settings: Settings,
     registry: SourceReg,
-    pagination: PaginationParams = Depends(),
+    query: ListParams,
     search: str | None = Query(
         None,
         description="Search in source name, drifted field, and stored or live value",
     ),
-) -> PaginatedResponse[SourceDefaultDrift]:
+) -> Page[SourceDefaultDrift]:
     """Sources whose table or current version runs a header, TTL or engine other than the default.
 
     TTL and engine are measured on a deployed source's table, read from ClickHouse,
@@ -1242,8 +1230,7 @@ def get_default_drift(
 
     ``core`` is true for an engine-owned source, which the apply endpoint will
     refuse. The landing source is never listed. ``search`` matches the source
-    name, a drifted field name, or a stored or live value. ``per_page=-1``
-    returns every match.
+    name, a drifted field name, or a stored or live value.
     """
     gc = _optional_gitcrud(request)
     ttl = resolve_state(gc, settings)
@@ -1270,11 +1257,7 @@ def get_default_drift(
         search,
         ["source", "drifted", "stored"],
     )
-    return PaginatedResponse.from_list(
-        [row["item"] for row in rows],
-        pagination.page,
-        pagination.per_page,
-    )
+    return paginate([row["item"] for row in rows], query, bound={"search": search})
 
 
 # -- ClickHouse Cloud lifecycle (control plane) ---------------
@@ -1328,10 +1311,7 @@ def clickhouse_cloud_start(user: CurrentUser, settings: Settings):
 
     cloud = settings.clickhouse.cloud
     if not cloud.configured:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "ClickHouse Cloud is not configured"},
-        )
+        raise ProblemError(503, "ClickHouse Cloud is not configured", code="not_configured")
     logger.info("CH Cloud start requested via API", actor=getattr(user, "username", "?"))
     try:
         st = CloudService(cloud).start()
@@ -1353,10 +1333,7 @@ def clickhouse_cloud_stop(user: CurrentUser, settings: Settings):
 
     cloud = settings.clickhouse.cloud
     if not cloud.configured:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "ClickHouse Cloud is not configured"},
-        )
+        raise ProblemError(503, "ClickHouse Cloud is not configured", code="not_configured")
     logger.info("CH Cloud stop requested via API", actor=getattr(user, "username", "?"))
     try:
         st = CloudService(cloud).stop()

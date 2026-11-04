@@ -16,29 +16,29 @@ import pytest
 
 
 class TestTasksRouter:
-    """GET/POST /api/v1/tasks endpoints."""
+    """GET/POST /api/v1/operations endpoints."""
 
     def test_list_empty(self, client, admin_headers):
-        resp = client.get("/api/v1/tasks", headers=admin_headers)
+        resp = client.get("/api/v1/operations", headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["items"] == []
 
     def test_get_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.get("/api/v1/tasks/nonexistent-id", headers=admin_headers)
+        resp = client.get("/api/v1/operations/nonexistent-id", headers=admin_headers)
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
 
     def test_cancel_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.post("/api/v1/tasks/nonexistent-id/cancel", headers=admin_headers)
+        resp = client.post("/api/v1/operations/nonexistent-id/cancel", headers=admin_headers)
         assert resp.status_code == 404
 
     def test_list_filtered_by_kind_empty(self, client, admin_headers):
-        resp = client.get("/api/v1/tasks?kind=hunt:execute", headers=admin_headers)
+        resp = client.get("/api/v1/operations?kind=hunt:execute", headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["items"] == []
 
     def test_stream_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.get("/api/v1/tasks/nonexistent-id/stream", headers=admin_headers)
+        resp = client.get("/api/v1/operations/nonexistent-id/stream", headers=admin_headers)
         assert resp.status_code == 404
 
 
@@ -60,7 +60,7 @@ class TestHuntsRouter:
         assert resp.status_code == 200
         data = resp.json()
         assert data["items"] == []
-        assert data["total"] == 0
+        assert data["total_size"] == 0
 
     def test_list_search_and_pagination(self, client, admin_headers):
         payload_a = {
@@ -94,20 +94,20 @@ class TestHuntsRouter:
             headers=admin_headers,
         )
         assert search.status_code == 200
-        assert search.json()["total"] == 1
+        assert search.json()["total_size"] == 1
         assert search.json()["items"][0]["name"] == "alpha_hunt"
 
         page = client.get(
             "/api/v1/hunts",
-            params={"page": 1, "per_page": 1, "sort_by": "name", "sort_order": "asc"},
+            params={"page_size": 1, "order_by": "name"},
             headers=admin_headers,
         )
         assert page.status_code == 200
         body = page.json()
-        assert body["total"] == 2
+        assert body["total_size"] == 2
         assert len(body["items"]) == 1
         assert body["items"][0]["name"] == "alpha_hunt"
-        assert body["next_page"] == 2
+        assert body["next_page_token"]
 
         client.delete("/api/v1/hunts/alpha_hunt", headers=admin_headers)
         client.delete("/api/v1/hunts/beta_hunt", headers=admin_headers)
@@ -295,10 +295,10 @@ class TestPipelineRouter:
         """Returns list (possibly empty) without error."""
         resp = client.get("/api/v1/pipeline/templates", headers=admin_headers)
         assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+        assert isinstance(resp.json()["items"], list)
 
     def test_build_returns_202(self, client, admin_headers):
-        """Build request returns 202 with task_id."""
+        """A build answers 202 and the operation to poll at Location."""
         resp = client.post(
             "/api/v1/pipeline/build",
             json={"build_core": False},
@@ -306,19 +306,18 @@ class TestPipelineRouter:
         )
         assert resp.status_code == 202
         data = resp.json()
-        assert "task_id" in data
-        assert len(data["task_id"]) > 0
+        assert data["name"].startswith("operations/")
+        assert resp.headers["location"] == f"/api/v1/{data['name']}"
 
-        task_id = data["task_id"]
         detail = None
         for _ in range(20):
-            detail = client.get(f"/api/v1/tasks/{task_id}", headers=admin_headers)
+            detail = client.get(resp.headers["location"], headers=admin_headers)
             if detail.status_code == 200:
                 break
             time.sleep(0.05)
         assert detail is not None, "no response"
         assert detail.status_code == 200, detail.text
-        assert detail.json()["kind"] == "pipeline:build"
+        assert detail.json()["metadata"]["kind"] == "pipeline:build"
 
     def test_requires_auth(self, client):
         resp = client.get("/api/v1/pipeline/templates")

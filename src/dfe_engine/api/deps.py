@@ -14,10 +14,10 @@ from collections.abc import Iterable, Iterator, Sequence
 from datetime import timedelta
 from typing import TYPE_CHECKING, Annotated, Any, NamedTuple
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Request, status
 from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, iter_route_contexts
-from scalo.api import permission
+from scalo.api import ProblemError, permission
 from scalo.logger import logger
 from starlette.routing import BaseRoute
 
@@ -68,16 +68,14 @@ def secrets_store(request: Request) -> DfeSecrets:
     """The app's one store for the secrets the engine mints, built at startup.
 
     Raises:
-        HTTPException: 503 when the app was built without one.
+        ProblemError: 503 when the app was built without one.
     """
     store = getattr(request.app.state, "dfe_secrets", None)
     if store is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "secrets_unavailable",
-                "message": "no secrets backend is configured; set DFE_ENGINE_SECRETS_PROVIDER",
-            },
+        raise ProblemError(
+            503,
+            "no secrets backend is configured; set DFE_ENGINE_SECRETS_PROVIDER",
+            code="secrets_unavailable",
         )
     return store
 
@@ -191,12 +189,10 @@ def get_schema_registry():
     """FastAPI dependency: resolve SchemaRegistry singleton (meta schemas)."""
     reg = _registries.get("meta_schema")
     if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "SchemaRegistry not initialized -- set DFE_ENGINE_SCHEMAS_DIR (schemas.schemas_dir)",
-            },
+        raise ProblemError(
+            503,
+            "SchemaRegistry not initialized -- set DFE_ENGINE_SCHEMAS_DIR (schemas.schemas_dir)",
+            code="not_configured",
         )
     return reg
 
@@ -205,15 +201,11 @@ def get_derived_schema_registry():
     """FastAPI dependency: resolve the DerivedSchemaRegistry singleton."""
     reg = _registries.get("derived_schema")
     if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": (
-                    "DerivedSchemaRegistry not initialized -- set DFE_ENGINE_SCHEMAS_DIR "
-                    "(schemas.schemas_dir) or enable gitops"
-                ),
-            },
+        raise ProblemError(
+            503,
+            "DerivedSchemaRegistry not initialized -- set DFE_ENGINE_SCHEMAS_DIR "
+            "(schemas.schemas_dir) or enable gitops",
+            code="not_configured",
         )
     return reg
 
@@ -222,12 +214,10 @@ def get_source_registry():
     """FastAPI dependency: resolve SourceRegistry singleton."""
     reg = _registries.get("source")
     if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "SourceRegistry not initialized -- set DFE_ENGINE_SOURCES_DIR",
-            },
+        raise ProblemError(
+            503,
+            "SourceRegistry not initialized -- set DFE_ENGINE_SOURCES_DIR",
+            code="not_configured",
         )
     return reg
 
@@ -241,13 +231,10 @@ def get_service_config_registry():
     """FastAPI dependency: resolve ServiceConfigRegistry singleton."""
     reg = _registries.get("service_config")
     if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "ServiceConfigRegistry not initialized"
-                " -- set DFE_ENGINE_SERVICES_CONFIG_YAML_DIR",
-            },
+        raise ProblemError(
+            503,
+            "ServiceConfigRegistry not initialized -- set DFE_ENGINE_SERVICES_CONFIG_YAML_DIR",
+            code="not_configured",
         )
     return reg
 
@@ -256,12 +243,10 @@ def get_field_map_registry():
     """FastAPI dependency: resolve FieldMapRegistry singleton."""
     reg = _registries.get("fieldmap")
     if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "FieldMapRegistry not initialized -- set DFE_ENGINE_FIELDMAPS_DIR",
-            },
+        raise ProblemError(
+            503,
+            "FieldMapRegistry not initialized -- set DFE_ENGINE_FIELDMAPS_DIR",
+            code="not_configured",
         )
     return reg
 
@@ -275,13 +260,10 @@ def get_alert_destinations_registry():
     """FastAPI dependency: resolve the AlertDestinationRegistry singleton."""
     reg = _registries.get("alert_destinations")
     if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "Alert destinations not initialized"
-                " -- set DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR",
-            },
+        raise ProblemError(
+            503,
+            "Alert destinations not initialized -- set DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR",
+            code="not_configured",
         )
     return reg
 
@@ -295,12 +277,10 @@ def get_rule_registry():
     """FastAPI dependency: resolve RuleRegistry singleton."""
     reg = _registries.get("rules")
     if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "RuleRegistry not initialized -- set DFE_ENGINE_HUNTS_RULES_DIR (hunts.rules_dir)",
-            },
+        raise ProblemError(
+            503,
+            "RuleRegistry not initialized -- set DFE_ENGINE_HUNTS_RULES_DIR (hunts.rules_dir)",
+            code="not_configured",
         )
     return reg
 
@@ -314,12 +294,10 @@ def get_hunt_config_registry():
     """FastAPI dependency: resolve HuntConfigRegistry singleton."""
     reg = _registries.get("hunt_configs")
     if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "HuntConfigRegistry not initialized -- set DFE_ENGINE_HUNTS_DIR (hunts.hunt_dir)",
-            },
+        raise ProblemError(
+            503,
+            "HuntConfigRegistry not initialized -- set DFE_ENGINE_HUNTS_DIR (hunts.hunt_dir)",
+            code="not_configured",
         )
     return reg
 
@@ -601,10 +579,8 @@ def require_local_account_enabled(request: Request, user_id: str) -> Any:
     if denied is None:
         return bound
     code, message = denied
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"code": code, "message": message},
-        headers={"WWW-Authenticate": "Bearer"},
+    raise ProblemError(
+        status.HTTP_401_UNAUTHORIZED, message, code=code, headers={"WWW-Authenticate": "Bearer"}
     )
 
 
@@ -663,16 +639,18 @@ async def get_current_user(request: Request) -> AuthContext:
             except (JitIdentityCollisionError, JitSubjectUnusableError) as exc:
                 # Ordered before the catch-all: a refused identity is a 401, not a 503.
                 audit_login_denied(oidc_subject, "oidc", client_ip, exc.reason)
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail={"code": "unauthorized", "message": str(exc)},
+                raise ProblemError(
+                    status.HTTP_401_UNAUTHORIZED,
+                    str(exc),
+                    code="unauthorized",
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from exc
             except (JitAccountUnavailableError, JitNoRoleError) as exc:
                 audit_login_denied(oidc_subject, "oidc", client_ip, exc.reason)
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail={"code": exc.reason, "message": str(exc)},
+                raise ProblemError(
+                    status.HTTP_401_UNAUTHORIZED,
+                    str(exc),
+                    code=exc.reason,
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from exc
             except Exception as exc:
@@ -681,12 +659,10 @@ async def get_current_user(request: Request) -> AuthContext:
                     "JIT provisioning failed", user_id=oidc_subject, **describe_http_error(exc)
                 )
                 audit_jit_failed(oidc_subject, exc)
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail={
-                        "code": "service_unavailable",
-                        "message": "The login could not be recorded. Try again.",
-                    },
+                raise ProblemError(
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+                    "The login could not be recorded. Try again.",
+                    code="service_unavailable",
                 ) from exc
 
         bound = require_local_account_enabled(request, oidc_subject)
@@ -725,10 +701,7 @@ async def get_current_user(request: Request) -> AuthContext:
                 "expired_key": "API key expired",
                 "disabled_key": "API key disabled",
             }.get(reason, "Invalid API key")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": "unauthorized", "message": message},
-            )
+            raise ProblemError(status.HTTP_401_UNAUTHORIZED, message, code="unauthorized")
         group_store = request.app.state.group_store
         resolution = _resolve_group_grants(key_meta.groups, group_store)
         roles, org_ids = resolution.roles, resolution.org_ids
@@ -782,12 +755,10 @@ async def get_current_user(request: Request) -> AuthContext:
         account = require_local_account_enabled(request, jwt_user_id)
         if session_ended(account, payload):
             audit_login_denied(jwt_user_id, "jwt", client_ip, "session_ended")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={
-                    "code": "session_ended",
-                    "message": "This session has ended; sign in again",
-                },
+            raise ProblemError(
+                status.HTTP_401_UNAUTHORIZED,
+                "This session has ended; sign in again",
+                code="session_ended",
                 headers={"WWW-Authenticate": "Bearer"},
             )
         # The refresh route carries the session's sign-in time forward from these.
@@ -828,9 +799,10 @@ async def get_current_user(request: Request) -> AuthContext:
         return AuthContext(org_id="default", user_id="dev", roles=["admin"])
 
     audit_login_denied("anonymous", "none", client_ip, "no_credentials")
-    raise HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail={"code": "unauthorized", "message": "Authentication required"},
+    raise ProblemError(
+        status.HTTP_401_UNAUTHORIZED,
+        "Authentication required",
+        code="unauthorized",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -959,16 +931,13 @@ def refuse_unknown_orgs(request: Request, names: Iterable[str]) -> None:
         names: The org names the write binds or reads.
 
     Raises:
-        HTTPException: 422 ``unknown_org`` naming every unregistered org.
+        ProblemError: 422 ``unknown_org`` naming every unregistered org.
     """
     known = {org.name for org in registered_orgs(request)}
     unknown = [name for name in dict.fromkeys(names) if name and name not in known]
     if unknown:
         listed = ", ".join(f"'{name}'" for name in unknown)
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "unknown_org", "message": f"Not a registered org: {listed}"},
-        )
+        raise ProblemError(422, f"Not a registered org: {listed}", code="unknown_org")
 
 
 def grant_orgs(grant: ScopedGrant, orgs: list[Any], role_config: RoleConfig) -> list[Any]:
@@ -1060,30 +1029,26 @@ def granted_bound_org(request: Request, user: AuthContext, action: str) -> str:
         The session's ``org_id``.
 
     Raises:
-        HTTPException: 403 ``no_org`` for a session bound to no org, and 403
+        ProblemError: 403 ``no_org`` for a session bound to no org, and 403
             ``org_not_granted`` for one bound to an org its groups do not grant.
     """
     if not request.app.state.settings.auth.enabled:
         return user.org_id
     if not user.org_id:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "no_org",
-                "message": "This read is held to one org, and the session's account is "
-                "bound to none: bind the account to an org first",
-            },
+        raise ProblemError(
+            403,
+            "This read is held to one org, and the session's account is "
+            "bound to none: bind the account to an org first",
+            code="no_org",
         )
     if reads_every_org(request, user, action):
         return user.org_id
     if user.org_id not in {org.name for org in held_orgs(request, user, action)}:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "org_not_granted",
-                "message": f"The session's account is bound to org '{user.org_id}', "
-                "which none of its groups grants",
-            },
+        raise ProblemError(
+            403,
+            f"The session's account is bound to org '{user.org_id}', "
+            "which none of its groups grants",
+            code="org_not_granted",
         )
     return user.org_id
 

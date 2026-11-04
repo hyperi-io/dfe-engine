@@ -54,8 +54,8 @@ def test_a_column_default_that_reads_outside_the_row_is_refused(client, admin_he
     assert response.status_code == 422, response.text
     body = response.json()
     assert body["code"] == "validation_error"
-    assert "The default for column 'host_name' may not call" in body["message"]
-    listed = client.get("/api/v1/schemas", headers=admin_headers, params={"per_page": -1})
+    assert "The default for column 'host_name' may not call" in body["detail"]
+    listed = client.get("/api/v1/schemas", headers=admin_headers, params={"page_size": 1000})
     assert SCHEMA not in [row["name"] for row in listed.json()["items"]]
 
 
@@ -66,7 +66,7 @@ def test_the_materialized_and_alias_forms_are_refused_as_well(client, admin_head
     )
 
     assert response.status_code == 422, response.text
-    assert "may not call url()" in response.json()["message"]
+    assert "may not call url()" in response.json()["detail"]
 
 
 @pytest.mark.parametrize("default", ["now64(3)", "if(host_name IN ('a', 'b'), 'listed', 'x')"])

@@ -82,8 +82,8 @@ def test_an_unreachable_deploy_repo_answers_503_with_retry_after(
     assert int(resp.headers["Retry-After"]) >= 1
     body = resp.json()
     assert body["code"] == "service_unavailable"
-    assert body["context"] == {"service": "gitops", "remote": remote}
-    assert body["message"] == GITOPS_UNAVAILABLE_MESSAGE
+    assert body.items() >= {"service": "gitops", "remote": remote}.items()
+    assert body["detail"] == GITOPS_UNAVAILABLE_MESSAGE
     labels = {"op": "fetch", "outcome": "exhausted"}
     assert _sample(manager, "gitops_write_retries_total", labels) == 1
 
@@ -121,7 +121,7 @@ def test_an_open_write_breaker_answers_503_until_its_window_ends(
     assert int(tripped.headers["Retry-After"]) >= 55
     assert turned_away.status_code == 503, turned_away.text
     assert 1 <= int(turned_away.headers["Retry-After"]) <= 60
-    assert turned_away.json()["context"] == {"service": "gitops", "remote": remote}
+    assert turned_away.json().items() >= {"service": "gitops", "remote": remote}.items()
     assert _sample(manager, "gitops_write_breaker_total", {"event": "rejected"}) == 1
     labels = {"op": "fetch", "outcome": "exhausted"}
     assert _sample(manager, "gitops_write_retries_total", labels) == 1

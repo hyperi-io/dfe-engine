@@ -95,7 +95,7 @@ def test_list_providers_includes_builtin_default(client, app, admin_headers, tmp
     _wire_gitcrud(app, tmp_path)
     resp = client.get("/api/v1/sigma/providers", headers=admin_headers)
     assert resp.status_code == 200
-    names = {p["name"] for p in resp.json()}
+    names = {p["name"] for p in resp.json()["items"]}
     assert "sigmahq" in names
 
 
@@ -161,7 +161,7 @@ def test_sync_populates_catalogue_and_select_flow(client, app, admin_headers, tm
     listing = client.get("/api/v1/sigma/catalogue", headers=admin_headers)
     assert listing.status_code == 200
     page = listing.json()
-    assert page["total"] == 1
+    assert page["total_size"] == 1
     assert page["items"][0]["id"] == _UUID
     assert page["items"][0]["origin"] == "file"
     assert page["items"][0]["selected"] is False
@@ -177,7 +177,7 @@ def test_sync_populates_catalogue_and_select_flow(client, app, admin_headers, tm
     assert sel.json()["rules"] == [_UUID]
     assert client.get("/api/v1/sigma/selected", headers=admin_headers).json()["rules"] == [_UUID]
     only_sel = client.get("/api/v1/sigma/catalogue?selected=true", headers=admin_headers)
-    assert only_sel.json()["total"] == 1
+    assert only_sel.json()["total_size"] == 1
 
     # deselect
     desel = client.post(f"/api/v1/sigma/catalogue/{_UUID}/deselect", headers=admin_headers)

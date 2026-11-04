@@ -35,9 +35,10 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Literal, NoReturn
 from urllib.parse import urlencode, urlsplit
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
+from scalo.api import ProblemError
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
@@ -113,12 +114,10 @@ def validate_return_to(return_to: str, request_origin: str, trusted_origins: lis
 
 
 def _refuse_return_to() -> NoReturn:
-    raise HTTPException(
-        status_code=400,
-        detail={
-            "code": "invalid_return_to",
-            "message": "return_to must be a relative path or a URL on a CORS-allowed origin",
-        },
+    raise ProblemError(
+        400,
+        "return_to must be a relative path or a URL on a CORS-allowed origin",
+        code="invalid_return_to",
     )
 
 
@@ -201,14 +200,8 @@ async def _reload_rp_if_provider_known(request: Request, provider: str):
     return await _rebuild_rp(request)
 
 
-def _not_found(provider: str) -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail={
-            "code": "not_found",
-            "message": f"OIDC provider '{provider}' not found or disabled",
-        },
-    )
+def _not_found(provider: str) -> ProblemError:
+    return ProblemError(404, f"OIDC provider '{provider}' not found or disabled", code="not_found")
 
 
 async def _rp_or_404(request: Request, provider: str):
@@ -279,13 +272,12 @@ def _hand_back_url(return_to: str, fields: dict[str, str]) -> str:
     return f"{return_to.partition('#')[0]}#{urlencode(fields)}"
 
 
-def _hand_back_refusal(return_to: str, provider: str, exc: HTTPException) -> RedirectResponse:
+def _hand_back_refusal(return_to: str, provider: str, exc: ProblemError) -> RedirectResponse:
     """303 a refused browser login to ``return_to`` with the refusal's code in the URL fragment.
 
     The code is one the engine wrote, never the IdP's text. No token or cookie goes with it.
     """
-    code = exc.detail.get("code") if isinstance(exc.detail, dict) else None
-    fields = {"error": code if isinstance(code, str) else "unauthorized", "provider": provider}
+    fields = {"error": exc.problem.code or "unauthorized", "provider": provider}
     return RedirectResponse(_hand_back_url(return_to, fields), status_code=303)
 
 
@@ -315,7 +307,7 @@ async def oidc_callback(
     rp = await _rp_or_404(request, provider)
     try:
         return await _complete_login(provider, request, settings, rp, return_to)
-    except HTTPException as exc:
+    except ProblemError as exc:
         if not return_to:
             raise
         return _hand_back_refusal(return_to, provider, exc)
@@ -328,7 +320,7 @@ async def _complete_login(
     rp: OidcRelyingParty,
     return_to: str | None,
 ) -> JSONResponse | RedirectResponse:
-    """Exchange the IdP code, admit the identity and mint its token; a refusal raises HTTPException."""
+    """Exchange the IdP code, admit the identity and mint its token; a refusal raises ProblemError."""
     try:
         identity = await rp.handle_callback(provider, request)
     except Exception as exc:
@@ -340,20 +332,13 @@ async def _complete_login(
         reason = str(failure.get("code") or failure["error_type"])
         audit_login_denied("unknown", "oidc", _get_client_ip(request), reason)
         # The answer carries no reason: this route takes unauthenticated callers.
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "unauthorized",
-                "message": "OIDC login failed; the engine log has the reason",
-            },
+        raise ProblemError(
+            401, "OIDC login failed; the engine log has the reason", code="unauthorized"
         ) from exc
 
     if not identity.subject:
         audit_login_denied("unknown", "oidc", _get_client_ip(request), "no_subject")
-        raise HTTPException(
-            status_code=401,
-            detail={"code": "unauthorized", "message": "IdP id_token carried no subject"},
-        )
+        raise ProblemError(401, "IdP id_token carried no subject", code="unauthorized")
 
     jit = getattr(request.app.state, "jit_provisioner", None)
     if jit:
@@ -369,28 +354,18 @@ async def _complete_login(
         except (JitIdentityCollisionError, JitSubjectUnusableError) as exc:
             # Ordered before the catch-all: a refused identity is a 401, not a 503.
             audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
-            raise HTTPException(
-                status_code=401,
-                detail={"code": "unauthorized", "message": str(exc)},
-            ) from exc
+            raise ProblemError(401, str(exc), code="unauthorized") from exc
         except (JitAccountUnavailableError, JitNoRoleError) as exc:
             audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
-            raise HTTPException(
-                status_code=401,
-                detail={"code": exc.reason, "message": str(exc)},
-            ) from exc
+            raise ProblemError(401, str(exc), code=exc.reason) from exc
         except Exception as exc:
             # A token minted with no account behind it cannot be disabled locally; the text names store paths, so only its class is logged.
             logger.error(
                 "JIT provisioning failed", user_id=identity.subject, **describe_http_error(exc)
             )
             audit_jit_failed(identity.subject, exc)
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "service_unavailable",
-                    "message": "The login could not be recorded. Try again.",
-                },
+            raise ProblemError(
+                503, "The login could not be recorded. Try again.", code="service_unavailable"
             ) from exc
 
     account = require_local_account_enabled(request, identity.subject)

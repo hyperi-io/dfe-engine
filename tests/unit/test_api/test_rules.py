@@ -79,7 +79,7 @@ class TestRulesListAndDetail:
         assert resp.status_code == 200
         data = resp.json()
         assert data["items"] == []
-        assert data["total"] == 0
+        assert data["total_size"] == 0
 
     def test_list_after_create_with_search(self, client, admin_headers):
         create = client.post(
@@ -97,7 +97,7 @@ class TestRulesListAndDetail:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] == 1
+        assert data["total_size"] == 1
         assert data["items"][0]["name"] == rule_name
 
         miss = client.get(
@@ -105,7 +105,7 @@ class TestRulesListAndDetail:
             params={"search": "nonexistent"},
             headers=admin_headers,
         )
-        assert miss.json()["total"] == 0
+        assert miss.json()["total_size"] == 0
 
     def test_get_rule_detail(self, client, admin_headers):
         create = client.post(
@@ -232,8 +232,8 @@ class TestRulesUpdateAndDelete:
         assert delete.status_code == 409
         body = delete.json()
         assert body["code"] == "conflict"
-        assert rule_name in body["message"]
-        assert "rule_guard_hunt" in body["message"]
+        assert rule_name in body["detail"]
+        assert "rule_guard_hunt" in body["detail"]
 
         assert client.get(f"/api/v1/rules/{rule_name}", headers=admin_headers).status_code == 200
         client.delete("/api/v1/hunts/rule_guard_hunt", headers=admin_headers)
@@ -407,7 +407,7 @@ class TestRulesFromHyperdx:
         assert resp.status_code == 422, resp.text
         assert resp.json()["code"] == "validation_error"
         assert "saved_search_id" in resp.text
-        assert client.get("/api/v1/rules", headers=admin_headers).json()["total"] == 0
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
 
     def test_from_hyperdx_refuses_empty_raw_sql(self, client, admin_headers):
         resp = client.post(
@@ -422,10 +422,10 @@ def _assert_refused(resp) -> list[dict]:
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["code"] == "invalid_sql"
-    sql_errors = body["context"]["sql_errors"]
+    sql_errors = body["sql_errors"]
     assert sql_errors
     assert all(error["message"] for error in sql_errors)
-    assert sql_errors[0]["message"] in body["message"]
+    assert sql_errors[0]["message"] in body["detail"]
     return sql_errors
 
 
@@ -440,7 +440,7 @@ class TestRulesRefuseUncompilable:
         )
 
         _assert_refused(resp)
-        assert client.get("/api/v1/rules", headers=admin_headers).json()["total"] == 0
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
         assert client.get("/api/v1/rules/hyperdx-rule", headers=admin_headers).status_code == 404
 
     def test_rendered_hyperdx_view_keeps_its_table_and_filters(self, client, admin_headers):
@@ -470,7 +470,7 @@ class TestRulesRefuseUncompilable:
         assert [e["message"] for e in sql_errors] == [
             "Rule has empty detection logic (WHERE clause)."
         ]
-        assert client.get("/api/v1/rules", headers=admin_headers).json()["total"] == 0
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
 
     def test_create_refuses_sql_that_does_not_parse(self, client, admin_headers):
         resp = client.post(
@@ -573,11 +573,11 @@ def _assert_matches_everything(resp, where: str) -> str:
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["code"] == "rule_matches_everything"
-    assert body["message"].startswith("This rule matches every event in dfe.main: ")
-    assert body["message"].endswith("Add a condition that narrows it.")
-    assert body["context"]["source"] == "dfe.main"
-    assert where in body["context"]["where_clause"]
-    return body["message"]
+    assert body["detail"].startswith("This rule matches every event in dfe.main: ")
+    assert body["detail"].endswith("Add a condition that narrows it.")
+    assert body["source"] == "dfe.main"
+    assert where in body["where_clause"]
+    return body["detail"]
 
 
 class TestRulesRefuseMatchEverything:
@@ -611,7 +611,7 @@ class TestRulesRefuseMatchEverything:
 
         message = _assert_matches_everything(resp, "notEmpty(toString(`_json`)) = 1")
         assert "true whenever _json is present, and every event has it" in message
-        assert client.get("/api/v1/rules", headers=admin_headers).json()["total"] == 0
+        assert client.get("/api/v1/rules", headers=admin_headers).json()["total_size"] == 0
 
     def test_update_refuses_and_keeps_the_stored_rule(self, client, admin_headers):
         payload = _sample_create_payload(name="kept_narrow")

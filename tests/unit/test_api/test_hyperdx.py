@@ -19,7 +19,7 @@ For ``/sources``: an unreachable HyperDX is never reported as an empty listing.
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from scalo.api import ProblemError
 
 from dfe_engine.api.v1.hyperdx import hyperdx_connection, hyperdx_identity, hyperdx_sources
 from dfe_engine.auth import Scope, ScopedGrant
@@ -198,9 +198,9 @@ async def test_a_caller_with_no_query_execute_anywhere_is_refused(tmp_path):
     )
     req = _request([_org("acme", ["acme"])], settings)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(ProblemError) as exc:
         await hyperdx_connection(req, user, settings)
-    assert exc.value.status_code == 403
+    assert exc.value.status == 403
 
 
 async def test_caller_with_no_resolvable_org_is_refused(tmp_path):
@@ -208,9 +208,9 @@ async def test_caller_with_no_resolvable_org_is_refused(tmp_path):
     user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=[])
     req = _request([_org("acme", ["acme"])], settings)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(ProblemError) as exc:
         await hyperdx_connection(req, user, settings)
-    assert exc.value.status_code == 403
+    assert exc.value.status == 403
 
 
 async def test_caller_spanning_two_separate_orgs_fails_closed(tmp_path):
@@ -218,9 +218,9 @@ async def test_caller_spanning_two_separate_orgs_fails_closed(tmp_path):
     user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=["acme", "nerk"])
     req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])], settings)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(ProblemError) as exc:
         await hyperdx_connection(req, user, settings)
-    assert exc.value.status_code == 403
+    assert exc.value.status == 403
 
 
 async def test_org_with_many_ids_still_resolves_to_one_connection(tmp_path):
@@ -242,9 +242,9 @@ async def test_org_without_a_credential_is_503(tmp_path):
     user = AuthContext(user_id="u", roles=["org_viewer"], org_ids=["acme"])
     req = _request([_org("acme", ["acme"])], settings)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(ProblemError) as exc:
         await hyperdx_connection(req, user, settings)
-    assert exc.value.status_code == 503
+    assert exc.value.status == 503
 
 
 async def test_the_password_comes_from_the_apps_shared_store(tmp_path):
@@ -337,10 +337,10 @@ async def test_a_caller_the_connection_refuses_has_no_identity(tmp_path, user):
     settings = _settings(tmp_path)
     req = _request([_org("acme", ["acme"]), _org("nerk", ["nerk"])], settings)
 
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(ProblemError) as exc:
         await hyperdx_connection(req, user, settings)
 
-    assert exc.value.status_code == 403
+    assert exc.value.status == 403
     assert hyperdx_identity(req, user) == ""
 
 
@@ -400,12 +400,12 @@ async def test_sources_reports_the_team_each_source_landed_on():
 
 async def test_sources_is_503_when_hyperdx_does_not_answer():
     # An empty listing reads as "the source is missing", a different fault.
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(ProblemError) as exc:
         await hyperdx_sources(_sources_request(FakeFork(None)))
-    assert exc.value.status_code == 503
+    assert exc.value.status == 503
 
 
 async def test_sources_is_503_on_a_deployment_without_hyperdx():
-    with pytest.raises(HTTPException) as exc:
+    with pytest.raises(ProblemError) as exc:
         await hyperdx_sources(_sources_request(None))
-    assert exc.value.status_code == 503
+    assert exc.value.status == 503

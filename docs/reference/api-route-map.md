@@ -1,6 +1,6 @@
 # API route map
 
-Where each engine API operation goes in the resource hierarchy. `openapi-spec/route_map.py` generates this page from the engine's routes, `openapi-spec/route-plan.toml` and `openapi-spec/route-consumers.json`: change those and run `uv run python openapi-spec/generate.py`, never this page.
+Where each engine API operation goes in the resource hierarchy. `scripts/route_map.py` generates this page from the engine's routes, `scripts/route-plan.toml` and `scripts/route-consumers.json`: change those and run `uv run python scripts/generate_openapi.py`, never this page.
 
 One row per operation the engine serves today. **New** is where it goes, and its operation id, `dfe` CLI command and MCP tool all come from that path. An MCP tool exists only for an operation that opts in. **Consumers** counts the files in each repo that name the old path, whatever the method (ui = dfe-ui 973f7139f030, infra = dfe-infra a235b788df2a, docker = dfe-docker 4ba5d7ab78f7, cli = dfe-engine 79d5bffd2333).
 
@@ -8,9 +8,9 @@ One row per operation the engine serves today. **New** is where it goes, and its
 
 | Status | Operations | Meaning |
 |---|---|---|
-| moved | 90 | A new path, method or both |
+| moved | 87 | A new path, method or both |
 | merged into | 9 | Folded into the operation **New** names |
-| unchanged | 38 | Same method and path |
+| unchanged | 41 | Same method and path |
 | frozen | 54 | Kept as it is |
 | decide | 129 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
@@ -142,6 +142,14 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | `GET /api/v1/ingest/rules` | `GET /api/v1/ingest/rules` | `ingest.rules.list` | `dfe ingest rules list` | `dfe_ingest_rules_list` | unchanged | 0 |  |
 | `POST /api/v1/ingest/rules/order` | `POST /api/v1/ingest/rules/order` | `ingest.rules.order` | `dfe ingest rules order` | `dfe_ingest_rules_order` | unchanged | 0 |  |
 
+## operations
+
+| Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
+|---|---|---|---|---|---|---|---|
+| `GET /api/v1/operations` | `GET /api/v1/operations` | `operations.list` | `dfe operations list` | `dfe_operations_list` | unchanged | 0 | Background tasks are operations (AIP-151). |
+| `GET /api/v1/operations/{operation}` | `GET /api/v1/operations/{operation}` | `operations.get` | `dfe operations get` | `dfe_operations_get` | unchanged | 0 | Background tasks are operations (AIP-151). |
+| `POST /api/v1/operations/{operation}/cancel` | `POST /api/v1/operations/{operation}/cancel` | `operations.cancel` | `dfe operations cancel` | `dfe_operations_cancel` | unchanged | 0 | Background tasks are operations (AIP-151). |
+
 ## orgs
 
 | Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
@@ -220,9 +228,6 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | `GET /api/v1/system/settings` | `GET /api/v1/system/settings` | `system.settings` | `dfe system settings` | `dfe_system_settings` | unchanged | ui 2 |  |
 | `GET /api/v1/system/status` | `GET /api/v1/system/status` | `system.status` | `dfe system status` | `dfe_system_status` | unchanged | 0 |  |
 | `GET /api/v1/system/version` | `GET /api/v1/system/version` | `system.version` | `dfe system version` | `dfe_system_version` | unchanged | ui 3, infra 1 |  |
-| `GET /api/v1/tasks` | `GET /api/v1/system/operations` | `system.operations.list` | `dfe system operations list` | `dfe_system_operations_list` | moved | infra 1 | Background tasks are operations (AIP-151). |
-| `GET /api/v1/tasks/{task_id}` | `GET /api/v1/system/operations/{operation}` | `system.operations.get` | `dfe system operations get` | `dfe_system_operations_get` | moved | 0 | Background tasks are operations (AIP-151). |
-| `POST /api/v1/tasks/{task_id}/cancel` | `POST /api/v1/system/operations/{operation}/cancel` | `system.operations.cancel` | `dfe system operations cancel` | `dfe_system_operations_cancel` | moved | 0 | Background tasks are operations (AIP-151). |
 
 ## Frozen: protocol
 
@@ -410,8 +415,8 @@ No root holds synthetic data.
 | `GET /api/v1/synthetic-data/packs` | - | - | - | - | decide | 0 |  |
 | `POST /api/v1/synthetic-data/stream` | - | - | - | - | decide | 0 |  |
 | `GET /api/v1/synthetic-data/streams` | - | - | - | - | decide | 0 |  |
-| `DELETE /api/v1/synthetic-data/streams/{task_id}` | - | - | - | - | decide | 0 |  |
-| `GET /api/v1/synthetic-data/streams/{task_id}` | - | - | - | - | decide | 0 |  |
+| `GET /api/v1/synthetic-data/streams/{operation}` | - | - | - | - | decide | 0 |  |
+| `POST /api/v1/synthetic-data/streams/{operation}/cancel` | - | - | - | - | decide | 0 |  |
 
 ### queries
 

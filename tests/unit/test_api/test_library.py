@@ -78,7 +78,7 @@ class TestKinds:
         assert resp.status_code == 200, resp.text
         # Membership is not pinned: a kind arrives as a manifest edit, so an
         # exact-set assertion would break on every one of them.
-        by_name = {k["name"]: k for k in resp.json()}
+        by_name = {k["name"]: k for k in resp.json()["items"]}
         assert {"vrl", "vector-yaml", "wasm"} <= set(by_name)
         assert by_name["wasm"]["encoding"] == "base64"
         assert by_name["vector-yaml"]["suffixes"] == [".yaml", ".yml"]
@@ -167,7 +167,7 @@ class TestVersions:
         _publish(client, admin_headers, content=V1, description="first")
         _publish(client, admin_headers, content=V2, description="second")
 
-        listed = client.get(f"{LIB}/parse-syslog/versions", headers=admin_headers).json()
+        listed = client.get(f"{LIB}/parse-syslog/versions", headers=admin_headers).json()["items"]
         assert [v["version"] for v in listed] == [1, 2]
         assert listed[0]["description"] == "first"
         assert listed[0]["published_by"] == "admin"
@@ -308,7 +308,7 @@ class TestFilters:
     def _names(self, client, headers, **params):
         resp = client.get(LIB, params=params, headers=headers)
         assert resp.status_code == 200, resp.text
-        return sorted(a["name"] for a in resp.json())
+        return sorted(a["name"] for a in resp.json()["items"])
 
     def test_no_filter_lists_everything(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
@@ -344,7 +344,7 @@ class TestFilters:
         resp = client.get(
             LIB, params=[("label", "team=sec"), ("label", "tier=1")], headers=admin_headers
         )
-        assert [a["name"] for a in resp.json()] == ["parse-syslog"]
+        assert [a["name"] for a in resp.json()["items"]] == ["parse-syslog"]
 
     def test_filter_by_state(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
@@ -456,7 +456,7 @@ class TestLinking:
         link = resp.json()["link"]
         assert (link["tag"], link["version"]) == ("stable", 1)
 
-        listed = client.get(f"{self.BASE}/links", headers=admin_headers).json()
+        listed = client.get(f"{self.BASE}/links", headers=admin_headers).json()["items"]
         assert listed[0]["version"] == 1
         assert listed[0]["available_version"] == 1
 
@@ -513,7 +513,7 @@ class TestLinking:
         client.put(
             f"{self.BASE}/000_parse.vrl", json={"content": ".hand = 1\n"}, headers=admin_headers
         )
-        (checked,) = client.get(f"{self.BASE}/links", headers=admin_headers).json()
+        (checked,) = client.get(f"{self.BASE}/links", headers=admin_headers).json()["items"]
         assert checked["drift"] is True
         assert checked["outdated"] is False
 
@@ -521,7 +521,7 @@ class TestLinking:
         self._setup(client, app, admin_headers, tmp_path)
         self._link(client, admin_headers)
         _publish(client, admin_headers, content=V2)
-        (checked,) = client.get(f"{self.BASE}/links", headers=admin_headers).json()
+        (checked,) = client.get(f"{self.BASE}/links", headers=admin_headers).json()["items"]
         assert (checked["drift"], checked["outdated"]) == (False, True)
         assert checked["available_version"] == 2
 
@@ -530,12 +530,12 @@ class TestLinking:
         self._setup(client, app, admin_headers, tmp_path)
         self._link(client, admin_headers)
         assert client.delete(f"{self.BASE}/000_parse.vrl", headers=admin_headers).status_code == 200
-        assert client.get(f"{self.BASE}/links", headers=admin_headers).json() == []
+        assert client.get(f"{self.BASE}/links", headers=admin_headers).json()["items"] == []
 
     def test_usage_names_the_instances_that_link_it(self, client, app, admin_headers, tmp_path):
         self._setup(client, app, admin_headers, tmp_path)
         self._link(client, admin_headers)
-        found = client.get(f"{LIB}/parse-syslog/usage", headers=admin_headers).json()
+        found = client.get(f"{LIB}/parse-syslog/usage", headers=admin_headers).json()["items"]
         assert len(found) == 1
         assert found[0]["service"] == VRL
         assert found[0]["instance"] == "syslog"
@@ -593,7 +593,7 @@ class TestRbac:
             headers=overlay_only,
         )
         assert resp.status_code == 403
-        assert "library:read" in resp.json()["message"]
+        assert "library:read" in resp.json()["detail"]
 
 
 class TestGovernedWrite:

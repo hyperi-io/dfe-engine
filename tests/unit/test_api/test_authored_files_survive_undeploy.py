@@ -36,7 +36,7 @@ def _set_state(client, headers, state: str):
 def _programs(client, headers) -> list[tuple[str, str]]:
     listed = client.get(FILES, headers=headers)
     assert listed.status_code == 200, listed.text
-    names = [entry["name"] for entry in listed.json()]
+    names = [entry["name"] for entry in listed.json()["items"]]
     return [(n, client.get(f"{FILES}/{n}", headers=headers).json()["content"]) for n in names]
 
 
@@ -74,7 +74,7 @@ def test_the_parked_copy_deploys_nothing(client, app, admin_headers, tmp_path):
     assert not fnmatch.fnmatch(parked_file, APPLICATIONSET_GLOB)
     assert "deploy" not in gc.get("helmvars", APP.parked_name)
     assert APP not in instances.list_instances(gc)
-    listed = client.get("/api/v1/apps", headers=admin_headers).json()
+    listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
     vrl = next(entry for entry in listed if entry["service"] == "dfe-transform-vrl")
     assert vrl["instances"] == []
 

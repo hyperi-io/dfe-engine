@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi import FastAPI, UploadFile
+from scalo.api import ProblemError
 from starlette.requests import Request
 
 from dfe_engine.api.v1.schemas import elastic_converter
@@ -30,11 +31,9 @@ def _reset_settings_after_each_test() -> Iterator[None]:
     reset_settings()
 
 
-def _detail(refused: pytest.ExceptionInfo[HTTPException]) -> dict[str, Any]:
-    """The error body a refusal carries."""
-    detail = refused.value.detail
-    assert isinstance(detail, dict), detail
-    return detail
+def _detail(refused: pytest.ExceptionInfo[ProblemError]) -> dict[str, Any]:
+    """The problem a refusal carries."""
+    return refused.value.problem.model_dump()
 
 
 def _http_request(
@@ -71,9 +70,9 @@ class _ExplodingReader(io.BytesIO):
 async def test_elastic_converter_upload_read_error_returns_422() -> None:
     uf = UploadFile(file=_ExplodingReader(), filename="x.json")
     user = AuthContext(user_id="tester")
-    with pytest.raises(HTTPException) as ri:
+    with pytest.raises(ProblemError) as ri:
         await elastic_converter(request=_http_request(load_settings()), user=user, file=uf)
-    assert ri.value.status_code == 422
+    assert ri.value.status == 422
     assert _detail(ri)["code"] == "upload_read_error"
 
 
@@ -83,9 +82,9 @@ async def test_elastic_converter_upload_exceeds_max_returns_413(
     monkeypatch.setenv(_LIMIT_ENV, "48")
     uf = UploadFile(filename="big.json", file=io.BytesIO(b"y" * 49))
     user = AuthContext(user_id="tester")
-    with pytest.raises(HTTPException) as ri:
+    with pytest.raises(ProblemError) as ri:
         await elastic_converter(request=_http_request(load_settings()), user=user, file=uf)
-    assert ri.value.status_code == 413
+    assert ri.value.status == 413
     assert _detail(ri)["code"] == "upload_too_large"
 
 
@@ -96,9 +95,9 @@ async def test_elastic_converter_declared_content_length_too_large_returns_413(
     uf = UploadFile(filename="x.json", file=io.BytesIO(b"{}"))
     user = AuthContext(user_id="tester")
     req = _http_request(load_settings(), [(b"content-length", b"99999999")])
-    with pytest.raises(HTTPException) as ri:
+    with pytest.raises(ProblemError) as ri:
         await elastic_converter(request=req, user=user, file=uf)
-    assert ri.value.status_code == 413
+    assert ri.value.status == 413
     assert _detail(ri)["code"] == "upload_too_large"
 
 
@@ -115,11 +114,11 @@ async def test_a_config_file_limit_reaches_the_converter(
 
     uf = UploadFile(filename="big.json", file=io.BytesIO(b"y" * 257))
     user = AuthContext(user_id="tester")
-    with pytest.raises(HTTPException) as ri:
+    with pytest.raises(ProblemError) as ri:
         await elastic_converter(request=_http_request(from_file), user=user, file=uf)
-    assert ri.value.status_code == 413
+    assert ri.value.status == 413
     assert _detail(ri)["code"] == "upload_too_large"
-    assert "(256 bytes)" in _detail(ri)["message"]
+    assert "(256 bytes)" in _detail(ri)["detail"]
 
 
 def test_elastic_converter_upload_json(client, admin_headers) -> None:
@@ -146,7 +145,7 @@ def test_elastic_converter_invalid_template_returns_422(client, admin_headers) -
     assert resp.status_code == 422
     data = resp.json()
     assert data["code"] == "elastic_convert_error"
-    assert "Invalid JSON" in data["message"]
+    assert "Invalid JSON" in data["detail"]
 
 
 def test_elastic_converter_large_upload_returns_413(app, client, admin_headers) -> None:

@@ -19,13 +19,14 @@ cannot take are three different 422s.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
+from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import CurrentUser, DerivedSchemaReg, SchemaReg, require_action
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.review import routing_audit_detail, set_review_headers
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -121,11 +122,8 @@ def _response(schema: DerivedSchema, *, path: str) -> DerivedSchemaResponse:
 # -- Helpers --------------------------------------------------
 
 
-def _validation_error(message: str, *, code: str = "validation_error") -> HTTPException:
-    return HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail={"code": code, "message": message},
-    )
+def _validation_error(message: str, *, code: str = "validation_error") -> ProblemError:
+    return ProblemError(status.HTTP_422_UNPROCESSABLE_CONTENT, message, code=code)
 
 
 def _canonical(schema_path: str) -> str:
@@ -171,12 +169,10 @@ def _checked(
 ) -> DerivedSchema:
     """Build the document the write stores, or raise the 422 that stops it."""
     if body.path is not None and _canonical(body.path) != path:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "code": "path_mismatch",
-                "message": f"Body path {body.path!r} must match URL path {path!r}",
-            },
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Body path {body.path!r} must match URL path {path!r}",
+            code="path_mismatch",
         )
 
     try:
@@ -211,24 +207,26 @@ def _checked(
 # -- Routes ---------------------------------------------------
 
 
+DerivedSchemasList = Annotated[
+    ListQuery,
+    Depends(list_query(order_by=("path", "base", "current", "updated_at"), tiebreak="path")),
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedResponse[DerivedSchemaSummary],
+    response_model=Page[DerivedSchemaSummary],
     dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
 )
 async def list_derived_schemas(
     user: CurrentUser,
     registry: DerivedSchemaReg,
-    pagination: PaginationParams = Depends(),
+    query: DerivedSchemasList,
     search: str | None = Query(None, description="Search in path and base"),
-    sort_by: str | None = Query(None, description="Sort field (path, base, current, updated_at)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
-) -> PaginatedResponse[DerivedSchemaSummary]:
+) -> Page[DerivedSchemaSummary]:
     """List every stored derived schema."""
-    rows = apply_sort(apply_search(registry.list(), search, ["path", "base"]), sort_by, sort_order)
-    return PaginatedResponse.from_list(
-        [DerivedSchemaSummary(**row) for row in rows], pagination.page, pagination.per_page
-    )
+    rows = sort_by_order(apply_search(registry.list(), search, ["path", "base"]), query.order_by)
+    return paginate([DerivedSchemaSummary(**row) for row in rows], query, bound={"search": search})
 
 
 @router.get(
@@ -246,10 +244,7 @@ async def get_derived_schema(
     try:
         schema = registry.get(path)
     except DerivedSchemaNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Derived schema {path!r} not found"},
-        ) from exc
+        raise ProblemError(404, f"Derived schema {path!r} not found", code="not_found") from exc
     except DerivedSchemaValidationError as exc:
         raise _validation_error(str(exc)) from exc
     return _response(schema, path=path)
@@ -306,10 +301,7 @@ async def update_derived_schema(
     """Replace a derived schema. The body is the whole document, as on create."""
     path = _canonical(schema_path)
     if not registry.exists(path):
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Derived schema {path!r} not found"},
-        )
+        raise ProblemError(404, f"Derived schema {path!r} not found", code="not_found")
     schema = _checked(body, path=path, schema_registry=schema_registry)
     routing = ReviewRouting()
     saved = registry.save(
@@ -344,10 +336,7 @@ async def delete_derived_schema(
     try:
         registry.delete(path, created_by=git_author(user), routing=routing)
     except DerivedSchemaNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Derived schema {path!r} not found"},
-        ) from exc
+        raise ProblemError(404, f"Derived schema {path!r} not found", code="not_found") from exc
     audit_resource_change(
         user.user_id, "derived_schema", path, "deleted", routing_audit_detail(routing)
     )

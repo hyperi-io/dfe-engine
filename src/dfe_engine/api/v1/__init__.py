@@ -29,6 +29,7 @@ from dfe_engine.api.v1.library import router as library_router
 from dfe_engine.api.v1.lifecycle import router as lifecycle_router
 from dfe_engine.api.v1.oidc_login import router as oidc_login_router
 from dfe_engine.api.v1.oidc_providers import router as oidc_providers_router
+from dfe_engine.api.v1.operations import router as operations_router
 from dfe_engine.api.v1.orgs import router as orgs_router
 from dfe_engine.api.v1.pipeline import router as pipeline_router
 from dfe_engine.api.v1.queries import router as queries_router
@@ -43,7 +44,6 @@ from dfe_engine.api.v1.sigma import router as sigma_router
 from dfe_engine.api.v1.sources import router as sources_router
 from dfe_engine.api.v1.synthetic_data import router as synthetic_data_router
 from dfe_engine.api.v1.system import router as system_router
-from dfe_engine.api.v1.tasks import router as tasks_router
 from dfe_engine.api.v1.transforms import router as transforms_router
 from dfe_engine.api.v1.usage import router as usage_router
 from dfe_engine.clickhouse.attribution import tags_context
@@ -127,7 +127,7 @@ def build_v1_router(settings: DFESettings) -> APIRouter:
     v1_router.include_router(sampler_router)
     v1_router.include_router(synthetic_data_router)
     v1_router.include_router(pipeline_router)
-    v1_router.include_router(tasks_router)
+    v1_router.include_router(operations_router)
     # The licence numbers: cores, node cores, bytes and events per second
     v1_router.include_router(usage_router)
     # Ahead of schemas_router: /definitions/derived/... would otherwise be swallowed

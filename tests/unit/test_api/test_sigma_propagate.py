@@ -142,7 +142,7 @@ def test_propagate_generates_binding_and_hunt(client, app, admin_headers, tmp_pa
 
     # bindings list + get
     listing = client.get("/api/v1/sigma/bindings", headers=admin_headers).json()
-    assert listing["total"] == 1
+    assert listing["total_size"] == 1
     assert listing["items"][0]["rule_id"] == _BINDING
     assert listing["items"][0]["drift"] is False
 

@@ -82,7 +82,7 @@ class TestTheIssuedAdmin:
 
         assert resp.status_code == 403
         assert resp.json()["code"] == "password_change_required"
-        assert _CHANGE in resp.json()["message"]
+        assert _CHANGE in resp.json()["detail"]
 
     def test_a_write_is_refused_before_it_touches_anything(self, fresh):
         resp = fresh.post(
@@ -191,7 +191,7 @@ class TestTheChange:
 
         assert resp.status_code == 400
         assert resp.json()["code"] == "password_reused"
-        assert "current password" in resp.json()["message"]
+        assert "current password" in resp.json()["detail"]
         assert fresh.get("/api/v1/sources", headers=headers).status_code == 403
 
     def test_the_issued_password_cannot_be_readopted_after_the_change(self, fresh):
@@ -205,7 +205,7 @@ class TestTheChange:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "password_reused"
-        assert "issued" in resp.json()["message"]
+        assert "issued" in resp.json()["detail"]
         assert (
             fresh.post(_LOGIN, json={"username": "admin", "password": ADMIN_PASSWORD}).status_code
             == 401
@@ -226,7 +226,7 @@ class TestTheFloorOnTheChange:
 
         assert resp.status_code == 422, resp.text
         assert resp.json()["errors"][0]["field"] == "new_password"
-        assert str(MIN_ADMIN_PASSWORD_LENGTH) in resp.json()["errors"][0]["message"]
+        assert str(MIN_ADMIN_PASSWORD_LENGTH) in resp.json()["errors"][0]["detail"]
         assert short not in resp.text
         assert fresh.app.state.account_store.get("admin").password_change_required is True
         assert fresh.get("/api/v1/sources", headers=headers).status_code == 403

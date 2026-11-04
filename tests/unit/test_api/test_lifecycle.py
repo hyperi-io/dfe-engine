@@ -93,7 +93,7 @@ def test_list_services_shows_tier_and_state(client, app, admin_headers, tmp_path
     _wire_gitcrud(app, tmp_path)
     r = client.get("/api/v1/lifecycle", headers=admin_headers)
     assert r.status_code == 200
-    by = {s["name"]: s for s in r.json()}
+    by = {s["name"]: s for s in r.json()["items"]}
     assert by["clickhouse"]["state"] == "pinned"
     assert by["receiver"]["tier"] == "managed_app"
     assert by["kafka"]["tier"] == "managed_backing"

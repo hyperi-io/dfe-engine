@@ -62,8 +62,8 @@ def test_a_failed_raw_query_answers_a_reference_its_log_line_carries(
     assert body["code"] == "query_error"
     assert BACKEND_TEXT not in resp.text
     assert "a1b2c3" not in resp.text
-    reference = REFERENCE.search(body["message"])
-    assert reference is not None, body["message"]
+    reference = REFERENCE.search(body["detail"])
+    assert reference is not None, body["detail"]
     (logged,) = _logged(warnings, reference.group(1))
     assert logged["error"] == BACKEND_TEXT
 
@@ -80,9 +80,9 @@ def test_a_refused_token_answers_a_reference_not_the_libraries_reason(client, wa
     assert resp.headers["WWW-Authenticate"] == "Bearer"
     body = resp.json()
     assert body["code"] == "unauthorized"
-    assert body["message"].startswith("Invalid token (reference ")
-    reference = REFERENCE.search(body["message"])
+    assert body["detail"].startswith("Invalid token (reference ")
+    reference = REFERENCE.search(body["detail"])
     assert reference is not None
     (logged,) = _logged(warnings, reference.group(1))
     assert logged["error"]
-    assert logged["error"] not in body["message"]
+    assert logged["error"] not in body["detail"]

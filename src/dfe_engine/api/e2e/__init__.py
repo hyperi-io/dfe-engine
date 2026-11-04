@@ -12,7 +12,7 @@ Mounted by ``create_app`` only when ``DFE_ENGINE_E2E_SERVER`` is on and the post
 non-production. Lives under ``/api/e2e`` (not the versioned product API). In
 that process, ``/docs`` has a spec dropdown: **API** (``/openapi.json``) vs
 **E2E** (``/openapi.e2e.json``). The committed product spec never includes
-them; ``openapi-spec/openapi.e2e.json`` is generated alongside it.
+them; ``openapi/openapi.e2e.json`` is generated alongside it.
 
 GET  /api/e2e/status       -> confirm the group is live
 POST /api/e2e/seed-static  -> run a named seed script (e.g. seed_admin)
@@ -21,8 +21,9 @@ POST /api/e2e/seed-static  -> run a named seed script (e.g. seed_admin)
 import functools
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
+from scalo.api import ProblemError
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
@@ -127,10 +128,7 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         # RoutingNotApplicableError is in the tuple because a FlowError never
         # reaches here -- routing.py:164 wraps it, so catching FlowError alone
         # left the refusal this endpoint exists to report answering 500.
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(422, str(exc), code="validation_error") from exc
     logger.warning("e2e seed", script=body.script, success=success)
     message = f"Seed {body.script} successful" if success else f"Unknown seed script: {body.script}"
     return SeedResponse(success=success, message=message)

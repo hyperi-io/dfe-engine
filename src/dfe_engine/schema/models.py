@@ -23,8 +23,9 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from scalo.api import ListQuery, Page, paginate
 
-from dfe_engine.api.pagination import PaginatedResponse, PaginatedResponseWithObjects, PathTree
+from dfe_engine.api.conventions import PathTree
 from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.source.type_registry import (
     LOWCARDINALITY_ATTRIBUTE,
@@ -202,18 +203,15 @@ class SchemaVersion(BaseModel):
 
 
 class SchemaVersionGet(BaseModel):
-    """Schema version payload for GET definition (columns paginated)."""
+    """The selected version's metadata, its columns paged in the answer's ``items``."""
 
     date: str = Field(..., description="Date of the version")
     type: str = Field(..., description="Type of the version")
     summary: str = Field(..., description="Summary of the version")
-    columns: PaginatedResponse[SchemaColumn] = Field(
-        ..., description="Paginated columns for this version"
-    )
 
 
-class MetaSchemaGetResponse(BaseModel):
-    """Meta-schema definition for a single requested version."""
+class MetaSchemaGetResponse(Page[SchemaColumn]):
+    """A page of one version's columns, with the meta-schema's metadata."""
 
     resource_type: ResourceType = Field(
         default="custom",
@@ -221,9 +219,7 @@ class MetaSchemaGetResponse(BaseModel):
     )
     current: str = Field(..., description="Current version of the schema")
     selected: str = Field(..., description="Version id requested via query parameter")
-    version: SchemaVersionGet = Field(
-        ..., description="Metadata and paginated columns for ``selected``"
-    )
+    version: SchemaVersionGet = Field(..., description="Metadata for ``selected``")
     path: str = Field(..., description="Registry path (e.g. aws/cloudtrail)")
     versions: list[str] = Field(..., description="All version identifiers defined on this schema")
 
@@ -415,22 +411,17 @@ SchemaSummary = PathTree[SchemaSummaryObject]
 """Schema list tree grouped by registry path (``PathTree`` of ``SchemaSummaryObject``)."""
 
 
-class PaginatedSchemaSummaryResponse(
-    PaginatedResponseWithObjects[SchemaSummaryObject, SchemaSummary]
-):
-    """Schema list: path tree in ``objects`` plus paginated ``items``."""
+class SchemaSummaryPage(Page[SchemaSummaryObject]):
+    """A page of schema summaries, with the folder tree over every match in ``objects``."""
+
+    objects: SchemaSummary
 
     @classmethod
     def from_summaries(
-        cls,
-        summaries: list[SchemaSummaryObject],
-        page: int,
-        per_page: int,
-    ) -> PaginatedSchemaSummaryResponse:
-        """A page of schema summaries, with the folder tree over all of them."""
-        return cls.with_objects(
-            summaries,
-            page,
-            per_page,
-            SchemaSummary.from_paths(summaries, path=lambda obj: obj.name),
+        cls, summaries: list[SchemaSummaryObject], query: ListQuery, bound: dict[str, Any]
+    ) -> SchemaSummaryPage:
+        """Page ``summaries`` and tree all of them."""
+        page = paginate(summaries, query, bound=bound)
+        return cls(
+            **dict(page), objects=SchemaSummary.from_paths(summaries, path=lambda obj: obj.name)
         )

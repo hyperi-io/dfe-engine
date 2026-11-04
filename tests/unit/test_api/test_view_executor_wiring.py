@@ -37,7 +37,7 @@ def test_a_reader_with_no_password_is_a_503_that_names_it(client, admin_headers,
 
     assert resp.status_code == 503, resp.text
     assert resp.json()["code"] == "reader_unprovisioned"
-    assert "dfe_query_reader" in resp.json()["message"]
+    assert "dfe_query_reader" in resp.json()["detail"]
 
 
 def test_a_failed_build_is_not_kept(app, client, admin_headers):

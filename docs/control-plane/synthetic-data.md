@@ -48,7 +48,7 @@ correlated columns together. Format reference: the dfe-schemas repo, at
 (`POST /synthetic-data/stream`, `GET/DELETE /synthetic-data/streams...`).
 Reads need `synthetic-data:read`; generating or streaming needs
 `synthetic-data:run` (write-grade - it injects data into the pipeline).
-Full contract: `openapi-spec/openapi.json`.
+Full contract: `openapi/openapi.json`.
 
 ## Ceilings and the standing demo stream
 

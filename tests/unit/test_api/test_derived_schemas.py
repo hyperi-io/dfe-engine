@@ -124,7 +124,7 @@ class TestCreate:
         client.post(URL, headers=admin_headers, json=_body([{"name": "timestamp"}]))
         again = client.post(URL, headers=admin_headers, json=_body([{"name": "timestamp"}]))
         assert again.status_code == 422
-        assert "already exists" in again.json()["message"]
+        assert "already exists" in again.json()["detail"]
 
     def test_a_body_path_that_disagrees_with_the_url_is_refused(
         self, base_schema, client, admin_headers
@@ -141,7 +141,7 @@ class TestCreate:
         # first so a selection body is not read as a meta-schema body.
         created = client.post(URL, headers=admin_headers, json=_body([{"name": "timestamp"}]))
         assert created.status_code == 201, created.text
-        listed = client.get("/api/v1/schemas", headers=admin_headers, params={"per_page": -1})
+        listed = client.get("/api/v1/schemas", headers=admin_headers, params={"page_size": 1000})
         assert f"derived/{DERIVED}" not in [row["name"] for row in listed.json()["items"]]
 
 
@@ -151,8 +151,8 @@ class TestValidationFailures:
         assert response.status_code == 422
         body = response.json()
         assert body["code"] == "unknown_column"
-        assert "user_name" in body["message"]
-        assert BASE in body["message"]
+        assert "user_name" in body["detail"]
+        assert BASE in body["detail"]
 
     def test_an_index_the_type_registry_does_not_know(self, base_schema, client, admin_headers):
         response = client.post(
@@ -163,7 +163,7 @@ class TestValidationFailures:
         assert response.status_code == 422
         body = response.json()
         assert body["code"] == "unknown_index_use_case"
-        assert "word_search" in body["message"]
+        assert "word_search" in body["detail"]
 
     def test_an_index_the_primitive_cannot_take(self, base_schema, client, admin_headers):
         response = client.post(
@@ -174,7 +174,7 @@ class TestValidationFailures:
         assert response.status_code == 422
         body = response.json()
         assert body["code"] == "incompatible_index"
-        assert "integer" in body["message"]
+        assert "integer" in body["detail"]
 
     def test_an_unknown_base(self, base_schema, client, admin_headers):
         body = {**_body([{"name": "timestamp"}]), "base": "meta/beats/absent"}

@@ -101,7 +101,7 @@ class TestCatalogue:
         _wire(app, tmp_path)
         resp = client.get("/api/v1/apps", headers=admin_headers)
         assert resp.status_code == 200, resp.text
-        by_service = {e["service"]: e for e in resp.json()}
+        by_service = {e["service"]: e for e in resp.json()["items"]}
         assert VRL in by_service
         assert by_service[VRL]["instances"] == []
         assert by_service[VRL]["file_sets"][0]["language"] == "vrl"
@@ -113,7 +113,7 @@ class TestCatalogue:
         # dfe-ui #290 reproduced the dfe-transform- prefix rule to build its engine
         # picker; this field is what lets it drop that rule.
         _wire(app, tmp_path)
-        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
         engines = {e["service"]: e["transform_engine"] for e in listed}
         assert engines[VRL] == "vrl"
         assert engines["dfe-transform-elastic"] == "elastic"
@@ -123,7 +123,7 @@ class TestCatalogue:
         self, client, app, admin_headers, tmp_path
     ):
         _wire(app, tmp_path)
-        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
         marked = {e["transform_engine"] for e in listed if e["transform_engine"]}
         assert marked == catalogue.transform_engines()
 
@@ -132,7 +132,7 @@ class TestCatalogue:
     ):
         # The console labels an app from this field, so the name stays manifest data.
         _wire(app, tmp_path)
-        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
         labels = {e["service"]: e["display_name"] for e in listed}
         assert labels["hyperdx"] == "Search"
         assert labels["dfe-loader"] is None
@@ -154,7 +154,7 @@ class TestCatalogue:
     def test_the_routing_flag_matches_the_manifest(self, client, app, admin_headers, tmp_path):
         # Without it the UI can only find out by probing /routing for a 400.
         _wire(app, tmp_path)
-        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
         assert {e["service"]: e["has_compiled_routing"] for e in listed} == {
             service: catalogue.descriptor(service).has_compiled_routing
             for service in catalogue.services()
@@ -171,7 +171,7 @@ class TestCatalogue:
         )
         flagged = {
             e["service"]: e["has_compiled_routing"]
-            for e in client.get("/api/v1/apps", headers=admin_headers).json()
+            for e in client.get("/api/v1/apps", headers=admin_headers).json()["items"]
         }
         assert flagged[UNROUTED] is False
         probe = client.get(f"/api/v1/apps/{UNROUTED}/default/routing", headers=admin_headers)
@@ -204,7 +204,7 @@ class TestOptionalApps:
 
         entry = next(
             e
-            for e in client.get("/api/v1/apps?profile=slim", headers=admin_headers).json()
+            for e in client.get("/api/v1/apps?profile=slim", headers=admin_headers).json()["items"]
             if e["service"] == "dfe-loader"
         )
 
@@ -219,7 +219,7 @@ class TestOptionalApps:
 
         entry = next(
             e
-            for e in client.get("/api/v1/apps", headers=admin_headers).json()
+            for e in client.get("/api/v1/apps", headers=admin_headers).json()["items"]
             if e["service"] == "dfe-archiver"
         )
 
@@ -235,7 +235,7 @@ class TestOptionalApps:
         _wire(app, tmp_path)
 
         def offered(query: str) -> bool:
-            listed = client.get(f"/api/v1/apps{query}", headers=admin_headers).json()
+            listed = client.get(f"/api/v1/apps{query}", headers=admin_headers).json()["items"]
             return next(e for e in listed if e["service"] == "dfe-archiver")["offered"]
 
         assert offered("?profile=scale")
@@ -250,7 +250,7 @@ class TestOptionalApps:
         _wire(app, tmp_path)
         app.state.settings.deployment.profile = "slim"
 
-        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
 
         assert not next(e for e in listed if e["service"] == "dfe-archiver")["offered"]
 
@@ -260,7 +260,7 @@ class TestOptionalApps:
         _wire(app, tmp_path)
         app.state.settings.deployment.profile = "slim"
 
-        listed = client.get("/api/v1/apps?profile=scale", headers=admin_headers).json()
+        listed = client.get("/api/v1/apps?profile=scale", headers=admin_headers).json()["items"]
 
         assert next(e for e in listed if e["service"] == "dfe-archiver")["offered"]
 
@@ -299,7 +299,7 @@ class TestLifecycle:
         assert "env" not in doc
 
         listed = client.get("/api/v1/apps", headers=admin_headers)
-        by_service = {e["service"]: e for e in listed.json()}
+        by_service = {e["service"]: e for e in listed.json()["items"]}
         assert by_service[VRL]["instances"] == ["edge"]
 
     def test_deploying_twice_conflicts(self, client, app, admin_headers, tmp_path):
@@ -339,7 +339,7 @@ class TestLifecycle:
         )
         assert resp.status_code == 404, resp.text
         assert resp.json()["code"] == "unknown_source"
-        assert "nosuchsource" in resp.json()["message"]
+        assert "nosuchsource" in resp.json()["detail"]
 
     def test_a_defined_source_deploys(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
@@ -476,7 +476,7 @@ class TestScaling:
         resp = client.put(f"{BASE}/scaling", json={"replica_count": 3}, headers=admin_headers)
         assert resp.status_code == 400
         assert resp.json()["code"] == "invalid_dial"
-        assert "KEDA is enabled" in resp.json()["message"]
+        assert "KEDA is enabled" in resp.json()["detail"]
 
     def test_a_count_with_the_keda_flag_unset_is_400(self, client, app, admin_headers, tmp_path):
         # The transform's chart runs KEDA unless the overlay turns it off, which is the
@@ -555,11 +555,11 @@ class TestFiles:
         assert got["content"] == VRL_SOURCE
         assert got["language"] == "vrl"
 
-        listed = client.get(f"{BASE}/files/transforms", headers=admin_headers).json()
+        listed = client.get(f"{BASE}/files/transforms", headers=admin_headers).json()["items"]
         assert [f["name"] for f in listed] == ["000_parse.vrl"]
 
         assert client.delete(path, headers=admin_headers).status_code == 200
-        assert client.get(f"{BASE}/files/transforms", headers=admin_headers).json() == []
+        assert client.get(f"{BASE}/files/transforms", headers=admin_headers).json()["items"] == []
 
     @pytest.mark.parametrize(
         ("allow", "status"), [(False, 400), (True, 200)], ids=["refused_by_default", "allowed"]
@@ -580,8 +580,10 @@ class TestFiles:
         if status == 400:
             detail = resp.json()
             assert detail["code"] == "invalid_transform"
-            assert "line 1: get_env_var()" in detail["message"]
-            assert client.get(f"{BASE}/files/transforms", headers=admin_headers).json() == []
+            assert "line 1: get_env_var()" in detail["detail"]
+            assert (
+                client.get(f"{BASE}/files/transforms", headers=admin_headers).json()["items"] == []
+            )
 
     def test_rewriting_identical_content_is_not_a_change(
         self, client, app, admin_headers, tmp_path
@@ -609,7 +611,7 @@ class TestFiles:
 
         assert resp.status_code == 409
         assert resp.json()["code"] == "table_name_taken"
-        assert resp.json()["context"]["files"] == ["geo.csv", "geo.json"]
+        assert resp.json()["files"] == ["geo.csv", "geo.json"]
 
     def test_wrong_extension_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
@@ -864,7 +866,7 @@ class TestAdversarialRegressions:
         assert alpha["component"] == "transform-vrl-alpha"
         assert beta["component"] == "transform-vrl-beta"
 
-        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
         by_service = {e["service"]: e for e in listed}
         assert by_service[VRL]["instances"] == ["alpha", "beta"]
 
@@ -892,7 +894,7 @@ class TestAdversarialRegressions:
             "topic": "alpha",
             "crates": ["dfe-fetcher"],
         }
-        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
         by_service = {e["service"]: e for e in listed}
         assert by_service["dfe-fetcher"]["instances"] == ["alpha"]
         assert by_service["dfe-fetcher"]["routing_scope"] == "instance"
@@ -1007,7 +1009,7 @@ class TestRouting:
 
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "receiver_auth_unreadable"
-        assert "DFE_ENGINE_SECRETS_PROVIDER=ansible_vault" in resp.json()["message"]
+        assert "DFE_ENGINE_SECRETS_PROVIDER=ansible_vault" in resp.json()["detail"]
 
     def test_sync_writes_the_block_and_commits(self, client, app, admin_headers, tmp_path):
         gc = self._deployed(client, app, admin_headers, tmp_path)
@@ -1070,7 +1072,7 @@ class TestOptimisticConcurrency:
         assert body["code"] == "conflict"
         # head is what the caller re-reads against, so a conflict is recoverable
         # without a second round trip.
-        return body["context"]["head"]
+        return body["head"]
 
     def test_every_read_that_backs_a_write_carries_the_head(
         self, client, app, admin_headers, tmp_path

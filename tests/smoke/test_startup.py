@@ -63,8 +63,8 @@ class TestAPIBootstrap:
         assert callable(create_app)
 
     def test_api_module_imports(self):
-        from dfe_engine.api import deps, errors, pagination
+        from dfe_engine.api import conventions, deps, errors
 
         assert deps is not None
         assert errors is not None
-        assert pagination is not None
+        assert conventions is not None

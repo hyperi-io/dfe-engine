@@ -1,6 +1,6 @@
 """The committed OpenAPI spec must describe the app it ships with.
 
-``openapi-spec/openapi.json`` is not documentation. The sync workflow copies it
+``openapi/openapi.json`` is not documentation. The sync workflow copies it
 verbatim into dfe-ui and runs ``yarn generate`` over it, so the UI's TypeScript
 types are whatever this file says -- a stale spec compiles the UI against a
 contract the server does not implement. The workflow triggers on CHANGES to the
@@ -25,7 +25,7 @@ at ``1.20.19`` against a ``VERSION`` of ``1.21.2`` with every test green).
 The route map (``docs/reference/api-route-map.md``) is generated from the same app,
 so it is held to the app the same way.
 
-Regenerate with ``uv run python openapi-spec/generate.py``.
+Regenerate with ``uv run python scripts/generate_openapi.py``.
 """
 
 import json
@@ -39,7 +39,7 @@ from dfe_engine.api.app import create_app
 from dfe_engine.settings import SigmaSettings, load_settings, reset_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SPEC_DIR = REPO_ROOT / "openapi-spec"
+SPEC_DIR = REPO_ROOT / "openapi"
 SPEC_FILE = SPEC_DIR / "openapi.json"
 E2E_SPEC_FILE = SPEC_DIR / "openapi.e2e.json"
 
@@ -47,7 +47,7 @@ E2E_SPEC_FILE = SPEC_DIR / "openapi.e2e.json"
 # 0.0.0, which is why the structural comparison drops the version at all.
 VERSION_FILE = REPO_ROOT / "VERSION"
 
-REGENERATE = "regenerate with: uv run python openapi-spec/generate.py"
+REGENERATE = "regenerate with: uv run python scripts/generate_openapi.py"
 
 # What an editable install reports for a package whose version CI stamps at release.
 PLACEHOLDER_VERSIONS = {"", "dev", "0.0.0"}
@@ -171,26 +171,6 @@ def test_committed_spec_version_matches_the_repo(spec_file):
         f"{spec_file.name} is at {committed_version!r} while VERSION says "
         f"{repo_version!r} -- the spec was not regenerated. {REGENERATE}"
     )
-
-
-def test_post_sources_409_documents_the_core_landing_conflict(committed):
-    """POST /sources can 409 for the core landing's reserved name, not just a plain dup.
-
-    Regression for #381: the union once named only the plain-duplicate and
-    match-conflict shapes, so a caller reading the spec could not tell the two
-    "code": "conflict" causes apart.
-    """
-    schema = committed["paths"]["/api/v1/sources"]["post"]["responses"]["409"]["content"][
-        "application/json"
-    ]["schema"]
-    refs = {member["$ref"] for member in schema["anyOf"]}
-
-    assert refs == {
-        "#/components/schemas/SourceNameConflictErrorResponse",
-        "#/components/schemas/CoreResourceConflictErrorResponse",
-        "#/components/schemas/MatchConflictErrorResponse",
-        "#/components/schemas/AliasConflictErrorResponse",
-    }
 
 
 @pytest.mark.parametrize(

@@ -113,7 +113,7 @@ class TestSchemasRouter:
         )
         assert resp.status_code == 404
         assert resp.json()["code"] == "no_schema"
-        assert "schema.meta_schema" in resp.json()["message"]
+        assert "schema.meta_schema" in resp.json()["detail"]
 
     def test_deploy_dry_run_plans_ddl_without_touching_clickhouse(self, tmp_path, monkeypatch):
         # A source WITH a real schema; dry_run must return the DDL and apply nothing
@@ -377,11 +377,11 @@ class TestSchemasRouter:
             headers=admin_headers,
         )
         assert resp.status_code == 404
-        assert "9.9.9" in resp.json()["message"]
+        assert "9.9.9" in resp.json()["detail"]
 
-    def test_columns_invalid_per_page_returns_422(self, client, admin_headers):
+    def test_columns_negative_page_size_returns_422(self, client, admin_headers):
         resp = client.get(
-            "/api/v1/sources/nonexistent/columns?per_page=0",
+            "/api/v1/sources/nonexistent/columns?page_size=-1",
             headers=admin_headers,
         )
         assert resp.status_code == 422
@@ -489,10 +489,8 @@ class TestSchemasRouter:
                 resp = tc.get(base_url, headers=headers)
                 assert resp.status_code == 200
                 body = resp.json()
-                total = body["total"]
+                total = body["total_size"]
                 assert total >= 3
-                assert body["page"] == 1
-                assert body["per_page"] == 25
                 assert len(body["items"]) == total
                 assert all(
                     key in body["items"][0]
@@ -502,23 +500,12 @@ class TestSchemasRouter:
                 for item in body["items"]:
                     assert item["attribute"] is None or isinstance(item["attribute"], list)
 
-                page2 = tc.get(f"{base_url}?page=2&per_page=2", headers=headers)
-                assert page2.status_code == 200
-                page2_body = page2.json()
-                assert page2_body["page"] == 2
-                assert page2_body["per_page"] == 2
-                assert page2_body["total"] == total
-                expected_page2_len = min(2, max(0, total - 2))
-                assert len(page2_body["items"]) == expected_page2_len
-                if total > 2:
-                    assert page2_body["next_page"] == 3
-                    assert page2_body["prev_page"] == 1
+                first = tc.get(f"{base_url}?page_size=2", headers=headers).json()
+                assert len(first["items"]) == 2
+                assert first["next_page_token"]
 
-                all_page = tc.get(f"{base_url}?per_page=-1", headers=headers)
-                assert all_page.status_code == 200
-                all_body = all_page.json()
-                assert all_body["per_page"] == -1
-                assert len(all_body["items"]) == all_body["total"]
+                all_body = tc.get(f"{base_url}?page_size=1000", headers=headers).json()
+                assert len(all_body["items"]) == all_body["total_size"]
                 names = {item["name"] for item in all_body["items"]}
                 assert {"alpha", "beta", "gamma"}.issubset(names)
         finally:
@@ -652,7 +639,7 @@ class TestSchemasMetaListRouter:
         resp = client.get("/api/v1/schemas", headers=admin_headers)
         assert resp.status_code == 200
         body = resp.json()
-        assert body["total"] == 0
+        assert body["total_size"] == 0
         assert body["items"] == []
 
     def test_list_meta_not_configured_returns_503(self, tmp_path):
@@ -769,10 +756,10 @@ class TestSchemasMetaListRouter:
 
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
-                resp = tc.get("/api/v1/schemas?page=1&per_page=10", headers=headers)
+                resp = tc.get("/api/v1/schemas?page_size=10", headers=headers)
             assert resp.status_code == 200
             body = resp.json()
-            assert body["total"] == 1
+            assert body["total_size"] == 1
             assert len(body["items"]) == 1
             assert body["items"][0]["name"] == "aws/cloudtrail"
             assert body["objects"]["children"]["aws"]["items"]
@@ -847,33 +834,33 @@ class TestSchemasMetaListRouter:
 
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
-                all_resp = tc.get("/api/v1/schemas?per_page=-1", headers=headers)
+                all_resp = tc.get("/api/v1/schemas?page_size=1000", headers=headers)
                 meta_resp = tc.get(
-                    "/api/v1/schemas?schema_type=meta&per_page=-1",
+                    "/api/v1/schemas?schema_type=meta&page_size=1000",
                     headers=headers,
                 )
                 multi_resp = tc.get(
-                    "/api/v1/schemas?schema_type=meta&schema_type=aws&per_page=-1",
+                    "/api/v1/schemas?schema_type=meta&schema_type=aws&page_size=1000",
                     headers=headers,
                 )
                 none_resp = tc.get(
-                    "/api/v1/schemas?schema_type=unknown&per_page=-1",
+                    "/api/v1/schemas?schema_type=unknown&page_size=1000",
                     headers=headers,
                 )
             assert all_resp.status_code == 200
-            assert all_resp.json()["total"] == 2
+            assert all_resp.json()["total_size"] == 2
 
             assert meta_resp.status_code == 200
             meta_body = meta_resp.json()
-            assert meta_body["total"] == 1
+            assert meta_body["total_size"] == 1
             assert meta_body["items"][0]["name"] == "meta/logs_base"
             assert set(meta_body["objects"]["children"]) == {"meta"}
 
             assert multi_resp.status_code == 200
-            assert multi_resp.json()["total"] == 2
+            assert multi_resp.json()["total_size"] == 2
 
             assert none_resp.status_code == 200
-            assert none_resp.json()["total"] == 0
+            assert none_resp.json()["total_size"] == 0
             assert none_resp.json()["items"] == []
         finally:
             _registries.clear()
@@ -959,42 +946,37 @@ class TestSchemasMetaListRouter:
                 assert body["selected"] == "1"
                 selected = body["version"]
                 assert selected["date"] == "2026-01-01"
-                cols = selected["columns"]
-                assert cols["total"] == 3
+                assert body["total_size"] == 3
 
                 expr_filter = tc.get(
                     f"{columns_url}?version=1&expr=%40source",
                     headers=headers,
                 )
                 assert expr_filter.status_code == 200
-                assert expr_filter.json()["version"]["columns"]["total"] == 1
+                assert expr_filter.json()["total_size"] == 1
 
                 search_name_only = tc.get(
                     f"{columns_url}?version=1&search=z&searchable_columns=name",
                     headers=headers,
                 )
                 assert search_name_only.status_code == 200
-                item = search_name_only.json()["version"]["columns"]["items"][0]
+                item = search_name_only.json()["items"][0]
                 assert item["name"] == "z_col"
                 assert item["_matched_searchable"] == ["name"]
 
+                first = tc.get(f"{columns_url}?version=1&page_size=1", headers=headers).json()
                 page2 = tc.get(
-                    f"{columns_url}?version=1&page=2&per_page=1",
+                    columns_url,
+                    params={"version": "1", "page_size": 1, "page_token": first["next_page_token"]},
                     headers=headers,
                 )
                 assert page2.status_code == 200
-                assert page2.json()["version"]["columns"]["items"][0]["name"] == "z_col"
+                assert page2.json()["items"][0]["name"] == "z_col"
 
-                all_page = tc.get(
-                    f"{columns_url}?version=1&per_page=-1",
-                    headers=headers,
-                )
-                assert all_page.status_code == 200
-                all_cols = all_page.json()["version"]["columns"]
-                assert all_cols["per_page"] == -1
-                assert len(all_cols["items"]) == all_cols["total"] == 3
+                all_cols = tc.get(f"{columns_url}?version=1&page_size=1000", headers=headers).json()
+                assert len(all_cols["items"]) == all_cols["total_size"] == 3
                 assert all_cols["items"][0]["_field_type"] == "base"
-                assert all_cols["next_page"] is None
+                assert all_cols["next_page_token"] is None
 
                 bad_version = tc.get(
                     f"{columns_url}?version=99",
@@ -1118,7 +1100,7 @@ class TestSchemasMetaWriteRouter:
                 )
                 assert invalid_cols.status_code == 422
                 assert invalid_cols.json()["code"] == "validation_error"
-                assert "Column validation failed" in invalid_cols.json()["message"]
+                assert "Column validation failed" in invalid_cols.json()["detail"]
 
                 missing_field_type = tc.post(
                     "/api/v1/schemas/definitions/gcp/missing_field_type",
@@ -1425,7 +1407,7 @@ class TestSchemasMetaWriteRouter:
                 ver = get_new.json()["version"]
                 assert ver["type"] == "revision"
                 assert ver["summary"] == "added column p"
-                assert len(ver["columns"]["items"]) == 3
+                assert len(get_new.json()["items"]) == 3
 
                 empty_cols = tc.post(
                     f"{base}/versions",
@@ -1550,7 +1532,7 @@ class TestSchemasMetaWriteRouter:
                 )
                 assert core_del.status_code == 409
                 assert core_del.json()["code"] == "conflict"
-                assert core_del.json()["message"] == "Core resources can't be mutated"
+                assert core_del.json()["detail"] == "Core resources can't be mutated"
         finally:
             _registries.clear()
 

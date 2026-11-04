@@ -311,7 +311,7 @@ class TestOidcAuthentication:
         )
 
         _assert_refused_without_role(resp, app, "bob-example-com")
-        assert resp.json()["message"] == (
+        assert resp.json()["detail"] == (
             "OIDC login refused: no DFE group with a role is linked to your identity provider "
             "groups. Ask a DFE administrator to link one."
         )
@@ -392,7 +392,7 @@ class TestOidcAuthentication:
         resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
 
         assert resp.status_code == 401, resp.text
-        assert resp.json()["message"] == "Account disabled"
+        assert resp.json()["detail"] == "Account disabled"
 
     def test_oidc_whitespace_in_groups_stripped(self, client: TestClient, app):
         """Whitespace around group names is stripped."""
@@ -472,7 +472,7 @@ class TestOidcAuthentication:
         )
 
         assert resp.status_code == 401
-        assert resp.json()["message"] == "Account disabled"
+        assert resp.json()["detail"] == "Account disabled"
         assert store.get("blocked-sso-example-com").last_login_at == ""
 
     def test_blocked_external_account_is_refused(self, client: TestClient, app):
@@ -491,7 +491,7 @@ class TestOidcAuthentication:
         )
 
         assert resp.status_code == 401
-        assert resp.json()["message"] == "Account blocked"
+        assert resp.json()["detail"] == "Account blocked"
         assert store.get("locked-sso-example-com").last_login_at == ""
 
 

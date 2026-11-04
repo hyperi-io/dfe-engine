@@ -53,10 +53,10 @@ import functools
 from dataclasses import asdict
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from scalo.api import scalo_extra
+from scalo.api import FieldError, ListParams, Page, ProblemError, paginate, scalo_extra
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api import body_limits
@@ -69,7 +69,7 @@ from dfe_engine.api.deps import (
     request_tenancy,
     require_action,
 )
-from dfe_engine.api.errors import ErrorResponse, backend_failure
+from dfe_engine.api.errors import backend_failure
 from dfe_engine.api.v1.app_contracts import read_contract
 from dfe_engine.api.v1.helm import conflict_error
 from dfe_engine.api.v1.sampler import check_sample_scope, sample_org_scope
@@ -702,10 +702,7 @@ class MetricsResponse(BaseModel):
 def _gitcrud(request: Request) -> GitCrud:
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
+        raise ProblemError(503, "gitops is not enabled", code="not_configured")
     return gc
 
 
@@ -737,7 +734,7 @@ def _require_metrics_read(request: Request, user: Any, service: str) -> None:
     """
     action = f"service:{service}:metrics:read"
     if not authorize(user, action, role_config=request.app.state.role_config).allowed:
-        raise HTTPException(403, detail={"code": "forbidden", "message": f"requires {action}"})
+        raise ProblemError(403, f"requires {action}", code="forbidden")
 
 
 def _require_source(request: Request, app: AppInstance) -> None:
@@ -755,15 +752,11 @@ def _require_source(request: Request, app: AppInstance) -> None:
     try:
         get_source_registry().get_source(app.instance)
     except SourceNotFoundError as exc:
-        raise HTTPException(
+        raise ProblemError(
             404,
-            detail={
-                "code": "unknown_source",
-                "message": (
-                    f"{app.service} instances are named for the source they transform, "
-                    f"and no source {app.instance!r} is defined"
-                ),
-            },
+            f"{app.service} instances are named for the source they transform, "
+            f"and no source {app.instance!r} is defined",
+            code="unknown_source",
         ) from exc
 
 
@@ -801,23 +794,17 @@ def _resolve(service: str, instance: str) -> AppInstance:
     try:
         return instances.instance_of(service, instance)
     except UnknownAppError:
-        raise HTTPException(
-            404, detail={"code": "unknown_app", "message": f"no such app: {service}"}
-        ) from None
+        raise ProblemError(404, f"no such app: {service}", code="unknown_app") from None
     except InvalidInstanceError as exc:
-        raise HTTPException(400, detail={"code": "invalid_instance", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_instance") from exc
 
 
 def _overlay(gc: GitCrud, app: AppInstance) -> dict:
     try:
         return instances.read_overlay(gc, app)
     except ResourceNotFoundError:
-        raise HTTPException(
-            404,
-            detail={
-                "code": "not_deployed",
-                "message": f"{app.service}/{app.instance} has no values overlay",
-            },
+        raise ProblemError(
+            404, f"{app.service}/{app.instance} has no values overlay", code="not_deployed"
         ) from None
 
 
@@ -841,7 +828,7 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     try:
         validate_result(stored, doc, keda_by_default=scaling.keda_by_default(_CLASS, name))
     except CommitPolicyError as exc:
-        raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="policy_violation") from exc
 
     policy = _policy(request)
     if policy is None:
@@ -852,7 +839,7 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     try:
         return policy.enforce_document(_CLASS, name, stored, doc, override=override)
     except ProtectedVarError as exc:
-        raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="protected_var") from exc
 
 
 def commit_overlay(
@@ -906,7 +893,7 @@ def commit_overlay(
     except ConcurrencyConflictError as exc:
         raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
-        raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
+        raise ProblemError(409, str(exc), code="review_required") from exc
 
     audit_resource_change(user.user_id, "helmvars", name, "updated", {"summary": summary})
     return WriteResult(
@@ -937,6 +924,7 @@ def _file_sets(service: str) -> list[FileSetSummary]:
 
 @router.get("", dependencies=[_DEPLOY_READ])
 def list_apps(
+    query: ListParams,
     user: CurrentUser,
     request: Request,
     settings: Settings,
@@ -949,7 +937,7 @@ def list_apps(
             "states none and every app is reported as offered."
         ),
     ),
-) -> list[CatalogueEntry]:
+) -> Page[CatalogueEntry]:
     """Every manageable app, with the instances currently deployed."""
     gc = _gitcrud(request)
     deployed = instances.list_instances(gc)
@@ -976,7 +964,7 @@ def list_apps(
                 instances=[i.instance for i in deployed if i.service == service],
             )
         )
-    return entries
+    return paginate(entries, query, bound={"profile": profile})
 
 
 @router.post("/{service}/instances", response_model=WriteResult, dependencies=[_DEPLOY_WRITE])
@@ -997,37 +985,29 @@ def create_instance(
     values = _restored({}, body.values)
     gc = _gitcrud(request)
     if instances.exists(gc, app):
-        raise HTTPException(
-            409,
-            detail={
-                "code": "already_exists",
-                "message": f"{service}/{body.instance} is already deployed",
-            },
+        raise ProblemError(
+            409, f"{service}/{body.instance} is already deployed", code="already_exists"
         )
     ceiling = stage_instance_ceiling(app.descriptor, request.app.state.settings)
     allowed, reason = instances.additional_instance_allowed(gc, app, ceiling)
     if not allowed:
-        raise HTTPException(409, detail={"code": "single_instance_app", "message": reason})
+        raise ProblemError(409, reason, code="single_instance_app")
     _require_source(request, app)
     try:
         doc = instances.initial_overlay(app, values)
     except ValueError as exc:
-        raise HTTPException(400, detail={"code": "invalid_values", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_values") from exc
     # An instance-routed app is derived state: it exists for an active, deployed
     # source and carries that source's compiled block from the first commit.
     if app.descriptor.routing_is_per_instance:
         registry = get_source_registry()
         source = registry.get_source(app.instance)
         if source.state != "active" or not source.deployed_version:
-            raise HTTPException(
+            raise ProblemError(
                 409,
-                detail={
-                    "code": "source_not_live",
-                    "message": (
-                        f"{service} instances follow their source: {app.instance!r} must be "
-                        "active and deployed, and the source deploy creates the instance"
-                    ),
-                },
+                f"{service} instances follow their source: {app.instance!r} must be "
+                "active and deployed, and the source deploy creates the instance",
+                code="source_not_live",
             )
         found = _routing_status(request, app, doc, registry)
         routing.apply(app.descriptor, doc, found.compiled)
@@ -1078,10 +1058,7 @@ def delete_instance(
     app = _resolve(service, instance)
     gc = _gitcrud(request)
     if not instances.exists(gc, app):
-        raise HTTPException(
-            404,
-            detail={"code": "not_deployed", "message": f"{service}/{instance} is not deployed"},
-        )
+        raise ProblemError(404, f"{service}/{instance} is not deployed", code="not_deployed")
     return remove_overlay(request, user, app, if_match=if_match)
 
 
@@ -1129,7 +1106,7 @@ def remove_overlay(
     except ConcurrencyConflictError as exc:
         raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
-        raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
+        raise ProblemError(409, str(exc), code="review_required") from exc
     audit_resource_change(user.user_id, "helmvars", name, "deleted", {})
     return WriteResult(
         changed=outcome.changed,
@@ -1143,13 +1120,14 @@ def remove_overlay(
 
 @router.get("/{service}/{instance}/history", dependencies=[_READ])
 def get_history(
+    query: ListParams,
     service: str,
     instance: str,
     user: CurrentUser,
     request: Request,
     applied_revision: str | None = None,
     limit: int = 20,
-) -> list[HistoryEntry]:
+) -> Page[HistoryEntry]:
     """Every change to this instance, newest first.
 
     Supply the revision Argo has synced as ``applied_revision`` to see which
@@ -1161,16 +1139,20 @@ def get_history(
     entries = instances.history(
         gc, app, applied_revision=applied_revision, limit=min(max(limit, 1), 200)
     )
-    return [
-        HistoryEntry(
-            sha=e.sha,
-            timestamp=e.timestamp,
-            actor=e.actor,
-            summary=e.summary,
-            state=e.state,
-        )
-        for e in entries
-    ]
+    return paginate(
+        [
+            HistoryEntry(
+                sha=e.sha,
+                timestamp=e.timestamp,
+                actor=e.actor,
+                summary=e.summary,
+                state=e.state,
+            )
+            for e in entries
+        ],
+        query,
+        bound={"applied_revision": applied_revision, "limit": limit},
+    )
 
 
 @router.get("/{service}/{instance}/values", dependencies=[_READ])
@@ -1245,31 +1227,22 @@ def _require_fresh(gc: GitCrud, if_match: str | None) -> None:
     landing between this check and the write.
     """
     if if_match and if_match != _etag(gc):
-        raise HTTPException(
+        raise ProblemError(
             412,
-            detail={
-                "code": "stale_etag",
-                "message": "the deploy repo has moved on since this was read",
-                "head": _etag(gc),
-            },
+            "the deploy repo has moved on since this was read",
+            code="stale_etag",
+            head=_etag(gc),
         )
 
 
-def _refuse(status: int, code: str, path: str, message: str) -> HTTPException:
+def _refuse(status: int, code: str, path: str, message: str) -> ProblemError:
     """One refusal shape, so the console can show the path beside the reason."""
-    return HTTPException(status, detail={"code": code, "path": path, "message": message})
+    return ProblemError(status, message, code=code, path=path)
 
 
-def _table_name_taken(exc: files.TableNameTakenError) -> HTTPException:
+def _table_name_taken(exc: files.TableNameTakenError) -> ProblemError:
     """A 409 naming both files, since either one can be renamed to resolve it."""
-    return HTTPException(
-        409,
-        detail={
-            "code": "table_name_taken",
-            "message": str(exc),
-            "files": [exc.existing, exc.name],
-        },
-    )
+    return ProblemError(409, str(exc), code="table_name_taken", files=[exc.existing, exc.name])
 
 
 def _checked_changes(
@@ -1580,7 +1553,7 @@ def set_scaling(
     target = _deploy_target(request)
     supported, reason = scaling.support(catalogue.descriptor(service), target)
     if not supported:
-        raise HTTPException(409, detail={"code": "scaling_unsupported", "message": reason})
+        raise ProblemError(409, reason, code="scaling_unsupported")
 
     doc = _overlay(_gitcrud(request), app)
     try:
@@ -1590,7 +1563,7 @@ def set_scaling(
             **body.model_dump(exclude_none=True),
         )
     except InvalidDialError as exc:
-        raise HTTPException(400, detail={"code": "invalid_dial", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_dial") from exc
     if not changes:
         return WriteResult(changed=False)
 
@@ -1615,7 +1588,7 @@ def _file_set(service: str, set_name: str):
     try:
         return catalogue.file_set(service, set_name)
     except UnknownAppError as exc:
-        raise HTTPException(404, detail={"code": "unknown_file_set", "message": str(exc)}) from exc
+        raise ProblemError(404, str(exc), code="unknown_file_set") from exc
 
 
 # The path reads as a get on {set_name}, which would share an id with the file read below.
@@ -1625,16 +1598,24 @@ def _file_set(service: str, set_name: str):
     openapi_extra=scalo_extra(verb="list"),
 )
 def list_app_files(
-    service: str, instance: str, set_name: str, user: CurrentUser, request: Request
-) -> list[FileSummary]:
+    query: ListParams,
+    service: str,
+    instance: str,
+    set_name: str,
+    user: CurrentUser,
+    request: Request,
+) -> Page[FileSummary]:
     """Every file in the set, without their contents."""
     app = _resolve(service, instance)
     fs = _file_set(service, set_name)
     doc = _overlay(_gitcrud(request), app)
-    return [
-        FileSummary(name=f.name, language=f.language, size_bytes=f.size_bytes)
-        for f in files.list_files(doc, fs)
-    ]
+    return paginate(
+        [
+            FileSummary(name=f.name, language=f.language, size_bytes=f.size_bytes)
+            for f in files.list_files(doc, fs)
+        ],
+        query,
+    )
 
 
 def _require_library_read(request: Request, user: Any) -> None:
@@ -1645,7 +1626,7 @@ def _require_library_read(request: Request, user: Any) -> None:
     """
     action = f"{links.LIBRARY_CLASS}:read"
     if not authorize(user, action, role_config=request.app.state.role_config).allowed:
-        raise HTTPException(403, detail={"code": "forbidden", "message": f"requires {action}"})
+        raise ProblemError(403, f"requires {action}", code="forbidden")
 
 
 def _link_model(link: links.Link) -> LinkModel:
@@ -1660,8 +1641,13 @@ def _link_model(link: links.Link) -> LinkModel:
 
 @router.get("/{service}/{instance}/files/{set_name}/links", dependencies=[_READ])
 def list_app_links(
-    service: str, instance: str, set_name: str, user: CurrentUser, request: Request
-) -> list[LinkStatusModel]:
+    query: ListParams,
+    service: str,
+    instance: str,
+    set_name: str,
+    user: CurrentUser,
+    request: Request,
+) -> Page[LinkStatusModel]:
     """Where each linked file came from, and whether it still matches.
 
     ``drift`` means the content beside the link is no longer what the linked
@@ -1676,18 +1662,21 @@ def list_app_links(
     try:
         checked = links.status(doc, fs, links.crud_source(gc))
     except ValueError as exc:
-        raise HTTPException(400, detail={"code": "invalid_links", "message": str(exc)}) from exc
-    return [
-        LinkStatusModel(
-            **_link_model(s.link).model_dump(),
-            resolved_digest=s.resolved_digest,
-            available_version=s.available_version,
-            missing=s.missing,
-            drift=s.drift,
-            outdated=s.outdated,
-        )
-        for s in checked
-    ]
+        raise ProblemError(400, str(exc), code="invalid_links") from exc
+    return paginate(
+        [
+            LinkStatusModel(
+                **_link_model(s.link).model_dump(),
+                resolved_digest=s.resolved_digest,
+                available_version=s.available_version,
+                missing=s.missing,
+                drift=s.drift,
+                outdated=s.outdated,
+            )
+            for s in checked
+        ],
+        query,
+    )
 
 
 @router.post(
@@ -1718,10 +1707,7 @@ def link_app_file(
     source = links.crud_source(gc)
     env = source.envelope(body.artifact)
     if env is None:
-        raise HTTPException(
-            404,
-            detail={"code": "no_such_artifact", "message": f"no artefact {body.artifact!r}"},
-        )
+        raise ProblemError(404, f"no artefact {body.artifact!r}", code="no_such_artifact")
     try:
         changed = links.resolve(
             doc,
@@ -1734,17 +1720,13 @@ def link_app_file(
             tag=body.tag,
         )
     except (links.ArtifactNotLinkableError, InvalidFilenameError) as exc:
-        raise HTTPException(400, detail={"code": "not_linkable", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="not_linkable") from exc
     except files.TableNameTakenError as exc:
         raise _table_name_taken(exc) from exc
     except library.TagNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "no_such_tag", "message": f"no tag {exc.args[0]!r}"}
-        ) from None
+        raise ProblemError(404, f"no tag {exc.args[0]!r}", code="no_such_tag") from None
     except library.VersionNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "no_such_version", "message": f"no version {exc.args[0]}"}
-        ) from None
+        raise ProblemError(404, f"no version {exc.args[0]}", code="no_such_version") from None
 
     link = _link_model(links.read_link(doc, fs, body.name))
     if not changed:
@@ -1792,7 +1774,7 @@ def relink_app_files(
     try:
         moved = links.relink(doc, fs, links.crud_source(gc))
     except ValueError as exc:
-        raise HTTPException(400, detail={"code": "invalid_links", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_links") from exc
     if not moved:
         return RelinkResult(changed=False, reload=str(fs.reload))
     protected = _enforce(request, user, app.overlay_name, doc)
@@ -1835,9 +1817,7 @@ def copy_app_files(
     source_app = _resolve(service, instance)
     target_app = _resolve(service, body.target_instance)
     if source_app == target_app:
-        raise HTTPException(
-            400, detail={"code": "same_instance", "message": "source and target are the same"}
-        )
+        raise ProblemError(400, "source and target are the same", code="same_instance")
     fs = _file_set(service, set_name)
     gc = _gitcrud(request)
     source_doc = _overlay(gc, source_app)
@@ -1894,9 +1874,7 @@ def read_app_file(
     try:
         found = files.read_file(doc, fs, filename)
     except FileNotInSetError:
-        raise HTTPException(
-            404, detail={"code": "no_such_file", "message": f"{filename} is not in {set_name}"}
-        ) from None
+        raise ProblemError(404, f"{filename} is not in {set_name}", code="no_such_file") from None
     return FileDetail(
         name=found.name,
         language=found.language,
@@ -1952,7 +1930,6 @@ async def _read_file_write(request: Request) -> FileWriteRequest:
     dependencies=[_WRITE],
     responses={
         413: {
-            "model": ErrorResponse,
             "description": (
                 "The file exceeds repository.max_object_bytes (HTTP 413, code "
                 "payload_too_large). Tune via DFE_ENGINE_REPOSITORY_MAX_OBJECT_BYTES."
@@ -2008,22 +1985,20 @@ def _write_app_file(
     if checked.refused or (
         checked.blocks_write and request.app.state.settings.transform_validation.blocking
     ):
-        raise HTTPException(
+        raise ProblemError(
             400,
-            detail={
-                "code": "invalid_transform",
-                "message": checked.message,
-                "errors": list(checked.errors),
-                "backend": checked.backend,
-            },
+            checked.message,
+            code="invalid_transform",
+            errors=[FieldError(field="content", location="body", detail=e) for e in checked.errors],
+            backend=checked.backend,
         )
 
     try:
         changed = files.upsert_file(doc, fs, filename, body.content)
     except InvalidFilenameError as exc:
-        raise HTTPException(400, detail={"code": "invalid_filename", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_filename") from exc
     except InvalidContentError as exc:
-        raise HTTPException(400, detail={"code": "invalid_content", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_content") from exc
     except files.TableNameTakenError as exc:
         raise _table_name_taken(exc) from exc
     reported = _validation_model(checked)
@@ -2063,9 +2038,7 @@ def delete_app_file(
     try:
         files.delete_file(doc, fs, filename)
     except FileNotInSetError:
-        raise HTTPException(
-            404, detail={"code": "no_such_file", "message": f"{filename} is not in {set_name}"}
-        ) from None
+        raise ProblemError(404, f"{filename} is not in {set_name}", code="no_such_file") from None
     # Provenance for a file that is gone would be re-resolved by the next relink,
     # putting the deleted file back.
     try:
@@ -2091,12 +2064,10 @@ def delete_app_file(
 def _routing_app(service: str, instance: str) -> AppInstance:
     app = _resolve(service, instance)
     if not app.descriptor.has_compiled_routing:
-        raise HTTPException(
+        raise ProblemError(
             400,
-            detail={
-                "code": "routing_not_compiled",
-                "message": f"{service} routing is not derived from the source definitions",
-            },
+            f"{service} routing is not derived from the source definitions",
+            code="routing_not_compiled",
         )
     return app
 
@@ -2112,23 +2083,15 @@ def _routing_status(request: Request, app: AppInstance, doc: dict, source_regist
             tenancy=request_tenancy(request),
         )
     except routing.RoutingNotApplicableError as exc:
-        raise HTTPException(
-            409,
-            detail={"code": "routing_not_applicable", "message": str(exc)},
-        ) from exc
+        raise ProblemError(409, str(exc), code="routing_not_applicable") from exc
     except BearerSourceUnreadableError as exc:
-        raise HTTPException(
-            409,
-            detail={"code": "receiver_auth_unreadable", "message": str(exc)},
-        ) from exc
+        raise ProblemError(409, str(exc), code="receiver_auth_unreadable") from exc
     except routing.UnknownRoutingCompilerError as exc:
-        raise HTTPException(
+        raise ProblemError(
             500,
-            detail={
-                "code": "unknown_routing_compiler",
-                "message": f"the app manifest names compiler {exc.args[0]!r}, which this "
-                f"engine does not implement (known: {', '.join(routing.compilers())})",
-            },
+            f"the app manifest names compiler {exc.args[0]!r}, which this "
+            f"engine does not implement (known: {', '.join(routing.compilers())})",
+            code="unknown_routing_compiler",
         ) from None
 
 
@@ -2203,7 +2166,7 @@ def _require_dry_run(request: Request, user: Any) -> None:
     """
     action = scopes_dict["dryrun_execute"]
     if not authorize(user, action, role_config=request.app.state.role_config).allowed:
-        raise HTTPException(403, detail={"code": "forbidden", "message": f"requires {action}"})
+        raise ProblemError(403, f"requires {action}", code="forbidden")
 
 
 def _require_sampler_read(request: Request, user: Any) -> None:
@@ -2214,7 +2177,7 @@ def _require_sampler_read(request: Request, user: Any) -> None:
     """
     action = scopes_dict["sampler_read"]
     if not authorize(user, action, role_config=request.app.state.role_config).allowed:
-        raise HTTPException(403, detail={"code": "forbidden", "message": f"requires {action}"})
+        raise ProblemError(403, f"requires {action}", code="forbidden")
 
 
 async def _sample_events(
@@ -2226,25 +2189,19 @@ async def _sample_events(
     """
     sampler = getattr(request.app.state, "sampler", None)
     if sampler is None:
-        raise HTTPException(
-            503, detail={"code": "not_configured", "message": "Sampler not initialised"}
-        )
+        raise ProblemError(503, "Sampler not initialised", code="not_configured")
     # A dry run reads the newest rows inline, not the default mode's gated logreducer reduction.
     req = SampleRequest(mode=SampleMode.RECENT, source=source, limit=limit)
     org_ids = sample_org_scope(request, user)
     try:
         await run_blocking(functools.partial(sampler.resolve_or_raise, req, source_registry))
     except SamplerError as exc:
-        raise HTTPException(
-            400, detail={"code": "bad_sample_request", "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code="bad_sample_request") from exc
     await check_sample_scope(sampler, req, ch, source_registry, org_ids)
     try:
         result: dict[str, Any] = await sampler.run(req, ch, source_registry, org_ids=org_ids)
     except SamplerError as exc:
-        raise HTTPException(
-            400, detail={"code": "bad_sample_request", "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code="bad_sample_request") from exc
     # Sampler.run returns SampleResult.model_dump(), a dict -- not an object.
     lines = result.get("lines") or []
     return [str(line) for line in lines]
@@ -2278,8 +2235,8 @@ async def dry_run_app_file(
         try:
             content = files.read_file(doc, fs, body.name).content
         except FileNotInSetError:
-            raise HTTPException(
-                404, detail={"code": "no_such_file", "message": f"{body.name} is not in {set_name}"}
+            raise ProblemError(
+                404, f"{body.name} is not in {set_name}", code="no_such_file"
             ) from None
 
     source = body.source or app.instance
@@ -2326,7 +2283,7 @@ def _reader(request: Request, client: Any) -> OperationalReader:
     return OperationalReader(client, settings.clickhouse.effective_data_database)
 
 
-def metrics_unavailable(exc: MetricsUnavailableError) -> HTTPException:
+def metrics_unavailable(exc: MetricsUnavailableError) -> ProblemError:
     """The 503 for an otel read ClickHouse refused, its text logged rather than sent."""
     return backend_failure(
         503,

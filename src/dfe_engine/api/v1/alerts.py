@@ -23,12 +23,20 @@ DELETE /api/v1/alerts/destinations/{name}     -> Delete destination
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, Field
-from scalo.api import scalo_extra
+from scalo.api import (
+    ListQuery,
+    Page,
+    ProblemError,
+    list_query,
+    paginate,
+    scalo_extra,
+    sort_by_order,
+)
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.review import apply_review_headers
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
@@ -89,26 +97,28 @@ class AlertDestinationSummary(BaseModel):
 # -- Endpoints ------------------------------------------------
 
 
+DestinationsList = Annotated[
+    ListQuery, Depends(list_query(order_by=("name", "enabled"), tiebreak="name"))
+]
+
+
 @router.get(
     "/destinations",
-    response_model=PaginatedResponse[AlertDestinationSummary],
+    response_model=Page[AlertDestinationSummary],
     dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
 async def list_destinations(
     user: CurrentUser,
     registry: AlertDestRegistry,
     hunt_registry: OptionalHuntConfigReg,
-    pagination: PaginationParams = Depends(),
+    query: DestinationsList,
     search: str | None = Query(None, description="Search in name/description"),
     hunt: str | None = Query(
         None,
         description="Hunt file name (YAML stem); only destinations referenced in that hunt's alerts",
     ),
-    sort_by: str | None = Query(None, description="Sort field (name, enabled)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List alert destinations."""
-    # No URL in the rows, so sort_by cannot order on another destination's credential.
     raw = [
         {
             "name": dest.name,
@@ -122,24 +132,19 @@ async def list_destinations(
 
     if hunt is not None:
         if hunt_registry is None:
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "not_configured",
-                    "message": "Hunt config registry not initialized -- set DFE_ENGINE_HUNTS_DIR (hunts.hunt_dir)",
-                },
+            raise ProblemError(
+                503,
+                "Hunt config registry not initialized -- set DFE_ENGINE_HUNTS_DIR (hunts.hunt_dir)",
+                code="not_configured",
             )
         try:
             allowed = set(hunt_registry.alert_destination_names_for_hunt(hunt))
         except HuntConfigNotFoundError:
-            raise HTTPException(
-                status_code=404,
-                detail={"code": "not_found", "message": f"Hunt '{hunt}' not found"},
-            ) from None
+            raise ProblemError(404, f"Hunt '{hunt}' not found", code="not_found") from None
         raw = [item for item in raw if item.get("name") in allowed]
 
     raw = apply_search(raw, search, ["name", "description"])
-    raw = apply_sort(raw, sort_by, sort_order)
+    raw = sort_by_order(raw, query.order_by)
 
     summaries = [
         AlertDestinationSummary(
@@ -150,7 +155,7 @@ async def list_destinations(
         )
         for item in raw
     ]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(summaries, query, bound={"search": search, "hunt": hunt})
 
 
 # Declared, since the path alone names the same action as GET /destinations.
@@ -174,21 +179,13 @@ async def create_destination(
     routed to a review branch and ``X-DFE-Review-Required`` says so.
     """
     if not is_destination_name(body.name):
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "validation_error",
-                "message": f"Alert destination name {body.name!r} must be {DESTINATION_NAME_RULE}",
-            },
+        raise ProblemError(
+            422,
+            f"Alert destination name {body.name!r} must be {DESTINATION_NAME_RULE}",
+            code="validation_error",
         )
     if body.name in registry:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": f"Alert destination '{body.name}' already exists",
-            },
-        )
+        raise ProblemError(409, f"Alert destination '{body.name}' already exists", code="conflict")
     # Nothing is stored yet, so the mask has nothing to restore from and is refused.
     body.url = _typed_url(body.url, "")
     if body.hunt_name is not None:
@@ -210,13 +207,7 @@ async def create_destination(
 async def get_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Get an alert destination by name."""
     if name not in registry:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Alert destination '{name}' not found",
-            },
-        )
+        raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")
     return _destination_from_registry(registry.get(name))
 
 
@@ -239,13 +230,7 @@ async def update_destination(
     routed to a review branch and ``X-DFE-Review-Required`` says so.
     """
     if name not in registry:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Alert destination '{name}' not found",
-            },
-        )
+        raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")
     existing = registry.get(name)
     body.name = name
     body.url = _typed_url(body.url, existing.url)
@@ -268,13 +253,7 @@ async def update_destination(
 async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Delete an alert destination."""
     if not registry.remove(name):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Alert destination '{name}' not found",
-            },
-        )
+        raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")
     audit_resource_change(user.user_id, "alert_destination", name, "deleted")
 
 
@@ -302,7 +281,7 @@ def _typed_url(written: str, stored: str) -> str:
     """The URL to store: the stored one where the mask was written back, else what was written.
 
     Raises:
-        HTTPException: 400 when the mask stands where no URL is stored, so a
+        ProblemError: 400 when the mask stands where no URL is stored, so a
             destination is never saved pointing at the placeholder, or masks only
             part of a URL every read shows whole, whether the rest is right or not.
     """
@@ -312,9 +291,7 @@ def _typed_url(written: str, stored: str) -> str:
             written, stored or contract.MISSING, path="url", shown=shown or contract.MISSING
         )
     except contract.MaskedValueError as exc:
-        raise HTTPException(
-            status_code=400, detail={"code": exc.code, "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code=exc.code) from exc
 
 
 def _write_destination(
@@ -337,20 +314,15 @@ def _write_destination(
 
 def _ensure_hunt_for_link(hunt_registry: Any | None, hunt_name: str) -> None:
     if hunt_registry is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "Hunt config registry not initialized -- set DFE_ENGINE_HUNTS_DIR (hunts.hunt_dir)",
-            },
+        raise ProblemError(
+            503,
+            "Hunt config registry not initialized -- set DFE_ENGINE_HUNTS_DIR (hunts.hunt_dir)",
+            code="not_configured",
         )
     try:
         require_hunt(hunt_registry, hunt_name)
     except HuntConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{hunt_name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Hunt '{hunt_name}' not found", code="not_found") from None
 
 
 def _url_scheme(url: str) -> str:

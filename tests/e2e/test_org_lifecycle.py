@@ -157,7 +157,7 @@ class TestOrgLifecycleE2E:
         assert resp.status_code == 404
         data = resp.json()
         assert "code" in data
-        assert "message" in data
+        assert "detail" in data
 
     def test_create_duplicate_org_returns_409(self, e2e_client: TestClient):
         """Creating the same org name twice returns 409."""

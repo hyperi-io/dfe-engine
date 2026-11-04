@@ -173,8 +173,8 @@ class TestAGroupNameOutsideTheOrgCannotBeProbed:
         assert group_name.status_code == link_id.status_code == 409
         assert group_name.json()["code"] == link_id.json()["code"] == "conflict"
         assert "source_id" not in link_id.text
-        assert group_name.json()["message"] == "Group name 'globex-analysts' is not available"
-        assert link_id.json()["message"] == f"Group name '{SYSTEM_SOURCE_ID}' is not available"
+        assert group_name.json()["detail"] == "Group name 'globex-analysts' is not available"
+        assert link_id.json()["detail"] == f"Group name '{SYSTEM_SOURCE_ID}' is not available"
 
 
 class TestAGroupOutsideTheOrgReadsAsMissing:
@@ -207,7 +207,7 @@ class TestAGroupOutsideTheOrgReadsAsMissing:
 
         assert present.status_code == missing.status_code == 404, present.text
         assert present.json()["code"] == missing.json()["code"] == "not_found"
-        assert present.json()["message"] == f"Group '{existing}' not found"
+        assert present.json()["detail"] == f"Group '{existing}' not found"
 
     def test_its_own_group_still_answers_a_refusal_it_can_act_on(
         self, client: TestClient, orgadmin: dict[str, str]
@@ -220,4 +220,4 @@ class TestAGroupOutsideTheOrgReadsAsMissing:
         )
 
         assert resp.status_code == 403, resp.text
-        assert "system" in resp.json()["message"]
+        assert "system" in resp.json()["detail"]

@@ -1,5 +1,5 @@
 # Where each engine API operation goes in the resource hierarchy (dfe_engine/api/conventions.py).
-# openapi-spec/route_map.py renders docs/reference/api-route-map.md from this file and the
+# scripts/route_map.py renders docs/reference/api-route-map.md from this file and the
 # app's own routes. One row per operation the engine serves: `old` is today's method and
 # path, `new` the method and path it moves to, `verb` the action a GET there declares.
 # status: moved | merged | unchanged | frozen | decide | removed. `note` names an entry
@@ -168,6 +168,9 @@ routes = [
   { old = "GET /api/v1/library/{artifact}/versions/{version}", new = "GET /api/v1/governance/library/{item}/versions/{version}", status = "moved" },
   { old = "GET /api/v1/lifecycle", status = "decide", note = "lifecycle" },
   { old = "POST /api/v1/lifecycle/{name}", status = "decide", note = "lifecycle" },
+  { old = "GET /api/v1/operations", status = "unchanged", note = "tasks-operations" },
+  { old = "GET /api/v1/operations/{operation}", status = "unchanged", note = "tasks-operations" },
+  { old = "POST /api/v1/operations/{operation}/cancel", status = "unchanged", note = "tasks-operations" },
   { old = "GET /api/v1/orgs", status = "unchanged" },
   { old = "POST /api/v1/orgs", new = "PUT /api/v1/orgs/{org}", status = "merged", note = "apply-creates" },
   { old = "GET /api/v1/orgs/available-ids", status = "unchanged" },
@@ -304,8 +307,8 @@ routes = [
   { old = "GET /api/v1/synthetic-data/packs", status = "decide", note = "synthetic-data" },
   { old = "POST /api/v1/synthetic-data/stream", status = "decide", note = "synthetic-data" },
   { old = "GET /api/v1/synthetic-data/streams", status = "decide", note = "synthetic-data" },
-  { old = "DELETE /api/v1/synthetic-data/streams/{task_id}", status = "decide", note = "synthetic-data" },
-  { old = "GET /api/v1/synthetic-data/streams/{task_id}", status = "decide", note = "synthetic-data" },
+  { old = "GET /api/v1/synthetic-data/streams/{operation}", status = "decide", note = "synthetic-data" },
+  { old = "POST /api/v1/synthetic-data/streams/{operation}/cancel", status = "decide", note = "synthetic-data" },
   { old = "GET /api/v1/system/clickhouse-cloud", status = "decide", note = "clickhouse-cloud" },
   { old = "POST /api/v1/system/clickhouse-cloud/start", status = "decide", note = "clickhouse-cloud" },
   { old = "POST /api/v1/system/clickhouse-cloud/stop", status = "decide", note = "clickhouse-cloud" },
@@ -320,9 +323,6 @@ routes = [
   { old = "GET /api/v1/system/settings", verb = "settings", status = "unchanged" },
   { old = "GET /api/v1/system/status", verb = "status", status = "unchanged" },
   { old = "GET /api/v1/system/version", verb = "version", status = "unchanged" },
-  { old = "GET /api/v1/tasks", new = "GET /api/v1/system/operations", status = "moved", note = "tasks-operations" },
-  { old = "GET /api/v1/tasks/{task_id}", new = "GET /api/v1/system/operations/{operation}", status = "moved", note = "tasks-operations" },
-  { old = "POST /api/v1/tasks/{task_id}/cancel", new = "POST /api/v1/system/operations/{operation}/cancel", status = "moved", note = "tasks-operations" },
   { old = "POST /api/v1/transforms/compile", status = "decide", note = "compute-helpers" },
   { old = "POST /api/v1/transforms/test", status = "decide", note = "compute-helpers" },
   { old = "GET /api/v1/usage", status = "decide", note = "usage-scope" },

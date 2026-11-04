@@ -29,8 +29,9 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+from scalo.api import ListQuery, Page, paginate
 
-from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
+from dfe_engine.api.conventions import PathTree
 from dfe_engine.clickhouse.function_guard import (
     CallNotPermittedError,
     refuse_calls_outside_the_row,
@@ -2270,25 +2271,17 @@ SourceSummaryTree = PathTree[SourceSummaryObject]
 """Source list tree grouped by path segments derived from the source name."""
 
 
-class PaginatedSourceSummaryResponse(
-    PaginatedResponseWithObjects[SourceSummaryObject, SourceSummaryTree]
-):
-    """Source list: path tree in ``objects`` plus paginated ``items``."""
+class SourceSummaryPage(Page[SourceSummaryObject]):
+    """A page of source summaries, with the folder tree over every match in ``objects``."""
+
+    objects: SourceSummaryTree
 
     @classmethod
     def from_summaries(
-        cls,
-        summaries: list[SourceSummaryObject],
-        page: int,
-        per_page: int,
-    ) -> PaginatedSourceSummaryResponse:
-        """A page of source summaries, with the folder tree over all of them."""
-        return cls.with_objects(
-            summaries,
-            page,
-            per_page,
-            SourceSummaryTree.from_paths(
-                summaries,
-                path=lambda obj: obj.name,
-            ),
+        cls, summaries: list[SourceSummaryObject], query: ListQuery, bound: dict[str, Any]
+    ) -> SourceSummaryPage:
+        """Page ``summaries`` and tree all of them."""
+        page = paginate(summaries, query, bound=bound)
+        return cls(
+            **dict(page), objects=SourceSummaryTree.from_paths(summaries, path=lambda obj: obj.name)
         )

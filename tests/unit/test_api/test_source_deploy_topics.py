@@ -526,11 +526,14 @@ class TestTheDeployRoute:
         assert resp.status_code == 502, resp.text
         body = resp.json()
         assert body["code"] == "topics_not_created"
-        assert body["context"] == {
-            "source": name,
-            "topics": [{"topic": f"{name}_land", "reason": REFUSED}],
-        }
-        assert f"{name}_land (the broker refused it (POLICY_VIOLATION)" in body["message"]
+        assert (
+            body.items()
+            >= {
+                "source": name,
+                "topics": [{"topic": f"{name}_land", "reason": REFUSED}],
+            }.items()
+        )
+        assert f"{name}_land (the broker refused it (POLICY_VIOLATION)" in body["detail"]
         stored = client.get(f"/api/v1/sources/{name}", headers=admin_headers).json()
         assert stored["deployed_version"] is None
         (audit,) = [e for e in audit_events if e.get("event") == "resource.schema.deploy_failed"]

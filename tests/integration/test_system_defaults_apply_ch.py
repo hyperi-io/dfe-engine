@@ -77,7 +77,7 @@ def _apply(stack, *names: str) -> dict:
 
 
 def _drift(stack) -> dict[str, dict]:
-    resp = stack.client.get(DRIFT, headers=stack.headers, params={"per_page": -1})
+    resp = stack.client.get(DRIFT, headers=stack.headers, params={"page_size": 1000})
     assert resp.status_code == 200, resp.text
     return {item["source"]: item for item in resp.json()["items"]}
 

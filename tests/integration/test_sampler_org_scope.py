@@ -169,7 +169,7 @@ def test_a_table_without_org_id_is_refused_to_the_held_viewer(stack):
     resp = _sample(stack, stack.viewer, "untenanted")
 
     assert resp.status_code == 403, resp.text
-    assert "has no _org_id column" in resp.json()["message"]
+    assert "has no _org_id column" in resp.json()["detail"]
 
 
 def test_a_table_that_does_not_exist_is_a_bad_request_for_the_held_viewer(stack):

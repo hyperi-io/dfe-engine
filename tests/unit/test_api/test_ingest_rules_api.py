@@ -171,7 +171,7 @@ class TestReordering:
 
         assert resp.status_code == 412
         assert resp.json()["code"] == "etag_mismatch"
-        assert resp.json()["context"]["etag"] == _listed(client, admin_headers)[1]
+        assert resp.json()["etag"] == _listed(client, admin_headers)[1]
         assert wired.head_revision() == head
 
     def test_a_list_missing_a_block_is_409_with_the_current_blocks(
@@ -185,10 +185,8 @@ class TestReordering:
 
         assert resp.status_code == 409
         assert resp.json()["code"] == "order_conflict"
-        assert resp.json()["context"] == {
-            "target": "_source",
-            "blocks": ["source.cisco-asa", "source.cisco-ftd", "source.cisco-ios"],
-        }
+        assert resp.json()["blocks"] == ["source.cisco-asa", "source.cisco-ftd", "source.cisco-ios"]
+        assert resp.json()["target"] == "_source"
 
     @pytest.mark.parametrize(
         ("blocks", "detail"),
@@ -208,7 +206,7 @@ class TestReordering:
 
         assert resp.status_code == 422
         assert resp.json()["code"] == "invalid_order"
-        assert any(detail in error["message"] for error in resp.json()["errors"])
+        assert any(detail in error["detail"] for error in resp.json()["errors"])
 
     def test_a_dry_run_previews_the_order_and_commits_nothing(self, client, admin_headers, wired):
         _, etag = _listed(client, admin_headers)
@@ -358,7 +356,7 @@ class TestRuleRefusals:
         assert resp.status_code == 422, resp.text
         body = resp.json()
         assert body["code"] == "invalid_rule"
-        [error] = body["context"]["rule_errors"]
+        [error] = body["rule_errors"]
         assert error["field"] == "when"
         assert when[error["span"]["start"] : error["span"]["end"]] == "matches"
         assert body["errors"][0]["field"] == "when"

@@ -89,17 +89,17 @@ def _listed(resp) -> set[str]:
 def test_a_caller_lists_the_sources_of_the_orgs_it_holds(
     client_as, stored_sources, identity, visible
 ):
-    resp = client_as(identity).get("/api/v1/sources", params={"per_page": 100})
+    resp = client_as(identity).get("/api/v1/sources", params={"page_size": 100})
 
     assert _listed(resp) == visible
-    assert resp.json()["total"] == len(visible)
+    assert resp.json()["total_size"] == len(visible)
 
 
 def test_a_caller_with_no_source_read_anywhere_is_refused(client_as, stored_sources):
     resp = client_as("dfe-nobody").get("/api/v1/sources")
 
     assert resp.status_code == 403, resp.text
-    assert "source:read" in resp.json()["message"]
+    assert "source:read" in resp.json()["detail"]
 
 
 EVERY_SOURCE = SHARED - {"main"} | set(FETCHERS)
@@ -190,7 +190,7 @@ def test_an_unknown_source_is_a_404_not_a_403_for_an_org_viewer(client_as, store
 def test_the_ingest_rule_list_leaves_out_the_blocks_of_sources_the_caller_cannot_read(
     client_as, wired_sources, identity, openable
 ):
-    resp = client_as(identity).get("/api/v1/ingest/rules", params={"per_page": 100})
+    resp = client_as(identity).get("/api/v1/ingest/rules", params={"page_size": 100})
 
     if not openable:
         assert resp.status_code == 403, resp.text

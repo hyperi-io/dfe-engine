@@ -19,8 +19,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
+from scalo.api import ListParams, Page, ProblemError, paginate
 from scalo.logger import logger
 
 from dfe_engine.api.deps import (
@@ -31,7 +32,6 @@ from dfe_engine.api.deps import (
     registered_orgs,
     require_action,
 )
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams
 from dfe_engine.api.review import ReviewFields, apply_routing_headers, set_review_headers
 from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
 from dfe_engine.auth.audit import audit_resource_change
@@ -178,12 +178,10 @@ def _get_source_mapper(request: Request, *, with_columns: bool = False):
 
     source_registry = _registries.get("source")
     if source_registry is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "SourceRegistry not configured - required for Sigma mappings",
-            },
+        raise ProblemError(
+            503,
+            "SourceRegistry not configured - required for Sigma mappings",
+            code="not_configured",
         )
 
     fieldmap_registry = _registries.get("fieldmap")
@@ -196,16 +194,13 @@ def _get_source_mapper(request: Request, *, with_columns: bool = False):
     )
 
 
-def _view_build_error(exc: Exception) -> HTTPException:
+def _view_build_error(exc: Exception) -> ProblemError:
     """The 400 a view render answers when the source's schema or field-map pin is invalid."""
-    return HTTPException(status_code=400, detail={"code": "build_error", "message": str(exc)})
+    return ProblemError(400, str(exc), code="build_error")
 
 
-def _source_not_found(source_name: str) -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
-    )
+def _source_not_found(source_name: str) -> ProblemError:
+    return ProblemError(404, f"Source '{source_name}' not found", code="not_found")
 
 
 # -- Endpoints -----------------------------------------------
@@ -249,16 +244,16 @@ async def get_field_mappings(
 # sigma:read (reads) / sigma:write (mutations); gitops must be enabled (else 503).
 
 
-@router.get("/views", response_model=PaginatedResponse[SigmaViewSummary], dependencies=[_READ])
+@router.get("/views", response_model=Page[SigmaViewSummary], dependencies=[_READ])
 async def list_sigma_view_definitions(
     request: Request,
     user: CurrentUser,
-    pagination: PaginationParams = Depends(),
-) -> PaginatedResponse[SigmaViewSummary]:
+    query: ListParams,
+) -> Page[SigmaViewSummary]:
     """List the sources that have a stored Sigma view definition, paginated."""
     store = SigmaViewStore(_gitcrud(request), posture=_posture(request))
     items = [SigmaViewSummary(**row) for row in store.summaries()]
-    return PaginatedResponse.from_list(items, pagination.page, pagination.per_page)
+    return paginate(items, query)
 
 
 @router.get("/views/{source_name}", response_model=SigmaViewDefinition, dependencies=[_READ])
@@ -270,10 +265,7 @@ async def get_sigma_view_definition(
     try:
         return store.get(source_name)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404,
-            detail={"code": "not_found", "message": f"no sigma view for '{source_name}'"},
-        ) from exc
+        raise ProblemError(404, f"no sigma view for '{source_name}'", code="not_found") from exc
 
 
 @router.put("/views/{source_name}", response_model=SigmaViewDefinition, dependencies=[_WRITE])
@@ -307,10 +299,7 @@ async def delete_sigma_view_definition(
     try:
         await asyncio.to_thread(store.delete, source_name, user.user_id)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404,
-            detail={"code": "not_found", "message": f"no sigma view for '{source_name}'"},
-        ) from exc
+        raise ProblemError(404, f"no sigma view for '{source_name}'", code="not_found") from exc
     audit_resource_change(user.user_id, "sigma_view", source_name, "deleted")
     apply_routing_headers(response, store.writes.routing)
 
@@ -343,7 +332,7 @@ async def generate_sigma_view(
         try:
             ddl = store.generate_ddl(source_name, db=target_db)
         except SigmaViewError as exc:
-            raise HTTPException(422, detail={"code": "invalid_view", "message": str(exc)}) from exc
+            raise ProblemError(422, str(exc), code="invalid_view") from exc
         return SigmaViewResult(source_name=source_name, ddl=ddl)
 
     mapper = _get_source_mapper(request, with_columns=True)
@@ -352,7 +341,7 @@ async def generate_sigma_view(
     except KeyError, FileNotFoundError, SourceNotFoundError:
         raise _source_not_found(source_name)
     except SigmaViewError as exc:
-        raise HTTPException(422, detail={"code": "invalid_view", "message": str(exc)}) from exc
+        raise ProblemError(422, str(exc), code="invalid_view") from exc
     except (SchemaBuildError, SchemaLoadError, FieldMapError) as exc:
         raise _view_build_error(exc) from exc
     return SigmaViewResult(source_name=source_name, ddl=ddl)
@@ -383,10 +372,11 @@ async def generate_all_sigma_views(
 
 @router.get(
     "/logsource",
-    response_model=list[LogsourceMatch],
+    response_model=Page[LogsourceMatch],
     dependencies=[Depends(require_action(scopes_dict["sigma_read"]))],
 )
 async def find_sources_for_logsource(
+    query: ListParams,
     request: Request,
     user: CurrentUser,
     product: str | None = Query(None, description="Sigma logsource product (e.g. windows, aws)"),
@@ -397,7 +387,7 @@ async def find_sources_for_logsource(
         None, description="Sigma logsource service (e.g. sysmon, security)"
     ),
     _auth: None = Depends(require_action(scopes_dict["sigma_read"])),
-) -> list[LogsourceMatch]:
+) -> Page[LogsourceMatch]:
     """Find sources matching a Sigma logsource selector."""
     mapper = _get_source_mapper(request)
     sources = mapper.get_sources_for_logsource(
@@ -405,13 +395,17 @@ async def find_sources_for_logsource(
         category=category or "",
         service=service or "",
     )
-    return [
-        LogsourceMatch(
-            source=s.source,
-            display_name=getattr(s, "display_name", "") or "",
-        )
-        for s in sources
-    ]
+    return paginate(
+        [
+            LogsourceMatch(
+                source=s.source,
+                display_name=getattr(s, "display_name", "") or "",
+            )
+            for s in sources
+        ],
+        query,
+        bound={"product": product, "category": category, "service": service},
+    )
 
 
 # == Sigma rule catalogue: providers + id-keyed CRUD store + selection ==========
@@ -489,10 +483,7 @@ class SelectionResponse(BaseModel):
 def _gitcrud(request: Request) -> GitCrud:
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
+        raise ProblemError(503, "gitops is not enabled", code="not_configured")
     return gc
 
 
@@ -546,16 +537,12 @@ def _confine_provider_url(url: str, field: str) -> None:
 
     parsed = urlparse(url.strip())
     if parsed.scheme not in ("http", "https"):
-        raise HTTPException(
-            422, detail={"code": "bad_url_scheme", "message": f"{field} must be http(s)"}
-        )
+        raise ProblemError(422, f"{field} must be http(s)", code="bad_url_scheme")
     host = (parsed.hostname or "").rstrip(".").lower()
     if not host:
-        raise HTTPException(422, detail={"code": "bad_url", "message": f"{field} has no host"})
+        raise ProblemError(422, f"{field} has no host", code="bad_url")
     if host in ("localhost", "metadata", "metadata.google.internal"):
-        raise HTTPException(
-            422, detail={"code": "host_blocked", "message": f"{field} host {host!r} is blocked"}
-        )
+        raise ProblemError(422, f"{field} host {host!r} is blocked", code="host_blocked")
 
     def _blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
         return (
@@ -573,12 +560,8 @@ def _confine_provider_url(url: str, field: str) -> None:
     except ValueError:
         literal = None
     if literal is not None and _blocked(literal):
-        raise HTTPException(
-            422,
-            detail={
-                "code": "host_blocked",
-                "message": f"{field} host {host!r} is blocked ({literal})",
-            },
+        raise ProblemError(
+            422, f"{field} host {host!r} is blocked ({literal})", code="host_blocked"
         )
 
     # A hostname (or decimal/octal numeric) is resolved BEST-EFFORT: reject if it
@@ -593,12 +576,8 @@ def _confine_provider_url(url: str, field: str) -> None:
             infos = []
         for info in infos:
             if _blocked(ipaddress.ip_address(info[4][0])):
-                raise HTTPException(
-                    422,
-                    detail={
-                        "code": "host_blocked",
-                        "message": f"{field} host {host!r} resolves to a blocked address",
-                    },
+                raise ProblemError(
+                    422, f"{field} host {host!r} resolves to a blocked address", code="host_blocked"
                 )
     allowed = [
         h.strip().lower()
@@ -606,12 +585,10 @@ def _confine_provider_url(url: str, field: str) -> None:
         if h.strip()
     ]
     if allowed and host not in allowed:
-        raise HTTPException(
+        raise ProblemError(
             422,
-            detail={
-                "code": "host_not_allowed",
-                "message": f"{field} host {host!r} not in DFE_ENGINE_SIGMA_ALLOWED_HOSTS",
-            },
+            f"{field} host {host!r} not in DFE_ENGINE_SIGMA_ALLOWED_HOSTS",
+            code="host_not_allowed",
         )
 
 
@@ -634,12 +611,8 @@ def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
             raw = Path(directory)
             target = raw.resolve() if raw.is_absolute() else (base / raw).resolve()
             if not target.is_relative_to(base):
-                raise HTTPException(
-                    422,
-                    detail={
-                        "code": "path_escape",
-                        "message": f"local_files directory must resolve under {base}",
-                    },
+                raise ProblemError(
+                    422, f"local_files directory must resolve under {base}", code="path_escape"
                 )
     elif config.kind == ProviderKind.GIT_REPO:
         _confine_provider_url(str(config.options.get("url", "")), "git url")
@@ -655,9 +628,7 @@ def _parse_since(value: str | None) -> datetime | None:
     try:
         return datetime.fromisoformat(value)
     except ValueError as exc:
-        raise HTTPException(
-            400, detail={"code": "bad_since", "message": "since must be ISO 8601"}
-        ) from exc
+        raise ProblemError(400, "since must be ISO 8601", code="bad_since") from exc
 
 
 def _sync_response(info: TaskInfo) -> SyncResponse:
@@ -686,10 +657,12 @@ async def _run_sync(provider, catalog, actor, since, *, task) -> dict[str, Any]:
 # -- Provider CRUD -------------------------------------------
 
 
-@router.get("/providers", response_model=list[ProviderConfig], dependencies=[_READ])
-async def list_providers(request: Request, user: CurrentUser) -> list[ProviderConfig]:
+@router.get("/providers", response_model=Page[ProviderConfig], dependencies=[_READ])
+async def list_providers(
+    query: ListParams, request: Request, user: CurrentUser
+) -> Page[ProviderConfig]:
     """List provider configs (the built-in SigmaHQ default is present OOTB)."""
-    return _provider_store(request).list_configs()
+    return paginate(_provider_store(request).list_configs(), query)
 
 
 @router.post("/providers", response_model=ProviderConfig, status_code=201, dependencies=[_ADMIN])
@@ -711,9 +684,7 @@ async def get_provider(name: str, request: Request, user: CurrentUser) -> Provid
     try:
         return _provider_store(request).get_config(name)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"provider '{name}' not found"}
-        ) from exc
+        raise ProblemError(404, f"provider '{name}' not found", code="not_found") from exc
 
 
 @router.put("/providers/{name}", response_model=ProviderConfig, dependencies=[_ADMIN])
@@ -739,9 +710,7 @@ async def enable_provider(
     try:
         saved = await asyncio.to_thread(store.set_enabled, name, True, user.user_id)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"provider '{name}' not found"}
-        ) from exc
+        raise ProblemError(404, f"provider '{name}' not found", code="not_found") from exc
     audit_resource_change(user.user_id, "sigma_provider", name, "enabled")
     apply_routing_headers(response, store.writes.routing)
     return saved
@@ -756,9 +725,7 @@ async def disable_provider(
     try:
         saved = await asyncio.to_thread(store.set_enabled, name, False, user.user_id)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"provider '{name}' not found"}
-        ) from exc
+        raise ProblemError(404, f"provider '{name}' not found", code="not_found") from exc
     audit_resource_change(user.user_id, "sigma_provider", name, "disabled")
     apply_routing_headers(response, store.writes.routing)
     return saved
@@ -773,9 +740,7 @@ async def delete_provider(
     try:
         await asyncio.to_thread(store.delete_config, name, user.user_id)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"provider '{name}' not found"}
-        ) from exc
+        raise ProblemError(404, f"provider '{name}' not found", code="not_found") from exc
     audit_resource_change(user.user_id, "sigma_provider", name, "deleted")
     apply_routing_headers(response, store.writes.routing)
 
@@ -801,13 +766,9 @@ async def sync_provider_endpoint(
     try:
         config = store.get_config(name)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"provider '{name}' not found"}
-        ) from exc
+        raise ProblemError(404, f"provider '{name}' not found", code="not_found") from exc
     if not config.enabled:
-        raise HTTPException(
-            409, detail={"code": "provider_disabled", "message": f"provider '{name}' is disabled"}
-        )
+        raise ProblemError(409, f"provider '{name}' is disabled", code="provider_disabled")
     since_dt = _parse_since(since)
     provider = _make_provider(request, config)
     catalog = _catalog(request)
@@ -827,23 +788,21 @@ async def get_sync(task_id: str, request: Request, user: CurrentUser) -> SyncRes
     # 'sigma:' also let a 'sigma:propagate' task through, whose result dict then
     # failed SyncReportModel validation -> 500 instead of the 404 contract.
     if info is None or info.kind != "sigma:sync":
-        raise HTTPException(404, detail={"code": "not_found", "message": "sync task not found"})
+        raise ProblemError(404, "sync task not found", code="not_found")
     return _sync_response(info)
 
 
 # -- Rule catalogue (paginated list / get / edit / adopt / delete) ----
 
 
-@router.get(
-    "/catalogue", response_model=PaginatedResponse[CatalogRuleSummary], dependencies=[_READ]
-)
+@router.get("/catalogue", response_model=Page[CatalogRuleSummary], dependencies=[_READ])
 async def list_catalogue(
     request: Request,
     user: CurrentUser,
-    pagination: PaginationParams = Depends(),
+    query: ListParams,
     q: str | None = Query(None, description="Search id/title (case-insensitive)"),
     selected: bool | None = Query(None, description="Filter by selection state"),
-) -> PaginatedResponse[CatalogRuleSummary]:
+) -> Page[CatalogRuleSummary]:
     """Paginated catalogue of stored sigma rules, marked with selection state."""
     catalog = _catalog(request)
     selected_ids = set(_selection_store(request).list_selected())
@@ -858,7 +817,7 @@ async def list_catalogue(
             continue
         items.append(CatalogRuleSummary(**r, selected=is_sel))
     items.sort(key=lambda x: (x.title or x.id).lower())
-    return PaginatedResponse.from_list(items, pagination.page, pagination.per_page)
+    return paginate(items, query, bound={"q": q, "selected": selected})
 
 
 @router.get("/catalogue/{rule_id}", response_model=CatalogRuleDetail, dependencies=[_READ])
@@ -869,9 +828,7 @@ async def get_catalogue_rule(
     try:
         doc = _catalog(request).get_rule(rule_id)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"rule '{rule_id}' not found"}
-        ) from exc
+        raise ProblemError(404, f"rule '{rule_id}' not found", code="not_found") from exc
     return _detail(doc, _selection_store(request).is_selected(rule_id))
 
 
@@ -886,9 +843,7 @@ async def edit_catalogue_rule(
             catalog.edit_rule, rule_id, body.rule, user.user_id, title=body.title
         )
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"rule '{rule_id}' not found"}
-        ) from exc
+        raise ProblemError(404, f"rule '{rule_id}' not found", code="not_found") from exc
     audit_resource_change(user.user_id, "sigma_rule", rule_id, "edited")
     apply_routing_headers(response, catalog.writes.routing)
     return _detail(doc, _selection_store(request).is_selected(rule_id))
@@ -903,9 +858,7 @@ async def adopt_catalogue_rule(
     try:
         doc = await asyncio.to_thread(catalog.adopt_rule, rule_id, user.user_id)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"rule '{rule_id}' not found"}
-        ) from exc
+        raise ProblemError(404, f"rule '{rule_id}' not found", code="not_found") from exc
     audit_resource_change(user.user_id, "sigma_rule", rule_id, "adopted")
     apply_routing_headers(response, catalog.writes.routing)
     return _detail(doc, _selection_store(request).is_selected(rule_id))
@@ -920,9 +873,7 @@ async def delete_catalogue_rule(
     try:
         await asyncio.to_thread(catalog.delete_rule, rule_id, user.user_id)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"rule '{rule_id}' not found"}
-        ) from exc
+        raise ProblemError(404, f"rule '{rule_id}' not found", code="not_found") from exc
     audit_resource_change(user.user_id, "sigma_rule", rule_id, "deleted")
     apply_routing_headers(response, catalog.writes.routing)
 
@@ -942,9 +893,7 @@ async def select_rule(
 ) -> SelectionResponse:
     """Select a catalogued rule to implement."""
     if not _catalog(request).exists(rule_id):
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"rule '{rule_id}' not in catalogue"}
-        )
+        raise ProblemError(404, f"rule '{rule_id}' not in catalogue", code="not_found")
     store = _selection_store(request)
     await asyncio.to_thread(store.select, rule_id, user.user_id)
     audit_resource_change(user.user_id, "sigma_selection", rule_id, "selected")
@@ -1189,24 +1138,22 @@ async def get_propagation(
     """Poll a propagate task."""
     info = _task_manager(request).get(task_id)
     if info is None or info.kind != "sigma:propagate":
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": "propagation task not found"}
-        )
+        raise ProblemError(404, "propagation task not found", code="not_found")
     result = _propagate_response(info)
     _apply_report_headers(response, result.report)
     return result
 
 
-@router.get("/bindings", response_model=PaginatedResponse[BindingSummary], dependencies=[_READ])
+@router.get("/bindings", response_model=Page[BindingSummary], dependencies=[_READ])
 async def list_bindings(
     request: Request,
     user: CurrentUser,
     rules: RuleReg,
     hunts: HuntConfigReg,
-    pagination: PaginationParams = Depends(),
+    query: ListParams,
     source: str | None = Query(None, description="Filter by source label"),
     drift: bool | None = Query(None, description="Filter by drift state"),
-) -> PaginatedResponse[BindingSummary]:
+) -> Page[BindingSummary]:
     """Paginated list of the generated sigma-bound rules, with live drift state."""
     propagator = _propagator(request, rules, hunts, user.user_id)
     rows = await asyncio.to_thread(propagator.list_bindings)
@@ -1216,7 +1163,7 @@ async def list_bindings(
     if drift is not None:
         items = [b for b in items if b.drift == drift]
     items.sort(key=lambda b: b.rule_id)
-    return PaginatedResponse.from_list(items, pagination.page, pagination.per_page)
+    return paginate(items, query, bound={"source": source, "drift": drift})
 
 
 @router.get("/bindings/{rule_id}", response_model=BindingSummary, dependencies=[_READ])
@@ -1227,9 +1174,7 @@ async def get_binding(
     propagator = _propagator(request, rules, hunts, user.user_id)
     row = await asyncio.to_thread(propagator.get_binding, rule_id)
     if row is None:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"no sigma binding '{rule_id}'"}
-        )
+        raise ProblemError(404, f"no sigma binding '{rule_id}'", code="not_found")
     return BindingSummary(**row)
 
 
@@ -1251,9 +1196,7 @@ async def delete_binding(
     propagator = _propagator(request, rules, hunts, user.user_id)
     routing = await asyncio.to_thread(propagator.delete_binding, rule_id)
     if routing is None:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"no sigma binding '{rule_id}'"}
-        )
+        raise ProblemError(404, f"no sigma binding '{rule_id}'", code="not_found")
     set_review_headers(
         response, review_required=routing.review_required, pr_url=routing.first_pr_url
     )

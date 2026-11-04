@@ -60,7 +60,7 @@ def test_a_bad_option_is_a_400(client, admin_headers, refusing_executor, options
 
     assert resp.status_code == 400, resp.text
     assert resp.json()["code"] == "invalid_options"
-    assert message in resp.json()["message"]
+    assert message in resp.json()["detail"]
 
 
 def test_paging_a_view_that_caps_its_own_rows_is_a_400(app, client, admin_headers):
@@ -69,4 +69,4 @@ def test_paging_a_view_that_caps_its_own_rows_is_a_400(app, client, admin_header
     resp = client.post(EXECUTE, json={"options": {"offset": 25}}, headers=admin_headers)
 
     assert resp.status_code == 400, resp.text
-    assert "caps its own rows" in resp.json()["message"]
+    assert "caps its own rows" in resp.json()["detail"]

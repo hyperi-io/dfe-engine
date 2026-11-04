@@ -37,7 +37,7 @@ def _assert_refused(resp, reason: str) -> None:
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["code"] == "invalid_sql"
-    (error,) = body["context"]["sql_errors"]
+    (error,) = body["sql_errors"]
     assert error["message"].startswith("CEL filter refused: ")
     assert reason in error["message"]
     assert "double()" in error["suggestion"]

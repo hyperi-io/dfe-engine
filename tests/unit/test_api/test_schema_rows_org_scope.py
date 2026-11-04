@@ -154,7 +154,7 @@ def test_a_table_without_org_id_is_refused_before_any_row_is_read(tenant, ch, ro
     resp = tenant.get(f"/api/v1/schemas/{NOMETA_SOURCE}/{route}")
 
     assert resp.status_code == 403, resp.text
-    assert "has no _org_id column" in resp.json()["message"]
+    assert "has no _org_id column" in resp.json()["detail"]
     assert ch.row_reads() == []
 
 
@@ -165,7 +165,7 @@ def test_a_held_caller_in_no_registered_org_is_refused(app, client, settings, ch
     resp = stray.get(f"/api/v1/schemas/{NOMETA_SOURCE}/sample-rows")
 
     assert resp.status_code == 403, resp.text
-    assert "no registered org" in resp.json()["message"]
+    assert "no registered org" in resp.json()["detail"]
     assert ch.calls == []
 
 

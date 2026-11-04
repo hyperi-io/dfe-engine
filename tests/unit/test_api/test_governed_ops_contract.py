@@ -47,7 +47,7 @@ class TestClassesListing:
         _wire_gitcrud(app, tmp_path)
         resp = client.get("/api/v1/gitops/classes", headers=viewer_headers)
         assert resp.status_code == 200, resp.text
-        by_name = {c["name"]: c for c in resp.json()}
+        by_name = {c["name"]: c for c in resp.json()["items"]}
         # the registry's classes are all present
         assert set(by_name) == set(default_registry().names())
         # helmvars is a legal action target; every governance-prefixed class is not
@@ -79,7 +79,7 @@ class TestResourceListing:
         _seed_helmvar(client, admin_headers)
         resp = client.get("/api/v1/gitops/classes/helmvars/resources", headers=admin_headers)
         assert resp.status_code == 200, resp.text
-        assert resp.json() == ["receiver-default"]
+        assert resp.json()["items"] == ["receiver-default"]
 
 
 class TestVarsListing:
@@ -97,7 +97,7 @@ class TestVarsListing:
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text
-        by_path = {v["path"]: v for v in resp.json()}
+        by_path = {v["path"]: v for v in resp.json()["items"]}
         assert by_path["keda.maxReplicas"]["value"] == 6
         assert by_path["keda.maxReplicas"]["protected"] is True
 
@@ -112,7 +112,7 @@ class TestVarsListing:
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text
-        by_path = {v["path"]: v["value"] for v in resp.json()}
+        by_path = {v["path"]: v["value"] for v in resp.json()["items"]}
         assert by_path["config.kafka.sasl.password"] == contract.REDACTED
         assert by_path["extraEnv.DFE_X_TOKEN"] == contract.REDACTED
         assert by_path["keda.maxReplicas"] == 6
@@ -139,7 +139,7 @@ class TestVarsListing:
             "/api/v1/gitops/classes/accounts/resources/kaz/vars", headers=admin_headers
         )
         assert accounts.status_code == 200, accounts.text
-        by_path = {v["path"]: v["value"] for v in accounts.json()}
+        by_path = {v["path"]: v["value"] for v in accounts.json()["items"]}
         assert by_path["password_hash"] == contract.REDACTED
         assert by_path["seeded_password_hash"] == contract.REDACTED
         assert by_path["groups[0]"] == "dfe-admins"
@@ -147,7 +147,7 @@ class TestVarsListing:
             "/api/v1/gitops/classes/gov_settings/resources/auth/vars", headers=admin_headers
         )
         assert settings.status_code == 200, settings.text
-        assert {v["path"]: v["value"] for v in settings.json()} == {
+        assert {v["path"]: v["value"] for v in settings.json()["items"]} == {
             "breakglass.password_hash": contract.REDACTED
         }
         for digest in ("digest-8840", "digest-8841", "bg-8842"):
@@ -250,7 +250,7 @@ class TestValidateDefine:
         # nothing was written: HEAD unmoved, action not defined
         assert gc.head_revision() == head_before
         listed = client.get("/api/v1/governance/actions", headers=admin_headers)
-        assert listed.json() == []
+        assert listed.json()["items"] == []
 
     def test_collects_every_error(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
@@ -530,7 +530,7 @@ class TestActionsCarryNoCredentials:
         )
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "credential_in_action"
-        assert "vars routes" in resp.json()["message"]
+        assert "vars routes" in resp.json()["detail"]
         assert gc.head_revision() == before
         assert gc.list(ACTION_CLASS) == []
 
@@ -559,7 +559,7 @@ class TestActionsCarryNoCredentials:
         assert read["changes"] == [{**change, "value": 12}]
         listed = client.get(
             f"/api/v1/gitops/classes/{ACTION_CLASS}/resources/carrier/vars", headers=admin_headers
-        ).json()
+        ).json()["items"]
         assert {v["path"]: v["value"] for v in listed}["changes[0].value"] == 12
 
     def test_every_shipped_action_would_define(self, client, app, admin_headers, tmp_path):
@@ -641,7 +641,7 @@ class TestLegacyCredentialActionsReadMasked:
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text
-        by_path = {v["path"]: v["value"] for v in resp.json()}
+        by_path = {v["path"]: v["value"] for v in resp.json()["items"]}
         assert by_path["changes[0].value"] == contract.REDACTED
         assert by_path["changes[3].value"] == 9
         for credential in self.PLAINTEXT:

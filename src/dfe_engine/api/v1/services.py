@@ -9,13 +9,14 @@ GET    /api/v1/services/{service}/{instance}/history   -> Git history
 POST   /api/v1/services/seed                   -> Seed built-in defaults
 """
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field, SecretStr
+from scalo.api import ListParams, ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, Settings, require_action
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -95,24 +96,28 @@ class SeedResponse(BaseModel):
 # --- Endpoints ---
 
 
+ServiceConfigsList = Annotated[
+    ListQuery,
+    Depends(list_query(order_by=("service", "instance", "updated_at"), tiebreak="service")),
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedResponse[ServiceConfigSummary],
+    response_model=Page[ServiceConfigSummary],
     dependencies=[Depends(require_action(scopes_dict["service_read"]))],
 )
 async def list_service_configs(
     user: CurrentUser,
     registry: ServiceConfigReg,
-    pagination: PaginationParams = Depends(),
+    query: ServiceConfigsList,
     service: str | None = Query(None, description="Filter by service type"),
     search: str | None = Query(None, description="Search in service/instance names"),
-    sort_by: str | None = Query(None, description="Sort field (service, instance, updated_at)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List service configs with optional filtering."""
     raw = registry.list_configs(service=service)
     raw = apply_search(raw, search, ["service", "instance"])
-    raw = apply_sort(raw, sort_by, sort_order)
+    raw = sort_by_order(raw, query.order_by)
     summaries = [
         ServiceConfigSummary(
             service=item.get("service", ""),
@@ -121,7 +126,7 @@ async def list_service_configs(
         )
         for item in raw
     ]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(summaries, query, bound={"service": service, "search": search})
 
 
 @router.get(
@@ -139,12 +144,8 @@ async def get_service_config(
     try:
         config = registry.get_config(service, instance)
     except ConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Service config '{service}/{instance}' not found",
-            },
+        raise ProblemError(
+            404, f"Service config '{service}/{instance}' not found", code="not_found"
         )
     return ServiceConfigDetail(service=service, instance=instance, config=_shown(config))
 
@@ -185,9 +186,7 @@ async def save_service_config(
     try:
         restored = contract.restore_masked(_as_redacted(sent), stored, shown=shown)
     except contract.MaskedValueError as exc:
-        raise HTTPException(
-            status_code=400, detail={"code": exc.code, "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code=exc.code) from exc
     removed = {key for key, value in body.items() if value is None}
     config = {key: value for key, value in stored.items() if key not in removed} | restored
     registry.save_config(
@@ -216,12 +215,8 @@ async def delete_service_config(
     try:
         registry.get_config(service, instance)
     except ConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Service config '{service}/{instance}' not found",
-            },
+        raise ProblemError(
+            404, f"Service config '{service}/{instance}' not found", code="not_found"
         )
     registry.delete_config(service, instance)
     audit_resource_change(user.user_id, "service_config", f"{service}/{instance}", "deleted")
@@ -248,10 +243,11 @@ async def validate_service_config(
 
 @router.get(
     "/{service}/{instance}/history",
-    response_model=list[ConfigHistoryEntry],
+    response_model=Page[ConfigHistoryEntry],
     dependencies=[Depends(require_action(scopes_dict["service_read"]))],
 )
 async def get_service_config_history(
+    query: ListParams,
     service: str,
     instance: str,
     user: CurrentUser,
@@ -263,19 +259,20 @@ async def get_service_config_history(
         entries = registry.get_config_history(service, instance, limit=limit)
     except ValueError as exc:
         # Unknown/schema-less service -> _validate_service raises ValueError.
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": str(exc)},
-        ) from exc
-    return [
-        ConfigHistoryEntry(
-            commit=e.get("commit", ""),
-            message=e.get("message", ""),
-            author=e.get("author", ""),
-            date=e.get("date", ""),
-        )
-        for e in entries
-    ]
+        raise ProblemError(404, str(exc), code="not_found") from exc
+    return paginate(
+        [
+            ConfigHistoryEntry(
+                commit=e.get("commit", ""),
+                message=e.get("message", ""),
+                author=e.get("author", ""),
+                date=e.get("date", ""),
+            )
+            for e in entries
+        ],
+        query,
+        bound={"limit": limit},
+    )
 
 
 @router.post(
@@ -288,9 +285,6 @@ async def seed_service_configs(user: CurrentUser, registry: ServiceConfigReg, se
     try:
         count = registry.seed_defaults(overwrite=False, settings=settings)
     except BearerSourceUnreadableError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "receiver_auth_unreadable", "message": str(exc)},
-        ) from exc
+        raise ProblemError(409, str(exc), code="receiver_auth_unreadable") from exc
     audit_resource_change(user.user_id, "service_config", "all", "seeded")
     return SeedResponse(seeded=count)

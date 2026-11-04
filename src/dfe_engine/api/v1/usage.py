@@ -35,8 +35,9 @@ from dfe_schemas.usage import (
     NODE_CORES,
     UsageMetric,
 )
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
+from scalo.api import ProblemError
 
 from dfe_engine.api.deps import (
     ClickHouseClient,
@@ -47,7 +48,7 @@ from dfe_engine.api.deps import (
     registered_orgs,
     require_own_org_action,
 )
-from dfe_engine.api.errors import ErrorResponse, backend_failure
+from dfe_engine.api.errors import backend_failure
 from dfe_engine.auth.models import AuthContext
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
@@ -175,7 +176,7 @@ def usage_scope(request: Request, user: AuthContext, org: str | None) -> UsageSc
         The orgs and tenant ids the read covers.
 
     Raises:
-        HTTPException: 422 ``unknown_org`` for an unregistered org a platform caller
+        ProblemError: 422 ``unknown_org`` for an unregistered org a platform caller
             names, 403 ``org_not_granted`` for an org a held caller does not hold,
             registered or not, and 403 ``no_org`` for a held caller holding no
             registered org.
@@ -191,22 +192,17 @@ def usage_scope(request: Request, user: AuthContext, org: str | None) -> UsageSc
     granted = held_orgs(request, user, _ACTION)
     chosen = granted if org is None else [entry for entry in granted if entry.name == org]
     if org is not None and not chosen:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "org_not_granted", "message": f"The caller holds no org '{org}'"},
-        )
+        raise ProblemError(403, f"The caller holds no org '{org}'", code="org_not_granted")
     names = [entry.name for entry in chosen]
     # '' is the whole deployment's row, which no held read may reach.
     tenant_ids = [
         tenant for entry in chosen for tenant in org_tenant_ids(entry) if tenant != ALL_ORGS
     ]
     if not tenant_ids:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "no_org",
-                "message": "The caller's groups name no registered org, so it has no usage to read",
-            },
+        raise ProblemError(
+            403,
+            "The caller's groups name no registered org, so it has no usage to read",
+            code="no_org",
         )
     return UsageScope(held=True, orgs=names, tenant_ids=sorted(set(tenant_ids)))
 
@@ -215,7 +211,7 @@ def _reader(request: Request, client: Any) -> UsageReader:
     return UsageReader(client, request.app.state.settings.clickhouse.effective_data_database)
 
 
-def _unavailable(exc: UsageUnavailableError) -> HTTPException:
+def _unavailable(exc: UsageUnavailableError) -> ProblemError:
     """The 503 for a usage read ClickHouse refused, its text logged rather than sent."""
     return backend_failure(
         503,
@@ -266,11 +262,10 @@ def _today() -> date:
     response_model=UsageOverviewResponse,
     responses={
         403: {
-            "model": ErrorResponse,
             "description": "No usage:read, or the caller is held to its orgs and holds no "
             "registered one",
         },
-        503: {"model": ErrorResponse, "description": "ClickHouse could not read the usage tables"},
+        503: {"description": "ClickHouse could not read the usage tables"},
     },
     dependencies=[_READ],
 )
@@ -318,16 +313,14 @@ def get_usage_overview(
     response_model=UsageSeriesResponse,
     responses={
         403: {
-            "model": ErrorResponse,
             "description": "No usage:read, or the caller is held to its orgs and does not "
             "hold the one named",
         },
         422: {
-            "model": ErrorResponse,
             "description": "An unknown metric or org, a range ending before it starts, "
             "or an org named for a metric kept only for the whole deployment",
         },
-        503: {"model": ErrorResponse, "description": "ClickHouse could not read the usage tables"},
+        503: {"description": "ClickHouse could not read the usage tables"},
     },
     dependencies=[_READ],
 )
@@ -366,32 +359,19 @@ def get_usage(
     try:
         declared = usage_metric(metric)
     except KeyError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "unknown_metric",
-                "message": f"No usage metric '{metric}', it is one of "
-                f"{', '.join(usage_metric_names())}",
-            },
+        raise ProblemError(
+            422,
+            f"No usage metric '{metric}', it is one of {', '.join(usage_metric_names())}",
+            code="unknown_metric",
         ) from exc
     last = last_day or _today()
     first = first_day or last - timedelta(days=OVERVIEW_DAYS - 1)
     if first > last:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "bad_range",
-                "message": f"The range starts {first}, after it ends {last}",
-            },
-        )
+        raise ProblemError(422, f"The range starts {first}, after it ends {last}", code="bad_range")
     scope = usage_scope(request, user, org)
     if org is not None and not scope.held and not declared.per_org:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "not_per_org",
-                "message": f"{metric} is measured for the whole deployment, not per org",
-            },
+        raise ProblemError(
+            422, f"{metric} is measured for the whole deployment, not per org", code="not_per_org"
         )
     status, points = _read(
         _reader(request, client), declared, scope, first_day=first, last_day=last

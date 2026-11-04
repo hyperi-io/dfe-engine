@@ -124,7 +124,7 @@ class TestRefresh:
 
         resp = client.post("/api/v1/auth/refresh", headers=viewer_headers)
         assert resp.status_code == 401
-        assert resp.json()["message"] == "Account disabled"
+        assert resp.json()["detail"] == "Account disabled"
 
         client.put(
             "/api/v1/auth/accounts/viewer",
@@ -231,7 +231,7 @@ class TestMe:
 
         resp = client.get("/api/v1/auth/me", headers=viewer_headers)
         assert resp.status_code == 401
-        assert resp.json()["message"] == "Account disabled"
+        assert resp.json()["detail"] == "Account disabled"
 
         client.put(
             "/api/v1/auth/accounts/viewer",
@@ -255,7 +255,7 @@ class TestMe:
 
         resp = client.get("/api/v1/auth/me", headers=viewer_headers)
         assert resp.status_code == 401
-        assert resp.json()["message"] == "Account blocked"
+        assert resp.json()["detail"] == "Account blocked"
 
         client.put(
             "/api/v1/auth/accounts/viewer",
@@ -280,7 +280,7 @@ class TestMe:
             headers={"Authorization": f"Bearer {token}"},
         )
         assert resp.status_code == 401
-        assert resp.json()["message"] == "Account disabled"
+        assert resp.json()["detail"] == "Account disabled"
 
     """GET /api/v1/auth/permissions"""
 

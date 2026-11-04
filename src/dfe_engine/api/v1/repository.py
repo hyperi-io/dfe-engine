@@ -24,10 +24,10 @@ import json
 from datetime import datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Body, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Header, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from scalo.api import CliHints, scalo_extra
+from scalo.api import CliHints, ListParams, Page, ProblemError, paginate, scalo_extra
 from scalo.logger import logger
 
 from dfe_engine.api import body_limits
@@ -100,18 +100,12 @@ def _store(client: Any, settings: Any) -> RepositoryStore:
     return RepositoryStore(client, database=settings.clickhouse.effective_data_database)
 
 
-def _validation_error(message: str) -> HTTPException:
-    return HTTPException(
-        status_code=422,
-        detail={"code": "validation_error", "message": message},
-    )
+def _validation_error(message: str) -> ProblemError:
+    return ProblemError(422, message, code="validation_error")
 
 
-def _not_found() -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail={"code": "not_found", "message": "Object not found"},
-    )
+def _not_found() -> ProblemError:
+    return ProblemError(404, "Object not found", code="not_found")
 
 
 def _validate_names(namespace: str, key: str | None = None) -> None:
@@ -273,12 +267,10 @@ async def patch_preferences(
 
     payload = json.dumps(new_doc, separators=(",", ":")).encode("utf-8")
     if len(payload) > settings.repository.max_prefs_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail={
-                "code": "payload_too_large",
-                "message": f"Preferences exceed {settings.repository.max_prefs_bytes} bytes",
-            },
+        raise ProblemError(
+            413,
+            f"Preferences exceed {settings.repository.max_prefs_bytes} bytes",
+            code="payload_too_large",
         )
     try:
         meta = store.put(
@@ -304,10 +296,11 @@ async def patch_preferences(
 # The path reads as a get on {namespace}, which would share an id with the object read below.
 @router.get(
     "/objects/{scope}/{scope_id}/{namespace}",
-    response_model=list[ObjectEntry],
+    response_model=Page[ObjectEntry],
     openapi_extra=scalo_extra(verb="list", cli=CliHints(hidden=True)),
 )
 async def list_objects(
+    query: ListParams,
     scope: RepositoryScope,
     scope_id: str,
     namespace: str,
@@ -320,7 +313,7 @@ async def list_objects(
     _validate_names(namespace)
     stored_id = _require_read(request, user, scope, scope_id)
     store = _store(ch_client, settings)
-    return store.list(scope, stored_id, namespace)
+    return paginate(store.list(scope, stored_id, namespace), query)
 
 
 @router.get("/objects/{scope}/{scope_id}/{namespace}/{key}", openapi_extra=CLI_HIDDEN)
@@ -374,12 +367,10 @@ async def put_object(
 
     body = await request.body()
     if len(body) > settings.repository.max_object_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail={
-                "code": "payload_too_large",
-                "message": f"Object exceeds {settings.repository.max_object_bytes} bytes",
-            },
+        raise ProblemError(
+            413,
+            f"Object exceeds {settings.repository.max_object_bytes} bytes",
+            code="payload_too_large",
         )
     content_type = request.headers.get("Content-Type") or "application/octet-stream"
 

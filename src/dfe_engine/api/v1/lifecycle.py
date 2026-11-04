@@ -16,8 +16,9 @@ pinned services (ClickHouse, OpenBao, the cluster, DNS, Argo) have no lifecycle
 API. Every change is a git commit (commit != deployment - Argo reconciles).
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+from scalo.api import ListParams, Page, ProblemError, paginate
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.write_turn import WRITE_TURN
@@ -68,10 +69,7 @@ class LifecycleResponse(BaseModel):
 def _gitcrud(request: Request) -> GitCrud:
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
+        raise ProblemError(503, "gitops is not enabled", code="not_configured")
     return gc
 
 
@@ -83,14 +81,14 @@ def _current_state(gc: GitCrud, svc: ServiceLifecycle) -> str:
 
 
 @router.get("", dependencies=[Depends(require_action(scopes_dict["lifecycle_read"]))])
-def list_services(user: CurrentUser, request: Request) -> list[ServiceInfo]:
+def list_services(query: ListParams, user: CurrentUser, request: Request) -> Page[ServiceInfo]:
     """List services with their tier and current lifecycle state."""
     gc = _gitcrud(request)
     out: list[ServiceInfo] = []
     for svc in services():
         state = "pinned" if svc.tier == ServiceTier.PINNED else _current_state(gc, svc)
         out.append(ServiceInfo(name=svc.name, tier=svc.tier.value, state=state))
-    return out
+    return paginate(out, query)
 
 
 @router.post("/{name}", response_model=LifecycleResponse)
@@ -101,24 +99,20 @@ def set_lifecycle(
     try:
         svc = resolve(name)
     except KeyError as exc:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"unknown service '{name}'"}
-        ) from exc
+        raise ProblemError(404, f"unknown service '{name}'", code="not_found") from exc
     if svc.tier == ServiceTier.PINNED:
-        raise HTTPException(
-            404, detail={"code": "not_found", "message": f"'{name}' has no lifecycle API (pinned)"}
-        )
+        raise ProblemError(404, f"'{name}' has no lifecycle API (pinned)", code="not_found")
 
     action = required_action(name, body.state)
     decision = authorize(user, action, role_config=request.app.state.role_config)
     if not decision.allowed:
-        raise HTTPException(403, detail={"code": "forbidden", "message": decision.reason})
+        raise ProblemError(403, decision.reason, code="forbidden")
 
     gc = _gitcrud(request)
     try:
         res = set_state(gc, name, body.state, user.user_id)
     except LifecycleError as exc:
-        raise HTTPException(403, detail={"code": "forbidden", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="forbidden") from exc
     audit_resource_change(
         user.user_id, "lifecycle", name, body.state.value, {"commit": res.commit_sha}
     )

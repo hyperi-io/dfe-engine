@@ -307,10 +307,10 @@ def _get(client: TestClient, path: str, headers: dict[str, str]) -> dict[str, An
 
 
 def _get_list(client: TestClient, path: str, headers: dict[str, str]) -> list[Any]:
-    """The JSON array a route answers, failing the test on any other shape."""
-    body = _get_json(client, path, headers)
-    assert isinstance(body, list), body
-    return body
+    """The items of the page a list route answers, failing the test on any other shape."""
+    body = _get(client, path, headers)
+    assert isinstance(body["items"], list), body
+    return body["items"]
 
 
 def _labels(routing: dict[str, Any]) -> list[str]:
@@ -353,8 +353,8 @@ class TestSeedRefusalIsLegible:
         assert resp.status_code == 422, resp.text
         body = resp.json()
         assert body["code"] == "validation_error"
-        assert "dfe-fetcher" in body["message"]
-        assert "docker-slim" in body["message"]
+        assert "dfe-fetcher" in body["detail"]
+        assert "docker-slim" in body["detail"]
 
     def test_a_refused_seed_answers_422_with_the_reason(self, appmgmt_client, monkeypatch):
         from dfe_engine.api.e2e.seed import Seed
@@ -372,7 +372,7 @@ class TestSeedRefusalIsLegible:
         assert resp.status_code == 422, resp.text
         body = resp.json()
         assert body["code"] == "validation_error"
-        assert body["message"] == reason
+        assert body["detail"] == reason
 
 
 class TestSeedSourceWithTransform:

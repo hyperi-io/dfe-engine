@@ -18,7 +18,7 @@ Every mode is submitted to the TaskManager. Fast modes (recent/random) are
 blocked on for up to ``sampler.wait_seconds`` so they return ``completed`` with
 the result inline (sync feel for the CLI / downstream APIs). Gated modes
 (smart/anomaly) return ``pending`` immediately unless the caller passes ``wait``;
-poll here or subscribe to ``GET /tasks/{task_id}/stream`` (SSE) for the UI.
+poll here or subscribe to ``GET /operations/{operation}/stream`` (SSE) for the UI.
 
 A caller without a platform grant holding ``sampler:read`` is held to its own
 orgs: every read binds ``_org_id`` to the tenant ids of its orgs, a target that
@@ -28,8 +28,9 @@ it only the tasks held to its orgs.
 
 import functools
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
+from scalo.api import ListParams, Page, ProblemError, paginate
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
@@ -72,9 +73,7 @@ class SampleSubmitResponse(BaseModel):
 def _sampler(request: Request) -> Sampler:
     sampler = getattr(request.app.state, "sampler", None)
     if sampler is None:  # pragma: no cover - always wired in lifespan
-        raise HTTPException(
-            503, detail={"code": "not_configured", "message": "Sampler not initialised"}
-        )
+        raise ProblemError(503, "Sampler not initialised", code="not_configured")
     return sampler
 
 
@@ -109,7 +108,7 @@ async def check_sample_scope(
     """Refuse with a 403 a sample that cannot be held to ``org_ids``.
 
     Raises:
-        HTTPException: 403 naming why the sample cannot be held to the caller's
+        ProblemError: 403 naming why the sample cannot be held to the caller's
             orgs; 400 when the target cannot be described.
     """
     if org_ids is None:
@@ -119,11 +118,9 @@ async def check_sample_scope(
             functools.partial(sampler.check_org_scope, req, ch, source_registry, org_ids)
         )
     except SampleScopeError as exc:
-        raise HTTPException(403, detail={"code": "forbidden", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="forbidden") from exc
     except SamplerError as exc:
-        raise HTTPException(
-            400, detail={"code": "bad_sample_request", "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code="bad_sample_request") from exc
 
 
 def _to_response(info: TaskInfo) -> SampleSubmitResponse:
@@ -154,9 +151,7 @@ async def _submit(
         # burying it in a background task the caller then has to poll for.
         sampler.resolve_or_raise(req, source_registry)
     except SamplerError as exc:
-        raise HTTPException(
-            400, detail={"code": "bad_sample_request", "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code="bad_sample_request") from exc
     org_ids = sample_org_scope(request, user)
     await check_sample_scope(sampler, req, ch, source_registry, org_ids)
 
@@ -226,12 +221,12 @@ async def get_sample(task_id: str, request: Request, user: CurrentUser) -> Sampl
     org_ids = sample_org_scope(request, user)
     info = _task_manager(request).get(task_id, reader_orgs=org_ids)
     if info is None:
-        raise HTTPException(404, detail={"code": "not_found", "message": "sample task not found"})
+        raise ProblemError(404, "sample task not found", code="not_found")
     return _to_response(info)
 
 
-@router.get("/samples", response_model=list[TaskInfo], dependencies=[_READ])
-async def list_samples(request: Request, user: CurrentUser) -> list[TaskInfo]:
+@router.get("/samples", response_model=Page[TaskInfo], dependencies=[_READ])
+async def list_samples(query: ListParams, request: Request, user: CurrentUser) -> Page[TaskInfo]:
     """List recent sample tasks (most recent first); a caller held to its orgs sees only theirs."""
     org_ids = sample_org_scope(request, user)
-    return _task_manager(request).list(kind=_TASK_KIND, reader_orgs=org_ids)
+    return paginate(_task_manager(request).list(kind=_TASK_KIND, reader_orgs=org_ids), query)

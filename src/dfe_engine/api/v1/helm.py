@@ -19,8 +19,9 @@ protected vars). Optimistic concurrency via the If-Match header (commit SHA).
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel
+from scalo.api import ListParams, Page, ProblemError, paginate
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.write_turn import WRITE_TURN
@@ -67,10 +68,7 @@ def gitcrud_of(request: Request) -> GitCrud:
     """The app's GitCrud engine, or a 503 when gitops is off."""
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
+        raise ProblemError(503, "gitops is not enabled", code="not_configured")
     return gc
 
 
@@ -89,22 +87,19 @@ def forge_of(request: Request):
     return getattr(request.app.state, "forge", None)
 
 
-def conflict_error(exc: ConcurrencyConflictError) -> HTTPException:
+def conflict_error(exc: ConcurrencyConflictError) -> ProblemError:
     """The 409 for a write whose base revision is stale, the stored document masked.
 
     ``head`` is the revision to re-read against. ``current`` is the document as it
     stands at head, masked as every read of the deploy repo is, so a stale
     ``If-Match`` never reads a credential back.
     """
-    return HTTPException(
-        status_code=409,
-        detail={
-            "code": "conflict",
-            "message": str(exc),
-            # non-reserved keys become the ErrorResponse.context (current vs theirs)
-            "current": contract.shown_resource(exc.current),
-            "head": exc.head,
-        },
+    return ProblemError(
+        409,
+        str(exc),
+        code="conflict",
+        current=contract.shown_resource(exc.current),
+        head=exc.head,
     )
 
 
@@ -113,9 +108,7 @@ def check_name(name: str) -> None:
     try:
         validate_name(name)
     except CommitPolicyError as exc:
-        raise HTTPException(
-            status_code=400, detail={"code": "invalid_name", "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code="invalid_name") from exc
 
 
 def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
@@ -133,9 +126,7 @@ def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
     try:
         shown = contract.redact_resource(doc)
     except contract.ContractError as exc:
-        raise HTTPException(
-            500, detail={"code": "contract_unreadable", "message": str(exc)}
-        ) from exc
+        raise ProblemError(500, str(exc), code="contract_unreadable") from exc
     return flatten(shown)
 
 
@@ -156,7 +147,7 @@ def enforce_protected(request: Request, user: Any, cls: str, name: str, path: st
     try:
         policy.enforce(cls, name, path, override=has_override(request, user))
     except ProtectedVarError as exc:
-        raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="protected_var") from exc
     return protected
 
 
@@ -183,13 +174,11 @@ def set_var_governed(
     try:
         value = contract.restore_masked_at(stored, path, value)
     except contract.MaskedValueError as exc:
-        raise HTTPException(
-            status_code=400, detail={"code": exc.code, "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code=exc.code) from exc
     try:
         validate_write(stored, path, value, keda_by_default=scaling.keda_by_default(cls, name))
     except CommitPolicyError as exc:
-        raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="policy_violation") from exc
 
     protected = enforce_protected(request, user, cls, name, path)
 
@@ -230,9 +219,7 @@ def set_var_governed(
     except ConcurrencyConflictError as exc:
         raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "review_required", "message": str(exc)}
-        ) from exc
+        raise ProblemError(409, str(exc), code="review_required") from exc
     audit_resource_change(
         user.user_id,
         cls,
@@ -264,7 +251,7 @@ def delete_var_governed(cls: str, name: str, path: str, user: Any, request: Requ
             _stored_doc(gc, cls, name), path, keda_by_default=scaling.keda_by_default(cls, name)
         )
     except CommitPolicyError as exc:
-        raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="policy_violation") from exc
     protected = enforce_protected(request, user, cls, name, path)
 
     def _write(branch: str):
@@ -286,9 +273,7 @@ def delete_var_governed(cls: str, name: str, path: str, user: Any, request: Requ
             write=_write,
         )
     except ReviewRequiredError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "review_required", "message": str(exc)}
-        ) from exc
+        raise ProblemError(409, str(exc), code="review_required") from exc
     audit_resource_change(user.user_id, cls, name, "updated", {"path": path, "revert": True})
     return WriteResult(
         changed=outcome.changed,
@@ -300,15 +285,17 @@ def delete_var_governed(cls: str, name: str, path: str, user: Any, request: Requ
 
 
 @router.get("/files", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
-def list_files(user: CurrentUser, request: Request) -> list[str]:
+def list_files(query: ListParams, user: CurrentUser, request: Request) -> Page[str]:
     """List helm-var overlay resources."""
-    return gitcrud_of(request).list(_CLASS)
+    return paginate(gitcrud_of(request).list(_CLASS), query)
 
 
 @router.get(
     "/files/{name}/vars", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))]
 )
-def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
+def list_vars(
+    query: ListParams, name: str, user: CurrentUser, request: Request
+) -> Page[dict[str, Any]]:
     """Flattened dot-path vars for a resource, each marked protected or not.
 
     Credentials come back masked, as the app surface's values route masks them.
@@ -320,7 +307,7 @@ def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, 
     for path, value in shown_vars(gc, _CLASS, name).items():
         protected = bool(policy and policy.is_protected(_CLASS, name, path))
         out.append({"path": path, "value": value, "protected": protected})
-    return out
+    return paginate(out, query)
 
 
 @router.put(

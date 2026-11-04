@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #  Project:      dfe-engine
-#  File:         openapi-spec/route_map.py
+#  File:         scripts/route_map.py
 #  Purpose:      Generate the API route map: where each operation moves in the resource hierarchy
 #  Language:     Python
 #
@@ -22,8 +22,8 @@ run, so the page cannot drift from the code.
 
 Usage::
 
-    uv run python openapi-spec/generate.py
-    uv run python openapi-spec/route_map.py --refresh-consumers \
+    uv run python scripts/generate_openapi.py
+    uv run python scripts/route_map.py --refresh-consumers \
         --repo dfe-ui=/projects/dfe-ui --repo dfe-infra=/projects/dfe-infra \
         --repo dfe-docker=/projects/dfe-docker
 
@@ -396,9 +396,9 @@ def render(
         "# API route map",
         "",
         "Where each engine API operation goes in the resource hierarchy. "
-        "`openapi-spec/route_map.py` generates this page from the engine's routes, "
-        "`openapi-spec/route-plan.toml` and `openapi-spec/route-consumers.json`: "
-        "change those and run `uv run python openapi-spec/generate.py`, never this page.",
+        "`scripts/route_map.py` generates this page from the engine's routes, "
+        "`scripts/route-plan.toml` and `scripts/route-consumers.json`: "
+        "change those and run `uv run python scripts/generate_openapi.py`, never this page.",
         "",
         "One row per operation the engine serves today. **New** is where it goes, and its operation id, "
         "`dfe` CLI command and MCP tool all come from that path. "
@@ -468,7 +468,7 @@ def write(spec: dict[str, Any]) -> Path:
 
 def _spec() -> dict[str, Any]:
     sys.path.insert(0, str(SPEC_DIR))
-    from generate import product_spec
+    from generate_openapi import product_spec
 
     return product_spec()
 

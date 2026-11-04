@@ -304,7 +304,7 @@ class TestRotate:
 
         assert resp.status_code == 400
         assert resp.json()["code"] == "not_store_backed"
-        message = resp.json()["message"]
+        message = resp.json()["detail"]
         _assert_plain(message)
         assert "breakglass" in message
         assert "reset" in message.lower()
@@ -328,9 +328,9 @@ class TestRotate:
         assert resp.status_code == 501
         body = resp.json()
         assert body["code"] == "admin_password_kept_outside_dfe"
-        _assert_plain(body["message"])
-        assert command in body["message"]
-        assert command in body["context"]["store_command"]
+        _assert_plain(body["detail"])
+        assert command in body["detail"]
+        assert command in body["store_command"]
 
     def test_with_a_secret_path_it_writes_the_secret_store(self, tmp_path):
         settings = _settings(tmp_path, gitops=False, secret_path="auth/admin-password")

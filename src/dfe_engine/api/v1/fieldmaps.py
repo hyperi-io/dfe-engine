@@ -8,12 +8,22 @@ DELETE /api/v1/field-maps/{standard}/{source} -> Delete source-specific map
 POST   /api/v1/field-maps/seed             -> Seed built-in defaults
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
-from scalo.api import scalo_extra
+from typing import Annotated
 
+from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
+from scalo.api import (
+    ListQuery,
+    Page,
+    ProblemError,
+    list_query,
+    paginate,
+    scalo_extra,
+    sort_by_order,
+)
+
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import CurrentUser, FieldMapReg, require_action
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.fieldmap.models import FieldMap
@@ -45,24 +55,28 @@ class SeedResponse(BaseModel):
 # -- Endpoints ------------------------------------------------
 
 
+FieldMapsList = Annotated[
+    ListQuery,
+    Depends(list_query(order_by=("standard", "source", "mapping_count"), tiebreak="standard")),
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedResponse[FieldMapSummary],
+    response_model=Page[FieldMapSummary],
     dependencies=[Depends(require_action(scopes_dict["fieldmap_read"]))],
 )
 async def list_field_maps(
     user: CurrentUser,
     registry: FieldMapReg,
-    pagination: PaginationParams = Depends(),
+    query: FieldMapsList,
     standard: str | None = Query(None, description="Filter by mapping standard (e.g. sigma, ecs)"),
     search: str | None = Query(None, description="Search in standard/source names"),
-    sort_by: str | None = Query(None, description="Sort field (standard, source, mapping_count)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List field maps with optional filtering."""
     raw = registry.list_maps(standard=standard)
     raw = apply_search(raw, search, ["standard", "source"])
-    raw = apply_sort(raw, sort_by, sort_order)
+    raw = sort_by_order(raw, query.order_by)
     summaries = [
         FieldMapSummary(
             standard=item.get("standard", ""),
@@ -74,7 +88,7 @@ async def list_field_maps(
         )
         for item in raw
     ]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(summaries, query, bound={"standard": standard, "search": search})
 
 
 @router.post(
@@ -94,13 +108,7 @@ async def create_field_map(
     try:
         fm = registry.save_map(body, created_by=git_author(user))
     except FieldMapValidationError as e:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "validation_error",
-                "message": str(e),
-            },
-        )
+        raise ProblemError(422, str(e), code="validation_error")
     audit_resource_change(user.user_id, "field_map", f"{fm.standard}", "created")
     return fm
 
@@ -117,13 +125,7 @@ async def get_default_field_map(standard: str, user: CurrentUser, registry: Fiel
     try:
         fm = registry.get_map(standard)
     except FieldMapNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Field map for standard '{standard}' not found",
-            },
-        )
+        raise ProblemError(404, f"Field map for standard '{standard}' not found", code="not_found")
     return fm
 
 
@@ -143,13 +145,7 @@ async def get_source_field_map(
     try:
         fm = registry.get_map(standard, source=source)
     except FieldMapNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Field map for '{standard}/{source}' not found",
-            },
-        )
+        raise ProblemError(404, f"Field map for '{standard}/{source}' not found", code="not_found")
     return fm
 
 
@@ -163,13 +159,7 @@ async def delete_source_field_map(
 ):
     """Delete a source-specific field map override."""
     if not registry.map_exists(standard, source=source):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Field map for '{standard}/{source}' not found",
-            },
-        )
+        raise ProblemError(404, f"Field map for '{standard}/{source}' not found", code="not_found")
     registry.delete_map(standard, source=source)
     audit_resource_change(user.user_id, "field_map", f"{standard}/{source}", "deleted")
 

@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         api/conventions.py
-#  Purpose:      The resource hierarchy every engine operation is named by and checked against
+#  Purpose:      The resource hierarchy every engine operation is named by, and the list contract
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -12,12 +12,16 @@
 (``<root>.<child...>.<verb>``), and :func:`scalo.api.install` writes the
 ``x-scalo`` extension onto each operation from the same model. The UI client,
 the ``dfe`` CLI and the MCP tools all read their names from there, so nothing
-else names an operation.
+else names an operation. Every list answers a :class:`scalo.api.Page`.
 """
 
-from collections.abc import Sequence
+# A present for Kay, 2026-10-28: one list contract, so the console pages every list the same way.
+
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from fastapi.routing import APIRoute, iter_route_contexts
+from pydantic import BaseModel, Field, model_validator
 from scalo.api import CliHints, Hierarchy, scalo_extra
 from starlette.routing import BaseRoute
 
@@ -28,6 +32,7 @@ ROOTS = frozenset(
         "governance",
         "identity",
         "ingest",
+        "operations",
         "orgs",
         "pipelines",
         "schemas",
@@ -113,3 +118,52 @@ def protocol_paths(routes: Sequence[BaseRoute]) -> list[str]:
         if _is_protocol(endpoint.__module__) and context.path_format:
             found.add(context.path_format)
     return sorted(found)
+
+
+def apply_search[T: Mapping[str, Any]](
+    items: Sequence[T], query: str | None, fields: Sequence[str]
+) -> list[T]:
+    """Keep the items where any of ``fields`` contains ``query``, ignoring case."""
+    if not query:
+        return list(items)
+    needle = query.lower()
+    return [item for item in items if any(needle in str(item.get(f, "")).lower() for f in fields)]
+
+
+class PathTree[T](BaseModel):
+    """Nested tree: leaf ``items`` at each node plus ``children`` by path segment."""
+
+    items: list[T] = Field(default_factory=list, description="Entries attached at this path level")
+    children: dict[str, PathTree[T]] = Field(
+        default_factory=dict, description="Further nesting keyed by path segment"
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_tree_node(cls, data: Any) -> Any:
+        if data is None:
+            return {"items": [], "children": {}}
+        if not isinstance(data, dict):
+            return data
+        items = data.get("items", [])
+        children = data.get("children")
+        if isinstance(children, dict):
+            return {"items": items, "children": children}
+        return {
+            "items": items,
+            "children": {k: v for k, v in data.items() if k not in {"items", "children"}},
+        }
+
+    @classmethod
+    def from_paths(cls, data: Sequence[T], *, path: Callable[[T], str]) -> PathTree[T]:
+        """Group flat rows into a folder tree by a slash-separated path."""
+        root: dict[str, Any] = {"items": [], "children": {}}
+        for obj in data:
+            parts = [p for p in path(obj).split("/") if p]
+            if not parts:
+                continue
+            cur = root
+            for seg in parts[:-1]:
+                cur = cur.setdefault("children", {}).setdefault(seg, {"items": [], "children": {}})
+            cur.setdefault("items", []).append(obj)
+        return cls.model_validate(root)

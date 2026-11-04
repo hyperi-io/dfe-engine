@@ -1368,7 +1368,7 @@ class TestALinksProviderIsOneAnAssertionCarries:
 
         assert resp.status_code == 422, resp.text
         assert resp.json()["code"] == "invalid_source_provider"
-        assert provider not in resp.json()["message"]
+        assert provider not in resp.json()["detail"]
 
 
 class TestASourceIdIsMatchedExactly:

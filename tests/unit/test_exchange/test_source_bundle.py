@@ -132,7 +132,7 @@ class TestRoundTripIntoACleanDeployment:
             assert imported.status_code == 201, imported.text
             actions = {entry["path"]: entry["action"] for entry in imported.json()["schemas"]}
 
-            listed = client.get("/api/v1/schemas?per_page=-1", headers=headers)
+            listed = client.get("/api/v1/schemas?page_size=1000", headers=headers)
             paths = {entry["name"] for entry in listed.json()["items"]}
             columns = client.get(
                 "/api/v1/schemas/definitions/meta/cisco_ios/versions/columns?version=1.1.0",
@@ -144,7 +144,7 @@ class TestRoundTripIntoACleanDeployment:
         assert {"meta/cisco_ios", "meta/core_tpl"} <= paths
         assert not [path for path in paths if path.startswith("meta/cisco-ios_")]
         assert columns.status_code == 200
-        assert [column["name"] for column in columns.json()["version"]["columns"]["items"]] == [
+        assert [column["name"] for column in columns.json()["items"]] == [
             "host_name",
             "event_code",
         ]
@@ -168,7 +168,7 @@ class TestRoundTripIntoACleanDeployment:
         with client:
             imported = client.post("/api/v1/sources/import", json=bundle, headers=headers)
             listed = client.get("/api/v1/sources", headers=headers)
-            schemas = client.get("/api/v1/schemas?per_page=-1", headers=headers)
+            schemas = client.get("/api/v1/schemas?page_size=1000", headers=headers)
 
         assert imported.status_code == 422
         assert imported.json()["code"] == "unresolved_reference"
@@ -198,11 +198,11 @@ class TestAPinWithNoDefinition:
         with client:
             imported = client.post("/api/v1/sources/import", json=bundle, headers=headers)
             listed = client.get("/api/v1/sources", headers=headers)
-            schemas = client.get("/api/v1/schemas?per_page=-1", headers=headers)
+            schemas = client.get("/api/v1/schemas?page_size=1000", headers=headers)
 
         assert imported.status_code == 422, imported.text
         assert imported.json()["code"] == "unresolved_reference"
-        assert "meta/cisco_ios" in imported.json()["message"]
+        assert "meta/cisco_ios" in imported.json()["detail"]
         # Nothing was written: the check runs before the first write.
         assert "cisco-ios" not in {entry["name"] for entry in listed.json()["items"]}
         assert "meta/cisco_ios" not in {entry["name"] for entry in schemas.json()["items"]}
@@ -225,7 +225,7 @@ class TestAPinWithNoDefinition:
         client, headers = deployment("beta", schemas={"meta/core_tpl": CORE_SCHEMA})
         with client:
             imported = client.post("/api/v1/sources/import", json=bundle, headers=headers)
-            schemas = client.get("/api/v1/schemas?per_page=-1", headers=headers)
+            schemas = client.get("/api/v1/schemas?page_size=1000", headers=headers)
 
         assert imported.status_code == 201, imported.text
         assert "meta/cisco_ios" in {entry["name"] for entry in schemas.json()["items"]}
@@ -237,7 +237,7 @@ def _refused_and_absent(deployment, bundle: dict) -> tuple[Any, set[str], set[st
     with client:
         imported = client.post("/api/v1/sources/import", json=bundle, headers=headers)
         listed = client.get("/api/v1/sources", headers=headers)
-        schemas = client.get("/api/v1/schemas?per_page=-1", headers=headers)
+        schemas = client.get("/api/v1/schemas?page_size=1000", headers=headers)
     sources = {entry["name"] for entry in listed.json()["items"]}
     return imported, sources, {entry["name"] for entry in schemas.json()["items"]}
 
@@ -254,7 +254,7 @@ class TestAPinnedVersionWithNoDefinition:
 
         assert imported.status_code == 422, imported.text
         assert imported.json()["code"] == "unresolved_reference"
-        assert "'9.9.9'" in imported.json()["message"]
+        assert "'9.9.9'" in imported.json()["detail"]
         assert "cisco-ios" not in sources
 
     def test_a_core_reference_at_another_version_does_not_satisfy_the_pin(self, deployment):
@@ -276,7 +276,7 @@ class TestAPinnedVersionWithNoDefinition:
 
         assert imported.status_code == 422, imported.text
         assert imported.json()["code"] == "unresolved_reference"
-        assert "'1.2.0'" in imported.json()["message"]
+        assert "'1.2.0'" in imported.json()["detail"]
         # Nothing was written: the check runs before the first write.
         assert "cisco-ios" not in sources
         assert "meta/cisco_ios" not in schemas
@@ -290,7 +290,7 @@ class TestAPinnedVersionWithNoDefinition:
 
         assert imported.status_code == 422, imported.text
         assert imported.json()["code"] == "unresolved_reference"
-        assert "'9.9.9'" in imported.json()["message"]
+        assert "'9.9.9'" in imported.json()["detail"]
         assert "cisco-ios" not in sources
         assert "meta/cisco_ios" not in schemas
 

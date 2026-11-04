@@ -12,13 +12,12 @@ Wraps ``SchemaManager`` for version management and ``SchemaBuilderV2``
 for DDL pipeline execution.
 """
 
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import (
     APIRouter,
     Depends,
     File,
-    HTTPException,
     Query,
     Request,
     Response,
@@ -27,8 +26,19 @@ from fastapi import (
 )
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 from pydantic.json_schema import SkipJsonSchema
+from scalo.api import (
+    ListParams,
+    ListQuery,
+    Page,
+    ProblemError,
+    list_query,
+    paginate,
+    scalo_extra,
+    sort_by_order,
+)
 
 from dfe_engine.api.body_limits import own_limit, refuse_declared_oversize, too_large
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
@@ -41,17 +51,9 @@ from dfe_engine.api.deps import (
     ttl_settings,
 )
 from dfe_engine.api.errors import (
-    ErrorResponse,
     engine_message,
     no_schema_error,
     raise_exchange_http,
-)
-from dfe_engine.api.pagination import (
-    PaginatedResponse,
-    PaginationParams,
-    apply_schema_type_filter,
-    apply_search,
-    apply_sort,
 )
 from dfe_engine.api.review import routing_audit_detail, set_review_headers
 from dfe_engine.api.v1.sources import require_source_readable
@@ -80,8 +82,8 @@ from dfe_engine.schema.models import (
     MetaSchemaGetResponse,
     MetaSchemaUpdateRequest,
     MetaSchemaVersionWriteResponse,
-    PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
+    SchemaSummaryPage,
     SchemaVersionGet,
     meta_schema_from_create,
     meta_schema_version_write_response,
@@ -192,7 +194,7 @@ class SchemaBuildResult(BaseModel):
     ddl: DDLResult | None = None
 
 
-class SourceSchemaColumnsResponse(PaginatedResponse[SchemaColumn]):
+class SourceSchemaColumnsResponse(Page[SchemaColumn]):
     """Composed source columns plus meta-schema ``resource_type``."""
 
     resource_type: ResourceType = Field(
@@ -527,15 +529,20 @@ class PromoteFieldResponse(BaseModel):
 
 
 # -- Endpoints -----------------------------------------------
+SchemasList = Annotated[
+    ListQuery, Depends(list_query(order_by=("path", "current", "updated_at"), tiebreak="path"))
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedSchemaSummaryResponse,
+    response_model=SchemaSummaryPage,
     dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
 )
 async def list_schemas(
     user: CurrentUser,
     registry: SchemaReg,
-    pagination: PaginationParams = Depends(),
+    query: SchemasList,
     search: str | None = Query(None, description="Search in path"),
     schema_type: list[str] | None = Query(
         None,
@@ -544,14 +551,15 @@ async def list_schemas(
             "e.g. meta, common-header, additional, hunt-results"
         ),
     ),
-    sort_by: str | None = Query(None, description="Sort field (path, current, updated_at)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List all meta schemas with optional filtering."""
     raw = registry.list_schemas()
-    raw = apply_schema_type_filter(raw, schema_type)
+    if schema_type:
+        raw = [
+            row for row in raw if str(row.get("path", "")).strip("/").split("/")[0] in schema_type
+        ]
     raw = apply_search(raw, search, ["path"])
-    raw = apply_sort(raw, sort_by, sort_order)
+    raw = sort_by_order(raw, query.order_by)
     summaries = [
         SchemaSummaryObject(
             name=schema["path"],
@@ -563,8 +571,8 @@ async def list_schemas(
         )
         for schema in raw
     ]
-    return PaginatedSchemaSummaryResponse.from_summaries(
-        summaries, pagination.page, pagination.per_page
+    return SchemaSummaryPage.from_summaries(
+        summaries, query, bound={"search": search, "schema_type": schema_type}
     )
 
 
@@ -577,8 +585,8 @@ async def get_meta_schema(
     schema_path: str,
     user: CurrentUser,
     registry: SchemaReg,
+    query: ListParams,
     version: str = Query(..., description="Schema version to return (required)"),
-    pagination: PaginationParams = Depends(),
     search: str | None = Query(
         None,
         description="Case-insensitive substring search across all column fields",
@@ -603,8 +611,7 @@ async def get_meta_schema(
 ) -> MetaSchemaGetResponse:
     """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``).
 
-    Columns are paginated under ``version.columns``; use ``per_page=-1`` to return all
-    matching columns (after search/filters) in one page.
+    ``items`` is a page of the selected version's columns, after search and filters.
     """
     from dfe_engine.schema.registry import (
         SchemaNotFoundError,
@@ -615,28 +622,17 @@ async def get_meta_schema(
     try:
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     try:
         meta = registry.get_schema(canonical_path)
     except SchemaNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Schema {schema_path!r} not found",
-            },
-        )
+        raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found")
     if version not in meta.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version {version!r} not found for schema {canonical_path!r}",
-            },
+        raise ProblemError(
+            404, f"Version {version!r} not found for schema {canonical_path!r}", code="not_found"
         )
     ver = meta.versions[version]
     version_ids = list(meta.versions.keys())
@@ -653,25 +649,22 @@ async def get_meta_schema(
             searchable_columns=searchable_columns,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
-    columns_page = PaginatedResponse.from_list(
+    filters = {"search": search, "name": name, "type": type_filter, "use_case": use_case}
+    filters |= {"expr": expr, "comment": comment, "attribute": attribute}
+    page = paginate(
         filtered,
-        pagination.page,
-        pagination.per_page,
+        query,
+        bound={**filters, "version": version, "searchable_columns": searchable_columns},
     )
     return MetaSchemaGetResponse(
+        **dict(page),
         resource_type=meta.resource_type,
         current=meta.current,
         selected=version,
-        version=SchemaVersionGet(
-            date=ver.date,
-            type=ver.type,
-            summary=ver.summary,
-            columns=columns_page,
-        ),
+        version=SchemaVersionGet(date=ver.date, type=ver.type, summary=ver.summary),
         path=canonical_path,
         versions=version_ids,
     )
@@ -705,34 +698,24 @@ async def add_meta_schema_version(
     try:
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     if not body.columns:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "code": "validation_error",
-                "message": "columns must contain at least one column",
-            },
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "columns must contain at least one column",
+            code="validation_error",
         )
 
     try:
         current = registry.get_schema_current_version(canonical_path)
     except SchemaNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Schema {schema_path!r} not found",
-            },
-        ) from None
+        raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found") from None
     except SchemaValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     yaml_path = registry._yaml_path(canonical_path)
@@ -752,14 +735,12 @@ async def add_meta_schema_version(
             set_current=True,
         )
     except SchemaVersionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
     except SchemaLoadError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "schema_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="schema_error"
         ) from exc
 
     description = f"schema: {canonical_path} (add version {new_ver})"
@@ -799,43 +780,30 @@ async def delete_meta_schema_version(
     try:
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     try:
         meta = registry.get_schema(canonical_path)
     except SchemaNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Schema {schema_path!r} not found",
-            },
-        ) from None
+        raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found") from None
 
     if version not in meta.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version {version!r} not found for schema {canonical_path!r}",
-            },
+        raise ProblemError(
+            404, f"Version {version!r} not found for schema {canonical_path!r}", code="not_found"
         )
 
     yaml_path = registry._yaml_path(canonical_path)
     try:
         SchemaManager.delete_version(yaml_path, version)
     except SchemaVersionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
     except SchemaLoadError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "schema_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="schema_error"
         ) from exc
 
     description = f"schema: {canonical_path} (delete version {version})"
@@ -866,47 +834,38 @@ async def create_meta_schema(
     try:
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     if body.path is not None:
         try:
             body_path = canonical_schema_path(body.path)
         except SchemaValidationError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={"code": "validation_error", "message": str(exc)},
+            raise ProblemError(
+                status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
             ) from exc
         if body_path != canonical_path:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "path_mismatch",
-                    "message": f"Body path {body.path!r} must match URL path {schema_path!r}",
-                },
+            raise ProblemError(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"Body path {body.path!r} must match URL path {schema_path!r}",
+                code="path_mismatch",
             )
     if registry.find_schema_at_location(canonical_path) is not None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "code": "validation_error",
-                "message": (
-                    f"A meta-schema already exists at {canonical_path!r}. "
-                    f"Change it with PATCH /api/v1/schemas/definitions/{canonical_path}, "
-                    "which adds a version, or DELETE it first"
-                ),
-            },
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"A meta-schema already exists at {canonical_path!r}. "
+            f"Change it with PATCH /api/v1/schemas/definitions/{canonical_path}, "
+            "which adds a version, or DELETE it first",
+            code="validation_error",
         )
     to_save = meta_schema_from_create(body, path=canonical_path)
 
     try:
         SchemaManager.validate_meta_schema_columns(to_save)
     except SchemaVersionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     try:
@@ -915,9 +874,8 @@ async def create_meta_schema(
             created_by=git_author(user),
         )
     except SchemaValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "created")
     return saved.model_copy(update={"path": canonical_path})
@@ -950,37 +908,24 @@ async def update_meta_schema(
     try:
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     try:
         meta = registry.get_schema(canonical_path)
     except SchemaNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Schema {schema_path!r} not found",
-            },
-        )
+        raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found")
 
     if body.summary is not None and not version:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "code": "validation_error",
-                "message": "Query parameter 'version' is required when updating summary",
-            },
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Query parameter 'version' is required when updating summary",
+            code="validation_error",
         )
     if version and version not in meta.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version {version!r} not found for schema {canonical_path!r}",
-            },
+        raise ProblemError(
+            404, f"Version {version!r} not found for schema {canonical_path!r}", code="not_found"
         )
 
     yaml_path = registry._yaml_path(canonical_path)
@@ -990,12 +935,10 @@ async def update_meta_schema(
         if body.summary is not None:
             summary_version = version
             if summary_version is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail={
-                        "code": "validation_error",
-                        "message": "Query parameter 'version' is required when updating summary",
-                    },
+                raise ProblemError(
+                    status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    "Query parameter 'version' is required when updating summary",
+                    code="validation_error",
                 )
             SchemaManager.update_version_summary(yaml_path, summary_version, body.summary)
             description_parts.append(f"update summary for {summary_version}")
@@ -1004,14 +947,12 @@ async def update_meta_schema(
             SchemaManager.set_current(yaml_path, body.current)
             description_parts.append(f"set current to {body.current}")
     except SchemaVersionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
     except SchemaLoadError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "schema_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="schema_error"
         ) from exc
 
     description = f"schema: {canonical_path} ({', '.join(description_parts)})"
@@ -1040,19 +981,12 @@ async def delete_meta_schema(
     try:
         registry.get_schema(schema_path)
     except SchemaNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Schema {schema_path!r} not found",
-            },
-        )
+        raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found")
     try:
         registry.delete_schema(schema_path)
     except SchemaValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", schema_path, "deleted")
 
@@ -1060,6 +994,7 @@ async def delete_meta_schema(
 @router.get(
     "/definitions/{schema_path:path}/export",
     response_model=MetaSchemaExport,
+    openapi_extra=scalo_extra(verb="export"),
     response_model_exclude_none=True,
     dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
 )
@@ -1091,18 +1026,14 @@ async def export_meta_schema(
     try:
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     try:
         return build_meta_schema_export(registry, canonical_path, version=version)
     except SchemaNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Schema {schema_path!r} not found"},
-        ) from None
+        raise ProblemError(404, f"Schema {schema_path!r} not found", code="not_found") from None
     except ExchangeError as exc:
         raise_exchange_http(exc)
 
@@ -1113,7 +1044,6 @@ async def export_meta_schema(
     status_code=status.HTTP_201_CREATED,
     responses={
         409: {
-            "model": ErrorResponse,
             "description": (
                 "A meta schema already exists at the document's path, or that path holds a "
                 "core schema no import may overwrite (code conflict)"
@@ -1148,7 +1078,6 @@ async def import_meta_schema(
     response_model=list[MetaSchemaColumn],
     responses={
         413: {
-            "model": ErrorResponse,
             "description": (
                 "Upload or declared Content-Length exceeds api.elastic_converter_max_upload_bytes "
                 "(HTTP 413, code upload_too_large). Tune via DFE_ENGINE_API_ELASTIC_CONVERTER_* env vars."
@@ -1191,19 +1120,17 @@ async def elastic_converter(
 
     try:
         raw = await _read_upload_capped(file, max_bytes=max_bytes, read_chunk_size=chunk_sz)
-    except HTTPException:
+    except ProblemError:
         raise
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "upload_read_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="upload_read_error"
         ) from exc
     try:
         return ElasticSchemaService.template_json_to_columns(raw)
     except ElasticSchemaConversionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "elastic_convert_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="elastic_convert_error"
         ) from exc
 
 
@@ -1217,17 +1144,14 @@ async def get_schema_columns(
     user: CurrentUser,
     registry: SourceReg,
     schema_registry: SchemaReg,
+    query: ListParams,
     version: str | None = Query(
         None,
         description="Source version id (defaults to deployed_version)",
     ),
-    pagination: PaginationParams = Depends(),
     _auth: None = Depends(require_own_org_action(scopes_dict["source_read"])),
 ) -> SourceSchemaColumnsResponse:
-    """Get composed schema columns for a source version (profile + meta/derived/additional).
-
-    Use ``per_page=-1`` to return all columns in one page.
-    """
+    """Get composed schema columns for a source version (profile + meta/derived/additional)."""
     from dfe_engine.schema.schema_builder_v2 import (
         SchemaBuildError,
         SchemaBuilderV2,
@@ -1240,19 +1164,12 @@ async def get_schema_columns(
     try:
         source = registry.get_source(source_name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source {source_name!r} not found"},
-        )
+        raise ProblemError(404, f"Source {source_name!r} not found", code="not_found")
 
     version_id = version or source.runtime_version_id()
     if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{source_name}'",
-            },
+        raise ProblemError(
+            404, f"Version '{version_id}' not found for source '{source_name}'", code="not_found"
         )
 
     snap = source.versions[version_id]
@@ -1269,23 +1186,16 @@ async def get_schema_columns(
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
     except (SchemaBuildError, SchemaLoadError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "schema_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(400, str(exc), code="schema_error") from exc
 
     all_columns = [_composed_column_to_api(col) for col in columns]
-    page = PaginatedResponse.from_list(
-        all_columns,
-        pagination.page,
-        pagination.per_page,
-    )
+    page = paginate(all_columns, query, bound={"version": version})
     return SourceSchemaColumnsResponse(
         resource_type=_meta_schema_resource_type(
             schema_registry,
             meta_schema_ref=snap.effective_schema().meta_schema,
         ),
-        **page.model_dump(),
+        **dict(page),
     )
 
 
@@ -1317,19 +1227,12 @@ def build_schema(
     try:
         source = registry.get_source(source_name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source {source_name!r} not found"},
-        )
+        raise ProblemError(404, f"Source {source_name!r} not found", code="not_found")
 
     version_id = version or source.runtime_version_id()
     if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{source_name}'",
-            },
+        raise ProblemError(
+            404, f"Version '{version_id}' not found for source '{source_name}'", code="not_found"
         )
 
     snap = source.versions[version_id]
@@ -1347,10 +1250,7 @@ def build_schema(
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
     except (SchemaBuildError, SchemaLoadError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "build_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(400, str(exc), code="build_error") from exc
 
     columns = [_composed_column_to_api(col) for col in result.columns]
 
@@ -1378,7 +1278,7 @@ def _resolve_meta_schema(rel, source_name, schema_registry):
     """Resolve a meta-schema reference: (canonical path, MetaSchema, current columns).
 
     Raises:
-        HTTPException: 404 when the referenced meta-schema is missing.
+        ProblemError: 404 when the referenced meta-schema is missing.
     """
     from dfe_engine.schema.registry import SchemaNotFoundError, canonical_schema_path
 
@@ -1386,12 +1286,8 @@ def _resolve_meta_schema(rel, source_name, schema_registry):
     try:
         meta = schema_registry.get_schema(canonical)
     except SchemaNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Meta-schema '{canonical}' not found for source '{source_name}'",
-            },
+        raise ProblemError(
+            404, f"Meta-schema '{canonical}' not found for source '{source_name}'", code="not_found"
         ) from None
     return canonical, meta, meta.versions[meta.current].columns
 
@@ -1406,27 +1302,19 @@ def _resolve_promote_meta_schema(
     """Meta-schema for promote-field: source config or explicit ``schema_path`` in body."""
     configured = ver.effective_schema().meta_schema
     if schema_path and configured:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "code": "schema_path_conflict",
-                "message": (
-                    f"Source '{source.source}' already has meta_schema {configured!r}; "
-                    "do not set schema_path in the request body"
-                ),
-            },
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Source '{source.source}' already has meta_schema {configured!r}; "
+            "do not set schema_path in the request body",
+            code="schema_path_conflict",
         )
     rel = configured or schema_path
     if not rel:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "code": "no_meta_schema",
-                "message": (
-                    f"Source '{source.source}' has no meta_schema configured; "
-                    "provide schema_path in the request body"
-                ),
-            },
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Source '{source.source}' has no meta_schema configured; "
+            "provide schema_path in the request body",
+            code="no_meta_schema",
         )
     return _resolve_meta_schema(rel, source.source, schema_registry)
 
@@ -1478,12 +1366,10 @@ def _pinned_meta_schema_version(ver, meta: MetaSchema) -> str:
 def _columns_for_meta_version(meta: MetaSchema, version_id: str):
     ver = meta.versions.get(version_id)
     if ver is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "code": "validation_error",
-                "message": f"Meta-schema version {version_id!r} is not defined",
-            },
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            f"Meta-schema version {version_id!r} is not defined",
+            code="validation_error",
         )
     return ver.columns
 
@@ -1516,14 +1402,10 @@ def _ensure_writable_meta_schema_for_promote(
     if existing:
         fork_canonical = canonical_schema_path(existing)
         if schema_registry_path_is_core(fork_canonical, schema_registry):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "code": "core_schema_fork",
-                    "message": (
-                        f"Fork schema {fork_canonical!r} is a core resource and cannot be modified"
-                    ),
-                },
+            raise ProblemError(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"Fork schema {fork_canonical!r} is a core resource and cannot be modified",
+                code="core_schema_fork",
             )
         fork_meta = schema_registry.get_schema(fork_canonical)
         fork_ver = _pinned_meta_schema_version(ver, fork_meta)
@@ -1548,9 +1430,8 @@ def _ensure_writable_meta_schema_for_promote(
             summary=f"Cloned from {canonical} for source {source.source}",
         )
     except (SchemaVersionError, SchemaLoadError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     fork_data = yaml_load(dest_yaml)
@@ -1612,7 +1493,7 @@ def _dedicated_source_table_ready(
     """Whether ``version_id`` is deployed and its ClickHouse table is present.
 
     Raises:
-        HTTPException: 422 when ClickHouse could not be read.
+        ProblemError: 422 when ClickHouse could not be read.
     """
     if source.deployed_version != version_id:
         return False
@@ -1641,7 +1522,7 @@ def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None,
         version's match; null when the dedicated source table is queried whole.
 
     Raises:
-        HTTPException: 422 ``match_not_sampleable`` when the landing table would be
+        ProblemError: 422 ``match_not_sampleable`` when the landing table would be
             read for a source selected by a CEL Fast ``when``, which no table filter
             expresses.
     """
@@ -1668,20 +1549,18 @@ MATCH_NOT_SAMPLEABLE_MESSAGE = (
 """Shown as written: the landing-table filter expresses one plain field test only."""
 
 
-def _not_sampleable(source_name: str, match: Literal["group", "negated", "when"]) -> HTTPException:
+def _not_sampleable(source_name: str, match: Literal["group", "negated", "when"]) -> ProblemError:
     """The 422 for a landing-table read no filter can hold to the source's records."""
-    return HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail={
-            "code": "match_not_sampleable",
-            "message": MATCH_NOT_SAMPLEABLE_MESSAGE,
-            "source": source_name,
-            "match": match,
-        },
+    return ProblemError(
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
+        MATCH_NOT_SAMPLEABLE_MESSAGE,
+        code="match_not_sampleable",
+        source=source_name,
+        match=match,
     )
 
 
-def _promotion_refused(exc: Exception, code: str, source_name: str) -> HTTPException:
+def _promotion_refused(exc: Exception, code: str, source_name: str) -> ProblemError:
     """The 422 for a JSON-path read: the engine's refusal as written, ClickHouse's text logged."""
     message = engine_message(
         exc,
@@ -1689,25 +1568,19 @@ def _promotion_refused(exc: Exception, code: str, source_name: str) -> HTTPExcep
         event="JSON path read failed",
         source=source_name,
     )
-    return HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail={"code": code, "message": message},
-    )
+    return ProblemError(status.HTTP_422_UNPROCESSABLE_CONTENT, message, code=code)
 
 
-def _held_read_refused(exc: Exception) -> HTTPException:
+def _held_read_refused(exc: Exception) -> ProblemError:
     """The 403 for a row read that cannot be held to the caller's orgs."""
-    return HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={"code": "forbidden", "message": str(exc)},
-    )
+    return ProblemError(status.HTTP_403_FORBIDDEN, str(exc), code="forbidden")
 
 
 def _match_query_kwargs(match_rule, source_name: str) -> dict[str, Any]:
     """ClickHouse filter kwargs from a ``SourceMatch`` (or none for whole-table).
 
     Raises:
-        HTTPException: 422 ``match_not_sampleable`` for a group or a negated test,
+        ProblemError: 422 ``match_not_sampleable`` for a group or a negated test,
             which the one-field filter does not express.
     """
     if match_rule is None:
@@ -1731,23 +1604,20 @@ def _resolve_source_version(source, version, source_name):
     """Resolve a source version snapshot (defaults to current).
 
     Raises:
-        HTTPException: 404 when the requested version is not defined.
+        ProblemError: 404 when the requested version is not defined.
     """
     version_id = version or source.current
     try:
         return version_id, source.version(version_id)
     except ValueError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{source_name}'",
-            },
+        raise ProblemError(
+            404, f"Version '{version_id}' not found for source '{source_name}'", code="not_found"
         ) from None
 
 
 @router.get(
     "/{source_name}/json-paths",
+    openapi_extra=scalo_extra(verb="json-paths"),
     response_model=JsonPathsResponse,
     dependencies=[Depends(require_own_org_action(scopes_dict["schema_read"]))],
 )
@@ -1796,10 +1666,7 @@ async def discover_json_paths(
     try:
         source = source_registry.get_source(source_name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Source '{source_name}' not found", code="not_found") from None
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
     clickhouse = request.app.state.settings.clickhouse
@@ -1863,6 +1730,7 @@ async def discover_json_paths(
 
 @router.get(
     "/{source_name}/sample-rows",
+    openapi_extra=scalo_extra(verb="sample-rows"),
     response_model=SampleRowsResponse,
     dependencies=[Depends(require_own_org_action(scopes_dict["schema_read"]))],
 )
@@ -1902,10 +1770,7 @@ async def sample_source_rows(
     try:
         source = source_registry.get_source(source_name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Source '{source_name}' not found", code="not_found") from None
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
     clickhouse = request.app.state.settings.clickhouse
@@ -1956,7 +1821,6 @@ async def sample_source_rows(
     response_model=PromoteFieldResponse,
     responses={
         409: {
-            "model": ErrorResponse,
             "description": (
                 "The source is a core source the engine owns, such as the landing "
                 "source main, whose columns no promotion may change (code conflict)"
@@ -2006,24 +1870,17 @@ async def promote_field(
     try:
         source = source_registry.get_source(source_name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Source '{source_name}' not found", code="not_found") from None
 
     # Refused up front, not at the source write below: that write happens only after the
     # schema fork has been committed, so the registry's own refusal would leave the fork
     # behind and answer 500.
     if source.resource_type == "core":
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": (
-                    f"{CORE_RESOURCE_MUTATION_MESSAGE}: cannot promote a field on source "
-                    f"{source_name!r}, which the engine owns."
-                ),
-            },
+        raise ProblemError(
+            409,
+            f"{CORE_RESOURCE_MUTATION_MESSAGE}: cannot promote a field on source "
+            f"{source_name!r}, which the engine owns.",
+            code="conflict",
         )
 
     _version_id, ver = _resolve_source_version(source, None, source_name)
@@ -2108,13 +1965,11 @@ async def promote_field(
         )
 
     if body.atomic and has_error:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={
-                "code": "promotion_failed",
-                "message": "Atomic promotion aborted: one or more paths failed",
-                "results": [r.model_dump() for r in results],
-            },
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Atomic promotion aborted: one or more paths failed",
+            code="promotion_failed",
+            results=[r.model_dump() for r in results],
         )
 
     if not new_columns:
@@ -2159,9 +2014,8 @@ async def promote_field(
             set_current=True,
         )
     except SchemaVersionError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
 
     description = f"schema: {canonical} (promote {len(new_columns)} JSON field(s))"
@@ -2186,9 +2040,8 @@ async def promote_field(
             routing=review,
         )
     except SourceValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail={"code": "validation_error", "message": str(exc)},
+        raise ProblemError(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc), code="validation_error"
         ) from exc
     audit_resource_change(
         user.user_id, "source", source_name, "updated", routing_audit_detail(review)

@@ -21,8 +21,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
+from scalo.api import ProblemError
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.appmgmt import UnknownAppError, catalogue, contract
@@ -69,15 +70,11 @@ def read_contract(service: str) -> contract.AppContract:
     try:
         catalogue.descriptor(service)
     except UnknownAppError as exc:
-        raise HTTPException(
-            404, detail={"code": "unknown_app", "message": f"no such app: {service}"}
-        ) from exc
+        raise ProblemError(404, f"no such app: {service}", code="unknown_app") from exc
     try:
         return contract.contract(service)
     except contract.ContractError as exc:
-        raise HTTPException(
-            500, detail={"code": "contract_unreadable", "message": str(exc)}
-        ) from exc
+        raise ProblemError(500, str(exc), code="contract_unreadable") from exc
 
 
 @router.get("/{service}", dependencies=[_DEPLOY_READ])

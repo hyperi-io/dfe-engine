@@ -26,8 +26,9 @@ carry ``x-dfe-enum-source`` annotations pointing here.
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
+from scalo.api import ListParams, Page, ProblemError, paginate
 from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, require_action
@@ -65,10 +66,7 @@ class AutoMergeRequest(BaseModel):
 def _gitcrud(request: Request) -> GitCrud:
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
+        raise ProblemError(503, "gitops is not enabled", code="not_configured")
     return gc
 
 
@@ -111,7 +109,7 @@ def put_auto_merge(body: AutoMergeRequest, user: CurrentUser, request: Request) 
     # below with a 403 that carries the reason - no need to also WARN here.
     state = _state(request, warn=False)
     if body.enabled and not state.allowed:
-        raise HTTPException(403, detail={"code": "auto_merge_forbidden", "message": state.reason})
+        raise ProblemError(403, state.reason, code="auto_merge_forbidden")
     if body.enabled:
         logger.warning("AUTO-MERGE enabled via API", actor=user.user_id)
     set_stored(gc, body.enabled, user.user_id)
@@ -148,51 +146,54 @@ def _resource_class(gc: GitCrud, cls: str) -> ResourceClass:
     try:
         return gc.registry.get(cls)
     except UnknownResourceClassError as exc:
-        raise HTTPException(
-            404, detail={"code": "unknown_class", "message": f"unknown resource class '{cls}'"}
-        ) from exc
+        raise ProblemError(404, f"unknown resource class '{cls}'", code="unknown_class") from exc
 
 
 def _require_class_read(request: Request, user: AuthContext, rc: ResourceClass) -> None:
     """Gate on the CLASS's own :read grant - never a blanket one."""
     decision = authorize(user, rc.action("read"), role_config=request.app.state.role_config)
     if not decision.allowed:
-        raise HTTPException(403, detail={"code": "forbidden", "message": decision.reason})
+        raise ProblemError(403, decision.reason, code="forbidden")
 
 
-@router.get("/classes", response_model=list[ClassInfo])
-def list_classes(user: CurrentUser, request: Request) -> list[ClassInfo]:
+@router.get("/classes", response_model=Page[ClassInfo])
+def list_classes(query: ListParams, user: CurrentUser, request: Request) -> Page[ClassInfo]:
     """The resource-class registry - what VarChange.cls may legally name.
 
     Registry metadata only (no resource content), so any authenticated caller
     may read it; the per-class listings below are gated by each class's grant.
     """
     gc = _gitcrud(request)
-    return [
-        ClassInfo(
-            name=rc.name,
-            rbac_prefix=rc.rbac_prefix or rc.name,
-            directory=rc.directory,
-            versioned=rc.versioned,
-            action_writable=(rc.rbac_prefix or rc.name) != "governance",
-        )
-        for rc in gc.registry.all()
-    ]
+    return paginate(
+        [
+            ClassInfo(
+                name=rc.name,
+                rbac_prefix=rc.rbac_prefix or rc.name,
+                directory=rc.directory,
+                versioned=rc.versioned,
+                action_writable=(rc.rbac_prefix or rc.name) != "governance",
+            )
+            for rc in gc.registry.all()
+        ],
+        query,
+    )
 
 
-@router.get("/classes/{cls}/resources", response_model=list[str])
-def list_class_resources(cls: str, user: CurrentUser, request: Request) -> list[str]:
+@router.get("/classes/{cls}/resources", response_model=Page[str])
+def list_class_resources(
+    query: ListParams, cls: str, user: CurrentUser, request: Request
+) -> Page[str]:
     """Resource names in a class - what VarChange.name may legally name."""
     gc = _gitcrud(request)
     rc = _resource_class(gc, cls)
     _require_class_read(request, user, rc)
-    return gc.list(cls)
+    return paginate(gc.list(cls), query)
 
 
-@router.get("/classes/{cls}/resources/{name}/vars", response_model=list[VarEntry])
+@router.get("/classes/{cls}/resources/{name}/vars", response_model=Page[VarEntry])
 def list_class_resource_vars(
-    cls: str, name: str, user: CurrentUser, request: Request
-) -> list[VarEntry]:
+    query: ListParams, cls: str, name: str, user: CurrentUser, request: Request
+) -> Page[VarEntry]:
     """Flattened dot-path vars of one resource - what VarChange.path may name.
 
     Values ride along so a select can show the current value beside each path, with
@@ -204,20 +205,23 @@ def list_class_resource_vars(
     try:
         validate_name(name)
     except CommitPolicyError as exc:
-        raise HTTPException(400, detail={"code": "invalid_name", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_name") from exc
     policy = getattr(request.app.state, "policy_store", None)
     try:
         flat = shown_vars(gc, cls, name)
     except ResourceNotFoundError as exc:
-        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
-    return [
-        VarEntry(
-            path=path,
-            value=value,
-            protected=bool(policy and policy.is_protected(cls, name, path)),
-        )
-        for path, value in flat.items()
-    ]
+        raise ProblemError(404, str(exc), code="not_found") from exc
+    return paginate(
+        [
+            VarEntry(
+                path=path,
+                value=value,
+                protected=bool(policy and policy.is_protected(cls, name, path)),
+            )
+            for path, value in flat.items()
+        ],
+        query,
+    )
 
 
 class LogEntryModel(BaseModel):
@@ -302,7 +306,7 @@ def get_log(
             gc, limit=limit, before=before, applied_revision=applied_revision
         )
     except UnknownCursorError as exc:
-        raise HTTPException(400, detail={"code": "unknown_cursor", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="unknown_cursor") from exc
     if group_by is not None:
         return GroupedLogResponse(
             groups=[

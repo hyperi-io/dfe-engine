@@ -97,7 +97,7 @@ class TestApiKeyAuthentication:
         assert resp.status_code == 401
         body = resp.json()
         assert body["code"] == "unauthorized"
-        assert body["message"] == "API key expired"
+        assert body["detail"] == "API key expired"
 
     def test_oidc_takes_precedence_over_api_key(self, client: TestClient, app, test_api_key: str):
         """OIDC headers take precedence over API key."""

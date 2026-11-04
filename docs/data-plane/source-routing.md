@@ -73,7 +73,7 @@ A match is one test, or `all` or `any` of several, nested up to four groups deep
 
 A match that compiles to more than 32 rows is refused at save. Move the `any` outward. A source may carry `when`, a CEL Fast condition, in place of `match`. It compiles to one row with that `when`, and the save checks it under the profile the receiver compiles with, so regex, iteration and time functions are refused with the span of the call.
 
-Every save compiles the source's rows and checks them with scalo.rules as the receiver will. A refusal is a 422 `invalid_rule`, each problem with its field and, for `when`, its UTF-16 span in `context.rule_errors`. A stored block that no longer compiles is left out of the rule set with a loud warning rather than failing the whole receiver config, and `GET /api/v1/ingest/rules` lists it with `compiled: false`.
+Every save compiles the source's rows and checks them with scalo.rules as the receiver will. A refusal is a 422 `invalid_rule`, each problem with its field and, for `when`, its UTF-16 span in `rule_errors`. A stored block that no longer compiles is left out of the rule set with a loud warning rather than failing the whole receiver config, and `GET /api/v1/ingest/rules` lists it with `compiled: false`.
 
 ### Rule order
 
@@ -82,7 +82,7 @@ Blocks run in the order `governance/settings/ingest-order.yaml` stores, one list
 | Answer | When |
 |---|---|
 | 200 | stored, and the receiver rules recompiled. `reload: hot` is the receiver taking it where it stands |
-| 409 `order_conflict` | the list names other blocks than the field has now, the current list in `context.blocks` |
+| 409 `order_conflict` | the list names other blocks than the field has now, the current list in `blocks` |
 | 412 `etag_mismatch` | the order changed since it was read |
 | 422 `invalid_order` | a block listed twice, or the pinned `default` |
 | 428 | no `If-Match` |

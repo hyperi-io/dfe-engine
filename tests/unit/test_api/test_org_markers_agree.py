@@ -158,7 +158,7 @@ def test_an_unknown_marker_gets_nothing_on_every_path(app, api_settings, acme, t
     assert connection.json()["code"] == "no_single_org"
     assert group_user_name("stray-group") not in _pins(app, api_settings)
     assert sample.status_code == 403, sample.text
-    assert "no registered org" in sample.json()["message"]
+    assert "no registered org" in sample.json()["detail"]
     assert table.reads == []
 
 

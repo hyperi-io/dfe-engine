@@ -37,8 +37,9 @@ is the read that says where it landed; ``source:read`` gates it.
 from dataclasses import dataclass
 from typing import NamedTuple
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
+from scalo.api import ProblemError
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
@@ -161,25 +162,22 @@ async def hyperdx_connection(
     """
     identity = _resolve_identity(request, user)
     if isinstance(identity, _Refusal):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"code": identity.code, "message": identity.message},
-        )
+        raise ProblemError(status.HTTP_403_FORBIDDEN, identity.message, code=identity.code)
 
     store = secrets_store(request)
     password = await run_blocking(lambda: store.get_or_none(identity.secret_path)) or ""
     if not password:
         if identity.username == _PLATFORM_USERNAME:
-            detail = {
-                "code": "platform_reader_unprovisioned",
-                "message": "the platform ClickHouse reader has no credential yet",
-            }
-        else:
-            detail = {
-                "code": "org_unprovisioned",
-                "message": f"org '{identity.name}' has no ClickHouse credential yet",
-            }
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=detail)
+            raise ProblemError(
+                503,
+                "the platform ClickHouse reader has no credential yet",
+                code="platform_reader_unprovisioned",
+            )
+        raise ProblemError(
+            503,
+            f"org '{identity.name}' has no ClickHouse credential yet",
+            code="org_unprovisioned",
+        )
 
     return HyperDXConnection(
         name=identity.name,
@@ -217,12 +215,10 @@ class HyperDXSourcesResponse(BaseModel):
 def _require_every_org_reader(request: Request, user: CurrentUser) -> None:
     """Refuse a caller held to its orgs: a team is an org's ClickHouse user, so the listing spans them all."""
     if held_source_orgs(request, user) is not None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "org_not_granted",
-                "message": "This listing spans every org, and the caller is held to its own",
-            },
+        raise ProblemError(
+            status.HTTP_403_FORBIDDEN,
+            "This listing spans every org, and the caller is held to its own",
+            code="org_not_granted",
         )
 
 
@@ -244,18 +240,18 @@ async def hyperdx_sources(request: Request) -> HyperDXSourcesResponse:
     """
     client = getattr(request.app.state, "hyperdx_client", None)
     if client is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "hyperdx_absent", "message": "this deployment does not include Search"},
+        raise ProblemError(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "this deployment does not include Search",
+            code="hyperdx_absent",
         )
 
     from dfe_engine.hyperdx.sources import list_sources_by_team
 
     listing = await list_sources_by_team(client)
     if listing is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={"code": "hyperdx_unreachable", "message": "Search did not answer"},
+        raise ProblemError(
+            status.HTTP_503_SERVICE_UNAVAILABLE, "Search did not answer", code="hyperdx_unreachable"
         )
 
     return HyperDXSourcesResponse(

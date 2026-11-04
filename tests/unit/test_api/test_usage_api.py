@@ -392,7 +392,7 @@ def test_a_held_caller_naming_an_org_it_does_not_hold_learns_nothing_about_it(te
 
     assert resp.status_code == 403, resp.text
     body = resp.json()
-    assert (body["code"], body["message"]) == (
+    assert (body["code"], body["detail"]) == (
         "org_not_granted",
         f"The caller holds no org '{org}'",
     )

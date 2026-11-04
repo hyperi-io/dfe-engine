@@ -32,12 +32,14 @@ A membership change is mirrored onto a local account's ``groups`` list, never on
 
 import unicodedata
 from collections.abc import Iterable
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field, field_validator
+from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 from scalo.logger import logger
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     CurrentUser,
     bound_account,
@@ -47,12 +49,6 @@ from dfe_engine.api.deps import (
     live_role_config,
     provider_bindings,
     require_action,
-)
-from dfe_engine.api.pagination import (
-    PaginatedResponse,
-    PaginationParams,
-    apply_search,
-    apply_sort,
 )
 from dfe_engine.auth import AuthorizationError, RoleConfig, Scope
 from dfe_engine.auth.audit import audit_group_change, audit_permission_denied
@@ -193,18 +189,15 @@ def _visible(request: Request, user, group: Group, member: str | None, held: set
     return is_action_allowed(request, user, scopes_dict["group_read"], scope=scope_of(group))
 
 
-def _not_found(name: str) -> HTTPException:
-    return HTTPException(
-        status_code=404,
-        detail={"code": "not_found", "message": f"Group '{name}' not found"},
-    )
+def _not_found(name: str) -> ProblemError:
+    return ProblemError(404, f"Group '{name}' not found", code="not_found")
 
 
 def _visible_group(request: Request, user, name: str) -> Group:
     """The stored group *name* when the session sees it (:func:`_visible`).
 
     Raises:
-        HTTPException: The 404 a missing group answers, for one outside the caller's scope too.
+        ProblemError: The 404 a missing group answers, for one outside the caller's scope too.
     """
     group = request.app.state.group_store.get(name)
     if group is None or not _visible(
@@ -305,23 +298,17 @@ def _refuse_bad_link(
         _refuse_unknown_source_provider(name=source_provider, request=request)
     changes_link = (changes_source_id) or (changes_source_provider)
     if changes_link and source_id and not (source_provider):
-        raise HTTPException(
-            detail={
-                "code": "missing_source_provider",
-                "message": "a source_id needs a source_provider naming the provider whose logins it answers",
-            },
-            status_code=422,
+        raise ProblemError(
+            422,
+            "a source_id needs a source_provider naming the provider whose logins it answers",
+            code="missing_source_provider",
         )
     if not (changes_source_id) or not (source_id):
         return
     groups = request.app.state.group_store.list()
     if source_id_holder(groups=groups, name=name, source_id=source_id) is not None:
-        raise HTTPException(
-            detail={
-                "code": "conflict",
-                "message": f"source_id {source_id!r} is already another group's",
-            },
-            status_code=409,
+        raise ProblemError(
+            409, f"source_id {source_id!r} is already another group's", code="conflict"
         )
 
 
@@ -336,7 +323,7 @@ def _refuse_identifier_collision(
         message = f"name {name!r} is already another group's source_id"
     else:
         message = f"source_id {source_id!r} is already another group's name"
-    raise HTTPException(detail={"code": "identifier_taken", "message": message}, status_code=409)
+    raise ProblemError(409, message, code="identifier_taken")
 
 
 def _refuse_malformed_source_id(*, source_id: str) -> None:
@@ -350,9 +337,7 @@ def _refuse_malformed_source_id(*, source_id: str) -> None:
     elif any(unicodedata.category(character) == "Cc" for character in source_id):
         problem = "source_id must not contain control characters"
     if problem:
-        raise HTTPException(
-            detail={"code": "invalid_source_id", "message": problem}, status_code=422
-        )
+        raise ProblemError(422, problem, code="invalid_source_id")
 
 
 def _refuse_unknown_source_provider(*, name: str, request: Request) -> None:
@@ -367,9 +352,7 @@ def _refuse_unknown_source_provider(*, name: str, request: Request) -> None:
         )
     else:
         return
-    raise HTTPException(
-        detail={"code": "invalid_source_provider", "message": message}, status_code=422
-    )
+    raise ProblemError(422, message, code="invalid_source_provider")
 
 
 def check_role_assignment(request: Request, user, roles: Iterable[str], scope: Scope) -> None:
@@ -438,12 +421,8 @@ def _refuse_last_admin_member_removals(
         removed=dropped,
     ):
         return
-    raise HTTPException(
-        status_code=409,
-        detail={
-            "code": "last_admin",
-            "message": f"Cannot remove the last usable system admin from '{group_name}'",
-        },
+    raise ProblemError(
+        409, f"Cannot remove the last usable system admin from '{group_name}'", code="last_admin"
     )
 
 
@@ -464,10 +443,7 @@ async def create_group(
     try:
         validate_group_scope(body.scope)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "invalid_scope", "message": str(exc)},
-        ) from exc
+        raise ProblemError(422, str(exc), code="invalid_scope") from exc
 
     target = Group(name=body.name, scope=body.scope)
     check_action(request, user, scopes_dict["group_write"], scope=scope_of(target))
@@ -479,10 +455,7 @@ async def create_group(
     org_registry = getattr(request.app.state, "org_registry", None)
     # With no registry to check against, no org is known to exist.
     if org and (org_registry is None or org_registry.get(org) is None):
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "invalid_scope", "message": f"Org '{org}' not found"},
-        )
+        raise ProblemError(422, f"Org '{org}' not found", code="invalid_scope")
 
     changes_source_id, changes_source_provider = _link_changes(
         before=None, source_id=body.source_id, source_provider=body.source_provider
@@ -498,16 +471,13 @@ async def create_group(
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
     # Names are unique across every org, so a caller that cannot see every group learns only this.
-    unavailable = HTTPException(
-        status_code=409,
-        detail={"code": "conflict", "message": f"Group name '{body.name}' is not available"},
-    )
+    unavailable = ProblemError(409, f"Group name '{body.name}' is not available", code="conflict")
     sees_every_group = is_action_allowed(request, user, scopes_dict["group_read"])
     try:
         _refuse_identifier_collision(
             groups=store.list(), name=body.name, source_id=body.source_id, target=body.name
         )
-    except HTTPException as exc:
+    except ProblemError as exc:
         if sees_every_group:
             raise
         raise unavailable from exc
@@ -525,10 +495,7 @@ async def create_group(
     except GroupExistsError as exc:
         if not sees_every_group:
             raise unavailable from exc
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": f"Group '{body.name}' already exists"},
-        ) from exc
+        raise ProblemError(409, f"Group '{body.name}' already exists", code="conflict") from exc
     request_ch_rbac_reconcile(request.app.state)
     sync_account_groups_for_membership_change(
         account_store,
@@ -550,14 +517,15 @@ async def create_group(
     return _response(group)
 
 
-@router.get("", response_model=PaginatedResponse[GroupResponse])
+GroupsList = Annotated[ListQuery, Depends(list_query(order_by=("name", "scope"), tiebreak="name"))]
+
+
+@router.get("", response_model=Page[GroupResponse])
 async def list_groups(
     user: CurrentUser,
     request: Request,
-    pagination: PaginationParams = Depends(),
+    query: GroupsList,
     search: str | None = Query(None, description="Search in group name/description"),
-    sort_by: str | None = Query(None, description="Sort field (name, scope)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List groups visible to the caller (own memberships + scope grants), paginated."""
     from dfe_engine.auth.groups import GroupStore
@@ -568,9 +536,9 @@ async def list_groups(
     visible = [g for g in store.list() if _visible(request, user, g, member, held)]
     rows = [_response(g).model_dump() for g in visible]
     rows = apply_search(rows, search, ["name", "description"])
-    rows = apply_sort(rows, sort_by, sort_order)
+    rows = sort_by_order(rows, query.order_by)
     summaries = [GroupResponse.model_validate(row) for row in rows]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(summaries, query, bound={"search": search})
 
 
 @router.get("/{name}", response_model=GroupResponse)
@@ -762,10 +730,7 @@ async def delete_group(
     try:
         store.delete(name)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": str(exc)},
-        ) from exc
+        raise ProblemError(409, str(exc), code="conflict") from exc
     request_ch_rbac_reconcile(request.app.state)
     audit_group_change(
         admin_id=user.user_id,
@@ -797,10 +762,7 @@ async def get_group_attributes(
     store: GroupStore = request.app.state.group_store
     group = store.get(name)
     if group is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+        raise ProblemError(404, f"Group '{name}' not found", code="not_found")
     return {"attributes": group.attributes}
 
 
@@ -821,10 +783,7 @@ async def put_group_attributes(
     try:
         group = store.set_attributes(name, body.attributes)
     except KeyError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        ) from exc
+        raise ProblemError(404, f"Group '{name}' not found", code="not_found") from exc
     audit_group_change(user.user_id, name, "attributes_updated")
     return {"attributes": group.attributes}
 
@@ -847,10 +806,7 @@ async def get_group_sensitive_attributes(
 
     store: GroupStore = request.app.state.group_store
     if store.get(name) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+        raise ProblemError(404, f"Group '{name}' not found", code="not_found")
     return {"attributes": request.app.state.group_sensitive_attributes.get(name)}
 
 
@@ -869,10 +825,7 @@ async def put_group_sensitive_attributes(
 
     store: GroupStore = request.app.state.group_store
     if store.get(name) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+        raise ProblemError(404, f"Group '{name}' not found", code="not_found")
     request.app.state.group_sensitive_attributes.put(name, body.attributes)
     audit_group_change(user.user_id, name, "sensitive_attributes_updated")
     return {"attributes": request.app.state.group_sensitive_attributes.get(name)}

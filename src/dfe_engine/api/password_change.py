@@ -21,7 +21,8 @@ also log out. The setup status is public and never reaches this gate.
 
 from typing import Any
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
+from scalo.api import ProblemError
 
 from dfe_engine.api.errors import ErrorCode
 from dfe_engine.api.metrics import ApiMetrics
@@ -69,7 +70,7 @@ def refuse_until_password_changed(request: Request, account: Any) -> None:
         account: The session's store account, or None when it has none.
 
     Raises:
-        HTTPException: 403 ``password_change_required`` on any route outside
+        ProblemError: 403 ``password_change_required`` on any route outside
             :data:`ALLOWED_BEFORE_CHANGE`.
     """
     if account is None or not getattr(account, "password_change_required", False):
@@ -79,15 +80,11 @@ def refuse_until_password_changed(request: Request, account: Any) -> None:
     metrics = getattr(request.app.state, "api_metrics", None) or ApiMetrics()
     metrics.password_change_refused(request.method, _area(request))
     method, change_path = CHANGE_PASSWORD_ROUTE
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail={
-            "code": ErrorCode.PASSWORD_CHANGE_REQUIRED,
-            "message": (
-                f"Account '{account.username}' is on an issued password and must change "
-                f"it before using the API: {method} {change_path}"
-            ),
-        },
+    raise ProblemError(
+        status.HTTP_403_FORBIDDEN,
+        f"Account '{account.username}' is on an issued password and must change "
+        f"it before using the API: {method} {change_path}",
+        code=ErrorCode.PASSWORD_CHANGE_REQUIRED,
     )
 
 

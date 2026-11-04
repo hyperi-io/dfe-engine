@@ -217,7 +217,7 @@ class TestUnreadableBackend:
         body = resp.json()
         assert body["code"] == "invalid_binding"
         assert [e["field"] for e in body["errors"]] == ["listeners"]
-        assert "DFE_ENGINE_SECRETS_PROVIDER=ansible_vault" in body["errors"][0]["message"]
+        assert "DFE_ENGINE_SECRETS_PROVIDER=ansible_vault" in body["errors"][0]["detail"]
         assert _stored_tokens(app, "agents") == []
 
 

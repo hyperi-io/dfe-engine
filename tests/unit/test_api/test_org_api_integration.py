@@ -99,7 +99,7 @@ class TestOrgApiWithLifecycle:
         assert resp.status_code == 404
         data = resp.json()
         assert "code" in data
-        assert "message" in data
+        assert "detail" in data
 
     def test_update_org_display_name(self, client, admin_headers):
         """PUT /api/v1/orgs/{name} updates display_name."""

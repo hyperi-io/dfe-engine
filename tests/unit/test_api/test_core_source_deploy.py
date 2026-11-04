@@ -55,7 +55,7 @@ class TestCoreSourceDeploy:
 
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "conflict"
-        assert "main" in resp.json()["message"]
+        assert "main" in resp.json()["detail"]
 
     def test_a_dry_run_goes_on_to_the_build(self, core_client: TestClient, admin_headers: dict):
         # The tmp schemas tree holds no meta schema, so a dry run that got past the

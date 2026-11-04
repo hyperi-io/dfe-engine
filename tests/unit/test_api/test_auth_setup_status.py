@@ -430,9 +430,9 @@ def test_disabled_break_glass_login_is_403_with_a_reason(tmp_path):
             body = resp.json()
             assert body["code"] == "breakglass_disabled"
             # It names the setting and the file an operator edits, never the internal class.
-            assert breakglass.KEY_ENABLED in body["message"]
-            assert "governance/settings/auth.yaml" in body["message"]
-            assert breakglass.CLASS not in body["message"]
+            assert breakglass.KEY_ENABLED in body["detail"]
+            assert "governance/settings/auth.yaml" in body["detail"]
+            assert breakglass.CLASS not in body["detail"]
     finally:
         _registries.clear()
 

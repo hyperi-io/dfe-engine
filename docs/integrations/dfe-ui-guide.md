@@ -29,7 +29,7 @@ engine (the brain + API), and HyperDX (data exploration).
 
 This part is genuinely well done:
 
-- The engine publishes an **OpenAPI spec** (`dfe-engine/openapi-spec/openapi.json`) --
+- The engine publishes an **OpenAPI spec** (`dfe-engine/openapi/openapi.json`) --
   a machine-readable description of every endpoint, its inputs and outputs.
 - dfe-ui runs a tool (`openapi-typescript`) that turns that spec into TypeScript
   **types** (`packages/dfe-engine-types`). So the UI code knows, at compile time,
@@ -37,7 +37,7 @@ This part is genuinely well done:
   and the spec updates, the UI fails to compile rather than breaking silently.
 - A small hand-written client (`createApiClient`) uses those types for `get/post/
   put/delete`. List screens use TanStack Query's `useInfiniteQuery` against the
-  engine's `PaginatedResponse` (`items` + `next_page`).
+  engine's `Page` (`items` + `next_page_token`).
 
 **Login / auth:** the UI uses NextAuth with a username/password form that POSTs to
 the engine's `/api/v1/auth/login`, gets a JWT (bearer token), stores it in a secure

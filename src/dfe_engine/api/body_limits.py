@@ -17,13 +17,12 @@ its own bound with :func:`own_limit`.
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import HTTPException, Request, status
-from fastapi.responses import JSONResponse
+from fastapi import Request, status
 from fastapi.routing import iter_route_contexts
+from scalo.api import ProblemError, problem_response
 from starlette.routing import Match
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from dfe_engine.api.errors import ErrorResponse, _error_response_json
 from dfe_engine.settings import DFESettings
 
 TOO_LARGE_CODE = "payload_too_large"
@@ -37,12 +36,9 @@ type Bound = Callable[[DFESettings], int]
 """The most a route accepts, in bytes, read from the settings on each request."""
 
 
-def too_large(code: str, message: str) -> HTTPException:
+def too_large(code: str, message: str) -> ProblemError:
     """The 413 a capped route answers with."""
-    return HTTPException(
-        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
-        detail={"code": code, "message": message},
-    )
+    return ProblemError(status.HTTP_413_CONTENT_TOO_LARGE, message, code=code)
 
 
 def refuse_declared_oversize(request: Request, *, limit: int, code: str, message: str) -> None:
@@ -152,11 +148,7 @@ class RequestBodyCapMiddleware:
             body = await read_body_capped(
                 Request(scope, receive), limit=limit, code=TOO_LARGE_CODE, message=message
             )
-        except HTTPException as exc:
-            refusal = JSONResponse(
-                status_code=exc.status_code,
-                content=_error_response_json(ErrorResponse(code=TOO_LARGE_CODE, message=message)),
-            )
-            await refusal(scope, receive, send)
+        except ProblemError as exc:
+            await problem_response(exc.problem, exc.headers)(scope, receive, send)
             return
         await self.app(scope, _replay(body, receive), send)

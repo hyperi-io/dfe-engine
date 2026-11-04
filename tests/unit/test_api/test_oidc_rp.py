@@ -482,7 +482,7 @@ def test_validate_return_to_accepts_relative_and_trusted_origins():
 
 def test_validate_return_to_rejects_other_origins():
     import pytest
-    from fastapi import HTTPException
+    from scalo.api import ProblemError
 
     from dfe_engine.api.v1.oidc_login import validate_return_to
 
@@ -501,9 +501,9 @@ def test_validate_return_to_rejects_other_origins():
         "http://localhost:3001/login/oidc",
         "https://dfe.example.evil/login",
     ):
-        with pytest.raises(HTTPException) as excinfo:
+        with pytest.raises(ProblemError) as excinfo:
             validate_return_to(bad, origin, ["http://localhost:3000"])
-        assert excinfo.value.status_code == 400
+        assert excinfo.value.status == 400
 
 
 def test_a_production_posture_trusts_no_localhost_by_default(client, app):
@@ -708,7 +708,7 @@ def test_callback_refuses_an_identity_whose_groups_link_no_role(client, app, aud
 
     assert resp.status_code == 401, resp.text
     body = resp.json()
-    assert (body["code"], body["message"]) == ("no_role_granted", NO_ROLE_MESSAGE)
+    assert (body["code"], body["detail"]) == ("no_role_granted", NO_ROLE_MESSAGE)
     assert "access_token" not in body
     assert oidc_login.TOKEN_COOKIE not in resp.cookies
     assert app.state.account_store.get("stub-user") is None
@@ -938,7 +938,7 @@ def test_callback_refuses_a_disabled_external_account(client, app):
 
     assert resp.status_code == 401
     assert "access_token" not in resp.json()
-    assert resp.json()["message"] == "Account disabled"
+    assert resp.json()["detail"] == "Account disabled"
     assert store.get("stub-user").last_login_at == ""
 
 
@@ -952,7 +952,7 @@ def test_callback_refuses_a_blocked_external_account(client, app):
 
     assert resp.status_code == 401
     assert "access_token" not in resp.json()
-    assert resp.json()["message"] == "Account blocked"
+    assert resp.json()["detail"] == "Account blocked"
     assert store.get("stub-user").last_login_at == ""
 
 

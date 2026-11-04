@@ -5,13 +5,13 @@ from typing import Any, get_args
 
 import pytest
 from pydantic import ValidationError
+from scalo.api import ListQuery
 
 from dfe_engine.appmgmt.catalogue import transform_engines
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
     FetcherRoute,
     FetcherTopic,
-    PaginatedSourceSummaryResponse,
     SchemaColumn,
     Source,
     SourceFetcher,
@@ -19,6 +19,7 @@ from dfe_engine.source.models import (
     SourceMatch,
     SourceSchema,
     SourceSummaryObject,
+    SourceSummaryPage,
     SourceTransform,
     SourceVersion,
     SourceVersionGetResponse,
@@ -2157,7 +2158,7 @@ class TestSourceVersionGetResponse:
         assert resp.version.match.value == "x"
 
 
-class TestPaginatedSourceSummaryResponse:
+class TestSourceSummaryPage:
     def test_from_summaries_pagination_and_tree(self):
         objs = [
             SourceSummaryObject(
@@ -2175,8 +2176,8 @@ class TestPaginatedSourceSummaryResponse:
                 current_table_topic_type="main",
             ),
         ]
-        resp = PaginatedSourceSummaryResponse.from_summaries(objs, page=1, per_page=1)
-        assert resp.total == 2
+        resp = SourceSummaryPage.from_summaries(objs, ListQuery(page_size=1), {})
+        assert resp.total_size == 2
         assert len(resp.items) == 1
         root_names = {obj.name for obj in resp.objects.items}
         assert root_names == {"aws-cloudtrail", "syslog"}

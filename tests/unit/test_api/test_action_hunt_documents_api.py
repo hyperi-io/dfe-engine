@@ -105,8 +105,8 @@ def test_an_action_that_breaks_a_hunt_is_422(
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["code"] == "invalid_document"
-    assert body["message"].startswith("hunts/windows_hunt: ")
-    assert message in body["message"]
+    assert body["detail"].startswith("hunts/windows_hunt: ")
+    assert message in body["detail"]
     assert crud.get("hunts", "windows_hunt") == _HUNT
 
 
@@ -129,8 +129,8 @@ def test_an_action_that_breaks_a_rules_condition_is_422(client, app, admin_heade
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["code"] == "invalid_document"
-    assert body["message"].startswith("rules/certutil: ")
-    assert "may not call url()" in body["message"]
+    assert body["detail"].startswith("rules/certutil: ")
+    assert "may not call url()" in body["detail"]
     assert crud.get("rules", "certutil") == _RULE
 
 
