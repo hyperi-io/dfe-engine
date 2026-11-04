@@ -32,9 +32,9 @@ class TestPacks:
     def test_lists_reference_packs(self, client, admin_headers):
         r = client.get("/api/v1/synthetic-data/packs", headers=admin_headers)
         assert r.status_code == 200, r.text
-        refs = {p["ref"] for p in r.json()}
+        refs = {p["ref"] for p in r.json()["items"]}
         assert {"meta/syslog", "meta/otel/logs", "meta/beats/filebeat"} <= refs
-        syslog = next(p for p in r.json() if p["ref"] == "meta/syslog")
+        syslog = next(p for p in r.json()["items"] if p["ref"] == "meta/syslog")
         assert syslog["columns"] > 0
         assert syslog["scenarios"] > 0
 
@@ -168,10 +168,10 @@ class TestStream:
             },
             headers=admin_headers,
         )
-        assert r.status_code == 200, r.text
+        assert r.status_code == 202, r.text
         body = r.json()
-        assert body["status"] == "completed"
-        summary = body["result"]
+        assert body["done"] is True
+        summary = body["response"]
         assert summary["emitted"] == 5
         assert summary["failed"] == 5
         assert summary["sent"] == 0
@@ -189,12 +189,21 @@ class TestStream:
             headers=admin_headers,
         ).json()
         got = client.get(
-            f"/api/v1/synthetic-data/streams/{submit['task_id']}", headers=admin_headers
+            f"/api/v1/synthetic-data/streams/{submit['metadata']['id']}", headers=admin_headers
         )
         assert got.status_code == 200
-        assert got.json()["status"] == "completed"
+        assert got.json()["metadata"]["status"] == "completed"
         listed = client.get("/api/v1/synthetic-data/streams", headers=admin_headers)
-        assert any(t["id"] == submit["task_id"] for t in listed.json())
+        assert any(op["name"] == submit["name"] for op in listed.json()["items"])
+
+    @pytest.mark.parametrize(
+        ("method", "suffix"), [("GET", ""), ("POST", "/cancel")], ids=["poll", "cancel"]
+    )
+    def test_an_unknown_stream_is_404(self, client, admin_headers, method, suffix):
+        r = client.request(
+            method, f"/api/v1/synthetic-data/streams/not-a-task{suffix}", headers=admin_headers
+        )
+        assert r.status_code == 404
 
     def test_unbounded_stream_rejected(self, client, admin_headers):
         r = client.post(
@@ -229,14 +238,6 @@ class TestStream:
         )
         assert r.status_code == 400
 
-    def test_unknown_task_404(self, client, admin_headers):
-        r = client.get("/api/v1/synthetic-data/streams/not-a-task", headers=admin_headers)
-        assert r.status_code == 404
-
-    def test_cancel_unknown_task_404(self, client, admin_headers):
-        r = client.delete("/api/v1/synthetic-data/streams/not-a-task", headers=admin_headers)
-        assert r.status_code == 404
-
     def test_concurrent_stream_cap_enforced(self, client, admin_headers):
         # Long low-rate streams stay RUNNING; the default cap is 3.
         started = []
@@ -251,8 +252,8 @@ class TestStream:
                 },
                 headers=admin_headers,
             )
-            assert r.status_code == 200, r.text
-            started.append(r.json()["task_id"])
+            assert r.status_code == 202, r.text
+            started.append(r.headers["location"])
         try:
             r = client.post(
                 "/api/v1/synthetic-data/stream",
@@ -266,8 +267,8 @@ class TestStream:
             assert r.status_code == 409
             assert "too_many_streams" in r.text
         finally:
-            for task_id in started:
-                client.delete(f"/api/v1/synthetic-data/streams/{task_id}", headers=admin_headers)
+            for location in started:
+                client.post(f"{location}/cancel", headers=admin_headers)
 
     def test_viewer_cannot_stream(self, client, viewer_headers):
         r = client.post(
@@ -298,12 +299,10 @@ def test_a_submission_past_the_task_cap_is_429(client, admin_headers):
     }
     try:
         first = client.post("/api/v1/synthetic-data/stream", json=slow, headers=admin_headers)
-        assert first.status_code == 200, first.text
+        assert first.status_code == 202, first.text
         second = client.post("/api/v1/synthetic-data/stream", json=slow, headers=admin_headers)
         assert second.status_code == 429, second.text
         assert second.json()["code"] == "too_many_tasks"
-        client.delete(
-            f"/api/v1/synthetic-data/streams/{first.json()['task_id']}", headers=admin_headers
-        )
+        client.post(f"{first.headers['location']}/cancel", headers=admin_headers)
     finally:
         app.state.task_manager = original

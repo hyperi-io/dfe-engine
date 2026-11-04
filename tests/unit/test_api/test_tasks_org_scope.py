@@ -52,24 +52,24 @@ def tasks(app, client, api_settings, admin_headers):
 def test_the_list_shows_a_held_caller_only_its_own_orgs_tasks(tasks):
     tenant, _every_org, own = tasks
 
-    resp = tenant.get("/api/v1/tasks")
+    resp = tenant.get("/api/v1/operations")
 
     assert resp.status_code == 200, resp.text
-    assert [task["id"] for task in resp.json()] == [own]
+    assert [op["metadata"]["id"] for op in resp.json()["items"]] == [own]
 
 
 def test_a_task_across_every_org_is_not_found_for_a_held_caller(tasks):
     tenant, every_org, own = tasks
 
-    assert tenant.get(f"/api/v1/tasks/{every_org}").status_code == 404
-    assert tenant.get(f"/api/v1/tasks/{own}").json()["result"]["count"] == 1
+    assert tenant.get(f"/api/v1/operations/{every_org}").status_code == 404
+    assert tenant.get(f"/api/v1/operations/{own}").json()["response"]["count"] == 1
 
 
 def test_a_held_caller_cannot_stream_or_cancel_another_orgs_task(tasks):
     tenant, every_org, _own = tasks
 
-    assert tenant.get(f"/api/v1/tasks/{every_org}/stream").status_code == 404
-    assert tenant.post(f"/api/v1/tasks/{every_org}/cancel").status_code == 404
+    assert tenant.get(f"/api/v1/operations/{every_org}/stream").status_code == 404
+    assert tenant.post(f"/api/v1/operations/{every_org}/cancel").status_code == 404
 
 
 def test_a_task_held_to_another_org_is_hidden(app, client, api_settings, tasks):
@@ -79,8 +79,8 @@ def test_a_task_held_to_another_org_is_hidden(app, client, api_settings, tasks):
         app, api_settings, "beta-tenant", roles=["tenant_tasks"], org_ids=["beta"]
     )
 
-    assert other.get(f"/api/v1/tasks/{own}").status_code == 404
-    assert other.get("/api/v1/tasks").json() == []
+    assert other.get(f"/api/v1/operations/{own}").status_code == 404
+    assert other.get("/api/v1/operations").json()["items"] == []
 
 
 def test_a_held_caller_sees_no_task_that_carries_no_hold(client, admin_headers, tasks):
@@ -88,16 +88,23 @@ def test_a_held_caller_sees_no_task_that_carries_no_hold(client, admin_headers, 
     build = client.post("/api/v1/pipeline/build", json={"build_core": False}, headers=admin_headers)
     assert build.status_code == 202, build.text
 
-    assert tenant.get(f"/api/v1/tasks/{build.json()['task_id']}").status_code == 404
-    assert [task["id"] for task in tenant.get("/api/v1/tasks").json()] == [own]
+    assert (
+        tenant.get(
+            f"/api/v1/operations/{build.json()['name'].removeprefix('operations/')}"
+        ).status_code
+        == 404
+    )
+    assert [op["metadata"]["id"] for op in tenant.get("/api/v1/operations").json()["items"]] == [
+        own
+    ]
 
 
 def test_an_admin_still_sees_every_task(client, admin_headers, tasks):
     _tenant, every_org, own = tasks
 
-    listed = client.get("/api/v1/tasks", headers=admin_headers).json()
+    listed = client.get("/api/v1/operations", headers=admin_headers).json()["items"]
 
-    assert {task["id"] for task in listed} == {every_org, own}
+    assert {op["metadata"]["id"] for op in listed} == {every_org, own}
 
 
 def test_a_platform_task_reader_without_sampler_read_still_sees_every_task(
@@ -107,10 +114,10 @@ def test_a_platform_task_reader_without_sampler_read_still_sees_every_task(
     define_role(app, "task_auditor", ["task:read"], scoped=False)
     auditor = caller_in_group(app, api_settings, "auditor", roles=["task_auditor"], org_ids=[])
 
-    listed = auditor.get("/api/v1/tasks").json()
+    listed = auditor.get("/api/v1/operations").json()["items"]
 
-    assert {task["id"] for task in listed} == {every_org, own}
-    assert auditor.get(f"/api/v1/tasks/{every_org}").status_code == 200
+    assert {op["metadata"]["id"] for op in listed} == {every_org, own}
+    assert auditor.get(f"/api/v1/operations/{every_org}").status_code == 200
 
 
 @pytest.fixture
@@ -133,15 +140,15 @@ def org_bound(app, client, api_settings, admin_headers):
 def test_an_org_bound_task_reader_sees_only_its_own_orgs_tasks(org_bound):
     tenant, every_org, own = org_bound
 
-    listed = tenant.get("/api/v1/tasks")
+    listed = tenant.get("/api/v1/operations")
 
     assert listed.status_code == 200, listed.text
-    assert [task["id"] for task in listed.json()] == [own]
-    assert tenant.get(f"/api/v1/tasks/{own}").status_code == 200
-    assert tenant.get(f"/api/v1/tasks/{own}/stream").status_code == 200
-    assert tenant.post(f"/api/v1/tasks/{own}/cancel").status_code == 200
-    assert tenant.get(f"/api/v1/tasks/{every_org}").status_code == 404
-    assert tenant.post(f"/api/v1/tasks/{every_org}/cancel").status_code == 404
+    assert [op["metadata"]["id"] for op in listed.json()["items"]] == [own]
+    assert tenant.get(f"/api/v1/operations/{own}").status_code == 200
+    assert tenant.get(f"/api/v1/operations/{own}/stream").status_code == 200
+    assert tenant.post(f"/api/v1/operations/{own}/cancel").status_code == 200
+    assert tenant.get(f"/api/v1/operations/{every_org}").status_code == 404
+    assert tenant.post(f"/api/v1/operations/{every_org}/cancel").status_code == 404
 
 
 def test_an_org_bound_caller_without_task_read_is_refused(app, api_settings, org_bound):
@@ -150,9 +157,9 @@ def test_an_org_bound_caller_without_task_read_is_refused(app, api_settings, org
         app, api_settings, "bound-dv", roles=["data_viewer"], org_ids=["acme"], scope="org:acme"
     )
 
-    assert viewer.get("/api/v1/tasks").status_code == 403
-    assert viewer.get(f"/api/v1/tasks/{own}").status_code == 403
-    assert viewer.post(f"/api/v1/tasks/{own}/cancel").status_code == 403
+    assert viewer.get("/api/v1/operations").status_code == 403
+    assert viewer.get(f"/api/v1/operations/{own}").status_code == 403
+    assert viewer.post(f"/api/v1/operations/{own}/cancel").status_code == 403
 
 
 def test_an_org_bound_task_reader_lists_tasks_without_any_sample(app, client, api_settings):
@@ -162,7 +169,7 @@ def test_an_org_bound_task_reader_lists_tasks_without_any_sample(app, client, ap
         app, api_settings, "task-only", roles=["task_only"], org_ids=["acme"], scope="org:acme"
     )
 
-    resp = reader.get("/api/v1/tasks")
+    resp = reader.get("/api/v1/operations")
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == []
+    assert resp.json()["items"] == []

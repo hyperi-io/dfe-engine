@@ -47,7 +47,7 @@ ONE write path - so a change is auditable and consumers can never diverge.
 
 | SSoT | Lives in | Consumed by | Only written by |
 |---|---|---|---|
-| **API surface** - `openapi.json` | dfe-engine `openapi-spec/` | dfe CLI, dfe-ui types, dfe-ai, contract mock, reference docs | the FastAPI routes via `generate.py` (never hand-edited) |
+| **API surface** - `openapi.json` | dfe-engine `openapi/` | dfe CLI, dfe-ui types, dfe-ai, contract mock, reference docs | the FastAPI routes via `generate.py` (never hand-edited) |
 | **Schema** - event header, hunt-results DDL, profiles | dfe-schemas (the `dfe-schemas` wheel, pinned in `uv.lock`) | the engine (auto-creates the CH objects at startup), the CLI, dfe-ui | dfe-schemas commits |
 | **Deployment shape** - Helm charts + values | dfe-infra `helm/` (base charts) + the deploy-repo overlays | Argo CD, the cluster | base charts by dfe-infra; the overlays by the engine, one `values/<service>-<instance>-values.yaml` per app instance, each write a gitops commit. Where no chart runs (Compose), `appmgmt/appconfig.py` merges an overlay's `config:` over the deployment's base config into the app's config file |
 | **Deployed state** - the gitops YAML | dfe-deploy (per deployment) | Argo CD (syncs to the cluster), the engine (reads current state) | the engine API - every mutation is a git commit (governed ops); `dfe local` break-glass when the daemon is down |
@@ -92,8 +92,8 @@ do not call it "the dfe-api". Its own settings read as `DFE_ENGINE_API_*`.
 
 ## openapi.json is the API SSoT
 
-`openapi-spec/openapi.json` is the **single source of truth for the API surface**.
-It is generated from the FastAPI app (`uv run python openapi-spec/generate.py`)
+`openapi/openapi.json` is the **single source of truth for the API surface**.
+It is generated from the FastAPI app (`uv run python scripts/generate_openapi.py`)
 and committed. Every consumer keys off it, never off a hand-maintained copy:
 
 The spec is the hub; everything radiates out of it. The FastAPI routes feed it,
@@ -102,7 +102,7 @@ and every downstream consumer keys off it - never off a hand-kept copy:
 ```mermaid
 flowchart TB
     routes["FastAPI routes<br/>(the live API definition)"]
-    routes -->|"openapi-spec/generate.py"| spec[("openapi.json<br/>THE API SSoT")]
+    routes -->|"scripts/generate_openapi.py"| spec[("openapi.json<br/>THE API SSoT")]
 
     spec -->|"command tree at runtime<br/>(x-scalo.cli.hidden opts out)"| cli["dfe CLI"]
     spec -->|"openapi-typescript<br/>-> @dfe/dfe-engine-types"| ui["dfe-ui"]

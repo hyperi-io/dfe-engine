@@ -1,6 +1,6 @@
 """Every operation a session guards declares the token it needs and the 401 and 403 it answers.
 
-dfe-ui generates its client from ``openapi-spec/openapi.json``, so an error the
+dfe-ui generates its client from ``openapi/openapi.json``, so an error the
 spec leaves out has no type there, and a mock server built from it demands a
 token wherever the spec says one is needed. The app derives both from each
 route's dependency tree. The public operations are listed here by hand on
@@ -17,7 +17,6 @@ from fastapi import APIRouter, Depends, FastAPI
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import CurrentUser, get_current_user, require_action
 from dfe_engine.api.errors import declare_auth_errors
-from dfe_engine.api.v1.scim import SCIM_MEDIA_TYPE, SCIM_ROOT
 from dfe_engine.settings import load_settings, reset_settings
 
 PUBLIC_OPERATIONS = frozenset(
@@ -36,7 +35,7 @@ PUBLIC_OPERATIONS = frozenset(
 LOGIN = "POST /api/v1/auth/login"
 
 AUTH_STATUSES = ("401", "403")
-ERROR_SCHEMA = {"$ref": "#/components/schemas/ErrorResponse"}
+PROBLEM = {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
 BEARER = [{"BearerAuth": []}]
 
 
@@ -49,7 +48,7 @@ def _clean_settings():
 
 @pytest.fixture
 def spec(monkeypatch) -> dict[str, Any]:
-    """The product spec, built exactly as ``openapi-spec/generate.py`` builds it."""
+    """The product spec, built exactly as ``scripts/generate_openapi.py`` builds it."""
     monkeypatch.setenv("DFE_ENGINE_ENV", "dev")
     settings = load_settings()
     if settings.e2e_server:
@@ -65,8 +64,8 @@ def _operations(spec: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
             yield f"{method.upper()} {path}", operation
 
 
-def _json_schema(response: dict[str, Any]) -> Any:
-    return response.get("content", {}).get("application/json", {}).get("schema")
+def _content(response: dict[str, Any]) -> Any:
+    return response.get("content")
 
 
 def test_every_guarded_operation_declares_401_and_403(spec):
@@ -76,11 +75,11 @@ def test_every_guarded_operation_declares_401_and_403(spec):
         for key, operation in _operations(spec)
         if key not in PUBLIC_OPERATIONS
         for status in AUTH_STATUSES
-        if _json_schema(operation.get("responses", {}).get(status, {})) != ERROR_SCHEMA
+        if _content(operation.get("responses", {}).get(status, {})) != PROBLEM
     ]
 
     assert not missing, (
-        f"{len(missing)} guarded operation(s) do not declare the ErrorResponse they "
+        f"{len(missing)} guarded operation(s) do not declare the problem they "
         f"answer. A route that is public belongs in PUBLIC_OPERATIONS:\n  " + "\n  ".join(missing)
     )
 
@@ -104,7 +103,7 @@ def test_login_declares_the_401_and_403_it_answers(spec):
     responses = dict(_operations(spec))[LOGIN]["responses"]
 
     for status in AUTH_STATUSES:
-        assert _json_schema(responses.get(status, {})) == ERROR_SCHEMA, status
+        assert _content(responses.get(status, {})) == PROBLEM, status
 
 
 def test_only_a_guarded_operation_requires_the_token(spec):
@@ -119,20 +118,6 @@ def test_only_a_guarded_operation_requires_the_token(spec):
         f"{len(wrong)} operation(s) state the wrong security requirement: public ones "
         f"state none, guarded ones {BEARER}:\n  " + "\n  ".join(wrong)
     )
-
-
-def test_a_scim_403_also_names_the_scim_envelope(spec):
-    """A refused action on a SCIM route answers in RFC 7644's envelope, not the native one."""
-    scim = [
-        operation
-        for key, operation in _operations(spec)
-        if key.split(" ", 1)[1].startswith(SCIM_ROOT) and key not in PUBLIC_OPERATIONS
-    ]
-
-    assert scim
-    for operation in scim:
-        assert SCIM_MEDIA_TYPE in operation["responses"]["403"]["content"]
-        assert SCIM_MEDIA_TYPE not in operation["responses"]["401"]["content"]
 
 
 def _app_with_every_kind_of_guard() -> FastAPI:
@@ -175,20 +160,7 @@ def test_the_declaration_follows_the_dependency_tree():
     declared = {
         path
         for path, item in spec["paths"].items()
-        if all(_json_schema(item["get"]["responses"].get(s, {})) for s in AUTH_STATUSES)
+        if all(s in item["get"]["responses"] for s in AUTH_STATUSES)
     }
     assert declared == {"/api/outer/by-user", "/api/outer/by-action", "/api/outer/fenced"}
     assert not set(AUTH_STATUSES) & spec["paths"]["/api/outer/open"]["get"]["responses"].keys()
-
-
-def test_the_error_model_is_registered_where_no_route_declares_it():
-    """The declared reference must resolve even when nothing else in the spec uses it."""
-    app = _app_with_every_kind_of_guard()
-    spec = app.openapi()
-    assert "ErrorResponse" not in spec.get("components", {}).get("schemas", {})
-
-    declare_auth_errors(spec, app.routes)
-
-    schemas = spec["components"]["schemas"]
-    assert {"ErrorResponse", "FieldError"} <= schemas.keys()
-    assert list(schemas) == sorted(schemas)

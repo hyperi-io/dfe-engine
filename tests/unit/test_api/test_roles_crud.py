@@ -15,23 +15,22 @@ class TestRolesScopes:
         resp = client.get("/api/v1/auth/roles/scopes", headers=admin_headers)
         assert resp.status_code == 200
         body = resp.json()
-        assert "scopes" in body
-        assert "total" in body
-        assert "config:read" in body["scopes"]
+        assert "total_size" in body
+        assert "config:read" in body["items"]
         assert body["wildcard"] is True
         assert body["argo_namespace_prefix"] == "argo:"
 
     def test_list_scopes_search_and_prefix(self, client, admin_headers):
         resp = client.get(
             "/api/v1/auth/roles/scopes",
-            params={"search": "config", "prefix": "config:", "per_page": 5, "page": 1},
+            params={"search": "config", "prefix": "config:", "page_size": 5},
             headers=admin_headers,
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["per_page"] == 5
-        assert all(s.startswith("config:") for s in body["scopes"])
-        assert all("config" in s.lower() for s in body["scopes"])
+        assert len(body["items"]) <= 5
+        assert all(s.startswith("config:") for s in body["items"])
+        assert all("config" in s.lower() for s in body["items"])
 
 
 class TestRolesCrud:
@@ -40,7 +39,7 @@ class TestRolesCrud:
         assert resp.status_code == 200
         body = resp.json()
         assert "items" in body
-        assert body["total"] >= 1
+        assert body["total_size"] >= 1
         by_name = {r["name"]: r for r in body["items"]}
         assert "admin" in by_name
         assert by_name["admin"]["resource_type"] == "core"
@@ -60,19 +59,17 @@ class TestRolesCrud:
     def test_list_roles_search_and_pagination(self, client, admin_headers):
         resp = client.get(
             "/api/v1/auth/roles",
-            params={"search": "infra", "page": 1, "per_page": 2},
+            params={"search": "infra", "page_size": 2},
             headers=admin_headers,
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["per_page"] == 2
-        assert body["page"] == 1
         assert len(body["items"]) <= 2
         assert all(
             "infra" in r["name"].lower() or "infra" in r["description"].lower()
             for r in body["items"]
         )
-        assert body["total"] >= len(body["items"])
+        assert body["total_size"] >= len(body["items"])
 
     def test_list_roles_filter_resource_type_custom(self, client, admin_headers):
         client.post(
@@ -201,7 +198,7 @@ class TestRolesCrud:
         assert resp.status_code == 409
         data = resp.json()
         assert data["code"] == "conflict"
-        assert data["message"] == "Core resources can't be mutated"
+        assert data["detail"] == "Core resources can't be mutated"
         assert len(resp.content) > 0
 
     def test_update_core_role_returns_409(self, client, admin_headers):
@@ -217,5 +214,5 @@ class TestRolesCrud:
         assert resp.status_code == 409
         data = resp.json()
         assert data["code"] == "conflict"
-        assert data["message"] == "Core resources can't be mutated"
+        assert data["detail"] == "Core resources can't be mutated"
         assert len(resp.content) > 0

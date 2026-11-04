@@ -22,11 +22,12 @@ orgs with, so holding role:write never adds up to more than the caller already h
 
 from typing import Literal, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
+from scalo.api import ListParams, Page, ProblemError, paginate
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import CurrentUser, live_role_config, require_action
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
 from dfe_engine.auth import AuthContext, AuthorizationError, RoleConfig, Scope
 from dfe_engine.auth.audit import audit_permission_denied, audit_role_change
 from dfe_engine.auth.models import ungrantable_permissions
@@ -73,43 +74,12 @@ class RoleResponse(BaseModel):
     resource_type: str = Field(description="core for system roles, custom for user-created roles")
 
 
-class CasbinScopesResponse(BaseModel):
-    """Assignable Casbin scopes (paginated) plus picker metadata."""
+class CasbinScopesResponse(Page[str]):
+    """A page of assignable Casbin scopes, plus picker metadata."""
 
-    scopes: list[str] = Field(description="Permission patterns for the current page")
-    total: int = Field(description="Total scopes matching filters")
-    page: int = Field(description="Current page (1-based)")
-    per_page: int = Field(description="Page size; -1 means all scopes in one page")
-    total_pages: int
-    next_page: int | None = None
-    prev_page: int | None = None
     wildcard: bool
     argo_namespace_prefix: str
     notes: str
-
-
-def _casbin_scopes_response(
-    scope_strings: list[str],
-    *,
-    page: int,
-    per_page: int,
-    wildcard: bool,
-    argo_namespace_prefix: str,
-    notes: str,
-) -> CasbinScopesResponse:
-    paginated = PaginatedResponse.from_list(scope_strings, page, per_page)
-    return CasbinScopesResponse(
-        scopes=paginated.items,
-        total=paginated.total,
-        page=paginated.page,
-        per_page=paginated.per_page,
-        total_pages=paginated.total_pages,
-        next_page=paginated.next_page,
-        prev_page=paginated.prev_page,
-        wildcard=wildcard,
-        argo_namespace_prefix=argo_namespace_prefix,
-        notes=notes,
-    )
 
 
 def _role_response(role: Role) -> RoleResponse:
@@ -138,14 +108,11 @@ def _refuse_scoped_writes(name: str, *, permissions: list[str], scoped: bool) ->
     """Refuse a scoped role granting more than reads and ``query:execute``.
 
     Raises:
-        HTTPException: 422 ``scoped_role_not_read_only`` naming the role and the patterns.
+        ProblemError: 422 ``scoped_role_not_read_only`` naming the role and the patterns.
     """
     refusal = scoped and scoped_role_refusal(name, permissions)
     if refusal:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "scoped_role_not_read_only", "message": refusal},
-        )
+        raise ProblemError(422, refusal, code="scoped_role_not_read_only")
 
 
 def _refuse_ungrantable(
@@ -190,7 +157,7 @@ def _role_in_use(request: Request, role_name: str) -> bool:
 )
 async def list_casbin_scopes(
     user: CurrentUser,
-    pagination: PaginationParams = Depends(),
+    query: ListParams,
     search: str | None = Query(
         None,
         description="Case-insensitive substring match on permission scope strings",
@@ -207,11 +174,11 @@ async def list_casbin_scopes(
     if prefix:
         rows = [row for row in rows if str(row["scope"]).startswith(prefix)]
     rows = apply_search(rows, search, ["scope"])
-    scope_strings = [str(row["scope"]) for row in rows]
-    return _casbin_scopes_response(
-        scope_strings,
-        page=pagination.page,
-        per_page=pagination.per_page,
+    page = paginate(
+        [str(row["scope"]) for row in rows], query, bound={"search": search, "prefix": prefix}
+    )
+    return CasbinScopesResponse(
+        **page.model_dump(),
         wildcard=bool(data["wildcard"]),
         argo_namespace_prefix=str(data["argo_namespace_prefix"]),
         notes=str(data["notes"]),
@@ -241,10 +208,7 @@ async def create_role(
             scoped=body.scoped,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": str(exc)},
-        ) from exc
+        raise ProblemError(409, str(exc), code="conflict") from exc
     _refresh_role_config(request)
     audit_role_change(user.user_id, role.name, "created", _grant_details(role))
     return _role_response(role)
@@ -252,13 +216,13 @@ async def create_role(
 
 @router.get(
     "",
-    response_model=PaginatedResponse[RoleResponse],
+    response_model=Page[RoleResponse],
     dependencies=[Depends(require_action(scopes_dict["role_read"]))],
 )
 async def list_roles(
     user: CurrentUser,
     request: Request,
-    pagination: PaginationParams = Depends(),
+    query: ListParams,
     resource_type: RoleResourceTypeQuery | None = Query(
         None,
         description="Return only roles with this resource_type (core or custom)",
@@ -267,7 +231,7 @@ async def list_roles(
         None,
         description="Case-insensitive match on role name or description",
     ),
-) -> PaginatedResponse[RoleResponse]:
+) -> Page[RoleResponse]:
     """List roles with pagination, for a caller holding role:read."""
     store: RoleStore = request.app.state.role_store
     roles = store.list()
@@ -277,7 +241,7 @@ async def list_roles(
     rows = [_role_response(role).model_dump() for role in roles]
     rows = apply_search(rows, search, ["name", "description"])
     summaries = [RoleResponse.model_validate(row) for row in rows]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(summaries, query, bound={"resource_type": resource_type, "search": search})
 
 
 @router.get(
@@ -294,10 +258,7 @@ async def get_role(
     store: RoleStore = request.app.state.role_store
     role = store.get(name)
     if role is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Role '{name}' not found"},
-        )
+        raise ProblemError(404, f"Role '{name}' not found", code="not_found")
     return _role_response(role)
 
 
@@ -316,10 +277,7 @@ async def update_role(
     store: RoleStore = request.app.state.role_store
     stored = store.get(name)
     if stored is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Role '{name}' not found"},
-        )
+        raise ProblemError(404, f"Role '{name}' not found", code="not_found")
     permissions = stored.permissions if body.permissions is None else body.permissions
     scoped = stored.scoped if body.scoped is None else body.scoped
     _refuse_scoped_writes(name, permissions=permissions, scoped=scoped)
@@ -335,10 +293,7 @@ async def update_role(
             scoped=body.scoped,
         )
     except KeyError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Role '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Role '{name}' not found", code="not_found") from None
     _refresh_role_config(request)
     audit_role_change(user.user_id, role.name, "updated", _grant_details(role))
     return _role_response(role)
@@ -356,25 +311,13 @@ async def delete_role(
 ) -> None:
     """Delete a role no group holds, for a caller holding role:delete."""
     if _role_in_use(request, name):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": f"Role '{name}' is assigned to one or more groups",
-            },
-        )
+        raise ProblemError(409, f"Role '{name}' is assigned to one or more groups", code="conflict")
     store: RoleStore = request.app.state.role_store
     try:
         store.delete(name)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": str(exc)},
-        ) from exc
+        raise ProblemError(409, str(exc), code="conflict") from exc
     except KeyError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Role '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Role '{name}' not found", code="not_found") from None
     _refresh_role_config(request)
     audit_role_change(user.user_id, name, "deleted")

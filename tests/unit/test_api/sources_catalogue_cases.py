@@ -210,13 +210,18 @@ CREATE_FROM_CATALOGUE_REJECT_CASES: list[CreateFromCatalogueRejectCase] = [
         "entry": "cisco-asa",
         "body": {"transform": "default"},
         "expected_response": {
+            "type": "about:blank",
+            "title": "Unprocessable Content",
+            "status": 422,
+            "detail": "The request has 1 invalid field(s)",
             "code": "validation_error",
-            "message": "1 validation error(s)",
             "errors": [
                 {
                     "field": "entries.0.transform",
-                    "message": "Extra inputs are not permitted",
+                    "location": "body",
+                    "detail": "Extra inputs are not permitted",
                     "code": "extra_forbidden",
+                    "pointer": "#/entries/0/transform",
                 }
             ],
         },

@@ -14,16 +14,12 @@ operation behind them are mounted on top: ``login``, ``config``, ``auth list``,
 and the daemon-free ``local``, ``schema`` and ``kafka client-config``.
 """
 
-import dataclasses
-import json
 import os
 import re
 import secrets
-from collections.abc import Mapping
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit
 
-from scalo.cli.openapi import Response, ScaloHttpTransport, SpecCli, Store, Transport
+from scalo.cli.openapi import ScaloHttpTransport, SpecCli, Store, Transport
 
 from .authcmds import attach_builtins
 from .kafka import client_config
@@ -65,73 +61,6 @@ def _with_positional(op: dict[str, Any], names: list[str]) -> dict[str, Any]:
     return {**op, "x-scalo": {**op["x-scalo"], "cli": {**cli, "positional": names}}}
 
 
-def _envelope(reply: Response) -> dict[str, Any] | None:
-    """The reply body when it is the engine's page-number envelope, else ``None``."""
-    try:
-        body = reply.json()
-    except ValueError:
-        return None
-    paged = (
-        isinstance(body, dict)
-        and isinstance(body.get("items"), list)
-        and {"page", "next_page"} <= body.keys()
-    )
-    return body if paged else None
-
-
-class _PageWalker:
-    """Transport that answers a paged list with its ``items``, from every page unless the request names ``page``.
-
-    The engine pages by number (``items``, ``next_page``), where scalo pages by ``page_token``.
-    """
-
-    def __init__(self, inner: Transport) -> None:
-        self._inner = inner
-
-    def send(
-        self,
-        method: str,
-        url: str,
-        *,
-        headers: Mapping[str, str],
-        credentials: Mapping[str, str],
-        content: bytes | None,
-        timeout: float,
-    ) -> Response:
-        """Send the request, then every later page of a paged list."""
-        reply = self._inner.send(
-            method, url, headers=headers, credentials=credentials, content=content, timeout=timeout
-        )
-        body = _envelope(reply) if method == "GET" and reply.ok else None
-        if body is None:
-            return reply
-        items = list(body["items"])
-        parts = urlsplit(url)
-        pairs = parse_qsl(parts.query, keep_blank_values=True)
-        # A page the reply names must be later than the one just asked for, or a looping server never ends the walk.
-        asked = body["page"]
-        while (
-            all(name != "page" for name, _ in pairs)
-            and isinstance(body.get("next_page"), int)
-            and body["next_page"] > asked
-        ):
-            asked = body["next_page"]
-            next_url = parts._replace(query=urlencode([*pairs, ("page", asked)])).geturl()
-            reply = self._inner.send(
-                method,
-                next_url,
-                headers=headers,
-                credentials=credentials,
-                content=None,
-                timeout=timeout,
-            )
-            body = _envelope(reply) if reply.ok else None
-            if body is None:
-                return reply
-            items.extend(body["items"])
-        return dataclasses.replace(reply, content=json.dumps(items).encode())
-
-
 def build_cli(
     spec: dict[str, Any] | None = None,
     *,
@@ -153,7 +82,7 @@ def build_cli(
         name="dfe",
         env_prefix="DFE_ENGINE",
         help="dfe - the Data Fusion Engine CLI. Command tree generated from the engine OpenAPI spec.",
-        transport=_PageWalker(transport or ScaloHttpTransport()),
+        transport=transport or ScaloHttpTransport(),
         store=store,
     )
     attach_builtins(cli)

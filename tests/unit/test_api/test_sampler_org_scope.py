@@ -111,7 +111,7 @@ def test_a_caller_in_no_org_is_refused_before_any_read(viewer_of, table):
     resp = _sample(viewer_of("orgless-viewer", []))
 
     assert resp.status_code == 403, resp.text
-    assert "no registered org" in resp.json()["message"]
+    assert "no registered org" in resp.json()["detail"]
     assert table.reads == []
 
 
@@ -121,7 +121,7 @@ def test_a_table_without_org_id_is_refused_to_a_caller_held_to_its_orgs(client_a
     resp = _sample(client_as("dfe-multi-viewer"))
 
     assert resp.status_code == 403, resp.text
-    assert f"{EVENTS} has no _org_id column" in resp.json()["message"]
+    assert f"{EVENTS} has no _org_id column" in resp.json()["detail"]
     assert table.reads == []
 
 
@@ -140,7 +140,7 @@ def test_a_kafka_topic_is_refused_to_a_caller_held_to_its_orgs(client_as, table)
     )
 
     assert resp.status_code == 403, resp.text
-    assert "Kafka topic has no _org_id column" in resp.json()["message"]
+    assert "Kafka topic has no _org_id column" in resp.json()["detail"]
 
 
 def test_a_sample_across_every_org_is_hidden_from_a_caller_held_to_its_orgs(client_as, table):
@@ -149,9 +149,9 @@ def test_a_sample_across_every_org_is_hidden_from_a_caller_held_to_its_orgs(clie
     own = _sample(viewer).json()["task_id"]
 
     assert viewer.get(f"/api/v1/samples/{every_org}").status_code == 404
-    assert [task["id"] for task in viewer.get("/api/v1/samples").json()] == [own]
+    assert [task["id"] for task in viewer.get("/api/v1/samples").json()["items"]] == [own]
     assert viewer.get(f"/api/v1/samples/{own}").json()["result"]["count"] == 1
-    assert {task["id"] for task in admin.get("/api/v1/samples").json()} == {every_org, own}
+    assert {task["id"] for task in admin.get("/api/v1/samples").json()["items"]} == {every_org, own}
 
 
 def test_a_caller_in_fewer_orgs_does_not_see_a_sample_held_to_more(client_as, viewer_of, table):
@@ -160,7 +160,7 @@ def test_a_caller_in_fewer_orgs_does_not_see_a_sample_held_to_more(client_as, vi
     own = _sample(narrow).json()["task_id"]
 
     assert narrow.get(f"/api/v1/samples/{wide}").status_code == 404
-    assert [task["id"] for task in narrow.get("/api/v1/samples").json()] == [own]
+    assert [task["id"] for task in narrow.get("/api/v1/samples").json()["items"]] == [own]
     [_, (_, params)] = table.reads
     assert params["orgs"] == ["test_org"]
 
@@ -219,7 +219,9 @@ def test_an_org_bound_viewer_samples_its_own_org(app, api_settings, table, route
     assert resp.status_code == 200, resp.text
     [(_, params)] = table.reads
     assert params["orgs"] == ["test_org"]
-    assert [task["id"] for task in viewer.get("/api/v1/samples").json()] == [resp.json()["task_id"]]
+    assert [task["id"] for task in viewer.get("/api/v1/samples").json()["items"]] == [
+        resp.json()["task_id"]
+    ]
 
 
 def test_an_org_where_the_caller_holds_no_sampler_read_is_never_sampled(app, api_settings, table):

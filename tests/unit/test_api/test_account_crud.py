@@ -227,7 +227,7 @@ class TestCreateAccount:
         )
         assert resp.status_code == 422, resp.text
         assert resp.json()["errors"][0]["field"] == "password"
-        assert str(MIN_ADMIN_PASSWORD_LENGTH) in resp.json()["errors"][0]["message"]
+        assert str(MIN_ADMIN_PASSWORD_LENGTH) in resp.json()["errors"][0]["detail"]
         assert short not in resp.text
         assert app.state.account_store.get("short-pw") is None
 
@@ -1163,8 +1163,8 @@ class TestResetOwnPassword:
         body = resp.json()
         assert body["code"] == "password_reused"
         # No password history is stored, so the message claims no history depth.
-        assert "current password" in body["message"]
-        assert re.search(r"last \d+", body["message"]) is None
+        assert "current password" in body["detail"]
+        assert re.search(r"last \d+", body["detail"]) is None
 
     def test_oidc_user_cannot_reset_own_password(self, client, app, api_settings):
         from dfe_engine.api.deps import create_access_token
@@ -1294,8 +1294,8 @@ class TestResetPassword:
         body = resp.json()
         assert body["code"] == "password_reused"
         # No password history is stored, so the message claims no history depth.
-        assert "current password" in body["message"]
-        assert re.search(r"last \d+", body["message"]) is None
+        assert "current password" in body["detail"]
+        assert re.search(r"last \d+", body["detail"]) is None
 
     def test_a_password_under_the_floor_is_refused(self, client, app, admin_headers):
         store = app.state.account_store
@@ -1345,7 +1345,7 @@ class TestRotatePassword:
         assert body["code"] == "admin_password_kept_outside_dfe"
         # The wording varies with the detected deploy kind; that it names a store
         # operation rather than an engine one is what matters here.
-        assert body["context"]["store_command"]
+        assert body["store_command"]
 
     def test_a_declared_secret_path_writes_the_password_to_the_store(
         self, app, client, admin_headers
@@ -1383,7 +1383,7 @@ class TestRotatePassword:
 
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "conflict"
-        assert "Restore the secret, or wait out its recovery window" in resp.json()["message"]
+        assert "Restore the secret, or wait out its recovery window" in resp.json()["detail"]
 
     def test_a_regular_account_is_not_store_backed(self, client, admin_headers):
         resp = client.post(
@@ -1407,7 +1407,7 @@ class TestRotatePassword:
         assert resp.status_code == 422, resp.text
         body = resp.json()
         assert body["errors"][0]["field"] == "new_password"
-        assert body["errors"][0]["message"]
+        assert body["errors"][0]["detail"]
 
     def test_the_default_password_is_refused_however_it_is_padded(self, client, admin_headers):
         """Long enough to clear the floor, still the password the boot gate refuses."""
@@ -1418,7 +1418,7 @@ class TestRotatePassword:
         )
 
         assert resp.status_code == 422, resp.text
-        assert "default admin password" in resp.json()["errors"][0]["message"]
+        assert "default admin password" in resp.json()["errors"][0]["detail"]
 
     @pytest.mark.parametrize(
         ("password", "status"),

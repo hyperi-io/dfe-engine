@@ -448,7 +448,7 @@ class TestFlows:
     ) -> None:
         """A source compiled from an installed catalogue entry the deployed transform can run."""
         intake = shape.catalogue_intake
-        offered = engine.json("GET", f"/sources/catalogue?intake={intake}&per_page=-1")
+        offered = engine.json("GET", f"/sources/catalogue?intake={intake}&page_size=1000")
         items = offered.get("items") if isinstance(offered, dict) else None
         if not (items):
             pytest.skip(

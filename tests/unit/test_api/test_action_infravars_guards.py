@@ -77,8 +77,8 @@ class TestAnActionCannotSizeAManagedService:
 
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "managed_by_provider"
-        assert resp.json()["context"]["provider"] == "confluent-cloud"
-        assert resp.json()["context"]["path"] == "kafka.replicas"
+        assert resp.json()["provider"] == "confluent-cloud"
+        assert resp.json()["path"] == "kafka.replicas"
         assert gc.list("infravars") == []
 
     def test_an_invoker_holding_only_the_action_is_refused_too(
@@ -105,7 +105,7 @@ class TestAnActionCannotSizeAManagedService:
         resp = _invoke(client, invoker, "size-clickhouse")
 
         assert resp.status_code == 409, resp.text
-        assert resp.json()["context"]["set_in"] == "provider"
+        assert resp.json()["set_in"] == "provider"
         assert gc.list("infravars") == []
 
     def test_it_answers_before_the_count_guard(self, client, app, admin_headers, tmp_path):
@@ -163,8 +163,8 @@ class TestAnActionCannotShrinkAMemberCount:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "scale_down_refused"
-        assert "5 -> 2 would remove a member" in resp.json()["message"]
-        assert "reassigned off it" in resp.json()["message"]
+        assert "5 -> 2 would remove a member" in resp.json()["detail"]
+        assert "reassigned off it" in resp.json()["detail"]
         assert gc.get("infravars", "kafka") == {"kafka": {"replicas": 5}}
 
     def test_an_invoker_holding_only_the_action_is_refused_too(
@@ -189,7 +189,7 @@ class TestAnActionCannotShrinkAMemberCount:
         resp = _invoke(client, invoker, "shrink-keeper")
 
         assert resp.status_code == 400, resp.text
-        assert "clickhouse.keeper.replicas" in resp.json()["message"]
+        assert "clickhouse.keeper.replicas" in resp.json()["detail"]
         assert gc.get("infravars", "clickhouse-cluster")["clickhouse"]["keeper"]["replicas"] == 3
 
     @pytest.mark.parametrize(
@@ -210,7 +210,7 @@ class TestAnActionCannotShrinkAMemberCount:
         resp = _invoke(client, admin_headers, "away")
 
         assert resp.status_code == 400, resp.text
-        assert said in resp.json()["message"]
+        assert said in resp.json()["detail"]
         assert gc.get("infravars", "kafka") == {"kafka": {"replicas": 5}}
 
 
@@ -429,7 +429,7 @@ class TestValidateAnswersAsInvokeDoes:
         else:
             assert validated["valid"] is False
             (error,) = validated["errors"]
-            assert error.endswith(f": {invoked.json()['message']}")
+            assert error.endswith(f": {invoked.json()['detail']}")
 
 
 _SIZE = "size"
@@ -474,7 +474,7 @@ class TestValidateChecksEveryDetent:
             assert accepted.status_code == 200, accepted.text
         refused = _invoke(client, admin_headers, "resize", dry_run=True, params={_SIZE: "shrink"})
         assert refused.status_code == 400, refused.text
-        assert error.endswith(f": {refused.json()['message']}")
+        assert error.endswith(f": {refused.json()['detail']}")
 
     def test_every_refusing_detent_is_reported_in_one_pass(
         self, client, app, admin_headers, tmp_path
@@ -507,7 +507,7 @@ class TestValidateChecksEveryDetent:
         _define(client, admin_headers, "resize", changes, params)
         refused = _invoke(client, admin_headers, "resize", dry_run=True)
         assert refused.status_code == 400, refused.text
-        assert error == f"infravars/kafka:kafka.replicas: {refused.json()['message']}"
+        assert error == f"infravars/kafka:kafka.replicas: {refused.json()['detail']}"
 
     def test_a_detent_on_a_read_only_value_is_reported_once(
         self, client, app, admin_headers, tmp_path
@@ -525,7 +525,7 @@ class TestValidateChecksEveryDetent:
             refused = _invoke(client, admin_headers, "resize", dry_run=True, params={_SIZE: size})
             assert refused.status_code == 409, refused.text
             assert refused.json()["code"] == "managed_by_provider"
-            assert error == f"infravars/kafka:kafka.replicas: {refused.json()['message']}"
+            assert error == f"infravars/kafka:kafka.replicas: {refused.json()['detail']}"
 
 
 def _counted(bounds: dict) -> tuple[list[dict], dict]:
@@ -558,7 +558,7 @@ class TestValidateChecksEachEndOfANumber:
         refused = _invoke(client, admin_headers, "brokers", dry_run=True, params={"n": 2})
         assert refused.status_code == 400, refused.text
         assert refused.json()["code"] == "scale_down_refused"
-        assert "5 -> 2 would remove a member" in refused.json()["message"]
+        assert "5 -> 2 would remove a member" in refused.json()["detail"]
 
     def test_a_range_that_never_lowers_the_count_validates_clean(
         self, client, app, admin_headers, tmp_path

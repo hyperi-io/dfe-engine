@@ -2,30 +2,22 @@
 #  License:      BUSL-1.1
 """HTTP middleware that refuses writes to core resources."""
 
-import json
 from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI
+from scalo.api import ProblemError, problem_response
 from starlette.requests import Request
 from starlette.responses import Response
 
 from dfe_engine.api.deps import _registries
-from dfe_engine.api.errors import ErrorCode, ErrorResponse, _error_response_json
+from dfe_engine.api.errors import ErrorCode
 from dfe_engine.core_resources.policy import MUTATION_METHODS, match_api_core_mutation
 from dfe_engine.core_resources.yaml_resource_type import CORE_RESOURCE_MUTATION_MESSAGE
 
 
 def _core_mutation_error_response() -> Response:
-    payload = _error_response_json(
-        ErrorResponse(
-            code=ErrorCode.CONFLICT,
-            message=CORE_RESOURCE_MUTATION_MESSAGE,
-        )
-    )
-    return Response(
-        content=json.dumps(payload).encode("utf-8"),
-        status_code=409,
-        media_type="application/json",
+    return problem_response(
+        ProblemError(409, CORE_RESOURCE_MUTATION_MESSAGE, code=ErrorCode.CONFLICT).problem
     )
 
 

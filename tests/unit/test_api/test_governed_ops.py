@@ -51,11 +51,11 @@ class TestTier1HelmVars:
 
         listed = client.get("/api/v1/helm/files/receiver-default/vars", headers=admin_headers)
         assert listed.status_code == 200
-        by_path = {v["path"]: v for v in listed.json()}
+        by_path = {v["path"]: v for v in listed.json()["items"]}
         assert by_path["keda.maxReplicas"]["value"] == 10
 
         files = client.get("/api/v1/helm/files", headers=admin_headers)
-        assert files.json() == ["receiver-default"]
+        assert files.json()["items"] == ["receiver-default"]
 
     def test_replicacount_rejected(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
@@ -93,7 +93,7 @@ class TestTier1HelmVars:
         for resp in writes:
             assert resp.status_code == 403, resp.text
             assert resp.json()["code"] == "policy_violation"
-            assert "replicaCount" in resp.json()["message"]
+            assert "replicaCount" in resp.json()["detail"]
         assert gc.get(cls, "receiver-default") == stored
 
     def test_a_platform_chart_refuses_only_an_explicit_keda_over_a_pinned_count(
@@ -109,7 +109,7 @@ class TestTier1HelmVars:
             client.put(f"{url}/keda", json={"value": {"enabled": True}}, headers=admin_headers),
         ):
             assert resp.status_code == 403, resp.text
-            assert "replicaCount" in resp.json()["message"]
+            assert "replicaCount" in resp.json()["detail"]
         assert gc.get(cls, "receiver-default") == stored
         reverted = client.delete(f"{url}/keda.enabled", headers=admin_headers)
         assert reverted.status_code == 200, reverted.text
@@ -123,7 +123,7 @@ class TestTier1HelmVars:
         gc.put(cls, "receiver-default", {"deploy": {"service": "dfe-receiver"}}, "tester")
         refused = client.put(f"{url}/replicaCount", json={"value": 3}, headers=admin_headers)
         assert refused.status_code == 403, refused.text
-        message = refused.json()["message"]
+        message = refused.json()["detail"]
         for key in (KEDA_ENABLED_PATH, KEDA_MIN_PATH, KEDA_MAX_PATH.rsplit(".", 1)[-1]):
             assert key in message, (key, message)
 
@@ -259,7 +259,7 @@ class TestTier2Actions:
         assert created.status_code == 201, created.text
 
         listed = client.get("/api/v1/governance/actions", headers=admin_headers)
-        assert listed.json() == ["scale-receiver"]
+        assert listed.json()["items"] == ["scale-receiver"]
 
         # dry-run first - no commit
         dry = client.post(
@@ -300,7 +300,7 @@ class TestTier2Actions:
 
         listed = client.get("/api/v1/governance/policies", headers=admin_headers)
         assert listed.status_code == 200
-        assert listed.json() == ["lock"]
+        assert listed.json()["items"] == ["lock"]
 
         detail = client.get("/api/v1/governance/policies/lock", headers=admin_headers)
         assert detail.status_code == 200
@@ -400,7 +400,7 @@ class TestRouterConcurrency:
         conflict = client.put(url, json={"value": 3}, headers={**admin_headers, "If-Match": sha1})
         assert conflict.status_code == 409
         assert conflict.json()["code"] == "conflict"
-        assert "current" in conflict.json()["context"]
+        assert "current" in conflict.json()
 
 
 class TestRouterProtected:
@@ -477,7 +477,7 @@ class TestRouterProtected:
         refused = client.put(url, json={"value": floating}, headers=admin_headers)
         assert refused.status_code == 403, refused.text
         assert refused.json()["code"] == "policy_violation"
-        assert "image.tag" in refused.json()["message"]
+        assert "image.tag" in refused.json()["detail"]
         assert gc.get("helmvars", "receiver-default") == stored
 
         pinned = {"repository": "ghcr.io/x/y", "tag": "v1.1.0"}

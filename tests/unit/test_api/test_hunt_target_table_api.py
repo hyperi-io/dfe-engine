@@ -42,7 +42,7 @@ def test_creating_a_hunt_with_a_non_table_target_is_refused(client, admin_header
     )
 
     assert resp.status_code == 422, resp.text
-    assert "is not a table name" in resp.json()["message"]
+    assert "is not a table name" in resp.json()["detail"]
     assert client.get("/api/v1/hunts/windows_hunt", headers=admin_headers).status_code == 404
 
 
@@ -75,7 +75,7 @@ def test_updating_a_hunt_to_a_non_table_target_is_refused_and_keeps_the_old_one(
     )
 
     assert resp.status_code == 422, resp.text
-    assert "is not a table name" in resp.json()["message"]
+    assert "is not a table name" in resp.json()["detail"]
     stored = client.get("/api/v1/hunts/windows_hunt", headers=admin_headers).json()
     assert stored["global_target_table_name"] == "dfe.detection"
 

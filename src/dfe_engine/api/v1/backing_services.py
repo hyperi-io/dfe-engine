@@ -46,11 +46,11 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, TypeGuard
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field
+from scalo.api import ListParams, Page, ProblemError, paginate
 
 from dfe_engine.api.deps import CurrentUser, get_interactive_clickhouse_client, require_action
-from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.backing import observed, providers
@@ -610,7 +610,7 @@ def _guard_member_count(
         remedy: Appended to the refusal after the service's scale-down reason.
 
     Raises:
-        HTTPException: 400 ``scale_down_refused`` naming the count and the change.
+        ProblemError: 400 ``scale_down_refused`` naming the count and the change.
     """
     spec = _owner(path)
     if spec is None or name not in (_COMMON, spec.chart):
@@ -638,12 +638,10 @@ def _guard_member_count(
             )
         else:
             change = f"{before} -> {after!r} replaces a member count with something else"
-        raise HTTPException(
+        raise ProblemError(
             400,
-            detail={
-                "code": "scale_down_refused",
-                "message": f"{count} is up-only: {change}. {spec.scale_down_reason}.{remedy}",
-            },
+            f"{count} is up-only: {change}. {spec.scale_down_reason}.{remedy}",
+            code="scale_down_refused",
         )
 
 
@@ -684,7 +682,7 @@ def _refuse_managed(request: Request, name: str, path: str) -> None:
         path: The dot-path the write sets or removes.
 
     Raises:
-        HTTPException: 409 ``managed_by_provider`` naming who sizes the value and where.
+        ProblemError: 409 ``managed_by_provider`` naming who sizes the value and where.
     """
     spec = _owner(path)
     if spec is None or name not in (_COMMON, spec.chart):
@@ -694,19 +692,17 @@ def _refuse_managed(request: Request, name: str, path: str) -> None:
     relative = path.removeprefix(spec.prefix).removeprefix(".")
     if not resolution.refuses(relative):
         return
-    raise HTTPException(
+    raise ProblemError(
         409,
-        detail={
-            "code": MANAGED_REFUSAL,
-            "message": _managed_message(spec, path, stated, resolution),
-            "service": spec.service,
-            "path": path,
-            "managed_by": str(resolution.managed_by),
-            "provider": stated.provider or None,
-            "tier": stated.tier or None,
-            "set_in": str(resolution.set_in) if resolution.set_in else None,
-            "read_only": list(resolution.read_only),
-        },
+        _managed_message(spec, path, stated, resolution),
+        code=MANAGED_REFUSAL,
+        service=spec.service,
+        path=path,
+        managed_by=str(resolution.managed_by),
+        provider=stated.provider or None,
+        tier=stated.tier or None,
+        set_in=str(resolution.set_in) if resolution.set_in else None,
+        read_only=list(resolution.read_only),
     )
 
 
@@ -737,7 +733,7 @@ def guard_action_change(request: Request, cls: str, name: str, path: str, docume
         document: The resource as the whole action leaves it, every change applied.
 
     Raises:
-        HTTPException: 409 ``managed_by_provider`` naming who sizes the value, or 400
+        ProblemError: 409 ``managed_by_provider`` naming who sizes the value, or 400
             ``scale_down_refused`` naming the count and the change.
     """
     if cls != _CLASS:
@@ -748,7 +744,6 @@ def guard_action_change(request: Request, cls: str, name: str, path: str, docume
 
 _WRITE_RESPONSES: dict[int | str, dict[str, Any]] = {
     409: {
-        "model": ErrorResponse,
         "description": (
             "managed_by_provider: DFE does not run the service, so nothing in the "
             "deployment reads this value; context names who sizes it and set_in where. "
@@ -759,7 +754,9 @@ _WRITE_RESPONSES: dict[int | str, dict[str, Any]] = {
 
 
 @router.get("", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
-def list_backing_services(user: CurrentUser, request: Request) -> list[BackingServiceConfig]:
+def list_backing_services(
+    query: ListParams, user: CurrentUser, request: Request
+) -> Page[BackingServiceConfig]:
     """Every backing service's DECLARED deploy configuration, and who runs it.
 
     Declared, not observed: these are the values the deploy repo asks for, read
@@ -769,19 +766,21 @@ def list_backing_services(user: CurrentUser, request: Request) -> list[BackingSe
     its own broker or server and held briefly per service, and ``read_only``, the
     values a write is refused on.
     """
-    return [_config(request, spec) for spec in CATALOGUE]
+    return paginate([_config(request, spec) for spec in CATALOGUE], query)
 
 
 @router.get("/overlays", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
-def list_overlays(user: CurrentUser, request: Request) -> list[str]:
+def list_overlays(query: ListParams, user: CurrentUser, request: Request) -> Page[str]:
     """List substrate/platform overlay resources in the deploy repo's infra/ dir."""
-    return gitcrud_of(request).list(_CLASS)
+    return paginate(gitcrud_of(request).list(_CLASS), query)
 
 
 @router.get(
     "/overlays/{name}/vars", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))]
 )
-def list_overlay_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
+def list_overlay_vars(
+    query: ListParams, name: str, user: CurrentUser, request: Request
+) -> Page[dict[str, Any]]:
     """Flattened dot-path vars for one overlay, each marked protected or not.
 
     Credentials come back masked, as every other read of the deploy repo masks them.
@@ -789,14 +788,17 @@ def list_overlay_vars(name: str, user: CurrentUser, request: Request) -> list[di
     check_name(name)
     gc = gitcrud_of(request)
     policy = policy_of(request)
-    return [
-        {
-            "path": path,
-            "value": value,
-            "protected": bool(policy and policy.is_protected(_CLASS, name, path)),
-        }
-        for path, value in shown_vars(gc, _CLASS, name).items()
-    ]
+    return paginate(
+        [
+            {
+                "path": path,
+                "value": value,
+                "protected": bool(policy and policy.is_protected(_CLASS, name, path)),
+            }
+            for path, value in shown_vars(gc, _CLASS, name).items()
+        ],
+        query,
+    )
 
 
 @router.get("/{service}", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
@@ -804,12 +806,10 @@ def get_backing_service(service: str, user: CurrentUser, request: Request) -> Ba
     """One backing service's DECLARED deploy configuration (see the list route)."""
     spec = _BY_SERVICE.get(service)
     if spec is None:
-        raise HTTPException(
+        raise ProblemError(
             404,
-            detail={
-                "code": "not_found",
-                "message": f"unknown backing service {service!r}; known: {sorted(_BY_SERVICE)}",
-            },
+            f"unknown backing service {service!r}; known: {sorted(_BY_SERVICE)}",
+            code="not_found",
         )
     return _config(request, spec)
 

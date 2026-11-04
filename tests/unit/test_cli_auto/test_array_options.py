@@ -30,7 +30,7 @@ def test_from_catalogue_creates_every_entry_given(harness):
     assert reply["failed"] == []
     assert [row["source"] for row in reply["created"]] == ["cisco-asa", "okta-prod"]
     listed = harness.invoke(["--output", "json", "sources", "list"])
-    stored = {row["name"] for row in json.loads(listed.stdout)}
+    stored = {row["name"] for row in json.loads(listed.stdout)["items"]}
     assert {"cisco-asa", "okta-prod"} <= stored
 
 

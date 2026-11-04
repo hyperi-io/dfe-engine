@@ -30,7 +30,7 @@ def _refuse(client: TestClient, count: int) -> list[str]:
     for i in range(count):
         resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer forged-{i}"})
         assert resp.status_code == 401, resp.text
-        messages.append(resp.json()["message"])
+        messages.append(resp.json()["detail"])
     return messages
 
 

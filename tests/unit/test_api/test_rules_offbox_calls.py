@@ -51,7 +51,7 @@ def _assert_refused(resp) -> None:
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["code"] == "invalid_sql"
-    messages = [error["message"] for error in body["context"]["sql_errors"]]
+    messages = [error["message"] for error in body["sql_errors"]]
     assert any("may not call" in message for message in messages), messages
 
 
@@ -124,7 +124,7 @@ def test_a_rule_reading_another_table_is_refused_and_never_written(
     )
 
     assert resp.status_code == 422, resp.text
-    messages = [error["message"] for error in resp.json()["context"]["sql_errors"]]
+    messages = [error["message"] for error in resp.json()["sql_errors"]]
     assert any("SELECT" in message or "after IN" in message for message in messages), messages
     assert client.get("/api/v1/rules/lookup", headers=admin_headers).status_code == 404
 

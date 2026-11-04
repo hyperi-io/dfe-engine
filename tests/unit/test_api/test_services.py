@@ -50,7 +50,7 @@ class TestServicesList:
         assert resp.status_code == 200
         data = resp.json()
         assert data["items"] == []
-        assert data["total"] == 0
+        assert data["total_size"] == 0
 
     def test_list_requires_auth(self, client):
         resp = client.get("/api/v1/services")
@@ -164,7 +164,7 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
         resp = client.put(self.URL, json=body, headers=admin_headers)
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "masked_value"
-        assert "server.auth.bearer.tokens[1]" in resp.json()["message"]
+        assert "server.auth.bearer.tokens[1]" in resp.json()["detail"]
         path = Path(api_settings.services.config_yaml_dir) / "receiver-placeholder.yaml"
         assert not path.exists()
 
@@ -299,7 +299,7 @@ class TestALegacyMaskedCredentialRestoresOnlyWhereItWasSet:
         resp = client.put(self.URL, json=shown, headers=admin_headers)
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "credential_reentry_required"
-        assert "connections[0]" in resp.json()["message"]
+        assert "connections[0]" in resp.json()["detail"]
         assert _saved(api_settings, self.TABLE) == self.STORED
 
     def test_the_change_is_taken_with_the_token_typed_again(
@@ -345,7 +345,7 @@ class TestALegacyMaskedCredentialRestoresOnlyWhereItWasSet:
         resp = client.put(url, json=shown, headers=admin_headers)
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "credential_reentry_required"
-        assert "kafka.sasl" in resp.json()["message"]
+        assert "kafka.sasl" in resp.json()["detail"]
         assert _saved(api_settings, "receiver-placeholder")["kafka"]["sasl"]["username"] == "dfe"
 
 

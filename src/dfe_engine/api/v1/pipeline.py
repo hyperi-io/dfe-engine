@@ -9,16 +9,17 @@
 """Pipeline router -- Vector pipeline template listing and generation.
 
 Wraps ``PipelineBuilderController`` for REST access to pipeline template
-management. Build operations are async (returns 202 + task_id).
+management. A build is a long-running operation (202 and the operation to poll).
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
+from scalo.api import ACCEPTED_RESPONSES, ListParams, Page, paginate
 
 from dfe_engine.api.deps import CurrentUser, require_action
-from dfe_engine.api.task_manager import TaskManager
+from dfe_engine.api.task_manager import TaskManager, TaskOperation, accept_task
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
@@ -52,12 +53,6 @@ class PipelineBuildRequest(BaseModel):
     )
 
 
-class PipelineBuildResponse(BaseModel):
-    """Response from triggering a pipeline build."""
-
-    task_id: str = Field(description="Task ID for polling via /tasks/{task_id}")
-
-
 # -- Dependencies --------------------------------------------
 
 
@@ -70,13 +65,14 @@ def _get_task_manager(request: Request) -> TaskManager:
 
 @router.get(
     "/templates",
-    response_model=list[PipelineTemplate],
+    response_model=Page[PipelineTemplate],
     dependencies=[Depends(require_action(scopes_dict["pipeline_read"]))],
 )
 async def list_templates(
+    query: ListParams,
     user: CurrentUser,
     _auth: None = Depends(require_action(scopes_dict["pipeline_read"])),
-) -> list[PipelineTemplate]:
+) -> Page[PipelineTemplate]:
     """List available Vector pipeline templates."""
     from dfe_engine.pipeline.pipeline_controller import PipelineBuilderController
 
@@ -87,32 +83,31 @@ async def list_templates(
             args_download=False,
         )
     except Exception:
-        return []
+        return paginate([], query)
 
     templates: list[PipelineTemplate] = []
     types = result.get("type", [])
     names = result.get("templates", [])
     for ttype, name in zip(types, names, strict=False):
         templates.append(PipelineTemplate(type=ttype, name=name))
-    return templates
+    return paginate(templates, query)
 
 
 @router.post(
     "/build",
-    response_model=PipelineBuildResponse,
+    response_model=TaskOperation,
     status_code=202,
+    responses=ACCEPTED_RESPONSES,
     dependencies=[Depends(require_action(scopes_dict["pipeline_write"]))],
 )
 async def build_pipeline(
     body: PipelineBuildRequest,
     request: Request,
+    response: Response,
     user: CurrentUser,
     _auth: None = Depends(require_action(scopes_dict["pipeline_write"])),
-) -> PipelineBuildResponse:
-    """Trigger pipeline manifest generation.
-
-    Returns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``.
-    """
+) -> TaskOperation:
+    """Start pipeline manifest generation, answering the operation to poll."""
     manager = _get_task_manager(request)
     task_info = manager.submit(
         "pipeline:build",
@@ -122,7 +117,7 @@ async def build_pipeline(
         body.build_core,
     )
     audit_resource_change(user.user_id, "pipeline", "all", "executed")
-    return PipelineBuildResponse(task_id=task_info.id)
+    return accept_task(response, task_info)
 
 
 async def _build_pipeline(

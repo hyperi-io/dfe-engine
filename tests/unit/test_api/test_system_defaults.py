@@ -443,23 +443,21 @@ class TestDefaultDrift:
         named = client.get(DRIFT, headers=admin_headers, params={"search": "alpha"})
         assert named.status_code == 200, named.text
         assert [item["source"] for item in named.json()["items"]] == ["alpha"]
-        assert named.json()["total"] == 1
+        assert named.json()["total_size"] == 1
 
         landing = client.get(DRIFT, headers=admin_headers, params={"search": "main"})
         assert landing.json()["items"] == []
-        assert landing.json()["total"] == 0
+        assert landing.json()["total_size"] == 0
 
         by_engine = client.get(DRIFT, headers=admin_headers, params={"search": "MergeTree"})
         assert [item["source"] for item in by_engine.json()["items"]] == ["alpha", "zeta"]
 
-        page = client.get(DRIFT, headers=admin_headers, params={"page": 1, "per_page": 1})
+        page = client.get(DRIFT, headers=admin_headers, params={"page_size": 1})
         assert page.status_code == 200, page.text
         body = page.json()
         assert len(body["items"]) == 1
-        assert body["total"] == 2
-        assert body["page"] == 1
-        assert body["per_page"] == 1
-        assert body["next_page"] == 2
+        assert body["total_size"] == 2
+        assert body["next_page_token"]
         assert body["items"][0]["source"] != "main"
 
 

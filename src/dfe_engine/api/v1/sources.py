@@ -39,16 +39,26 @@ import asyncio
 import functools
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal, NamedTuple, NoReturn
+from typing import Annotated, Any, Literal, NamedTuple, NoReturn
 
 from dfe_schemas.clickhouse import PlatformProbe, ReplicationNotConfiguredError
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from scalo.api import FieldError as ProblemFieldError
-from scalo.api import ProblemError
+from scalo.api import (
+    ListParams,
+    ListQuery,
+    Page,
+    ProblemError,
+    list_query,
+    paginate,
+    scalo_extra,
+    sort_by_order,
+)
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
@@ -67,20 +77,11 @@ from dfe_engine.api.deps import (
 )
 from dfe_engine.api.errors import (
     TOPICS_NOT_CREATED,
-    CoreResourceConflictErrorResponse,
-    ErrorResponse,
-    InvalidRuleErrorResponse,
-    RuleError,
-    RuleErrorSpan,
-    SourceCreateConflictResponse,
-    SourceWriteConflictResponse,
-    TopicsNotCreatedErrorResponse,
     backend_failure,
     hide_backend_text,
     no_schema_error,
     raise_exchange_http,
 )
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.review import (
     AWAITING_REVIEW,
     ReviewFields,
@@ -144,10 +145,10 @@ from dfe_engine.source.flow import FlowError, SourceFlow, resolve_flow
 from dfe_engine.source.models import (
     DEFAULT_LANDING_LABEL,
     EXTERNAL_ENGINE,
-    PaginatedSourceSummaryResponse,
     Source,
     SourceState,
     SourceSummaryObject,
+    SourceSummaryPage,
     SourceVersion,
     SourceVersionGetResponse,
     SourceWriteRequest,
@@ -169,7 +170,7 @@ router = APIRouter(prefix="/sources", tags=["Sources"], dependencies=[WRITE_TURN
 _CH_UNREADABLE = "ClickHouse could not be read; the engine log has the reason"
 
 
-def _ch_unreadable(exc: Exception, source: str) -> HTTPException:
+def _ch_unreadable(exc: Exception, source: str) -> ProblemError:
     """The 503 for a deploy or plan that could not read ClickHouse's state."""
     return backend_failure(
         503,
@@ -185,27 +186,23 @@ def _require_replication(probe: PlatformProbe, source: str) -> None:
     """Refuse a deploy to a server the schema phase would refuse, with dfe-schemas' reason.
 
     Raises:
-        HTTPException: 503 ``clickhouse_not_replicated`` carrying the reason, which
+        ProblemError: 503 ``clickhouse_not_replicated`` carrying the reason, which
             dfe-schemas composes and which names no host, or 503
             ``clickhouse_unavailable`` when the server could not be asked.
     """
     try:
         probe.require_replication()
     except ReplicationNotConfiguredError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "clickhouse_not_replicated", "message": str(exc)},
-        ) from exc
+        raise ProblemError(503, str(exc), code="clickhouse_not_replicated") from exc
     except Exception as exc:
         raise _ch_unreadable(exc, source) from exc
 
 
 _INVALID_RULE: dict[int | str, dict[str, Any]] = {
     422: {
-        "model": InvalidRuleErrorResponse | ErrorResponse,
         "description": (
             "Refused, nothing written. The body failed validation (code validation_error), or "
-            "the receiver would refuse the source's rule (code invalid_rule): context.rule_errors "
+            "the receiver would refuse the source's rule (code invalid_rule): rule_errors "
             "names each field at fault and, for when, the span the check stopped at"
         ),
     },
@@ -226,13 +223,13 @@ def invalid_rule_problem(exc: SourceRuleError) -> ProblemError:
         ],
         source=exc.source,
         rule_errors=[
-            RuleError(
-                field=problem.field,
-                message=problem.detail,
-                span=None
+            {
+                "field": problem.field,
+                "message": problem.detail,
+                "span": None
                 if problem.span is None
-                else RuleErrorSpan(start=problem.span[0], end=problem.span[1]),
-            ).model_dump(mode="json")
+                else {"start": problem.span[0], "end": problem.span[1]},
+            }
             for problem in exc.problems
         ],
     )
@@ -242,47 +239,30 @@ def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
     """Map registry validation errors to HTTP responses (never 500)."""
     # 409, matching the core-resource guard's answer for roles, schemas and field maps.
     if isinstance(exc, SourceCoreResourceError):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": str(exc),
-                "source": exc.source,
-            },
-        ) from exc
+        raise ProblemError(409, str(exc), code="conflict", source=exc.source) from exc
     if isinstance(exc, SourceMatchConflictError):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "match_conflict",
-                "message": str(exc),
-                "source": exc.source,
-                "conflicting_source": exc.conflicting_source,
-                "field": exc.field,
-                "value": exc.value,
-            },
+        raise ProblemError(
+            409,
+            str(exc),
+            code="match_conflict",
+            source=exc.source,
+            conflicting_source=exc.conflicting_source,
+            field=exc.field,
+            value=exc.value,
         ) from exc
     if isinstance(exc, SourceAliasConflictError):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "alias_conflict",
-                "message": str(exc),
-                "source": exc.source,
-                "conflicting_source": exc.conflicting_source,
-                "profile": exc.profile,
-                "alias": exc.alias,
-            },
+        raise ProblemError(
+            409,
+            str(exc),
+            code="alias_conflict",
+            source=exc.source,
+            conflicting_source=exc.conflicting_source,
+            profile=exc.profile,
+            alias=exc.alias,
         ) from exc
     if isinstance(exc, SourceRuleError):
         raise invalid_rule_problem(exc) from exc
-    raise HTTPException(
-        status_code=422,
-        detail={
-            "code": "validation_error",
-            "message": str(exc),
-        },
-    ) from exc
+    raise ProblemError(422, str(exc), code="validation_error") from exc
 
 
 def _failure_code(exc: Exception) -> str:
@@ -466,7 +446,7 @@ def _refuse_unknown_fetched_org(request: Request, body: SourceWriteRequest) -> N
     """Refuse a fetched or external source naming an org the registry does not hold.
 
     Raises:
-        HTTPException: 422 ``unknown_org``.
+        ProblemError: 422 ``unknown_org``.
     """
     pipeline = body.external or (
         body.transform if body.transform is not None and body.transform.is_external else None
@@ -535,16 +515,15 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
             # report of that change: the render below finds the file current.
             hints += written.restart_required
             done.append(change.describe())
-    except HTTPException as exc:
-        detail = exc.detail if isinstance(exc.detail, str) else exc.detail.get("message", "")
-        logger.warning(f"apps not reconciled with the sources: {detail}")
-        return AppsSync(changes=done, error=str(detail), restart_required=_one_per_app(hints))
+    except ProblemError as exc:
+        logger.warning(f"apps not reconciled with the sources: {exc}")
+        return AppsSync(changes=done, error=str(exc), restart_required=_one_per_app(hints))
     except BearerSourceUnreadableError as exc:
         # The engine's own text, naming the setting to change, so it reaches the caller.
         logger.warning(f"apps not reconciled with the sources: {exc}")
         return AppsSync(changes=done, error=str(exc), restart_required=_one_per_app(hints))
     except Exception as exc:
-        # Anything but an HTTPException can be the deploy repo's own text.
+        # Anything but a ProblemError can be the deploy repo's own text.
         error = hide_backend_text(
             "the deploy repo could not be brought into step; the engine log has the reason",
             exc,
@@ -660,10 +639,7 @@ def _resolve_source(name: str, registry: Any) -> Source:
     try:
         return registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source {name!r} not found"},
-        ) from None
+        raise ProblemError(404, f"Source {name!r} not found", code="not_found") from None
 
 
 def _landing_table(source: Source) -> tuple[str, bool]:
@@ -766,7 +742,7 @@ class BulkDeployTask(BaseModel):
         default=None,
         description="Version requested; null means the working current at task start",
     )
-    task_id: str = Field(description="Task id for polling via GET /tasks/{task_id}")
+    operation: str = Field(description="The operation to poll, such as operations/7f3a")
     kind: str = Field(default="source:deploy", description="Task kind")
 
 
@@ -793,7 +769,7 @@ class BulkActionResponse(ReviewFields):
         default_factory=list,
         description=(
             "Deploy only: one ``source:deploy`` task per accepted source. "
-            "Poll via GET /tasks/{task_id}."
+            "Poll each at GET /api/v1/<operation>."
         ),
     )
     apps_synced: list[str] = _apps_synced_field()
@@ -1268,23 +1244,36 @@ class SourceVersionGetDetailResponse(SourceVersionGetResponse):
 # -- Endpoints --
 
 
+SourcesList = Annotated[
+    ListQuery,
+    Depends(
+        list_query(
+            order_by=(
+                "source",
+                "display_name",
+                "enabled",
+                "current",
+                "deployed_version",
+                "updated_at",
+            ),
+            tiebreak="source",
+        )
+    ),
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedSourceSummaryResponse,
+    response_model=SourceSummaryPage,
     dependencies=[Depends(require_own_org_action(scopes_dict["source_read"]))],
 )
 def list_sources(
     request: Request,
     user: CurrentUser,
     registry: SourceReg,
-    pagination: PaginationParams = Depends(),
+    query: SourcesList,
     search: str | None = Query(None, description="Search in source name and description"),
     enabled: bool | None = Query(None, description="Filter by enabled status"),
-    sort_by: str | None = Query(
-        None,
-        description="Sort field (source, display_name, enabled, current, deployed_version, updated_at)",
-    ),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List sources with pagination, search, filtering, and a full object tree.
 
@@ -1300,12 +1289,12 @@ def list_sources(
         raw_sources = [s for s in raw_sources if not s.get("enabled", True)]
 
     raw_sources = apply_search(raw_sources, search, ["source", "display_name", "description"])
-    raw_sources = apply_sort(raw_sources, sort_by, sort_order)
+    raw_sources = sort_by_order(raw_sources, query.order_by)
     raw_sources = _pin_landing_source_first(raw_sources)
 
     summaries = [_to_summary(row) for row in raw_sources]
-    return PaginatedSourceSummaryResponse.from_summaries(
-        summaries, pagination.page, pagination.per_page
+    return SourceSummaryPage.from_summaries(
+        summaries, query, bound={"search": search, "enabled": enabled}
     )
 
 
@@ -1368,7 +1357,7 @@ def require_source_readable(
     the handler answers it with its own 404.
 
     Raises:
-        HTTPException: 403 ``org_not_granted`` for a fetcher source bound to an org the
+        ProblemError: 403 ``org_not_granted`` for a fetcher source bound to an org the
             caller is not held to.
     """
     held = held_source_orgs(request, user)
@@ -1379,12 +1368,10 @@ def require_source_readable(
     except SourceNotFoundError:
         return
     if not source_model_is_readable(source, held):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "org_not_granted",
-                "message": f"Source {name!r} is bound to an org the caller does not hold",
-            },
+        raise ProblemError(
+            403,
+            f"Source {name!r} is bound to an org the caller does not hold",
+            code="org_not_granted",
         )
 
 
@@ -1413,7 +1400,6 @@ _CREATED_APPS_NOT_SYNCED = {
     responses={
         202: _CREATED_APPS_NOT_SYNCED,
         409: {
-            "model": SourceCreateConflictResponse,
             "description": (
                 "Source name already exists (code conflict), the name is the core "
                 "landing the engine owns and reconciles itself (code conflict), "
@@ -1448,22 +1434,10 @@ def create_source(
     name = body.source
 
     if not name:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "validation_error",
-                "message": "'source' field is required",
-            },
-        )
+        raise ProblemError(422, "'source' field is required", code="validation_error")
 
     if registry.source_exists(name):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": f"Source {name!r} already exists",
-            },
-        )
+        raise ProblemError(409, f"Source {name!r} already exists", code="conflict")
     _refuse_unknown_fetched_org(request, body)
 
     routing = ReviewRouting()
@@ -1490,14 +1464,14 @@ def create_source(
 
 @router.get(
     "/catalogue",
-    response_model=PaginatedResponse[CatalogueEntryObject],
+    response_model=Page[CatalogueEntryObject],
     dependencies=[Depends(require_own_org_action(scopes_dict["source_read"]))],
 )
 def list_catalogue(
     user: CurrentUser,
     registry: SourceReg,
     settings: Settings,
-    pagination: PaginationParams = Depends(),
+    query: ListParams,
     intake: str | None = Query(
         None, description="Only entries that arrive this way (beats, receiver, fetcher)"
     ),
@@ -1524,7 +1498,7 @@ def list_catalogue(
             "create-from-catalogue page offers only what is left to create"
         ),
     ),
-) -> PaginatedResponse[CatalogueEntryObject]:
+) -> Page[CatalogueEntryObject]:
     """List the sources the installed dfe-schemas catalogue ships ready to create.
 
     ``tags`` keeps an entry whose holding directory is one of the names given.
@@ -1541,15 +1515,11 @@ def list_catalogue(
     """
     catalogue = _source_catalogue()
     if intake is not None and intake not in source_catalogue_module.INTAKES:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "validation_error",
-                "message": (
-                    f"Unknown intake {intake!r}. Must be: "
-                    f"{', '.join(sorted(source_catalogue_module.INTAKES))}"
-                ),
-            },
+        raise ProblemError(
+            422,
+            f"Unknown intake {intake!r}. Must be: "
+            f"{', '.join(sorted(source_catalogue_module.INTAKES))}",
+            code="validation_error",
         )
 
     taken = (
@@ -1587,33 +1557,34 @@ def list_catalogue(
             or needle in entry.data_stream.lower()
         ]
     # Entries are held in name order, and only the page served is judged against the contract.
-    page = PaginatedResponse[str].from_list(
-        [entry.name for entry in entries], pagination.page, pagination.per_page
+    bound = {"intake": intake, "search": search, "tags": tags, "engine": engine}
+    page = paginate(
+        [entry.name for entry in entries], query, bound={**bound, "include_stored": include_stored}
     )
     rows = [
         _to_catalogue_object(entry=catalogue.entries[name], settings=settings)
         for name in page.items
     ]
-    return PaginatedResponse[CatalogueEntryObject](
-        items=rows, total=page.total, page=page.page, per_page=page.per_page
+    return Page[CatalogueEntryObject](
+        items=rows, next_page_token=page.next_page_token, total_size=page.total_size
     )
 
 
 @router.get(
     "/catalogue-tags",
-    response_model=PaginatedResponse[CatalogueTagObject],
+    response_model=Page[CatalogueTagObject],
     dependencies=[Depends(require_own_org_action(scopes_dict["source_read"]))],
 )
 def list_catalogue_tags(
     user: CurrentUser,
-    pagination: PaginationParams = Depends(),
+    query: ListParams,
     name: str | None = Query(
         None,
         description=(
             "Keep tags whose directory key or display name starts with this. The match ignores case"
         ),
     ),
-) -> PaginatedResponse[CatalogueTagObject]:
+) -> Page[CatalogueTagObject]:
     """List the directories under the catalogue that hold source files.
 
     A tag is one directory directly under ``catalogue/``. Files that sit in the
@@ -1627,30 +1598,28 @@ def list_catalogue_tags(
         directory = source_catalogue_module.catalogue_tags_directory()
     except source_catalogue_module.SourceCatalogueError as exc:
         logger.error("Source catalogue unreadable", error=str(exc))
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "catalogue_error",
-                "message": "the source catalogue could not be read; the engine log has the reason",
-            },
+        raise ProblemError(
+            502,
+            "the source catalogue could not be read; the engine log has the reason",
+            code="catalogue_error",
         ) from exc
     tags = source_catalogue_module.catalogue_tag_list(directory=directory, name=name)
-    return PaginatedResponse[CatalogueTagObject].from_list(
+    return paginate(
         [CatalogueTagObject(description=tag.description, id=tag.id, name=tag.name) for tag in tags],
-        pagination.page,
-        pagination.per_page,
+        query,
+        bound={"name": name},
     )
 
 
 @router.get(
     "/engines",
-    response_model=PaginatedResponse[TableEngineObject],
+    response_model=Page[TableEngineObject],
     dependencies=[Depends(require_own_org_action(scopes_dict["source_read"]))],
 )
 def list_table_engines(
     user: CurrentUser,
-    pagination: PaginationParams = Depends(),
-) -> PaginatedResponse[TableEngineObject]:
+    query: ListParams,
+) -> Page[TableEngineObject]:
     """List the table engines a source may select, from dfe-schemas ``registries/engines.yaml``."""
     rows = [
         TableEngineObject(
@@ -1661,7 +1630,7 @@ def list_table_engines(
         )
         for option in engine_registry().options
     ]
-    return PaginatedResponse.from_list(rows, pagination.page, pagination.per_page)
+    return paginate(rows, query)
 
 
 _CATALOGUE_CONFLICTS = frozenset(
@@ -1686,17 +1655,11 @@ def _catalogue_failure(
 
 
 def _catalogue_http_failure(
-    entry: str, exc: HTTPException, *, source: str
+    entry: str, exc: ProblemError, *, source: str
 ) -> CatalogueSourceFailure:
     """A refusal raised as HTTP, recorded on the entry instead of aborting the batch."""
-    detail = exc.detail if isinstance(exc.detail, dict) else {}
-    code = detail.get("code", "validation_error")
-    message = detail.get("message", exc.detail)
     return CatalogueSourceFailure(
-        entry=entry,
-        source=source,
-        code=code if isinstance(code, str) else "validation_error",
-        message=message if isinstance(message, str) else str(exc.detail),
+        entry=entry, source=source, code=exc.problem.code or "validation_error", message=str(exc)
     )
 
 
@@ -1734,7 +1697,7 @@ def _compile_catalogue_item(
     name = _catalogue_source_name(write)
     try:
         _refuse_unknown_fetched_org(request, write)
-    except HTTPException as exc:
+    except ProblemError as exc:
         return _catalogue_http_failure(item.entry, exc, source=name)
     available = source_catalogue_module.variant_availability(transform=write.transform)
     if available.state == "missing_variant" and write.transform is not None:
@@ -1802,7 +1765,6 @@ def _catalogue_status(
             ),
         },
         422: {
-            "model": ErrorResponse,
             "description": (
                 "The request failed before any source could be written. The body is "
                 "{code, message}: the selection is longer than 50, empty, or not a valid request"
@@ -1914,21 +1876,11 @@ def get_source_version(
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Source '{name}' not found",
-            },
-        ) from None
+        raise ProblemError(404, f"Source '{name}' not found", code="not_found") from None
 
     if version not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version}' not found for source '{name}'",
-            },
+        raise ProblemError(
+            404, f"Version '{version}' not found for source '{name}'", code="not_found"
         )
 
     settings = get_settings()
@@ -1957,7 +1909,7 @@ def get_source_version(
 
 @router.get(
     "/{name}/columns",
-    response_model=PaginatedResponse[SchemaColumn],
+    response_model=Page[SchemaColumn],
     dependencies=[
         Depends(require_own_org_action(scopes_dict["source_read"])),
         Depends(require_source_in_held_orgs),
@@ -1968,16 +1920,13 @@ def get_source_schema_columns(
     user: CurrentUser,
     registry: SourceReg,
     request: Request,
+    query: ListParams,
     version: str | None = Query(
         None,
         description="Source version id (defaults to deployed_version)",
     ),
-    pagination: PaginationParams = Depends(),
-) -> PaginatedResponse[SchemaColumn]:
-    """Get composed schema columns for a source version (profile + meta/derived/additional).
-
-    Use ``per_page=-1`` to return all columns in one page.
-    """
+) -> Page[SchemaColumn]:
+    """Get composed schema columns for a source version (profile + meta/derived/additional)."""
     from dfe_engine.schema.schema_builder_v2 import (
         SchemaBuildError,
         SchemaBuilderV2,
@@ -1989,19 +1938,12 @@ def get_source_schema_columns(
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Source '{name}' not found", code="not_found") from None
 
     version_id = version or source.runtime_version_id()
     if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{name}'",
-            },
+        raise ProblemError(
+            404, f"Version '{version_id}' not found for source '{name}'", code="not_found"
         )
 
     snap = source.versions[version_id]
@@ -2022,17 +1964,10 @@ def get_source_schema_columns(
     # the load failed. TypeRegistryError is a profile type the registry does not know.
     # Narrowing to fewer answers 500 for the rest.
     except (SchemaBuildError, SchemaLoadError, TypeRegistryError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "schema_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(400, str(exc), code="schema_error") from exc
 
     all_columns = [_to_api_schema_column(col) for col in columns]
-    return PaginatedResponse.from_list(
-        all_columns,
-        pagination.page,
-        pagination.per_page,
-    )
+    return paginate(all_columns, query, bound={"version": version})
 
 
 @router.post(
@@ -2062,19 +1997,12 @@ def build_source_schema(
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Source '{name}' not found", code="not_found") from None
 
     version_id = version or source.runtime_version_id()
     if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{name}'",
-            },
+        raise ProblemError(
+            404, f"Version '{version_id}' not found for source '{name}'", code="not_found"
         )
 
     snap = source.versions[version_id]
@@ -2094,10 +2022,7 @@ def build_source_schema(
             field_map_registry=get_field_map_registry_optional(),
         )
     except (SchemaBuildError, SchemaLoadError, TypeRegistryError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "build_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(400, str(exc), code="build_error") from exc
 
     columns = [_to_api_schema_column(col) for col in result.columns]
 
@@ -2166,10 +2091,7 @@ def plan_source_deploy(
             field_map_registry=get_field_map_registry_optional(),
         )
     except (SchemaBuildError, SchemaLoadError, TypeRegistryError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "build_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(400, str(exc), code="build_error") from exc
 
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
@@ -2646,35 +2568,21 @@ async def _execute_source_deploy(
     return deploy_result
 
 
-def _topics_not_created(name: str, failed: list[tuple[str, str]]) -> HTTPException:
+def _topics_not_created(name: str, failed: list[tuple[str, str]]) -> ProblemError:
     """The 502 for a deploy whose source rides the bus and did not get every topic.
 
     Each reason is the one ``ensure_topics`` recorded, which names the broker's
     error code and never its text.
     """
     named = ", ".join(f"{topic} ({reason})" for topic, reason in failed)
-    return HTTPException(
-        status_code=502,
-        detail={
-            "code": TOPICS_NOT_CREATED,
-            "message": (
-                f"Kafka topics not created for source '{name}', so it was not deployed: "
-                f"{named}. Its table is in place. Deploy again once the broker takes the topics"
-            ),
-            "source": name,
-            "topics": [{"topic": topic, "reason": reason} for topic, reason in failed],
-        },
+    return ProblemError(
+        502,
+        f"Kafka topics not created for source '{name}', so it was not deployed: "
+        f"{named}. Its table is in place. Deploy again once the broker takes the topics",
+        code=TOPICS_NOT_CREATED,
+        source=name,
+        topics=[{"topic": topic, "reason": reason} for topic, reason in failed],
     )
-
-
-def _http_exception_message(exc: HTTPException) -> str:
-    """A task-facing message from an HTTPException detail."""
-    detail = exc.detail
-    if isinstance(detail, dict):
-        message = detail.get("message")
-        if isinstance(message, str) and message:
-            return message
-    return str(detail)
 
 
 async def _run_source_deploy_task(
@@ -2701,8 +2609,8 @@ async def _run_source_deploy_task(
             version=version,
             dry_run=dry_run,
         )
-    except HTTPException as exc:
-        raise RuntimeError(_http_exception_message(exc)) from exc
+    except ProblemError as exc:
+        raise RuntimeError(str(exc)) from exc
     task.set_progress(100, f"{'Planned' if dry_run else 'Deployed'} {label}")
     return result.model_dump(mode="json")
 
@@ -2712,7 +2620,6 @@ async def _run_source_deploy_task(
     response_model=SchemaDeployResult,
     responses={
         502: {
-            "model": TopicsNotCreatedErrorResponse | ErrorResponse,
             "description": (
                 "A backing service refused the deploy: ClickHouse rejected the DDL, or "
                 "the source rides the bus and the broker did not create its topics "
@@ -2851,7 +2758,7 @@ def _plan_and_apply_ddl(
         The plan, and how many of its statements ClickHouse took.
 
     Raises:
-        HTTPException: 503 when ClickHouse could not be read, 502 when it rejected a statement.
+        ProblemError: 503 when ClickHouse could not be read, 502 when it rejected a statement.
     """
     try:
         planned = plan_deploy_statements(
@@ -2951,16 +2858,10 @@ def _apply_source_schema(
     # the load failed. TypeRegistryError is a profile type the registry does not know.
     # Narrowing to fewer answers 500 for the rest.
     except (SchemaBuildError, SchemaLoadError, TypeRegistryError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "build_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(400, str(exc), code="build_error") from exc
 
     if not result.create_table_ddl:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "no_ddl", "message": "no CREATE TABLE DDL was generated"},
-        )
+        raise ProblemError(400, "no CREATE TABLE DDL was generated", code="no_ddl")
 
     views = dict(result.view_ddls or {})
     validation_errors = list(result.validation_errors or [])
@@ -2985,13 +2886,11 @@ def _apply_source_schema(
 
     # Deploy mode: refuse to apply a schema that failed validation.
     if validation_errors:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "validation_failed",
-                "message": "schema has validation errors; fix them or use dry_run to review",
-                "errors": validation_errors,
-            },
+        raise ProblemError(
+            400,
+            "schema has validation errors; fix them or use dry_run to review",
+            code="validation_failed",
+            errors=[ProblemFieldError(field="schema", detail=str(e)) for e in validation_errors],
         )
 
     # The schema phase's refusal, made here too: after the caller's own errors, which
@@ -3007,16 +2906,12 @@ def _apply_source_schema(
                 builder, source, version_id, result, ch=ch, db=db, name=name, platform=platform
             )
     except SchemaLockBusyError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "schema_locked",
-                "message": (
-                    "another schema apply held the ClickHouse schema lease for the whole "
-                    "wait, so retry once it finishes"
-                ),
-                "holder": exc.holder,
-            },
+        raise ProblemError(
+            503,
+            "another schema apply held the ClickHouse schema lease for the whole "
+            "wait, so retry once it finishes",
+            code="schema_locked",
+            holder=exc.holder,
         ) from exc
     except SchemaLockError as exc:
         raise _ch_unreadable(exc, name) from exc
@@ -3047,13 +2942,7 @@ def get_source(name: str, user: CurrentUser, registry: SourceReg):
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Source {name!r} not found",
-            },
-        ) from None
+        raise ProblemError(404, f"Source {name!r} not found", code="not_found") from None
     settings = get_settings()
     store = SourceDeploymentStore.from_settings(settings)
     return _to_source_detail_response(source, store, settings)
@@ -3061,6 +2950,7 @@ def get_source(name: str, user: CurrentUser, registry: SourceReg):
 
 @router.get(
     "/{name}/flow",
+    openapi_extra=scalo_extra(verb="flow"),
     response_model=SourceFlowResponse,
     responses={
         422: {
@@ -3088,14 +2978,12 @@ def get_source_flow(name: str, user: CurrentUser, registry: SourceReg, settings:
     try:
         return _flow_response(resolve_flow(source, settings))
     except FlowError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "flow_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(422, str(exc), code="flow_error") from exc
 
 
 @router.get(
     "/{name}/lag",
+    openapi_extra=scalo_extra(verb="lag"),
     response_model=ExternalLagResponse,
     responses={
         422: {"description": "The source's transform is not the customer's own pipeline"},
@@ -3120,15 +3008,11 @@ async def get_external_lag(
     source = _resolve_source(name, registry)
     transform = source.version(source.current).transform
     if transform is None or transform.engine != EXTERNAL_ENGINE:
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "no_external_transform",
-                "message": (
-                    f"source {name!r} has no external transform, so no consumer group of the "
-                    "customer's reads its landing topic"
-                ),
-            },
+        raise ProblemError(
+            422,
+            f"source {name!r} has no external transform, so no consumer group of the "
+            "customer's reads its landing topic",
+            code="no_external_transform",
         )
     group = external_consumer_group(source.source)
     unread = ExternalLagResponse(
@@ -3161,6 +3045,7 @@ async def get_external_lag(
 
 @router.get(
     "/{name}/signals",
+    openapi_extra=scalo_extra(verb="signals"),
     response_model=SourceSignalsResponse,
     dependencies=[
         Depends(require_own_org_action(scopes_dict["source_read"])),
@@ -3209,6 +3094,7 @@ def get_source_signals(
 @router.get(
     "/{name}/export",
     response_model=SourceBundle,
+    openapi_extra=scalo_extra(verb="export"),
     response_model_exclude_none=True,
     dependencies=[
         Depends(require_own_org_action(scopes_dict["source_read"])),
@@ -3244,7 +3130,6 @@ def export_source(
     response_model=SourceResponse,
     responses={
         409: {
-            "model": SourceWriteConflictResponse,
             "description": (
                 "Receiver match duplicates another enabled source (code match_conflict), "
                 "an alias is another source's under the same profile (code alias_conflict), "
@@ -3287,13 +3172,7 @@ def update_source(
     from dfe_engine.source.registry import SourceNotFoundError
 
     if not registry.source_exists(name):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Source {name!r} not found",
-            },
-        )
+        raise ProblemError(404, f"Source {name!r} not found", code="not_found")
     _refuse_unknown_fetched_org(request, body)
 
     routing = ReviewRouting()
@@ -3302,13 +3181,7 @@ def update_source(
             name, body, created_by=git_author(user), routing=routing
         )
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Source '{name}' not found",
-            },
-        ) from None
+        raise ProblemError(404, f"Source '{name}' not found", code="not_found") from None
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(
@@ -3329,7 +3202,6 @@ def update_source(
     response_model=SourceResponse,
     responses={
         409: {
-            "model": SourceWriteConflictResponse,
             "description": (
                 "Enabling would duplicate another enabled source's receiver match (code "
                 "match_conflict) or alias (code alias_conflict), or the source is "
@@ -3357,13 +3229,7 @@ def patch_source_enabled(
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Source {name!r} not found",
-            },
-        ) from None
+        raise ProblemError(404, f"Source {name!r} not found", code="not_found") from None
 
     target = body.target_state()
     if source.state == target:
@@ -3399,7 +3265,6 @@ def patch_source_enabled(
     response_model=SourceDeleteResponse,
     responses={
         409: {
-            "model": CoreResourceConflictErrorResponse,
             "description": "The source is engine-owned and no write path may delete it",
         },
     },
@@ -3469,13 +3334,7 @@ def _delete_stored_source(
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Source {name!r} not found",
-            },
-        ) from None
+        raise ProblemError(404, f"Source {name!r} not found", code="not_found") from None
     try:
         registry.delete_source(
             name,
@@ -3505,22 +3364,17 @@ async def bulk_action(
 
     ``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.
     ``deploy`` submits one ``source:deploy`` background task per accepted source
-    (poll ``GET /tasks/{task_id}``); refused names land in ``failed``.
+    (poll ``GET /operations/{operation}``); refused names land in ``failed``.
 
     An action that applies immediately reports the one reconcile it ends with, as
     a single-source write does.
     """
     action_to_state = {"enable": "active", "disable": "disabled", "dormant": "dormant"}
     if body.action not in (*action_to_state, "delete", "deploy"):
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "validation_error",
-                "message": (
-                    f"Unknown action {body.action!r}. Must be: enable, disable, "
-                    "dormant, delete, deploy"
-                ),
-            },
+        raise ProblemError(
+            422,
+            f"Unknown action {body.action!r}. Must be: enable, disable, dormant, delete, deploy",
+            code="validation_error",
         )
 
     if body.action == "deploy":
@@ -3625,7 +3479,7 @@ def _submit_bulk_deploys(
             BulkDeployTask(
                 source=item.source,
                 version=item.version,
-                task_id=info.id,
+                operation=f"operations/{info.id}",
                 kind=info.kind,
             )
         )
@@ -3637,7 +3491,7 @@ def _submit_bulk_deploys(
             ",".join(entry.source for entry in deployments),
             "bulk_deploy_submitted",
             details={
-                "task_ids": [entry.task_id for entry in deployments],
+                "operations": [entry.operation for entry in deployments],
                 "dry_run": body.dry_run,
             },
         )
@@ -3720,16 +3574,10 @@ def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Request):
     deletes a stranded ``_load`` topic a deploy reported in ``topics_pending_removal``.
     """
     if getattr(request.app.state, "gitcrud", None) is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
+        raise ProblemError(503, "gitops is not enabled", code="not_configured")
     apps = reconcile_derived_apps(request, user, registry)
     if apps.error:
-        raise HTTPException(
-            status_code=502,
-            detail={"code": "reconcile_failed", "message": apps.error, "changes": apps.changes},
-        )
+        raise ProblemError(502, apps.error, code="reconcile_failed", changes=apps.changes)
     return AppsReconcileResponse(
         changes=apps.changes,
         restart_required=apps.restart_required,
@@ -3756,7 +3604,6 @@ def seed_sources(user: CurrentUser, registry: SourceReg):
     status_code=201,
     responses={
         409: {
-            "model": ErrorResponse,
             "description": (
                 "The source name already exists here, or a meta schema the bundle carries "
                 "would land on an occupied path (code conflict)"
@@ -3824,12 +3671,10 @@ def _source_catalogue() -> source_catalogue_module.SourceCatalogue:
         return source_catalogue_module.source_catalogue()
     except ManifestError as exc:
         logger.error("Source catalogue unreadable", error=str(exc))
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "catalogue_error",
-                "message": "the source catalogue could not be read; the engine log has the reason",
-            },
+        raise ProblemError(
+            502,
+            "the source catalogue could not be read; the engine log has the reason",
+            code="catalogue_error",
         ) from exc
 
 
@@ -3874,10 +3719,7 @@ def _resolve_source_version(
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Source '{name}' not found", code="not_found") from None
 
     if version:
         version_id = version
@@ -3887,12 +3729,8 @@ def _resolve_source_version(
         version_id = source.runtime_version_id()
 
     if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{name}'",
-            },
+        raise ProblemError(
+            404, f"Version '{version_id}' not found for source '{name}'", code="not_found"
         )
     return source, version_id
 

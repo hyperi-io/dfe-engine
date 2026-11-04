@@ -24,13 +24,22 @@ a logged-in user. Password hashes are NEVER returned in any response.
 """
 
 import functools
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field, field_validator
-from scalo.api import scalo_extra
+from scalo.api import (
+    ListQuery,
+    Page,
+    ProblemError,
+    list_query,
+    paginate,
+    scalo_extra,
+    sort_by_order,
+)
 from scalo.concurrency import run_blocking
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
@@ -40,13 +49,6 @@ from dfe_engine.api.deps import (
     refuse_unknown_orgs,
     require_action,
     secrets_store,
-)
-from dfe_engine.api.errors import ErrorResponse
-from dfe_engine.api.pagination import (
-    PaginatedResponse,
-    PaginationParams,
-    apply_search,
-    apply_sort,
 )
 from dfe_engine.api.v1.account_groups import check_group_changes
 from dfe_engine.api.v1.auth import persist_session_end, throttled
@@ -408,10 +410,7 @@ def _require_account(store: Any, username: str) -> Account:
     """Return the account, or 404 when it is missing or soft-deleted."""
     account = store.get(username)
     if account is None or account.is_soft_deleted:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+        raise ProblemError(404, f"Account '{username}' not found", code="not_found")
     return account
 
 
@@ -423,25 +422,18 @@ def _require_own_account(store: Any, user_id: str) -> Account:
     """
     account = account_for_session_subject(store, user_id)
     if account is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{user_id}' not found"},
-        )
+        raise ProblemError(404, f"Account '{user_id}' not found", code="not_found")
     return account
 
 
 def _refuse_external(account: Account) -> None:
     """Refuse a local password for an account its identity provider authenticates."""
     if account.external:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "external_account",
-                "message": (
-                    f"'{account.username}' signs in through its identity provider, so "
-                    "change its password there, not in DFE."
-                ),
-            },
+        raise ProblemError(
+            409,
+            f"'{account.username}' signs in through its identity provider, so "
+            "change its password there, not in DFE.",
+            code="external_account",
         )
 
 
@@ -482,21 +474,14 @@ async def _reset_stored_password(
     store: AccountStore = request.app.state.account_store
     existing = store.get(username)
     if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Account '{username}' not found"},
-        )
+        raise ProblemError(404, f"Account '{username}' not found", code="not_found")
     _refuse_external(existing)
     if not await run_blocking(_write_new_password, store, existing, new_password):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "password_reused",
-                "message": (
-                    "New password must differ from the account's current password "
-                    "and from the password it was last issued"
-                ),
-            },
+        raise ProblemError(
+            400,
+            "New password must differ from the account's current password "
+            "and from the password it was last issued",
+            code="password_reused",
         )
     stored = store.get(username) or existing
     await persist_session_end(request, stored, actor=actor)
@@ -531,10 +516,7 @@ async def create_account(
 
     store: AccountStore = request.app.state.account_store
     group_store = request.app.state.group_store
-    conflict = HTTPException(
-        status_code=409,
-        detail={"code": "conflict", "message": f"Account '{body.username}' already exists"},
-    )
+    conflict = ProblemError(409, f"Account '{body.username}' already exists", code="conflict")
     if store.get(body.username) is not None:
         raise conflict
     refuse_unknown_orgs(request, [body.org])
@@ -566,10 +548,7 @@ async def create_account(
     except AccountExistsError as exc:
         raise conflict from exc
     except InvalidNameError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(422, str(exc), code="validation_error") from exc
     sync_group_members_for_account_groups_change(
         group_store,
         body.username,
@@ -589,15 +568,21 @@ async def create_account(
     return _account_response(request, account, group_store.list())
 
 
+AccountsList = Annotated[
+    ListQuery,
+    Depends(list_query(order_by=("username", "created_at", "updated_at"), tiebreak="username")),
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedResponse[AccountResponse],
+    response_model=Page[AccountResponse],
     dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
 async def list_accounts(
     user: CurrentUser,
     request: Request,
-    pagination: PaginationParams = Depends(),
+    query: AccountsList,
     search: str | None = Query(None, description="Search in username, name, or email"),
     oidc_id: str | None = Query(
         None,
@@ -611,8 +596,6 @@ async def list_accounts(
         False,
         description="Include the local admin and break-glass recovery accounts.",
     ),
-    sort_by: str | None = Query(None, description="Sort field (username, created_at, updated_at)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List accounts (admin only), paginated. No password hashes returned."""
     from dfe_engine.auth.accounts import AccountStore
@@ -630,9 +613,18 @@ async def list_accounts(
     groups = request.app.state.group_store.list()
     rows = [_account_response(request, a, groups).model_dump() for a in accounts]
     rows = apply_search(rows, search, ["username", "name", "email"])
-    rows = apply_sort(rows, sort_by, sort_order)
+    rows = sort_by_order(rows, query.order_by)
     summaries = [AccountResponse.model_validate(row) for row in rows]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(
+        summaries,
+        query,
+        bound={
+            "search": search,
+            "oidc_id": oidc_id,
+            "blocked": blocked,
+            "include_core": include_core,
+        },
+    )
 
 
 @router.get("/me", response_model=AccountResponse)
@@ -715,11 +707,9 @@ async def get_account(
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
     responses={
         403: {
-            "model": ErrorResponse,
             "description": "self_deactivate: an account cannot disable or block itself",
         },
         409: {
-            "model": ErrorResponse,
             "description": (
                 "last_admin: disabling, blocking, or stripping the system admin "
                 "group from this account would leave no usable system admin"
@@ -748,13 +738,7 @@ async def update_account(
     group_store = request.app.state.group_store
     existing = _require_account(store, username)
     if username == user.user_id and (body.enabled is False or body.blocked is True):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "self_deactivate",
-                "message": "Cannot deactivate your own account",
-            },
-        )
+        raise ProblemError(403, "Cannot deactivate your own account", code="self_deactivate")
     bindings = provider_bindings(request)
     if admin_retirement.locks_out_last_admin(
         existing,
@@ -764,15 +748,11 @@ async def update_account(
         enabled=body.enabled,
         blocked=body.blocked,
     ):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "last_admin",
-                "message": (
-                    f"Cannot deactivate '{username}': it is the last usable account "
-                    "with the system admin role"
-                ),
-            },
+        raise ProblemError(
+            409,
+            f"Cannot deactivate '{username}': it is the last usable account "
+            "with the system admin role",
+            code="last_admin",
         )
     if body.groups is not None:
         groups = group_store.list()
@@ -798,15 +778,11 @@ async def update_account(
             bindings=bindings,
             held_after=held_after,
         ):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "last_admin",
-                    "message": (
-                        f"Cannot remove the system admin group from '{username}': "
-                        "it is the last usable account with the system admin role"
-                    ),
-                },
+            raise ProblemError(
+                409,
+                f"Cannot remove the system admin group from '{username}': "
+                "it is the last usable account with the system admin role",
+                code="last_admin",
             )
     update_fields: dict[str, object] = _contact_updates(body)
     if body.groups is not None:
@@ -858,12 +834,10 @@ async def update_account(
     openapi_extra=scalo_extra(verb="change-password"),
     responses={
         403: {
-            "model": ErrorResponse,
             "description": "current_password is not the account's password "
             "(invalid_current_password)",
         },
         429: {
-            "model": ErrorResponse,
             "description": "Too many wrong current passwords; Retry-After gives the "
             "seconds to wait",
         },
@@ -901,12 +875,8 @@ async def reset_current_user_password(
     if not await run_blocking(store.verify_password, account.username, body.current_password):
         throttle.failed(account.username, client_ip)
         audit_login_denied(user.user_id, "password_change", client_ip, "wrong_current_password")
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "invalid_current_password",
-                "message": "That is not this account's current password.",
-            },
+        raise ProblemError(
+            403, "That is not this account's current password.", code="invalid_current_password"
         )
     throttle.succeeded(account.username)
     result = await _reset_stored_password(
@@ -984,16 +954,12 @@ async def rotate_password(
 
     local = settings.auth.local
     if username != admin_account_name(local.admin_name):
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "not_store_backed",
-                "message": (
-                    f"'{username}' does not get its password from the deployment's "
-                    "secret store, so there is nothing to rotate. Reset its password "
-                    "instead."
-                ),
-            },
+        raise ProblemError(
+            400,
+            f"'{username}' does not get its password from the deployment's "
+            "secret store, so there is nothing to rotate. Reset its password "
+            "instead.",
+            code="not_store_backed",
         )
     if not local.admin_password_secret_path:
         command = rotation_store_command(
@@ -1002,16 +968,12 @@ async def rotate_password(
             secret_name=local.admin_secret_name,
             secret_key=local.admin_secret_key,
         )
-        raise HTTPException(
-            status_code=501,
-            detail={
-                "code": "admin_password_kept_outside_dfe",
-                "message": (
-                    "This deployment keeps the admin password outside DFE, so change "
-                    f"it where it is stored: {command}"
-                ),
-                "store_command": command,
-            },
+        raise ProblemError(
+            501,
+            "This deployment keeps the admin password outside DFE, so change "
+            f"it where it is stored: {command}",
+            code="admin_password_kept_outside_dfe",
+            store_command=command,
         )
 
     store = secrets_store(request)
@@ -1023,6 +985,7 @@ async def rotate_password(
 
 @router.get(
     "/{username}/git-status",
+    openapi_extra=scalo_extra(verb="git-status"),
     response_model=AccountGitState,
     dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
@@ -1076,11 +1039,9 @@ async def account_git_status(
     dependencies=[Depends(require_action(scopes_dict["account_write"]))],
     responses={
         403: {
-            "model": ErrorResponse,
             "description": "self_delete: an account cannot delete itself",
         },
         409: {
-            "model": ErrorResponse,
             "description": "last_admin: deleting this account would leave no usable system admin",
         },
     },
@@ -1104,13 +1065,7 @@ async def delete_account(
     group_store = request.app.state.group_store
     existing = _require_account(store, username)
     if username == user.user_id:
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "self_delete",
-                "message": "Cannot delete your own account",
-            },
-        )
+        raise ProblemError(403, "Cannot delete your own account", code="self_delete")
     # Deleting an account takes it out of every group it holds, so it needs their roles.
     groups = group_store.list()
     bindings = provider_bindings(request)
@@ -1120,15 +1075,11 @@ async def delete_account(
         if not admin_retirement.other_usable_admin_exists(
             store, group_store, bindings=bindings, excluding=username
         ):
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "last_admin",
-                    "message": (
-                        f"Cannot delete '{username}': it is the last usable account "
-                        "with the system admin role"
-                    ),
-                },
+            raise ProblemError(
+                409,
+                f"Cannot delete '{username}': it is the last usable account "
+                "with the system admin role",
+                code="last_admin",
             )
     # The store refuses the local admin and breakglass, the accounts the deploy repo carries.
     store.delete(username)

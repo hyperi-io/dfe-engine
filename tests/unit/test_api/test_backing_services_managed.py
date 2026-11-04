@@ -125,7 +125,7 @@ CH_EXTERNAL = BackingFactSettings(provider="external")
 def _by_service(client, headers) -> dict[str, dict]:
     resp = client.get(_BACKING, headers=headers)
     assert resp.status_code == 200, resp.text
-    return {s["service"]: s for s in resp.json()}
+    return {s["service"]: s for s in resp.json()["items"]}
 
 
 class TestNoStatedProvider:
@@ -389,7 +389,7 @@ class TestManagedWritesAreRefused:
         resp = _put(client, admin_headers, "kafka", "kafka.replicas", 3)
 
         assert resp.status_code == 409, resp.text
-        assert resp.json()["context"]["managed_by"] == "external"
+        assert resp.json()["managed_by"] == "external"
 
     def test_a_self_run_key_with_no_declared_mode_writes(
         self, client, app, admin_headers, tmp_path
@@ -458,7 +458,7 @@ class TestTheWayBackFromExternal:
         resp = _put(client, admin_headers, "kafka", "kafka.mode", "cluster")
 
         assert resp.status_code == 409, resp.text
-        assert "mode" in resp.json()["context"]["read_only"]
+        assert "mode" in resp.json()["read_only"]
 
 
 class TestTheRefusalBody:
@@ -469,18 +469,21 @@ class TestTheRefusalBody:
         body = _put(client, admin_headers, "kafka", "kafka.replicas", 9).json()
 
         assert body["code"] == "managed_by_provider"
-        assert body["message"].startswith("kafka.replicas is not this deployment's to set")
-        assert "confluent-cloud sizes kafka on the basic tier" in body["message"]
-        assert "deployment dial" in body["message"]
-        assert body["context"] == {
-            "service": "kafka",
-            "path": "kafka.replicas",
-            "managed_by": "provider",
-            "provider": "confluent-cloud",
-            "tier": "basic",
-            "set_in": "deployment",
-            "read_only": KAFKA_READ_ONLY,
-        }
+        assert body["detail"].startswith("kafka.replicas is not this deployment's to set")
+        assert "confluent-cloud sizes kafka on the basic tier" in body["detail"]
+        assert "deployment dial" in body["detail"]
+        assert (
+            body.items()
+            >= {
+                "service": "kafka",
+                "path": "kafka.replicas",
+                "managed_by": "provider",
+                "provider": "confluent-cloud",
+                "tier": "basic",
+                "set_in": "deployment",
+                "read_only": KAFKA_READ_ONLY,
+            }.items()
+        )
 
     def test_a_provider_sized_only_in_its_own_console(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
@@ -488,11 +491,11 @@ class TestTheRefusalBody:
 
         body = _put(client, admin_headers, "clickhouse-cluster", "clickhouse.replicas", 3).json()
 
-        assert body["context"]["set_in"] == "provider"
-        assert body["context"]["read_only"] == CLICKHOUSE_READ_ONLY
-        assert "provider's own console or API" in body["message"]
+        assert body["set_in"] == "provider"
+        assert body["read_only"] == CLICKHOUSE_READ_ONLY
+        assert "provider's own console or API" in body["detail"]
         # No tier stated, so the message claims none.
-        assert " tier" not in body["message"]
+        assert " tier" not in body["detail"]
 
     def test_an_external_service_is_changed_by_whoever_runs_it(
         self, client, app, admin_headers, tmp_path
@@ -502,9 +505,9 @@ class TestTheRefusalBody:
 
         body = _put(client, admin_headers, "clickhouse-cluster", "clickhouse.replicas", 3).json()
 
-        assert body["context"]["managed_by"] == "external"
-        assert body["context"]["set_in"] == "operator"
-        assert "DFE does not run this clickhouse" in body["message"]
+        assert body["managed_by"] == "external"
+        assert body["set_in"] == "operator"
+        assert "DFE does not run this clickhouse" in body["detail"]
 
 
 class TestTheGuardRunsFirst:

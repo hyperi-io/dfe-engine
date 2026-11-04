@@ -20,8 +20,9 @@ models register under the same name (see dfe_engine.ai). RBAC: rules:read.
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
+from scalo.api import ProblemError
 
 from dfe_engine.ai import (
     AIModuleResult,
@@ -48,10 +49,7 @@ def _registry(request: Request):
 def _module(request: Request, module_type: AIModuleType):
     modules = _registry(request).list_modules(module_type)
     if not modules:
-        raise HTTPException(
-            503,
-            detail={"code": "no_ai_module", "message": f"no {module_type.value} module registered"},
-        )
+        raise ProblemError(503, f"no {module_type.value} module registered", code="no_ai_module")
     return modules[0]
 
 
