@@ -118,7 +118,7 @@ def test_convert_uses_sigma_field_names_verbatim():
 
     rule_dict = SigmaCollection.from_yaml(_rule_yaml()).rules[0].to_dict()
     where = convert_detection_to_where(rule_dict)
-    assert "Image ILIKE '%\\\\certutil.exe'" in where  # backslash escaped for CH literal
+    assert "Image ILIKE '%\\\\\\\\certutil.exe'" in where  # LIKE then literal escaping
 
 
 def test_convert_handles_a_boolean_field_value():
@@ -131,7 +131,7 @@ def test_convert_handles_a_boolean_field_value():
         "detection": {"sel": {"fieldA": True}, "condition": "sel"},
     }
     where = convert_detection_to_where(rule_dict)
-    assert where == "fieldA = true"
+    assert where == "fieldA=true"
 
 
 def test_convert_raises_on_unconvertible_detection():

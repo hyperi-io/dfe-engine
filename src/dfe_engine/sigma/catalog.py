@@ -163,7 +163,7 @@ class SigmaCatalogStore:
                     "id": doc.get("id", rule_id),
                     "title": doc.get("title", ""),
                     "origin": prov.get("origin", ""),
-                    "upstream_modified": _as_text(prov.get("upstream_modified")),
+                    "upstream_modified": as_text(prov.get("upstream_modified")),
                     "local_edited": bool(prov.get("local_edited", False)),
                     "drift": bool(prov.get("drift", False)),
                 }
@@ -214,7 +214,7 @@ class SigmaCatalogStore:
                 # poll (upstream unchanged -> False), erasing the review signal
                 # before an operator ever sees it.
                 "drift": bool(prev.get("drift", False))
-                or (_as_text(new_upstream) != _as_text(prev.get("upstream_modified"))),
+                or (as_text(new_upstream) != as_text(prev.get("upstream_modified"))),
                 "source_ref": prev.get("source_ref", doc.source_ref),
             },
         }
@@ -522,7 +522,7 @@ async def sync_provider(
     )
 
 
-def _as_text(value: Any) -> str | None:
+def as_text(value: Any) -> str | None:
     """Coerce a (possibly YAML-date) change signal to a stable string for compare/JSON."""
     if value is None:
         return None

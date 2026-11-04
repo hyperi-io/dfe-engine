@@ -67,6 +67,13 @@ generated rule carries a `sigma_rule_id` back-reference and a `sigma_provenance`
 marker (the upstream change signal + a hash of the generated WHERE) so drift and
 hand-edits are detected. Deselecting a rule leaves its binding STALE until pruned.
 
+The conversion is the [pysigma-backend-clickhouse](https://pypi.org/project/pysigma-backend-clickhouse/) backend, which owns the Sigma modifiers, wildcards and LIKE, regex and CIDR escaping. `sigma_backend_clickhouse.py` subclasses it to emit the bare condition, quote field names through the engine's column quoting and match a text-indexed column through `lower(col) LIKE`. What does not convert is recorded as `failed` in the report:
+
+- A correlation rule, which is a whole query and not a condition.
+- A keyword-only rule (`- needle`), which has no column to search. About 3% of the SigmaHQ set.
+
+Plain string equality is case-sensitive, where Sigma matches case-insensitively (`OriginalFileName: CertUtil.exe` misses `certutil.exe`). A JSON-derived view column holds a ClickHouse `Dynamic` value, so a `|contains` or `|startswith` match throws on a field that lands as a number in some rows. Give such a column a CAST `type` in its view definition. Numbers in an equality or a list are compared as quoted text, which suits either form.
+
 ## Source-views - Sigma-aligned columns
 
 A Sigma rule references fields (`Image`, `EventID`) that may not be real columns.
