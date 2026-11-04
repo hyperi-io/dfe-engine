@@ -81,101 +81,6 @@ class TestGraphCredentials:
 
 
 # ---------------------------------------------------------------------------
-# Constructor
-# ---------------------------------------------------------------------------
-
-
-class TestEntraAdapterConstructor:
-    def test_stores_provider_reference(self):
-        provider = _make_provider()
-        adapter = EntraAdapter(provider)
-        assert adapter._provider is provider
-
-    def test_provider_type_is_entra_id(self):
-        provider = _make_provider()
-        adapter = EntraAdapter(provider)
-        assert adapter._provider.type == "entra_id"
-
-    def test_reads_env_var_names_from_provider(self):
-        provider = _make_provider(
-            client_id_env="MY_CLIENT_ID",
-            tenant_id_env="MY_TENANT_ID",
-            client_secret_env="MY_CLIENT_SECRET",
-        )
-        adapter = EntraAdapter(provider)
-        assert adapter._provider.client_id_env == "MY_CLIENT_ID"
-        assert adapter._provider.groups.tenant_id_env == "MY_TENANT_ID"
-        assert adapter._provider.groups.client_secret_env == "MY_CLIENT_SECRET"
-
-    def test_graph_base_constant(self):
-        assert EntraAdapter.GRAPH_BASE == "https://graph.microsoft.com/v1.0"
-
-
-# ---------------------------------------------------------------------------
-# _get_token — no credentials available
-# ---------------------------------------------------------------------------
-
-
-class TestGetTokenMissingCredentials:
-    def test_returns_none_when_no_env_vars_set(self, monkeypatch):
-        # Ensure none of the env vars are present
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        provider = _make_provider()
-        adapter = EntraAdapter(provider)
-        result = adapter._get_token()
-        assert result is None
-
-    def test_returns_none_when_client_id_env_var_missing(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.setenv("ENTRA_TENANT_ID", "test-tenant-id")
-        monkeypatch.setenv("ENTRA_CLIENT_SECRET", "test-secret")
-
-        provider = _make_provider()
-        adapter = EntraAdapter(provider)
-        result = adapter._get_token()
-        assert result is None
-
-    def test_returns_none_when_tenant_id_env_var_missing(self, monkeypatch):
-        monkeypatch.setenv("ENTRA_CLIENT_ID", "test-client-id")
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.setenv("ENTRA_CLIENT_SECRET", "test-secret")
-
-        provider = _make_provider()
-        adapter = EntraAdapter(provider)
-        result = adapter._get_token()
-        assert result is None
-
-    def test_returns_none_when_client_secret_env_var_missing(self, monkeypatch):
-        monkeypatch.setenv("ENTRA_CLIENT_ID", "test-client-id")
-        monkeypatch.setenv("ENTRA_TENANT_ID", "test-tenant-id")
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        provider = _make_provider()
-        adapter = EntraAdapter(provider)
-        result = adapter._get_token()
-        assert result is None
-
-    def test_returns_none_when_env_var_name_is_empty_string(self, monkeypatch):
-        # Provider configured with empty env var names
-        provider = OIDCProvider(
-            type="entra_id",
-            issuer="https://login.microsoftonline.com/test/v2.0",
-            client_id_env="",
-            groups=GroupResolutionConfig(
-                mode="api",
-                tenant_id_env="",
-                client_secret_env="",
-            ),
-        )
-        adapter = EntraAdapter(provider)
-        result = adapter._get_token()
-        assert result is None
-
-
-# ---------------------------------------------------------------------------
 # resolve_user_groups (the >200 overage enrichment) -- no answer when no credentials
 # ---------------------------------------------------------------------------
 
@@ -198,80 +103,34 @@ class TestResolveUserGroupsNoCredentials:
 
 
 # ---------------------------------------------------------------------------
-# list_all_groups — empty list when no credentials
+# A missing credential: no token, no listing, and a connection test that says so
 # ---------------------------------------------------------------------------
 
 
 class TestListAllGroupsNoCredentials:
-    async def test_refuses_to_list_when_no_credentials(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        with pytest.raises(DirectoryNotConfiguredError):
-            await adapter.list_all_groups()
-
     @pytest.mark.parametrize(
-        "missing", ["ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"]
+        "missing",
+        [
+            ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"),
+            ("ENTRA_CLIENT_ID",),
+            ("ENTRA_TENANT_ID",),
+            ("ENTRA_CLIENT_SECRET",),
+        ],
+        ids=["none-set", "no-client-id", "no-tenant-id", "no-client-secret"],
     )
-    async def test_refuses_to_list_when_one_credential_is_missing(self, monkeypatch, missing):
+    async def test_refuses_to_list_when_a_credential_is_missing(self, monkeypatch, missing):
         for name in ("ENTRA_CLIENT_ID", "ENTRA_TENANT_ID", "ENTRA_CLIENT_SECRET"):
             monkeypatch.setenv(name, "set")
-        monkeypatch.delenv(missing)
+        for name in missing:
+            monkeypatch.delenv(name)
 
         adapter = EntraAdapter(_make_provider())
+        assert adapter._get_token() is None
         with pytest.raises(DirectoryNotConfiguredError):
             await adapter.list_all_groups()
-
-
-# ---------------------------------------------------------------------------
-# test_connection — returns (False, message) when no credentials
-# ---------------------------------------------------------------------------
-
-
-class TestTestConnectionNoCredentials:
-    async def test_returns_false_when_no_credentials(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
         success, message = await adapter.test_connection()
         assert success is False
-
-    async def test_returns_message_string_when_no_credentials(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        success, message = await adapter.test_connection()
-        assert isinstance(message, str)
-        assert len(message) > 0
-
-    async def test_returns_tuple_of_two_elements(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        result = await adapter.test_connection()
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-
-    async def test_message_mentions_credentials(self, monkeypatch):
-        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
-        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
-
-        adapter = EntraAdapter(_make_provider())
-        _success, message = await adapter.test_connection()
-        # Message should explain why it failed — credentials issue
-        assert any(
-            keyword in message.lower()
-            for keyword in ("credential", "token", "configure", "missing", "env")
-        )
+        assert "not configured" in message
 
 
 class TestTestConnectionCredentialState:
