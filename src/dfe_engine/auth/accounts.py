@@ -40,7 +40,7 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.auth.protected_accounts import resolve_floor
-from dfe_engine.auth.store_names import store_key
+from dfe_engine.auth.store_names import case_twin, store_key
 from dfe_engine.names import VALID_NAME, InvalidNameError
 from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string, yaml_load
 
@@ -236,13 +236,16 @@ class AccountStore:
 
         Raises:
             AccountExistsError: An account is already stored under *username*,
-                including one another replica created at the same moment.
+                including one another replica created at the same moment, or under
+                it in another case.
             InvalidNameError: *username* is not a name an account can have.
             ValueError: bcrypt refuses *password*.
         """
         if not VALID_NAME.match(username):
             raise InvalidNameError(f"Invalid account name: {username!r}")
         path = self._path(username)
+        if (twin := case_twin(self._dir, username)) is not None:
+            raise AccountExistsError(f"Account already exists: {twin}")
         account = _new_account(
             username,
             password,
