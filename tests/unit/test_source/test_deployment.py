@@ -13,7 +13,7 @@ from dfe_engine.source.deployment import (
     SourceDeploymentStore,
     SourcePlanArtifact,
     artifact_from_build,
-    deploy_statements_for_build,
+    plan_deploy_statements,
     plan_from_build,
     plan_ready_status,
     previous_deployed_version_ids,
@@ -229,14 +229,14 @@ class TestDeployStatements:
             view_ddls={},
         )
         builder = SchemaBuilderV2(TypeRegistry.default())
-        statements, exists = deploy_statements_for_build(
+        statements, exists = plan_deploy_statements(
             builder,
             source,
             "1.0.0",
             result,
             db="analytics",
             ch_client=None,
-        )
+        )[:2]
         assert exists is False
         assert len(statements) == 1
         assert "analytics.evt" in statements[0]

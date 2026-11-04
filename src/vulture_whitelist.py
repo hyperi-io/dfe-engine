@@ -114,7 +114,7 @@ _.external_topics, _.preserve_quotes, _.show
 _.healthcheck, _.Output
 
 # The dfe-schemas validation script (scripts/validate_schemas.py) calls these.
-_.from_file, _.load_table_spec
+_.from_file, _.load_table_config, _.load_table_spec
 
 # Tests reset these process-wide singletons and caches between cases.
 _.reload_contracts, _.reset_instance, _.reset_settings
@@ -125,13 +125,12 @@ _.check_cooldown, _.cooldown_td, _.dispatch, _.ensure_table_exists, _.get_ddl, _
 _.max_alerts_per_run, _.record_fire
 
 # Documented library API (docs/data-plane/schema-classes.md, query-api-python.md).
-_.build_ddl_only, _.clone_version, _.generate_alter_add, _.generate_alter_modify
-_.get_order_by_columns, _.reference_root, _.to_csv, _.to_pandas, _.to_pydict, _.to_pylist
-_.write_all
+_.clone_version, _.get_order_by_columns, _.reference_root, _.to_csv, _.to_pandas
+_.to_pydict, _.to_pylist
 
 # Helpers and constants currently used only by tests.
 _._resolve_roles_from_groups, _.add_verify_key_pem, _.candidate_fields
-_.deploy_statements_for_build, _.execute_ddl_statements, _.extract_metadata, _.FORK_ACCEPTS
+_.execute_ddl_statements, _.extract_metadata, _.FORK_ACCEPTS
 _.get_draft, _.get_published, _.get_version, _.list_adapters, _.load_clickhouse_settings
 _.load_plan, _.protocol_paths, _.query_names, _.read_payload, _.save_draft, _.save_plan
 _.set_deployed

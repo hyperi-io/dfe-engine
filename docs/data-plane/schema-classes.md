@@ -18,7 +18,7 @@ overview: [schema.md](schema.md).
 | `src/dfe_engine/schema/schema_ddl.py` | `DDLGenerator`, `DDLConfig` - column/index/view DDL generation |
 | `src/dfe_engine/schema/schema_builder_v2.py` | `SchemaBuilderV2`, `SchemaBuildResult` - Source -> DDL orchestration |
 | `src/dfe_engine/schema/schema_manager.py` | `SchemaManager` - version write operations (add, clone, create) |
-| `src/dfe_engine/schema/ddl_writer.py` | `DDLFileWriter` - reference SQL file generation |
+| `src/dfe_engine/schema/applier.py` | `SchemaApplier`, `ManifestApplier`, `plan_source_table`, `read_table` - brings a live table to its CREATE TABLE, for a source deploy and the manifest alike |
 | dfe-schemas `dfe_schemas/clickhouse.py` | `PlatformProbe` (Cloud or self-hosted, probed once per connection), `engine_clause` (the one `Replicated*` form), `create_database`, the settings realign |
 | `src/dfe_engine/fieldmap/view_generator.py` | `ViewGenerator` - standard field map -> view DDL |
 
@@ -97,10 +97,6 @@ result.create_table_ddl  # CREATE TABLE statement
 result.columns  # list[SchemaColumn]
 result.validation_errors  # list[str]
 result.view_ddls  # {"sigma": "CREATE VIEW ...", ...}
-
-ddl = builder.build_ddl_only(columns, "my_table", DDLConfig(ttl_days=90))
-add_ddl = builder.generate_alter_add(source, new_column, after="existing_col")
-modify_ddl = builder.generate_alter_modify(source, modified_column)
 ```
 
 ### DDLGenerator (`schema/schema_ddl.py`)
@@ -110,7 +106,7 @@ from dfe_engine.schema.schema_ddl import DDLGenerator, DDLConfig
 
 gen = DDLGenerator(TypeRegistry.default())
 ddl = gen.generate_create_table("my_table", columns, DDLConfig(ttl_days=90))
-add_ddl = gen.generate_alter_add_column("my_table", column, after="prev_col")
+add_ddl = gen.generate_alter_add_column("my_table", column)
 view_ddl = gen.generate_view("my_table", {"SourceIP": "source_ip"}, "sigma")
 ```
 
@@ -149,19 +145,19 @@ SchemaManager.clone_version(
 )
 ```
 
-### DDLFileWriter (`schema/ddl_writer.py`)
+### The applier (`schema/applier.py`)
+
+One applier brings every live table to its CREATE TABLE. It reads the statement
+with sqlglot's ClickHouse tokens, and an added column or index is cut from the
+CREATE's own text.
 
 ```python
-from dfe_engine.schema.ddl_writer import DDLFileWriter
+from dfe_engine.schema.applier import plan_source_table
 
-writer = DDLFileWriter()
-files = writer.generate_all()  # {relative_path: sql_content}
-written = writer.write_all(Path("out/"))  # writes + returns paths
+plan = plan_source_table(client, result.create_table_ddl, database="dfe",
+                         table=source.table_name, ttl_days=90)
+plan.statements  # CREATE, or ADD COLUMN / index / TTL / settings moves
 ```
-
-> **Note:** the writer's output layout is the contract for the dfe-schemas
-> repo's committed `argocd/ddl/` tree and its kustomization - change one,
-> change both.
 
 ## Validation rules
 

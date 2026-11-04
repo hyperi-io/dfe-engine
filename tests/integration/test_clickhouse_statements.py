@@ -25,7 +25,7 @@ from dfe_engine.clickhouse.statements import CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE, 
 from dfe_engine.schema.applier import SchemaApplier
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.services.schema.json_promotion_service import _fetch_samples, qualified_table
-from dfe_engine.source.deployment import deploy_statements_for_build, execute_ddl
+from dfe_engine.source.deployment import execute_ddl, plan_deploy_statements
 from dfe_engine.source.models import Source
 
 pytestmark = pytest.mark.integration
@@ -75,9 +75,9 @@ def _deploy_statements(ch_client, manager_client, db: str, source: Source) -> li
     builder = SchemaBuilderV2(platform=PlatformProbe(ch_client).platform)
     result = builder.build(source)
     assert not result.validation_errors, result.validation_errors
-    statements, _ = deploy_statements_for_build(
+    statements, _ = plan_deploy_statements(
         builder, source, source.runtime_version_id(), result, db=db, ch_client=manager_client
-    )
+    )[:2]
     return statements
 
 

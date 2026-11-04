@@ -5,23 +5,21 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""``index_changes`` against a real ClickHouse's ``system.data_skipping_indices``.
+"""The index moves of the one applier against a real ``system.data_skipping_indices``.
 
-The deploy planner skips a column the table already carries, so this is the only
-path by which a derived field's index can follow its definition.
+A column the table already carries is never re-added, so this is the only path by
+which a derived field's index can follow its definition.
 """
 
 import pytest
 from dfe_schemas.clickhouse import PlatformProbe
 
+from dfe_engine.schema.applier import plan_source_table, read_table
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
-from dfe_engine.schema.schema_ddl import DDLConfig
-from dfe_engine.source.deployment import (
-    deploy_statements_for_build,
-    index_changes,
-    qualify_ddl_statements,
-)
+from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
+from dfe_engine.source.deployment import plan_deploy_statements
 from dfe_engine.source.models import SchemaColumn, Source
+from dfe_engine.source.type_registry import TypeRegistry
 
 pytestmark = pytest.mark.integration
 
@@ -39,9 +37,6 @@ def test_index_changes_bring_existing_columns_to_their_declared_indexes(
     ch_client, clickhouse_test_database
 ):
     db = clickhouse_test_database
-    ddl = SchemaBuilderV2().ddl_generator
-    # The planner renders for the placeholder and fills the database in afterwards.
-    cfg = DDLConfig()
     ch_client.command(
         f"CREATE TABLE `{db}`.events (host String, user String, port UInt16, "
         "INDEX idx_host host TYPE bloom_filter GRANULARITY 4, "
@@ -53,17 +48,23 @@ def test_index_changes_bring_existing_columns_to_their_declared_indexes(
         SchemaColumn(name="user", type="string", use_case="exact_match"),
         SchemaColumn(name="port", type="integer", use_case="range"),
     ]
-    expected = {index.name: index for col in columns for index in ddl.index_definitions(col)}
+    create = DDLGenerator(TypeRegistry.default()).generate_create_table(
+        "events", columns, DDLConfig(db=db)
+    )
 
-    planned = index_changes(ch_client, ddl, db, "events", columns, cfg)
-    for statement in qualify_ddl_statements(planned, db):
+    def plan() -> tuple[str, ...]:
+        return plan_source_table(
+            ch_client, create, database=db, table="events", ttl_days=None
+        ).statements
+
+    for statement in plan():
         ch_client.command(statement)
 
     live = _live(ch_client, db)
     assert "idx_host" not in live
-    assert set(live) == set(expected)
+    assert set(live) == {index.name for index in read_table(create).indexes}
     # A second pass finds nothing to change, so ClickHouse's spelling of a type matches ours.
-    assert index_changes(ch_client, ddl, db, "events", columns, cfg) == []
+    assert plan() == ()
 
 
 def _source(name: str) -> Source:
@@ -81,9 +82,9 @@ def _plan(manager_client, db: str, source: Source) -> list[str]:
     builder = SchemaBuilderV2(platform=PlatformProbe(manager_client).platform)
     result = builder.build(source)
     assert not result.validation_errors, result.validation_errors
-    statements, _ = deploy_statements_for_build(
+    statements, _ = plan_deploy_statements(
         builder, source, source.runtime_version_id(), result, db=db, ch_client=manager_client
-    )
+    )[:2]
     return statements
 
 

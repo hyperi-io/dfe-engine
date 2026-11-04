@@ -26,8 +26,8 @@ from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import resolve_registry_path
 from dfe_engine.settings import DFESettings
 from dfe_engine.source.deployment import (
-    deploy_statements_for_build,
     execute_ddl_statements,
+    plan_deploy_statements,
     run_source_build,
 )
 from dfe_engine.source.models import Source
@@ -86,14 +86,14 @@ def _deploy(manager_client, db: str, source: Source, schemas_dir: Path, maps) ->
     )
     assert not result.validation_errors, result.validation_errors
     # The builder here only renders ALTERs for an existing table; the views come from result.
-    statements, _ = deploy_statements_for_build(
+    statements, _ = plan_deploy_statements(
         SchemaBuilderV2(platform=platform),
         source,
         source.runtime_version_id(),
         result,
         db=db,
         ch_client=manager_client,
-    )
+    )[:2]
     executed, failed = execute_ddl_statements(manager_client, statements)
     assert failed == [], failed
     assert len(executed) == len(statements)

@@ -43,7 +43,7 @@ from dfe_engine.governance.ch.render import render_pinned_user, render_tier
 from dfe_engine.hyperdx.dashboards import dashboard_files
 from dfe_engine.schema.phase import SchemaBootstrapState
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
-from dfe_engine.source.deployment import deploy_statements_for_build
+from dfe_engine.source.deployment import plan_deploy_statements
 from dfe_engine.source.models import Source
 from tests.integration.conftest import _unavailable
 from tests.support.clickhouse_cleanup import drop_database_and_policies
@@ -295,14 +295,14 @@ def _deploy(*, client: Any, database: str, source: Source) -> None:
     builder = SchemaBuilderV2(platform=PlatformProbe(client).platform)
     result = builder.build(source=source)
     assert not (result.validation_errors), result.validation_errors
-    statements, _ = deploy_statements_for_build(
+    statements, _ = plan_deploy_statements(
         builder=builder,
         ch_client=client,
         db=database,
         result=result,
         source=source,
         version_id=source.runtime_version_id(),
-    )
+    )[:2]
     for statement in statements:
         client.command(statement)
 

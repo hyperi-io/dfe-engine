@@ -19,7 +19,6 @@ import dfe_schemas
 import pytest
 
 from dfe_engine.schema.core_schema import landing_table_name
-from dfe_engine.schema.ddl_writer import DDLFileWriter
 from dfe_engine.source.core_sources import seed_core_sources
 from dfe_engine.source.registry import SourceRegistry
 from tests.support.core_sources import write_landing_definition
@@ -63,13 +62,6 @@ def test_the_shipped_manifest_names_the_landing_table_main():
 
 def test_the_name_follows_the_manifest(renamed_landing_tree: Path):
     assert landing_table_name() == RENAMED
-
-
-def test_the_ddl_writer_follows_the_manifest(renamed_landing_tree: Path):
-    ddl = DDLFileWriter(database="dfe").generate_default_table()
-
-    assert f"CREATE TABLE IF NOT EXISTS `dfe`.`{RENAMED}`" in ddl
-    assert "`dfe`.`main`" not in ddl
 
 
 def test_the_core_source_follows_the_manifest(renamed_landing_tree: Path, tmp_path: Path):

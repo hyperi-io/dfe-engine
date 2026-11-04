@@ -32,7 +32,7 @@ from dfe_engine.settings import (
     ClickHouseSettings,
     DFESettings,
 )
-from dfe_engine.source.deployment import SettingsChange, deploy_statements_for_build
+from dfe_engine.source.deployment import SettingsChange, plan_deploy_statements
 from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -144,9 +144,9 @@ def _redeploy_statements(client, database: str, source: Source) -> tuple[list[st
     builder = SchemaBuilderV2(platform=_platform(client))
     result = builder.build(source)
     assert not result.validation_errors, result.validation_errors
-    statements, table_exists = deploy_statements_for_build(
+    statements, table_exists = plan_deploy_statements(
         builder, source, source.runtime_version_id(), result, db=database, ch_client=client
-    )
+    )[:2]
     return statements, table_exists
 
 

@@ -77,24 +77,24 @@ def test_non_transient_ch_error_surfaces_immediately(manager):
 def heartbeat_table(manager):
     """The REAL hunt_runner_heartbeat table, in a throwaway database.
 
-    Built from its dfe-schemas definition through the applier the deployment
-    uses, so the insert below writes the columns and the engine a deployment
-    actually has -- TTL clause included, which is DDL only a real server can
-    accept or reject.
+    Rendered from the manifest the schema phase applies, so the insert below writes
+    the columns and the engine a deployment actually has -- TTL clause included,
+    which is DDL only a real server can accept or reject.
     """
     from dfe_schemas.clickhouse import PlatformProbe
 
     from dfe_engine.schema.applier import SchemaApplier
-    from dfe_engine.schema.table_loader import load_table_spec
+    from dfe_engine.schema.plan import render_one
 
     client = manager.get_clickhouse_client()
     db = f"dfe_hb_{uuid.uuid4().hex[:8]}"
-    applier = SchemaApplier(client, PlatformProbe(client).platform)
-    applier.ensure_database(db)
-    spec = load_table_spec("tables/internal/hunt_runner_heartbeat", db)
-    applier.ensure_table(db, spec.name, spec.columns, spec.config)
+    platform = PlatformProbe(client).platform
+    SchemaApplier(client, platform).ensure_database(db)
+    table = render_one("data.hunt_runner_heartbeat", data_database=db, platform=platform)
+    for statement in table.statements:
+        client.command(statement)
     try:
-        yield db, spec.name
+        yield db, table.name
     finally:
         client.command(f"DROP DATABASE IF EXISTS `{db}` SYNC")
 

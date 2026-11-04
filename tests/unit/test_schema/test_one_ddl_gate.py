@@ -13,16 +13,15 @@ every query succeeds and the answer depends which node answered. ``ON CLUSTER``
 on a table inside the Replicated database is refused outright (code 80). So every
 table the engine renders must be ``Replicated*``, and only the self-hosted CREATE
 DATABASE may fan out. dfe-schemas' ``ddl_violations`` is the check, and this
-feeds it every render path the engine has: the manifest on both platforms, the
-reference tables, every engine variant a source may pick, and the ALTER and view
-forms a deploy runs.
+feeds it every render path the engine has: the manifest on both platforms, every
+engine variant a source may pick, and the ALTER and view forms a deploy and a
+promotion preview run. A deploy's ALTERs are cut from the CREATE this checks.
 """
 
 import pytest
 from dfe_schemas.clickhouse import Platform
 from dfe_schemas.render import ddl_violations
 
-from dfe_engine.schema.ddl_writer import DDLFileWriter
 from dfe_engine.schema.plan import build_plan
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoader
@@ -31,14 +30,6 @@ from dfe_engine.source.engine_registry import EngineRegistry
 from dfe_engine.source.type_registry import TypeRegistry
 
 PLATFORMS = list(Platform)
-
-
-def _leaves(tree: dict) -> list[str]:
-    """Every SQL string in DDLFileWriter's nested output."""
-    found: list[str] = []
-    for value in tree.values():
-        found.extend(_leaves(value) if isinstance(value, dict) else [value])
-    return found
 
 
 def _engines() -> list[str]:
@@ -69,14 +60,6 @@ def test_every_manifest_object_takes_the_one_shape(tmp_path, platform: Platform)
     assert _problems(statements) == []
 
 
-@pytest.mark.parametrize("platform", PLATFORMS)
-def test_every_reference_table_takes_the_one_shape(platform: Platform):
-    statements = _leaves(DDLFileWriter(platform=platform, database="dfe").generate_all())
-
-    assert len(statements) >= 4
-    assert _problems(statements) == []
-
-
 @pytest.mark.parametrize("engine", _engines())
 def test_every_engine_a_source_may_pick_renders_replicated(engine: str):
     columns = SchemaLoader.load_profile("timeseries")
@@ -93,7 +76,6 @@ def test_every_alter_and_view_form_a_deploy_runs_carries_no_on_cluster():
     cfg = DDLConfig(db="dfe")
     statements = [
         gen.generate_alter_add_column("probe", columns[0], cfg),
-        gen.generate_alter_modify_column("probe", columns[0], cfg),
         gen.generate_view("probe", {"event.code": "_org_id"}, "ecs", cfg),
     ]
     for column in columns:

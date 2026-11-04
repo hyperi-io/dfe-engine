@@ -842,10 +842,9 @@ def late_clickhouse(request):
 def dfe_db(ch_client):
     """An isolated database carrying the REAL landing, detection and coordination tables.
 
-    Built from the same specs the core schema applies, so a hunt writes into the
-    detection table a deployment actually has rather than a stand-in shaped to suit
-    the test. The runner only asserts its coordination tables exist, so they are
-    rendered from the manifest the engine's schema phase applies at boot.
+    Rendered from the manifest the engine's schema phase applies at boot, so a hunt
+    writes into the detection table a deployment actually has rather than a
+    stand-in shaped to suit the test.
     """
     import uuid
 
@@ -853,17 +852,12 @@ def dfe_db(ch_client):
 
     from dfe_engine.hunts.ch_coordinator import _COORDINATION_IDS
     from dfe_engine.schema.applier import SchemaApplier
-    from dfe_engine.schema.ddl_writer import DDLFileWriter
     from dfe_engine.schema.plan import render_one
 
     db = f"dfe_core_{uuid.uuid4().hex[:8]}"
     platform = PlatformProbe(ch_client).platform
-    applier = SchemaApplier(ch_client, platform)
-    applier.ensure_database(db)
-    writer = DDLFileWriter(platform=platform, database=db)
-    for spec in (writer.default_table_spec(), writer.detection_table_spec()):
-        applier.ensure_table(db, spec.name, spec.columns, spec.config)
-    for object_id in _COORDINATION_IDS:
+    SchemaApplier(ch_client, platform).ensure_database(db)
+    for object_id in ("data.main", "data.detection", *_COORDINATION_IDS):
         for statement in render_one(object_id, data_database=db, platform=platform).statements:
             ch_client.command(statement)
     try:

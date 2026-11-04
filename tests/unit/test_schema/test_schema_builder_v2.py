@@ -9,7 +9,7 @@ from dfe_engine.schema.schema_builder_v2 import (
     SchemaBuilderV2,
     SchemaBuildResult,
 )
-from dfe_engine.source.models import SchemaColumn, Source
+from dfe_engine.source.models import Source
 from dfe_engine.source.type_registry import TypeRegistry
 from dfe_engine.yaml_utils import yaml_dump
 
@@ -517,43 +517,6 @@ class TestErrors:
         source = _make_source(meta_schema="missing.yaml")
         with pytest.raises(SchemaBuildError, match="meta_schema"):
             builder.build(source)
-
-
-# ── ALTER TABLE ─────────────────────────────────────────────────────
-
-
-class TestAlterTable:
-    def test_generate_alter_add(self, registry):
-        builder = SchemaBuilderV2(registry=registry)
-        source = _make_source()
-        col = SchemaColumn(name="new_field", type="string", use_case="dimension")
-        ddl = builder.generate_alter_add(source, col)
-        assert "ADD COLUMN" in ddl
-        assert "`new_field`" in ddl
-
-    def test_generate_alter_modify(self, registry):
-        builder = SchemaBuilderV2(registry=registry)
-        source = _make_source()
-        col = SchemaColumn(name="user_name", type="string", attribute=["lowcardinality"])
-        ddl = builder.generate_alter_modify(source, col)
-        assert "MODIFY COLUMN" in ddl
-        assert "LowCardinality" in ddl
-
-
-# ── build_ddl_only ──────────────────────────────────────────────────
-
-
-class TestBuildDDLOnly:
-    def test_ddl_from_precomposed_columns(self, registry):
-        builder = SchemaBuilderV2(registry=registry)
-        columns = [
-            SchemaColumn(name="_ts", type="timestamp", order=0),
-            SchemaColumn(name="x", type="string"),
-        ]
-        ddl = builder.build_ddl_only(columns, "my_table")
-        assert "CREATE TABLE IF NOT EXISTS `{db}`.`my_table`" in ddl
-        assert "`_ts`" in ddl
-        assert "`x`" in ddl
 
 
 # ── View DDL Integration (FieldMapRegistry) ────────────────────────
