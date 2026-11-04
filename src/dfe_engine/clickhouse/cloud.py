@@ -33,10 +33,7 @@ from scalo.logger import logger
 
 from ..settings import ClickHouseCloudSettings
 
-# CH Cloud service states we key behaviour on. "stopped" needs an explicit start
-# (slow cold-start), and "idle" auto-wakes on connect but also accepts a start.
 _RUNNING = "running"
-_STOPPED_STATES = frozenset({"stopped", "idle"})
 
 
 class CloudServiceError(Exception):
@@ -63,11 +60,6 @@ class CloudServiceStatus:
     def is_running(self) -> bool:
         """Whether the service is running."""
         return self.state == _RUNNING
-
-    @property
-    def is_stopped(self) -> bool:
-        """Whether the service is stopped or idle."""
-        return self.state in _STOPPED_STATES
 
 
 # bool is an int in Python, so each parser refuses it where it wants a number.

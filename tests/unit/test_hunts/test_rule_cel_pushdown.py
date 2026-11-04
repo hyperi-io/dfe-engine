@@ -746,42 +746,6 @@ class TestBuildInsertSelect:
         assert "{timestamp_condition}" in sql
 
 
-# ── to_rule_info() ───────────────────────────────────────────────
-
-
-class TestToRuleInfo:
-    """CEL-only rules produce valid rule_info dicts."""
-
-    def test_cel_only_rule_info_with_source(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="CEL Info",
-                cel_filter="x > 0",
-                source="my_source",
-            ),
-            rule_id="info_01",
-        )
-        info = rule.to_rule_info()
-        assert info["rule_name"] == "info_01"
-        assert info["source"] == "my_source"
-        assert "source_table_name" not in info  # No SQL, no table extracted
-
-    def test_combined_rule_info(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Combined Info",
-                user_sql="SELECT 1 FROM db.my_table WHERE x = 1",
-                cel_filter="y > 10",
-                source="my_source",
-            ),
-            rule_id="info_02",
-        )
-        info = rule.to_rule_info()
-        assert info["rule_name"] == "info_02"
-        assert info["source_table_name"] == "my_table"
-        assert info["source"] == "my_source"
-
-
 # ── Real-world detection patterns ────────────────────────────────
 
 

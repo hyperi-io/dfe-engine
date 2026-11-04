@@ -298,32 +298,6 @@ class FieldMapRegistry:
 
         return results
 
-    def get_maps_for_standard(self, standard: str) -> list[FieldMap]:
-        """Get all field maps for a standard.
-
-        Args:
-            standard: Standard name (e.g. 'sigma').
-
-        Returns:
-            List of FieldMap models.
-        """
-        maps = []
-        for table in self._store.list_tables():
-            parsed_std, _ = self._parse_table_name(table)
-            if parsed_std != standard:
-                continue
-
-            config_data = self._store.get(table)
-            if config_data is None:
-                continue
-
-            try:
-                maps.append(FieldMap.model_validate(config_data))
-            except Exception:
-                logger.warning(f"Failed to parse field map '{table}', skipping")
-
-        return maps
-
     def map_exists(self, standard: str, source: str | None = None) -> bool:
         """Check if a field map exists."""
         table = self._table_name(standard, source)

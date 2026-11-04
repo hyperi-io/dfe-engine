@@ -22,29 +22,6 @@ from dfe_engine.auth.models import AuthorizationError as AuthorizationError
 # =============================================================================
 
 
-class QueryRequest(BaseModel):
-    """Request payload for query execution.
-
-    Clients specify a query label and parameters - never raw SQL.
-    The SQL is resolved server-side via parameterized views.
-    """
-
-    query: str = Field(
-        ...,
-        description="Query label (e.g., 'analytics/user_activity', 'hunts/active_threats')",
-        examples=["analytics/user_activity", "hunts/active_threats", "system/health"],
-        pattern=r"^[a-z][a-z0-9_]*(/[a-z][a-z0-9_]*)*$",
-    )
-    params: dict[str, Any] | None = Field(
-        default=None,
-        description="Query parameters (validated against view definition)",
-    )
-    options: QueryOptions | None = Field(
-        default=None,
-        description="Execution options (limit, timeout, etc.)",
-    )
-
-
 class QueryOptions(BaseModel):
     """Query execution options.
 

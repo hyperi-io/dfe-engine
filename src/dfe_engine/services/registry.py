@@ -481,24 +481,6 @@ class ServiceConfigRegistry:
     # YAML Export
     # -------------------------------------------------------------------------
 
-    def export_yaml(self, service: str, instance: str, path: Path) -> Path:
-        """Export a configuration to a standalone YAML file.
-
-        Args:
-            service: Service name
-            instance: Deployment instance name
-            path: Output file path
-
-        Returns:
-            Path to the written file
-        """
-        config_data = stored_form(self.get_config(service, instance))
-        path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        yaml_dump(config_data, path)
-        logger.info(f"Exported {service}/{instance} config to {path}")
-        return path
-
     # -------------------------------------------------------------------------
     # Git Operations (passthrough)
     # -------------------------------------------------------------------------

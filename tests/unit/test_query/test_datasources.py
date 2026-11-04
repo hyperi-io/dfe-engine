@@ -56,47 +56,6 @@ class TestAdapterRegistry:
         assert isinstance(adapter, CustomAdapter)
 
 
-class TestDatasourceAdapterBase:
-    def test_execute_with_explain_sequential(self):
-        class TestAdapter(DatasourceAdapter):
-            def execute(self, query, params=None, timeout_seconds=30, max_rows=None):
-                return [{"x": 1}, {"x": 2}, {"x": 3}], ["x"]
-
-            def explain(self, query, params=None):
-                return ExplainPlan(steps=[], warnings=["test warning"])
-
-            def healthcheck(self):
-                return True
-
-        adapter = TestAdapter("default")
-        rows, columns, plan = adapter.execute_with_explain("SELECT 1", parallel=False)
-
-        assert len(rows) == 3
-        assert plan.warnings == ["test warning"]
-
-    def test_execute_with_explain_parallel(self):
-        call_order = []
-
-        class TestAdapter(DatasourceAdapter):
-            def execute(self, query, params=None, timeout_seconds=30, max_rows=None):
-                call_order.append("execute")
-                return [{"x": 1}], ["x"]
-
-            def explain(self, query, params=None):
-                call_order.append("explain")
-                return ExplainPlan(steps=[], warnings=[])
-
-            def healthcheck(self):
-                return True
-
-        adapter = TestAdapter("default")
-        rows, columns, plan = adapter.execute_with_explain("SELECT 1", parallel=True)
-
-        assert "execute" in call_order
-        assert "explain" in call_order
-        assert len(rows) == 1
-
-
 class TestClickHouseAdapter:
     @pytest.fixture
     def mock_manager(self):

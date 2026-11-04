@@ -150,7 +150,6 @@ class TestStatus:
         assert st.id == "svc-1"
         assert st.name == "dfe"
         assert st.state == "stopped"
-        assert st.is_stopped
         assert not st.is_running
         # Prove the real HttpClient sent HTTP basic auth (the control-plane key),
         # i.e. `auth=(id, secret)` reached httpx - not a mocked transport.

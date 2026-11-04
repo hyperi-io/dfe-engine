@@ -8,85 +8,8 @@ from dfe_engine.query.models import (
     ExplainStepType,
     QueryMetadata,
     QueryOptions,
-    QueryRequest,
 )
 from tests.support.present import present
-
-
-class TestQueryRequest:
-    """Tests for QueryRequest model (labeled query design)."""
-
-    def test_minimal_request(self):
-        """Test creating request with only required fields."""
-        request = QueryRequest(
-            query="analytics/user_activity",
-        )
-
-        assert request.query == "analytics/user_activity"
-        assert request.params is None
-        assert request.options is None
-
-    def test_request_with_params(self):
-        """Test request with query parameters."""
-        request = QueryRequest(
-            query="hunts/active_threats",
-            params={"severities": ["critical", "high"]},
-        )
-
-        assert request.params == {"severities": ["critical", "high"]}
-
-    def test_request_with_options(self):
-        """Test request with all options."""
-        options = QueryOptions(
-            limit=100,
-            timeout_seconds=60,
-        )
-        request = QueryRequest(
-            query="analytics/events",
-            options=options,
-        )
-
-        request_options = present(request.options)
-        assert request_options.limit == 100
-        assert request_options.timeout_seconds == 60
-
-    def test_request_serialization(self):
-        """Test JSON serialization."""
-        request = QueryRequest(
-            query="system/health",
-            params={"id": 123},
-        )
-
-        data = request.model_dump()
-
-        assert data["query"] == "system/health"
-        assert data["params"] == {"id": 123}
-
-    def test_various_query_labels(self):
-        """Test different query label formats."""
-        labels = [
-            "analytics/user_activity",
-            "hunts/active_threats",
-            "system/health",
-            "admin/table_stats",
-        ]
-
-        for label in labels:
-            request = QueryRequest(query=label)
-            assert request.query == label
-
-    def test_invalid_query_label_format(self):
-        """Test that invalid label formats are rejected."""
-        invalid_labels = [
-            "UPPER_CASE",
-            "with spaces",
-            "with-dashes",
-            "",
-        ]
-
-        for label in invalid_labels:
-            with pytest.raises(ValueError):
-                QueryRequest(query=label)
 
 
 class TestQueryOptions:

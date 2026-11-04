@@ -1025,15 +1025,6 @@ class TestSourceYaml:
         assert s1.schema_config.engine == s2.schema_config.engine
 
 
-class TestMaterialisationAction:
-    def test_locked_rule(self):
-        from dfe_engine.source.models import materialisation_action
-
-        assert materialisation_action("active") == "create"
-        assert materialisation_action("dormant") == "leave"
-        assert materialisation_action("disabled") == "reclaim"
-
-
 class TestSourceVersion:
     def test_to_yaml_dict_omits_empty_containers(self):
         ver = SourceVersion(

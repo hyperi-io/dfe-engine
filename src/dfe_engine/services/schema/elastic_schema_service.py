@@ -313,24 +313,3 @@ class ElasticSchemaService:
         if not isinstance(doc, dict):
             raise ElasticSchemaConversionError("JSON root must be an object")
         return ElasticSchemaService.template_dict_to_columns(doc, roots)
-
-    @staticmethod
-    def beats_fields_to_columns(
-        fields: Any, roots: Iterable[str] | None = None
-    ) -> list[SchemaColumn]:
-        """Convert a parsed beats ``fields.yml`` to physical columns via the ES-template importer.
-
-        The parsed YAML is a list of field groups. Same `_map_es_type` + physical naming + subtree-selection as an index-template
-        import - just fed from the beats field format instead of a generated template.
-        Re-running it over a module's ``fields.yml`` refreshes a source's columns so
-        incoming data keeps landing as the format evolves. filebeat is imported
-        PER-MODULE (one call per module `fields.yml`); other beats whole.
-        """
-        props = _fields_to_properties(fields)
-        if not props:
-            raise ElasticSchemaConversionError(
-                "fields.yml produced no properties (expected a list of field groups)"
-            )
-        return ElasticSchemaService.template_dict_to_columns(
-            {"mappings": {"properties": props}}, roots
-        )

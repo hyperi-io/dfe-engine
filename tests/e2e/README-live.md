@@ -2,7 +2,7 @@
 
 Tests that run against a REAL deployed DFE rather than the in-process TestClient
 suite. Marked `@pytest.mark.live` and EXCLUDED from the default run
-(`-m 'not integration and not live and not upstream'`); they SKIP unless the
+(`-m 'not integration and not live'`); they SKIP unless the
 `DFE_E2E_*` env vars point at a deployment. No mocks -- every step hits a real
 endpoint.
 

@@ -66,12 +66,6 @@ class TestGetTeam:
         pass
 
 
-class TestSourcesHttp:
-    @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_create_source_success(self):
-        pass
-
-
 class TestInviteMemberHttp:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
     async def test_invite_member_success(self):
