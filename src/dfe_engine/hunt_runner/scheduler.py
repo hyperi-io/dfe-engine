@@ -46,14 +46,3 @@ def decide(
     if running_count >= cap:
         return Decision("wait", "cap_reached")
     return Decision("run", "")
-
-
-def mark_deferred(state: HuntState) -> HuntState:
-    """Record an overrun: flag too_aggressive (for the UI) + bump the counter."""
-    return state.model_copy(
-        update={
-            "status": "deferred",
-            "too_aggressive": True,
-            "overrun_count": state.overrun_count + 1,
-        }
-    )

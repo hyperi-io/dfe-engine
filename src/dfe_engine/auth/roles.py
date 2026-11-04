@@ -205,21 +205,6 @@ class RoleConfig:
             return False
         return any(permission_matches(perm, action) for perm in role.permissions)
 
-    def check_roles(self, role_names: list[str], action: str) -> str | None:
-        """Return the first role in role_names that grants action, or None.
-
-        Args:
-            role_names: Ordered list of role names to check.
-            action: Action string to test.
-
-        Returns:
-            Name of the first granting role, or None if none grant it.
-        """
-        for name in role_names:
-            if self.has_permission(name, action):
-                return name
-        return None
-
     def resolve_permissions(self, role_names: list[str]) -> set[str]:
         """Return the union of all permission patterns across the given roles.
 

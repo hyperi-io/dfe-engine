@@ -215,7 +215,7 @@ tmp_path_retention_policy = "failed"
 tmp_path_retention_count = 1
 # No worker count here on purpose: hyperi-ci derives it from the host it runs
 # on, and a number pinned here is correct on exactly one machine (hyperi-ci#152).
-addopts = "-vv --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live and not upstream'"
+addopts = "-vv --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live'"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
@@ -246,7 +246,6 @@ markers = [
     "integration: Integration tests (require ClickHouse)",
     "e2e: End-to-end tests",
     "live: Against a REAL system, never in CI: a deployed DFE (needs DFE_E2E_* env) or a Google Workspace (needs DFE_LIVE_GOOGLE_* env, or DFE_GOOGLE_SA_JSON and DFE_OIDC_GOOGLE_FIXTURE_USER for the service account path). Skipped without that env, and the full tier excludes it by name",
-    "upstream: Validates the importer against LIVE external schema repos (elastic/beats etc.; network, CI-excluded)",
     "slow: Slow running tests",
     "smoke: Startup smoke tests (mandatory, every push)",
     "requires_schemas: Tests that need the dfe-schemas package installed",

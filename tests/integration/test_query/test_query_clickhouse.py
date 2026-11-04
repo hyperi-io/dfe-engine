@@ -260,15 +260,6 @@ class TestExplain:
         plan = adapter.explain(f"SELECT metadata['org'], count() FROM {people} GROUP BY 1")
         assert ExplainStepType.AGGREGATE in [step.step_type for step in plan.steps]
 
-    @pytest.mark.parametrize("parallel", [False, True], ids=["sequential", "parallel"])
-    def test_execute_with_explain(self, adapter, people, parallel):
-        rows, columns, plan = adapter.execute_with_explain(
-            f"SELECT id, name FROM {people}", parallel=parallel
-        )
-        assert len(rows) == 5
-        assert columns == ["id", "name"]
-        assert plan.steps
-
     def test_the_estimate_counts_rows_not_parts(self, adapter, ch_client, people):
         # A second insert makes a second part: 8 rows across 2 parts.
         ch_client.command(

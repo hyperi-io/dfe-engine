@@ -1161,18 +1161,6 @@ class TestFetcherOrg:
         assert moved.drift is True
         assert moved.compiled["org_id"] == "beta"
 
-    def test_instances_needing_sync_skips_an_instance_with_no_source(
-        self, fetched_registry, settings
-    ):
-        orphan = instances.instance_of(FETCHER, "gone")
-        live = instances.instance_of(FETCHER, "okta-audit")
-        found = routing.instances_needing_sync(
-            [(orphan, instances.initial_overlay(orphan)), (live, instances.initial_overlay(live))],
-            fetched_registry,
-            settings,
-        )
-        assert [app.instance for app, _ in found] == ["okta-audit"]
-
 
 class TestTransformInstance:
     def test_on_the_bus_it_reads_land_and_writes_load(self, settings):

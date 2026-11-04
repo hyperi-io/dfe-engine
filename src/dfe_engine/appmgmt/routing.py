@@ -58,7 +58,6 @@ from dfe_engine.source.registry import SourceNotFoundError, require_equals_route
 
 from . import catalogue
 from .catalogue import AppDescriptor, CatalogueError
-from .instances import AppInstance
 from .scaling import DeployTarget
 
 if TYPE_CHECKING:
@@ -557,30 +556,3 @@ def sync(
         return False
     apply(app, doc, current.compiled)
     return True
-
-
-def instances_needing_sync(
-    apps: list[tuple[AppInstance, dict]],
-    registry: SourceReader,
-    settings: Any,
-    *,
-    tenancy: Tenancy | None = None,
-) -> list[tuple[AppInstance, RoutingStatus]]:
-    """Every instance whose overlay routing disagrees with the sources.
-
-    An instance-scoped app whose source is gone is skipped here: it has nothing
-    to sync to, and removing it is the derived-deployment reconcile's call.
-    """
-    out: list[tuple[AppInstance, RoutingStatus]] = []
-    for app, doc in apps:
-        if not app.descriptor.has_compiled_routing:
-            continue
-        try:
-            found = status(
-                app.descriptor, doc, registry, settings, instance=app.instance, tenancy=tenancy
-            )
-        except RoutingNotApplicableError:
-            continue
-        if found.drift:
-            out.append((app, found))
-    return out

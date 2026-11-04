@@ -17,8 +17,6 @@ from __future__ import annotations
 
 import importlib.metadata
 
-from pydantic import BaseModel
-
 from dfe_engine.services.plugin import ServicePlugin
 
 # Internal registry -- populated on first access
@@ -92,16 +90,6 @@ def get_plugin(name: str) -> ServicePlugin:
 def valid_services() -> set[str]:
     """Return the set of all registered service names."""
     return set(_ensure_loaded().keys())
-
-
-def config_classes() -> dict[str, type[BaseModel]]:
-    """Return service name -> config class mapping (replaces SERVICE_CONFIG_CLASSES)."""
-    return {name: p.config_class for name, p in _ensure_loaded().items()}
-
-
-def all_plugins() -> dict[str, ServicePlugin]:
-    """Return a copy of the full plugin registry."""
-    return dict(_ensure_loaded())
 
 
 def reset() -> None:

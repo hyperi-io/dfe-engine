@@ -19,7 +19,6 @@ from dfe_engine.hunt_runner import HuntState, decide, next_due, phase_offset
 from dfe_engine.hunt_runner.ch_coordinator import Lease
 from dfe_engine.hunt_runner.metrics import HuntRunnerMetrics
 from dfe_engine.hunt_runner.runner import HuntFailures, HuntRunner
-from dfe_engine.hunt_runner.scheduler import mark_deferred
 
 from .conftest import Observation
 
@@ -96,14 +95,6 @@ def test_a_hunt_whose_offset_falls_between_ticks_still_runs_every_interval():
     # Once per interval, never twice, and never zero.
     assert worker.runs == 3
     assert coord.watermarks[hunt_id] == base + 2 * 60 + 46 - 60
-
-
-def test_mark_deferred_flags_too_aggressive():
-    st = HuntState(hunt_id="h", status="running", overrun_count=1)
-    out = mark_deferred(st)
-    assert out.too_aggressive is True
-    assert out.overrun_count == 2
-    assert out.status == "deferred"
 
 
 class _RecordingCoordinator:

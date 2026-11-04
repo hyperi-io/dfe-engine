@@ -48,7 +48,7 @@ async def test_a_refused_request_leaves_the_breaker_closed(status: int):
     with refusing_api(status, {"error": "refused"}) as server:
         client = HyperDXClient(base_url=server.base_url, api_key="k")
 
-        assert await client.create_source({"name": "hunts"}) is None
+        assert await client.list_sources() is None
         server.status, server.body = 200, TEAM
         team = await client.get_team()
 
@@ -104,18 +104,15 @@ async def test_every_call_is_skipped_while_the_breaker_is_open(audit_events: lis
         assert await client.get_team() is None
         seen = len(server.paths)
 
-        assert await client.get_team_api_key() is None
         assert await client.invite_member("user@corp.com") is False
         assert await client.list_sources() is None
-        assert await client.create_source({"name": "s"}) is None
-        assert await client.update_source("s1", {"name": "s"}) is False
         assert await client.delete_source("s1") is False
         assert await client.put_dfe_source("filebeat", {"kind": "log"}) is None
         assert await client.delete_dfe_source("filebeat") is None
         assert await client.list_dfe_sources() is None
 
         assert len(server.paths) == seen
-        assert _skips(audit_events) == 9
+        assert _skips(audit_events) == 6
 
 
 @pytest.mark.usefixtures("reprobe_at_once")

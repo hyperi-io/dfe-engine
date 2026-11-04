@@ -114,13 +114,6 @@ class HyperDXClient:
         data = await self._request("get", "/team", op="get_team")
         return data if isinstance(data, dict) else None
 
-    async def get_team_api_key(self) -> str | None:
-        """Return the caller's team API key, or None on failure."""
-        team = await self.get_team()
-        if not team:
-            return None
-        return team.get("apiKey") or None
-
     async def invite_member(self, email: str) -> bool:
         """Invite a user to the caller's team via ``POST /team/invitation``.
 
@@ -150,41 +143,6 @@ class HyperDXClient:
         """List the caller's team sources, or None on failure."""
         data = await self._request("get", "/sources", op="list_sources")
         return data if isinstance(data, list) else None
-
-    async def create_source(self, source: dict[str, Any]) -> dict[str, Any] | None:
-        """Create a source on the caller's team.
-
-        Args:
-            source: Fork ``SourceSchemaNoId`` body (``name``, ``kind``,
-                ``connection``, ``from``, ``timestampValueExpression``, ...).
-
-        Returns:
-            The created source document, or None on failure.
-        """
-        data = await self._request(
-            "post",
-            "/sources",
-            json_body=source,
-            op="create_source",
-            source=str(source.get("name", "")),
-        )
-        return data if isinstance(data, dict) else None
-
-    async def update_source(self, source_id: str, source: dict[str, Any]) -> bool:
-        """Update a source; the fork validates the FULL schema including ``id``.
-
-        Returns:
-            True on success, False on failure.
-        """
-        body = {**source, "id": source_id}
-        data = await self._request(
-            "put",
-            f"/sources/{source_id}",
-            json_body=body,
-            op="update_source",
-            source_id=source_id,
-        )
-        return data is not None
 
     async def delete_source(self, source_id: str) -> bool:
         """Delete a source from the caller's team.

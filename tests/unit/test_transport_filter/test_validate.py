@@ -16,7 +16,6 @@ from dfe_engine.transport_filter import (
     TransportFilterTierConfig,
     validate_filter_rules,
 )
-from dfe_engine.transport_filter.validate import warn_suboptimal_ordering
 
 
 class TestValidation:
@@ -110,22 +109,3 @@ class TestValidation:
         assert len(errors) == 2
         assert errors[0].index == 1
         assert errors[1].index == 2
-
-
-class TestOrderingWarnings:
-    def test_optimal_order_no_warnings(self) -> None:
-        rules = [
-            FilterRule(expression="has(_internal)", action=FilterAction.DROP),
-            FilterRule(expression='status == "poison"', action=FilterAction.DLQ),
-        ]
-        warnings = warn_suboptimal_ordering(rules)
-        assert warnings == []
-
-    def test_tier2_before_tier1_warns(self) -> None:
-        rules = [
-            FilterRule(expression="size(x) > 0", action=FilterAction.DROP),  # Tier 2
-            FilterRule(expression="has(_table)", action=FilterAction.DROP),  # Tier 1
-        ]
-        warnings = warn_suboptimal_ordering(rules)
-        assert len(warnings) == 1
-        assert "Tier 2" in warnings[0]

@@ -284,10 +284,6 @@ class AIModuleRegistry:
         self._modules[module.name] = module
         logger.info(f"Registered AI module '{module.name}' (type={module.module_type.value})")
 
-    def unregister(self, name: str) -> None:
-        """Remove a registered module."""
-        self._modules.pop(name, None)
-
     def get(self, name: str) -> AIModuleInterface:
         """Get a module by name.
 
@@ -306,8 +302,3 @@ class AIModuleRegistry:
         if module_type is not None:
             modules = [m for m in modules if m.module_type == module_type]
         return modules
-
-    @property
-    def module_names(self) -> list[str]:
-        """Names of all registered modules."""
-        return list(self._modules.keys())

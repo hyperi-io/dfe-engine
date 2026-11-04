@@ -141,20 +141,6 @@ def view_name_to_label(name: str) -> str:
     return f"{namespace}/{short_name}"
 
 
-def label_to_view_name(label: str) -> str:
-    """Convert an API label to a view name.
-
-    analytics/user_activity -> dfe_v_analytics_user_activity
-
-    Args:
-        label: API label (e.g. analytics/user_activity)
-
-    Returns:
-        Full view name (e.g. dfe_v_analytics_user_activity)
-    """
-    return VIEW_PREFIX + label.replace("/", "_")
-
-
 class ViewCatalog:
     """Discovers and caches parameterized view definitions from ClickHouse.
 

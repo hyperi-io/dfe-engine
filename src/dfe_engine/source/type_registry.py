@@ -379,11 +379,6 @@ class TypeRegistry:
         return sorted(self._use_cases.keys())
 
     @property
-    def attribute_names(self) -> list[str]:
-        """List all known attribute names."""
-        return sorted(self._attributes.keys())
-
-    @property
     def cardinalities(self) -> list[str]:
         """The cardinality vocabulary, from the registry or the package default."""
         return list(self._cardinality.get("values") or CARDINALITIES)
@@ -394,13 +389,6 @@ class TypeRegistry:
         if name not in self._use_cases:
             raise InvalidUseCaseError(f"Unknown use case '{use_case}'")
         return list(self._use_cases[name]["valid_primitives"])
-
-    def valid_primitives_for_attribute(self, attribute: str) -> list[str] | str:
-        """Get the list of valid primitives for an attribute (or 'all')."""
-        if attribute not in self._attributes:
-            raise InvalidAttributeError(f"Unknown attribute '{attribute}'")
-        valid = self._attributes[attribute]["valid_primitives"]
-        return "all" if valid == "all" else list(valid)
 
     def primitive_defaults(self, primitive: str) -> dict[str, Any]:
         """Get the default CH type, codec, and nullable for a primitive."""

@@ -83,12 +83,6 @@ class FieldMap(BaseModel):
         return validate_source_name(v.lower())
 
     @property
-    def registry_key(self) -> str:
-        """Compound key used in the registry: '{standard}/{source_or__default}'."""
-        name = self.source if self.source else DEFAULT_MAP_NAME
-        return f"{self.standard}/{name}"
-
-    @property
     def is_default(self) -> bool:
         """Whether this is the default map for its standard."""
         return self.source is None
