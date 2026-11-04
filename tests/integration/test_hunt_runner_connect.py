@@ -19,9 +19,9 @@ import pytest
 from prometheus_client.parser import text_string_to_metric_families
 from scalo.metrics import create_metrics
 
-from dfe_engine.hunt_runner.cli import _connect_coordinator
-from dfe_engine.hunt_runner.connect import connect_when_available
-from dfe_engine.hunt_runner.metrics import CLICKHOUSE_UNAVAILABLE, HuntRunnerMetrics
+from dfe_engine.hunts.connect import connect_when_available
+from dfe_engine.hunts.runner_cli import _connect_coordinator
+from dfe_engine.hunts.runner_metrics import CLICKHOUSE_UNAVAILABLE, HuntRunnerMetrics
 from dfe_engine.settings import (
     APISettings,
     ClickHouseResilienceSettings,

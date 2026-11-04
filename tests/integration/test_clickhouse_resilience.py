@@ -120,7 +120,7 @@ def test_the_wrapper_inserts_rows_a_real_clickhouse_reads_back(manager, heartbea
 
 def test_a_real_runner_heartbeat_round_trips_through_the_wrapper(manager, heartbeat_table):
     """The API's own liveness read, over rows the coordinator's writer put there."""
-    from dfe_engine.hunt_runner.run_status import live_runner_count
+    from dfe_engine.hunts.run_status import live_runner_count
 
     db, _table = heartbeat_table
     client = manager.get_clickhouse_client()

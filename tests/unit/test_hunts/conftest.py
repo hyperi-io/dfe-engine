@@ -6,6 +6,7 @@ import pytest
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.settings import reset_settings
+from tests.support.recording_metrics import RecordingManager
 
 # Reset settings and ClickHouseManager to pick up dotenv values
 reset_settings()
@@ -30,3 +31,9 @@ def cleanup(tmp_path_factory):
             func(path)
 
         shutil.rmtree(temp_dir, onexc=on_rm_error)
+
+
+@pytest.fixture
+def manager() -> RecordingManager:
+    """A recording metrics manager to build a real ``HuntRunnerMetrics`` over."""
+    return RecordingManager()

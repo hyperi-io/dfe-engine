@@ -21,14 +21,12 @@ from __future__ import annotations
 
 import pytest
 
-from dfe_engine.hunt_runner import (
-    ChCoordinator,
-    HuntRunner,
-    HuntWorker,
-    load_specs,
-    publish_schedule,
-    run_loop,
-)
+from dfe_engine.hunts.ch_coordinator import ChCoordinator
+from dfe_engine.hunts.daemon import run_loop
+from dfe_engine.hunts.runner import HuntRunner
+from dfe_engine.hunts.schedule import publish_schedule
+from dfe_engine.hunts.spec_loader import load_specs
+from dfe_engine.hunts.worker import HuntWorker
 
 
 def test_loaded_hunt_runs_windowed_insert_and_is_attributed(ch_client, dfe_db, tmp_path):
@@ -100,7 +98,8 @@ def test_a_hunt_with_no_query_fails_and_leaves_its_watermark_where_it_was(ch_cli
     # would move it past a window nothing scanned, and every fire would look clean.
     coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
     coord.ensure_schema()
-    from dfe_engine.hunt_runner import EmptyHuntQuery, HuntSpec
+    from dfe_engine.hunts.hunt_spec import HuntSpec
+    from dfe_engine.hunts.worker import EmptyHuntQuery
 
     spec = HuntSpec(hunt_id="noop", interval_seconds=60)
     worker = HuntWorker(ch_client, coord)

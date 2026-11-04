@@ -15,8 +15,8 @@ update and delete is one gitcrud commit, routed by the deployment's posture like
 any other governed write (direct in dev/solo, a review PR in production+team).
 
 The stored bytes are whatever the registry hands over -- no metadata block, no
-rewriting -- because ``hunt_runner/spec_loader.py`` and
-``hunt_runner/rule_compiler.py`` parse these files as they stand.
+rewriting -- because ``hunts/spec_loader.py`` and
+``hunts/rule_compiler.py`` parse these files as they stand.
 
 With gitops off (the docker tier) no backend is built and the registries keep
 their DirectoryConfigStore over the shared config volume the docker runner reads.

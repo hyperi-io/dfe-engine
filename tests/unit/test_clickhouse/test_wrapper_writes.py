@@ -18,7 +18,7 @@ import pytest
 
 from dfe_engine.clickhouse.attribution import tags_context
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-from dfe_engine.hunt_runner.ch_coordinator import ChCoordinator
+from dfe_engine.hunts.ch_coordinator import ChCoordinator
 
 
 class _RecordingConnectClient:

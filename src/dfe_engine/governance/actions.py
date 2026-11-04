@@ -37,7 +37,7 @@ from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, del_path, get_pat
 from dfe_engine.gitcrud.commit_policy import added_violations
 from dfe_engine.gitcrud.registry import UnknownResourceClassError
 from dfe_engine.gitops.repo import PublishResult
-from dfe_engine.hunt_runner.checkpoint import TIMESTAMP_FIELD
+from dfe_engine.hunts.checkpoint import TIMESTAMP_FIELD
 from dfe_engine.hunts.rule_guard import refuse_rule_condition
 from dfe_engine.hunts.validator import HuntValidator
 

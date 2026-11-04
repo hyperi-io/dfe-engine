@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The runner's metrics, built in a fresh interpreter and printed as text.
 
-``tests/hunt_runner/test_served_metrics.py`` runs this as a child and reads the
+``tests/unit/test_hunts/test_runner_served_metrics.py`` runs this as a child and reads the
 Prometheus exposition it prints. OpenTelemetry's global MeterProvider can be set once
 per process, and the unit suite disables the SDK, so the pod's shape needs a process
 no other test has touched. The name keeps it out of normal collection.
@@ -17,7 +17,7 @@ import sys
 
 from prometheus_client import REGISTRY, generate_latest
 
-from dfe_engine.hunt_runner import metrics
+from dfe_engine.hunts import runner_metrics as metrics
 
 
 def main() -> int:

@@ -120,6 +120,7 @@ _.from_file, _.load_table_spec
 _.reload_contracts, _.reset_instance, _.reset_settings
 
 # Alerting code with no caller outside its tests (hunts/alert_grouping.py, alerting/dispatcher.py).
+_.AlertGroupingConfig, _.AlertStateManager, _.build_group_key, _.build_grouping_query
 _.check_cooldown, _.cooldown_td, _.dispatch, _.ensure_table_exists, _.get_ddl, _.has_group_by
 _.max_alerts_per_run, _.record_fire
 
