@@ -69,7 +69,7 @@ class TestCreateOrg:
         )
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
-        assert "acme" in resp.json()["message"]
+        assert "acme" in resp.json()["detail"]
 
     def test_create_org_tenant_id_equal_to_another_orgs_name_returns_409(
         self, client, admin_headers
@@ -155,7 +155,7 @@ class TestListOrgs:
         assert resp.status_code == 200
         body = resp.json()
         assert [org["name"] for org in body["items"]] == ["default"]
-        assert body["total"] == 1
+        assert body["total_size"] == 1
 
     def test_list_returns_created_orgs(self, client, admin_headers):
         client.post(
@@ -282,7 +282,7 @@ class TestUpdateOrg:
         )
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
-        assert "acme" in resp.json()["message"]
+        assert "acme" in resp.json()["detail"]
         assert client.get("/api/v1/orgs/beta", headers=admin_headers).json()["org_ids"] == [
             "t-beta-1"
         ]

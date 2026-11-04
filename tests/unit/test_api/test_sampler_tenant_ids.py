@@ -98,7 +98,7 @@ def test_a_group_naming_no_registered_org_is_refused_before_any_read(
     resp = _sample(viewer)
 
     assert resp.status_code == 403, resp.text
-    assert "no registered org" in resp.json()["message"]
+    assert "no registered org" in resp.json()["detail"]
     assert table.reads == []
 
 
@@ -190,7 +190,7 @@ def test_a_gated_sample_of_a_table_without_org_id_is_refused_to_a_held_caller(
     resp = _sample(viewer, mode=mode)
 
     assert resp.status_code == 403, resp.text
-    assert "has no _org_id column" in resp.json()["message"]
+    assert "has no _org_id column" in resp.json()["detail"]
     assert table.reads == []
 
 
@@ -218,7 +218,7 @@ def test_a_dry_run_through_the_real_sampler_refuses_a_table_it_cannot_hold(dry_r
     resp = _dry_run(dry_runner)
 
     assert resp.status_code == 403, resp.text
-    assert "has no _org_id column" in resp.json()["message"]
+    assert "has no _org_id column" in resp.json()["detail"]
     assert table.reads == []
 
 
@@ -232,5 +232,5 @@ def test_a_dry_run_through_the_real_sampler_refuses_a_caller_in_no_registered_or
     resp = _dry_run(stray)
 
     assert resp.status_code == 403, resp.text
-    assert "no registered org" in resp.json()["message"]
+    assert "no registered org" in resp.json()["detail"]
     assert table.reads == []

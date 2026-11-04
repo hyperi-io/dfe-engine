@@ -15,7 +15,7 @@ from types import SimpleNamespace
 
 import pytest
 from dfe_schemas.clickhouse import PlatformProbe
-from fastapi import HTTPException
+from scalo.api import ProblemError
 
 from dfe_engine.api.v1 import sources as sources_module
 
@@ -49,23 +49,21 @@ def test_a_server_with_keeper_and_the_macros_passes():
 
 
 def test_a_keeperless_server_answers_503_with_the_schema_phases_reason():
-    with pytest.raises(HTTPException) as raised:
+    with pytest.raises(ProblemError) as raised:
         sources_module._require_replication(PlatformProbe(_Server(keeper=False)), "acme")
 
-    assert raised.value.status_code == 503
-    detail = raised.value.detail
-    assert isinstance(detail, dict)
-    assert detail["code"] == "clickhouse_not_replicated"
-    assert "is missing Keeper" in detail["message"]
-    assert "docs/clickhouse-platform.md" in detail["message"]
+    assert raised.value.status == 503
+    problem = raised.value.problem
+    assert problem.code == "clickhouse_not_replicated"
+    assert "is missing Keeper" in (problem.detail or "")
+    assert "docs/clickhouse-platform.md" in (problem.detail or "")
 
 
 def test_a_server_that_cannot_be_asked_answers_503_without_its_text(audit_events):
-    with pytest.raises(HTTPException) as raised:
+    with pytest.raises(ProblemError) as raised:
         sources_module._require_replication(PlatformProbe(_Unreachable()), "acme")
 
-    assert raised.value.status_code == 503
-    detail = raised.value.detail
-    assert isinstance(detail, dict)
-    assert detail["code"] == "clickhouse_unavailable"
-    assert "ch.internal" not in str(detail)
+    assert raised.value.status == 503
+    problem = raised.value.problem
+    assert problem.code == "clickhouse_unavailable"
+    assert "ch.internal" not in problem.model_dump_json()

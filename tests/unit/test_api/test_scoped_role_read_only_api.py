@@ -17,8 +17,8 @@ def _refused(resp, role: str, write: str) -> None:
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["code"] == "scoped_role_not_read_only"
-    assert f"'{role}'" in body["message"]
-    assert body["message"].endswith(f"not {write}")
+    assert f"'{role}'" in body["detail"]
+    assert body["detail"].endswith(f"not {write}")
 
 
 @pytest.mark.parametrize("write", WRITES)

@@ -12,6 +12,7 @@ GET /api/v1/deployment/admin-links -> Each admin UI the deployer listed, with wh
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
+from scalo.api import ListParams, Page, paginate
 
 from dfe_engine.admin_links import AdminLinks, AdminLinkStatus
 from dfe_engine.api.deps import CurrentUser, require_action
@@ -37,10 +38,12 @@ class AdminLinkResponse(BaseModel):
 
 @router.get(
     "/admin-links",
-    response_model=list[AdminLinkResponse],
+    response_model=Page[AdminLinkResponse],
     dependencies=[Depends(require_action(scopes_dict["deployment_admin_links_read"]))],
 )
-async def list_admin_links(user: CurrentUser, request: Request) -> list[AdminLinkResponse]:
+async def list_admin_links(
+    query: ListParams, user: CurrentUser, request: Request
+) -> Page[AdminLinkResponse]:
     """Each admin UI this deployment runs, in the order its deployer listed them.
 
     The deployer supplies the list, so an empty one means it listed none. Gated to
@@ -48,7 +51,10 @@ async def list_admin_links(user: CurrentUser, request: Request) -> list[AdminLin
     deployment's consoles. Links only; nothing here carries a credential.
     """
     links: AdminLinks = request.app.state.admin_links
-    return [
-        AdminLinkResponse(name=link.name, purpose=link.purpose, url=link.url, status=status)
-        for link, status in await links.statuses()
-    ]
+    return paginate(
+        [
+            AdminLinkResponse(name=link.name, purpose=link.purpose, url=link.url, status=status)
+            for link, status in await links.statuses()
+        ],
+        query,
+    )

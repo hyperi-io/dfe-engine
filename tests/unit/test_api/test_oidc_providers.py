@@ -383,17 +383,22 @@ class TestUpdateProvider:
         )
 
         expected_body = {
+            "type": "about:blank",
+            "title": "Unprocessable Content",
+            "status": 422,
             "code": "validation_error",
             "errors": [
                 {
                     "code": "env_var_not_set",
                     "field": "groups.api_token_env",
-                    "message": f"the env var {UNSET_SECRET_ENV!r} is not set in the engine, so the "
+                    "location": "body",
+                    "detail": f"the env var {UNSET_SECRET_ENV!r} is not set in the engine, so the "
                     "secret would resolve empty: set it in the engine's environment first or send "
                     "the secret's value",
+                    "pointer": "#/groups/api_token_env",
                 }
             ],
-            "message": "1 validation error(s)",
+            "detail": "The request has 1 invalid field(s)",
         }
         assert (resp.status_code, resp.json()) == (422, expected_body)
 
@@ -1153,7 +1158,7 @@ class TestCredentialsGoToTheSecretStore:
         assert resp.status_code == 409, resp.text
         body = resp.json()
         assert body["code"] == "conflict"
-        assert "Restore the secret, or wait out its recovery window" in body["message"]
+        assert "Restore the secret, or wait out its recovery window" in body["detail"]
         assert app.state.oidc_provider_registry.get("okta") is None
 
     def test_a_secret_is_never_echoed_back(self, client, admin_headers):

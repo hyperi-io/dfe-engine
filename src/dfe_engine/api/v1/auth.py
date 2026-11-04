@@ -13,8 +13,9 @@ import time
 from datetime import timedelta
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
+from scalo.api import ProblemError
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
@@ -29,7 +30,6 @@ from dfe_engine.api.deps import (
     resolve_live_grants_for_user,
     resolve_live_groups_for_user,
 )
-from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.metrics import ApiMetrics
 from dfe_engine.api.password_change import PASSWORD_CHANGE_CLAIM
 from dfe_engine.api.v1.hyperdx import hyperdx_identity
@@ -217,17 +217,15 @@ async def persist_session_end(request: Request, account: Account, *, actor: str)
     await run_blocking(account_durability.publish_session_end, gc, account, actor=actor)
 
 
-def throttled(request: Request, wait: int) -> HTTPException:
+def throttled(request: Request, wait: int) -> ProblemError:
     """The 429 a sign-in or password check answers while its caller must wait, counted."""
     metrics = getattr(request.app.state, "api_metrics", None) or ApiMetrics()
     route = str(getattr(request.scope.get("route"), "path", "")) or "unknown"
     metrics.sign_in_throttled(route)
-    return HTTPException(
-        status_code=429,
-        detail={
-            "code": "too_many_attempts",
-            "message": f"Too many failed attempts; try again in {wait} seconds",
-        },
+    return ProblemError(
+        429,
+        f"Too many failed attempts; try again in {wait} seconds",
+        code="too_many_attempts",
         headers={"Retry-After": str(wait)},
     )
 
@@ -267,15 +265,12 @@ def _mint(
     # Public, so the session-derived declaration skips it; the refusals are its own.
     responses={
         401: {
-            "model": ErrorResponse,
             "description": "Invalid username or password, or the account is disabled or blocked",
         },
         403: {
-            "model": ErrorResponse,
             "description": "The break-glass account is disabled in governance settings",
         },
         429: {
-            "model": ErrorResponse,
             "description": "Too many failed sign-ins for this username or from this "
             "address; Retry-After gives the seconds to wait",
         },
@@ -306,16 +301,12 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         if not allowed:
             # Only a deploy repo can turn the account off, so there is one to name.
             where = request.app.state.gitcrud.resource_class(breakglass.CLASS)
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "breakglass_disabled",
-                    "message": (
-                        "The break-glass account is turned off. To turn it back on, set "
-                        f"{breakglass.KEY_ENABLED} to true in "
-                        f"{where.directory}/{breakglass.NAME}{where.suffix} in the deploy repo."
-                    ),
-                },
+            raise ProblemError(
+                403,
+                "The break-glass account is turned off. To turn it back on, set "
+                f"{breakglass.KEY_ENABLED} to true in "
+                f"{where.directory}/{breakglass.NAME}{where.suffix} in the deploy repo.",
+                code="breakglass_disabled",
             )
 
     try:
@@ -372,7 +363,6 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     response_model=TokenResponse,
     responses={
         401: {
-            "model": ErrorResponse,
             "description": "The session is older than api.max_session_minutes "
             "(session_expired), has ended, or no account backs it",
         },
@@ -387,9 +377,10 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings,
     account = require_local_account_enabled(request, user.user_id)
     # Each refresh issues a new expiry, so only a session an account backs may renew.
     if account is None and settings.auth.enabled:
-        raise HTTPException(
-            status_code=401,
-            detail={"code": "unauthorized", "message": "No account is bound to this session"},
+        raise ProblemError(
+            401,
+            "No account is bound to this session",
+            code="unauthorized",
             headers={"WWW-Authenticate": "Bearer"},
         )
     auth_time = session_auth_time(getattr(request.state, "token_claims", None), now=now)
@@ -397,12 +388,10 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings,
         auth_time, now=now, max_session_minutes=settings.api.max_session_minutes
     )
     if left <= 0:
-        raise HTTPException(
-            status_code=401,
-            detail={
-                "code": "session_expired",
-                "message": "The session is past its maximum age; sign in again",
-            },
+        raise ProblemError(
+            401,
+            "The session is past its maximum age; sign in again",
+            code="session_expired",
             headers={"WWW-Authenticate": "Bearer"},
         )
     change_required = _password_change_required(request, user.user_id)
@@ -546,16 +535,12 @@ def retire_bootstrap_admin(
         return evaluate_initial_setup(request)
     state = SETUP_MACHINE.evaluate(ctx)
     if not retire_admin_available(ctx, state.complete):
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "retire_admin_unavailable",
-                "message": (
-                    "Retiring the bootstrap admin needs a completed setup, a deploy "
-                    "repo to record the fact in, and an enabled admin-role account "
-                    f"other than '{admin_name}' and '{breakglass.USERNAME}'"
-                ),
-            },
+        raise ProblemError(
+            409,
+            "Retiring the bootstrap admin needs a completed setup, a deploy "
+            "repo to record the fact in, and an enabled admin-role account "
+            f"other than '{admin_name}' and '{breakglass.USERNAME}'",
+            code="retire_admin_unavailable",
         )
 
     gc = request.app.state.gitcrud

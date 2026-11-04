@@ -197,7 +197,7 @@ def test_an_admin_write_is_refused_by_clickhouse(stack, ch_client, statement):
     assert resp.status_code == 500, resp.text
     assert resp.json()["code"] == "query_error"
     # ClickHouse's reason is in the log line the answer's reference names, never the answer.
-    message = resp.json()["message"]
+    message = resp.json()["detail"]
     assert "readonly" not in message.lower()
     reference = re.search(r"\(reference ([0-9a-f]{12})\)$", message)
     assert reference is not None, message

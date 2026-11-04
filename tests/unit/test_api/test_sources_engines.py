@@ -20,7 +20,7 @@ class TestListTableEngines:
         assert resp.status_code == 200, resp.text
         body = resp.json()
         engines = {item["name"]: item for item in body["items"]}
-        assert body["total"] == len(engines)
+        assert body["total_size"] == len(engines)
         assert engines["MergeTree"]["arguments"] == "none"
         assert engines["MergeTree"]["argument_hint"] == ""
         assert engines["CollapsingMergeTree"]["arguments"] == "required"

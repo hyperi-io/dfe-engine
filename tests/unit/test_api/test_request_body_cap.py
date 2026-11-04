@@ -22,14 +22,16 @@ def _json_of(size: int) -> bytes:
 
 
 def _refusal(limit: int, setting: str, env: str) -> dict[str, object]:
-    """The 413 body, in the same envelope every other API error uses."""
+    """The 413 problem, the shape every other API error takes."""
     return {
+        "type": "about:blank",
+        "title": "Content Too Large",
+        "status": 413,
         "code": "payload_too_large",
-        "message": (
+        "detail": (
             f"The request body is larger than the {limit}-byte limit. "
             f"Raise {setting} ({env}) to accept a larger one."
         ),
-        "errors": [],
     }
 
 

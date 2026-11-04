@@ -138,11 +138,11 @@ class TestListCatalogue:
         assert row["availability"] == case["expected_availability"]
 
     def test_pages(self, admin_headers: dict[str, str], client: TestClient):
-        data = client.get(CATALOGUE, headers=admin_headers, params={"per_page": 5}).json()
-        assert (data["total"], len(data["items"])) == (len(sc.source_catalogue().entries), 5)
+        data = client.get(CATALOGUE, headers=admin_headers, params={"page_size": 5}).json()
+        assert (data["total_size"], len(data["items"])) == (len(sc.source_catalogue().entries), 5)
 
     def test_intake_filter(self, admin_headers: dict[str, str], client: TestClient):
-        params = {"intake": "receiver", "per_page": -1}
+        params = {"intake": "receiver", "page_size": 1000}
         listed = client.get(CATALOGUE, headers=admin_headers, params=params).json()["items"]
         entries = sc.source_catalogue().entries
         receivers = [name for name, entry in entries.items() if "receiver" in entry.intakes]
@@ -163,7 +163,7 @@ class TestListCatalogue:
         )
 
         def listed(tags: list[str] | None = None) -> list[str]:
-            params: dict[str, Any] = {"per_page": -1}
+            params: dict[str, Any] = {"page_size": 1000}
             if tags is not None:
                 params["tags"] = tags
             resp = client.get(CATALOGUE, headers=admin_headers, params=params)
@@ -226,15 +226,15 @@ class TestListCatalogue:
         created = _create(client, admin_headers, "okta", {"intake": "beats"})
         assert created.status_code == 201, created.text
 
-        resp = client.get(CATALOGUE, headers=admin_headers, params={**params, "per_page": -1})
+        resp = client.get(CATALOGUE, headers=admin_headers, params={**params, "page_size": 1000})
 
         assert resp.status_code == 200, resp.text
         assert [row["name"] for row in resp.json()["items"]] == expected
-        assert resp.json()["total"] == len(expected)
+        assert resp.json()["total_size"] == len(expected)
 
     def test_unknown_intake(self, admin_headers: dict[str, str], client: TestClient):
         resp = client.get(CATALOGUE, headers=admin_headers, params={"intake": "carrier"})
-        assert (resp.status_code, resp.json()["message"]) == (
+        assert (resp.status_code, resp.json()["detail"]) == (
             422,
             "Unknown intake 'carrier'. Must be: beats, fetcher, receiver",
         )
@@ -248,13 +248,15 @@ class TestListCatalogue:
     def test_an_entry_already_stored_is_left_out(
         self, admin_headers: dict[str, str], client: TestClient
     ):
-        before = client.get(CATALOGUE, headers=admin_headers, params={"per_page": 1}).json()[
-            "total"
+        before = client.get(CATALOGUE, headers=admin_headers, params={"page_size": 1}).json()[
+            "total_size"
         ]
         created = _create(client, admin_headers, "okta", {"intake": "beats"})
         assert created.status_code == 201, created.text
         listed = client.get(CATALOGUE, headers=admin_headers, params={"search": "okta"})
-        again = client.get(CATALOGUE, headers=admin_headers, params={"per_page": 1}).json()["total"]
+        again = client.get(CATALOGUE, headers=admin_headers, params={"page_size": 1}).json()[
+            "total_size"
+        ]
         assert "okta" not in {row["name"] for row in listed.json()["items"]}
         assert again == before - 1
 
@@ -291,7 +293,9 @@ class TestListCatalogueTags:
         (holding / ".hidden").mkdir()
         monkeypatch.setattr(sc, "catalogue_tags_directory", lambda: holding)
 
-        listed = client.get(CATALOGUE_TAGS, headers=admin_headers, params={"per_page": -1}).json()
+        listed = client.get(
+            CATALOGUE_TAGS, headers=admin_headers, params={"page_size": 1000}
+        ).json()
 
         assert [(row["id"], row["name"], row["description"]) for row in listed["items"]] == [
             ("abnormal", "abnormal", ""),
@@ -311,13 +315,13 @@ class TestListCatalogueTags:
         monkeypatch.setattr(sc, "catalogue_tags_directory", lambda: holding)
 
         listed = client.get(
-            CATALOGUE_TAGS, headers=admin_headers, params={"name": "ACT", "per_page": -1}
+            CATALOGUE_TAGS, headers=admin_headers, params={"name": "ACT", "page_size": 1000}
         ).json()
         middle = client.get(
-            CATALOGUE_TAGS, headers=admin_headers, params={"name": "mq", "per_page": -1}
+            CATALOGUE_TAGS, headers=admin_headers, params={"name": "mq", "page_size": 1000}
         ).json()
         loose = client.get(
-            CATALOGUE_TAGS, headers=admin_headers, params={"name": "un", "per_page": -1}
+            CATALOGUE_TAGS, headers=admin_headers, params={"name": "un", "page_size": 1000}
         ).json()
 
         assert [row["id"] for row in listed["items"]] == ["active-mq"]
@@ -337,9 +341,11 @@ class TestListCatalogueTags:
         )
         monkeypatch.setattr(sc, "catalogue_tags_directory", lambda: holding)
 
-        listed = client.get(CATALOGUE_TAGS, headers=admin_headers, params={"per_page": -1}).json()
+        listed = client.get(
+            CATALOGUE_TAGS, headers=admin_headers, params={"page_size": 1000}
+        ).json()
         by_name = client.get(
-            CATALOGUE_TAGS, headers=admin_headers, params={"name": "Amazon", "per_page": -1}
+            CATALOGUE_TAGS, headers=admin_headers, params={"name": "Amazon", "page_size": 1000}
         ).json()
 
         assert listed["items"] == [
@@ -404,7 +410,7 @@ class TestCreateSourceFromCatalogue:
         )
         assert resp.status_code == 422, resp.text
         assert resp.json()["code"] == "validation_error"
-        assert resp.json()["message"]
+        assert resp.json()["detail"]
         assert "created" not in resp.json()
         assert client.get("/api/v1/sources/okta", headers=admin_headers).status_code == 404
 

@@ -25,18 +25,14 @@ authenticating but stays listed (``expired: true``) until it is revoked.
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
+from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import CurrentUser, refuse_unknown_orgs, require_action
-from dfe_engine.api.pagination import (
-    PaginatedResponse,
-    PaginationParams,
-    apply_search,
-    apply_sort,
-)
 from dfe_engine.api.v1.account_groups import check_role_assignment, scope_of
 from dfe_engine.auth.audit import audit_api_key_change
 from dfe_engine.auth.membership import groups_named
@@ -135,10 +131,7 @@ async def create_api_key(
 
     store: APIKeyStore = request.app.state.api_key_store
     if store.get(body.name) is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": f"API key '{body.name}' already exists"},
-        )
+        raise ProblemError(409, f"API key '{body.name}' already exists", code="conflict")
     # The key's session takes every role its groups carry, so minting it hands them out.
     for group in groups_named(body.groups, request.app.state.group_store.list()):
         check_role_assignment(request, user, group.roles, scope_of(group))
@@ -157,10 +150,7 @@ async def create_api_key(
         )
     except ValueError as exc:
         # Bad/past expires_at -- the duplicate-name case is caught above.
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "validation_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(400, str(exc), code="validation_error") from exc
     audit_api_key_change(
         user.user_id,
         key_meta.name,
@@ -171,18 +161,21 @@ async def create_api_key(
     return APIKeyCreatedResponse(**_response_fields(key_meta), full_key=full_key)
 
 
+ApiKeysList = Annotated[
+    ListQuery, Depends(list_query(order_by=("name", "created_at", "expires_at"), tiebreak="name"))
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedResponse[APIKeyResponse],
+    response_model=Page[APIKeyResponse],
     dependencies=[Depends(require_action(scopes_dict["api_key_read"]))],
 )
 async def list_api_keys(
     user: CurrentUser,
     request: Request,
-    pagination: PaginationParams = Depends(),
+    query: ApiKeysList,
     search: str | None = Query(None, description="Search in key name/description"),
-    sort_by: str | None = Query(None, description="Sort field (name, created_at, expires_at)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List API keys, paginated. No key hashes or full keys returned."""
     from dfe_engine.auth.api_keys import APIKeyStore
@@ -190,9 +183,9 @@ async def list_api_keys(
     store: APIKeyStore = request.app.state.api_key_store
     rows = [APIKeyResponse(**_response_fields(k)).model_dump() for k in store.list()]
     rows = apply_search(rows, search, ["name", "description"])
-    rows = apply_sort(rows, sort_by, sort_order)
+    rows = sort_by_order(rows, query.order_by)
     summaries = [APIKeyResponse.model_validate(row) for row in rows]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(summaries, query, bound={"search": search})
 
 
 @router.delete(
@@ -214,11 +207,5 @@ async def revoke_api_key(
     try:
         store.revoke(short_token)
     except KeyError:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"No API key with short_token '{short_token}'",
-            },
-        )
+        raise ProblemError(404, f"No API key with short_token '{short_token}'", code="not_found")
     audit_api_key_change(user.user_id, key_name, short_token, "revoked")

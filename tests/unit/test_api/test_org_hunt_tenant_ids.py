@@ -319,8 +319,8 @@ class TestATenantIdAHuntStillReadsForAnotherOrg:
 
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "tenant_id_held"
-        assert "windows_hunt" in resp.json()["message"]
-        assert resp.json()["context"]["held"] == [
+        assert "windows_hunt" in resp.json()["detail"]
+        assert resp.json()["held"] == [
             {"hunt": "windows_hunt", "org": "acme", "tenant_ids": ["acme-1"], "branch": None}
         ]
         assert client.get(f"{ORGS}/newcorp", headers=admin_headers).status_code == 404
@@ -353,7 +353,7 @@ class TestATenantIdAHuntStillReadsForAnotherOrg:
         )
 
         assert resp.status_code == 409, resp.text
-        assert resp.json()["context"]["held"] == [
+        assert resp.json()["held"] == [
             {
                 "hunt": "windows_hunt",
                 "org": "acme",

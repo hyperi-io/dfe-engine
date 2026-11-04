@@ -32,7 +32,7 @@ own and shared by every source, so any reader sees them.
 from collections.abc import Callable
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from scalo.api import (
     DryRun,
@@ -45,7 +45,7 @@ from scalo.api import (
 )
 
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action, require_own_org_action
-from dfe_engine.api.errors import ErrorCode, ErrorResponse
+from dfe_engine.api.errors import ErrorCode
 from dfe_engine.api.review import ReviewFields, apply_routing_headers, review_fields
 from dfe_engine.api.v1.sources import (
     AppsSync,
@@ -100,13 +100,12 @@ _WRITE_ATTEMPTS = 3
 
 _REFUSED: dict[int | str, dict[str, Any]] = {
     422: {
-        "model": ErrorResponse,
         "description": (
             "Refused, nothing written: a block named twice or a pinned block (code "
             "invalid_order), or a binding the receiver could not compile (code invalid_binding)"
         ),
     },
-    503: {"model": ErrorResponse, "description": "No deploy repo, where the ingest rules live"},
+    503: {"description": "No deploy repo, where the ingest rules live"},
 }
 
 
@@ -200,15 +199,13 @@ class CompatProfileSummary(BaseModel):
 
 
 def _store(registry: Any) -> IngestStore:
-    """Raises: HTTPException: 503 ``not_configured`` without a deploy repo."""
+    """Raises: ProblemError: 503 ``not_configured`` without a deploy repo."""
     store = registry.ingest_store
     if store is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "The ingest rules live in the deploy repo, and gitops is not enabled",
-            },
+        raise ProblemError(
+            503,
+            "The ingest rules live in the deploy repo, and gitops is not enabled",
+            code="not_configured",
         )
     return store
 
@@ -359,11 +356,10 @@ def list_rule_blocks(
     response_model=RuleOrderResponse,
     responses={
         409: {
-            "model": ErrorResponse,
             "description": (
                 "The list names other blocks than the field has now, because a source or a "
                 "binding changed since it was read (code order_conflict, the current list in "
-                "context.blocks), or the deploy repo kept moving (code conflict)"
+                "blocks), or the deploy repo kept moving (code conflict)"
             ),
         },
         **_REFUSED,
@@ -569,7 +565,7 @@ def list_compat_profiles(registry: SourceReg, query: ListParams) -> Page[CompatP
 @router.get(
     "/compat-profiles/{profile}",
     response_model=CompatProfile,
-    responses={404: {"model": ErrorResponse, "description": "No such profile is stored"}},
+    responses={404: {"description": "No such profile is stored"}},
     dependencies=[_READ],
 )
 def get_compat_profile(profile: str, registry: SourceReg, response: Response) -> CompatProfile:
@@ -577,9 +573,8 @@ def get_compat_profile(profile: str, registry: SourceReg, response: Response) ->
     try:
         held = _store(registry).profile(profile)
     except CompatProfileNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Compatibility profile {profile!r} not found"},
+        raise ProblemError(
+            404, f"Compatibility profile {profile!r} not found", code="not_found"
         ) from None
     response.headers["ETag"] = profile_etag(held)
     return held

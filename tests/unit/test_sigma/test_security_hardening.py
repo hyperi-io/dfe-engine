@@ -69,16 +69,16 @@ class TestProviderReachConfinement:
 
     def test_local_files_dir_escape_rejected(self, tmp_path):
         import pytest
-        from fastapi import HTTPException
+        from scalo.api import ProblemError
 
         from dfe_engine.api.v1.sigma import _validate_provider_reach
 
         cfg = ProviderConfig(
             name="evil", kind=ProviderKind.LOCAL_FILES, options={"directory": "../../etc"}
         )
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(ProblemError) as exc:
             _validate_provider_reach(self._request(tmp_path), cfg)
-        assert exc.value.status_code == 422
+        assert exc.value.status == 422
 
     def test_local_files_dir_under_config_ok(self, tmp_path):
         from dfe_engine.api.v1.sigma import _validate_provider_reach
@@ -90,7 +90,7 @@ class TestProviderReachConfinement:
 
     def test_git_host_allowlist_rejects_off_list(self, tmp_path, monkeypatch):
         import pytest
-        from fastapi import HTTPException
+        from scalo.api import ProblemError
 
         from dfe_engine.api.v1.sigma import _validate_provider_reach
 
@@ -98,9 +98,9 @@ class TestProviderReachConfinement:
         cfg = ProviderConfig(
             name="evil", kind=ProviderKind.GIT_REPO, options={"url": "https://evil.example/x"}
         )
-        with pytest.raises(HTTPException) as exc:
+        with pytest.raises(ProblemError) as exc:
             _validate_provider_reach(self._request(tmp_path), cfg)
-        assert exc.value.status_code == 422
+        assert exc.value.status == 422
 
     def test_git_host_on_allowlist_ok(self, tmp_path, monkeypatch):
         from dfe_engine.api.v1.sigma import _validate_provider_reach

@@ -199,7 +199,7 @@ class TestSourceCRUDWorkflow:
         resp = e2e_client.get("/api/v1/sources", headers=headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] >= 1
+        assert data["total_size"] >= 1
 
         # Delete
         resp = e2e_client.delete("/api/v1/sources/e2e-test-source", headers=headers)
@@ -302,29 +302,26 @@ class TestTaskManagerWorkflow:
             headers=headers,
         )
         assert resp.status_code == 202
-        task_id = resp.json()["task_id"]
-        assert task_id
+        operation = resp.headers["location"]
+        name = resp.json()["name"]
 
-        # Poll task status (background task may finish slightly after 202)
+        # The background task may finish slightly after the 202.
         data = None
         for _ in range(20):
-            resp = e2e_client.get(f"/api/v1/tasks/{task_id}", headers=headers)
+            resp = e2e_client.get(operation, headers=headers)
             if resp.status_code == 200:
                 data = resp.json()
                 break
             assert resp.status_code != 404, resp.text
             time.sleep(0.05)
-        assert data is not None, f"GET /tasks/{task_id} failed: {resp.status_code} {resp.text}"
-        assert data["id"] == task_id
-        assert data["kind"] == "pipeline:build"
-        # Task may be pending, running, completed, or failed
-        assert data["status"] in ("pending", "running", "completed", "failed")
+        assert data is not None, f"GET {operation} failed: {resp.status_code} {resp.text}"
+        assert data["name"] == name
+        assert data["metadata"]["kind"] == "pipeline:build"
+        assert data["metadata"]["status"] in ("pending", "running", "completed", "failed")
 
-        # List tasks filtered by kind
-        resp = e2e_client.get("/api/v1/tasks?kind=pipeline:build", headers=headers)
+        resp = e2e_client.get("/api/v1/operations?kind=pipeline:build", headers=headers)
         assert resp.status_code == 200
-        tasks = resp.json()
-        assert any(t["id"] == task_id for t in tasks)
+        assert any(op["name"] == name for op in resp.json()["items"])
 
 
 class TestCrossRouterConsistency:
@@ -353,12 +350,10 @@ class TestCrossRouterConsistency:
             assert resp.status_code == 200, f"Failed: {endpoint}"
             data = resp.json()
             assert "items" in data, f"Missing 'items' in {endpoint}"
-            assert "total" in data, f"Missing 'total' in {endpoint}"
-            assert "page" in data, f"Missing 'page' in {endpoint}"
-            assert "per_page" in data, f"Missing 'per_page' in {endpoint}"
+            assert "next_page_token" in data, f"Missing 'next_page_token' in {endpoint}"
 
     def test_all_not_found_return_consistent_error(self, e2e_client):
-        """404 errors should all have code + message."""
+        """404 errors should all have code + detail."""
         headers = self._login(e2e_client)
 
         not_found_endpoints = [
@@ -366,7 +361,7 @@ class TestCrossRouterConsistency:
             "/api/v1/services/nonexistent/default",
             "/api/v1/auth/accounts/nonexistent",
             "/api/v1/auth/groups/nonexistent",
-            "/api/v1/tasks/nonexistent-id",
+            "/api/v1/operations/nonexistent-id",
         ]
 
         for endpoint in not_found_endpoints:
@@ -374,7 +369,7 @@ class TestCrossRouterConsistency:
             assert resp.status_code == 404, f"Expected 404 for {endpoint}, got {resp.status_code}"
             data = resp.json()
             assert "code" in data, f"Missing 'code' in 404 for {endpoint}"
-            assert "message" in data, f"Missing 'message' in 404 for {endpoint}"
+            assert "detail" in data, f"Missing 'detail' in 404 for {endpoint}"
 
     def test_health_endpoints_unauthenticated(self, e2e_client):
         """Health probes must answer without auth.

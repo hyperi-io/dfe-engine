@@ -1,45 +1,13 @@
-"""Tests for error handling -- error format, exception handlers."""
+"""Every error answers RFC 9457 problem+json, through scalo's handlers and the engine's."""
 
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.errors import ErrorCode, ErrorResponse, FieldError
+from dfe_engine.api.errors import ErrorCode
 from dfe_engine.gitcrud.commit_policy import NAME_MAX
 from dfe_engine.settings import DFESettings, GitopsSettings
-
-
-class TestErrorModels:
-    """ErrorResponse and FieldError serialization."""
-
-    def test_error_response_basic(self):
-        err = ErrorResponse(code="not_found", message="Source not found")
-        data = err.model_dump(mode="json")
-        assert data["code"] == "not_found"
-        assert data["message"] == "Source not found"
-        assert data["errors"] == []
-
-    def test_error_response_with_field_errors(self):
-        err = ErrorResponse(
-            code="validation_error",
-            message="2 validation error(s)",
-            errors=[
-                FieldError(field="source", message="Required"),
-                FieldError(field="schema_config.ttl_days", message="Must be positive"),
-            ],
-        )
-        data = err.model_dump(mode="json")
-        assert len(data["errors"]) == 2
-        assert data["errors"][0]["field"] == "source"
-        assert data["errors"][1]["field"] == "schema_config.ttl_days"
-
-    def test_error_codes(self):
-        assert ErrorCode.UNAUTHORIZED == "unauthorized"
-        assert ErrorCode.FORBIDDEN == "forbidden"
-        assert ErrorCode.NOT_FOUND == "not_found"
-        assert ErrorCode.VALIDATION_ERROR == "validation_error"
-        assert ErrorCode.INTERNAL_ERROR == "internal_error"
 
 
 class TestExceptionHandlers:
@@ -50,7 +18,7 @@ class TestExceptionHandlers:
         assert resp.status_code == 401
         data = resp.json()
         assert data["code"] == "unauthorized"
-        assert "message" in data
+        assert data["detail"]
 
     def test_401_bad_token(self, client: TestClient):
         resp = client.get(
@@ -81,11 +49,9 @@ class TestExceptionHandlers:
         assert data["errors"][0]["field"]  # field path present
 
     def test_error_response_shape_consistent(self, client: TestClient):
-        """All error responses have code + message."""
         resp = client.get("/api/v1/sources/nonexistent")  # no auth
-        data = resp.json()
-        assert "code" in data
-        assert "message" in data
+        assert resp.headers["content-type"] == "application/problem+json"
+        assert {"type", "title", "status", "detail", "code"} <= set(resp.json())
 
     def test_health_no_auth(self, client: TestClient):
         """Health endpoints need no auth. Liveness is dependency-free (always
@@ -113,25 +79,26 @@ class TestExceptionHandlers:
             assert resp.status_code == 404, f"{path} still answers ({resp.status_code})"
 
 
-class TestTheRouterAnswersInTheEnvelope:
-    """A path no route matches, or a method its route does not take, answers ErrorResponse."""
+class TestTheRouterAnswersAProblem:
+    """A path no route matches, or a method its route does not take, answers a problem."""
 
     def test_an_unknown_path(self, client: TestClient):
         resp = client.get("/api/v1/no-such-route")
 
         assert resp.status_code == 404
-        assert resp.json() == {"code": "request_error", "message": "Not Found", "errors": []}
+        assert resp.json() == {
+            "type": "about:blank",
+            "title": "Not Found",
+            "status": 404,
+            "detail": "Not Found",
+        }
 
     def test_a_method_the_route_does_not_take(self, client: TestClient, admin_headers: dict):
         resp = client.patch("/api/v1/sources", headers=admin_headers)
 
         assert resp.status_code == 405
-        assert resp.json() == {
-            "code": "request_error",
-            "message": "Method Not Allowed",
-            "errors": [],
-        }
-        # The router's Allow header survives the envelope.
+        assert resp.json()["title"] == "Method Not Allowed"
+        # The router's Allow header survives the problem.
         assert resp.headers["allow"]
 
 
@@ -164,8 +131,8 @@ class TestServiceUnavailable:
         assert resp.status_code == 503
         data = resp.json()
         assert data["code"] == "service_unavailable"
-        assert data["context"]["waking"] is False
-        assert "message" in data
+        assert data["waking"] is False
+        assert data["detail"]
 
     def test_waking_says_warming_up(self):
         c = TestClient(self._app(), raise_server_exceptions=False)
@@ -173,12 +140,12 @@ class TestServiceUnavailable:
         assert resp.status_code == 503
         data = resp.json()
         assert data["code"] == "service_unavailable"
-        assert data["context"]["waking"] is True
-        assert "warming up" in data["message"].lower()
+        assert data["waking"] is True
+        assert "warming up" in data["detail"].lower()
 
 
 class TestAnUnexpectedFailure:
-    """The catch-all 500 answers in the envelope the caller's client parses."""
+    """The catch-all 500 answers in the shape the caller's client parses."""
 
     @staticmethod
     def _client() -> TestClient:
@@ -209,84 +176,13 @@ class TestAnUnexpectedFailure:
         assert resp.json()["detail"] == "An unexpected error occurred"
         assert "volume went away" not in resp.text
 
-    def test_a_native_route_keeps_the_native_envelope(self):
+    def test_a_native_route_answers_a_problem(self):
         resp = self._client().get("/api/v1/broken")
 
         assert resp.status_code == 500
-        assert resp.headers["content-type"].startswith("application/json")
-        assert resp.json() == {
-            "code": ErrorCode.INTERNAL_ERROR,
-            "message": "An unexpected error occurred",
-            "errors": [],
-        }
-
-
-class TestScaloApiHelpersAnswerInTheEnvelope:
-    """A refusal from scalo.api's write and list helpers reaches the caller as ErrorResponse."""
-
-    @staticmethod
-    def _client() -> TestClient:
-        from fastapi import FastAPI
-        from scalo.api import ListParams, PreconditionHeaders, ProblemError, paginate
-
-        from dfe_engine.api.errors import install_exception_handlers
-
-        app = FastAPI()
-        install_exception_handlers(app)
-
-        @app.put("/things/{name}")
-        def _apply(name: str, pre: PreconditionHeaders) -> dict:
-            pre.check('"current"')
-            return {"name": name}
-
-        @app.get("/things")
-        def _list(query: ListParams) -> dict:
-            return paginate(["a", "b", "c"], query).model_dump()
-
-        @app.get("/fields")
-        def _fields() -> None:
-            from scalo.api import FieldError as ProblemField
-
-            raise ProblemError(
-                422,
-                "bad",
-                code="invalid",
-                errors=[ProblemField(field="spec.size", detail="too big")],
-            )
-
-        return TestClient(app, raise_server_exceptions=False)
-
-    def test_a_stale_etag_is_412_with_the_current_one(self):
-        resp = self._client().put("/things/x", headers={"If-Match": '"stale"'})
-
-        assert resp.status_code == 412
-        assert resp.json() == {
-            "code": "etag_mismatch",
-            "message": "If-Match does not match the current ETag",
-            "errors": [],
-            "context": {"etag": '"current"'},
-        }
-
-    def test_a_write_with_no_precondition_is_428(self):
-        resp = self._client().put("/things/x")
-
-        assert resp.status_code == 428
-        assert resp.json()["code"] == "precondition_required"
-
-    def test_a_page_token_from_elsewhere_is_400(self):
-        resp = self._client().get("/things", params={"page_token": "not-ours"})
-
-        assert resp.status_code == 400
-        assert resp.json()["code"] == "invalid_page_token"
-        assert "context" not in resp.json()
-
-    def test_field_errors_keep_their_field(self):
-        resp = self._client().get("/fields")
-
-        assert resp.status_code == 422
-        assert resp.json()["errors"] == [
-            {"field": "spec.size", "message": "too big", "code": ErrorCode.VALIDATION_ERROR}
-        ]
+        assert resp.headers["content-type"] == "application/problem+json"
+        assert resp.json()["code"] == ErrorCode.INTERNAL_ERROR
+        assert "volume went away" not in resp.text
 
 
 @pytest.fixture
@@ -302,7 +198,7 @@ _RULE = {"name": "r1", "user_sql": "SELECT * FROM dfe.main WHERE 1 = 1"}
 
 
 class TestABadRequestNeverAnswers500:
-    """Malformed bodies and names a store cannot hold answer 4xx in the envelope, never 500."""
+    """Malformed bodies and names a store cannot hold answer a 4xx problem, never 500."""
 
     @pytest.mark.parametrize(
         ("authed", "method", "path", "body", "status", "code"),
@@ -397,7 +293,7 @@ class TestABadRequestNeverAnswers500:
             ),
         ],
     )
-    def test_refused_in_the_envelope(
+    def test_refused_as_a_problem(
         self,
         on_a_deploy_repo: DFESettings,
         client: TestClient,

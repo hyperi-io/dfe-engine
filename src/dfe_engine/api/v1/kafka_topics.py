@@ -29,8 +29,9 @@ import asyncio
 import functools
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
+from scalo.api import ProblemError
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api.deps import (
@@ -140,15 +141,11 @@ def _require_managed(settings: DFESettings) -> None:
     would read as "no topics needed" rather than "not this deployment's job".
     """
     if not topics_managed(settings):
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": (
-                    "this deployment does not manage Kafka topics: it runs no bus, or "
-                    "kafka.ensure_topics is off"
-                ),
-            },
+        raise ProblemError(
+            503,
+            "this deployment does not manage Kafka topics: it runs no bus, or "
+            "kafka.ensure_topics is off",
+            code="not_configured",
         )
 
 
@@ -168,10 +165,7 @@ def _specs_in_scope(
     try:
         one = registry.get_source(source)
     except SourceNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"unknown source '{source}'"},
-        ) from exc
+        raise ProblemError(404, f"unknown source '{source}'", code="not_found") from exc
     return specs_for_sources([one], settings)
 
 
@@ -308,23 +302,16 @@ async def remove_source_topics(
     """
     _require_managed(settings)
     if not confirm and not dry_run:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "confirmation_required",
-                "message": (
-                    f"deleting '{source}' topics destroys the records on them; pass "
-                    "confirm=true, or dry_run=true to see what would go"
-                ),
-            },
+        raise ProblemError(
+            400,
+            f"deleting '{source}' topics destroys the records on them; pass "
+            "confirm=true, or dry_run=true to see what would go",
+            code="confirmation_required",
         )
     try:
         one = registry.get_source(source)
     except SourceNotFoundError as exc:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"unknown source '{source}'"},
-        ) from exc
+        raise ProblemError(404, f"unknown source '{source}'", code="not_found") from exc
 
     outcome = await asyncio.to_thread(
         remove_topics, source_topic_names(one), settings=settings, dry_run=dry_run

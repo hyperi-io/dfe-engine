@@ -7,7 +7,7 @@ with the DFE Engine REST API.
 
 ```bash
 # Generate TypeScript types from OpenAPI spec
-npx openapi-typescript openapi-spec/openapi.json -o src/types/api.d.ts
+npx openapi-typescript openapi/openapi.json -o src/types/api.d.ts
 
 # Start Prism mock server for development
 docker compose -f docker-compose.dev.yaml up prism
@@ -46,20 +46,25 @@ const { access_token } = await resp.json();
 
 ## Error Handling
 
-All errors return a consistent shape:
+Every error is RFC 9457 `application/problem+json`, scalo's `Problem` in the spec:
 
 ```typescript
-interface ErrorResponse {
-  code: string;        // Machine-readable: "not_found", "conflict", "unauthorized"
-  message: string;     // Human-readable summary
-  errors?: FieldError[];  // Field-level validation details (422 only)
-  context?: Record<string, unknown>;  // Structured data for specific errors
+interface Problem {
+  type: string;        // "about:blank"
+  title: string;       // the status phrase
+  status: number;
+  detail?: string;     // what went wrong this time
+  code?: string;       // machine-readable: "not_found", "conflict", "unauthorized"
+  errors?: FieldError[];  // one per invalid field
+  [extension: string]: unknown;  // e.g. conflicting_source on a match_conflict
 }
 
 interface FieldError {
-  field: string;    // Dotted path: "schema_config.engine"
-  message: string;  // "field required"
-  code: string;     // "missing"
+  field: string;      // dotted path below its location: "schema_config.engine"
+  location?: string;  // body, query, path, header or cookie
+  detail: string;
+  code?: string;      // "missing"
+  pointer?: string;   // JSON Pointer, for a body field
 }
 ```
 
@@ -69,6 +74,7 @@ interface FieldError {
 | 403 | `forbidden` | Insufficient permissions |
 | 404 | `not_found` | Resource doesn't exist |
 | 409 | `conflict` | Duplicate name or match conflict |
+| 412 | `etag_mismatch` | `If-Match` is stale; `etag` carries the current one |
 | 413 | `payload_too_large` | Request body over `api.max_request_body_bytes` (4 MiB, `DFE_ENGINE_API_MAX_REQUEST_BODY_BYTES`), or over a file upload's own limit |
 | 422 | `validation_error` | Request body validation failed |
 | 500 | `internal_error` | Unexpected server error |
@@ -76,57 +82,30 @@ interface FieldError {
 
 ## Pagination
 
-Most list endpoints return `PaginatedResponse<T>`. Some also include a full
-collection view in `objects` (see below) so the UI can render a tree or other
-aggregate without paginating that structure separately.
+Every list answers scalo's `Page<T>` (AIP-158). The schema and source lists add `objects`, a folder tree over every match.
 
 ```typescript
-interface PaginatedResponse<T> {
+interface Page<T> {
   items: T[];
-  total: number;       // Total across all pages
-  page: number;        // Current page (1-based)
-  per_page: number;    // -1 means all items in one response (page forced to 1)
-  total_pages: number;
-  next_page: number | null;   // null = last page
-  prev_page: number | null;
-}
-
-// List + full side payload (e.g. GET /api/v1/schemas)
-interface PaginatedResponseWithObjects<T, ObjectT> extends PaginatedResponse<T> {
-  objects: ObjectT;    // All matching rows after filters — not limited to `items`
-}
-
-// Nested folder tree used in `objects` for schema list
-interface PathTree<T> {
-  items: T[];                          // Entries at this path level
-  children: Record<string, PathTree<T>>;  // Keyed by path segment
+  next_page_token: string | null;  // null on the last page
+  total_size?: number;
 }
 ```
 
-`items` is the current page only. When `objects` is present, it is built from
-the same filtered, sorted result set as `items`, but includes every match
-(e.g. a path tree for the schema browser). Re-fetching page 2 still returns the
-full `objects` tree; only `items` changes.
+Query parameters: `page_size` (0 or absent is 50, above 1000 is cut to 1000), `page_token` (the previous `next_page_token`), `skip`, and `order_by` (`"display_name desc, name"`) on a list that sorts. A list's own filters, such as `search`, are bound into the token, so change them and start again from the first page.
 
 ```typescript
-// TanStack Query — simple list (sources, tasks, …)
 const { data, fetchNextPage } = useInfiniteQuery({
   queryKey: ['sources'],
-  queryFn: ({ pageParam = 1 }) =>
-    fetch(`/api/v1/sources?page=${pageParam}&per_page=25`).then(r => r.json()),
-  getNextPageParam: (lastPage) => lastPage.next_page ?? undefined,
+  queryFn: ({ pageParam }) =>
+    fetch(`/api/v1/sources?page_size=50${pageParam ? `&page_token=${pageParam}` : ''}`).then(r => r.json()),
+  getNextPageParam: (lastPage) => lastPage.next_page_token || undefined,
 });
-
-// Schema list: table from `items`, sidebar tree from `objects` (any page)
-type SchemaList = PaginatedResponseWithObjects<SchemaSummaryObject, PathTree<SchemaSummaryObject>>;
-const list = await fetch('/api/v1/schemas?page=1&per_page=25').then(r => r.json()) as SchemaList;
-const tableRows = list.items;
-const pathTree = list.objects;
 ```
 
-Query parameters: `page` (1-based), `per_page` (1-100 or `-1` for all, default 25),
-`search` (text filter), `sort_by`, `sort_order` (asc/desc). Schema list also
-accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
+## Long-running operations
+
+A request that starts slow work answers 202 with an AIP-151 `Operation` and a `Location` to poll: `GET /api/v1/operations/{operation}` until `done`, then read `response` or `error` (a `Problem`). `metadata` carries the progress.
 
 ## API Surface (74 Endpoints)
 
@@ -159,7 +138,7 @@ A group sync answers 200 with `created`, `updated`, `total`, `groups_skipped`, `
 | POST | `/sources` | Create source |
 | GET | `/sources/{name}` | Get source details |
 | GET | `/sources/{name}/versions/{version}` | Get one version snapshot |
-| GET | `/sources/{name}/columns` | Composed schema columns for a source version (paginated `items`; `?version=` source id, default `deployed_version`; `?page=` / `?per_page=`, use `-1` for all) |
+| GET | `/sources/{name}/columns` | Composed schema columns for a source version (a `Page` of columns; `?version=` source id, default `deployed_version`) |
 | POST | `/sources/{name}/build` | Build DDL from a source version (`?version=` source id; default `deployed_version`) |
 | POST | `/sources/{name}/plan` | Dry-run deploy plan (`?version=` defaults to `current`; not persisted) |
 | POST | `/sources/{name}/deploy` | Apply plan DDL to ClickHouse and set `deployed_version` (`?version=` defaults to `current`) |
@@ -195,7 +174,7 @@ Schema-less service config for Rust services (receiver, loader, archiver, etc.)
 |--------|------|---------|
 | GET | `/hunts/status` | Hunt runner liveness (`running`, `runners`) + hunt count |
 | GET | `/hunts` | List configured hunts |
-| POST | `/hunts/{name}/run` | Trigger ad-hoc execution (202 + task_id) |
+| POST | `/hunts/{name}/run` | Queue an ad-hoc run (202) |
 
 ### Queries (`/api/v1/queries`)
 
@@ -232,25 +211,24 @@ View execution returns **JSON** (`QueryResponse`) with fields:
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/pipeline/templates` | List Vector templates |
-| POST | `/pipeline/build` | Build pipeline manifests (202 + task_id) |
+| POST | `/pipeline/build` | Build pipeline manifests (202 + the operation to poll) |
 
-### Tasks (`/api/v1/tasks`)
+### Operations (`/api/v1/operations`)
 
-Background task polling for long-running operations (hunt execution,
-pipeline builds).
+Long-running operations, such as pipeline builds and synthetic-data streams.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/tasks` | List tasks (filter by `kind`) |
-| GET | `/tasks/{id}` | Get task status |
-| POST | `/tasks/{id}/cancel` | Cancel running task |
-| GET | `/tasks/{id}/stream` | SSE progress stream |
+| GET | `/operations` | List operations (filter by `kind`) |
+| GET | `/operations/{id}` | Get an operation |
+| POST | `/operations/{id}/cancel` | Cancel a running operation |
+| GET | `/operations/{id}/stream` | SSE progress stream |
 
 #### SSE Stream Events
 
 ```typescript
-// EventSource: GET /api/v1/tasks/{id}/stream
-const es = new EventSource(`/api/v1/tasks/${taskId}/stream`);
+// EventSource: GET /api/v1/operations/{id}/stream
+const es = new EventSource(`/api/v1/operations/${id}/stream`);
 es.addEventListener('progress', (e) => {
   const { status, progress, message } = JSON.parse(e.data);
   // Update progress bar
@@ -530,7 +508,7 @@ optimistic concurrency - a mismatch returns
 pnpm add -D openapi-typescript
 
 # Generate types (run after any API change)
-npx openapi-typescript ../dfe-engine/openapi-spec/openapi.json \
+npx openapi-typescript ../dfe-engine/openapi/openapi.json \
   -o src/types/dfe-engine-api.d.ts
 ```
 
@@ -551,7 +529,7 @@ services:
     image: stoplight/prism:4
     command: mock -h 0.0.0.0 /spec/openapi.json
     volumes:
-      - ./openapi-spec:/spec
+      - ./openapi:/spec
     ports:
       - "4010:4010"
 ```
@@ -564,8 +542,8 @@ Point the UI at `http://localhost:4010` during development.
 CI validates the committed spec matches the running app:
 
 ```bash
-uv run python openapi-spec/generate.py
-git diff --exit-code openapi-spec/openapi.json openapi-spec/openapi.e2e.json
+uv run python scripts/generate_openapi.py
+git diff --exit-code openapi/openapi.json openapi/openapi.e2e.json
 ```
 
 If this fails, the spec needs regenerating after route/model changes.

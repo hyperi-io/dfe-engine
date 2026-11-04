@@ -33,7 +33,9 @@ from datetime import UTC, date, datetime
 from enum import Enum
 from typing import Any
 
+from fastapi import Response
 from pydantic import BaseModel, Field
+from scalo.api import Operation, ProblemError, accept
 from scalo.logger import logger
 
 TASK_FAILED_MESSAGE = "The task failed; the engine log has the reason"
@@ -99,6 +101,28 @@ class TaskInfo(BaseModel):
     message: str = Field(default="", description="Human-readable status message")
     result: Any | None = Field(default=None, description="Task result (on completion)")
     error: str | None = Field(default=None, description="Error message (on failure)")
+
+
+TaskOperation = Operation[TaskInfo, Any]
+
+
+def task_operation(info: TaskInfo) -> TaskOperation:
+    """The task as a long-running operation, with its ``TaskInfo`` as the metadata."""
+    error = None
+    if info.status == TaskStatus.FAILED:
+        error = ProblemError(500, info.error or TASK_FAILED_MESSAGE, code="task_failed").problem
+    elif info.status == TaskStatus.CANCELLED:
+        error = ProblemError(409, "The operation was cancelled", code="cancelled").problem
+    done = info.status.is_terminal
+    response = ({} if info.result is None else info.result) if done and error is None else None
+    return Operation[TaskInfo, Any](
+        name=f"operations/{info.id}", done=done, metadata=info, error=error, response=response
+    )
+
+
+def accept_task(response: Response, info: TaskInfo) -> TaskOperation:
+    """Answer 202 with the task's operation and its polling URL."""
+    return accept(response, task_operation(info), location=f"/api/v1/operations/{info.id}")
 
 
 class _Task:

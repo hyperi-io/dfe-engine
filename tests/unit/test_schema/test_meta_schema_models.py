@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import pydantic
 import pytest
+from scalo.api import ListQuery
 
 from dfe_engine.schema.models import (
     MetaSchema,
     MetaSchemaAddVersionRequest,
-    PaginatedSchemaSummaryResponse,
     SchemaColumn,
     SchemaColumnWrite,
     SchemaSummary,
     SchemaSummaryObject,
+    SchemaSummaryPage,
     SchemaVersion,
 )
 from dfe_engine.schema.registry import coerce_common_header_legacy_versions
@@ -273,7 +274,7 @@ class TestSchemaSummaryTree:
         assert tree.children == {}
 
 
-class TestPaginatedSchemaSummaryResponse:
+class TestSchemaSummaryPage:
     def test_from_summaries_pagination_and_tree(self):
         objs = [
             SchemaSummaryObject(
@@ -291,8 +292,8 @@ class TestPaginatedSchemaSummaryResponse:
                 column_count=1,
             ),
         ]
-        resp = PaginatedSchemaSummaryResponse.from_summaries(objs, page=1, per_page=1)
-        assert resp.total == 2
+        resp = SchemaSummaryPage.from_summaries(objs, ListQuery(page_size=1), {})
+        assert resp.total_size == 2
         assert len(resp.items) == 1
         assert resp.objects.children.keys() >= {"a", "b"}
 

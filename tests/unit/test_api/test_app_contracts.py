@@ -360,7 +360,7 @@ class TestWritingConfig:
         resp = _write(client, admin_headers, {"config.batch_processing.max_chunk_size": "lots"})
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "invalid_value"
-        assert resp.json()["context"]["path"] == "config.batch_processing.max_chunk_size"
+        assert resp.json()["path"] == "config.batch_processing.max_chunk_size"
         assert gc.head_revision() == before
 
     def test_a_rust_enum_branch_the_app_does_not_declare_is_refused(
@@ -370,7 +370,7 @@ class TestWritingConfig:
         _deploy(client, admin_headers)
         resp = _write(client, admin_headers, {"config.clickhouse.insert_format": "csv"})
         assert resp.status_code == 400, resp.text
-        assert "takes one of" in resp.json()["message"]
+        assert "takes one of" in resp.json()["detail"]
 
     def test_a_value_only_the_capability_catalogue_refuses_is_refused(
         self, client, app, admin_headers, tmp_path, monkeypatch
@@ -407,7 +407,7 @@ class TestWritingConfig:
         resp = _write(client, admin_headers, {"config.widget.mode": "medium"})
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "invalid_value"
-        assert "'fast', 'slow'" in resp.json()["message"]
+        assert "'fast', 'slow'" in resp.json()["detail"]
 
     def test_a_path_the_deployment_sets_is_refused_and_names_what_sets_it(
         self, client, app, admin_headers, tmp_path
@@ -417,7 +417,7 @@ class TestWritingConfig:
         resp = _write(client, admin_headers, {"config.clickhouse.hosts": ["ch-0:8123"]})
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "chart_derived"
-        assert "DFE_LOADER_CLICKHOUSE_HOSTS" in resp.json()["message"]
+        assert "DFE_LOADER_CLICKHOUSE_HOSTS" in resp.json()["detail"]
 
     def test_a_secret_is_written_and_still_never_read_back(
         self, client, app, admin_headers, tmp_path
@@ -602,7 +602,7 @@ class TestClearingConfig:
 
         assert resp.status_code == 200, resp.text
         history = client.get(f"/api/v1/apps/{LOADER}/default/history", headers=admin_headers)
-        shas = [entry["sha"] for entry in history.json()]
+        shas = [entry["sha"] for entry in history.json()["items"]]
         assert shas.index(before) == 1
 
     def test_an_option_that_was_never_set_commits_nothing(
@@ -628,7 +628,7 @@ class TestClearingConfig:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "invalid_path"
-        assert resp.json()["context"]["path"] == path
+        assert resp.json()["path"] == path
         assert gc.head_revision() == before
 
     def test_a_clear_names_at_least_one_path(self, client, app, admin_headers, tmp_path):
@@ -726,7 +726,7 @@ class TestClearingBesideACredential:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "credential_reentry_required"
-        assert resp.json()["context"]["path"] == "config.sources.rest.primary.url"
+        assert resp.json()["path"] == "config.sources.rest.primary.url"
         assert gc.head_revision() == before
         assert "rest-tok-7741" not in resp.text
 
@@ -767,7 +767,7 @@ class TestArchiverChartDerivedPaths:
         resp = _write_archiver(client, admin_headers, {"config.kafka.brokers": ["k:9092"]})
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "chart_derived"
-        assert "KAFKA_BROKERS" in resp.json()["message"]
+        assert "KAFKA_BROKERS" in resp.json()["detail"]
 
     def test_a_transport_path_is_refused_and_names_the_bare_env_var(
         self, client, app, admin_headers, tmp_path
@@ -777,7 +777,7 @@ class TestArchiverChartDerivedPaths:
         resp = _write_archiver(client, admin_headers, {"config.transport": "grpc"})
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "chart_derived"
-        assert "ARCHIVER_TRANSPORT" in resp.json()["message"]
+        assert "ARCHIVER_TRANSPORT" in resp.json()["detail"]
 
     def test_an_s3_path_the_deployment_names_is_refused_and_names_the_bare_env_var(
         self, client, app, admin_headers, tmp_path
@@ -787,7 +787,7 @@ class TestArchiverChartDerivedPaths:
         resp = _write_archiver(client, admin_headers, {"config.archive.s3.bucket": "landing"})
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "chart_derived"
-        assert "S3_BUCKET" in resp.json()["message"]
+        assert "S3_BUCKET" in resp.json()["detail"]
 
     def test_an_s3_path_the_deployment_leaves_empty_is_the_overlay_s(
         self, client, app, admin_headers, tmp_path
@@ -816,7 +816,7 @@ class TestArchiverChartDerivedPaths:
         resp = _write_archiver(client, admin_headers, {"config.dlq.mode": "fan_out"})
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "chart_derived"
-        assert "DLQ_MODE" in resp.json()["message"]
+        assert "DLQ_MODE" in resp.json()["detail"]
 
 
 class TestCustomEnvCannotShadowAChartSetName:
@@ -832,7 +832,7 @@ class TestCustomEnvCannotShadowAChartSetName:
     def _assert_refused(self, resp, name):
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "chart_set_env"
-        assert name in resp.json()["message"]
+        assert name in resp.json()["detail"]
 
     def test_the_loader_chart_s_broker_list_cannot_be_shadowed(
         self, client, app, admin_headers, tmp_path
@@ -1053,7 +1053,7 @@ class TestANewInstanceRefusesTheMask:
         resp = _deploy(client, admin_headers, values={"config": shown["values"]["config"]})
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "masked_value"
-        assert resp.json()["context"]["path"] == "config"
+        assert resp.json()["path"] == "config"
         assert gc.head_revision() == before
         assert "dfe-loader-default-values" not in gc.list("helmvars")
 
@@ -1141,7 +1141,7 @@ class TestTheReceiverConfigmapsOwnKeysAreRefused:
 
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "chart_derived"
-        assert supplier in resp.json()["message"]
+        assert supplier in resp.json()["detail"]
         assert gc.head_revision() == before
 
 
@@ -1361,7 +1361,7 @@ class TestCredentialsAreNotEchoed:
         )
         assert refused.status_code == 400, refused.text
         assert refused.json()["code"] == "credential_reentry_required"
-        assert refused.json()["context"]["path"] == path
+        assert refused.json()["path"] == path
         assert gc.head_revision() == before
 
         retyped = [{**moved[0], "token": "okta-a-5531"}, shown[1]]
@@ -1386,7 +1386,7 @@ class TestCredentialsAreNotEchoed:
             "/api/v1/helm/files/dfe-receiver-default-values/vars", headers=admin_headers
         )
         assert resp.status_code == 200, resp.text
-        by_path = {v["path"]: v["value"] for v in resp.json()}
+        by_path = {v["path"]: v["value"] for v in resp.json()["items"]}
         assert by_path["config.server.auth.bearer.tokens[0]"] == contract.REDACTED
         assert by_path["config.server.auth.accepted_headers[0].name"] == "x-api-key"
         assert by_path["config.server.auth.accepted_headers[0].values[0]"] == contract.REDACTED
@@ -1518,10 +1518,10 @@ class TestAStaleWriteReadsNoCredentialBack:
         assert resp.status_code == 409, resp.text
         body = resp.json()
         assert body["code"] == "conflict"
-        auth = body["context"]["current"]["config"]["server"]["auth"]
+        auth = body["current"]["config"]["server"]["auth"]
         assert auth["mode"] == "bearer"
         assert auth["bearer"]["tokens"] == [contract.REDACTED, contract.REDACTED]
-        assert body["context"]["head"]
+        assert body["head"]
         for credential in PLAINTEXT:
             assert credential not in resp.text
 

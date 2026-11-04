@@ -92,7 +92,7 @@ def test_a_customer_naming_no_registered_org_is_refused_and_nothing_is_saved(
 
     assert resp.status_code == 422, resp.text
     assert resp.json()["code"] == "unknown_org"
-    assert "'ghost'" in resp.json()["message"]
+    assert "'ghost'" in resp.json()["detail"]
     assert client.get(f"{HUNTS}/windows_hunt", headers=admin_headers).status_code == 404
 
 

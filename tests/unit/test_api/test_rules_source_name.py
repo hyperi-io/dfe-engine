@@ -33,7 +33,7 @@ def _assert_refused(resp) -> None:
     assert resp.status_code == 422, resp.text
     body = resp.json()
     assert body["code"] == "invalid_sql"
-    messages = [error["message"] for error in body["context"]["sql_errors"]]
+    messages = [error["message"] for error in body["sql_errors"]]
     assert any("names no table the hunt runner can scan" in m for m in messages), messages
     assert any("is not a table name" in m for m in messages), messages
 

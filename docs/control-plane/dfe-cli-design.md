@@ -109,7 +109,7 @@ first match wins:
 
 AWS CLI v2's entire command tree is generated from botocore's JSON service models -
 that is what makes it consistent and always in step with the services. DFE already
-ships the equivalent: `openapi-spec/openapi.json` (74 operations, 23 routers). The
+ships the equivalent: `openapi/openapi.json` (74 operations, 23 routers). The
 `dfe` command tree is GENERATED from it:
 
 - **router/tag -> noun group**, **operation -> verb**. So:
@@ -148,8 +148,8 @@ Available on every command:
 
 ## 6. Pagination
 
-The API's list endpoints return `PaginatedResponse[T]` with a computed `next_page`.
-The CLI auto-paginates by following `next_page` until exhausted (AWS v2 default),
+The API's list endpoints return scalo's `Page[T]` with an opaque `next_page_token`.
+The CLI auto-paginates by following `next_page_token` until exhausted (AWS v2 default),
 assembling one result set; `--no-paginate` returns a single page, `--max-items`
 caps, `--page-size` sets the server page size.
 

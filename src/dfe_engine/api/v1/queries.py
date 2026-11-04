@@ -19,8 +19,9 @@ from __future__ import annotations
 import time
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
+from scalo.api import ListParams, Page, ProblemError, paginate
 from scalo.logger import logger
 
 from dfe_engine.api.deps import (
@@ -95,18 +96,13 @@ def _require_view_executor(request: Request, settings: Settings):
     try:
         executor = build_view_executor(settings)
     except RestrictedReaderUnavailableError as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "reader_unprovisioned", "message": str(exc)},
-        ) from exc
+        raise ProblemError(503, str(exc), code="reader_unprovisioned") from exc
     except Exception as exc:
         logger.warning("view executor unavailable", error=str(exc))
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "Query engine not configured -- ClickHouse connection required",
-            },
+        raise ProblemError(
+            503,
+            "Query engine not configured -- ClickHouse connection required",
+            code="not_configured",
         ) from exc
     request.app.state.view_executor = executor
     return executor
@@ -120,29 +116,31 @@ ViewExec = Annotated[Any, Depends(_require_view_executor)]
 
 @router.get(
     "/views",
-    response_model=list[ViewDefinition],
+    response_model=Page[ViewDefinition],
     dependencies=[Depends(require_action(scopes_dict["query_read"]))],
 )
 def list_views(
+    query: ListParams,
     user: CurrentUser,
     executor: ViewExec,
     namespace: str | None = Query(None, description="Filter by namespace"),
-) -> list[ViewDefinition]:
+) -> Page[ViewDefinition]:
     """List available parameterized views."""
-    return executor.list_views(namespace=namespace)
+    return paginate(executor.list_views(namespace=namespace), query, bound={"namespace": namespace})
 
 
 @router.get(
     "/views/namespaces",
-    response_model=list[str],
+    response_model=Page[str],
     dependencies=[Depends(require_action(scopes_dict["query_read"]))],
 )
 def list_namespaces(
+    query: ListParams,
     user: CurrentUser,
     executor: ViewExec,
-) -> list[str]:
+) -> Page[str]:
     """List available view namespaces."""
-    return executor._catalog.get_namespaces()
+    return paginate(executor._catalog.get_namespaces(), query)
 
 
 @router.get(
@@ -159,10 +157,7 @@ def get_view(
     try:
         return executor.get_view(label)
     except KeyError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"View '{label}' not found"},
-        )
+        raise ProblemError(404, f"View '{label}' not found", code="not_found")
 
 
 # -- View execution ------------------------------------------
@@ -193,10 +188,7 @@ def execute_view(
     try:
         view_def = executor.get_view(label)
     except KeyError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"View '{label}' not found"},
-        )
+        raise ProblemError(404, f"View '{label}' not found", code="not_found")
     if view_def.tenant_isolated:
         granted_bound_org(request, user, scopes_dict["query_execute"])
     try:
@@ -208,15 +200,9 @@ def execute_view(
             role_config=live_role_config(request),
         )
     except KeyError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"View '{label}' not found"},
-        )
+        raise ProblemError(404, f"View '{label}' not found", code="not_found")
     except ViewRequestError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "invalid_options", "message": str(exc)},
-        )
+        raise ProblemError(400, str(exc), code="invalid_options")
     except ViewExecutionError as exc:
         raise backend_failure(
             500,
@@ -268,10 +254,7 @@ def execute_raw_query(
     try:
         adapter = get_adapter(request.datasource)
     except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "invalid_datasource", "message": str(exc)},
-        )
+        raise ProblemError(400, str(exc), code="invalid_datasource")
 
     options = request.options or QueryOptions()
     timeout = options.timeout_seconds or 30
@@ -325,15 +308,16 @@ class CostLeaderboardRow(BaseModel):
 
 @router.get(
     "/cost-leaderboard",
-    response_model=list[CostLeaderboardRow],
+    response_model=Page[CostLeaderboardRow],
     dependencies=[Depends(require_action(scopes_dict["query_read"]))],
 )
 def query_cost_leaderboard(
+    query: ListParams,
     user: CurrentUser,
     feature: str = Query("hunts", description="Attribution feature to rank (e.g. 'hunts')"),
     days: int = Query(7, ge=1, le=365, description="Lookback window in days"),
     limit: int = Query(50, ge=1, le=500, description="Max rows"),
-) -> list[CostLeaderboardRow]:
+) -> Page[CostLeaderboardRow]:
     """Top query-cost consumers from ``dfe.query_log_archive``, heaviest first.
 
     Groups by the attribution id (the hunt id for feature='hunts') and returns the
@@ -364,4 +348,8 @@ def query_cost_leaderboard(
             exc,
             event="cost leaderboard query failed",
         ) from exc
-    return [CostLeaderboardRow(**row) for row in rows]
+    return paginate(
+        [CostLeaderboardRow(**row) for row in rows],
+        query,
+        bound={"feature": feature, "days": days, "limit": limit},
+    )

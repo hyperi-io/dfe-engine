@@ -28,21 +28,25 @@ import functools
 import re
 from collections.abc import Iterable, Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, Field, field_validator
+from scalo.api import (
+    ListQuery,
+    Page,
+    ProblemError,
+    list_query,
+    paginate,
+    scalo_extra,
+    sort_by_order,
+)
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import CurrentUser, provider_bindings, require_action, secrets_store
-from dfe_engine.api.pagination import (
-    PaginatedResponse,
-    PaginationParams,
-    apply_search,
-    apply_sort,
-)
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.oidc.credential_env import (
     env_var_resolves,
@@ -678,10 +682,7 @@ async def create_provider(
 
     registry = _get_registry(request)
     if registry.get(body.name) is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": f"OIDC provider '{body.name}' already exists"},
-        )
+        raise ProblemError(409, f"OIDC provider '{body.name}' already exists", code="conflict")
 
     client_secret_path = (
         provider_secret_path(field="client_secret", provider_name=body.name)
@@ -732,36 +733,36 @@ async def create_provider(
     try:
         registry.create(body.name, provider)
     except ValueError:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": f"OIDC provider '{body.name}' already exists"},
-        )
+        raise ProblemError(409, f"OIDC provider '{body.name}' already exists", code="conflict")
 
     await _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", body.name, "created")
     return _provider_to_response(body.name, provider)
 
 
+ProvidersList = Annotated[
+    ListQuery, Depends(list_query(order_by=("name", "type", "created_at"), tiebreak="name"))
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedResponse[ProviderResponse],
+    response_model=Page[ProviderResponse],
     dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
 )
 async def list_providers(
     user: CurrentUser,
     request: Request,
-    pagination: PaginationParams = Depends(),
+    query: ProvidersList,
     search: str | None = Query(None, description="Search in provider name/display name"),
-    sort_by: str | None = Query(None, description="Sort field (name, type, created_at)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List OIDC providers (admin only), paginated."""
     registry = _get_registry(request)
     rows = [_provider_to_response(name, p).model_dump() for name, p in registry.list()]
     rows = apply_search(rows, search, ["name", "display_name"])
-    rows = apply_sort(rows, sort_by, sort_order)
+    rows = sort_by_order(rows, query.order_by)
     summaries = [ProviderResponse.model_validate(row) for row in rows]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(summaries, query, bound={"search": search})
 
 
 @router.get(
@@ -778,10 +779,7 @@ async def get_provider(
     registry = _get_registry(request)
     provider = registry.get(name)
     if provider is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
-        )
+        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
     return _provider_to_response(name, provider)
 
 
@@ -803,10 +801,7 @@ async def update_provider(
     registry = _get_registry(request)
     current = registry.get(name)
     if current is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
-        )
+        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
 
     stale_paths = []
     env_problems = []
@@ -924,10 +919,7 @@ async def delete_provider(
     registry = _get_registry(request)
     provider = registry.get(name)
     if provider is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
-        )
+        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
 
     # Find groups that reference this provider
     group_store: GroupStore = request.app.state.group_store
@@ -994,10 +986,7 @@ async def sync_provider_groups(
 
     registry = _get_registry(request)
     if registry.get(name) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
-        )
+        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
 
     group_store = request.app.state.group_store
     result = await sync_provider(
@@ -1027,6 +1016,7 @@ async def sync_provider_groups(
 @router.get(
     "/{name}/test",
     response_model=TestResponse,
+    openapi_extra=scalo_extra(verb="test"),
     dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
 )
 async def test_provider(
@@ -1040,10 +1030,7 @@ async def test_provider(
     registry = _get_registry(request)
     provider = registry.get(name)
     if provider is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
-        )
+        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
 
     adapter = get_adapter(provider, secrets=getattr(request.app.state, "dfe_secrets", None))
     success, message = await adapter.test_connection()
@@ -1053,6 +1040,7 @@ async def test_provider(
 @router.get(
     "/{name}/verify-login",
     response_model=LoginConfigResponse,
+    openapi_extra=scalo_extra(verb="verify-login"),
     dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
 )
 async def verify_login_config(
@@ -1070,10 +1058,7 @@ async def verify_login_config(
     registry = _get_registry(request)
     provider = registry.get(name)
     if provider is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
-        )
+        raise ProblemError(404, f"OIDC provider '{name}' not found", code="not_found")
 
     from dfe_engine.auth.oidc.credential_env import credential_check
 

@@ -10,12 +10,14 @@ POST   /api/v1/rules/validate     -> Validate SQL/CEL without creating
 
 import functools
 import re
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
+from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 from scalo.concurrency import run_blocking
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     CurrentUser,
     HuntConfigReg,
@@ -25,8 +27,7 @@ from dfe_engine.api.deps import (
     held_tenant_ids,
     require_action,
 )
-from dfe_engine.api.errors import ErrorCode, ErrorResponse
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.errors import ErrorCode
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
@@ -44,7 +45,6 @@ router = APIRouter(prefix="/rules", tags=["Rules"], dependencies=[WRITE_TURN])
 
 _REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
     422: {
-        "model": ErrorResponse,
         "description": (
             "Refused, nothing written. The body failed validation (code validation_error). "
             "Or the hunt runner could not compile the rule -- its SQL does not parse as "
@@ -52,7 +52,7 @@ _REFUSED_RULE_RESPONSES: dict[int | str, dict] = {
             "name (letters, digits, '_' and '-'), has no WHERE to detect with, or "
             "calls a function that reads outside the row (url, s3, a dictionary) or sends "
             "it to another service (the ai* functions), or carries a CEL filter that "
-            "does not transpile (code invalid_sql, the errors in context.sql_errors). "
+            "does not transpile (code invalid_sql, the errors in sql_errors). "
             "Or the rule matches "
             "every event in its source (code rule_matches_everything, the source and "
             "detection WHERE in context)."
@@ -211,26 +211,32 @@ class RuleFromHyperdxResponse(BaseModel):
 # -- Endpoints ------------------------------------------------
 
 
+RulesList = Annotated[
+    ListQuery,
+    Depends(
+        list_query(
+            order_by=("name", "display_name", "severity", "source", "hunt_name", "created_at"),
+            tiebreak="name",
+        )
+    ),
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedResponse[RuleSummary],
+    response_model=Page[RuleSummary],
     dependencies=[Depends(require_action(scopes_dict["rule_read"]))],
 )
 def list_rules(
     user: CurrentUser,
     registry: RuleReg,
-    pagination: PaginationParams = Depends(),
+    query: RulesList,
     search: str | None = Query(
         None,
         description="Case-insensitive search in name, display_name, source, hunt_name, severity",
     ),
     severity: str | None = Query(None, description="Filter by severity"),
     source: str | None = Query(None, description="Filter by source label"),
-    sort_by: str | None = Query(
-        None,
-        description="Sort field (name, display_name, severity, source, hunt_name, created_at)",
-    ),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List detection rules with pagination and search."""
     raw = registry.list_rules()
@@ -242,10 +248,12 @@ def list_rules(
         raw = [row for row in raw if row.get("source") == source]
 
     raw = apply_search(raw, search, ["name", "display_name", "source", "hunt_name", "severity"])
-    raw = apply_sort(raw, sort_by, sort_order)
+    raw = sort_by_order(raw, query.order_by)
 
     summaries = [RuleSummary.model_validate(row) for row in raw]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(
+        summaries, query, bound={"search": search, "severity": severity, "source": source}
+    )
 
 
 @router.post(
@@ -284,10 +292,7 @@ def create_rule(
     from dfe_engine.settings import get_clickhouse_config
 
     if registry.name_exists(body.name):
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": f"Rule '{body.name}' already exists"},
-        )
+        raise ProblemError(409, f"Rule '{body.name}' already exists", code="conflict")
 
     service = RuleCreationService(ch_config=get_clickhouse_config(settings), hunts=settings.hunts)
     display = (
@@ -443,10 +448,7 @@ def get_rule(name: str, user: CurrentUser, registry: RuleReg, settings: Settings
     try:
         rule = registry.get(name)
     except RuleNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Rule '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Rule '{name}' not found", code="not_found") from None
     sql_errors = _sql_errors_for_original_sql(settings, rule.original_sql)
     return _rule_to_response(rule, sql_errors=sql_errors)
 
@@ -477,10 +479,7 @@ def update_rule(
     try:
         existing = registry.get(name)
     except RuleNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Rule '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Rule '{name}' not found", code="not_found") from None
 
     from dfe_engine.hunts.rule_creation_service import (
         RuleCreateRequest as SvcRequest,
@@ -540,20 +539,11 @@ def delete_rule(
     used_by = hunt_registry.hunt_names_referencing_rule(name)
     if used_by:
         hunts = ", ".join(sorted(used_by))
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": f"Rule '{name}' is referenced by hunt(s): {hunts}",
-            },
-        )
+        raise ProblemError(409, f"Rule '{name}' is referenced by hunt(s): {hunts}", code="conflict")
     try:
         outcome = registry.delete(name, created_by=git_author(user))
     except RuleNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Rule '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Rule '{name}' not found", code="not_found") from None
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "rule", name, "deleted", review_audit_detail(outcome))
 
@@ -647,20 +637,18 @@ def _refuse_uncompilable(result) -> None:
     rule's own execution check reports.
 
     Raises:
-        HTTPException: 422 ``invalid_sql``, every error in ``context.sql_errors``.
+        ProblemError: 422 ``invalid_sql``, every error in ``sql_errors``.
     """
     sql_errors = _map_sql_errors(result.sql_errors or [])
     if not sql_errors:
         sql_errors = [SqlValidationError(message=m) for m in result.rule.validate_rule()]
     if not sql_errors:
         return
-    raise HTTPException(
-        status_code=422,
-        detail={
-            "code": ErrorCode.INVALID_SQL,
-            "message": "Rule not saved: " + "; ".join(e.message for e in sql_errors),
-            "sql_errors": [e.model_dump(exclude_none=True) for e in sql_errors],
-        },
+    raise ProblemError(
+        422,
+        "Rule not saved: " + "; ".join(e.message for e in sql_errors),
+        code=ErrorCode.INVALID_SQL,
+        sql_errors=[e.model_dump(exclude_none=True) for e in sql_errors],
     )
 
 
@@ -668,19 +656,17 @@ def _refuse_matches_everything(result) -> None:
     """Refuse, before anything is written, a rule whose condition matches every event.
 
     Raises:
-        HTTPException: 422 ``rule_matches_everything``, with the source and the
+        ProblemError: 422 ``rule_matches_everything``, with the source and the
             detection WHERE in context.
     """
     if not result.matches_everything:
         return
-    raise HTTPException(
-        status_code=422,
-        detail={
-            "code": ErrorCode.RULE_MATCHES_EVERYTHING,
-            "message": result.matches_everything,
-            "source": source_label(result.rule),
-            "where_clause": result.rule.where_clause,
-        },
+    raise ProblemError(
+        422,
+        result.matches_everything,
+        code=ErrorCode.RULE_MATCHES_EVERYTHING,
+        source=source_label(result.rule),
+        where_clause=result.rule.where_clause,
     )
 
 

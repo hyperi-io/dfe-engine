@@ -172,7 +172,7 @@ def test_a_hunt_already_naming_a_dotted_rule_is_edited_but_takes_no_new_one(clie
 
     assert added.status_code == 422, added.text
     assert edited.status_code == 200, edited.text
-    assert "lin.cert" in added.json()["message"]
+    assert "lin.cert" in added.json()["detail"]
     stored = client.get("/api/v1/hunts/windows_hunt", headers=admin_headers).json()
     assert stored["cron"] == "*/10 * * * *"
     assert [entry["rule_name"] for entry in stored["rules"]] == ["win.cert"]

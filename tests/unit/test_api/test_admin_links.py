@@ -98,7 +98,7 @@ def test_an_admin_gets_each_listed_ui_with_its_status(client: TestClient, admin_
     resp = client.get(ADMIN_LINKS, headers=admin_headers)
 
     assert resp.status_code == 200, resp.text
-    assert resp.json() == [
+    assert resp.json()["items"] == [
         {
             "name": "Argo CD",
             "purpose": "Sync state of every app",
@@ -121,7 +121,7 @@ def test_an_admin_gets_each_listed_ui_with_its_status(client: TestClient, admin_
 
 
 def test_the_probe_address_never_leaves_the_engine(client: TestClient, admin_headers):
-    body = client.get(ADMIN_LINKS, headers=admin_headers).json()
+    body = client.get(ADMIN_LINKS, headers=admin_headers).json()["items"]
 
     assert all(set(entry) == {"name", "purpose", "url", "status"} for entry in body)
     assert "127.0.0.1" not in json.dumps(body)
@@ -131,7 +131,11 @@ def test_an_infra_admin_gets_the_list(client: TestClient, operator_headers):
     resp = client.get(ADMIN_LINKS, headers=operator_headers)
 
     assert resp.status_code == 200, resp.text
-    assert [entry["name"] for entry in resp.json()] == ["Argo CD", "Kafbat", "Cruise Control"]
+    assert [entry["name"] for entry in resp.json()["items"]] == [
+        "Argo CD",
+        "Kafbat",
+        "Cruise Control",
+    ]
 
 
 def test_a_viewer_is_refused_though_it_holds_deployment_read(client: TestClient, viewer_headers):
@@ -155,7 +159,7 @@ def _serve(settings: DFESettings, manager=None) -> tuple[int, Any, FastAPI]:
             resp = client.get(ADMIN_LINKS, headers={"Authorization": f"Bearer {token}"})
     finally:
         _registries.clear()
-    return resp.status_code, resp.json(), app
+    return resp.status_code, resp.json()["items"], app
 
 
 def test_a_deployer_that_lists_nothing_gets_an_empty_list(api_settings: DFESettings):

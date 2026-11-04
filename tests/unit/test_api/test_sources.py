@@ -3,8 +3,8 @@
 from dataclasses import replace
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from scalo.api import ProblemError
 
 from dfe_engine.api.deps import _registries
 from dfe_engine.api.v1.sources import _raise_save_validation_http
@@ -51,16 +51,15 @@ class TestListSources:
         assert data["items"][0]["resource_type"] == "core"
         assert data["items"][0]["origin"] is None
         assert data["items"][0]["current_table_topic_type"] == "main"
-        assert data["total"] == 1
-        assert data["page"] == 1
-        assert data["total_pages"] == 1
+        assert data["total_size"] == 1
+        assert data["next_page_token"] is None
 
     def test_list_after_create(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get("/api/v1/sources", headers=admin_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["total"] >= 1
+        assert data["total_size"] >= 1
         by_name = {item["name"]: item for item in data["items"]}
         assert "test-source" in by_name
         assert "objects" in data
@@ -154,23 +153,20 @@ class TestListSources:
             )
 
         # Six in total: the five above plus the seeded landing source.
-        resp = client.get("/api/v1/sources?page=1&per_page=2", headers=admin_headers)
-        data = resp.json()
-        assert len(data["items"]) == 2
-        assert data["total"] == 6
-        assert data["total_pages"] == 3
-        assert data["next_page"] == 2
-        assert data["prev_page"] is None
+        pages, token = [], None
+        while len(pages) < 4:
+            params = {"page_size": 2, **({"page_token": token} if token else {})}
+            data = client.get("/api/v1/sources", params=params, headers=admin_headers).json()
+            pages.append([item["name"] for item in data["items"]])
+            token = data["next_page_token"]
+            if token is None:
+                break
+        assert [len(page) for page in pages] == [2, 2, 2]
+        assert data["total_size"] == 6
+        assert len({name for page in pages for name in page}) == 6
 
-        # Page 3 (last)
-        resp = client.get("/api/v1/sources?page=3&per_page=2", headers=admin_headers)
-        data = resp.json()
-        assert len(data["items"]) == 2
-        assert data["next_page"] is None
-        assert data["prev_page"] == 2
-
-    def test_list_invalid_per_page_returns_422(self, client: TestClient, admin_headers: dict):
-        resp = client.get("/api/v1/sources?page=1&per_page=0", headers=admin_headers)
+    def test_list_negative_page_size_returns_422(self, client: TestClient, admin_headers: dict):
+        resp = client.get("/api/v1/sources?page_size=-1", headers=admin_headers)
         assert resp.status_code == 422
 
     def test_list_search(self, client: TestClient, admin_headers: dict):
@@ -195,7 +191,7 @@ class TestListSources:
 
         resp = client.get("/api/v1/sources?search=windows", headers=admin_headers)
         data = resp.json()
-        assert data["total"] == 1
+        assert data["total_size"] == 1
         assert data["items"][0]["name"] == "windows-audit"
 
     def test_list_sort(self, client: TestClient, admin_headers: dict):
@@ -209,7 +205,7 @@ class TestListSources:
                 headers=admin_headers,
             )
 
-        resp = client.get("/api/v1/sources?sort_by=source&sort_order=asc", headers=admin_headers)
+        resp = client.get("/api/v1/sources?order_by=source", headers=admin_headers)
         data = resp.json()
         names = [item["name"] for item in data["items"]]
         assert names[0] == "main"
@@ -226,7 +222,7 @@ class TestListSources:
                 headers=admin_headers,
             )
 
-        resp = client.get("/api/v1/sources?sort_by=source&sort_order=asc", headers=admin_headers)
+        resp = client.get("/api/v1/sources?order_by=source", headers=admin_headers)
         names = [item["name"] for item in resp.json()["items"]]
         assert names[0] == "main"
         assert names[1:] == sorted(names[1:])
@@ -294,10 +290,10 @@ class TestListSources:
 
 class TestSaveValidationHttpMapping:
     def test_generic_validation_error_is_422(self):
-        with pytest.raises(HTTPException) as exc_info:
+        with pytest.raises(ProblemError) as exc_info:
             _raise_save_validation_http(SourceValidationError("invalid source definition"))
-        assert exc_info.value.status_code == 422
-        assert exc_info.value.detail["code"] == "validation_error"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
+        assert exc_info.value.status == 422
+        assert exc_info.value.problem.code == "validation_error"
 
 
 class TestCreateSource:
@@ -360,8 +356,8 @@ class TestCreateSource:
         assert resp.status_code == 422, resp.text
         body = resp.json()
         assert body["code"] == "validation_error"
-        assert "DNS-1123 label" in body["message"]
-        assert "use '-' instead of '_'" in body["message"]
+        assert "DNS-1123 label" in body["detail"]
+        assert "use '-' instead of '_'" in body["detail"]
 
     def test_create_rejects_version_tree_in_body(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -432,8 +428,8 @@ class TestCreateOnATransportTheDeploymentLacks:
         assert resp.status_code == 422, resp.text
         body = resp.json()
         assert body["code"] == "validation_error"
-        assert "asks for the direct transport" in body["message"]
-        assert "offers bus" in body["message"]
+        assert "asks for the direct transport" in body["detail"]
+        assert "offers bus" in body["detail"]
 
     def test_the_transport_the_deployment_carries_still_saves(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -500,7 +496,7 @@ class TestCreateNeedingAPerSourceAppOnDirect:
         if status == 422:
             assert resp.json()["code"] == "validation_error"
             assert (
-                "Sources that need a per-source app (fetcher, transform)" in resp.json()["message"]
+                "Sources that need a per-source app (fetcher, transform)" in resp.json()["detail"]
             )
 
 
@@ -535,7 +531,7 @@ class TestArchiveWhereTheProfileDeploysNoArchiver:
         assert resp.status_code == 422, resp.text
         body = resp.json()
         assert body["code"] == "validation_error"
-        assert f"the {self.PROFILE} profile does not deploy dfe-archiver" in body["message"]
+        assert f"the {self.PROFILE} profile does not deploy dfe-archiver" in body["detail"]
         assert client.get("/api/v1/sources/test-source", headers=admin_headers).status_code == 404
 
     @pytest.mark.usefixtures("no_archiver_here")
@@ -558,7 +554,7 @@ class TestArchiveWhereTheProfileDeploysNoArchiver:
         )
 
         assert resp.status_code == 422, resp.text
-        assert "the docker-slim profile does not run dfe-archiver" in resp.json()["message"]
+        assert "the docker-slim profile does not run dfe-archiver" in resp.json()["detail"]
 
     def test_a_profile_that_deploys_the_archiver_accepts_it(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -651,7 +647,7 @@ class TestMainFlow:
 
         assert resp.status_code == 409, resp.text
         assert resp.json()["code"] == "conflict"
-        assert "main" in resp.json()["message"]
+        assert "main" in resp.json()["detail"]
         stored = client.get("/api/v1/sources/main", headers=admin_headers).json()
         assert stored["description"] != "hijacked"
 
@@ -728,7 +724,7 @@ class TestMainFlow:
         )
 
         assert resp.status_code == 422, resp.text
-        assert "reserved" in resp.json()["message"]
+        assert "reserved" in resp.json()["detail"]
 
 
 class TestGetSourceFlow:
@@ -787,7 +783,7 @@ class TestGetSourceFlow:
         resp = client.get("/api/v1/sources/test-source/flow", headers=admin_headers)
 
         assert resp.status_code == 422, resp.text
-        assert "asks for the bus transport" in resp.json()["message"]
+        assert "asks for the bus transport" in resp.json()["detail"]
 
     def test_reading_a_flow_needs_source_read(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -1093,7 +1089,7 @@ class TestUpdateSource:
             headers=admin_headers,
         )
         assert resp.status_code == 422, resp.text
-        assert "Cannot change source origin" in resp.json()["message"]
+        assert "Cannot change source origin" in resp.json()["detail"]
 
     def test_update_refuses_to_clear_a_meta_schema(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -1115,7 +1111,7 @@ class TestUpdateSource:
             headers=admin_headers,
         )
         assert resp.status_code == 422, resp.text
-        assert "Cannot remove the meta schema" in resp.json()["message"]
+        assert "Cannot remove the meta schema" in resp.json()["detail"]
 
     def test_update_rejects_versions_payload(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -1191,11 +1187,11 @@ class TestUpdateSource:
         assert create_dup.status_code == 409
         dup_body = create_dup.json()
         assert dup_body["code"] == "match_conflict"
-        assert dup_body["context"]["conflicting_source"] == "source-alpha"
-        assert dup_body["context"]["source"] == "source-gamma"
-        assert dup_body["context"]["field"] == "ingest_type"
-        assert dup_body["context"]["value"] == "shared_value"
-        assert "source-alpha" in dup_body["message"]
+        assert dup_body["conflicting_source"] == "source-alpha"
+        assert dup_body["source"] == "source-gamma"
+        assert dup_body["field"] == "ingest_type"
+        assert dup_body["value"] == "shared_value"
+        assert "source-alpha" in dup_body["detail"]
 
         conflict_put = client.put(
             "/api/v1/sources/source-beta",
@@ -1531,10 +1527,10 @@ class TestBulkDeploy:
         assert body["failed"] == []
         assert {row["source"] for row in body["deployments"]} == {"deploy-a", "deploy-b"}
         assert all(row["kind"] == "source:deploy" for row in body["deployments"])
-        assert len({row["task_id"] for row in body["deployments"]}) == 2
+        assert len({row["operation"] for row in body["deployments"]}) == 2
 
         for row in body["deployments"]:
-            task = app.state.task_manager.get(row["task_id"])
+            task = app.state.task_manager.get(row["operation"].removeprefix("operations/"))
             assert task is not None
             assert task.kind == "source:deploy"
 
@@ -1608,7 +1604,7 @@ class TestDeployReportsWhyItCouldNotBuild:
         )
 
         assert resp.status_code == 400, resp.text
-        assert "not found" in resp.json()["message"]
+        assert "not found" in resp.json()["detail"]
 
     def test_a_meta_schema_that_does_not_exist_answers_400_on_the_real_path(
         self, client, admin_headers, sample_source
@@ -1681,4 +1677,4 @@ class TestDeployReportsWhyItCouldNotBuild:
 
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == code
-        assert "nosuchtype" in resp.json()["message"]
+        assert "nosuchtype" in resp.json()["detail"]

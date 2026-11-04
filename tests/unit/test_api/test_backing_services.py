@@ -71,7 +71,7 @@ class TestDeclaredReads:
 
     def test_undeclared_values_report_no_source(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
-        body = client.get("/api/v1/backing-services", headers=admin_headers).json()
+        body = client.get("/api/v1/backing-services", headers=admin_headers).json()["items"]
         assert [s["service"] for s in body] == ["clickhouse", "kafka"]
         ch = body[0]
         assert ch["mode"] == {"value": None, "source": None, "protected": False}
@@ -132,7 +132,7 @@ class TestDeclaredReads:
         # ClickHouse's chart name is not its prefix, so a caller deriving one from
         # service or chart gets it wrong for one of the two.
         _wire_gitcrud(app, tmp_path)
-        body = client.get("/api/v1/backing-services", headers=admin_headers).json()
+        body = client.get("/api/v1/backing-services", headers=admin_headers).json()["items"]
         assert {s["service"]: s["prefix"] for s in body} == {
             "clickhouse": "clickhouse",
             "kafka": "kafka",
@@ -172,9 +172,11 @@ class TestOverlayVars:
 
         listed = client.get(
             "/api/v1/backing-services/overlays/clickhouse-cluster/vars", headers=admin_headers
-        ).json()
+        ).json()["items"]
         assert {v["path"]: v["value"] for v in listed} == {"clickhouse.replicas": 5}
-        names = client.get("/api/v1/backing-services/overlays", headers=admin_headers).json()
+        names = client.get("/api/v1/backing-services/overlays", headers=admin_headers).json()[
+            "items"
+        ]
         assert names == ["clickhouse-cluster"]
 
     def test_credentials_come_back_masked(self, client, app, admin_headers, tmp_path):
@@ -192,7 +194,7 @@ class TestOverlayVars:
             "/api/v1/backing-services/overlays/clickhouse-cluster/vars", headers=admin_headers
         )
         assert resp.status_code == 200, resp.text
-        assert {v["path"]: v["value"] for v in resp.json()} == {
+        assert {v["path"]: v["value"] for v in resp.json()["items"]} == {
             "clickhouse.replicas": 3,
             "clickhouse.auth.password": contract.REDACTED,
             "extraEnv.CLICKHOUSE_ADMIN_SECRET": contract.REDACTED,
@@ -352,7 +354,7 @@ class TestMemberCountsGoUpOnly:
         resp = self._set(client, admin_headers, "kafka", "kafka.replicas", 3)
         assert resp.status_code == 400
         assert resp.json()["code"] == "scale_down_refused"
-        assert "reassigned off it" in resp.json()["message"]
+        assert "reassigned off it" in resp.json()["detail"]
         assert gc.get("infravars", "kafka")["kafka"]["replicas"] == 5
 
     def test_lowering_clickhouse_nodes_names_the_clickhouse_reason(
@@ -362,7 +364,7 @@ class TestMemberCountsGoUpOnly:
         gc.put("infravars", "clickhouse-cluster", {"clickhouse": {"replicas": 3}}, "tester")
         resp = self._set(client, admin_headers, "clickhouse-cluster", "clickhouse.replicas", 1)
         assert resp.status_code == 400
-        assert "drops a copy of the data" in resp.json()["message"]
+        assert "drops a copy of the data" in resp.json()["detail"]
 
     def test_the_keeper_ensemble_is_up_only_as_well(self, client, app, admin_headers, tmp_path):
         gc = _wire_gitcrud(app, tmp_path)
@@ -430,7 +432,7 @@ class TestMemberCountsGoUpOnly:
         gc.put("infravars", "kafka", {"kafka": {"replicas": 9}}, "tester")
         resp = self._set(client, admin_headers, "kafka", "kafka.replicas", 6)
         assert resp.status_code == 400
-        assert "9 -> 6" in resp.json()["message"]
+        assert "9 -> 6" in resp.json()["detail"]
 
     def test_an_unrelated_overlay_is_not_guarded(self, client, app, admin_headers, tmp_path):
         # network-policies is not in either service's stack, so a count written
@@ -473,7 +475,7 @@ class TestMemberCountsGoUpOnly:
         resp = self._set(client, admin_headers, name, path, value)
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "scale_down_refused"
-        assert count in resp.json()["message"]
+        assert count in resp.json()["detail"]
         assert gc.get("infravars", name) == stored
 
     def test_a_writer_cannot_shrink_the_keeper_with_a_map_that_omits_it(
@@ -497,8 +499,8 @@ class TestMemberCountsGoUpOnly:
         )
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "scale_down_refused"
-        assert "clickhouse.keeper.replicas" in resp.json()["message"]
-        assert "chart default" in resp.json()["message"]
+        assert "clickhouse.keeper.replicas" in resp.json()["detail"]
+        assert "chart default" in resp.json()["detail"]
         assert gc.get("infravars", "clickhouse-cluster") == stored
 
     @pytest.mark.parametrize(
@@ -524,7 +526,7 @@ class TestMemberCountsGoUpOnly:
         resp = self._set(client, admin_headers, name, path, value)
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "scale_down_refused"
-        assert said in resp.json()["message"]
+        assert said in resp.json()["detail"]
         assert gc.get("infravars", name) == stored
 
     def test_a_parent_map_that_keeps_the_count_still_writes(
@@ -562,7 +564,7 @@ class TestTheResolverSizingIsDeclared:
 
         assert resp.status_code == 400
         assert resp.json()["code"] == "scale_down_refused"
-        assert "5 -> 3" in resp.json()["message"]
+        assert "5 -> 3" in resp.json()["detail"]
 
     def test_lowering_a_sized_keeper_ensemble_is_refused(
         self, client, app, admin_headers, tmp_path
@@ -629,8 +631,8 @@ class TestARevertCannotShrinkAMemberCount:
         resp = self._revert(client, _writer(app, api_settings), name, path)
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "scale_down_refused"
-        assert count in resp.json()["message"]
-        assert "helmvars:override" in resp.json()["message"]
+        assert count in resp.json()["detail"]
+        assert "helmvars:override" in resp.json()["detail"]
         assert gc.get("infravars", name) == stored
 
     def test_the_override_grant_reverts_the_keeper(self, client, app, admin_headers, tmp_path):
@@ -657,7 +659,7 @@ class TestARevertCannotShrinkAMemberCount:
             client, _writer(app, api_settings), "clickhouse-cluster", "clickhouse.keeper.replicas"
         )
         assert resp.status_code == 400, resp.text
-        assert "5 -> 3" in resp.json()["message"]
+        assert "5 -> 3" in resp.json()["detail"]
 
     def test_a_revert_onto_an_equal_or_higher_count_is_allowed(
         self, client, app, api_settings, tmp_path
@@ -712,7 +714,7 @@ class TestARevertCannotShrinkAMemberCount:
             client, _writer(app, api_settings), "clickhouse-cluster", "clickhouse.keeper.replicas"
         )
         assert resp.status_code == 400, resp.text
-        assert "chart default" in resp.json()["message"]
+        assert "chart default" in resp.json()["detail"]
 
 
 class TestStorageModelIsDecidedAtDeploy:
@@ -729,8 +731,8 @@ class TestStorageModelIsDecidedAtDeploy:
         assert resp.status_code == 403
         assert resp.json()["code"] == "protected_var"
         # The reason names the var AND the pattern, so the UI can render it.
-        assert "clickhouse.storageModel" in resp.json()["message"]
-        assert "infravars:*:clickhouse.storageModel" in resp.json()["message"]
+        assert "clickhouse.storageModel" in resp.json()["detail"]
+        assert "infravars:*:clickhouse.storageModel" in resp.json()["detail"]
 
     def test_every_locked_key_refuses(self, client, app, api_settings, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
@@ -927,7 +929,7 @@ class TestALockHoldsAboveAndBelowTheLeaf:
         )
         assert resp.status_code == 403, resp.text
         assert resp.json()["code"] == "protected_var"
-        assert "infravars:*:kafka.sizing.*" in resp.json()["message"]
+        assert "infravars:*:kafka.sizing.*" in resp.json()["detail"]
         assert gc.get("infravars", "kafka") == self.STORED
 
     @pytest.mark.parametrize("path", ["kafka.sizing", "kafka"])
@@ -954,7 +956,7 @@ class TestALockHoldsAboveAndBelowTheLeaf:
             headers=_writer(app, api_settings),
         )
         assert resp.status_code == 403, resp.text
-        assert "infravars:*:cloud" in resp.json()["message"]
+        assert "infravars:*:cloud" in resp.json()["detail"]
         assert gc.get("infravars", "common") == {"cloud": "aws"}
 
     def test_a_sibling_under_the_same_parent_still_writes(
@@ -1003,7 +1005,7 @@ class TestALockHoldsAboveAndBelowTheLeaf:
         )
         listed = client.get(
             "/api/v1/backing-services/overlays/common/vars", headers=admin_headers
-        ).json()
+        ).json()["items"]
         assert {v["path"]: v["protected"] for v in listed} == {
             "cloud.provider": True,
             "networkModel": False,

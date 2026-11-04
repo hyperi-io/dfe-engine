@@ -300,7 +300,7 @@ class TestObjectsRbac:
         client.put(f"{OBJECTS}/org/acme/ui/b", content=b"bbb", headers=admin_headers)
         resp = client.get(f"{OBJECTS}/org/acme/ui", headers=_headers(api_settings, "orguser"))
         assert resp.status_code == 200
-        entries = resp.json()
+        entries = resp.json()["items"]
         assert [e["key"] for e in entries] == ["a", "b"]
         assert entries[1]["size"] == 3
         # Cross-org list is hidden too.

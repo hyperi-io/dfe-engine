@@ -57,6 +57,8 @@ dependencies = [
     #            the iteration macro it is.
     # >=2.32.4:  scalo.deployment.test_support.pytest_plugin, the run's one shared
     #            ClickHouse the integration tier tests on.
+    # >=2.32.5:  the one API contract: token-paged Page lists, problem+json errors,
+    #            Operation for 202s and Preconditions.guard.
     # Upper bound: <3 is the API-stability boundary. An unbounded `>=` is invisible
     # to Renovate -- the constraint is satisfied by every future release, so no PR
     # is ever raised and the version moves silently in the lock.
@@ -68,7 +70,7 @@ dependencies = [
     # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
     # goes green while reporting nothing. [opentelemetry] is no longer a separate
     # extra: [metrics] carries the SDK.
-    "scalo[api,cli,expression,http,metrics,secrets-kubernetes]>=2.32.4,<3",
+    "scalo[api,cli,expression,http,metrics,secrets-kubernetes]>=2.32.5,<3",
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed

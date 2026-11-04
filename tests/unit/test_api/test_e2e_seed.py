@@ -256,16 +256,16 @@ class TestTheOrganisationSeedMovesTheHuntsNamingIt:
     def test_a_seed_taking_an_id_a_hunt_reads_for_another_org_is_refused(
         self, tmp_path, monkeypatch
     ):
-        from fastapi import HTTPException
+        from scalo.api import ProblemError
 
         monkeypatch.setenv("DFE_ENGINE_ENV", "test")
         hunts = _hunts(tmp_path, ["gone"], {"gone": ["organisation"]})
         seeder, orgs = _organisations(tmp_path, hunts)
 
-        with pytest.raises(HTTPException) as refused:
+        with pytest.raises(ProblemError) as refused:
             seeder.seed_organisation()
 
-        assert refused.value.status_code == 409
+        assert refused.value.status == 409
         assert orgs.get("organisation") is None
 
 

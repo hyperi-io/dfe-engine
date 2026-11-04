@@ -427,7 +427,7 @@ GET    /api/v1/auth/oidc/{provider}/callback         # OIDC callback, mints the 
 
 Account, group, API key, role and OIDC provider CRUD sit under
 `/api/v1/auth/accounts`, `/api/v1/auth/groups`, `/api/v1/auth/api-keys`,
-`/api/v1/auth/roles` and `/api/v1/auth/oidc-providers`. `openapi-spec/openapi.json`
+`/api/v1/auth/roles` and `/api/v1/auth/oidc-providers`. `openapi/openapi.json`
 lists every route.
 
 ### 3.4 Bootstrap Defaults

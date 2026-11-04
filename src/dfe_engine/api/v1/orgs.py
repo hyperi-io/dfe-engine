@@ -33,13 +33,15 @@ reconcile a source write runs.
 """
 
 import functools
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
+from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
@@ -51,12 +53,6 @@ from dfe_engine.api.deps import (
     require_action,
 )
 from dfe_engine.api.errors import backend_failure
-from dfe_engine.api.pagination import (
-    PaginatedResponse,
-    PaginationParams,
-    apply_search,
-    apply_sort,
-)
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth import Scope
@@ -173,39 +169,37 @@ def _create_hunts_first(
     """Refuse a taken name or a collision, then store the new org's tenant ids in its hunts.
 
     Raises:
-        HTTPException: 409 ``conflict`` for a name taken or a tenant id another org holds,
+        ProblemError: 409 ``conflict`` for a name taken or a tenant id another org holds,
             or 409 ``tenant_id_held`` for one a hunt still reads for another org.
     """
     if registry.get(body.name) is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": f"Org '{body.name}' already exists"},
-        )
+        raise ProblemError(409, f"Org '{body.name}' already exists", code="conflict")
     other = colliding_org(body.name, body.org_ids, registry.list())
     if other is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": f"Org '{body.name}' collides with tenant-fenced org '{other.name}'",
-            },
+        raise ProblemError(
+            409,
+            f"Org '{body.name}' collides with tenant-fenced org '{other.name}'",
+            code="conflict",
         )
     tenant_ids = org_tenant_ids(body)
     refuse_held_tenant_ids(hunts, body.name, tenant_ids)
     return store_hunt_tenant_ids(hunts, body.name, tenant_ids, actor)
 
 
+OrgsList = Annotated[
+    ListQuery, Depends(list_query(order_by=("name", "display_name", "updated_at"), tiebreak="name"))
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedResponse[OrgResponse],
+    response_model=Page[OrgResponse],
 )
 async def list_orgs(
     user: CurrentUser,
     request: Request,
-    pagination: PaginationParams = Depends(),
+    query: OrgsList,
     search: str | None = Query(None, description="Search in org name/display name"),
-    sort_by: str | None = Query(None, description="Sort field (name, display_name, updated_at)"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List organisations visible to the caller, paginated.
 
@@ -225,9 +219,9 @@ async def list_orgs(
         ]
     rows = [_org_response(o).model_dump() for o in visible]
     rows = apply_search(rows, search, ["name", "display_name"])
-    rows = apply_sort(rows, sort_by, sort_order)
+    rows = sort_by_order(rows, query.order_by)
     summaries = [OrgResponse.model_validate(row) for row in rows]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(summaries, query, bound={"search": search})
 
 
 @router.get(
@@ -281,10 +275,7 @@ async def get_org(
     registry: OrgRegistry = request.app.state.org_registry
     org = registry.get(name)
     if org is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Org '{name}' not found"},
-        )
+        raise ProblemError(404, f"Org '{name}' not found", code="not_found")
     return _org_response(org)
 
 
@@ -324,32 +315,23 @@ def _update_org(
     """Store the org's tenant ids in its hunts, then write the org.
 
     Raises:
-        HTTPException: 404 ``not_found``, 409 ``reserved_org`` for an update that would
+        ProblemError: 404 ``not_found``, 409 ``reserved_org`` for an update that would
             disable the default org or take its tenant id, 409 ``conflict`` for a
             tenant id another org holds, or 409 ``tenant_id_held`` for one a hunt
             still reads for another org.
     """
     existing = registry.get(name)
     if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Org '{name}' not found"},
-        )
+        raise ProblemError(404, f"Org '{name}' not found", code="not_found")
     try:
         refuse_reserved_update(existing.model_copy(update=body.model_dump(exclude_none=True)))
     except ReservedOrgError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "reserved_org", "message": str(exc)}
-        ) from exc
+        raise ProblemError(409, str(exc), code="reserved_org") from exc
     if body.org_ids is not None:
         other = colliding_org(name, body.org_ids, registry.list())
         if other is not None:
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "conflict",
-                    "message": f"Org '{name}' collides with tenant-fenced org '{other.name}'",
-                },
+            raise ProblemError(
+                409, f"Org '{name}' collides with tenant-fenced org '{other.name}'", code="conflict"
             )
 
     # Apply field updates
@@ -409,26 +391,19 @@ def _delete_hunts_first(
     """Refuse a delete the org's dependants forbid, then take its tenant ids out of its hunts.
 
     Raises:
-        HTTPException: 404 ``not_found``, 409 ``reserved_org`` for the default org,
+        ProblemError: 404 ``not_found``, 409 ``reserved_org`` for the default org,
             409 ``org_bound`` for one another org's ingest credential binds, or 409
             ``org_in_use`` for one a fetched source names.
     """
     if registry.get(name) is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Org '{name}' not found"},
-        )
+        raise ProblemError(404, f"Org '{name}' not found", code="not_found")
     try:
         refuse_reserved_delete(name)
         refuse_bound_delete(name, registry.ingest_credentials)
     except ReservedOrgError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "reserved_org", "message": str(exc)}
-        ) from exc
+        raise ProblemError(409, str(exc), code="reserved_org") from exc
     except OrgBoundError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "org_bound", "message": str(exc)}
-        ) from exc
+        raise ProblemError(409, str(exc), code="org_bound") from exc
     refuse_org_named_by_sources(name)
     return store_hunt_tenant_ids(hunts, name, None, actor)
 
@@ -439,7 +414,7 @@ def refuse_org_named_by_sources(name: str) -> None:
     Its fetcher would otherwise be compiled for an org that is gone and stop.
 
     Raises:
-        HTTPException: 409 ``org_in_use`` naming each source.
+        ProblemError: 409 ``org_in_use`` naming each source.
     """
     registry = get_source_registry_optional()
     if registry is None:
@@ -450,13 +425,11 @@ def refuse_org_named_by_sources(name: str) -> None:
         if any(v.fetcher is not None and v.fetcher.org == name for v in source.versions.values())
     )
     if named:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "org_in_use",
-                "message": f"Org '{name}' is the org of fetched source(s) "
-                f"{', '.join(named)}: move them to another org first",
-            },
+        raise ProblemError(
+            409,
+            f"Org '{name}' is the org of fetched source(s) "
+            f"{', '.join(named)}: move them to another org first",
+            code="org_in_use",
         )
 
 
@@ -495,7 +468,7 @@ def refuse_held_tenant_ids(hunts: Any, org: str, tenant_ids: list[str]) -> None:
         tenant_ids: Its tenant ids once written.
 
     Raises:
-        HTTPException: 409 ``tenant_id_held`` naming each hunt.
+        ProblemError: 409 ``tenant_id_held`` naming each hunt.
     """
     if hunts is None:
         return
@@ -507,19 +480,15 @@ def refuse_held_tenant_ids(hunts: Any, org: str, tenant_ids: list[str]) -> None:
         + (f"once review branch '{h.branch}' merges" if h.branch else "on main")
         for h in held
     )
-    raise HTTPException(
-        status_code=409,
-        detail={
-            "code": "tenant_id_held",
-            "message": (
-                f"Org '{org}' cannot take a tenant id a hunt still reads for another org: "
-                f"{where}. Merge or close that review, or edit the hunt, first"
-            ),
-            "held": [
-                {"hunt": h.hunt, "org": h.org, "tenant_ids": h.tenant_ids, "branch": h.branch}
-                for h in held
-            ],
-        },
+    raise ProblemError(
+        409,
+        f"Org '{org}' cannot take a tenant id a hunt still reads for another org: "
+        f"{where}. Merge or close that review, or edit the hunt, first",
+        code="tenant_id_held",
+        held=[
+            {"hunt": h.hunt, "org": h.org, "tenant_ids": h.tenant_ids, "branch": h.branch}
+            for h in held
+        ],
     )
 
 

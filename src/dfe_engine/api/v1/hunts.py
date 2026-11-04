@@ -21,12 +21,14 @@ one query already answers for all of them.
 """
 
 import time
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field, field_validator
+from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 from scalo.logger import logger
 
+from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import (
     CurrentUser,
     HuntConfigReg,
@@ -37,7 +39,6 @@ from dfe_engine.api.deps import (
     registered_orgs,
     require_action,
 )
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
@@ -83,7 +84,7 @@ def _refuse_new_rule_names(rules: list[str], stored: dict[str, Any]) -> None:
     editable. The rule-file contract refuses a name that leaves the directory either way.
 
     Raises:
-        HTTPException: 422 ``validation_error`` naming the first refused reference.
+        ProblemError: 422 ``validation_error`` naming the first refused reference.
     """
     held = {entry["rule_name"] for entry in _rules_from_stored(stored.get("rules"))}
     for name in rules:
@@ -92,17 +93,14 @@ def _refuse_new_rule_names(rules: list[str], stored: dict[str, Any]) -> None:
         try:
             validate_rule_name(name)
         except InvalidNameError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail={"code": "validation_error", "message": str(exc)},
-            ) from exc
+            raise ProblemError(422, str(exc), code="validation_error") from exc
 
 
 def _resolve_customers(request: Request, config: dict[str, Any]) -> None:
     """Store each customer's tenant ids beside the names, as the runner reads them.
 
     Raises:
-        HTTPException: 422 ``unknown_org`` when a customer names no registered org.
+        ProblemError: 422 ``unknown_org`` when a customer names no registered org.
     """
     customers = hunt_customers(config)
     refuse_unknown_orgs(request, customers)
@@ -134,10 +132,7 @@ def _validate_hunt_config(config: dict[str, Any], settings: Any, rules: Any) -> 
             source_registry=None,
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "validation_error", "message": str(exc)},
-        ) from exc
+        raise ProblemError(422, str(exc), code="validation_error") from exc
 
 
 router = APIRouter(prefix="/hunts", tags=["hunts"], dependencies=[WRITE_TURN])
@@ -447,15 +442,25 @@ def get_engine_status(
     )
 
 
+HuntsList = Annotated[
+    ListQuery,
+    Depends(
+        list_query(
+            order_by=("name", "display_name", "source_table", "target_table"), tiebreak="name"
+        )
+    ),
+]
+
+
 @router.get(
     "",
-    response_model=PaginatedResponse[HuntSummary],
+    response_model=Page[HuntSummary],
     dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
 )
 def list_hunts(
     registry: HuntConfigReg,
     user: CurrentUser,
-    pagination: PaginationParams = Depends(),
+    query: HuntsList,
     search: str | None = Query(
         None,
         description=(
@@ -463,12 +468,7 @@ def list_hunts(
             "source_table, target_table"
         ),
     ),
-    sort_by: str | None = Query(
-        None,
-        description="Sort field (name, display_name, source_table, target_table)",
-    ),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
-) -> PaginatedResponse[HuntSummary]:
+) -> Page[HuntSummary]:
     """List persisted hunt configurations, each with its run state, paginated.
 
     Run state comes from ONE ClickHouse read across every listed hunt: the watermark
@@ -481,11 +481,11 @@ def list_hunts(
         search,
         ["name", "display_name", "customers", "rules", "source_table", "target_table"],
     )
-    raw = apply_sort(raw, sort_by, sort_order)
+    raw = sort_by_order(raw, query.order_by)
     now = int(time.time())
     status = _run_status_for([row["name"] for row in raw], now)
     summaries = [_hunt_row_to_summary(row, status.get(row["name"]), now) for row in raw]
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    return paginate(summaries, query, bound={"search": search})
 
 
 @router.post(
@@ -510,10 +510,7 @@ def create_hunt(
     ``unknown_org`` when a customer names no registered org.
     """
     if registry.name_exists(body.name):
-        raise HTTPException(
-            status_code=409,
-            detail={"code": "conflict", "message": f"Hunt '{body.name}' already exists"},
-        )
+        raise ProblemError(409, f"Hunt '{body.name}' already exists", code="conflict")
     config = body.to_config_dict(hunt_name=body.name)
     _validate_hunt_config(config, settings, rules)
     _resolve_customers(request, config)
@@ -542,10 +539,7 @@ def get_hunt(
     try:
         config = registry.get(name)
     except HuntConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Hunt '{name}' not found", code="not_found") from None
     return HuntDetailResponse.from_stored_config(name, config)
 
 
@@ -573,10 +567,7 @@ def update_hunt(
     try:
         stored = registry.get(name)
     except HuntConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Hunt '{name}' not found", code="not_found") from None
 
     _refuse_new_rule_names(body.rules, stored)
     config = body.to_config_dict(hunt_name=name)
@@ -613,10 +604,7 @@ def delete_hunt(
     try:
         registry.get(name)
     except HuntConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Hunt '{name}' not found", code="not_found") from None
     if alert_registry is not None:
         delete_destinations_owned_by_hunt(alert_registry, registry, name)
     outcome = registry.delete(name, created_by=user.user_id)
@@ -653,10 +641,7 @@ def trigger_hunt(
     try:
         registry.get(name)
     except HuntConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
-        ) from None
+        raise ProblemError(404, f"Hunt '{name}' not found", code="not_found") from None
 
     from dfe_engine.hunts.ch_coordinator import ChCoordinator
 
@@ -668,26 +653,18 @@ def trigger_hunt(
         if not _clickhouse_unreachable(exc):
             # A 503 here would claim ClickHouse is down when it is not.
             logger.exception(f"could not queue a run for hunt '{name}': {exc}")
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "code": "queue_failed",
-                    "message": (
-                        "The run could not be queued and the cause was not a ClickHouse "
-                        "connection failure; the error is in the engine log"
-                    ),
-                },
+            raise ProblemError(
+                500,
+                "The run could not be queued and the cause was not a ClickHouse "
+                "connection failure; the error is in the engine log",
+                code="queue_failed",
             ) from exc
         logger.error(f"could not queue a run for hunt '{name}': {exc}")
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "coordination_unavailable",
-                "message": (
-                    "The hunt coordination tables in ClickHouse are unreachable, "
-                    "so the run could not be queued"
-                ),
-            },
+        raise ProblemError(
+            503,
+            "The hunt coordination tables in ClickHouse are unreachable, "
+            "so the run could not be queued",
+            code="coordination_unavailable",
         ) from exc
 
     audit_resource_change(user.user_id, "hunt", name, "run queued")

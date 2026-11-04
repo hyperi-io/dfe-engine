@@ -6,7 +6,7 @@ fails here, and so does a listed violation that no longer happens, so the list o
 shrinks as each router moves into the resource hierarchy. The protocol routers are
 exempt by name (``dfe_engine.api.conventions.PROTOCOL_ROUTERS``).
 
-The app is built the way ``openapi-spec/generate.py`` builds it, sigma included, so
+The app is built the way ``scripts/generate_openapi.py`` builds it, sigma included, so
 the check covers every operation the committed spec describes.
 """
 

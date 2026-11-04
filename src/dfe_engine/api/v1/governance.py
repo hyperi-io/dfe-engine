@@ -23,8 +23,9 @@ admins (governance:write). Everything commits to gitops via the engine.
 import functools
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel
+from scalo.api import ListParams, Page, ProblemError, paginate
 
 from dfe_engine.api.deps import CurrentUser, live_role_config, require_action
 from dfe_engine.api.errors import backend_failure
@@ -80,10 +81,7 @@ class InvokeResponse(BaseModel):
 def _gitcrud(request: Request) -> GitCrud:
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
+        raise ProblemError(503, "gitops is not enabled", code="not_configured")
     return gc
 
 
@@ -110,9 +108,7 @@ def _check_name(name: str) -> None:
     try:
         validate_name(name)
     except CommitPolicyError as exc:
-        raise HTTPException(
-            status_code=400, detail={"code": "invalid_name", "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code="invalid_name") from exc
 
 
 def _route_admin_write(
@@ -139,15 +135,13 @@ def _route_admin_write(
             write=write,
         )
     except ReviewRequiredError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "review_required", "message": str(exc)}
-        ) from exc
+        raise ProblemError(409, str(exc), code="review_required") from exc
 
 
 @router.get("/actions", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
-def list_actions(user: CurrentUser, request: Request) -> list[str]:
+def list_actions(query: ListParams, user: CurrentUser, request: Request) -> Page[str]:
     """List the defined actions by name."""
-    return _actions(request).list()
+    return paginate(_actions(request).list(), query)
 
 
 @router.get(
@@ -158,13 +152,13 @@ def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
     try:
         return _actions(request).get_shown(name)
     except ResourceNotFoundError as exc:
-        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+        raise ProblemError(404, str(exc), code="not_found") from exc
 
 
 @router.get("/policies", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
-def list_policies(user: CurrentUser, request: Request) -> list[str]:
+def list_policies(query: ListParams, user: CurrentUser, request: Request) -> Page[str]:
     """List the protected-var policies by name."""
-    return _policies(request).list()
+    return paginate(_policies(request).list(), query)
 
 
 @router.get(
@@ -176,7 +170,7 @@ def get_policy(name: str, user: CurrentUser, request: Request) -> ProtectedPolic
     try:
         return _policies(request).get(name)
     except ResourceNotFoundError as exc:
-        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+        raise ProblemError(404, str(exc), code="not_found") from exc
 
 
 @router.post("/actions/{name}/invoke", response_model=InvokeResponse)
@@ -207,12 +201,12 @@ def invoke_action(
     try:
         action = store.get(name)
     except ResourceNotFoundError as exc:
-        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+        raise ProblemError(404, str(exc), code="not_found") from exc
 
     # Per-action RBAC: the action declares the permission needed to run it.
     decision = authorize(user, action.required_action, role_config=request.app.state.role_config)
     if not decision.allowed:
-        raise HTTPException(403, detail={"code": "forbidden", "message": decision.reason})
+        raise ProblemError(403, decision.reason, code="forbidden")
 
     policy = getattr(request.app.state, "policy_store", None)
     override = authorize(
@@ -227,17 +221,17 @@ def invoke_action(
             name, user.user_id, params=params, policy=policy, dry_run=True, override=override
         )
     except InvalidParamsError as exc:
-        raise HTTPException(422, detail={"code": "invalid_params", "message": str(exc)}) from exc
+        raise ProblemError(422, str(exc), code="invalid_params") from exc
     except InvalidDocumentError as exc:
-        raise HTTPException(422, detail={"code": "invalid_document", "message": str(exc)}) from exc
+        raise ProblemError(422, str(exc), code="invalid_document") from exc
     except ProtectedVarError as exc:
-        raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="protected_var") from exc
     except ActionForbiddenError as exc:
-        raise HTTPException(403, detail={"code": "action_forbidden", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="action_forbidden") from exc
     except CommitPolicyError as exc:
-        raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="policy_violation") from exc
     except contract.MaskedValueError as exc:
-        raise HTTPException(400, detail={"code": exc.code, "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code=exc.code) from exc
 
     # The infra overlay's guards judge what the action leaves, as on a direct write there.
     for change in action.changes:
@@ -278,9 +272,7 @@ def invoke_action(
             write=_write,
         )
     except ReviewRequiredError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "review_required", "message": str(exc)}
-        ) from exc
+        raise ProblemError(409, str(exc), code="review_required") from exc
     audit_resource_change(
         user.user_id,
         "action",
@@ -313,10 +305,8 @@ def _overlay_refusal(
     """The message invoke refuses this change with under the infra overlay guards, or None."""
     try:
         guard_action_change(request, cls, name, path, document)
-    except HTTPException as exc:
-        if not isinstance(exc.detail, dict):
-            raise
-        return exc.detail["message"]
+    except ProblemError as exc:
+        return exc.problem.detail
     return None
 
 
@@ -365,9 +355,7 @@ def create_action(
     try:
         _actions(request).refuse_credentials(body)
     except CredentialInActionError as exc:
-        raise HTTPException(
-            400, detail={"code": "credential_in_action", "message": str(exc)}
-        ) from exc
+        raise ProblemError(400, str(exc), code="credential_in_action") from exc
 
     def _write(branch: str):
         return _actions(request).save(body, user.user_id, branch=branch)
@@ -398,7 +386,7 @@ def delete_action(name: str, user: CurrentUser, request: Request, response: Resp
     try:
         _actions(request).get(name)
     except ResourceNotFoundError as exc:
-        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+        raise ProblemError(404, str(exc), code="not_found") from exc
 
     def _write(branch: str):
         return _actions(request).delete(name, user.user_id, branch=branch)
@@ -458,7 +446,7 @@ def delete_policy(name: str, user: CurrentUser, request: Request, response: Resp
     try:
         gc.get(_POLICY_CLASS, name)
     except ResourceNotFoundError as exc:
-        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+        raise ProblemError(404, str(exc), code="not_found") from exc
 
     def _write(branch: str):
         return gc.delete(_POLICY_CLASS, name, user.user_id, branch=branch)

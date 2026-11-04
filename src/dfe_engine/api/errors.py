@@ -1,210 +1,39 @@
-"""Unified error handling for DFE Engine API.
+#  Project:      dfe-engine
+#  File:         api/errors.py
+#  Purpose:      Engine problem codes, the domain exceptions they answer, and backend-text hiding
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-All errors return ``ErrorResponse`` -- a single shape the UI can parse uniformly.
-Pydantic 422 errors are reshaped into the same format with field-level detail.
+"""Engine errors as RFC 9457 problem+json, through scalo's ``Problem``.
+
+A route raises :class:`scalo.api.ProblemError` with a stable snake_case ``code``.
+The domain exceptions below are answered the same way wherever they are raised.
 """
 
 from collections.abc import Sequence
-from typing import Annotated, Any, Literal, NoReturn
+from typing import Any, NoReturn
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.openapi.constants import REF_TEMPLATE
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-from scalo.api import ProblemError
+from scalo.api import ProblemError, problem_response
 from scalo.logger import logger
-from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.routing import BaseRoute
 
 from dfe_engine.api.middleware.access_log import route_template
 from dfe_engine.http_errors import failure_reference, referenced
 from dfe_engine.log_limit import LineLimit
 
-# -- Response models ------------------------------------------
-
-
-class FieldError(BaseModel):
-    """A validation error on a specific field."""
-
-    field: str = Field(description="Dotted path to the invalid field")
-    message: str = Field(description="Human-readable error message")
-    code: str = Field(default="validation_error", description="Machine-readable error code")
-
-
-class ErrorResponse(BaseModel):
-    """Unified error response.
-
-    All API errors return this shape. The UI can always parse:
-    - ``code`` for programmatic branching
-    - ``message`` for a human-readable summary
-    - ``errors`` for field-level validation details (422 only)
-    - ``context`` for optional structured data on specific errors (e.g. conflicts)
-    """
-
-    code: str = Field(description="Machine-readable error code")
-    message: str = Field(description="Human-readable error summary")
-    errors: list[FieldError] = Field(default_factory=list)
-    context: dict[str, Any] | None = Field(
-        default=None,
-        description="Structured details for specific errors (e.g. match_conflict)",
-    )
-
-
-class SourceNameConflictErrorResponse(BaseModel):
-    """409 when POST /sources and the source name already exists."""
-
-    code: Literal["conflict"] = "conflict"
-    message: str = Field(description="Human-readable explanation")
-    errors: list[FieldError] = Field(default_factory=list)
-
-
-class MatchConflictContext(BaseModel):
-    """Structured context for a receiver condition another enabled source already has."""
-
-    source: str = Field(description="Source identifier being saved")
-    conflicting_source: str = Field(
-        description="Other enabled source that already uses this condition",
-    )
-    field: str = Field(description="Receiver match JSON field name, empty for a group or a when")
-    value: str = Field(description="Receiver match expected value, empty for a group or a when")
-
-
-class MatchConflictErrorResponse(BaseModel):
-    """409 when two enabled sources share the same receiver match rule."""
-
-    code: Literal["match_conflict"] = "match_conflict"
-    message: str = Field(description="Human-readable explanation")
-    errors: list[FieldError] = Field(default_factory=list)
-    context: MatchConflictContext
-
-
-class AliasConflictContext(BaseModel):
-    """Structured context for an alias two enabled sources claim under one profile."""
-
-    source: str = Field(description="Source identifier being saved")
-    conflicting_source: str = Field(description="Other enabled source that already has the alias")
-    profile: str = Field(description="The compatibility profile both name it under")
-    alias: str = Field(description="The alias")
-
-
-class AliasConflictErrorResponse(BaseModel):
-    """409 when two enabled sources claim one alias under the same compatibility profile."""
-
-    code: Literal["alias_conflict"] = "alias_conflict"
-    message: str = Field(description="Human-readable explanation")
-    errors: list[FieldError] = Field(default_factory=list)
-    context: AliasConflictContext
-
-
-class RuleErrorSpan(BaseModel):
-    """Where in a CEL Fast condition a refusal points, in UTF-16 code units as a browser indexes."""
-
-    start: int = Field(description="First code unit of the text at fault")
-    end: int = Field(description="One past the last code unit")
-
-
-class RuleError(BaseModel):
-    """One reason the receiver would refuse a source's rule."""
-
-    field: str = Field(
-        description="The body field at fault: when, match, aliases or compat_profiles"
-    )
-    message: str = Field(description="What is wrong, as the receiver's rule engine reports it")
-    span: RuleErrorSpan | None = Field(
-        default=None, description="For when: the function name or character the check stopped at"
-    )
-
-
-class InvalidRuleContext(BaseModel):
-    """Structured context for a source whose rule the receiver would refuse."""
-
-    source: str = Field(description="Source identifier being saved")
-    rule_errors: list[RuleError] = Field(description="Every refusal, each with its span")
-
-
-class InvalidRuleErrorResponse(BaseModel):
-    """422 when a source's match, when or profile bindings would not compile in the receiver."""
-
-    code: Literal["invalid_rule"] = "invalid_rule"
-    message: str = Field(description="Human-readable explanation")
-    errors: list[FieldError] = Field(default_factory=list)
-    context: InvalidRuleContext
-
-
-class CoreResourceConflictContext(BaseModel):
-    """Structured context for a write that named an engine-owned resource."""
-
-    source: str = Field(description="The engine-owned source the write named")
-
-
-class CoreResourceConflictErrorResponse(BaseModel):
-    """409 when a write names a resource the engine owns and reconciles itself."""
-
-    code: Literal["conflict"] = "conflict"
-    message: str = Field(description="Human-readable explanation")
-    errors: list[FieldError] = Field(default_factory=list)
-    context: CoreResourceConflictContext
-
-
 TOPICS_NOT_CREATED = "topics_not_created"
-
-
-class TopicNotCreated(BaseModel):
-    """One Kafka topic a source deploy needed and the broker did not create."""
-
-    topic: str = Field(description="The topic name")
-    reason: str = Field(
-        description="Why, naming the broker's error code where it gave one and never its text"
-    )
-
-
-class TopicsNotCreatedContext(BaseModel):
-    """Structured context for a source deploy refused because its topics were not created."""
-
-    source: str = Field(description="The source being deployed")
-    topics: list[TopicNotCreated] = Field(description="Every topic the broker did not create")
-
-
-class TopicsNotCreatedErrorResponse(BaseModel):
-    """502 when a source on the bus transport is deployed and the broker did not create its topics.
-
-    The source is not marked deployed. Its ClickHouse table is already in place,
-    and a later deploy re-runs both steps.
-    """
-
-    code: Literal["topics_not_created"] = "topics_not_created"
-    message: str = Field(description="Human-readable explanation, naming each topic and reason")
-    errors: list[FieldError] = Field(default_factory=list)
-    context: TopicsNotCreatedContext
-
-
-# Plain union, not discriminated: SourceNameConflictErrorResponse and
-# CoreResourceConflictErrorResponse both carry code "conflict", which
-# Field(discriminator="code") refuses to build a union over.
-SourceCreateConflictResponse = (
-    SourceNameConflictErrorResponse
-    | CoreResourceConflictErrorResponse
-    | MatchConflictErrorResponse
-    | AliasConflictErrorResponse
-)
-
-SourceWriteConflictResponse = Annotated[
-    MatchConflictErrorResponse | CoreResourceConflictErrorResponse | AliasConflictErrorResponse,
-    Field(discriminator="code"),
-]
-
-
-def _error_response_json(body: ErrorResponse) -> dict[str, Any]:
-    """Serialize for HTTP; omit null optional fields."""
-    return body.model_dump(mode="json", exclude_none=True)
 
 
 # -- Error codes ----------------------------------------------
 
 
 class ErrorCode:
-    """Machine-readable error codes used in ErrorResponse."""
+    """Machine-readable problem codes the console branches on."""
 
     UNAUTHORIZED = "unauthorized"
     FORBIDDEN = "forbidden"
@@ -267,8 +96,8 @@ def backend_failure(
     reference: str = "",
     limit: LineLimit | None = None,
     **fields: Any,
-) -> HTTPException:
-    """The HTTPException a route raises for a failure whose text is logged instead of sent.
+) -> ProblemError:
+    """The ProblemError a route raises for a failure whose text is logged instead of sent.
 
     The answer and the log line carry the same reference, so whoever reads the
     answer can find the reason.
@@ -291,11 +120,7 @@ def backend_failure(
     """
     reference = reference or failure_reference()
     told = hide_backend_text(message, exc, event=event, limit=limit, reference=reference, **fields)
-    return HTTPException(
-        status_code=status_code,
-        detail={"code": code, "message": referenced(told, reference)},
-        headers=headers,
-    )
+    return ProblemError(status_code, referenced(told, reference), code=code, headers=headers)
 
 
 def engine_message(exc: BaseException, fallback: str, *, event: str, **fields: Any) -> str:
@@ -318,19 +143,15 @@ def engine_message(exc: BaseException, fallback: str, *, event: str, **fields: A
     return hide_backend_text(fallback, exc, event=event, **fields)
 
 
-def no_schema_error(source: str, version_id: str) -> HTTPException:
+def no_schema_error(source: str, version_id: str) -> ProblemError:
     """Build the 404 for a source version that names no schema, saying how to give it one."""
-    return HTTPException(
-        status_code=404,
-        detail={
-            "code": "no_schema",
-            "message": (
-                f"Source {source!r} version {version_id!r} has no schema configured. "
-                "Set schema.meta_schema, schema.derived_schema or schema.additional_fields "
-                "on the source, importing a meta schema with POST /api/v1/schemas/import "
-                "first if none fits"
-            ),
-        },
+    return ProblemError(
+        404,
+        f"Source {source!r} version {version_id!r} has no schema configured. "
+        "Set schema.meta_schema, schema.derived_schema or schema.additional_fields "
+        "on the source, importing a meta schema with POST /api/v1/schemas/import "
+        "first if none fits",
+        code="no_schema",
     )
 
 
@@ -344,148 +165,77 @@ def raise_exchange_http(exc: Exception) -> NoReturn:
     from dfe_engine.exchange.schemas import ExchangeConflictError, ExchangeUnresolvedError
 
     if isinstance(exc, ExchangeConflictError):
-        raise HTTPException(
-            status_code=409,
-            detail={"code": ErrorCode.CONFLICT, "message": str(exc)},
-        ) from exc
+        raise ProblemError(409, str(exc), code=ErrorCode.CONFLICT) from exc
     if isinstance(exc, ExchangeUnresolvedError):
-        raise HTTPException(
-            status_code=422,
-            detail={"code": ErrorCode.UNRESOLVED_REFERENCE, "message": str(exc)},
-        ) from exc
-    raise HTTPException(
-        status_code=422,
-        detail={"code": ErrorCode.VALIDATION_ERROR, "message": str(exc)},
-    ) from exc
+        raise ProblemError(422, str(exc), code=ErrorCode.UNRESOLVED_REFERENCE) from exc
+    raise ProblemError(422, str(exc), code=ErrorCode.VALIDATION_ERROR) from exc
 
 
 # -- Exception handlers ---------------------------------------
 
 
+def _answer(
+    status: int, code: str, detail: str, headers: dict[str, str] | None = None, **extensions: Any
+) -> JSONResponse:
+    error = ProblemError(status, detail, code=code, headers=headers, **extensions)
+    return problem_response(error.problem, error.headers)
+
+
 def install_exception_handlers(app: FastAPI) -> None:
-    """Register all exception handlers on the app."""
+    """Answer the engine's domain exceptions as problems. Call it after :func:`scalo.api.install`."""
+    from scalo.resilience import ServiceUnavailable
+
     from dfe_engine.api.password_floor import count_floor_refusal, is_floor_refusal
-
-    # Starlette's base class, so the router's own 404 and 405 answer this envelope too.
-    @app.exception_handler(StarletteHTTPException)
-    async def http_exception_handler(_request: Request, exc: StarletteHTTPException):
-        if isinstance(exc.detail, str):
-            body = ErrorResponse(code="request_error", message=exc.detail)
-        elif isinstance(exc.detail, dict):
-            d = exc.detail
-            code = d.get("error") or d.get("code") or "request_error"
-            if not isinstance(code, str):
-                code = "request_error"
-            message = d.get("message")
-            if not isinstance(message, str):
-                message = str(d)
-            reserved = {"code", "message", "error"}
-            ctx = {k: v for k, v in d.items() if k not in reserved}
-            body = ErrorResponse(code=code, message=message, context=ctx or None)
-        else:
-            body = ErrorResponse(code="request_error", message=str(exc.detail))
-        # Kept so a 401 names its scheme and a 429 says when to retry.
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=_error_response_json(body),
-            headers=exc.headers,
-        )
-
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(request: Request, exc: RequestValidationError):
-        errors = exc.errors()
-        if is_floor_refusal(errors):
-            count_floor_refusal(request)
-        field_errors = [
-            FieldError(
-                field=".".join(str(loc) for loc in err["loc"] if loc != "body"),
-                message=err["msg"],
-                code=err.get("type", "validation_error"),
-            )
-            for err in errors
-        ]
-        body = ErrorResponse(
-            code=ErrorCode.VALIDATION_ERROR,
-            message=f"{len(field_errors)} validation error(s)",
-            errors=field_errors,
-        )
-        return JSONResponse(status_code=422, content=_error_response_json(body))
-
-    # scalo.api's precondition and page-token helpers raise this, answered in the same envelope.
-    @app.exception_handler(ProblemError)
-    async def problem_error_handler(_request: Request, exc: ProblemError):
-        problem = exc.problem
-        body = ErrorResponse(
-            code=problem.code or "request_error",
-            message=problem.detail or problem.title,
-            errors=[
-                FieldError(
-                    field=error.field,
-                    message=error.detail,
-                    code=error.code or ErrorCode.VALIDATION_ERROR,
-                )
-                for error in problem.errors
-            ],
-            context=problem.model_extra or None,
-        )
-        return JSONResponse(
-            status_code=exc.status, content=_error_response_json(body), headers=exc.headers
-        )
-
-    # Import engine exceptions here to avoid circular imports at module level
+    from dfe_engine.api.task_manager import TaskCapacityError
     from dfe_engine.api.v1.scim import SCIM_ROOT, scim_error
     from dfe_engine.auth.models import AuthenticationError, AuthorizationError
+    from dfe_engine.auth.protected_accounts import ProtectedAccountError
+    from dfe_engine.gitcrud.engine import ResourceNotFoundError
+    from dfe_engine.gitops.repo import GitopsUnavailableError
+    from dfe_engine.names import InvalidNameError
+    from dfe_engine.secrets import SecretNameHeldError
 
     def is_scim(request: Request) -> bool:
-        """Whether *request* came to a SCIM route, whose client reads the RFC 7644 envelope."""
         return request.url.path.startswith(SCIM_ROOT)
 
+    problem_validation = app.exception_handlers[RequestValidationError]
+
+    @app.exception_handler(RequestValidationError)
+    async def validation(request: Request, exc: RequestValidationError):
+        if is_floor_refusal(exc.errors()):
+            count_floor_refusal(request)
+        return await problem_validation(request, exc)  # ty: ignore[invalid-await]  # scalo registers an async handler
+
     @app.exception_handler(AuthenticationError)
-    async def auth_error_handler(_request: Request, exc: AuthenticationError):
-        body = ErrorResponse(code=ErrorCode.UNAUTHORIZED, message=str(exc))
-        return JSONResponse(status_code=401, content=_error_response_json(body))
+    async def unauthenticated(_request: Request, exc: AuthenticationError):
+        return _answer(401, ErrorCode.UNAUTHORIZED, str(exc))
 
     @app.exception_handler(AuthorizationError)
-    async def authz_error_handler(request: Request, exc: AuthorizationError):
+    async def forbidden(request: Request, exc: AuthorizationError):
         if is_scim(request):
             return scim_error(403, str(exc))
-        body = ErrorResponse(code=ErrorCode.FORBIDDEN, message=str(exc))
-        return JSONResponse(status_code=403, content=_error_response_json(body))
+        return _answer(403, ErrorCode.FORBIDDEN, str(exc))
 
-    # Registered once rather than caught per route, so a route nobody has written
-    # yet answers a protected-name refusal the same way.
     # Starlette matches the most derived handler, so this wins over AuthorizationError.
-    from dfe_engine.auth.protected_accounts import ProtectedAccountError
-
     @app.exception_handler(ProtectedAccountError)
-    async def protected_account_handler(request: Request, exc: ProtectedAccountError):
+    async def protected_account(request: Request, exc: ProtectedAccountError):
         if is_scim(request):
             # mutability is the nearest RFC 7644 scimType: the attribute is not
             # mutable on this resource, whatever it is on any other.
             return scim_error(403, str(exc), "mutability")
-        body = ErrorResponse(code=ErrorCode.PROTECTED_ACCOUNT, message=str(exc))
-        return JSONResponse(status_code=403, content=_error_response_json(body))
-
-    # One handler for every route that submits a background task.
-    from dfe_engine.api.task_manager import TaskCapacityError
+        return _answer(403, ErrorCode.PROTECTED_ACCOUNT, str(exc))
 
     @app.exception_handler(TaskCapacityError)
-    async def task_capacity_handler(_request: Request, exc: TaskCapacityError):
-        body = ErrorResponse(code=ErrorCode.TOO_MANY_TASKS, message=str(exc))
-        return JSONResponse(status_code=429, content=_error_response_json(body))
+    async def task_capacity(_request: Request, exc: TaskCapacityError):
+        return _answer(429, ErrorCode.TOO_MANY_TASKS, str(exc))
 
-    # A backing service (today: ClickHouse) was unreachable after its
-    # reconnect-and-retry budget was exhausted. Retryable -> 503, never a
-    # 500/crash. ``waking`` is True when a CH Cloud auto-wake was in flight, so the
-    # UI can say "warming up" and back off rather than treat it as a hard outage.
-    from scalo.resilience import ServiceUnavailable
-
+    # ``waking`` is true while a ClickHouse Cloud auto-wake is in flight, so the
+    # console can say "warming up" and back off rather than report an outage.
     @app.exception_handler(ServiceUnavailable)
-    async def service_unavailable_handler(request: Request, exc: ServiceUnavailable):
+    async def service_unavailable(request: Request, exc: ServiceUnavailable):
         waking = bool(getattr(exc, "waking", False))
-        if waking:
-            message = "Backing service is warming up, retry shortly"
-        else:
+        message = "Backing service is warming up, retry shortly"
+        if not waking:
             # scalo's message ends with the backend's last error, verbatim.
             message = hide_backend_text(
                 SERVICE_UNAVAILABLE_MESSAGE,
@@ -493,66 +243,50 @@ def install_exception_handlers(app: FastAPI) -> None:
                 event="backing service unavailable",
                 route=route_template(request.scope),
             )
-        body = ErrorResponse(
-            code=ErrorCode.SERVICE_UNAVAILABLE,
-            message=message,
-            context={"waking": waking},
-        )
-        return JSONResponse(status_code=503, content=_error_response_json(body))
+        return _answer(503, ErrorCode.SERVICE_UNAVAILABLE, message, waking=waking)
 
-    # The deploy repo stayed unreachable for a write's whole retry budget. Starlette
-    # matches the most derived handler, so this wins over ServiceUnavailable.
-    from dfe_engine.gitops.repo import GitopsUnavailableError
-
+    # Starlette matches the most derived handler, so this wins over ServiceUnavailable.
     @app.exception_handler(GitopsUnavailableError)
-    async def gitops_unavailable_handler(request: Request, exc: GitopsUnavailableError):
-        body = ErrorResponse(
-            code=ErrorCode.SERVICE_UNAVAILABLE,
-            message=hide_backend_text(
-                GITOPS_UNAVAILABLE_MESSAGE,
-                exc,
-                event="deploy repo unavailable",
-                route=route_template(request.scope),
-            ),
-            context={"service": "gitops", "remote": exc.remote},
+    async def gitops_unavailable(request: Request, exc: GitopsUnavailableError):
+        message = hide_backend_text(
+            GITOPS_UNAVAILABLE_MESSAGE,
+            exc,
+            event="deploy repo unavailable",
+            route=route_template(request.scope),
         )
-        return JSONResponse(
-            status_code=503,
-            content=_error_response_json(body),
-            headers={"Retry-After": str(exc.retry_after_seconds)},
+        headers = {"Retry-After": str(exc.retry_after_seconds)}
+        return _answer(
+            503,
+            ErrorCode.SERVICE_UNAVAILABLE,
+            message,
+            headers,
+            service="gitops",
+            remote=exc.remote,
         )
-
-    # A secret still being deleted holds the name a write needs, which the caller can wait out.
-    from dfe_engine.secrets import SecretNameHeldError
 
     @app.exception_handler(SecretNameHeldError)
-    async def secret_name_held_handler(_request: Request, exc: SecretNameHeldError):
-        body = ErrorResponse(code=ErrorCode.CONFLICT, message=exc.message)
-        return JSONResponse(status_code=409, content=_error_response_json(body))
-
-    # A path parameter names a file on every read as well as every write, so a route need not catch these itself.
-    from dfe_engine.gitcrud.engine import ResourceNotFoundError
-    from dfe_engine.names import InvalidNameError
+    async def secret_name_held(_request: Request, exc: SecretNameHeldError):
+        return _answer(409, ErrorCode.CONFLICT, exc.message)
 
     @app.exception_handler(InvalidNameError)
-    async def invalid_name_handler(_request: Request, exc: InvalidNameError):
-        body = ErrorResponse(code=ErrorCode.INVALID_NAME, message=str(exc))
-        return JSONResponse(status_code=400, content=_error_response_json(body))
+    async def invalid_name(_request: Request, exc: InvalidNameError):
+        return _answer(400, ErrorCode.INVALID_NAME, str(exc))
 
     @app.exception_handler(ResourceNotFoundError)
-    async def resource_not_found_handler(_request: Request, _exc: ResourceNotFoundError):
-        body = ErrorResponse(code=ErrorCode.NOT_FOUND, message="The resource does not exist")
-        return JSONResponse(status_code=404, content=_error_response_json(body))
+    async def resource_not_found(_request: Request, _exc: ResourceNotFoundError):
+        return _answer(404, ErrorCode.NOT_FOUND, "The resource does not exist")
 
+    # Registered here, not by scalo, so a SCIM client gets the RFC 7644 envelope.
     @app.exception_handler(Exception)
-    async def unhandled_exception_handler(request: Request, exc: Exception):
+    async def unhandled(request: Request, exc: Exception):
         # The route template, since a path can carry a login or other identifier.
-        logger.exception(f"Unhandled exception on {request.method} {route_template(request.scope)}")
+        logger.opt(exception=exc).error(
+            "Unhandled exception", method=request.method, route=route_template(request.scope)
+        )
         message = "An unexpected error occurred"
         if is_scim(request):
             return scim_error(500, message)
-        body = ErrorResponse(code=ErrorCode.INTERNAL_ERROR, message=message)
-        return JSONResponse(status_code=500, content=_error_response_json(body))
+        return _answer(500, ErrorCode.INTERNAL_ERROR, message)
 
 
 # -- OpenAPI declarations -------------------------------------
@@ -563,25 +297,9 @@ _UNAUTHORIZED_DESCRIPTION = (
 )
 _FORBIDDEN_DESCRIPTION = (
     "Refused: the session lacks the action this route checks, or its account must "
-    "replace an issued password first"
+    "replace an issued password first. A SCIM route answers a refused action in the "
+    "RFC 7644 error envelope"
 )
-_SCIM_FORBIDDEN_DESCRIPTION = (
-    f"{_FORBIDDEN_DESCRIPTION}. A refused action answers in the RFC 7644 error envelope."
-)
-
-
-def _register_schema(schemas: dict[str, Any], model: type[BaseModel]) -> None:
-    """Add *model* and the models it nests to the spec, keeping any definition already there."""
-    definition = model.model_json_schema(ref_template=REF_TEMPLATE)
-    for name, nested in definition.pop("$defs", {}).items():
-        schemas.setdefault(name, nested)
-    schemas.setdefault(model.__name__, definition)
-
-
-def _error_content() -> dict[str, Any]:
-    """The native envelope as an OpenAPI response's content."""
-    ref = {"$ref": REF_TEMPLATE.format(model=ErrorResponse.__name__)}
-    return {"application/json": {"schema": ref}}
 
 
 def declare_auth_errors(openapi: dict[str, Any], routes: Sequence[BaseRoute]) -> None:
@@ -589,32 +307,17 @@ def declare_auth_errors(openapi: dict[str, Any], routes: Sequence[BaseRoute]) ->
 
     Those are the routes whose dependency tree reaches
     :func:`~dfe_engine.api.deps.get_current_user`, through ``CurrentUser`` or
-    ``require_action`` (:func:`~dfe_engine.api.deps.guarded_operations`), so a
-    new route behind either carries both with nothing listed by hand. A public
-    route carries neither. Both answer :class:`ErrorResponse`, except a refused
-    action on a SCIM route, which the 403 handler answers in the SCIM envelope.
+    ``require_action`` (:func:`~dfe_engine.api.deps.guarded_operations`). A
+    public route carries neither. :func:`scalo.api.install` types both as problems.
 
     Args:
         openapi: The generated OpenAPI document, updated in place.
         routes: The application's routes, included routers unexpanded.
     """
     from dfe_engine.api.deps import guarded_operations
-    from dfe_engine.api.v1.scim import SCIM_MEDIA_TYPE, SCIM_ROOT
 
-    components = openapi.setdefault("components", {})
-    schemas = components.setdefault("schemas", {})
-    _register_schema(schemas, ErrorResponse)
-    components["schemas"] = dict(sorted(schemas.items()))
-
-    for path, operation in guarded_operations(openapi, routes):
+    for _path, operation in guarded_operations(openapi, routes):
         responses = operation.setdefault("responses", {})
-        responses.setdefault(
-            "401", {"description": _UNAUTHORIZED_DESCRIPTION, "content": _error_content()}
-        )
-        description, content = _FORBIDDEN_DESCRIPTION, _error_content()
-        if path.startswith(SCIM_ROOT):
-            description = _SCIM_FORBIDDEN_DESCRIPTION
-            # Unmodelled, as every SCIM body in this spec is.
-            content[SCIM_MEDIA_TYPE] = {"schema": {}}
-        responses.setdefault("403", {"description": description, "content": content})
+        responses.setdefault("401", {"description": _UNAUTHORIZED_DESCRIPTION})
+        responses.setdefault("403", {"description": _FORBIDDEN_DESCRIPTION})
         operation["responses"] = dict(sorted(responses.items()))

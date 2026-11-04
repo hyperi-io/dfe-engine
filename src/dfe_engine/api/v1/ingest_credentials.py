@@ -33,7 +33,7 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 from scalo.api import (
     DryRun,
@@ -162,11 +162,9 @@ def _now() -> str:
 
 
 def _require_org(registry: OrgRegistry, org: str) -> None:
-    """Raises: HTTPException: 404 ``not_found`` when no org is named *org*."""
+    """Raises: ProblemError: 404 ``not_found`` when no org is named *org*."""
     if registry.get(org) is None:
-        raise HTTPException(
-            status_code=404, detail={"code": "not_found", "message": f"Org '{org}' not found"}
-        )
+        raise ProblemError(404, f"Org '{org}' not found", code="not_found")
 
 
 def _owned(registry: OrgRegistry, org: str, name: str) -> IngestCredential | None:
@@ -176,15 +174,11 @@ def _owned(registry: OrgRegistry, org: str, name: str) -> IngestCredential | Non
 
 
 def _require_owned(registry: OrgRegistry, org: str, name: str) -> IngestCredential:
-    """Raises: HTTPException: 404 ``not_found`` unless *org* owns a credential *name*."""
+    """Raises: ProblemError: 404 ``not_found`` unless *org* owns a credential *name*."""
     held = _owned(registry, org, name)
     if held is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Ingest credential '{name}' not found in org '{org}'",
-            },
+        raise ProblemError(
+            404, f"Ingest credential '{name}' not found in org '{org}'", code="not_found"
         )
     return held
 
@@ -277,7 +271,7 @@ def _check_bound_orgs(request: Request, user: Any, credential: IngestCredential)
             check_action(request, user, scopes_dict["org_write"], scope=Scope(type="org", id=bound))
 
 
-def _secrets_failure(exc: Exception) -> HTTPException:
+def _secrets_failure(exc: Exception) -> ProblemError:
     return backend_failure(
         503,
         "secrets_unavailable",
@@ -294,7 +288,7 @@ def _sync_tokens(request: Request) -> None:
     """Rewrite the receiver's bearer secrets from the credentials as they now are.
 
     Raises:
-        HTTPException: 503 ``secrets_unavailable`` when the secrets backend refuses.
+        ProblemError: 503 ``secrets_unavailable`` when the secrets backend refuses.
     """
     try:
         sync_bearer_tokens(
@@ -341,16 +335,14 @@ def _store(
     the stored one is still that credential.
 
     Raises:
-        HTTPException: 409 ``credential_id_taken`` when another org took the id first.
+        ProblemError: 409 ``credential_id_taken`` when another org took the id first.
         ProblemError: 412 or 409 ``conflict`` when another write created, changed or
             removed it since, as :func:`_changed_since_read` judges.
     """
     try:
         _registry(request).ingest_credentials.put(credential, new=new, current=current)
     except CredentialIdTakenError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "credential_id_taken", "message": str(exc)}
-        ) from exc
+        raise ProblemError(409, str(exc), code="credential_id_taken") from exc
     except CredentialChangedError as exc:
         raise _changed_since_read(request, credential, preconditions) from exc
 
@@ -367,7 +359,7 @@ def _put(
     record and new token stand, and this write changes nothing.
 
     Raises:
-        HTTPException: 409 ``credential_id_taken`` when another org took the id first,
+        ProblemError: 409 ``credential_id_taken`` when another org took the id first,
             503 ``secrets_unavailable`` when the secrets backend refuses.
         ProblemError: 412 or 409 ``conflict`` when another write changed or removed it since.
     """
@@ -451,7 +443,7 @@ def _mint(
     finishes drops the old token.
 
     Raises:
-        HTTPException: 409 ``credential_id_taken`` when another org took the id first,
+        ProblemError: 409 ``credential_id_taken`` when another org took the id first,
             503 ``secrets_unavailable`` when the secrets backend or mirror refuses.
         ProblemError: 412 or 409 ``conflict`` when another write created, changed or
             removed it first.
@@ -468,7 +460,7 @@ def _mint(
         raise
     try:
         _sync_tokens(request)
-    except HTTPException:
+    except ProblemError:
         try:
             _put_back_record(request, credential, previous)
         finally:
@@ -486,7 +478,7 @@ def _delete(request: Request, credential: IngestCredential, preconditions: Preco
     for an org's cascade.
 
     Raises:
-        HTTPException: 503 ``secrets_unavailable`` when the secrets backend refuses.
+        ProblemError: 503 ``secrets_unavailable`` when the secrets backend refuses.
         ProblemError: 412 or 409 ``conflict`` when another write changed or removed it since.
     """
     try:
@@ -556,13 +548,11 @@ async def apply_ingest_credential(
     current = _owned(registry, org, credential)
     preconditions.check(None if current is None else credential_etag(current))
     if current is None and registry.ingest_credentials.get(credential) is not None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "credential_id_taken",
-                "message": f"Ingest credential id '{credential}' is taken: ids are unique "
-                "across every org because the receiver keys its bindings on them",
-            },
+        raise ProblemError(
+            409,
+            f"Ingest credential id '{credential}' is taken: ids are unique "
+            "across every org because the receiver keys its bindings on them",
+            code="credential_id_taken",
         )
     desired = _desired(registry, org, credential, body, get_settings().secrets)
     _check_bound_orgs(request, user, desired)

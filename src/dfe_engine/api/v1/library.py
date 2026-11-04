@@ -32,8 +32,9 @@ refused. Metadata and tags are mutable and never produce a version.
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from pydantic import BaseModel, Field
+from scalo.api import FieldError, ListParams, Page, ProblemError, paginate
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.v1.helm import conflict_error
@@ -210,10 +211,7 @@ class UsageModel(BaseModel):
 def _gitcrud(request: Request) -> GitCrud:
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "gitops is not enabled"},
-        )
+        raise ProblemError(503, "gitops is not enabled", code="not_configured")
     return gc
 
 
@@ -230,7 +228,7 @@ def _check_name(name: str) -> str:
     try:
         validate_name(name)
     except CommitPolicyError as exc:
-        raise HTTPException(400, detail={"code": "invalid_name", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_name") from exc
     return name
 
 
@@ -239,12 +237,8 @@ def _kind(name: str):
         return library.kind(name)
     except library.UnknownKindError:
         declared = ", ".join(k.name for k in library.kinds()) or "none"
-        raise HTTPException(
-            400,
-            detail={
-                "code": "unknown_kind",
-                "message": f"no kind {name!r} is declared (declared: {declared})",
-            },
+        raise ProblemError(
+            400, f"no kind {name!r} is declared (declared: {declared})", code="unknown_kind"
         ) from None
 
 
@@ -253,28 +247,21 @@ def _state(value: str) -> library.LifecycleState:
         return library.LifecycleState(value)
     except ValueError:
         allowed = ", ".join(str(s) for s in library.LifecycleState)
-        raise HTTPException(
-            400,
-            detail={"code": "invalid_state", "message": f"expected one of: {allowed}"},
-        ) from None
+        raise ProblemError(400, f"expected one of: {allowed}", code="invalid_state") from None
 
 
 def _envelope(gc: GitCrud, name: str) -> dict:
     try:
         return gc.get(_CLASS, name)
     except ResourceNotFoundError:
-        raise HTTPException(
-            404, detail={"code": "no_such_artifact", "message": f"no artefact {name!r}"}
-        ) from None
+        raise ProblemError(404, f"no artefact {name!r}", code="no_such_artifact") from None
 
 
 def _version(env: dict, version: int) -> library.ArtifactVersion:
     try:
         return library.read_version(env, version)
     except library.VersionNotFoundError:
-        raise HTTPException(
-            404, detail={"code": "no_such_version", "message": f"no version {version}"}
-        ) from None
+        raise ProblemError(404, f"no version {version}", code="no_such_version") from None
 
 
 def _content(gc: GitCrud, name: str, env: dict, found: library.ArtifactVersion) -> str:
@@ -282,13 +269,10 @@ def _content(gc: GitCrud, name: str, env: dict, found: library.ArtifactVersion) 
     try:
         raw = gc.read_payload_bytes(_CLASS, name, found.path)
     except ResourceNotFoundError:
-        raise HTTPException(
+        raise ProblemError(
             409,
-            detail={
-                "code": "missing_content",
-                "message": f"version {found.version} names {found.path!r}, "
-                "which is not in the repo",
-            },
+            f"version {found.version} names {found.path!r}, which is not in the repo",
+            code="missing_content",
         ) from None
     return library.as_text(library.artifact_kind_of(env), raw)
 
@@ -330,14 +314,12 @@ def _validate(request: Request, language: str, content: str) -> ValidationModel:
         allow_host_functions=posture.allow_host_functions,
     )
     if result.refused or (result.blocks_write and posture.blocking):
-        raise HTTPException(
+        raise ProblemError(
             400,
-            detail={
-                "code": "invalid_content",
-                "message": result.message,
-                "errors": list(result.errors),
-                "backend": result.backend,
-            },
+            result.message,
+            code="invalid_content",
+            errors=[FieldError(field="content", location="body", detail=e) for e in result.errors],
+            backend=result.backend,
         )
     return ValidationModel(
         status=str(result.status),
@@ -369,7 +351,7 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     try:
         return policy.enforce_document(_CLASS, name, stored, doc, override=override)
     except ProtectedVarError as exc:
-        raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
+        raise ProblemError(403, str(exc), code="protected_var") from exc
 
 
 def _fit_subject(name: str, summary: str) -> tuple[str, str]:
@@ -445,7 +427,7 @@ def _commit(
     except ConcurrencyConflictError as exc:
         raise conflict_error(exc) from exc
     except ReviewRequiredError as exc:
-        raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
+        raise ProblemError(409, str(exc), code="review_required") from exc
 
     audit_resource_change(user.user_id, _CLASS, name, "updated", {"summary": summary})
     return WriteResult(
@@ -461,17 +443,20 @@ def _commit(
 
 
 @router.get("/kinds", dependencies=[_READ])
-def list_kinds(user: CurrentUser, request: Request) -> list[KindModel]:
+def list_kinds(query: ListParams, user: CurrentUser, request: Request) -> Page[KindModel]:
     """Every artefact kind the manifest declares."""
-    return [
-        KindModel(
-            name=k.name,
-            language=k.language,
-            suffixes=list(k.suffixes),
-            encoding=str(k.encoding),
-        )
-        for k in library.kinds()
-    ]
+    return paginate(
+        [
+            KindModel(
+                name=k.name,
+                language=k.language,
+                suffixes=list(k.suffixes),
+                encoding=str(k.encoding),
+            )
+            for k in library.kinds()
+        ],
+        query,
+    )
 
 
 # --- artefacts ---
@@ -479,6 +464,7 @@ def list_kinds(user: CurrentUser, request: Request) -> list[KindModel]:
 
 @router.get("", dependencies=[_READ])
 def list_artifacts(
+    query: ListParams,
     user: CurrentUser,
     request: Request,
     kind: str = "",
@@ -489,7 +475,7 @@ def list_artifacts(
         description="Repeatable 'key' or 'key=value' selector; all must match.",
     ),
     q: str = Query(default="", description="Substring of the name or the description."),
-) -> list[ArtifactModel]:
+) -> Page[ArtifactModel]:
     """Every artefact, filtered. Different filters AND together."""
     gc = _gitcrud(request)
     out: list[ArtifactModel] = []
@@ -500,7 +486,8 @@ def list_artifacts(
             continue
         if library.matches(summary, kind_name=kind, group=group, state=state, labels=label, text=q):
             out.append(_summary_model(summary))
-    return out
+    bound = {"kind": kind, "group": group, "state": state, "label": label, "q": q}
+    return paginate(out, query, bound=bound)
 
 
 @router.post("", response_model=WriteResult, dependencies=[_WRITE])
@@ -519,9 +506,7 @@ def create_artifact(
     except ResourceNotFoundError:
         pass
     else:
-        raise HTTPException(
-            409, detail={"code": "already_exists", "message": f"artefact {name!r} already exists"}
-        )
+        raise ProblemError(409, f"artefact {name!r} already exists", code="already_exists")
 
     artifact_kind = _kind(body.kind)
     try:
@@ -532,7 +517,7 @@ def create_artifact(
             labels=body.labels,
         )
     except library.InvalidArtifactError as exc:
-        raise HTTPException(400, detail={"code": "invalid_metadata", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_metadata") from exc
 
     checked: ValidationModel | None = None
     version: int | None = None
@@ -544,9 +529,7 @@ def create_artifact(
                 doc, content=body.content, actor=user.user_id, message=body.message
             )
         except library.InvalidArtifactError as exc:
-            raise HTTPException(
-                400, detail={"code": "invalid_content", "message": str(exc)}
-            ) from exc
+            raise ProblemError(400, str(exc), code="invalid_content") from exc
 
     protected = _enforce(request, user, name, doc)
     result = _commit(
@@ -578,7 +561,7 @@ def patch_artifact(
             doc, description=body.description, labels=body.labels, group=body.group
         )
     except library.InvalidArtifactError as exc:
-        raise HTTPException(400, detail={"code": "invalid_metadata", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_metadata") from exc
     if not changed:
         return WriteResult(changed=False)
     protected = _enforce(request, user, name, doc)
@@ -600,15 +583,11 @@ def delete_artifact(artifact: str, user: CurrentUser, request: Request) -> Write
     linked = links.usage(gc, name)
     if linked:
         where = ", ".join(f"{u.service}/{u.instance}" for u in linked[:5])
-        raise HTTPException(
+        raise ProblemError(
             409,
-            detail={
-                "code": "artifact_in_use",
-                "message": (
-                    f"{name} is linked by {len(linked)} file(s) ({where}); unlink them "
-                    "or set the artefact's state to disabled or deprecated"
-                ),
-            },
+            f"{name} is linked by {len(linked)} file(s) ({where}); unlink them "
+            "or set the artefact's state to disabled or deprecated",
+            code="artifact_in_use",
         )
     settings = request.app.state.settings
     scope, subject_summary = _fit_subject(name, "remove artefact")
@@ -639,7 +618,7 @@ def delete_artifact(artifact: str, user: CurrentUser, request: Request) -> Write
             write=_write,
         )
     except ReviewRequiredError as exc:
-        raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
+        raise ProblemError(409, str(exc), code="review_required") from exc
     audit_resource_change(user.user_id, _CLASS, name, "deleted", {})
     return WriteResult(
         changed=outcome.changed,
@@ -667,11 +646,13 @@ def set_state(
 
 
 @router.get("/{artifact}/versions", dependencies=[_READ])
-def list_versions(artifact: str, user: CurrentUser, request: Request) -> list[VersionSummary]:
+def list_versions(
+    query: ListParams, artifact: str, user: CurrentUser, request: Request
+) -> Page[VersionSummary]:
     """Every version, oldest first, without their content."""
     name = _check_name(artifact)
     env = _envelope(_gitcrud(request), name)
-    return [_version_summary(v) for v in library.versions(env)]
+    return paginate([_version_summary(v) for v in library.versions(env)], query)
 
 
 @router.post("/{artifact}/versions", response_model=WriteResult, dependencies=[_WRITE])
@@ -692,13 +673,10 @@ def publish_version(
     try:
         artifact_kind = library.artifact_kind_of(doc)
     except library.UnknownKindError as exc:
-        raise HTTPException(
+        raise ProblemError(
             409,
-            detail={
-                "code": "unknown_kind",
-                "message": f"artefact declares kind {exc.args[0]!r}, which the manifest no "
-                "longer declares",
-            },
+            f"artefact declares kind {exc.args[0]!r}, which the manifest no longer declares",
+            code="unknown_kind",
         ) from None
     checked = _validate(request, artifact_kind.language, body.content)
     try:
@@ -711,9 +689,9 @@ def publish_version(
             version=body.version,
         )
     except library.InvalidArtifactError as exc:
-        raise HTTPException(400, detail={"code": "invalid_content", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_content") from exc
     except VersionConflictError as exc:
-        raise HTTPException(409, detail={"code": "version_conflict", "message": str(exc)}) from exc
+        raise ProblemError(409, str(exc), code="version_conflict") from exc
 
     if not changed:
         return WriteResult(changed=False, version=version, validation=checked)
@@ -763,12 +741,10 @@ def rollback(
     try:
         raw = gc.read_payload_bytes(_CLASS, name, found.path)
     except ResourceNotFoundError as exc:
-        raise HTTPException(
+        raise ProblemError(
             409,
-            detail={
-                "code": "missing_content",
-                "message": f"version {body.version} names {found.path!r}, which is not in the repo",
-            },
+            f"version {body.version} names {found.path!r}, which is not in the repo",
+            code="missing_content",
         ) from exc
     changed, plan = library.rollback(doc, body.version, raw)
     if not changed:
@@ -800,7 +776,7 @@ def set_tag(
     try:
         changed = library.set_tag(doc, tag, body.version)
     except library.InvalidArtifactError as exc:
-        raise HTTPException(400, detail={"code": "invalid_tag", "message": str(exc)}) from exc
+        raise ProblemError(400, str(exc), code="invalid_tag") from exc
     if not changed:
         return WriteResult(changed=False, version=body.version)
     protected = _enforce(request, user, name, doc)
@@ -818,9 +794,7 @@ def delete_tag(artifact: str, tag: str, user: CurrentUser, request: Request) -> 
     try:
         library.delete_tag(doc, tag)
     except library.TagNotFoundError:
-        raise HTTPException(
-            404, detail={"code": "no_such_tag", "message": f"no tag {tag!r}"}
-        ) from None
+        raise ProblemError(404, f"no tag {tag!r}", code="no_such_tag") from None
     protected = _enforce(request, user, name, doc)
     return _commit(request, user, name, doc, summary=f"untag {tag}", protected=protected)
 
@@ -829,19 +803,24 @@ def delete_tag(artifact: str, tag: str, user: CurrentUser, request: Request) -> 
 
 
 @router.get("/{artifact}/usage", dependencies=[_READ])
-def get_usage(artifact: str, user: CurrentUser, request: Request) -> list[UsageModel]:
+def get_usage(
+    query: ListParams, artifact: str, user: CurrentUser, request: Request
+) -> Page[UsageModel]:
     """Every instance file that links to this artefact."""
     name = _check_name(artifact)
     gc = _gitcrud(request)
     _envelope(gc, name)
-    return [
-        UsageModel(
-            service=u.service,
-            instance=u.instance,
-            file_set=u.file_set,
-            name=u.name,
-            version=u.version,
-            tag=u.tag,
-        )
-        for u in links.usage(gc, name)
-    ]
+    return paginate(
+        [
+            UsageModel(
+                service=u.service,
+                instance=u.instance,
+                file_set=u.file_set,
+                name=u.name,
+                version=u.version,
+                tag=u.tag,
+            )
+            for u in links.usage(gc, name)
+        ],
+        query,
+    )

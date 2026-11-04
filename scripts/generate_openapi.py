@@ -2,11 +2,11 @@
 
 Run after any model/route changes::
 
-    uv run python openapi-spec/generate.py
+    uv run python scripts/generate_openapi.py
 
 Writes:
-- ``openapi.json`` — product API (committed; frontend types, CLI, Prism)
-- ``openapi.e2e.json`` — Playwright helpers for ``make e2e-server``
+- ``openapi.json`` -- product API (committed; frontend types, CLI, Prism)
+- ``openapi.e2e.json`` -- Playwright helpers for ``make e2e-server``
 - ``docs/reference/api-route-map.md`` -- where each operation moves (``route_map.py``)
 """
 
@@ -20,7 +20,7 @@ from dfe_engine.api.app import create_app
 from dfe_engine.api.e2e_docs import build_e2e_spec
 from dfe_engine.settings import SigmaSettings, load_settings
 
-SPEC_DIR = Path(__file__).parent
+SPEC_DIR = Path(__file__).resolve().parents[1] / "openapi"
 SPEC_FILE = SPEC_DIR / "openapi.json"
 E2E_SPEC_FILE = SPEC_DIR / "openapi.e2e.json"
 
@@ -65,7 +65,7 @@ def _spec_version(reported: str) -> str:
 
 def product_spec() -> dict:
     """The product spec, stamped with the release version, as the committed file holds it."""
-    # Schema export only — avoid production posture guard on dev JWT placeholder.
+    # Schema export only -- avoid production posture guard on dev JWT placeholder.
     os.environ["DFE_ENGINE_ENV"] = "dev"
     # The spec describes every operation a deployment can switch on, sigma included.
     settings = load_settings().model_copy(
@@ -99,7 +99,7 @@ def main() -> None:
     try:
         print(f"Route map written to {route_map.write(spec)}")
     except route_map.RouteMapError as exc:
-        raise SystemExit(f"route map refused, fix openapi-spec/route-plan.toml:\n{exc}") from exc
+        raise SystemExit(f"route map refused, fix scripts/route-plan.toml:\n{exc}") from exc
 
 
 if __name__ == "__main__":
