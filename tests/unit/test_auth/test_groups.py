@@ -19,7 +19,6 @@ from scalo.metrics import create_metrics
 
 from dfe_engine.auth.groups import (
     GROUPS_SKIPPED,
-    DocuStoreGroupStore,
     Group,
     GroupExistsError,
     GroupMetrics,
@@ -50,10 +49,10 @@ def _unlinked(manager) -> dict[str, float]:
 
 
 def test_the_stores_annotations_can_be_read():
-    """Both stores define list(), which a bare list[...] in their signatures would name."""
+    """The store defines list(), which a bare list[...] in its signatures would name."""
     assert GroupStore.list.__annotations__["return"] == list[Group]
     assert GroupStore.create.__annotations__["members"] == list[str] | None
-    assert DocuStoreGroupStore.resolve_roles_for_member.__annotations__["return"] == list[str]
+    assert GroupStore.resolve_roles_for_member.__annotations__["return"] == list[str]
 
 
 class TestGroupModel:

@@ -10,8 +10,7 @@
 
 A YAML store joins the name onto its directory as ``{name}.yaml``, so a name
 from a request that reached that join unchecked would resolve a path outside the
-store. The document stores key on the same names, so both backends share one rule,
-:data:`dfe_engine.names.VALID_NAME`.
+store. Every key follows :data:`dfe_engine.names.VALID_NAME`.
 """
 
 from dfe_engine import names

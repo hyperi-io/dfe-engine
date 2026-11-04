@@ -49,11 +49,6 @@ database, which a server without them refuses (dfe-schemas
 ``docs/clickhouse-platform.md``). A configured cluster target must carry the same,
 and keep its SQL users and roles in Keeper.
 
-The document store resolves separately (``mongo_uri``): ``DFE_TEST_MONGO_URI`` if
-set, else one FerretDB per xdist worker on the same docker host, named
-`dfe-engine-test-integration-<worker>-<pid>-ferretdb` and removed at session end.
-DFE_TEST_KEEP does not apply to it.
-
 The Kafka broker resolves the same way (``kafka_bootstrap``): ``DFE_TEST_KAFKA_BOOTSTRAP``
 if set, else one KRaft broker per xdist worker on local docker, named
 `dfe-engine-test-integration-<worker>-<pid>-kafka` and removed at session end.
@@ -92,15 +87,6 @@ from tests.support.producer_contract import in_ci
 _CH_TAG = "26.3.42.3"
 _CH_DIGEST = "sha256:21d572843e59539c7d100286b6f5a6053c341fe4b33c2d7b74b1ff7cb24c5399"
 _DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}@{_CH_DIGEST}"
-
-# The document store production runs (dfe-infra versions.yaml); the eval image
-# bundles its PostgreSQL + DocumentDB backend into one container. versions.yaml
-# pins the production image, not this one, so the digest is ghcr's index for the tag.
-# renovate: datasource=docker depName=ghcr.io/ferretdb/ferretdb-eval
-_FERRETDB_TAG = "2.7.0"
-_FERRETDB_DIGEST = "sha256:1bf47a449dd65839aabfc1a535d1370c98326f8a90de20437eda0aeb30bd8dd5"
-_FERRETDB_IMAGE = f"ghcr.io/ferretdb/ferretdb-eval:{_FERRETDB_TAG}@{_FERRETDB_DIGEST}"
-_FERRETDB_USER = "dfe"
 
 # The broker dfe-infra runs on the docker path, at the digest versions.yaml pins for the tag.
 # renovate: datasource=docker depName=apache/kafka
@@ -1129,29 +1115,6 @@ def _engine_api(
         drop_database_and_policies(client=ch_client, database=database)
 
 
-def _mongo_when_ready(uri: str, timeout: float = 180.0, delay: float = 1.0) -> None:
-    """Poll until an authenticated listDatabases succeeds; ping answers before the backend.
-
-    The eval image initialises its PostgreSQL on first start, and with one container
-    per xdist worker starting at once that has taken longer than a minute on CI.
-    """
-    from pymongo import MongoClient
-
-    deadline = time.monotonic() + timeout
-    last: Exception | None = None
-    while time.monotonic() < deadline:
-        client = MongoClient(uri, serverSelectionTimeoutMS=1000)
-        try:
-            client.list_database_names()
-            return
-        except Exception as exc:  # FerretDB or its PostgreSQL still starting
-            last = exc
-            time.sleep(delay)
-        finally:
-            client.close()
-    raise last if last is not None else RuntimeError("document store unreachable")
-
-
 def _log_tail(docker: list[str], name: str, lines: int = 15) -> str:
     """The container's last log lines on one line, or why they could not be read."""
     try:
@@ -1159,62 +1122,6 @@ def _log_tail(docker: list[str], name: str, lines: int = 15) -> str:
     except (subprocess.SubprocessError, FileNotFoundError) as exc:
         return f"<unavailable: {exc}>"
     return " | ".join((proc.stdout + proc.stderr).split("\n")).strip(" |")
-
-
-@pytest.fixture(scope="session")
-def mongo_uri():
-    """A mongo-wire document store URI: ``DFE_TEST_MONGO_URI``, else FerretDB on docker.
-
-    Session-scoped, so each xdist worker starts one container and its tests share it;
-    every test isolates itself in a throwaway database. The name carries the pid
-    because concurrent runs on one host each have a ``gw0``.
-    """
-    configured = os.environ.get("DFE_TEST_MONGO_URI", "").strip()
-    if configured:
-        yield configured
-        return
-
-    spec = os.environ.get("DFE_TEST_DOCKER_HOST") or "local"
-    docker = _docker_prefix(spec)
-    worker = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    name = _container_name(f"{worker}-{os.getpid()}", "ferretdb")
-    password = secrets.token_hex(16)
-    run_cmd = [
-        *docker,
-        "run",
-        "-d",
-        "--name",
-        name,
-        *_container_labels("ferretdb"),
-        "-p",
-        "0:27017",
-        "-e",
-        f"POSTGRES_USER={_FERRETDB_USER}",
-        "-e",
-        f"POSTGRES_PASSWORD={password}",
-        dockerhub_image(_FERRETDB_IMAGE),
-    ]
-    try:
-        _run(run_cmd, timeout=240)  # first image pull can be slow
-    except (subprocess.SubprocessError, FileNotFoundError) as exc:
-        _unavailable(f"docker host '{spec}' cannot start FerretDB: {exc}")
-
-    def teardown() -> None:
-        _remove_container(docker, name)
-
-    try:
-        out = _run([*docker, "port", name, "27017"], timeout=30).stdout.strip()
-        port = int(out.splitlines()[-1].rsplit(":", 1)[-1])
-        uri = f"mongodb://{_FERRETDB_USER}:{password}@{_reach_address(spec)}:{port}/"
-        _mongo_when_ready(uri)
-    except Exception as exc:
-        tail = _log_tail(docker, name).replace(password, "***")
-        teardown()
-        _unavailable(f"FerretDB on '{spec}' did not come up: {exc}; container log: {tail}")
-    try:
-        yield uri
-    finally:
-        teardown()
 
 
 def _kafka_env(port: int) -> list[str]:

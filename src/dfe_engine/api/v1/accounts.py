@@ -87,7 +87,7 @@ async def _persist_account(
     """Mirror an account write into the durable deploy repo and report the state.
 
     Only the local admin's account doc is git-persisted; regular users are durable
-    in their own store (document store/yaml), so they never touch the deploy repo.
+    in their own YAML store, so they never touch the deploy repo.
     The mirror is a commit and a push, so it runs on a worker thread.
     """
     if not account_durability.is_local_admin(username, settings.auth.local.admin_name):

@@ -39,8 +39,8 @@ from dfe_engine.gitcrud.engine import ResourceNotFoundError
 if TYPE_CHECKING:
     from collections.abc import Collection, Mapping
 
-    from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
-    from dfe_engine.auth.groups import DocuStoreGroupStore, Group, GroupStore
+    from dfe_engine.auth.accounts import Account, AccountStore
+    from dfe_engine.auth.groups import Group, GroupStore
     from dfe_engine.gitcrud.engine import GitCrud
     from dfe_engine.gitops.repo import PublishResult
 
@@ -116,8 +116,8 @@ def _usable_admin_session(account: Account) -> bool:
 
 
 def other_usable_admin_exists(
-    account_store: AccountStore | DocuStoreAccountStore | None,
-    group_store: GroupStore | DocuStoreGroupStore | None,
+    account_store: AccountStore | None,
+    group_store: GroupStore | None,
     *,
     bindings: Mapping[str, str],
     excluding: str,
@@ -147,8 +147,8 @@ def other_usable_admin_exists(
 
 def locks_out_last_admin(
     account: Account,
-    account_store: AccountStore | DocuStoreAccountStore | None,
-    group_store: GroupStore | DocuStoreGroupStore | None,
+    account_store: AccountStore | None,
+    group_store: GroupStore | None,
     *,
     bindings: Mapping[str, str],
     enabled: bool | None = None,
@@ -175,8 +175,8 @@ def locks_out_last_admin(
 
 def locks_out_last_admin_by_group_loss(
     account: Account,
-    account_store: AccountStore | DocuStoreAccountStore | None,
-    group_store: GroupStore | DocuStoreGroupStore | None,
+    account_store: AccountStore | None,
+    group_store: GroupStore | None,
     *,
     bindings: Mapping[str, str],
     held_after: Collection[str],
@@ -204,8 +204,8 @@ def locks_out_last_admin_by_group_loss(
 
 
 def locks_out_last_admin_by_member_removals(
-    account_store: AccountStore | DocuStoreAccountStore | None,
-    group_store: GroupStore | DocuStoreGroupStore | None,
+    account_store: AccountStore | None,
+    group_store: GroupStore | None,
     *,
     bindings: Mapping[str, str],
     group_name: str,
@@ -239,8 +239,8 @@ def locks_out_last_admin_by_member_removals(
 
 
 def another_admin_exists(
-    account_store: AccountStore | DocuStoreAccountStore | None,
-    group_store: GroupStore | DocuStoreGroupStore | None,
+    account_store: AccountStore | None,
+    group_store: GroupStore | None,
     admin_name: str,
     *,
     bindings: Mapping[str, str],

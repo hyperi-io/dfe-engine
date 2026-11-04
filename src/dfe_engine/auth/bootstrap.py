@@ -46,13 +46,11 @@ from scalo.logger import logger
 from dfe_engine.auth.accounts import (
     Account,
     AccountStore,
-    DocuStoreAccountStore,
     matches_digest,
     refuse_unhashable_password,
 )
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.groups import (
-    DocuStoreGroupStore,
     GroupMetrics,
     GroupStore,
     warn_identifier_collisions,
@@ -128,7 +126,7 @@ def default_credentials_in_use(admin_password: str) -> bool:
 
 
 def admin_on_default_password(
-    account_store: AccountStore | DocuStoreAccountStore | None,
+    account_store: AccountStore | None,
     admin_name: str,
     admin_password: str,
 ) -> bool:
@@ -233,16 +231,14 @@ def bootstrap_auth(
     auth_dir: Path,
     default_admin_password: str = "",
     default_admin_name: str = "",
-    account_store: AccountStore | DocuStoreAccountStore | None = None,
-    group_store: GroupStore | DocuStoreGroupStore | None = None,
     group_metrics: GroupMetrics | None = None,
     gitcrud: GitCrud | None = None,
     seed_accounts: list[SeedAccount] | None = None,
     breakglass_password: str = "",
     recovery_email: str = "",
 ) -> tuple[
-    AccountStore | DocuStoreAccountStore,
-    GroupStore | DocuStoreGroupStore,
+    AccountStore,
+    GroupStore,
     APIKeyStore,
     RoleStore,
     RoleConfig,
@@ -258,12 +254,7 @@ def bootstrap_auth(
             to ``changeme``.
         default_admin_name: Username for the local admin. Empty falls through
             to ``admin``.
-        account_store: The account store to bootstrap. None builds the YAML store
-            under ``auth_dir``.
-        group_store: The group store to bootstrap. None builds the YAML store
-            under ``auth_dir``.
-        group_metrics: Where the default group store counts the group files it
-            skips. Unused when ``group_store`` is given.
+        group_metrics: Where the group store counts the group files it skips.
         gitcrud: When gitops is enabled, the deploy-repo engine. The live store is
             hydrated from it before the reconcile, an admin the reconcile created or
             re-hashed is persisted back into it, and the break-glass hash and the
@@ -300,15 +291,11 @@ def bootstrap_auth(
         logger.info(f"Re-applied built-in roles from the package: {', '.join(reapplied)}")
     role_config = role_store.load_config()
 
-    # Instantiate stores. A caller may inject a backend (e.g. a document store); the
-    # default is the YAML file store. Accounts and groups share one backend.
-    if account_store is None:
-        account_store = AccountStore(accounts_dir, admin_name=default_admin_name)
-    if group_store is None:
-        group_store = GroupStore(groups_dir, admin_name=default_admin_name, metrics=group_metrics)
+    account_store = AccountStore(accounts_dir, admin_name=default_admin_name)
+    group_store = GroupStore(groups_dir, admin_name=default_admin_name, metrics=group_metrics)
     api_key_store = APIKeyStore(api_keys_dir)
 
-    # Seed default groups if the store has none (backend-agnostic)
+    # Seed default groups if the store has none
     if not group_store.list():
         _seed_groups(group_store)
         logger.info("Seeded default groups")
@@ -366,7 +353,7 @@ def bootstrap_auth(
 
 
 def _disable_retired_admin(
-    account_store: AccountStore | DocuStoreAccountStore,
+    account_store: AccountStore,
     admin_name: str,
 ) -> None:
     """Keep a retired admin disabled, whatever the deploy repo's copy of it says.
@@ -391,14 +378,14 @@ def _seed_roles(dest: Path) -> None:
         shutil.copy2(src, dest)
 
 
-def _seed_groups(group_store: GroupStore | DocuStoreGroupStore) -> None:
+def _seed_groups(group_store: GroupStore) -> None:
     """Create default groups."""
     for name, (roles, description) in _DEFAULT_GROUPS.items():
         group_store.create(name, roles=roles, description=description)
 
 
 def _config_password_wins(
-    account_store: AccountStore | DocuStoreAccountStore,
+    account_store: AccountStore,
     account: Account,
     password: str,
     *,
@@ -424,8 +411,8 @@ def _config_password_wins(
 
 
 def _reconcile_seed_accounts(
-    account_store: AccountStore | DocuStoreAccountStore,
-    group_store: GroupStore | DocuStoreGroupStore,
+    account_store: AccountStore,
+    group_store: GroupStore,
     seed_accounts: list[SeedAccount],
     *,
     issued: set[str] | None = None,

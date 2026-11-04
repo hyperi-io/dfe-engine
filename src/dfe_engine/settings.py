@@ -1561,30 +1561,6 @@ class LocalAuthSettings(BaseModel):
     )
 
 
-class AccountStoreSettings(BaseModel):
-    """Document-store / mongo-wire connection for the local account store.
-
-    Used when ``auth.store_backend`` resolves to document. The URI carries the
-    SCRAM credential (sourced from the secret manager at deploy time); the
-    database is separate from HyperDX's for isolation.
-
-    Environment variables:
-    - DFE_ENGINE_AUTH_ACCOUNTS_STORE_URI -> auth.accounts_store.uri
-    - DFE_ENGINE_AUTH_ACCOUNTS_STORE_DATABASE -> auth.accounts_store.database
-    - DFE_ENGINE_AUTH_ACCOUNTS_STORE_COLLECTION -> auth.accounts_store.collection
-    """
-
-    uri: str = Field(
-        default="",
-        description="mongodb:// connection URI (SCRAM credential from the secret manager)",
-    )
-    database: str = Field(
-        default="dfe_engine",
-        description="Document database name (separate from HyperDX's)",
-    )
-    collection: str = Field(default="accounts", description="Accounts collection name")
-
-
 class LoginThrottleSettings(BaseModel):
     """Backoff after failed sign-ins, per username and per client address.
 
@@ -1718,17 +1694,6 @@ class AuthSettings(BaseModel):
     )
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
     login_throttle: LoginThrottleSettings = Field(default_factory=LoginThrottleSettings)
-    store_backend: str = Field(
-        default="auto",
-        description=(
-            "Central backend for BOTH local users and groups (config-cascade "
-            "overridable): 'auto' (default -- document when a reachable URI is "
-            "configured, else yaml files), 'document' (force; fail if unreachable), "
-            "or 'yaml'. gitcrud is not a store here -- only the local admin and the "
-            "break-glass hash are additionally git-persisted, as the teardown backstop."
-        ),
-    )
-    accounts_store: AccountStoreSettings = Field(default_factory=AccountStoreSettings)
     api_key_default_ttl_days: int = Field(
         default=90,
         ge=0,
@@ -2983,16 +2948,6 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("login_throttle", {})["client_failures"] = int(val)
     if val := _get_env("DFE_ENGINE_AUTH_LOGIN_THROTTLE_MAX_DELAY_SECONDS"):
         overrides["auth"].setdefault("login_throttle", {})["max_delay_seconds"] = int(val)
-
-    # Central users+groups store backend (auto default; document nested under auth.accounts_store)
-    if val := _get_env("DFE_ENGINE_AUTH_STORE_BACKEND"):
-        overrides["auth"]["store_backend"] = val
-    if val := _get_env("DFE_ENGINE_AUTH_ACCOUNTS_STORE_URI"):
-        overrides["auth"].setdefault("accounts_store", {})["uri"] = val
-    if val := _get_env("DFE_ENGINE_AUTH_ACCOUNTS_STORE_DATABASE"):
-        overrides["auth"].setdefault("accounts_store", {})["database"] = val
-    if val := _get_env("DFE_ENGINE_AUTH_ACCOUNTS_STORE_COLLECTION"):
-        overrides["auth"].setdefault("accounts_store", {})["collection"] = val
 
     # HyperDX settings
     if val := _get_env("DFE_ENGINE_HYPERDX_BASE_URL"):

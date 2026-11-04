@@ -41,8 +41,8 @@ from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
 from dfe_engine.gitcrud.engine import ResourceNotFoundError
 
 if TYPE_CHECKING:
-    from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
-    from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
+    from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.groups import GroupStore
     from dfe_engine.gitcrud.engine import GitCrud
 
 # The break-glass username is fixed: a deployment that has lost its UI recovers by
@@ -154,8 +154,8 @@ def mint_hash(crud: GitCrud, password: str, actor: str = "dfe-engine") -> str:
 
 
 def seed(
-    account_store: AccountStore | DocuStoreAccountStore,
-    group_store: GroupStore | DocuStoreGroupStore,
+    account_store: AccountStore,
+    group_store: GroupStore,
     crud: GitCrud | None,
     mint_password: str = "",
     recovery_email: str = "",

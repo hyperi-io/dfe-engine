@@ -36,12 +36,11 @@ Two things trip people up on a fresh clone:
 ## The no-dependencies auth spike
 
 To exercise the auth, accounts, groups or attributes endpoints with nothing else
-running -- no ClickHouse, no FerretDB, no deploy repo:
+running -- no ClickHouse, no deploy repo:
 
 ```sh
 env DFE_ENGINE_ENV=dev \
     DFE_ENGINE_AUTH_ENABLED=false \
-    DFE_ENGINE_AUTH_STORE_BACKEND=yaml \
     DFE_ENGINE_GITOPS_ENABLED=false \
     DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES=false \
     DFE_ENGINE_API_PORT=8003 \
@@ -54,10 +53,7 @@ env DFE_ENGINE_ENV=dev \
   from `curl`/Swagger. The engine still mints an ephemeral ES384 JWT authority at
   boot; you just do not need it on this path. (The offline `auth` subcommands live
   on the separate `dfe` CLI, not the `dfe-engine` daemon.)
-- **`store_backend: auto` falls to yaml** when no document-store URI is configured
-  (`DFE_ENGINE_AUTH_ACCOUNTS_STORE_URI` empty), so you get a file-backed account/group
-  store under `DFE_CONFIG_DIR/auth` with no FerretDB. Force it with
-  `DFE_ENGINE_AUTH_STORE_BACKEND=yaml` if you want to be explicit.
+- **Accounts and groups are YAML files** under `DFE_CONFIG_DIR/auth`.
 - **Attribute request bodies are wrapped.** `PUT
   /api/v1/auth/accounts/{username}/attributes` takes `{"attributes": {...}}`, not
   the bare object, and the `GET` returns the same shape. A bare object is a 422.
