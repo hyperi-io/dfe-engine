@@ -14,7 +14,7 @@ existing one.
 """
 
 import pytest
-from fastapi import HTTPException
+from scalo.api.problems import ProblemError
 
 from dfe_engine.api.v1.schemas import _dedicated_source_table_ready
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
@@ -97,10 +97,10 @@ def test_discovery_refuses_with_422_when_clickhouse_cannot_be_read(unreachable):
     source = _source("discovery-probe")
     deployed = source.model_copy(update={"deployed_version": source.current})
 
-    with pytest.raises(HTTPException) as refused:
+    with pytest.raises(ProblemError) as refused:
         _dedicated_source_table_ready(
             deployed, deployed.current, ch=unreachable, db="dfe", table=deployed.table_name
         )
 
-    assert refused.value.status_code == 422
-    assert refused.value.detail["code"] == "discovery_failed"  # ty: ignore[invalid-argument-type]  # starlette types detail as str, and the engine raises it with a dict
+    assert refused.value.status == 422
+    assert refused.value.problem.code == "discovery_failed"
