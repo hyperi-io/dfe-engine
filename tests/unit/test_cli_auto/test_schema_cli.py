@@ -15,10 +15,11 @@ bootstrap switched off, or the connection refused.
 import json
 
 import pytest
-from click.testing import CliRunner
 from scalo.logger import logger
+from typer.testing import CliRunner
 
-from dfe_engine.cli.auto.schema import schema_group
+from dfe_engine.cli.auto.main import main
+from dfe_engine.cli.auto.schema import schema_app
 from dfe_engine.schema import phase
 from dfe_engine.schema.manifest_applier import ManifestApplyError
 
@@ -34,7 +35,7 @@ def _cli_environment(monkeypatch):
 
 
 def _apply():
-    result = CliRunner().invoke(schema_group, ["apply", "--json"])
+    result = CliRunner().invoke(schema_app, ["apply", "--json"])
     return result, json.loads(result.stdout)
 
 
@@ -86,3 +87,26 @@ def test_apply_still_runs_when_its_metrics_cannot_be_built(monkeypatch):
     assert state["state"] == "failed"
     assert "manifest apply" in state["error"]
     assert "schema metrics unavailable; the pass runs without them" in warnings
+
+
+def test_status_needs_no_jwt_secret_in_the_production_posture(monkeypatch, capsys):
+    """The `dfe` entry point reaches ClickHouse in the production posture without DFE_ENGINE_API_JWT_SECRET."""
+    monkeypatch.setenv("DFE_ENGINE_ENV", "production")
+    monkeypatch.setenv("DFE_ENGINE_AUTH_ENABLED", "true")
+    # The command sets the secret itself, so register the variable for removal at teardown.
+    monkeypatch.setenv("DFE_ENGINE_API_JWT_SECRET", "placeholder")
+    monkeypatch.delenv("DFE_ENGINE_API_JWT_SECRET")
+    monkeypatch.setattr("sys.argv", ["dfe", "schema", "status"])
+
+    def unreachable(_settings):
+        raise RuntimeError("ClickHouse did not answer")
+
+    monkeypatch.setattr("dfe_engine.cli.auto.schema._client", unreachable)
+
+    with pytest.raises(SystemExit) as excinfo:
+        main()
+
+    assert excinfo.value.code == 1
+    err = capsys.readouterr().err
+    assert "ClickHouse did not answer" in err
+    assert "jwt_secret" not in err

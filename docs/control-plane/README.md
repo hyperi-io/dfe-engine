@@ -104,7 +104,7 @@ flowchart TB
     routes["FastAPI routes<br/>(the live API definition)"]
     routes -->|"openapi-spec/generate.py"| spec[("openapi.json<br/>THE API SSoT")]
 
-    spec -->|"command tree at runtime<br/>(x-cli:false opts out)"| cli["dfe CLI"]
+    spec -->|"command tree at runtime<br/>(x-scalo.cli.hidden opts out)"| cli["dfe CLI"]
     spec -->|"openapi-typescript<br/>-> @dfe/dfe-engine-types"| ui["dfe-ui"]
     spec -->|"HTTP client + MCP tool schemas"| ai["dfe-ai peer service"]
     spec -->|"Prism"| mock["contract mock (dev + CI)"]
@@ -118,7 +118,7 @@ flowchart TB
 
 - The **`dfe` CLI** generates its whole command tree from the spec at runtime -
   add an endpoint and the CLI grows a command, with no CLI code. An endpoint
-  opts out via the `x-cli` extension.
+  opts out via `x-scalo.cli.hidden`.
 - **dfe-ui** generates its TypeScript types from the same spec.
 - **dfe-ai** (the peer service) reads the spec for its client + MCP tool schemas.
 

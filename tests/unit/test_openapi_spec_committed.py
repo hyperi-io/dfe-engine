@@ -9,7 +9,7 @@ is silent at both ends.
 
 ``dfe-api`` is NOT a consumer: it builds its command tree from
 ``create_app().openapi()`` live, so it is immune to this file going stale
-(``dfe_engine/cli/auto/spec.py``). dfe-ui is the one that inherits the drift.
+(``dfe_engine/cli/auto/app.py``). dfe-ui is the one that inherits the drift.
 
 ``info.version`` is dropped from the STRUCTURAL comparison deliberately. It comes
 from package metadata, which is the release version in a built artefact and

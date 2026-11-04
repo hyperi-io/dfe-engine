@@ -1,140 +1,163 @@
 #  Project:      dfe-engine
 #  File:         cli/auto/app.py
-#  Purpose:      Assemble the root `dfe` click group (generated + built-ins)
+#  Purpose:      Assemble the `dfe` CLI: scalo's SpecCli over the engine spec plus the engine-only commands
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Root of the ``dfe`` CLI: global flags, the generated tree and the built-ins.
+"""Root of the ``dfe`` CLI.
 
-Global flags live on the root group and are propagated to every command via the
-click context object (a ``GlobalOptions``). The generated command tree is built
-from the live OpenAPI spec; the hand-written ``login``/``logout``/``auth``/``config``
-groups are mounted alongside. An unknown subcommand triggers a difflib
-"did you mean 'X'?" hint.
+scalo's ``SpecCli`` builds the command tree from the engine's OpenAPI document,
+so an endpoint becomes a command with no CLI code. The commands with no
+operation behind them are mounted on top: ``login``, ``config``, ``auth list``,
+and the daemon-free ``local``, ``schema`` and ``kafka client-config``.
 """
 
-import difflib
-from typing import Any, override
+import dataclasses
+import json
+import os
+import re
+import secrets
+from collections.abc import Mapping
+from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
-import click
+from scalo.cli.openapi import Response, ScaloHttpTransport, SpecCli, Store, Transport
 
 from .authcmds import attach_builtins
-from .build import GlobalOptions, HelpGroup, build_command_tree
-from .config import Store
-from .kafka import attach_kafka
-from .local import attach_local
-from .schema import attach_schema
-from .spec import iter_operations, load_live_spec
-
-_FORMATS = ("json", "yaml", "table", "value", "text")
+from .kafka import client_config
+from .local import local_app
+from .schema import schema_app
 
 
-class DfeGroup(HelpGroup):
-    """Root group: help-on-no-args (exit 0) + a did-you-mean hint on typos."""
+def load_live_spec() -> dict[str, Any]:
+    """The engine OpenAPI document, read from the in-process app factory.
 
-    @override
-    def resolve_command(
-        self, ctx: click.Context, args: list[str]
-    ) -> tuple[str | None, click.Command | None, list[str]]:
-        try:
-            return super().resolve_command(ctx, args)
-        except click.UsageError:
-            cmd_name = args[0] if args else ""
-            matches = difflib.get_close_matches(
-                cmd_name, list(self.list_commands(ctx)), n=1, cutoff=0.6
+    The CLI signs no tokens, but ``DFESettings`` refuses the production posture without a
+    jwt_secret, which a schema Job does not carry. A throwaway one satisfies that check.
+    """
+    from dfe_engine.api.app import create_app
+
+    os.environ.setdefault("DFE_ENGINE_API_JWT_SECRET", secrets.token_urlsafe(32))
+
+    return create_app().openapi()
+
+
+def _positional_path_params(spec: dict[str, Any]) -> dict[str, Any]:
+    """A copy of ``spec`` taking every path parameter as an argument, in path order, unless the operation names its own."""
+    paths = {}
+    for path, item in spec["paths"].items():
+        names = re.findall(r"{([^}]+)}", path)
+        paths[path] = {
+            method: _with_positional(op, names)
+            if names and isinstance(op, dict) and "x-scalo" in op
+            else op
+            for method, op in item.items()
+        }
+    return {**spec, "paths": paths}
+
+
+def _with_positional(op: dict[str, Any], names: list[str]) -> dict[str, Any]:
+    cli = op["x-scalo"].get("cli") or {}
+    if cli.get("positional"):
+        return op
+    return {**op, "x-scalo": {**op["x-scalo"], "cli": {**cli, "positional": names}}}
+
+
+def _envelope(reply: Response) -> dict[str, Any] | None:
+    """The reply body when it is the engine's page-number envelope, else ``None``."""
+    try:
+        body = reply.json()
+    except ValueError:
+        return None
+    paged = (
+        isinstance(body, dict)
+        and isinstance(body.get("items"), list)
+        and {"page", "next_page"} <= body.keys()
+    )
+    return body if paged else None
+
+
+class _PageWalker:
+    """Transport that answers a paged list with its ``items``, from every page unless the request names ``page``.
+
+    The engine pages by number (``items``, ``next_page``), where scalo pages by ``page_token``.
+    """
+
+    def __init__(self, inner: Transport) -> None:
+        self._inner = inner
+
+    def send(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Mapping[str, str],
+        credentials: Mapping[str, str],
+        content: bytes | None,
+        timeout: float,
+    ) -> Response:
+        """Send the request, then every later page of a paged list."""
+        reply = self._inner.send(
+            method, url, headers=headers, credentials=credentials, content=content, timeout=timeout
+        )
+        body = _envelope(reply) if method == "GET" and reply.ok else None
+        if body is None:
+            return reply
+        items = list(body["items"])
+        parts = urlsplit(url)
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        # A page the reply names must be later than the one just asked for, or a looping server never ends the walk.
+        asked = body["page"]
+        while (
+            all(name != "page" for name, _ in pairs)
+            and isinstance(body.get("next_page"), int)
+            and body["next_page"] > asked
+        ):
+            asked = body["next_page"]
+            next_url = parts._replace(query=urlencode([*pairs, ("page", asked)])).geturl()
+            reply = self._inner.send(
+                method,
+                next_url,
+                headers=headers,
+                credentials=credentials,
+                content=None,
+                timeout=timeout,
             )
-            hint = f" Did you mean '{matches[0]}'?" if matches else ""
-            raise click.UsageError(f"No such command '{cmd_name}'.{hint}", ctx)
+            body = _envelope(reply) if reply.ok else None
+            if body is None:
+                return reply
+            items.extend(body["items"])
+        return dataclasses.replace(reply, content=json.dumps(items).encode())
 
 
-def _root_callback(
-    ctx: click.Context,
-    format: str | None,
-    query: str | None,
-    quiet: bool,
-    url: str | None,
-    configuration: str | None,
-    debug: bool,
-    no_paginate: bool,
-) -> None:
-    # Merge flags into an injected GlobalOptions (tests hand one in via `obj=`)
-    # or a fresh one. Never clobber an injected store / client_factory.
-    opts = ctx.obj if isinstance(ctx.obj, GlobalOptions) else GlobalOptions()
-    opts.format = format or opts.format
-    opts.query = query or opts.query
-    opts.quiet = quiet or opts.quiet
-    opts.url = url or opts.url
-    opts.configuration = configuration or opts.configuration
-    opts.debug = debug or opts.debug
-    opts.no_paginate = no_paginate or opts.no_paginate
-    ctx.obj = opts
-
-
-def build_root(
+def build_cli(
     spec: dict[str, Any] | None = None,
     *,
-    obj: GlobalOptions | None = None,
-) -> DfeGroup:
-    """Build and return the fully assembled root command group.
+    transport: Transport | None = None,
+    store: Store | None = None,
+) -> SpecCli:
+    """Build the ``dfe`` CLI.
 
-    ``spec`` defaults to the live engine spec; tests may pass a spec built from a
-    test app to avoid re-loading and to match their settings. ``obj`` seeds the
-    context (tests inject a store + client_factory here).
+    Args:
+        spec: The OpenAPI document, the live engine spec by default.
+        transport: Sends the requests, ``scalo.http`` by default.
+        store: Profiles and credentials, ``~/.config/dfe`` by default.
+
+    Returns:
+        The CLI, ready to ``main()``.
     """
-    root = DfeGroup(
+    cli = SpecCli(
+        _positional_path_params(spec if spec is not None else load_live_spec()),
         name="dfe",
-        no_args_is_help=True,
-        help=(
-            "dfe - the Data Fusion Engine CLI. Command tree generated from the "
-            "engine OpenAPI spec; speaks HTTP to a running engine."
-        ),
-        params=[
-            click.Option(
-                ["--format", "format"],
-                type=click.Choice(_FORMATS),
-                help="Output format (default: yaml for describe, table for list, "
-                "else json; json when not a tty).",
-            ),
-            click.Option(["--query"], help="JMESPath filter applied before output."),
-            click.Option(
-                ["--quiet", "-q", "quiet"],
-                is_flag=True,
-                help="Auto-confirm prompts and suppress interactive output.",
-            ),
-            click.Option(["--url"], help="Engine base URL (overrides the profile)."),
-            click.Option(["--configuration"], help="Named configuration (profile) to use."),
-            click.Option(["--debug"], is_flag=True, help="Print tracebacks on error."),
-            click.Option(
-                ["--no-paginate", "no_paginate"],
-                is_flag=True,
-                help="Fetch only a single page for list commands.",
-            ),
-        ],
-        callback=click.pass_context(_root_callback),
+        env_prefix="DFE_ENGINE",
+        help="dfe - the Data Fusion Engine CLI. Command tree generated from the engine OpenAPI spec.",
+        transport=_PageWalker(transport or ScaloHttpTransport()),
+        store=store,
     )
-
-    spec = spec if spec is not None else load_live_spec()
-    build_command_tree(root, iter_operations(spec))
-    attach_builtins(root)
-    # `dfe local` - break-glass direct gitops CRUD for when the daemon is dead.
-    # Mounted alongside the generated tree; it speaks to the local clone, not HTTP.
-    attach_local(root)
-    # `dfe kafka` - emit client config for a provider (kcat / confluent / librdkafka),
-    # so a CLI "just works" against the DFE brokers. Local; no HTTP to the engine.
-    attach_kafka(root)
-    # `dfe schema` - plan, apply and read the schema against the local ClickHouse.
-    # Takes the same lease the boot phase does, so it serialises rather than races.
-    attach_schema(root)
-
-    if obj is not None:
-        # Stash the injected object as the group's default context object.
-        root.context_settings = {"obj": obj}
-
-    return root
-
-
-def make_root() -> DfeGroup:
-    """Entry-point helper: build the root with a default (live) config store."""
-    return build_root(obj=GlobalOptions(store=Store()))
+    attach_builtins(cli)
+    cli.add_typer(local_app, "local")
+    cli.add_typer(schema_app, "schema")
+    cli.command("kafka", "client-config")(client_config)
+    return cli

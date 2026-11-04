@@ -68,7 +68,7 @@ dependencies = [
     # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
     # goes green while reporting nothing. [opentelemetry] is no longer a separate
     # extra: [metrics] carries the SDK.
-    "scalo[api,expression,http,metrics,secrets-kubernetes]>=2.32.4,<3",
+    "scalo[api,cli,expression,http,metrics,secrets-kubernetes]>=2.32.4,<3",
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
@@ -92,7 +92,7 @@ dependencies = [
     "croniter>=6.2.2",
     # HTTP clients
     # 0.28.1 (2024-12) is the latest stable. 1.0 is dev-only on PyPI (dev6, 2026-08-31) and upstream is active.
-    # Imported by the dfe CLI client (cli/auto/client.py) and required by scalo's http extra.
+    # Required by scalo's http extra.
     "httpx>=0.28.1",
     "requests>=2.34.2",
     "urllib3>=2.7.0",
@@ -151,10 +151,6 @@ dependencies = [
     "msal>=1.37.0",
     "google-auth>=2.62.0",
     "google-api-python-client>=2.198.0",
-    # dfe CLI: click is the command framework, jmespath backs the --query
-    # projection (promoted from transitive to direct deps for the auto-CLI).
-    "click>=8.4.2",
-    "jmespath>=1.1.0",
     # Kafka topic admin: a source deploy creates its own _land/_load topics rather
     # than leaving them to the broker's auto-create. Ships manylinux wheels for
     # x86_64 and aarch64, so neither image platform builds librdkafka from source.
@@ -314,16 +310,6 @@ convention = "google"
 # __init__ on the class.
 "src/**/*.py" = ["D105", "D107"]
 "src/dfe_engine/sigma/*" = ["S701"]  # Jinja2 autoescape (controlled templates)
-# Vendored Apache-2.0 files (aws-cli/botocore) - kept as close to upstream as
-# possible; do not modernise idioms the upstream still uses. See vendor/NOTICE.
-"src/dfe_engine/cli/auto/vendor/*" = [
-    "UP031",  # percent-format (upstream style)
-    "B905",   # zip() without strict= (upstream targets older Python)
-    "UP032",
-    "C401",
-    "SIM",
-    "D",      # upstream carries no docstrings
-]
 # Each entry is a bare attribute access, which is how vulture sees a use.
 "src/vulture_whitelist.py" = ["B018"]
 "tests/**/*.py" = [
@@ -342,17 +328,6 @@ convention = "google"
 [tool.ty.environment]
 # Tests import shared helpers as `common.*` from tests/, the path pytest's pythonpath adds.
 extra-paths = ["tests"]
-
-# Vendored Apache-2.0 files stay as upstream wrote them (vendor/NOTICE lists every local
-# edit): colorama is an optional import, a section always exists before add_row, and
-# CPython's ioctl takes the str buffer typeshed refuses.
-[[tool.ty.overrides]]
-include = ["src/dfe_engine/cli/auto/vendor/**"]
-
-[tool.ty.overrides.rules]
-unresolved-import = "ignore"
-unresolved-attribute = "ignore"
-no-matching-overload = "ignore"
 
 # hyperi-ci runs `vulture src/`, so src/vulture_whitelist.py is scanned with the package.
 [tool.vulture]

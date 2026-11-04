@@ -18,7 +18,7 @@ suite already do that. It proves the CLI SEES what the API sees, which is the on
 thing those suites cannot tell you.
 
 The command tree is generated from ``create_app().openapi()`` at runtime
-(``cli/auto/spec.py``), so a route the engine serves becomes a command without
+(``cli/auto/app.py``), so a route the engine serves becomes a command without
 anyone wiring it. ``test_command_tree_covers_the_source_lifecycle`` guards that
 generation and needs NO live deployment, so it runs everywhere. The parity cases
 need a real engine and skip without one.
@@ -48,7 +48,7 @@ pytestmark = pytest.mark.live
 # Every command the four-part proof drives. Generated from the OpenAPI spec, so
 # one going missing means a route was withdrawn or the generator stopped reaching
 # it -- either way the CLI silently loses the operation.
-SOURCE_LIFECYCLE = ("create", "deploy", "plan", "describe", "list", "delete", "reconcile-apps")
+SOURCE_LIFECYCLE = ("create", "deploy", "plan", "get", "list", "delete", "reconcile-apps")
 
 # Long enough for a deploy against a real ClickHouse, short enough that a hung
 # broker fails the test rather than the session.
@@ -118,11 +118,11 @@ def _run(
 def _json(engine: EngineAPI, *args: str):
     """Run a command in JSON mode and parse it.
 
-    ``--format json`` explicitly: the default is tty-dependent, and a test that
+    ``--output json`` explicitly: the default is tty-dependent, and a test that
     parsed whatever a tty happened to produce would assert the formatter rather
     than the data.
     """
-    proc = _run("--format", "json", *args, url=engine.base, token=engine.token)
+    proc = _run("--output", "json", *args, url=engine.base, token=engine.token)
     try:
         return json.loads(proc.stdout)
     except json.JSONDecodeError as exc:
@@ -177,7 +177,7 @@ class TestParityWithTheAPI:
             pytest.skip("no sources on this deployment to describe")
         name = names[0]
 
-        from_cli = _json(engine, "sources", "describe", name)
+        from_cli = _json(engine, "sources", "get", name)
         from_api = engine.json("GET", f"/api/v1/sources/{name}")
 
         # Compared on the fields an operator acts on. The whole document would
