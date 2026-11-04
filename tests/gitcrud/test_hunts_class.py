@@ -126,10 +126,12 @@ class TestHuntsLandWhereTheRunnerLooks:
         assert spec.interval_seconds == 300
         assert spec.target_table == "dfe.detection"
         assert len(spec.queries) == 1
-        assert (
-            "WHERE {window} AND _org_id IN ('acme') AND (\nprocess_name = 'certutil.exe'\n    )"
-            in spec.queries[0].sql
-        )
+        sql = spec.queries[0].sql
+        # The window, the org filter, the dedupe and the rule are each their own conjunct.
+        assert "WHERE {window} AND " in sql
+        assert " AND _org_id IN ('acme') AND " in sql
+        assert " AND {unseen} AND " in sql
+        assert "AND (\nprocess_name = 'certutil.exe'\n    )" in sql
 
     def test_a_rule_compiles_off_the_synced_rules_directory(self, rules, crud):
         rules.save(RULE)
