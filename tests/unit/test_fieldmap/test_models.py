@@ -2,7 +2,7 @@
 
 import pytest
 
-from dfe_engine.fieldmap.models import DEFAULT_MAP_NAME, FieldMap
+from dfe_engine.fieldmap.models import FieldMap
 
 # ---------------------------------------------------------------
 # Helpers
@@ -142,14 +142,6 @@ class TestFieldMapValidation:
 
 
 class TestFieldMapProperties:
-    def test_registry_key_default(self):
-        fm = _make_field_map(standard="sigma")
-        assert fm.registry_key == f"sigma/{DEFAULT_MAP_NAME}"
-
-    def test_registry_key_source(self):
-        fm = _make_field_map(standard="ecs", source="windows-audit")
-        assert fm.registry_key == "ecs/windows-audit"
-
     def test_is_default_true(self):
         fm = _make_field_map()
         assert fm.is_default is True

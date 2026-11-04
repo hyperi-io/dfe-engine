@@ -5,8 +5,6 @@ import pytest
 from dfe_engine.services.descriptor import ServiceDescriptor
 from dfe_engine.services.plugin import ServicePlugin
 from dfe_engine.services.plugins import (
-    all_plugins,
-    config_classes,
     get_plugin,
     register,
     reset,
@@ -46,18 +44,6 @@ class TestPluginDiscovery:
     def test_get_plugin_unknown_raises(self):
         with pytest.raises(KeyError, match="Unknown service"):
             get_plugin("nonexistent-service")
-
-    def test_all_plugins_returns_dict(self):
-        plugins = all_plugins()
-        assert isinstance(plugins, dict)
-        assert len(plugins) == 7
-
-    def test_config_classes_mapping(self):
-        classes = config_classes()
-        assert len(classes) == 7
-        for name, cls in classes.items():
-            assert name in valid_services()
-            assert hasattr(cls, "model_validate")
 
 
 class TestPluginRegistration:

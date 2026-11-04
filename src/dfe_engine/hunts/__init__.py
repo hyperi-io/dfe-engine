@@ -1,4 +1,4 @@
-"""Hunt alerting and scoring, detection rules, and the hunt result schema."""
+"""Hunt alerting, detection rules, and the hunt result schema."""
 
 from .alert import (
     AlertConfig,
@@ -27,13 +27,6 @@ from .rule_creation_service import (
 )
 from .rule_model import Rule, RuleCreate
 from .rule_rewriter import ParsedRule, RuleRewriter
-from .scoring import (
-    ScoreFactor,
-    ScoringConfig,
-    compute_score,
-    evaluate_condition,
-    validate_condition,
-)
 from .validator import HuntValidator
 
 __all__ = [
@@ -57,14 +50,9 @@ __all__ = [
     "RuleCreateResult",
     "RuleCreationService",
     "RuleRewriter",
-    "ScoreFactor",
-    "ScoringConfig",
     "SqlValidationError",
     "build_alert_config",
     "build_group_key",
     "build_grouping_query",
-    "compute_score",
-    "evaluate_condition",
     "parse_duration",
-    "validate_condition",
 ]

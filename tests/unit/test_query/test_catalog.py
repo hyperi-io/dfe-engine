@@ -6,7 +6,6 @@ import pytest
 
 from dfe_engine.query.catalog import (
     ViewCatalog,
-    label_to_view_name,
     map_clickhouse_type,
     parse_view_parameters,
     view_name_to_label,
@@ -211,19 +210,6 @@ class TestViewNameConversion:
     def test_name_to_label_single_segment(self):
         """Single segment after prefix — namespace only."""
         assert view_name_to_label("dfe_v_health") == "health"
-
-    def test_label_to_name_standard(self):
-        assert label_to_view_name("analytics/user_activity") == "dfe_v_analytics_user_activity"
-
-    def test_label_to_name_system(self):
-        assert label_to_view_name("system/health") == "dfe_v_system_health"
-
-    def test_roundtrip(self):
-        """Name → label → name should be identity."""
-        original = "dfe_v_analytics_event_counts"
-        label = view_name_to_label(original)
-        restored = label_to_view_name(label)
-        assert restored == original
 
 
 # =============================================================================

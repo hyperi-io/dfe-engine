@@ -239,22 +239,6 @@ class Rule(BaseModel):
             warnings=warnings,
         )
 
-    def to_rule_info(self) -> dict[str, Any]:
-        """Convert to the dict format expected by Hunt.rules.
-
-        Returns a dict compatible with Hunt.__init__(rules=[...]),
-        enabling Rule-based hunts to integrate with the existing
-        hunt execution pipeline.
-        """
-        info: dict[str, Any] = {
-            "rule_name": self.rule_id,
-        }
-        if self.source_table:
-            info["source_table_name"] = self.source_table
-        if self.source:
-            info["source"] = self.source
-        return info
-
     def validate_rule(self) -> list[str]:
         """Validate the rule for execution readiness.
 

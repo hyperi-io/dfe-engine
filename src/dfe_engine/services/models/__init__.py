@@ -93,7 +93,7 @@ VALID_SERVICES = {
     SERVICE_FETCHER,
 }
 
-# Backward-compatible config class mapping (prefer plugins.config_classes())
+# Service name -> config class.
 SERVICE_CONFIG_CLASSES: dict[str, type] = {
     SERVICE_RECEIVER: ReceiverConfig,
     SERVICE_LOADER: LoaderConfig,

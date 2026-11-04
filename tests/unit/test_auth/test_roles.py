@@ -176,61 +176,6 @@ class TestRoleConfig:
 
 
 # ---------------------------------------------------------------------------
-# RoleConfig.check_roles tests
-# ---------------------------------------------------------------------------
-
-
-class TestCheckRoles:
-    @pytest.fixture
-    def config(self) -> RoleConfig:
-        return RoleConfig(
-            roles={
-                "admin": RoleDefinition(description="Admin", permissions=["*"]),
-                "viewer": RoleDefinition(
-                    description="Viewer",
-                    permissions=["config:read", "source:read"],
-                ),
-                "operator": RoleDefinition(
-                    description="Operator",
-                    permissions=["config:read", "config:write", "source:read"],
-                ),
-            }
-        )
-
-    def test_check_roles_returns_first_granting_role(self, config):
-        # viewer and operator both grant config:read — viewer comes first in the list
-        result = config.check_roles(["viewer", "operator"], "config:read")
-        assert result == "viewer"
-
-    def test_check_roles_later_role_grants(self, config):
-        # only operator grants config:write
-        result = config.check_roles(["viewer", "operator"], "config:write")
-        assert result == "operator"
-
-    def test_check_roles_no_grant_returns_none(self, config):
-        # neither viewer nor operator grant helm:compile
-        result = config.check_roles(["viewer", "operator"], "helm:compile")
-        assert result is None
-
-    def test_check_roles_admin_grants_everything(self, config):
-        result = config.check_roles(["admin"], "anything:at:all")
-        assert result == "admin"
-
-    def test_check_roles_empty_roles_returns_none(self, config):
-        result = config.check_roles([], "config:read")
-        assert result is None
-
-    def test_check_roles_unknown_role_returns_none(self, config):
-        result = config.check_roles(["nonexistent"], "config:read")
-        assert result is None
-
-    def test_check_roles_multi_role_first_match(self, config):
-        # admin comes before viewer — admin should win
-        result = config.check_roles(["admin", "viewer"], "config:read")
-        assert result == "admin"
-
-
-# ---------------------------------------------------------------------------
 # RoleConfig.resolve_permissions tests
 # ---------------------------------------------------------------------------
 

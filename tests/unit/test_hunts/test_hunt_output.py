@@ -33,8 +33,7 @@ class TestHuntResultSchemaInit:
 
     def test_detection_columns_defined(self):
         """Detection columns should include matched_uuid, rule_id, etc."""
-        schema = HuntResultSchema()
-        names = [dc.name for dc in schema.detection_columns]
+        names = [dc.name for dc in hunt_detection_columns()]
         assert "matched_uuid" in names
         assert "rule_id" in names
         assert "rule_name" in names
@@ -274,36 +273,6 @@ class TestBuildInsertSelect:
             timestamp_placeholder="{{ts_cond}}",
         )
         assert "{{ts_cond}}" in sql
-
-
-class TestResultTableColumns:
-    """Test result table column definitions."""
-
-    def test_returns_column_dicts(self):
-        """Should return a list of column definition dicts."""
-        schema = HuntResultSchema()
-        cols = schema.result_table_columns()
-        assert isinstance(cols, list)
-        assert all(isinstance(c, dict) for c in cols)
-
-    def test_includes_common_header_and_detection(self):
-        """Should include both common header and detection columns."""
-        schema = HuntResultSchema()
-        cols = schema.result_table_columns()
-        names = [c["name"] for c in cols]
-        assert "_timestamp" in names
-        assert "_org_id" in names
-        assert "_uuid" in names
-        assert "matched_uuid" in names
-        assert "rule_id" in names
-
-    def test_excludes_raw_and_tags(self):
-        """_raw and _tags should be excluded from result table."""
-        schema = HuntResultSchema()
-        cols = schema.result_table_columns()
-        names = [c["name"] for c in cols]
-        assert "_raw" not in names
-        assert "_tags" not in names
 
 
 class TestDetectionColumnsComeFromTheSchemas:

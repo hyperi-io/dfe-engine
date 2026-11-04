@@ -492,22 +492,6 @@ class TestSeedDefaults:
 # ---------------------------------------------------------------------------
 
 
-class TestExportYaml:
-    def test_export_yaml_writes_file(self, tmp_path, receiver_yaml):
-        svc_dir = tmp_path / "svc_export"
-        svc_dir.mkdir()
-        (svc_dir / "receiver-default.yaml").write_text(receiver_yaml)
-
-        reg = ServiceConfigRegistry(config_directory=svc_dir, refresh_interval=0)
-        try:
-            out = tmp_path / "export" / "receiver.yaml"
-            result_path = reg.export_yaml("receiver", "default", out)
-            assert result_path.exists()
-            assert result_path.stat().st_size > 0
-        finally:
-            reg.close()
-
-
 # ---------------------------------------------------------------------------
 # _parse_table_name
 # ---------------------------------------------------------------------------

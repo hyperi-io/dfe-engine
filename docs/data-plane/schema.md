@@ -393,11 +393,8 @@ derived separately.
 decided, so a column with nothing measured says so and gets the safe way to be
 wrong.
 
-Measure it rather than guess it. An Elasticsearch index template does not carry
-cardinality, so an imported column is `unknown`;
-`dfe_engine.services.schema.data_shape_service` reads the distinct count off
-rows that have already landed and returns it with the row count and the date it
-was taken.
+An Elasticsearch index template does not carry cardinality, so an imported
+column is `unknown`.
 
 `attribute: [lowcardinality]` is the retired spelling and still reads as
 `cardinality: low`. Declaring the two against each other is refused.

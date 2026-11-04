@@ -5,650 +5,131 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Names reached by something vulture cannot follow, each under the reason it is reached.
+"""Names reached by something vulture cannot follow, each group under the reason it is reached.
 
-hyperi-ci runs ``vulture src/``, so this file is scanned with the package and never
-imported. ty checks every entry, so renaming or removing a target fails the type check.
+hyperi-ci runs ``vulture src/``, so this file is scanned with the package and never imported.
+Vulture matches the bare name, so an entry hides that name everywhere.
 """
 
-import click
-from ruamel.yaml import YAML
 
-from dfe_engine import settings
-from dfe_engine.ai import interface as ai_interface
-from dfe_engine.alerting import dispatcher as alerting_dispatcher
-from dfe_engine.alerting import models as alerting_models
-from dfe_engine.api import conventions as api_conventions
-from dfe_engine.api import deps as api_deps
-from dfe_engine.api import errors as api_errors
-from dfe_engine.api.v1 import alerts as api_v1_alerts
-from dfe_engine.api.v1 import api_keys as api_v1_api_keys
-from dfe_engine.api.v1 import app_contracts as api_v1_app_contracts
-from dfe_engine.api.v1 import apps as api_v1_apps
-from dfe_engine.api.v1 import auth as api_v1_auth
-from dfe_engine.api.v1 import backing_services as api_v1_backing_services
-from dfe_engine.api.v1 import fieldmaps as api_v1_fieldmaps
-from dfe_engine.api.v1 import gitops as api_v1_gitops
-from dfe_engine.api.v1 import hunts as api_v1_hunts
-from dfe_engine.api.v1 import kafka_topics as api_v1_kafka_topics
-from dfe_engine.api.v1 import library as api_v1_library
-from dfe_engine.api.v1 import lifecycle as api_v1_lifecycle
-from dfe_engine.api.v1 import oidc_login as api_v1_oidc_login
-from dfe_engine.api.v1 import oidc_providers as api_v1_oidc_providers
-from dfe_engine.api.v1 import queries as api_v1_queries
-from dfe_engine.api.v1 import repository as api_v1_repository
-from dfe_engine.api.v1 import schemas as api_v1_schemas
-from dfe_engine.api.v1 import sigma as api_v1_sigma
-from dfe_engine.api.v1 import sources as api_v1_sources
-from dfe_engine.api.v1 import system as api_v1_system
-from dfe_engine.api.v1 import transforms as api_v1_transforms
-from dfe_engine.api.v1 import usage as api_v1_usage
-from dfe_engine.appmgmt import contract as appmgmt_contract
-from dfe_engine.appmgmt import library as appmgmt_library
-from dfe_engine.appmgmt import operations as appmgmt_operations
-from dfe_engine.appmgmt import routing as appmgmt_routing
-from dfe_engine.auth import accounts as auth_accounts
-from dfe_engine.auth import hyperdx_role as auth_hyperdx_role
-from dfe_engine.auth import jwt_authority as auth_jwt_authority
-from dfe_engine.auth import models as auth_models
-from dfe_engine.auth import oidc as auth_oidc
-from dfe_engine.auth import roles as auth_roles
-from dfe_engine.cli.auto import errors as cli_auto_errors
-from dfe_engine.cli.auto.vendor import table as cli_auto_vendor_table
-from dfe_engine.clickhouse import attribution as clickhouse_attribution
-from dfe_engine.clickhouse import clickhouse_manager as clickhouse_clickhouse_manager
-from dfe_engine.clickhouse import cloud as clickhouse_cloud
-from dfe_engine.fieldmap import models as fieldmap_models
-from dfe_engine.fieldmap import registry as fieldmap_registry
-from dfe_engine.gitcrud import defaults as gitcrud_defaults
-from dfe_engine.gitcrud import engine as gitcrud_engine
-from dfe_engine.gitcrud import forge as gitcrud_forge
-from dfe_engine.gitcrud import merge as gitcrud_merge
-from dfe_engine.gitcrud import metadata as gitcrud_metadata
-from dfe_engine.gitcrud import versioned as gitcrud_versioned
-from dfe_engine.governance import lifecycle as governance_lifecycle
-from dfe_engine.hunt_runner import ch_coordinator as hunt_runner_ch_coordinator
-from dfe_engine.hunt_runner import models as hunt_runner_models
-from dfe_engine.hunt_runner import scheduler as hunt_runner_scheduler
-from dfe_engine.hunts import alert_grouping as hunts_alert_grouping
-from dfe_engine.hunts import hunt_output as hunts_hunt_output
-from dfe_engine.hunts import rule_creation_service as hunts_rule_creation_service
-from dfe_engine.hunts import rule_model as hunts_rule_model
-from dfe_engine.hyperdx import client as hyperdx_client
-from dfe_engine.kafka import topics as kafka_topics
-from dfe_engine.keda_shim import shim as keda_shim_shim
-from dfe_engine.orgs import models as orgs_models
-from dfe_engine.pipeline import pipeline_util as pipeline_pipeline_util
-from dfe_engine.query import catalog as query_catalog
-from dfe_engine.query import datasources as query_datasources
-from dfe_engine.query import models as query_models
-from dfe_engine.query import result as query_result
-from dfe_engine.query.datasources import clickhouse as query_datasources_clickhouse
-from dfe_engine.query.datasources import storage as query_datasources_storage
-from dfe_engine.sampling import models as sampling_models
-from dfe_engine.schema import ddl_writer as schema_ddl_writer
-from dfe_engine.schema import derived_registry as schema_derived_registry
-from dfe_engine.schema import models as schema_models
-from dfe_engine.schema import registry as schema_registry
-from dfe_engine.schema import schema_builder_v2 as schema_schema_builder_v2
-from dfe_engine.schema import schema_loader as schema_schema_loader
-from dfe_engine.schema import schema_manager as schema_schema_manager
-from dfe_engine.schema import table_loader as schema_table_loader
-from dfe_engine.services import plugins as services_plugins
-from dfe_engine.services import registry as services_registry
-from dfe_engine.services.models import archiver as services_models_archiver
-from dfe_engine.services.models import common as services_models_common
-from dfe_engine.services.models import fetcher as services_models_fetcher
-from dfe_engine.services.models import loader as services_models_loader
-from dfe_engine.services.models import receiver as services_models_receiver
-from dfe_engine.services.models import source_common as services_models_source_common
-from dfe_engine.services.models import transform_vector as services_models_transform_vector
-from dfe_engine.services.models import transform_vrl as services_models_transform_vrl
-from dfe_engine.services.models import transform_wasm as services_models_transform_wasm
-from dfe_engine.services.schema import schema_sources as services_schema_schema_sources
-from dfe_engine.sigma import sigma_backend_clickhouse as sigma_sigma_backend_clickhouse
-from dfe_engine.sigma.providers import base as sigma_providers_base
-from dfe_engine.source import deployment as source_deployment
-from dfe_engine.source import engine_registry as source_engine_registry
-from dfe_engine.source import expression as source_expression
-from dfe_engine.source import models as source_models
-from dfe_engine.source import registry as source_registry
-from dfe_engine.source import type_registry as source_type_registry
-from dfe_engine.state_machines import setup as state_machines_setup
-from dfe_engine.synthetic_data import models as synthetic_data_models
-from dfe_engine.transport_filter import validate as transport_filter_validate
+class _Names:
+    def __getattr__(self, name: str) -> None: ...
 
-# pydantic fills or emits these fields: API bodies, stored documents, authored YAML.
-ai_interface.AIModuleResult.module_name
-ai_interface.LogParser.Input.existing_schema
-ai_interface.LogParser.Output.confidence
-ai_interface.LogParser.Output.field_mappings
-ai_interface.LogParser.Output.parser_config
-ai_interface.LogParser.Output.proposed_schema
-ai_interface.QueryGenerator.Output.proposed_query
-ai_interface.QueryGenerator.Output.rationale
-ai_interface.QueryOptimiser.Output.estimated_improvement
-ai_interface.QueryOptimiser.Output.proposed_query
-ai_interface.QueryOptimiser.Output.rationale
-ai_interface.SchemaOptimiser.Output.proposed_columns
-ai_interface.SchemaOptimiser.Output.proposed_indices
-ai_interface.SchemaOptimiser.Output.rationale
-alerting_models.AlertDestination.secret_ref
-api_errors.InvalidRuleContext.rule_errors
-api_v1_alerts.AlertDestination.url_scheme
-api_v1_alerts.AlertDestinationSummary.url_scheme
-api_v1_api_keys.APIKeyResponse.expired
-api_v1_app_contracts.AppContractResponse.config_schema
-api_v1_apps.AppConfigResponse.etag
-api_v1_apps.AppSummary.file_sets
-api_v1_apps.CatalogueEntry.file_sets
-api_v1_apps.DryRunResponse.sampled
-api_v1_apps.FileDetail.etag
-api_v1_apps.FileSetSummary.directory_setting
-api_v1_apps.RelinkResult.relinked
-api_v1_apps.ResourceBucketModel.average
-api_v1_apps.ResourceBucketModel.bucket_epoch
-api_v1_apps.RoutingResponse.etag
-api_v1_apps.ScalingResponse.deploy_target
-api_v1_apps.ScalingResponse.etag
-api_v1_apps.ValuesResponse.etag
-api_v1_apps.WriteResult.validation
-api_v1_auth.TokenResponse.expires_in
-api_v1_backing_services.AppPrincipal.principal
-api_v1_backing_services.BackingServiceConfig.principals
-api_v1_backing_services.BackingServiceConfig.storage_model
-api_v1_backing_services.ObservedSizing.provider_idle_scaling
-api_v1_backing_services.ObservedSizing.provider_max_replica_memory_gb
-api_v1_backing_services.ObservedSizing.provider_min_replica_memory_gb
-api_v1_backing_services.ObservedSizing.provider_replicas
-api_v1_backing_services.ProviderLimit.as_of
-api_v1_backing_services.ProviderLimit.source_url
-api_v1_backing_services.ProviderLimit.used
-api_v1_fieldmaps.FieldMapSummary.mapping_count
-api_v1_gitops.ClassInfo.action_writable
-api_v1_hunts.HuntEngineStatus.hunt_count
-api_v1_hunts.HuntRuleEntry.target_table_name
-api_v1_hunts.HuntRunQueued.queued
-api_v1_hunts.HuntRunQueued.requested_fire
-api_v1_hunts._HuntConfigFields.explain_queries
-api_v1_hunts._HuntConfigFields.min_interval_seconds
-api_v1_kafka_topics.TopicStateResponse.desired_partitions
-api_v1_kafka_topics.TopicStateResponse.desired_replication_factor
-api_v1_library.WriteResult.validation
-api_v1_lifecycle.LifecycleResponse.pending_reconcile
-api_v1_oidc_login.OidcLoginResponse.authorization_url
-api_v1_oidc_providers.DetachResponse.orphaned_groups
-api_v1_oidc_providers.GroupResolutionRequest.api_token
-api_v1_oidc_providers.GroupResolutionRequest.service_account_json
-api_v1_oidc_providers.OrphanedGroupInfo.member_count
-api_v1_oidc_providers.SyncResponse.groups_skipped
-api_v1_queries.CostLeaderboardRow.peak_memory
-api_v1_queries.CostLeaderboardRow.read_rows
-api_v1_repository.ObjectEntry.etag
-api_v1_repository.ObjectMetadata.etag
-api_v1_repository.PreferencesResponse.etag
-api_v1_repository.PreferencesResponse.preferences
-api_v1_schemas.DDLResult.create_table
-api_v1_schemas.SchemaDiff.copy_directives
-api_v1_sigma.CatalogRuleSummary.upstream_modified
-api_v1_sigma.SigmaViewSummary.json_derived_count
-api_v1_sigma.SourceMappingSummary.field_count
-api_v1_sources.ExternalConnectionModel.consumer_group
-api_v1_sources.ExternalConnectionModel.header_fields
-api_v1_sources.ExternalLagResponse.consumer_group
-api_v1_sources.FlowTransformModel.consumer_group
-api_v1_sources.BulkActionResponse.awaiting_review
-api_v1_sources.CatalogueEntryObject.availability
-api_v1_sources.CatalogueEntryObject.availability_reason
-api_v1_sources.CatalogueEntryObject.has_schema
-api_v1_sources.CatalogueEntryObject.runnable
-api_v1_sources.CatalogueEntryObject.runnable_intakes
-api_v1_sources.CatalogueEntryObject.runnable_reason
-api_v1_sources.DDLResult.create_table
-api_v1_sources.ReviewFields.review_branch
-api_v1_sources.SourceImportResponse.apps_sync_error
-api_v1_sources.SourceImportResponse.apps_synced
-api_v1_sources.SourceResponse.apps_sync_error
-api_v1_sources.SourceResponse.apps_synced
-api_v1_sources.SourceSignalsResponse.landed_in_default
-api_v1_sources.SourceVersionDetail.source_build
-api_v1_sources.SourceVersionDetail.source_deployment
-api_v1_system.DeploymentResponse.applies_routing
-api_v1_system.TransportFacts.per_source_apps
-api_v1_system.RetentionReconcileSummary.core_tables_altered
-api_v1_system.RetentionReconcileSummary.source_tables_altered
-api_v1_system.RetentionStatus.editable
-api_v1_system.SettingsSummary.api_cors_origins
-api_v1_system.SettingsSummary.api_host
-api_v1_system.SettingsSummary.api_port
-api_v1_system.SettingsSummary.auth_enabled
-api_v1_system.SettingsSummary.auth_local_enabled
-api_v1_system.SettingsSummary.clickhouse_data_database
-api_v1_system.SettingsSummary.clickhouse_database
-api_v1_system.SettingsSummary.clickhouse_default_ttl_days
-api_v1_system.SettingsSummary.clickhouse_host
-api_v1_system.SettingsSummary.services_config_dir
-api_v1_system.SystemDefaults.editable
-api_v1_system.VersionResponse.python_version
-api_v1_transforms.CompileResponse.wasm_bytes
-api_v1_transforms.TestResponse.wasm_memory_bytes
-api_v1_usage.UsageMetricOverview.highest_7d
-api_v1_usage.UsageOverviewResponse.highest_7d_label
-api_v1_usage.UsageSeriesResponse.highest
-auth_accounts.Account.last_login_at
-auth_models.AuthContext.connection_id
-auth_models.AuthzRequest.principal
-fieldmap_models.FieldMap.inherits
-hunt_runner_models.HuntState.last_completed_at
-hunts_alert_grouping.AlertGroupingConfig.max_alerts_per_run
-hunts_rule_creation_service.CostEstimate.estimated_rows
-hunts_rule_creation_service.CostEstimate.match_ratio
-hunts_rule_creation_service.CostEstimate.projected_per_day
-hunts_rule_creation_service.CostEstimate.rows_in_window
-orgs_models.Org.ch_password_env
-orgs_models.Org.hyperdx_team_api_key_env
-orgs_models.Org.hyperdx_team_id
-query_models.ExplainPlan.total_estimated_cost
-query_models.ExplainPlan.total_estimated_rows
-query_models.ExplainStep.actual_rows
-query_models.ExplainStep.actual_time_ms
-query_models.ExplainStep.estimated_cost
-query_models.ExplainStep.estimated_rows
-query_models.QueryMetadata.explain_duration_ms
-query_models.QueryMetadata.next_cursor
-query_models.QueryMetadata.total_count
-query_models.ViewParameter.placeholder
-sampling_models.SampleResult.requested_limit
-schema_models.SchemaColumn.matched_searchable
-sigma_providers_base.ProviderConfig.poll_interval_seconds
-source_deployment.SchemaDeployResult.apps_sync_error
-source_deployment.SchemaDeployResult.apps_synced
-source_deployment.SchemaDeployResult.create_table
-source_deployment.SchemaDeployResult.hyperdx_source_error
-source_deployment.SchemaDeployResult.hyperdx_source_teams
-source_deployment.SchemaDeployResult.topics_ensured
-source_models.SourceSummaryObject.current_table_topic_type
-source_models.SourceSummaryObject.has_fetcher
-source_models.SourceSummaryObject.has_transform
-source_models.SourceVersionGetResponse.current_table_topic_type
-source_models.SourceVersionGetResponse.previous_deployed_versions
-state_machines_setup.InitialSetupState.completed_steps
-state_machines_setup.InitialSetupState.current_step
-state_machines_setup.InitialSetupState.pending_steps
-state_machines_setup.InitialSetupState.step_details
-state_machines_setup.SetupStatus.admin_username
-state_machines_setup.SetupStatus.break_glass
-state_machines_setup.SetupStatus.initial_setup
-state_machines_setup.SetupStatus.oidc_providers
-synthetic_data_models.PackInfo.hinted_columns
 
-# The app config models, rendered to the YAML file each Rust app reads.
-services_models_archiver.ArchiveConfig.file_extension
-services_models_archiver.ArchiveConfig.path_template
-services_models_archiver.ArchiveConfig.roll_interval_secs
-services_models_archiver.ArchiveConfig.roll_size_bytes
-services_models_archiver.ArchiverBufferConfig.flush_age_secs
-services_models_archiver.ArchiverBufferConfig.flush_records
-services_models_archiver.ArchiverBufferConfig.writer_parallelism
-services_models_archiver.ArchiverConfig.compression
-services_models_archiver.ArchiverConfig.memory
-services_models_archiver.ArchiverKafkaConfig.acknowledgements
-services_models_archiver.ArchiverKafkaConfig.batch_size
-services_models_archiver.ArchiverKafkaConfig.max_poll_interval_ms
-services_models_archiver.ArchiverKafkaConfig.session_timeout_ms
-services_models_archiver.ArchiverRoutingConfig.default_segment
-services_models_archiver.AzureConfig.account_key
-services_models_archiver.AzureConfig.account_name
-services_models_archiver.GcsConfig.project_id
-services_models_archiver.GcsConfig.service_account_key
-services_models_archiver.MinioConfig.use_ssl
-services_models_archiver.S3Config.access_key_id
-services_models_archiver.S3Config.secret_access_key
-services_models_common.ClientTlsConfig.ca_cert_file
-services_models_common.ClientTlsConfig.skip_verify
-services_models_common.KafkaTlsConfig.ca_file
-services_models_common.KafkaTlsConfig.skip_verify
-services_models_common.MemoryConfig.limit_bytes
-services_models_common.MemoryConfig.pressure_threshold
-services_models_common.MemoryConfig.tracking_enabled
-services_models_common.SaslConfig.aws_access_key_id
-services_models_common.SaslConfig.aws_profile
-services_models_common.SaslConfig.aws_secret_access_key
-services_models_common.SaslConfig.aws_session_token
-services_models_common.SaslConfig.oauth_client_secret
-services_models_common.SaslConfig.oauth_extensions
-services_models_common.SaslConfig.oauth_scope
-services_models_fetcher.FetcherAuthConfig.bearer_token
-services_models_fetcher.FetcherConfig.extra_env
-services_models_fetcher.FetcherConfig.memory
-services_models_fetcher.FetcherKafkaConfig.batch_size
-services_models_fetcher.FetcherKafkaConfig.compression
-services_models_fetcher.FetcherKafkaConfig.linger_ms
-services_models_fetcher.FetcherRoutingConfig.category_to_topic
-services_models_fetcher.FetcherRoutingConfig.default_topic
-services_models_fetcher.FetcherRoutingConfig.topic_fields
-services_models_fetcher.FetcherSourceConfig.batch_size
-services_models_fetcher.FetcherSourceConfig.poll_interval_secs
-services_models_loader.CoercionConfig.array_to_json
-services_models_loader.CoercionConfig.default_timezone
-services_models_loader.CoercionConfig.null_handling
-services_models_loader.CoercionConfig.null_strings
-services_models_loader.CoercionConfig.timezone_fields
-services_models_loader.CoercionConfig.type_mappings
-services_models_loader.CoercionConfig.unknown_type_fallback
-services_models_loader.FieldSanitizationConfig.collapse_underscores
-services_models_loader.FieldSanitizationConfig.collision_strategy
-services_models_loader.FieldSanitizationConfig.handle_numeric_prefix
-services_models_loader.FieldSanitizationConfig.numeric_prefix
-services_models_loader.FieldSanitizationConfig.strip_at_prefix
-services_models_loader.FieldSanitizationConfig.trim_underscores
-services_models_loader.GrpcConfig.acknowledgements
-services_models_loader.GrpcConfig.compression
-services_models_loader.GrpcConfig.default_topic
-services_models_loader.GrpcConfig.max_hold_ms
-services_models_loader.GrpcConfig.max_message_size
-services_models_loader.GrpcConfig.recv_buffer_size
-services_models_loader.GrpcConfig.recv_timeout_ms
-services_models_loader.LoaderBufferConfig.flush_age_secs
-services_models_loader.LoaderConfig.coercion
-services_models_loader.LoaderConfig.field_sanitization
-services_models_loader.LoaderConfig.memory
-services_models_loader.LoaderConfig.schema_cache
-services_models_loader.LoaderConfig.timestamp_dq
-services_models_loader.LoaderHotReloadConfig.debounce_ms
-services_models_loader.LoaderKafkaConfig.acknowledgements
-services_models_loader.LoaderKafkaConfig.topic_regex
-services_models_loader.LoaderRoutingConfig.default_db
-services_models_loader.LoaderRoutingConfig.default_org_id
-services_models_loader.LoaderRoutingConfig.default_table
-services_models_loader.LoaderRoutingConfig.dlq
-services_models_loader.LoaderRoutingConfig.external_topics
-services_models_loader.LoaderRoutingConfig.org_id_field
-services_models_loader.LoaderRoutingConfig.org_routes
-services_models_loader.LoaderRoutingConfig.table_fields
-services_models_loader.LoaderRoutingConfig.topic_suffixes
-services_models_loader.MetadataConfig.collector_timestamp_path
-services_models_loader.MetadataConfig.disable_json_tables
-services_models_loader.MetadataConfig.disable_raw_tables
-services_models_loader.MetadataConfig.drop_tags
-services_models_loader.MetadataConfig.extract_timestamp_collector
-services_models_loader.MetadataConfig.inject_timestamp_load
-services_models_loader.MetadataConfig.json_output
-services_models_loader.MetadataConfig.raw_output
-services_models_loader.MetadataConfig.raw_source_fields
-services_models_loader.MetadataConfig.remove_routing_fields
-services_models_loader.MetadataConfig.table_capture_modes
-services_models_loader.MetadataConfig.tags_fields
-services_models_loader.MetadataConfig.tags_output
-services_models_loader.SchemaConfig.cache_ttl_secs
-services_models_loader.SchemaConfig.refresh_on_error
-services_models_loader.TimestampDqConfig.correct_known_bad
-services_models_loader.TimestampDqConfig.invalid_action
-services_models_loader.TimestampDqConfig.max_future_seconds
-services_models_loader.TimestampDqConfig.max_past_seconds
-services_models_receiver.AuthConfig.accepted_headers
-services_models_receiver.AuthConfig.header_name
-services_models_receiver.AuthConfig.header_values
-services_models_receiver.BearerConfig.refresh_interval_secs
-services_models_receiver.GrpcConfig.acknowledgements
-services_models_receiver.GrpcConfig.max_message_size
-services_models_receiver.LoaderConnectionConfig.grpc_endpoint
-services_models_receiver.LoaderConnectionConfig.timeout_ms
-services_models_receiver.ProducerConfig.acks
-services_models_receiver.ProducerConfig.batch_messages
-services_models_receiver.ProducerConfig.batch_size
-services_models_receiver.ProducerConfig.compression
-services_models_receiver.ProducerConfig.linger_ms
-services_models_receiver.ReceiverBufferConfig.pressure_threshold
-services_models_receiver.ReceiverConfig.ingest_bindings
-services_models_receiver.ReceiverConfig.otlp
-services_models_receiver.ReceiverConfig.prometheus_rw
-services_models_receiver.ReceiverConfig.splunk_hec
-services_models_receiver.ReceiverConfig.validation
-services_models_receiver.ReceiverRoutingConfig.default_org_id
-services_models_receiver.ReceiverRoutingConfig.dlq
-services_models_receiver.RuleMatch.negate
-services_models_receiver.RuleSetAction.from_field
-services_models_receiver.RuleSetAction.lookup
-services_models_receiver.ServerConfig.acknowledgements
-services_models_receiver.ServerConfig.max_body_size
-services_models_receiver.ServerConfig.request_timeout_ms
-services_models_receiver.TlsConfig.ca_file
-services_models_receiver.TlsConfig.ca_secret
-services_models_receiver.TlsConfig.client_auth
-services_models_receiver.TlsConfig.refresh_interval_secs
-services_models_receiver.ValidationConfig.dlq_on_invalid
-services_models_receiver.ValidationConfig.require_json
-services_models_receiver.ValidationConfig.required_fields
-services_models_source_common.SourceFileConfig.reload_interval_secs
-services_models_transform_vector.TransformKafkaConsumerConfig.topic_regex
-services_models_transform_vector.TransformKafkaProducerConfig.batch_size
-services_models_transform_vector.TransformKafkaProducerConfig.compression
-services_models_transform_vector.TransformKafkaProducerConfig.linger_ms
-services_models_transform_vector.TransformVectorConfig.extra_env
-services_models_transform_vector.TransformVectorConfig.extra_yaml_files
-services_models_transform_vector.TransformVectorConfig.memory
-services_models_transform_vrl.VrlPipelineConfig.batch_size
-services_models_transform_vrl.VrlPipelineConfig.batch_timeout_ms
-services_models_transform_vrl.VrlScalingConfig.pressure_threshold
-services_models_transform_vrl.VrlSinkConfig.compression
-services_models_transform_vrl.VrlSinkConfig.key_field
-services_models_transform_vrl.VrlSinkConfig.librdkafka_options
-services_models_transform_vrl.VrlSinkConfig.max_buffer_bytes
-services_models_transform_vrl.VrlSinkConfig.message_timeout_ms
-services_models_transform_vrl.VrlSourceConfig.acknowledgements
-services_models_transform_vrl.VrlSourceConfig.auto_offset_reset
-services_models_transform_vrl.VrlSourceConfig.commit_interval_ms
-services_models_transform_vrl.VrlSourceConfig.librdkafka_options
-services_models_transform_vrl.VrlSourceConfig.max_buffer_bytes
-services_models_transform_vrl.VrlSourceConfig.session_timeout_ms
-services_models_transform_wasm.TransformWasmConfig.extra_env
-services_models_transform_wasm.TransformWasmConfig.memory
-services_models_transform_wasm.WasmKafkaConsumerConfig.topic_regex
-services_models_transform_wasm.WasmKafkaProducerConfig.batch_size
-services_models_transform_wasm.WasmKafkaProducerConfig.compression
-services_models_transform_wasm.WasmKafkaProducerConfig.linger_ms
-services_models_transform_wasm.WasmSourceConfig.input_topic
-services_models_transform_wasm.WasmSourceConfig.output_topic
+_ = _Names()
 
-# A value lookup reaches these enum members.
-appmgmt_library.LifecycleState.DEPRECATED
-cli_auto_errors.ExitCode.USAGE
-governance_lifecycle.LifecycleState.PAUSED
-governance_lifecycle.LifecycleState.STOPPED
-pipeline_pipeline_util.VectorStepType.HYPERSEC
-pipeline_pipeline_util.VectorStepType.SOURCE
-sampling_models.SampleMode.RANDOM
-sigma_providers_base.AuthKind.GIT_TOKEN
+# Rust app config models: rendered to the YAML each app reads.
+_.accepted_headers, _.access_key_id, _.account_key, _.account_name, _.acknowledgements, _.acks
+_.array_to_json, _.auto_offset_reset, _.aws_access_key_id, _.aws_profile, _.aws_secret_access_key
+_.aws_session_token, _.batch_messages, _.batch_size, _.batch_timeout_ms, _.bearer_token
+_.ca_cert_file, _.ca_file, _.ca_secret, _.cache_ttl_secs, _.category_to_topic, _.client_auth
+_.coercion, _.collapse_underscores, _.collector_timestamp_path, _.collision_strategy
+_.commit_interval_ms, _.compression, _.correct_known_bad, _.debounce_ms, _.default_db
+_.default_org_id, _.default_segment, _.default_table, _.default_timezone, _.default_topic
+_.disable_json_tables, _.disable_raw_tables, _.dlq, _.dlq_on_invalid, _.drop_tags
+_.external_topics, _.extra_env, _.extra_yaml_files, _.extract_timestamp_collector
+_.field_sanitization, _.file_extension, _.flush_age_secs, _.flush_records, _.from_field
+_.grpc_endpoint, _.handle_numeric_prefix, _.header_name, _.header_values, _.ingest_bindings
+_.inject_timestamp_load, _.input_topic, _.invalid_action, _.json_output, _.key_field
+_.librdkafka_options, _.limit_bytes, _.linger_ms, _.max_body_size, _.max_buffer_bytes
+_.max_future_seconds, _.max_hold_ms, _.max_message_size, _.max_past_seconds
+_.max_poll_interval_ms, _.memory, _.message_timeout_ms, _.null_handling, _.null_strings
+_.numeric_prefix, _.oauth_client_secret, _.oauth_extensions, _.oauth_scope, _.org_id_field
+_.org_routes, _.otlp, _.output_topic, _.path_template, _.PATH_TEMPLATE_PLACEHOLDERS
+_.poll_interval_secs, _.pressure_threshold, _.project_id, _.prometheus_rw, _.raw_output
+_.raw_source_fields, _.recv_buffer_size, _.recv_timeout_ms, _.refresh_interval_secs
+_.refresh_on_error, _.reload_interval_secs, _.remove_routing_fields, _.request_timeout_ms
+_.require_json, _.required_fields, _.roll_interval_secs, _.roll_size_bytes, _.schema_cache
+_.secret_access_key, _.service_account_key, _.session_timeout_ms, _.skip_verify, _.splunk_hec
+_.strip_at_prefix, _.table_capture_modes, _.table_fields, _.tags_fields, _.tags_output
+_.timeout_ms, _.timestamp_dq, _.timezone_fields, _.topic_fields, _.topic_regex, _.topic_suffixes
+_.tracking_enabled, _.trim_underscores, _.type_mappings, _.unknown_type_fallback, _.use_ssl
+_.validation, _.writer_parallelism
 
-# These dataclass fields leave through asdict or vars.
-appmgmt_operations.ResourceBucket.average
-appmgmt_operations.ResourceBucket.bucket_epoch
-clickhouse_attribution.DfeQueryTags.trace_id
-kafka_topics.TopicState.desired_partitions
-kafka_topics.TopicState.desired_replication_factor
+# API request and response bodies: pydantic fills or emits these fields for clients.
+_.action_writable, _.api_cors_origins, _.api_host, _.api_port, _.api_token, _.applies_routing
+_.apps_sync_error, _.apps_synced, _.as_of, _.auth_enabled, _.auth_local_enabled
+_.authorization_url, _.availability, _.availability_reason, _.average, _.awaiting_review
+_.bucket_epoch, _.clickhouse_data_database, _.clickhouse_database, _.clickhouse_default_ttl_days
+_.clickhouse_host, _.config_schema, _.consumer_group, _.copy_directives, _.core_tables_altered
+_.create_table, _.deploy_target, _.desired_partitions, _.desired_replication_factor
+_.directory_setting, _.editable, _.expires_in, _.explain_queries, _.field_count, _.groups_skipped
+_.has_schema, _.header_fields, _.highest, _.highest_7d, _.highest_7d_label, _.hunt_count
+_.json_column, _.json_derived_count, _.landed_in_default, _.mapping_count, _.member_count
+_.min_interval_seconds, _.orphaned_groups, _.peak_memory, _.pending_reconcile, _.per_source_apps
+_.preferences, _.principal, _.principals, _.provider_idle_scaling
+_.provider_max_replica_memory_gb, _.provider_min_replica_memory_gb, _.provider_replicas
+_.python_version, _.queued, _.read_rows, _.relinked, _.requested_fire, _.rule_errors, _.runnable
+_.runnable_intakes, _.runnable_reason, _.sampled, _.service_account_json, _.services_config_dir
+_.source_build, _.source_deployment, _.source_tables_altered, _.source_url, _.storage_model
+_.target_table_name, _.upstream_modified, _.url_scheme, _.validation, _.wasm_bytes
+_.wasm_memory_bytes
 
-# pySigma's TextQueryBackend reads these class attributes and calls these methods by name.
-sigma_sigma_backend_clickhouse.SqlBackend.add_escaped
-sigma_sigma_backend_clickhouse.SqlBackend.and_in_operator
-sigma_sigma_backend_clickhouse.SqlBackend.cidr_expression
-sigma_sigma_backend_clickhouse.SqlBackend.cidr_in_list_expression
-sigma_sigma_backend_clickhouse.SqlBackend.cidr_wildcard
-sigma_sigma_backend_clickhouse.SqlBackend.compare_op_expression
-sigma_sigma_backend_clickhouse.SqlBackend.compare_operators
-sigma_sigma_backend_clickhouse.SqlBackend.contains_expression
-sigma_sigma_backend_clickhouse.SqlBackend.convert_and_as_in
-sigma_sigma_backend_clickhouse.SqlBackend.convert_condition_and
-sigma_sigma_backend_clickhouse.SqlBackend.convert_condition_field_eq_val_bool
-sigma_sigma_backend_clickhouse.SqlBackend.convert_condition_field_eq_val_cidr
-sigma_sigma_backend_clickhouse.SqlBackend.convert_condition_field_eq_val_num
-sigma_sigma_backend_clickhouse.SqlBackend.convert_condition_field_eq_val_re
-sigma_sigma_backend_clickhouse.SqlBackend.convert_condition_field_eq_val_str
-sigma_sigma_backend_clickhouse.SqlBackend.convert_condition_not
-sigma_sigma_backend_clickhouse.SqlBackend.convert_condition_or
-sigma_sigma_backend_clickhouse.SqlBackend.convert_or_as_in
-sigma_sigma_backend_clickhouse.SqlBackend.convert_value_str
-sigma_sigma_backend_clickhouse.SqlBackend.deferred_only_query
-sigma_sigma_backend_clickhouse.SqlBackend.deferred_separator
-sigma_sigma_backend_clickhouse.SqlBackend.deferred_start
-sigma_sigma_backend_clickhouse.SqlBackend.endswith_expression
-sigma_sigma_backend_clickhouse.SqlBackend.eq_token
-sigma_sigma_backend_clickhouse.SqlBackend.escape_char
-sigma_sigma_backend_clickhouse.SqlBackend.field_equals_field_expression
-sigma_sigma_backend_clickhouse.SqlBackend.field_in_list_expression
-sigma_sigma_backend_clickhouse.SqlBackend.finalize_output_default
-sigma_sigma_backend_clickhouse.SqlBackend.finalize_query_default
-sigma_sigma_backend_clickhouse.SqlBackend.formats
-sigma_sigma_backend_clickhouse.SqlBackend.group_expression
-sigma_sigma_backend_clickhouse.SqlBackend.in_expressions_allow_wildcards
-sigma_sigma_backend_clickhouse.SqlBackend.list_separator
-sigma_sigma_backend_clickhouse.SqlBackend.not_token
-sigma_sigma_backend_clickhouse.SqlBackend.or_in_operator
-sigma_sigma_backend_clickhouse.SqlBackend.parenthesize
-sigma_sigma_backend_clickhouse.SqlBackend.precedence
-sigma_sigma_backend_clickhouse.SqlBackend.re_escape
-sigma_sigma_backend_clickhouse.SqlBackend.re_escape_char
-sigma_sigma_backend_clickhouse.SqlBackend.re_escape_escape_char
-sigma_sigma_backend_clickhouse.SqlBackend.re_expression
-sigma_sigma_backend_clickhouse.SqlBackend.requires_pipeline
-sigma_sigma_backend_clickhouse.SqlBackend.startswith_expression
-sigma_sigma_backend_clickhouse.SqlBackend.str_quote
-sigma_sigma_backend_clickhouse.SqlBackend.token_separator
-sigma_sigma_backend_clickhouse.SqlBackend.unbound_value_num_expression
-sigma_sigma_backend_clickhouse.SqlBackend.unbound_value_re_expression
-sigma_sigma_backend_clickhouse.SqlBackend.unbound_value_str_expression
-sigma_sigma_backend_clickhouse.SqlBackend.wildcard_match_expression
+# Stored documents, results and dataclass fields: pydantic or asdict reads them.
+_.actual_rows, _.actual_time_ms, _.admin_username, _.apps_sync_error, _.apps_synced, _.average
+_.break_glass, _.bucket_epoch, _.ch_password_env, _.completed_steps, _.confidence, _.connection_id
+_.create_table, _.current_step, _.current_table_topic_type, _.desired_partitions
+_.desired_replication_factor, _.estimated_cost, _.estimated_improvement, _.estimated_rows
+_.existing_schema, _.explain_duration_ms, _.field_mappings, _.has_transform, _.hinted_columns
+_.hyperdx_source_error, _.hyperdx_source_teams, _.hyperdx_team_api_key_env, _.hyperdx_team_id
+_.inherits, _.initial_setup, _.last_completed_at, _.last_login_at, _.match_ratio
+_.matched_searchable, _.module_name, _.next_cursor, _.number, _.oidc_providers, _.parser_config
+_.pending_steps, _.placeholder, _.poll_interval_seconds, _.previous_deployed_versions, _.principal
+_.projected_per_day, _.proposed_columns, _.proposed_indices, _.proposed_query, _.proposed_schema
+_.rationale, _.requested_limit, _.rows_in_window, _.secret_ref, _.step_details, _.topics_ensured
+_.total_count, _.total_estimated_cost, _.total_estimated_rows, _.trace_id
 
-# Python or a library reaches these through a protocol.
-YAML().default_flow_style
-YAML().preserve_quotes
-auth_oidc.__getattr__
-cli_auto_errors.DfeCliError.show
-cli_auto_vendor_table.MultiTable()._rendering_index
-click.Group().context_settings
-source_models.SourceMatch._shape_only
-source_models.__getattr__
+# Settings pydantic loads from env and YAML: no engine code reads them yet.
+_.api_key_env, _.auto_bootstrap, _.checkpoint_destination, _.checkpoint_path, _.connections_min
+_.cron_task_timeout, _.default_alert_cooldown, _.default_max_sample_events, _.environment_file
+_.explain_queries, _.helm, _.jitter_seconds, _.log_path, _.max_concurrent_queries
+_.min_interval_seconds, _.num_threads, _.operator_password, _.resource_limit_execution_ms
+_.resource_limit_memory_bytes, _.resource_limit_read_bytes, _.resource_limit_read_rows
+_.s3_bucket, _.viewer_password, _.waking_budget_seconds, _.yaml_dir
 
-# A published contract declares these, and no engine code reads them yet.
-ai_interface.LogParser.Output
-ai_interface.QueryGenerator.Output
-ai_interface.QueryOptimiser.Output
-ai_interface.SchemaOptimiser.Output
+# Enum members reached by a value lookup.
+_.DEPRECATED, _.GIT_TOKEN, _.HYPERSEC, _.PAUSED, _.RANDOM, _.SOURCE, _.STOPPED, _.USAGE
 
-# dfe-schemas' validate_schemas.py calls these.
-schema_table_loader.load_table_spec
-source_engine_registry.EngineRegistry.from_file
-source_type_registry.TypeRegistry.from_file
+# pySigma's TextQueryBackend reads these class attributes and calls these by name.
+_.add_escaped, _.and_in_operator, _.cidr_expression, _.cidr_in_list_expression, _.cidr_wildcard
+_.compare_op_expression, _.compare_operators, _.contains_expression, _.convert_and_as_in
+_.convert_condition_and, _.convert_condition_field_eq_val_bool
+_.convert_condition_field_eq_val_cidr, _.convert_condition_field_eq_val_num
+_.convert_condition_field_eq_val_re, _.convert_condition_field_eq_val_str, _.convert_condition_not
+_.convert_condition_or, _.convert_or_as_in, _.convert_value_str, _.deferred_only_query
+_.deferred_separator, _.deferred_start, _.endswith_expression, _.eq_token, _.escape_char
+_.field_equals_field_expression, _.field_in_list_expression, _.finalize_output_default
+_.finalize_query_default, _.formats, _.group_expression, _.in_expressions_allow_wildcards
+_.list_separator, _.not_token, _.or_in_operator, _.parenthesize, _.precedence, _.re_escape
+_.re_escape_char, _.re_escape_escape_char, _.re_expression, _.requires_pipeline
+_.startswith_expression, _.str_quote, _.token_separator, _.unbound_value_num_expression
+_.unbound_value_re_expression, _.unbound_value_str_expression, _.wildcard_match_expression
 
-# Tests reset these process-wide singletons between cases.
-clickhouse_clickhouse_manager.ClickHouseManager.reset_instance
-fieldmap_registry.FieldMapRegistry.reset_instance
-schema_registry.SchemaRegistry.reset_instance
-services_registry.ServiceConfigRegistry.reset_instance
-settings.reset_settings
-source_registry.SourceRegistry.reset_instance
+# Reached by Python or a library through a protocol or hook.
+_.__getattr__, _._rendering_index, _._shape_only, _.context_settings, _.default_flow_style
+_.external_topics, _.preserve_quotes, _.show
 
-# Engine settings pydantic loads from env and YAML, and no engine code reads.
-settings.ClickHouseResilienceSettings.waking_budget_seconds
-settings.ClickHouseSettings.connections_min
-settings.DFESettings.helm
-settings.HelmSettings.environment_file
-settings.HuntsSettings.alert_channels
-settings.HuntsSettings.alert_destinations
-settings.HuntsSettings.checkpoint_destination
-settings.HuntsSettings.checkpoint_path
-settings.HuntsSettings.cron_task_timeout
-settings.HuntsSettings.default_alert_cooldown
-settings.HuntsSettings.default_max_sample_events
-settings.HuntsSettings.explain_queries
-settings.HuntsSettings.jitter_seconds
-settings.HuntsSettings.log_path
-settings.HuntsSettings.max_concurrent_queries
-settings.HuntsSettings.min_interval_seconds
-settings.HuntsSettings.num_threads
-settings.HuntsSettings.resource_limit_execution_ms
-settings.HuntsSettings.resource_limit_memory_bytes
-settings.HuntsSettings.resource_limit_read_bytes
-settings.HuntsSettings.resource_limit_read_rows
-settings.HyperDXSettings.api_key_env
-settings.LocalAuthSettings.operator_password
-settings.LocalAuthSettings.viewer_password
-settings.QuerySettings.yaml_dir
-settings.QueryViewSettings.auto_bootstrap
-settings.StorageSettings.s3_bucket
+# Declared by a base class for its subclasses to implement or fill.
+_.healthcheck, _.Output
 
-# Only tests reach these.
-ai_interface.AIModuleRegistry.module_names
-ai_interface.AIModuleRegistry.unregister
-alerting_dispatcher.Dispatcher.dispatch
-api_conventions.protocol_paths
-api_deps._resolve_roles_from_groups
-appmgmt_contract.reload_contracts
-appmgmt_routing.instances_needing_sync
-auth_hyperdx_role.FORK_ACCEPTS
-auth_jwt_authority.JwtAuthority.add_verify_key_pem
-auth_roles.RoleConfig.check_roles
-clickhouse_cloud.CloudServiceStatus.is_stopped
-fieldmap_models.FieldMap.registry_key
-fieldmap_registry.FieldMapRegistry.get_maps_for_standard
-gitcrud_defaults.diff_against_defaults
-gitcrud_engine.GitCrud.get_with_revision
-gitcrud_engine.GitCrud.read_payload
-gitcrud_forge.PullRequest.number
-gitcrud_merge.three_way_merge
-gitcrud_metadata.extract_metadata
-gitcrud_versioned.VersionedDoc.get_draft
-gitcrud_versioned.VersionedDoc.get_published
-gitcrud_versioned.VersionedDoc.get_version
-gitcrud_versioned.VersionedDoc.save_draft
-gitcrud_versioned.VersionedDoc.set_deployed
-hunt_runner_ch_coordinator.ChCoordinator.renew
-hunt_runner_scheduler.mark_deferred
-hunts_alert_grouping.AlertGroupingConfig.cooldown_td
-hunts_alert_grouping.AlertGroupingConfig.has_group_by
-hunts_alert_grouping.AlertStateManager.check_cooldown
-hunts_alert_grouping.AlertStateManager.ensure_table_exists
-hunts_alert_grouping.AlertStateManager.get_ddl
-hunts_alert_grouping.AlertStateManager.record_fire
-hunts_hunt_output.HuntResultSchema.detection_columns
-hunts_hunt_output.HuntResultSchema.result_table_columns
-hunts_hunt_output.results_table_columns
-hunts_rule_model.Rule.to_rule_info
-hyperdx_client.HyperDXClient.create_source
-hyperdx_client.HyperDXClient.get_team_api_key
-hyperdx_client.HyperDXClient.update_source
-keda_shim_shim.QueryShim.query_names
-query_catalog.label_to_view_name
-query_datasources.DatasourceAdapter.execute_with_explain
-query_datasources.DatasourceAdapter.healthcheck
-query_datasources.list_adapters
-query_datasources_clickhouse.ClickHouseAdapter.healthcheck
-query_datasources_storage.FilesystemAdapter.healthcheck
-query_datasources_storage.S3Adapter.healthcheck
-query_models.QueryRequest
-query_result.QueryResult.to_csv
-query_result.QueryResult.to_pandas
-query_result.QueryResult.to_pydict
-query_result.QueryResult.to_pylist
-schema_ddl_writer.DDLFileWriter.write_all
-schema_derived_registry.DerivedSchemaRegistry.reference_root
-schema_schema_builder_v2.SchemaBuilderV2.build_ddl_only
-schema_schema_builder_v2.SchemaBuilderV2.generate_alter_add
-schema_schema_builder_v2.SchemaBuilderV2.generate_alter_modify
-schema_schema_loader.SchemaLoader.get_order_by_columns
-schema_schema_manager.SchemaManager.clone_version
-services_models_archiver.PATH_TEMPLATE_PLACEHOLDERS
-services_plugins.all_plugins
-services_plugins.config_classes
-services_registry.ServiceConfigRegistry.export_yaml
-services_schema_schema_sources.import_schema
-settings.load_clickhouse_settings
-source_deployment.SourceDeploymentStore.load_plan
-source_deployment.SourceDeploymentStore.save_plan
-source_deployment.deploy_statements_for_build
-source_deployment.execute_ddl_statements
-source_expression.ExprValidationResult.candidate_fields
-source_models.materialisation_action
-source_type_registry.TypeRegistry.attribute_names
-source_type_registry.TypeRegistry.valid_primitives_for_attribute
-transport_filter_validate.warn_suboptimal_ordering
+# The dfe-schemas validation script (scripts/validate_schemas.py) calls these.
+_.from_file, _.load_table_spec
+
+# Tests reset these process-wide singletons and caches between cases.
+_.reload_contracts, _.reset_instance, _.reset_settings
+
+# Alerting code with no caller outside its tests (hunts/alert_grouping.py, alerting/dispatcher.py).
+_.check_cooldown, _.cooldown_td, _.dispatch, _.ensure_table_exists, _.get_ddl, _.has_group_by
+_.max_alerts_per_run, _.record_fire
+
+# Documented library API (docs/data-plane/schema-classes.md, query-api-python.md).
+_.build_ddl_only, _.clone_version, _.generate_alter_add, _.generate_alter_modify
+_.get_order_by_columns, _.reference_root, _.to_csv, _.to_pandas, _.to_pydict, _.to_pylist
+_.write_all
+
+# Helpers and constants currently used only by tests.
+_._resolve_roles_from_groups, _.add_verify_key_pem, _.candidate_fields
+_.deploy_statements_for_build, _.execute_ddl_statements, _.extract_metadata, _.FORK_ACCEPTS
+_.get_draft, _.get_published, _.get_version, _.list_adapters, _.load_clickhouse_settings
+_.load_plan, _.protocol_paths, _.query_names, _.read_payload, _.save_draft, _.save_plan
+_.set_deployed

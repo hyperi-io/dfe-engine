@@ -215,11 +215,6 @@ class HuntResultSchema:
         """The header profile the result table is built on."""
         return self._profile_name
 
-    @property
-    def detection_columns(self) -> tuple[HuntDetectionColumn, ...]:
-        """The detection columns every hunt result carries."""
-        return hunt_detection_columns()
-
     def insert_columns(self) -> list[str]:
         """Column names for the INSERT INTO clause.
 
@@ -357,41 +352,3 @@ class HuntResultSchema:
         return (
             f"INSERT INTO {target}\n    ({insert_cols})\nSELECT\n    {select_expr}\nFROM {matched}"
         )
-
-    def result_table_columns(self) -> list[dict]:
-        """Return column definitions for the hunt results table.
-
-        Returns a list of dicts suitable for DDL generation or
-        schema documentation. Includes common header, detection
-        columns, and optional _json.
-        """
-        columns = []
-
-        # Full profile columns (including generated ones like _uuid)
-        for col in self._profile_columns:
-            # Skip _raw and _tags -- not needed in hunt results
-            if col.name in ("_raw", "_tags"):
-                continue
-            columns.append(
-                {
-                    "name": col.name,
-                    "type": col.type,
-                    "attribute": col.attribute,
-                    "default": col.default,
-                    "expr": col.expr,
-                    "comment": col.comment,
-                }
-            )
-
-        # Hunt detection columns
-        for dc in hunt_detection_columns():
-            columns.append(
-                {
-                    "name": dc.name,
-                    "ch_type": dc.ch_type,
-                    "codec": dc.codec,
-                    "comment": dc.comment,
-                }
-            )
-
-        return columns

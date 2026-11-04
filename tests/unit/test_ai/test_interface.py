@@ -258,13 +258,6 @@ class TestAIModuleRegistry:
         with pytest.raises(KeyError, match="not found"):
             reg.get("nonexistent")
 
-    def test_unregister(self):
-        reg = AIModuleRegistry()
-        reg.register(StubQueryOptimiser())
-        reg.unregister("stub-query-opt")
-        with pytest.raises(KeyError):
-            reg.get("stub-query-opt")
-
     def test_list_all_modules(self):
         reg = AIModuleRegistry()
         reg.register(StubQueryOptimiser())
@@ -282,18 +275,8 @@ class TestAIModuleRegistry:
         assert len(query_mods) == 1
         assert query_mods[0].name == "stub-query-opt"
 
-    def test_module_names(self):
-        reg = AIModuleRegistry()
-        reg.register(StubQueryOptimiser())
-        reg.register(StubSchemaOptimiser())
-        assert set(reg.module_names) == {"stub-query-opt", "stub-schema-opt"}
-
     def test_multiple_same_type(self):
         reg = AIModuleRegistry()
         reg.register(StubQueryOptimiser("opt-v1"))
         reg.register(StubQueryOptimiser("opt-v2"))
         assert len(reg.list_modules(AIModuleType.QUERY_OPTIMISER)) == 2
-
-    def test_unregister_nonexistent_is_noop(self):
-        reg = AIModuleRegistry()
-        reg.unregister("does-not-exist")  # Should not raise

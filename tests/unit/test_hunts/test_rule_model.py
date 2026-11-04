@@ -99,30 +99,6 @@ class TestRule:
         rule = Rule.from_create(rc, rule_id="r1")
         assert rule.source == "my_source"
 
-    def test_to_rule_info(self):
-        rule = Rule(
-            rule_id="r1",
-            name="Test Rule",
-            source_table="windows_audit",
-            source="crowdstrike_edr",
-            where_clause="x = 1",
-        )
-        info = rule.to_rule_info()
-        assert info["rule_name"] == "r1"
-        assert info["source_table_name"] == "windows_audit"
-        assert info["source"] == "crowdstrike_edr"
-
-    def test_to_rule_info_minimal(self):
-        rule = Rule(
-            rule_id="r2",
-            name="Minimal",
-            where_clause="y = 2",
-        )
-        info = rule.to_rule_info()
-        assert info["rule_name"] == "r2"
-        assert "source_table_name" not in info
-        assert "source" not in info
-
     def test_validate_valid_rule(self):
         rule = Rule(
             rule_id="r1",

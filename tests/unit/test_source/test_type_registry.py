@@ -65,10 +65,6 @@ class TestTypeRegistryLoading:
         }
         assert set(registry.use_cases) == expected
 
-    def test_all_attributes_present(self, registry: TypeRegistry):
-        expected = {"lowcardinality", "nullable", "not_null", "materialized", "alias"}
-        assert set(registry.attribute_names) == expected
-
 
 # ---------------------------------------------------------------------------
 # Resolve — normal primitives
@@ -391,16 +387,6 @@ class TestIntrospection:
         assert "string" in prims
         assert "integer" in prims
         assert "text" not in prims
-
-    def test_valid_primitives_for_attribute_specific(self, registry: TypeRegistry):
-        prims = registry.valid_primitives_for_attribute("lowcardinality")
-        assert isinstance(prims, list)
-        assert "string" in prims
-        assert "json" not in prims
-
-    def test_valid_primitives_for_attribute_all(self, registry: TypeRegistry):
-        result = registry.valid_primitives_for_attribute("nullable")
-        assert result == "all"
 
     def test_primitive_defaults(self, registry: TypeRegistry):
         defaults = registry.primitive_defaults("string")

@@ -128,22 +128,6 @@ def state_from_enabled(enabled: bool) -> SourceState:
     return "active" if enabled else "disabled"
 
 
-def materialisation_action(state: SourceState) -> Literal["create", "leave", "reclaim"]:
-    """Lazy materialisation: CREATE on active, LEAVE on dormant, guarded RECLAIM on disabled.
-
-    Creates are idempotent (no has-been-materialised bit), dormant is a no-op
-    (never drop a dormant source's table - the pre-2.2 bug), and a drop happens
-    only on disabled behind the caller's guard. Gitops-declarative: the action
-    derives from the declared state alone.
-    """
-    actions: dict[str, Literal["create", "leave", "reclaim"]] = {
-        "active": "create",
-        "dormant": "leave",
-        "disabled": "reclaim",
-    }
-    return actions[state]
-
-
 @cache
 def engine_registry() -> EngineRegistry:
     """The permitted-engine registry, loaded on first use rather than at import."""

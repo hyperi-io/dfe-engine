@@ -187,33 +187,6 @@ class TestList:
 
 
 # ---------------------------------------------------------------
-# Get Maps For Standard
-# ---------------------------------------------------------------
-
-
-class TestGetMapsForStandard:
-    def test_returns_correct_standard(self, registry):
-        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
-        registry.save_map(_make_field_map(standard="sigma", source="win", mappings={"B": "b"}))
-        registry.save_map(_make_field_map(standard="ecs", mappings={"C": "c"}))
-
-        sigma_maps = registry.get_maps_for_standard("sigma")
-        assert len(sigma_maps) == 2
-        assert all(m.standard == "sigma" for m in sigma_maps)
-
-    def test_excludes_other_standards(self, registry):
-        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
-        registry.save_map(_make_field_map(standard="ecs", mappings={"B": "b"}))
-
-        ecs_maps = registry.get_maps_for_standard("ecs")
-        assert len(ecs_maps) == 1
-        assert ecs_maps[0].standard == "ecs"
-
-    def test_empty_for_unknown_standard(self, registry):
-        assert registry.get_maps_for_standard("ocsf") == []
-
-
-# ---------------------------------------------------------------
 # Map Exists
 # ---------------------------------------------------------------
 

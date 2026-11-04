@@ -57,44 +57,6 @@ class DatasourceAdapter(ABC):
     ) -> ExplainPlan:
         """Get execution plan for query."""
 
-    def execute_with_explain(
-        self,
-        query: str,
-        params: dict[str, Any] | None = None,
-        timeout_seconds: int = 30,
-        parallel: bool = False,
-    ) -> tuple[list[dict[str, Any]], list[str], ExplainPlan]:
-        """Execute query and return results with EXPLAIN plan.
-
-        Returns:
-            Tuple of (rows, column_names, ExplainPlan)
-        """
-        if parallel:
-            return self._execute_parallel(query, params, timeout_seconds)
-        rows, columns = self.execute(query, params, timeout_seconds)
-        plan = self.explain(query, params)
-        return rows, columns, plan
-
-    def _execute_parallel(
-        self,
-        query: str,
-        params: dict[str, Any] | None,
-        timeout_seconds: int,
-    ) -> tuple[list[dict[str, Any]], list[str], ExplainPlan]:
-        """Execute query and EXPLAIN in parallel using threads."""
-        from concurrent.futures import Future, ThreadPoolExecutor
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            query_future: Future[tuple[list[dict[str, Any]], list[str]]] = executor.submit(
-                self.execute, query, params, timeout_seconds
-            )
-            explain_future: Future[ExplainPlan] = executor.submit(self.explain, query, params)
-
-            rows, columns = query_future.result(timeout=timeout_seconds + 5)
-            plan = explain_future.result(timeout=timeout_seconds + 5)
-
-        return rows, columns, plan
-
     @abstractmethod
     def healthcheck(self) -> bool:
         """Check datasource connectivity."""
