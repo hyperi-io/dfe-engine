@@ -80,13 +80,8 @@ _.projected_per_day, _.proposed_columns, _.proposed_indices, _.proposed_query, _
 _.rationale, _.requested_limit, _.rows_in_window, _.secret_ref, _.step_details, _.topics_ensured
 _.total_count, _.total_estimated_cost, _.total_estimated_rows, _.trace_id
 
-# Settings pydantic loads from env and YAML: no engine code reads them yet.
-_.api_key_env, _.auto_bootstrap, _.checkpoint_destination, _.checkpoint_path, _.connections_min
-_.cron_task_timeout, _.default_alert_cooldown, _.default_max_sample_events, _.environment_file
-_.explain_queries, _.helm, _.jitter_seconds, _.log_path, _.max_concurrent_queries
-_.min_interval_seconds, _.num_threads, _.operator_password, _.resource_limit_execution_ms
-_.resource_limit_memory_bytes, _.resource_limit_read_bytes, _.resource_limit_read_rows
-_.s3_bucket, _.viewer_password, _.waking_budget_seconds, _.yaml_dir
+# Resilience settings reach scalo's ResilienceConfig through model_dump.
+_.waking_budget_seconds
 
 # Enum members reached by a value lookup.
 _.DEPRECATED, _.GIT_TOKEN, _.HYPERSEC, _.PAUSED, _.RANDOM, _.SOURCE, _.STOPPED, _.USAGE

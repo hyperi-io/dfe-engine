@@ -252,7 +252,6 @@ class TestCredentialName:
             ("password_env", "connections"),
             ("api_token_env", "groups"),
             ("ch_password_env", ""),
-            ("DFE_ENGINE_HYPERDX_API_KEY_ENV", ""),
         ],
     )
     def test_a_setting_that_holds_a_credential_word_is_not(self, name, parent):

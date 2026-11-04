@@ -15,14 +15,7 @@ clickhouse:
   # null -> follow the SCALO_TLS_VERIFY escape valve (cert verification ON by
   # default). Set false (DFE_ENGINE_CLICKHOUSE_VERIFY) only for self-signed dev/test CH.
   verify: null
-  connections_min: 10
   connections_max: 300
-
-# Hunt scheduler settings
-hunts:
-  log_path: "hunt_log_path"
-  checkpoint_path: ""
-  cron_task_timeout: 300
 
 # Artifactory settings for downloading templates
 artifactory:
@@ -45,7 +38,6 @@ kafka:
 storage:
   type: "auto"
   path: "./artifacts"
-  s3_bucket: ""
   s3_region: ""
 
 # Authorization settings
@@ -59,5 +51,3 @@ auth:
     enabled: true
     admin_name: "admin"
     admin_password: "changeme"
-    operator_password: "changeme"
-    viewer_password: "changeme"
