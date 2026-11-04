@@ -33,11 +33,13 @@ while the replica answering is behind on its tables, for at most a deferral cap
 counted from the first poll it held. A fire the cap lets run short of the horizon
 records that horizon, and the next fire re-reads from it. Each compiled rule also
 re-reads an overlap before its watermark and leaves out every source row it has
-already detected, keyed on (hunt, rule, matched ``_uuid``), so a row is never
-written or notified twice. A row is detected exactly once when it becomes readable
-within the overlap plus the deferral cap. Anything later is missed, and
-``hunt_safe_horizon_cap_reached_total`` and ``hunt_safe_horizon_seconds_behind``
-show the lag that reaches past that bound.
+already detected, keyed on (hunt, rule, matched ``_uuid``). A row is never
+missed when it becomes readable within the overlap plus the deferral cap. Anything
+later is, and ``hunt_safe_horizon_cap_reached_total`` and
+``hunt_safe_horizon_seconds_behind`` show the lag that reaches past that bound. The
+dedupe reads the answering replica's detections, so a fire the cap lets run while
+that replica's detection table lags can write and notify a duplicate, which
+``hunt_safe_horizon_cap_ran_with_target_lag_total`` counts.
 """
 
 import json
@@ -185,7 +187,10 @@ class HuntWorker:
         began = time.monotonic()
         try:
             reading = read_safe_horizon(
-                self._ch, tables, commit_allowance_seconds=self._commit_allowance
+                self._ch,
+                tables,
+                commit_allowance_seconds=self._commit_allowance,
+                targets={s.target for s in spec.queries if s.target is not None},
             )
         except ClickHouseError as exc:
             logger.warning(
@@ -221,6 +226,9 @@ class HuntWorker:
             deferral_cap_seconds=cap,
             held_seconds=reading.now - since,
         )
+        if reading.target_delay_seconds > 0:
+            # The dedupe reads this replica's detections, so a lagging copy can let a duplicate through.
+            self._metrics.safe_horizon_cap_ran_with_target_lag(hunt)
         self._release(hunt, fire, short_of=reading.horizon)
         return False
 
@@ -322,14 +330,12 @@ class HuntWorker:
         A fire that ran short of the safe horizon leaves that horizon as the point the
         next fire re-reads from. One that reached it clears the point.
         """
+        if dedupes and short_of is not None:
+            self._coord.set_safe_horizon_mark(hunt, SAFE_FROM, short_of)
+        elif dedupes and safe_from is not None:
+            self._coord.set_safe_horizon_mark(hunt, SAFE_FROM, 0)
         if self._coord.get_safe_horizon_mark(hunt, DEFERRED_SINCE) is not None:
             self._coord.set_safe_horizon_mark(hunt, DEFERRED_SINCE, 0)
-        if not dedupes:
-            return
-        if short_of is not None:
-            self._coord.set_safe_horizon_mark(hunt, SAFE_FROM, short_of)
-        elif safe_from is not None:
-            self._coord.set_safe_horizon_mark(hunt, SAFE_FROM, 0)
 
     def run(self, spec: HuntSpec, scheduled_start: int) -> int:
         """Execute the incremental window; return the new watermark (= window end).
@@ -408,9 +414,11 @@ class HuntWorker:
                     spec, statement, scheduled_start, count_sql, settings
                 )
         # Advance ONLY after every statement committed (crash-safe resume).
-        self._coord.set_watermark(spec.hunt_id, end)
+        # The marks land before the watermark, so a crash between them keeps the
+        # re-read range, and a failed mark write leaves the fire due to retry.
         if released is not None:
             self._settle_safe_horizon(spec.hunt_id, released[1], safe_from, dedupes=dedupes)
+        self._coord.set_watermark(spec.hunt_id, end)
         self._coord.record_run(spec.hunt_id, scheduled_start, written)
         # The ONE line a fire leaves behind: without it a hunt that stops finding
         # anything is indistinguishable from a hunt that stopped running (#357).

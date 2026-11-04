@@ -90,6 +90,12 @@ def test_the_safe_horizon_reads_every_table_once_as_quoted_literals():
     )
 
 
+def test_the_safe_horizon_reads_the_detection_tables_delay_on_its_own():
+    sql = safe_horizon_sql([("acme", "main"), ("acme", "detection")], [("acme", "detection")])
+
+    assert "maxIf(absolute_delay, (database, table) IN (('acme', 'detection')))" in sql
+
+
 def test_a_safe_horizon_over_no_table_is_refused():
     with pytest.raises(ValueError, match="no table"):
         safe_horizon_sql([])

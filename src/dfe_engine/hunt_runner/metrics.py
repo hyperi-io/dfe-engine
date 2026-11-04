@@ -42,6 +42,7 @@ FIRES_HELD = "hunt_fires_held_total"
 SAFE_HORIZON_DEFERRALS = "hunt_safe_horizon_deferrals_total"
 SAFE_HORIZON_DEFERRALS_PER_FIRE = "hunt_safe_horizon_deferrals_per_fire"
 SAFE_HORIZON_CAP_REACHED = "hunt_safe_horizon_cap_reached_total"
+SAFE_HORIZON_CAP_TARGET_LAG = "hunt_safe_horizon_cap_ran_with_target_lag_total"
 SAFE_HORIZON_SECONDS_BEHIND = "hunt_safe_horizon_seconds_behind"
 SAFE_HORIZON_QUERY_DURATION = "hunt_safe_horizon_query_duration_seconds"
 OVERLAP_ROWS_REREAD = "hunt_overlap_rows_reread_total"
@@ -117,6 +118,12 @@ class HuntRunnerMetrics:
         self._cap_reached = manager.counter(
             SAFE_HORIZON_CAP_REACHED,
             "Fires run short of the safe horizon because they were held for the deferral cap",
+            ["hunt_id"],
+        )
+        self._cap_target_lag = manager.counter(
+            SAFE_HORIZON_CAP_TARGET_LAG,
+            "Fires the deferral cap let run while their detection table lagged, so the "
+            "dedupe may have let a duplicate through",
             ["hunt_id"],
         )
         self._seconds_behind = manager.histogram(
@@ -262,6 +269,12 @@ class HuntRunnerMetrics:
         if capped:
             self._cap_reached.labels(hunt_id=hunt_id).inc()
 
+    def safe_horizon_cap_ran_with_target_lag(self, hunt_id: str) -> None:
+        """Record a capped fire run while its detection table lagged on the answering replica."""
+        if self._manager is None:
+            return
+        self._cap_target_lag.labels(hunt_id=hunt_id).inc()
+
     def overlap_reread(self, hunt_id: str, *, rows: int, duplicates: int) -> None:
         """Record the rows a fire re-read in its overlap and the detections it skipped."""
         if self._manager is None:
@@ -326,6 +339,7 @@ __all__ = [
     "RUNS",
     "RUN_DURATION",
     "SAFE_HORIZON_CAP_REACHED",
+    "SAFE_HORIZON_CAP_TARGET_LAG",
     "SAFE_HORIZON_DEFERRALS",
     "SAFE_HORIZON_DEFERRALS_PER_FIRE",
     "SAFE_HORIZON_QUERY_DURATION",

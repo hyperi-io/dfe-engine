@@ -38,11 +38,14 @@ class SafeHorizon:
         now: The server's clock, epoch seconds.
         delay_seconds: The largest replication delay over the hunt's tables.
         commit_allowance_seconds: How far the horizon trails the delay once there is one.
+        target_delay_seconds: The largest delay over the hunt's detection tables alone,
+            where the dedupe looks for what it already detected.
     """
 
     now: int
     delay_seconds: int
     commit_allowance_seconds: int
+    target_delay_seconds: int = 0
 
     @property
     def horizon(self) -> int:
@@ -62,8 +65,14 @@ class SafeHorizon:
         return max(0, fire - self.horizon)
 
 
-def safe_horizon_sql(tables: Iterable[tuple[str, str]]) -> str:
-    """The query reading the server's clock and the largest delay over *tables*.
+def _listed(pairs: Iterable[tuple[str, str]]) -> str:
+    return ", ".join(f"({quote_literal(db)}, {quote_literal(table)})" for db, table in pairs)
+
+
+def safe_horizon_sql(
+    tables: Iterable[tuple[str, str]], targets: Iterable[tuple[str, str]] = ()
+) -> str:
+    """The query reading the server's clock, the largest delay over *tables*, and over *targets*.
 
     Raises:
         ValueError: If *tables* is empty, since the read would measure nothing.
@@ -71,15 +80,24 @@ def safe_horizon_sql(tables: Iterable[tuple[str, str]]) -> str:
     pairs = sorted(set(tables))
     if not pairs:
         raise ValueError("a safe horizon over no table measures nothing")
-    listed = ", ".join(f"({quote_literal(db)}, {quote_literal(table)})" for db, table in pairs)
+    target_pairs = sorted(set(targets))
+    target_delay = "0"
+    if target_pairs:
+        target_delay = (
+            f"toInt64(maxIf(absolute_delay, (database, table) IN ({_listed(target_pairs)})))"
+        )
     return (
-        "SELECT toInt64(now()), toInt64(max(absolute_delay)) "  # noqa: S608 - quoted literals
-        f"FROM system.replicas WHERE (database, table) IN ({listed})"
+        f"SELECT toInt64(now()), toInt64(max(absolute_delay)), {target_delay} "  # noqa: S608 - quoted literals
+        f"FROM system.replicas WHERE (database, table) IN ({_listed(pairs)})"
     )
 
 
 def read_safe_horizon(
-    ch: Any, tables: Iterable[tuple[str, str]], *, commit_allowance_seconds: int
+    ch: Any,
+    tables: Iterable[tuple[str, str]],
+    *,
+    commit_allowance_seconds: int,
+    targets: Iterable[tuple[str, str]] = (),
 ) -> SafeHorizon:
     """Read the safe horizon for *tables* on the server *ch* answers from.
 
@@ -87,14 +105,16 @@ def read_safe_horizon(
         ch: A clickhouse-connect client.
         tables: The (database, table) pairs the fire reads and writes.
         commit_allowance_seconds: How far the horizon trails a non-zero delay.
+        targets: The detection tables among *tables*, whose delay is also read alone.
 
     Returns:
         The reading. A table with no replica row counts as no delay.
     """
     # An aggregate with no GROUP BY returns one row, with a delay of 0 over no replica row.
-    now, delay = ch.query(safe_horizon_sql(tables)).result_rows[0]
+    now, delay, target_delay = ch.query(safe_horizon_sql(tables, targets)).result_rows[0]
     return SafeHorizon(
         now=int(now),
         delay_seconds=int(delay or 0),
         commit_allowance_seconds=commit_allowance_seconds,
+        target_delay_seconds=int(target_delay or 0),
     )

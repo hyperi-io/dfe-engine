@@ -39,9 +39,12 @@ DIRECT_HUNT = HuntSpec(
 class _Ch:
     """A ClickHouse that reports one replication delay and records every statement."""
 
-    def __init__(self, *, now: int, delay: int = 0, broken: bool = False) -> None:
+    def __init__(
+        self, *, now: int, delay: int = 0, broken: bool = False, target_delay: int = 0
+    ) -> None:
         self.now = now
         self.delay = delay
+        self.target_delay = target_delay
         self.broken = broken
         self.queries: list[str] = []
         self.commands: list[str] = []
@@ -51,7 +54,7 @@ class _Ch:
         if "system.replicas" in sql:
             if self.broken:
                 raise DatabaseError("Code: 497. ACCESS_DENIED")
-            return SimpleNamespace(result_rows=[(self.now, self.delay)])
+            return SimpleNamespace(result_rows=[(self.now, self.delay, self.target_delay)])
         return SimpleNamespace(result_rows=[(self.now * 1000, 0, 0)])
 
     def command(self, sql: str, settings=None) -> SimpleNamespace:
@@ -65,17 +68,23 @@ class _Coordinator:
     def __init__(self, watermark: int | None, **marks: int) -> None:
         self.watermark = watermark
         self.marks: dict[str, int] = dict(marks)
+        # The one write that fails, by mark name or "watermark", to stand in for a crash there.
+        self.fail_on = ""
 
     def get_watermark(self, hunt_id: str) -> int | None:
         return self.watermark
 
     def set_watermark(self, hunt_id: str, watermark: int) -> None:
+        if self.fail_on == "watermark":
+            raise DatabaseError("Code: 210. NETWORK_ERROR")
         self.watermark = watermark
 
     def get_safe_horizon_mark(self, hunt_id: str, mark: str) -> int | None:
         return self.marks.get(mark) or None
 
     def set_safe_horizon_mark(self, hunt_id: str, mark: str, value: int) -> None:
+        if self.fail_on == mark:
+            raise DatabaseError("Code: 210. NETWORK_ERROR")
         self.marks[mark] = value
 
     def record_run(self, hunt_id: str, fire: int, rows_written: int) -> None:
@@ -238,3 +247,46 @@ def test_the_watermark_still_advances_to_the_fire():
     HuntWorker(_Ch(now=1000), coord, overlap_seconds=300).run(RULES_HUNT, 1000)  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
 
     assert coord.watermark == 1000
+
+
+@pytest.mark.parametrize("fail_on", ["safe_from", "deferred_since", "watermark"])
+def test_a_failed_write_after_a_capped_fire_keeps_the_re_read_range(fail_on):
+    """No persistence boundary loses the horizon: the fire stays due, and its retry recovers."""
+    coord = _Coordinator(400, deferred_since=700)
+    ch = _Ch(now=1000, delay=190)
+    worker = _worker(ch, coord=coord, overlap_seconds=120, max_deferral_seconds=300)
+    assert not worker.hold_for_safe_horizon(RULES_HUNT, 1000)
+    coord.fail_on = fail_on
+
+    with pytest.raises(DatabaseError):
+        worker.run(RULES_HUNT, 1000)
+    assert coord.watermark == 400
+
+    coord.fail_on = ""
+    # The replica is still stuck at 800, so a retry whose hold restarted waits out the cap again.
+    while worker.hold_for_safe_horizon(RULES_HUNT, 1000):
+        ch.now += 60
+        ch.delay = ch.now - 810
+    worker.run(RULES_HUNT, 1000)
+    assert coord.watermark == 1000
+    assert coord.marks["safe_from"] == 800
+
+    ch.commands.clear()
+    ch.now, ch.delay = 1600, 0
+    assert not worker.hold_for_safe_horizon(RULES_HUNT, 1600)
+    worker.run(RULES_HUNT, 1600)
+    [sql] = ch.commands
+    # 820 (fire - 180) is inside the read, and the dedupe skips what an attempt already wrote.
+    assert "_timestamp_load >= toDateTime64(680, 3)" in sql
+    assert "_uuid NOT IN (SELECT matched_uuid FROM `d`.`det`" in sql
+
+
+@pytest.mark.parametrize(("target_delay", "counted"), [(0, 0), (5, 1)])
+def test_a_capped_fire_on_a_lagging_detection_table_is_counted(manager, target_delay, counted):
+    coord = _Coordinator(None, deferred_since=1000)
+    ch = _Ch(now=1300, delay=900, target_delay=target_delay)
+    worker = _worker(ch, manager=manager, coord=coord, max_deferral_seconds=300)
+
+    assert not worker.hold_for_safe_horizon(RULES_HUNT, 1000)
+    observed = manager.observed("hunt_safe_horizon_cap_ran_with_target_lag_total")
+    assert len(observed) == counted
