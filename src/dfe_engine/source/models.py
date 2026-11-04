@@ -16,9 +16,10 @@ Usage:
 import re
 from datetime import date
 from functools import cache, lru_cache
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
+    AfterValidator,
     AliasChoices,
     BaseModel,
     ConfigDict,
@@ -516,8 +517,10 @@ class CompatBinding(BaseModel):
         return v
 
 
-def _bound_once(bindings: list[CompatBinding]) -> list[CompatBinding]:
+def _bound_once(bindings: list[CompatBinding] | None) -> list[CompatBinding] | None:
     """Refuse a binding list naming one profile twice."""
+    if bindings is None:
+        return None
     names = [binding.profile for binding in bindings]
     twice = sorted({name for name in names if names.count(name) > 1})
     if twice:
@@ -544,6 +547,11 @@ def _when_text(value: str | None) -> str | None:
     if value is not None and not value.strip():
         raise ValueError("when is empty: give a CEL Fast condition, or use match")
     return value
+
+
+_WhenText = Annotated[str | None, AfterValidator(_when_text)]
+_Aliases = Annotated[dict[str, list[str]], AfterValidator(_aliases_well_formed)]
+_Bindings = Annotated[list[CompatBinding] | None, AfterValidator(_bound_once)]
 
 
 class SourceSchema(BaseModel):
@@ -1350,11 +1358,9 @@ class SourceVersion(BaseModel):
     match: SourceMatch | None = Field(
         default=None, description="Receiver match rule (receiver-based sources)"
     )
-    when: str | None = Field(default=None, description=_WHEN_DESCRIPTION)
-    aliases: dict[str, list[str]] = Field(default_factory=dict, description=_ALIASES_DESCRIPTION)
-    compat_profiles: list[CompatBinding] | None = Field(
-        default=None, description=_COMPAT_PROFILES_DESCRIPTION
-    )
+    when: _WhenText = Field(default=None, description=_WHEN_DESCRIPTION)
+    aliases: _Aliases = Field(default_factory=dict, description=_ALIASES_DESCRIPTION)
+    compat_profiles: _Bindings = Field(default=None, description=_COMPAT_PROFILES_DESCRIPTION)
     transform: SourceTransform | None = Field(
         default=None, description="Transform stage (optional)"
     )
@@ -1373,21 +1379,6 @@ class SourceVersion(BaseModel):
             "the record out to it beside the stage that loads it"
         ),
     )
-
-    @field_validator("when")
-    @classmethod
-    def _validate_when(cls, v: str | None) -> str | None:
-        return _when_text(v)
-
-    @field_validator("aliases")
-    @classmethod
-    def _validate_aliases(cls, v: dict[str, list[str]]) -> dict[str, list[str]]:
-        return _aliases_well_formed(v)
-
-    @field_validator("compat_profiles")
-    @classmethod
-    def _validate_compat_profiles(cls, v: list[CompatBinding] | None) -> list[CompatBinding] | None:
-        return v if v is None else _bound_once(v)
 
     @model_validator(mode="after")
     def _at_most_one_origin(self) -> SourceVersion:
@@ -1524,11 +1515,9 @@ class SourceWriteRequest(BaseModel):
         default=None,
         description="Receiver match rule. One of match, when or fetcher is set",
     )
-    when: str | None = Field(default=None, description=_WHEN_DESCRIPTION)
-    aliases: dict[str, list[str]] = Field(default_factory=dict, description=_ALIASES_DESCRIPTION)
-    compat_profiles: list[CompatBinding] | None = Field(
-        default=None, description=_COMPAT_PROFILES_DESCRIPTION
-    )
+    when: _WhenText = Field(default=None, description=_WHEN_DESCRIPTION)
+    aliases: _Aliases = Field(default_factory=dict, description=_ALIASES_DESCRIPTION)
+    compat_profiles: _Bindings = Field(default=None, description=_COMPAT_PROFILES_DESCRIPTION)
     header: SourceHeader | None = Field(
         default=None,
         description="Common schema header configuration for this revision",
@@ -1572,21 +1561,6 @@ class SourceWriteRequest(BaseModel):
         default=None,
         description="Naming-standard views for this revision (sigma, ecs, cim, ocsf)",
     )
-
-    @field_validator("when")
-    @classmethod
-    def _validate_when(cls, v: str | None) -> str | None:
-        return _when_text(v)
-
-    @field_validator("aliases")
-    @classmethod
-    def _validate_aliases(cls, v: dict[str, list[str]]) -> dict[str, list[str]]:
-        return _aliases_well_formed(v)
-
-    @field_validator("compat_profiles")
-    @classmethod
-    def _validate_compat_profiles(cls, v: list[CompatBinding] | None) -> list[CompatBinding] | None:
-        return v if v is None else _bound_once(v)
 
     @model_validator(mode="after")
     def _exactly_one_origin(self) -> SourceWriteRequest:
