@@ -86,20 +86,9 @@ _.waking_budget_seconds
 # Enum members reached by a value lookup.
 _.DEPRECATED, _.GIT_TOKEN, _.HYPERSEC, _.PAUSED, _.RANDOM, _.SOURCE, _.STOPPED, _.USAGE
 
-# pySigma's TextQueryBackend reads these class attributes and calls these by name.
-_.add_escaped, _.and_in_operator, _.cidr_expression, _.cidr_in_list_expression, _.cidr_wildcard
-_.compare_op_expression, _.compare_operators, _.contains_expression, _.convert_and_as_in
-_.convert_condition_and, _.convert_condition_field_eq_val_bool
-_.convert_condition_field_eq_val_cidr, _.convert_condition_field_eq_val_num
-_.convert_condition_field_eq_val_re, _.convert_condition_field_eq_val_str, _.convert_condition_not
-_.convert_condition_or, _.convert_or_as_in, _.convert_value_str, _.deferred_only_query
-_.deferred_separator, _.deferred_start, _.endswith_expression, _.eq_token, _.escape_char
-_.field_equals_field_expression, _.field_in_list_expression, _.finalize_output_default
-_.finalize_query_default, _.formats, _.group_expression, _.in_expressions_allow_wildcards
-_.list_separator, _.not_token, _.or_in_operator, _.parenthesize, _.precedence, _.re_escape
-_.re_escape_char, _.re_escape_escape_char, _.re_expression, _.requires_pipeline
-_.startswith_expression, _.str_quote, _.token_separator, _.unbound_value_num_expression
-_.unbound_value_re_expression, _.unbound_value_str_expression, _.wildcard_match_expression
+# pySigma's TextQueryBackend reads these class attributes and calls these methods by name.
+_.backend_processing_pipeline, _.cidr_expression, _.convert_condition_field_eq_val_str
+_.correlation_methods, _.escape_and_quote_field, _.finalize_query_default
 
 # Reached by Python or a library through a protocol or hook.
 _.__getattr__, _._rendering_index, _._shape_only, _.context_settings, _.default_flow_style

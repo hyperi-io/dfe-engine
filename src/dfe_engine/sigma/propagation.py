@@ -46,7 +46,6 @@ hunt names the view in the data database the propagator is given.
 
 import hashlib
 from dataclasses import dataclass, field
-from datetime import datetime
 from typing import Any
 
 from scalo.logger import logger
@@ -63,7 +62,7 @@ from dfe_engine.hunts.hunt_config_registry import (
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleNotFoundError, RuleRegistry
 from dfe_engine.orgs.tenant_scope import tenant_ids_by_org
-from dfe_engine.sigma.catalog import SigmaCatalogStore, SigmaSelectionStore
+from dfe_engine.sigma.catalog import SigmaCatalogStore, SigmaSelectionStore, as_text
 from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend
 from dfe_engine.sigma.source_mapper import SigmaSourceMapper
 
@@ -181,7 +180,7 @@ def build_binding_rule(
         sigma_provenance={
             "source": source,
             "sigma_rule_id": sigma_id,
-            "upstream_modified": _as_text(prov.get("upstream_modified")),
+            "upstream_modified": as_text(prov.get("upstream_modified")),
             "sigma_local_edited": bool(prov.get("local_edited", False)),
             "sigma_drift": bool(prov.get("drift", False)),
             "generated_hash": _where_hash(where_clause),
@@ -192,23 +191,6 @@ def build_binding_rule(
 def sigma_view_name(source: str) -> str:
     """The generated sigma view table name for a source (see sigma/views.py)."""
     return f"{source}_sigma"
-
-
-def _as_text(value: Any) -> str | None:
-    """Coerce a (possibly YAML-date) change signal to a stable string.
-
-    Matches ``sigma.catalog._as_text`` (a ``datetime`` collapses to its date) so a
-    stored change signal and its regenerated compare value never spuriously differ
-    - a datetime isoformat vs a date isoformat would otherwise read as false drift.
-    """
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    if isinstance(value, datetime):
-        return value.date().isoformat()
-    iso = getattr(value, "isoformat", None)
-    return iso() if callable(iso) else str(value)
 
 
 # -- Report --------------------------------------------------
@@ -568,7 +550,7 @@ class SigmaPropagator:
             orphaned = True
         elif doc is not None:
             catalogue_drift = _catalogue_drifted(doc)
-            live_upstream = _as_text((doc.get("provenance", {}) or {}).get("upstream_modified"))
+            live_upstream = as_text((doc.get("provenance", {}) or {}).get("upstream_modified"))
             if live_upstream != prov.get("upstream_modified"):
                 catalogue_drift = True
 

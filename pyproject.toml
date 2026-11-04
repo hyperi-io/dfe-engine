@@ -102,8 +102,9 @@ dependencies = [
     # 3.1.6 (2025-03) is the latest release. Imported by pipeline/pipeline.py and required by pysigma.
     "Jinja2>=3.1.6",
     # Sigma rules
-    # Held below 2.0 for GA: the Sigma translation core, upgraded post-GA with its backends.
-    "pysigma>=1.4.0,<2",
+    "pysigma>=2.0.2,<3",
+    # LGPL-3.0, one maintainer, 1.1.1 (2026-08-10). The only ClickHouse backend for pySigma.
+    "pysigma-backend-clickhouse>=1.1.1",
     # Utilities
     "tabulate>=0.10.0",
     "pyparsing>=3.3.2",
@@ -139,13 +140,6 @@ dependencies = [
     # Must stay >=2.14.0: CVE-2026-102274, one malformed JWK aborts parsing of the whole JWK Set.
     "PyJWT[crypto]>=2.15.1",
     "sse-starlette>=3.4.5",
-    # Transitive override: diskcache pulled in by pySigma for MITRE ATT&CK caching.
-    # 5.6.3 (2023-08) is the latest release and the repo's last commit is 2024-03, so it is unmaintained.
-    # CVE-2025-69872 (unsafe pickle, CVSS 9.8): no upstream fix — maintainer unresponsive
-    # since Aug 2023, community PR #359 unreviewed. The irony: a security tool's dependency
-    # chain introduces a critical CVE. Accepted risk — dfe-engine never imports diskcache
-    # directly, cache dir has 0700 perms, and K8s pods provide filesystem isolation.
-    "diskcache>=5.6.3",
     "msal>=1.37.0",
     "google-auth>=2.62.0",
     "google-api-python-client>=2.198.0",
