@@ -4,12 +4,7 @@ from pathlib import Path
 
 import pydantic
 import pytest
-from dulwich import porcelain as dulwich_porcelain
-from dulwich.objects import Commit
-from dulwich.repo import Repo
 
-from dfe_engine.auth.models import AuthContext
-from dfe_engine.git_identity import COMMITTER_IDENTITY, git_author
 from dfe_engine.schema.models import MetaSchema, SchemaColumn, SchemaVersion
 from dfe_engine.schema.registry import (
     SchemaError,
@@ -165,7 +160,7 @@ class TestSchemaRegistryCRUD:
         assert canonical_schema_path("standalone") == "standalone"
 
     def test_relative_schemas_directory_is_resolved(self, tmp_path, monkeypatch):
-        """Regression: relative paths must be resolved so git delete can relativise."""
+        """A relative schemas directory resolves, so every schema path is absolute."""
         monkeypatch.chdir(tmp_path)
         schemas = tmp_path / "schemas"
         schemas.mkdir()
@@ -175,24 +170,6 @@ class TestSchemaRegistryCRUD:
             assert reg._directory == schemas.resolve()
             p = reg._yaml_path("a/b")
             assert p.is_absolute()
-        finally:
-            reg.close()
-            SchemaRegistry.reset_instance()
-
-    def test_delete_schema_git_repo_relative_schemas_dir(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        Repo.init(str(tmp_path))
-        (tmp_path / "schemas").mkdir()
-        SchemaRegistry.reset_instance()
-        reg = SchemaRegistry(schemas_directory="schemas", writable=True, refresh_interval=0)
-        try:
-            reg.save_schema(_minimal_meta("test/test"))
-            yaml_file = tmp_path / "schemas" / "test" / "test.yaml"
-            assert yaml_file.is_file()
-            reg.delete_schema("test/test")
-            assert not yaml_file.exists()
-            with pytest.raises(SchemaNotFoundError):
-                reg.get_schema("test/test")
         finally:
             reg.close()
             SchemaRegistry.reset_instance()
@@ -271,74 +248,6 @@ class TestSchemaRegistryCoverage:
             reg.close()
             SchemaRegistry.reset_instance()
 
-    def test_save_schema_git_commit_with_author_and_push(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        Repo.init(str(tmp_path))
-        repo = Repo(str(tmp_path))
-        config = repo.get_config()
-        config.set((b"user",), b"name", b"username")
-        config.set((b"user",), b"email", b"user@email.com")
-        config.write_to_path()
-        repo.close()
-        schemas = tmp_path / "schemas"
-        schemas.mkdir()
-        SchemaRegistry.reset_instance()
-        reg = SchemaRegistry(
-            schemas_directory=schemas,
-            writable=True,
-            refresh_interval=0,
-            git_push=True,
-        )
-        try:
-            ms = _minimal_meta("svc/widget")
-            reg.save_schema(ms, created_by="username <user@email.com>", description="audit")
-            assert reg.get_schema("svc/widget").current == "1"
-        finally:
-            reg.close()
-            SchemaRegistry.reset_instance()
-
-    def test_emailless_identity_commits_with_split_author_and_committer(self, tmp_path):
-        # Real repo with NO user.identity configured -- the scenario that used to
-        # 422 ("Invalid 'created_by' identity") for a bare 'admin'. The API now
-        # passes git_author(user), so the placeholder identity authors the commit
-        # while the engine is recorded as committer.
-        Repo.init(str(tmp_path))
-        schemas = tmp_path / "schemas"
-        schemas.mkdir()
-        SchemaRegistry.reset_instance()
-        reg = SchemaRegistry(schemas_directory=schemas, writable=True, refresh_interval=0)
-        try:
-            author = git_author(AuthContext(user_id="admin"))
-            reg.save_schema(_minimal_meta("svc/widget"), created_by=author)
-            repo = Repo(str(tmp_path))
-            head = repo[repo.head()]
-            repo.close()
-            assert isinstance(head, Commit)
-            assert head.author == b"admin <admin@dfe.local>"
-            assert head.committer == COMMITTER_IDENTITY.encode("utf-8")
-        finally:
-            reg.close()
-            SchemaRegistry.reset_instance()
-
-    def test_oidc_email_identity_authors_commit(self, tmp_path):
-        Repo.init(str(tmp_path))
-        schemas = tmp_path / "schemas"
-        schemas.mkdir()
-        SchemaRegistry.reset_instance()
-        reg = SchemaRegistry(schemas_directory=schemas, writable=True, refresh_interval=0)
-        try:
-            author = git_author(AuthContext(user_id="alice", email="alice@corp.com"))
-            reg.save_schema(_minimal_meta("svc/widget"), created_by=author)
-            repo = Repo(str(tmp_path))
-            head = repo[repo.head()]
-            repo.close()
-            assert isinstance(head, Commit)
-            assert head.author == b"alice <alice@corp.com>"
-            assert head.committer == COMMITTER_IDENTITY.encode("utf-8")
-        finally:
-            reg.close()
-            SchemaRegistry.reset_instance()
-
     def test_save_schema_rejects_invalid_dict(self, registry):
         with pytest.raises(SchemaValidationError, match="Invalid schema"):
             registry.save_schema(
@@ -351,68 +260,6 @@ class TestSchemaRegistryCoverage:
 
     def test_delete_schema_no_file_is_safe(self, registry):
         registry.delete_schema("missing/file")
-
-    def test_delete_schema_git_rm_failure_still_finishes(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        Repo.init(str(tmp_path))
-        (tmp_path / "schemas").mkdir()
-        SchemaRegistry.reset_instance()
-        reg = SchemaRegistry(schemas_directory="schemas", writable=True, refresh_interval=0)
-        try:
-            reg.save_schema(_minimal_meta("x/y"))
-            yaml_file = tmp_path / "schemas" / "x" / "y.yaml"
-            assert yaml_file.is_file()
-            monkeypatch.setattr(
-                dulwich_porcelain,
-                "rm",
-                lambda *a, **k: (_ for _ in ()).throw(dulwich_porcelain.Error("rm boom")),
-            )
-            reg.delete_schema("x/y")
-            assert not yaml_file.exists()
-            with pytest.raises(SchemaNotFoundError):
-                reg.get_schema("x/y")
-        finally:
-            reg.close()
-            SchemaRegistry.reset_instance()
-
-    def test_delete_schema_with_staged_uncommitted_index(self, tmp_path, monkeypatch):
-        """Regression: delete must remove YAML when index has staged add but no commit."""
-        monkeypatch.chdir(tmp_path)
-        Repo.init(str(tmp_path))
-        (tmp_path / "schemas").mkdir()
-        SchemaRegistry.reset_instance()
-        reg = SchemaRegistry(schemas_directory="schemas", writable=True, refresh_interval=0)
-        try:
-            reg.save_schema(_minimal_meta("test/test"))
-            yaml_file = tmp_path / "schemas" / "test" / "test.yaml"
-            assert yaml_file.is_file()
-            dulwich_porcelain.add(reg._store._repo, paths=["schemas/test/test.yaml"])
-            reg.delete_schema("test/test")
-            assert not yaml_file.exists()
-            with pytest.raises(SchemaNotFoundError):
-                reg.get_schema("test/test")
-            assert "test/test" not in [r["path"] for r in reg.list_schemas()]
-        finally:
-            reg.close()
-            SchemaRegistry.reset_instance()
-
-    def test_delete_schema_runs_push_when_configured(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        Repo.init(str(tmp_path))
-        (tmp_path / "schemas").mkdir()
-        SchemaRegistry.reset_instance()
-        reg = SchemaRegistry(
-            schemas_directory="schemas",
-            writable=True,
-            refresh_interval=0,
-            git_push=True,
-        )
-        try:
-            reg.save_schema(_minimal_meta("del/push"))
-            reg.delete_schema("del/push")
-        finally:
-            reg.close()
-            SchemaRegistry.reset_instance()
 
     def test_list_schemas_filters_exact_path(self, registry):
         registry.save_schema(_minimal_meta("a/one"))
@@ -515,20 +362,6 @@ class TestSchemaRegistryCoverage:
         rows = registry.list_schemas()
         row = next(r for r in rows if r["path"] == "stat/break")
         assert row["updated_at"] == ""
-
-    def test_is_git_and_current_branch_when_repo(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        Repo.init(str(tmp_path))
-        git_schemas = tmp_path / "git_schemas"
-        git_schemas.mkdir()
-        SchemaRegistry.reset_instance()
-        reg = SchemaRegistry(schemas_directory=git_schemas, writable=True, refresh_interval=0)
-        try:
-            assert reg.is_git is True
-            assert reg.current_branch in {"main", "master"}
-        finally:
-            reg.close()
-            SchemaRegistry.reset_instance()
 
     def test_on_change_registers_callback(self, registry):
         def cb(table: str, data: dict) -> None:

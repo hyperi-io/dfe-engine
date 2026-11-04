@@ -37,7 +37,6 @@ from dfe_engine.core_resources.yaml_resource_type import (
     CORE_RESOURCE_MUTATION_MESSAGE,
     config_is_core,
 )
-from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.gitcrud.routing import ReviewRouting, WriteOutcome, WritePosture
 from dfe_engine.source.alignment import MixedConnectorTypesError, require_one_type
 from dfe_engine.source.engine_registry import InvalidEngineError
@@ -308,7 +307,7 @@ class SourceRegistry:
     Backed by the gitcrud engine (deploy-repo ``config/sources/``) when a
     ``crud`` is provided, else by DirectoryConfigStore (YAML directory as SSoT).
     Provides CRUD operations, validation (unique _source, no match
-    conflicts), change callbacks, and git-aware writes.
+    conflicts) and change callbacks.
     """
 
     _instance: SourceRegistry | None = None
@@ -317,8 +316,6 @@ class SourceRegistry:
         self,
         sources_directory: str | Path | None = None,
         writable: bool | None = None,
-        git_branch: str | None = None,
-        git_push: bool = False,
         refresh_interval: int = 30,
         *,
         crud: GitCrud | None = None,
@@ -330,8 +327,6 @@ class SourceRegistry:
             sources_directory: Path to the YAML sources directory
                 (DirectoryConfigStore backend; ignored when ``crud`` is given).
             writable: Whether writes are allowed. None = auto-detect.
-            git_branch: Git branch for writes. None = current branch.
-            git_push: Auto-push after git commits.
             refresh_interval: Seconds between background cache refresh polls.
             crud: Governed Ops engine over the deploy repo. When provided the
                 ``sources`` resource class (config/sources/) is the SSoT and
@@ -358,8 +353,6 @@ class SourceRegistry:
             directory=self._sources_directory,
             refresh_interval=refresh_interval,
             writable=writable,
-            git_branch=git_branch,
-            git_push=git_push,
         )
         self._store.start()
 
@@ -368,8 +361,6 @@ class SourceRegistry:
         cls,
         sources_directory: str | Path | None = None,
         writable: bool | None = None,
-        git_branch: str | None = None,
-        git_push: bool = False,
         refresh_interval: int = 30,
     ) -> SourceRegistry:
         """Get singleton registry instance."""
@@ -381,8 +372,6 @@ class SourceRegistry:
             cls._instance = SourceRegistry(
                 sources_directory=sources_directory,
                 writable=writable,
-                git_branch=git_branch,
-                git_push=git_push,
                 refresh_interval=refresh_interval,
             )
         return cls._instance
@@ -464,8 +453,7 @@ class SourceRegistry:
 
         gitcrud: the doc gains the universal gitcrud ``metadata`` block (derived
         from the doc's own description/display_name) and the write is ONE commit
-        in the deploy repo. Directory backend: plain YAML write, git commit when
-        the directory is a repo, then a cache refresh.
+        in the deploy repo. Directory backend: plain YAML write, then a cache refresh.
         """
         if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.metadata import ResourceMetadata, with_metadata
@@ -497,10 +485,6 @@ class SourceRegistry:
         store = self._require_store()
         yaml_path = self._sources_directory / f"{name}.yaml"
         yaml_dump(doc, yaml_path)
-        if store.is_git:
-            commit_file(store, yaml_path, message, author=created_by)
-            if store._git_push:
-                store._git_push_remote()
         store._refresh_all()
         return str(yaml_path)
 
@@ -516,8 +500,7 @@ class SourceRegistry:
         """Remove one stored source doc; False when it did not exist.
 
         gitcrud: one attributed commit ("(by <created_by>)" suffix, like save).
-        Directory backend: unlink + engine-identity commit when git - it never
-        carried delete attribution, so ``created_by`` is deliberately unused there.
+        Directory backend: unlink, and ``created_by`` is unused.
         """
         if (crud := self._crud) is not None:
             from dfe_engine.gitcrud.engine import ResourceNotFoundError
@@ -545,29 +528,7 @@ class SourceRegistry:
         yaml_path = self._sources_directory / f"{name}.yaml"
         if not yaml_path.exists():
             return False
-
-        # Git rm + commit if git-aware
-        if store.is_git and store._repo is not None:
-            try:
-                from dulwich import porcelain as git
-
-                repo_root = Path(store._repo.path)
-                rel_path = str(yaml_path.relative_to(repo_root))
-
-                yaml_path.unlink()
-                git.rm(store._repo, paths=[rel_path])
-                git.commit(
-                    store._repo,
-                    author=COMMITTER_IDENTITY.encode("utf-8"),
-                    committer=COMMITTER_IDENTITY.encode("utf-8"),
-                    message=message.encode(),
-                )
-                if store._git_push:
-                    store._git_push_remote()
-            except Exception as e:
-                logger.error(f"Git delete failed: {e}")
-        else:
-            yaml_path.unlink()
+        yaml_path.unlink()
 
         # Remove from cache
         with store._lock:
@@ -661,8 +622,7 @@ class SourceRegistry:
         """Save a source definition to the YAML directory.
 
         Validates the source (Pydantic + uniqueness + match conflicts)
-        before writing. If the directory is a git repo, changes are
-        auto-committed.
+        before writing.
 
         Args:
             source: Source model or dict.
@@ -846,8 +806,6 @@ class SourceRegistry:
         routing: ReviewRouting | None = None,
     ) -> None:
         """Delete a source definition and its build, plan and deploy records.
-
-        Removes the YAML file and commits the deletion if git-aware.
 
         Args:
             source_name: The _source label.
@@ -1322,40 +1280,6 @@ class SourceRegistry:
             logger.debug("on_change is a no-op on the gitcrud sources backend")
             return
         self._require_store().on_change(source_name, callback)
-
-    # -----------------------------------------------------------------
-    # Git Operations (passthrough)
-    # -----------------------------------------------------------------
-
-    @property
-    def is_git(self) -> bool:
-        """Whether the sources backend is git-native."""
-        if self._crud is not None:
-            return True
-        return self._require_store().is_git
-
-    @property
-    def current_branch(self) -> str | None:
-        """Current git branch name."""
-        if self._crud is not None:
-            return self._crud.repo.branch
-        return self._require_store().current_branch
-
-    def list_branches(self) -> list[str]:
-        """List all git branches."""
-        if self._crud is not None:
-            raise SourceRegistryError(
-                "branch operations are owned by the gitcrud routing layer on this backend"
-            )
-        return self._require_store().list_branches()
-
-    def switch_branch(self, branch: str, create: bool = False) -> None:
-        """Switch to a git branch. Refreshes cache after switch."""
-        if self._crud is not None:
-            raise SourceRegistryError(
-                "branch operations are owned by the gitcrud routing layer on this backend"
-            )
-        self._require_store().switch_branch(branch, create=create)
 
     # -----------------------------------------------------------------
     # Built-in Sources

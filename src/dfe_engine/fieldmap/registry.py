@@ -24,8 +24,6 @@ Usage:
     registry.save_map(FieldMap(...))
 """
 
-from __future__ import annotations
-
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -34,7 +32,6 @@ from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
 from dfe_engine.fieldmap.models import DEFAULT_MAP_NAME, FieldMap
-from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -54,7 +51,7 @@ class FieldMapRegistry:
     """Registry for managing field map definitions.
 
     Backed by DirectoryConfigStore (YAML directory as SSoT).
-    Provides CRUD operations, standard-scoped queries, and git-aware writes.
+    Provides CRUD operations and standard-scoped queries.
     """
 
     _instance: FieldMapRegistry | None = None
@@ -63,8 +60,6 @@ class FieldMapRegistry:
         self,
         field_maps_directory: str | Path,
         writable: bool | None = None,
-        git_branch: str | None = None,
-        git_push: bool = False,
         refresh_interval: int = 30,
     ) -> None:
         self._directory = Path(field_maps_directory)
@@ -74,8 +69,6 @@ class FieldMapRegistry:
             directory=self._directory,
             refresh_interval=refresh_interval,
             writable=writable,
-            git_branch=git_branch,
-            git_push=git_push,
         )
         self._store.start()
 
@@ -84,8 +77,6 @@ class FieldMapRegistry:
         cls,
         field_maps_directory: str | Path | None = None,
         writable: bool | None = None,
-        git_branch: str | None = None,
-        git_push: bool = False,
         refresh_interval: int = 30,
     ) -> FieldMapRegistry:
         """Get singleton registry instance."""
@@ -97,8 +88,6 @@ class FieldMapRegistry:
             cls._instance = FieldMapRegistry(
                 field_maps_directory=field_maps_directory,
                 writable=writable,
-                git_branch=git_branch,
-                git_push=git_push,
                 refresh_interval=refresh_interval,
             )
         return cls._instance
@@ -158,18 +147,11 @@ class FieldMapRegistry:
 
         return FieldMap.model_validate(config_data)
 
-    def save_map(
-        self,
-        field_map: FieldMap | dict[str, Any],
-        created_by: str | None = None,
-        description: str | None = None,
-    ) -> FieldMap:
+    def save_map(self, field_map: FieldMap | dict[str, Any]) -> FieldMap:
         """Save a field map definition.
 
         Args:
             field_map: FieldMap model or dict.
-            created_by: Username/identity.
-            description: Change description.
 
         Returns:
             Validated FieldMap model.
@@ -195,15 +177,6 @@ class FieldMapRegistry:
         yaml_path = subdir / f"{name}.yaml"
         yaml_dump(config_data, yaml_path)
 
-        # Git commit if git-aware
-        if self._store.is_git:
-            commit_msg = description or f"fieldmap: update {table}"
-            if created_by:
-                commit_msg = f"{commit_msg} (by {created_by})"
-            commit_file(self._store, yaml_path, commit_msg, author=created_by)
-            if self._store._git_push:
-                self._store._git_push_remote()
-
         # Refresh cache
         self._store._refresh_all()
 
@@ -225,26 +198,7 @@ class FieldMapRegistry:
             logger.warning(f"Field map file does not exist: {yaml_path}")
             return
 
-        if self._store.is_git and self._store._repo is not None:
-            try:
-                from dulwich import porcelain as git
-
-                repo_root = Path(self._store._repo.path)
-                rel_path = str(yaml_path.relative_to(repo_root))
-                yaml_path.unlink()
-                git.rm(self._store._repo, paths=[rel_path])
-                git.commit(
-                    self._store._repo,
-                    author=COMMITTER_IDENTITY.encode("utf-8"),
-                    committer=COMMITTER_IDENTITY.encode("utf-8"),
-                    message=f"fieldmap: delete {table}".encode(),
-                )
-                if self._store._git_push:
-                    self._store._git_push_remote()
-            except Exception as e:
-                logger.error(f"Git delete failed: {e}")
-        else:
-            yaml_path.unlink()
+        yaml_path.unlink()
 
         with self._store._lock:
             self._store._cache.pop(table, None)
@@ -355,27 +309,13 @@ class FieldMapRegistry:
         return count
 
     # -----------------------------------------------------------------
-    # Change Callbacks & Git (passthrough)
+    # Change Callbacks
     # -----------------------------------------------------------------
 
     def on_change(self, standard: str, source: str | None, callback: Any) -> None:
         """Register a callback for when a field map changes."""
         table = self._table_name(standard, source)
         self._store.on_change(table, callback)
-
-    @property
-    def is_git(self) -> bool:
-        """Whether the field maps directory is INSIDE a git repository.
-
-        scalo walks up, so a directory under a gitops checkout answers True
-        without being a repository root itself.
-        """
-        return self._store.is_git
-
-    @property
-    def current_branch(self) -> str | None:
-        """Current git branch name."""
-        return self._store.current_branch
 
     # -----------------------------------------------------------------
     # Lifecycle

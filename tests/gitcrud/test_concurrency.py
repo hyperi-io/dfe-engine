@@ -14,6 +14,7 @@ import pytest
 from dfe_engine.gitcrud import (
     ConcurrencyConflictError,
     GitCrud,
+    Layout,
     ResourceClass,
     ResourceClassRegistry,
 )
@@ -23,7 +24,12 @@ from dfe_engine.gitops.repo import GitopsRepo
 @pytest.fixture
 def crud(tmp_path):
     repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
-    registry = ResourceClassRegistry([ResourceClass("helmvars", "values", rbac_prefix="helmvars")])
+    registry = ResourceClassRegistry(
+        [
+            ResourceClass("helmvars", "values", rbac_prefix="helmvars"),
+            ResourceClass("blobs", "config/blobs", rbac_prefix="blobs", layout=Layout.BUNDLE),
+        ]
+    )
     return GitCrud(repo, registry)
 
 
@@ -62,14 +68,61 @@ def test_put_with_current_base_revision_succeeds(crud):
     assert res.changed is True
 
 
-def test_put_with_stale_base_revision_conflicts(crud):
+@pytest.mark.parametrize(
+    ("cls", "name", "theirs", "write"),
+    [
+        pytest.param(
+            "helmvars",
+            "a",
+            {"x": 99},
+            lambda crud, rev: crud.put("helmvars", "a", {"x": 2}, "alice", base_revision=rev),
+            id="put",
+        ),
+        pytest.param(
+            "helmvars",
+            "a",
+            {"x": 99},
+            lambda crud, rev: crud.set_key("helmvars", "a", "x", 2, "alice", base_revision=rev),
+            id="set_key",
+        ),
+        pytest.param(
+            "blobs",
+            "b",
+            {"x": 99},
+            lambda crud, rev: crud.put_bundle("blobs", "b", {"x": 2}, "alice", base_revision=rev),
+            id="put_bundle",
+        ),
+        pytest.param(
+            "helmvars",
+            "a",
+            {"x": 99},
+            lambda crud, rev: crud.delete("helmvars", "a", "alice", base_revision=rev),
+            id="delete",
+        ),
+        pytest.param(
+            "helmvars",
+            "a",
+            None,
+            lambda crud, rev: crud.delete("helmvars", "a", "alice", base_revision=rev),
+            id="delete_of_a_resource_already_gone",
+        ),
+    ],
+)
+def test_a_write_with_a_stale_base_revision_conflicts(crud, cls, name, theirs, write):
     crud.put("helmvars", "a", {"x": 1}, actor="alice")
-    _doc, stale = crud.get_with_revision("helmvars", "a")
-    # someone else commits, moving HEAD
-    crud.put("helmvars", "a", {"x": 99}, actor="bob")
+    crud.put_bundle("blobs", "b", {"x": 1}, actor="alice")
+    stale = crud.head_revision()
+    if theirs is None:
+        crud.delete(cls, name, actor="bob")
+    elif cls == "blobs":
+        crud.put_bundle(cls, name, theirs, actor="bob")
+    else:
+        crud.put(cls, name, theirs, actor="bob")
+    head = crud.head_revision()
+
     with pytest.raises(ConcurrencyConflictError) as ei:
-        crud.put("helmvars", "a", {"x": 2}, actor="alice", base_revision=stale)
-    # the conflict carries the current (theirs) doc + new head
-    assert ei.value.current["x"] == 99
-    assert ei.value.head is not None
-    assert ei.value.head != stale
+        write(crud, stale)
+
+    assert ei.value.current == (theirs or {})
+    assert ei.value.head == head
+    assert crud.head_revision() == head

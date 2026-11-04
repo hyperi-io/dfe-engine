@@ -188,7 +188,8 @@ different subtrees (`config/` and `values/` + `ddl/`).
    the vendor never sees. Nothing site-specific in code.
 2. **YAML + git is the single source of truth.** No config database. Rust
    services read config files directly; the engine reads/writes them through
-   a git-aware in-memory store (DirectoryConfigStore from scalo). Identity
+   GitCrud on the deploy repo, or a cached YAML directory (DirectoryConfigStore
+   from scalo) for registries that live off it. Identity
    comes from the FILENAME, never a field inside the YAML (the store loads
    YAML 1.1, where `off`/`yes`/`no` become booleans).
 3. **Engine writes config, never installs infrastructure.** The hard

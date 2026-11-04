@@ -7,7 +7,6 @@ from dfe_engine.services.registry import (
     ServiceConfigRegistry,
 )
 from dfe_engine.yaml_utils import yaml_load_string
-from tests.support.git_repos import own_repo
 
 
 @pytest.fixture(autouse=True)
@@ -368,54 +367,6 @@ class TestSingleton:
         reg2 = ServiceConfigRegistry.get_instance(config_directory=svc_dir2)
         assert reg2 is not reg1
         reg2.close()
-
-
-# ---------------------------------------------------------------------------
-# git property stubs (non-git directory)
-# ---------------------------------------------------------------------------
-
-
-class TestGitProperties:
-    """Asked of a repository the test builds, so the answer holds wherever tmp_path lives.
-
-    The branch name belongs to that repository alone, which is what shows the
-    registry read it rather than whatever encloses ``tmp_path``.
-    """
-
-    @pytest.fixture
-    def repo_registry(self, tmp_path):
-        repo = own_repo(tmp_path / "repo", branch="config-branch")
-        reg = ServiceConfigRegistry(config_directory=repo / "services", refresh_interval=0)
-        yield reg
-        reg.close()
-
-    def test_is_git_true_for_a_directory_inside_a_repo(self, repo_registry):
-        assert repo_registry.is_git is True
-
-    def test_current_branch_is_the_enclosing_repos(self, repo_registry):
-        assert repo_registry.current_branch == "config-branch"
-
-    def test_list_branches_reads_the_enclosing_repo(self, repo_registry):
-        assert repo_registry.list_branches() == ["config-branch"]
-
-
-# ---------------------------------------------------------------------------
-# get_config_history (non-git → returns empty)
-# ---------------------------------------------------------------------------
-
-
-class TestConfigHistory:
-    def test_history_returns_empty_for_non_git(self, tmp_path, receiver_yaml):
-        svc_dir = tmp_path / "svc_hist"
-        svc_dir.mkdir()
-        (svc_dir / "receiver-default.yaml").write_text(receiver_yaml)
-
-        reg = ServiceConfigRegistry(config_directory=svc_dir, refresh_interval=0)
-        try:
-            history = reg.get_config_history("receiver", "default")
-            assert history == []
-        finally:
-            reg.close()
 
 
 # ---------------------------------------------------------------------------

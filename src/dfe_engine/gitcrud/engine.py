@@ -362,9 +362,8 @@ class GitCrud:
     ) -> PublishResult:
         """Publish one resource's write, conditional on base_revision through the push.
 
-        The guard before the write reads the head once. The remote can move between
-        that read and the push, and a write re-applied over that move would overwrite
-        it, so the deploy repo re-checks the head wherever it lands the write.
+        The deploy repo checks base_revision where it lands the write and again at
+        the push, so a conditional write never lands over a moved head.
 
         Raises:
             ConcurrencyConflictError: The head moved off base_revision.
@@ -398,7 +397,6 @@ class GitCrud:
         ``branch`` (non-empty) routes the commit to a review branch instead of the
         tracked branch -- the PR path the routing layer uses for production+team.
         """
-        self._guard_revision(cls_name, name, base_revision)
         cls = self._cls(cls_name)
         msg = message or f"{cls.name}({name}): update by {actor}"
         rel = self._rel(cls, name)
@@ -480,7 +478,6 @@ class GitCrud:
         ``removals`` are bundle-relative paths.
         """
         cls = self._require_bundle(cls_name)
-        self._guard_revision(cls_name, name, base_revision)
         rel = self._rel(cls, name)
         artifacts: dict[str, str | bytes] = {rel: self._yaml(rel, doc)}
         for relpath, content in (writes or {}).items():
@@ -515,7 +512,6 @@ class GitCrud:
         branch: str = "",
     ) -> PublishResult:
         """Set a single dot-path (creating intermediates) and commit."""
-        self._guard_revision(cls_name, name, base_revision)
         cls = self._cls(cls_name)
         # The doc is read before it is written, so a stale tree here writes back a
         # resource another replica's doc has moved on from.
@@ -564,9 +560,10 @@ class GitCrud:
         manifest - a directory left holding orphaned content would be enumerated
         as neither present nor absent.
 
-        A delete takes the same base_revision guard as a write: removing a
+        A delete takes the same base_revision condition as a write: removing a
         resource somebody has edited since you read it destroys their change as
-        thoroughly as overwriting it would.
+        thoroughly as overwriting it would. The head is checked before the absence
+        check too, so a stale revision on a resource already gone answers a conflict.
         """
         self._guard_revision(cls_name, name, base_revision)
         cls = self._cls(cls_name)

@@ -514,12 +514,7 @@ def create_hunt(
     config = body.to_config_dict(hunt_name=body.name)
     _validate_hunt_config(config, settings, rules)
     _resolve_customers(request, config)
-    outcome = registry.save(
-        body.name,
-        config,
-        created_by=user.user_id,
-        description=f"hunt: create {body.name}",
-    )
+    outcome = registry.save(body.name, config, created_by=user.user_id)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", body.name, "created", review_audit_detail(outcome))
     return HuntDetailResponse.from_stored_config(body.name, config)
@@ -573,12 +568,7 @@ def update_hunt(
     config = body.to_config_dict(hunt_name=name)
     _validate_hunt_config(config, settings, rules)
     _resolve_customers(request, config)
-    outcome = registry.save(
-        name,
-        config,
-        created_by=user.user_id,
-        description=f"hunt: update {name}",
-    )
+    outcome = registry.save(name, config, created_by=user.user_id)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", name, "updated", review_audit_detail(outcome))
     return HuntDetailResponse.from_stored_config(name, config)

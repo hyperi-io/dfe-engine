@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Two git-backed schema registries stand in for two deployments.
+"""Two schema registries stand in for two deployments.
 
 ``alpha`` is where an operator authored a schema; ``beta`` is a clean deployment
 carrying only what dfe-schemas ships. Nothing is shared between them, so a
@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from dulwich.repo import Repo
 from pydantic import ValidationError
 
 from dfe_engine.exchange.models import EXCHANGE_FORMAT, MetaSchemaExport, ResourceReference
@@ -32,8 +31,6 @@ from dfe_engine.exchange.schemas import (
 from dfe_engine.schema.registry import SchemaNotFoundError, SchemaRegistry
 from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string
 from tests.support.present import present
-
-AUTHOR = "tester <tester@dfe.local>"
 
 CUSTOM_SCHEMA = {
     "current": "1.1.0",
@@ -75,23 +72,12 @@ CORE_SCHEMA: dict[str, Any] = {
 
 
 def _registry(root: Path, *, seed: dict[str, dict]) -> SchemaRegistry:
-    """A git-backed schemas directory holding *seed*, keyed by registry path."""
-    root.mkdir(parents=True, exist_ok=True)
-    Repo.init(str(root))
+    """A schemas directory holding *seed*, keyed by registry path."""
     schemas = root / "schemas"
-    schemas.mkdir()
+    schemas.mkdir(parents=True)
     for path, document in seed.items():
         yaml_dump(document, schemas / f"{path}.yaml")
     return SchemaRegistry(schemas_directory=schemas, writable=True, refresh_interval=0)
-
-
-def _commit_count(registry: SchemaRegistry) -> int:
-    repo = registry._store._repo
-    assert repo is not None, "the fixture registry must be git-backed"
-    try:
-        return len(list(repo.get_walker()))
-    except KeyError:
-        return 0
 
 
 @pytest.fixture
@@ -117,7 +103,7 @@ class TestUserAuthoredRoundTrip:
     def test_export_then_import_reproduces_the_schema(self, alpha, beta):
         document = build_meta_schema_export(alpha, "meta/cisco_ios")
 
-        result = apply_meta_schema_export(beta, document, created_by=AUTHOR)
+        result = apply_meta_schema_export(beta, document)
 
         assert result.action == "created"
         assert (
@@ -137,20 +123,12 @@ class TestUserAuthoredRoundTrip:
         assert document.current == "1.0.0"
         assert list(present(document.versions)) == ["1.0.0"]
 
-    def test_the_import_is_a_git_commit(self, alpha, beta):
-        document = build_meta_schema_export(alpha, "meta/cisco_ios")
-        before = _commit_count(beta)
-
-        apply_meta_schema_export(beta, document, created_by=AUTHOR)
-
-        assert _commit_count(beta) == before + 1
-
     def test_a_second_import_is_refused_rather_than_overwriting(self, alpha, beta):
         document = build_meta_schema_export(alpha, "meta/cisco_ios")
-        apply_meta_schema_export(beta, document, created_by=AUTHOR)
+        apply_meta_schema_export(beta, document)
 
         with pytest.raises(ExchangeConflictError, match="already exists"):
-            apply_meta_schema_export(beta, document, created_by=AUTHOR)
+            apply_meta_schema_export(beta, document)
 
     def test_an_unknown_version_is_refused(self, alpha):
         with pytest.raises(ExchangeError, match=re.escape("9.9.9")):
@@ -187,19 +165,17 @@ class TestCoreSchemaTravelsAsAReference:
     def test_the_import_resolves_and_writes_nothing(self, alpha, beta):
         document = build_meta_schema_export(alpha, "meta/core_tpl")
         before_paths = sorted(entry["path"] for entry in beta.list_schemas())
-        before_commits = _commit_count(beta)
 
-        result = apply_meta_schema_export(beta, document, created_by=AUTHOR)
+        result = apply_meta_schema_export(beta, document)
 
         assert result.action == "resolved"
         assert result.version == "2.0.0"
         assert sorted(entry["path"] for entry in beta.list_schemas()) == before_paths
-        assert _commit_count(beta) == before_commits
 
     def test_the_import_does_not_fork_the_read_only_schema(self, alpha, beta):
         document = build_meta_schema_export(alpha, "meta/core_tpl")
 
-        apply_meta_schema_export(beta, document, created_by=AUTHOR)
+        apply_meta_schema_export(beta, document)
 
         resolved = beta.get_schema("meta/core_tpl")
         assert resolved.resource_type == "core"
@@ -213,7 +189,7 @@ class TestCoreSchemaTravelsAsAReference:
         )
 
         with pytest.raises(ExchangeUnresolvedError, match="dfe-schemas"):
-            apply_meta_schema_export(beta, document, created_by=AUTHOR)
+            apply_meta_schema_export(beta, document)
 
     def test_a_pin_the_deployment_cannot_reach_names_what_it_has(self, beta):
         document = MetaSchemaExport(
@@ -223,7 +199,7 @@ class TestCoreSchemaTravelsAsAReference:
         )
 
         with pytest.raises(ExchangeUnresolvedError, match=re.escape("present: 2.0.0")):
-            apply_meta_schema_export(beta, document, created_by=AUTHOR)
+            apply_meta_schema_export(beta, document)
 
     def test_a_custom_document_may_not_overwrite_a_core_schema(self, alpha, beta):
         document = build_meta_schema_export(alpha, "meta/cisco_ios").model_copy(
@@ -231,7 +207,7 @@ class TestCoreSchemaTravelsAsAReference:
         )
 
         with pytest.raises(ExchangeConflictError, match="core meta schema here"):
-            apply_meta_schema_export(beta, document, created_by=AUTHOR)
+            apply_meta_schema_export(beta, document)
 
 
 class TestDocumentFormat:
@@ -241,7 +217,7 @@ class TestDocumentFormat:
         )
 
         with pytest.raises(ExchangeError, match="newer than this deployment"):
-            apply_meta_schema_export(beta, document, created_by=AUTHOR)
+            apply_meta_schema_export(beta, document)
 
     def test_exporting_a_schema_that_is_not_there_raises_not_found(self, alpha):
         with pytest.raises(SchemaNotFoundError):

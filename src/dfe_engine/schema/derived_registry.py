@@ -217,11 +217,6 @@ class DerivedSchemaRegistry:
         """
         return self._directory.parent
 
-    @property
-    def is_git(self) -> bool:
-        """Whether writes land as git commits."""
-        return self._crud is not None
-
     def _path_under(self, root: Path, key: str) -> Path:
         # Append rather than with_suffix: a name carrying a dot keeps it.
         segments = key.split("/")

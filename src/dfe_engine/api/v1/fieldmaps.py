@@ -27,7 +27,6 @@ from dfe_engine.api.deps import CurrentUser, FieldMapReg, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.fieldmap.models import FieldMap
-from dfe_engine.git_identity import git_author
 
 router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
 
@@ -106,7 +105,7 @@ async def create_field_map(
     from dfe_engine.fieldmap.registry import FieldMapValidationError
 
     try:
-        fm = registry.save_map(body, created_by=git_author(user))
+        fm = registry.save_map(body)
     except FieldMapValidationError as e:
         raise ProblemError(422, str(e), code="validation_error")
     audit_resource_change(user.user_id, "field_map", f"{fm.standard}", "created")

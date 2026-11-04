@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING, Any
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
-from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.hunts.hunt_config_registry import (
     resolve_display_name,
     strip_identity_fields_from_yaml,
@@ -60,8 +59,6 @@ class RuleRegistry:
         self,
         rules_directory: str | Path | None = None,
         writable: bool | None = None,
-        git_branch: str | None = None,
-        git_push: bool = False,
         refresh_interval: int = 30,
         *,
         deploy_repo: DeployRepoStore | None = None,
@@ -72,8 +69,6 @@ class RuleRegistry:
             rules_directory: YAML rules directory (DirectoryConfigStore backend;
                 ignored when ``deploy_repo`` is given).
             writable: Whether writes are allowed. None = auto-detect.
-            git_branch: Git branch for writes. None = current branch.
-            git_push: Auto-push after git commits.
             refresh_interval: Seconds between background cache refresh polls.
             deploy_repo: Deploy-repo backend over the gitcrud ``rules`` class.
                 When provided, ``config/rules`` in the deploy repo is the SSoT
@@ -95,8 +90,6 @@ class RuleRegistry:
             directory=self._rules_directory,
             refresh_interval=refresh_interval,
             writable=writable,
-            git_branch=git_branch,
-            git_push=git_push,
         )
         self._store.start()
 
@@ -129,14 +122,13 @@ class RuleRegistry:
         return self._require_store().get(name)
 
     def _put_raw(
-        self, name: str, doc: dict[str, Any], *, created_by: str | None, message: str
+        self, name: str, doc: dict[str, Any], *, created_by: str | None
     ) -> WriteOutcome | None:
         """Write one rule doc and log where it landed; returns the git outcome.
 
         Deploy repo: ONE routed commit, and the doc is stored verbatim because the
         runner's rule_compiler parses this exact file. Directory backend: plain YAML
-        write, git commit when the directory is a repo, then a cache refresh, and no
-        routing outcome to report.
+        write, then a cache refresh, and no routing outcome to report.
         """
         if self._deploy is not None:
             outcome = self._deploy.put(name, doc, actor=created_by or "engine")
@@ -146,10 +138,6 @@ class RuleRegistry:
         store = self._require_store()
         yaml_path = rule_file(self._rules_directory, name, ".yaml")
         yaml_dump(doc, yaml_path)
-        if store.is_git:
-            commit_file(store, yaml_path, message, author=created_by)
-            if store._git_push:
-                store._git_push_remote()
         store._refresh_all()
         logger.info(f"Saved rule '{name}' -> {yaml_path}")
         return None
@@ -167,34 +155,7 @@ class RuleRegistry:
             return False, None
         if not yaml_path.exists():
             return False, None
-
-        if store.is_git and store._repo is not None:
-            try:
-                from dulwich import porcelain as git
-
-                repo_root = Path(store._repo.path).resolve(strict=False)
-                yaml_abs = yaml_path.resolve(strict=False)
-                rel_path = str(yaml_abs.relative_to(repo_root))
-                yaml_abs.unlink(missing_ok=True)
-                git.rm(store._repo, paths=[rel_path])
-                git.commit(
-                    store._repo,
-                    author=COMMITTER_IDENTITY.encode("utf-8"),
-                    committer=COMMITTER_IDENTITY.encode("utf-8"),
-                    message=f"rule: delete {name}".encode(),
-                )
-                if store._git_push:
-                    store._git_push_remote()
-            except ValueError:
-                logger.warning(
-                    f"Rules directory is outside git repo; deleting '{name}' without git commit"
-                )
-                yaml_path.unlink(missing_ok=True)
-            except Exception as e:
-                logger.error(f"Git delete failed for rule {name}: {e}")
-                yaml_path.unlink(missing_ok=True)
-        else:
-            yaml_path.unlink(missing_ok=True)
+        yaml_path.unlink(missing_ok=True)
 
         with store._lock:
             store._cache.pop(name, None)
@@ -222,28 +183,13 @@ class RuleRegistry:
             raise RuleNotFoundError(f"Rule not found: '{name}'")
         return _rule_from_stored(name, dict(config_data))
 
-    def save(
-        self,
-        rule: Rule,
-        *,
-        created_by: str | None = None,
-        description: str | None = None,
-    ) -> WriteOutcome | None:
+    def save(self, rule: Rule, *, created_by: str | None = None) -> WriteOutcome | None:
         """Persist one rule; returns the git routing outcome, None off gitops.
 
         A production+team write lands on a review branch rather than the branch the
         runner git-syncs, so the caller has to be able to say so.
         """
-        commit_msg = description or f"rule: update {rule.rule_id}"
-        if created_by:
-            commit_msg = f"{commit_msg} (by {created_by})"
-
-        return self._put_raw(
-            rule.rule_id,
-            _rule_to_yaml_dict(rule),
-            created_by=created_by,
-            message=commit_msg,
-        )
+        return self._put_raw(rule.rule_id, _rule_to_yaml_dict(rule), created_by=created_by)
 
     def delete(self, name: str, created_by: str | None = None) -> WriteOutcome | None:
         """Remove one rule; returns the git routing outcome, None off gitops."""

@@ -165,7 +165,6 @@ Schema-less service config for Rust services (receiver, loader, archiver, etc.)
 | GET | `/services` | List service configs |
 | GET/PUT/DELETE | `/services/{service}/{instance}` | CRUD per service+instance |
 | POST | `/services/{service}/{instance}/validate` | Validate config |
-| GET | `/services/{service}/{instance}/history` | Config change history |
 | POST | `/services/seed` | Seed defaults |
 
 ### Hunts (`/api/v1/hunts`)

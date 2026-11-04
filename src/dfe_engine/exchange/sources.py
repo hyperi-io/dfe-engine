@@ -269,13 +269,13 @@ def apply_source_bundle(
 
     A core bundle is resolved against the source the engine already reconciles
     here and never written. Everything else writes its schema definitions first,
-    then the source, both through the registries that commit to git.
+    then the source, both through their registries.
 
     Args:
         source_registry: Source registry to write through.
         schema_registry: Schema registry the definitions are written through.
         bundle: The bundle document.
-        created_by: Git author for the commits.
+        created_by: Git author for the source commit.
         routing: Records the source write when it went to a review branch instead of main.
 
     Returns:
@@ -311,16 +311,13 @@ def apply_source_bundle(
     if section is not None:
         _require_pins_resolve(schema_registry, section.pins, definitions)
     for document in definitions:
-        apply_meta_schema_export(schema_registry, document, created_by=created_by, dry_run=True)
+        apply_meta_schema_export(schema_registry, document, dry_run=True)
     try:
         source_registry.validate_source(source)
     except SourceValidationError as exc:
         raise ExchangeError(str(exc)) from exc
 
-    results = [
-        apply_meta_schema_export(schema_registry, document, created_by=created_by)
-        for document in definitions
-    ]
+    results = [apply_meta_schema_export(schema_registry, document) for document in definitions]
     source_registry.save_source(
         source,
         created_by=created_by,

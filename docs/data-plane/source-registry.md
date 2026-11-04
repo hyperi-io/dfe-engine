@@ -61,8 +61,8 @@ One YAML file per source, managed by `SourceRegistry` over two backends:
   (ResourceClass `sources`). Every mutation is one git commit attributed to the
   caller, and the stored doc carries the universal gitcrud `metadata` block.
 - **DirectoryConfigStore** (standalone fallback): a plain YAML directory as
-  SSoT -- the same git-aware, cached, callback-driven store `ServiceConfigRegistry`
-  uses.
+  SSoT -- the same cached, callback-driven store `ServiceConfigRegistry` uses. It
+  never commits: governed writes go through gitcrud.
 
 ```text
 # gitcrud backend                   # DirectoryConfigStore backend

@@ -355,9 +355,7 @@ class SigmaPropagator:
             # Preserve the original creation time so a re-propagate of an
             # unchanged rule is a true content no-op (no churn commit).
             rule = rule.model_copy(update={"created_at": existing.created_at})
-        outcome = self._rules.save(
-            rule, created_by=self._actor, description=f"sigma: propagate {rid}"
-        )
+        outcome = self._rules.save(rule, created_by=self._actor)
         return ("updated" if existing is not None else "created"), outcome
 
     # -- hunt binding (Task B) --
@@ -401,12 +399,7 @@ class SigmaPropagator:
             merged = _merged_rule_entries(existing.get("rules"), rule_ids)
             config["rules"] = merged
 
-        outcome = self._hunts.save(
-            hunt_name,
-            config,
-            created_by=self._actor,
-            description=f"sigma: bind hunt {hunt_name}",
-        )
+        outcome = self._hunts.save(hunt_name, config, created_by=self._actor)
         return hunt_name, outcome
 
     # -- orchestration --
