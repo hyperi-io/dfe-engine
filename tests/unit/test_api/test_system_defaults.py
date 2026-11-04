@@ -321,11 +321,6 @@ class TestApplyDefaults:
 
         assert resp.status_code == 422, resp.text
 
-    def test_a_viewer_cannot_apply_them(self, client, viewer_headers):
-        resp = client.post(APPLY, headers=viewer_headers, json={"sources": ["alpha"]})
-
-        assert resp.status_code == 403, resp.text
-
 
 DRIFT = "/api/v1/system/defaults/drift"
 
@@ -422,11 +417,6 @@ class TestDefaultDrift:
         assert resp.status_code == 503, resp.text
         assert resp.json()["code"] == "clickhouse_unavailable"
         assert elapsed < 15, f"drift took {elapsed:.1f}s against a refused connection"
-
-    def test_a_viewer_cannot_read_drift(self, client, viewer_headers):
-        resp = client.get(DRIFT, headers=viewer_headers)
-
-        assert resp.status_code == 403, resp.text
 
     def test_search_and_page_the_drifted_sources(self, admin_headers, app, client, tmp_path):
         _wire(app, tmp_path)

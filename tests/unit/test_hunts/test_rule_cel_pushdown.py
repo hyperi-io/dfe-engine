@@ -86,32 +86,6 @@ class TestCelOnlyRules:
         assert rule.source == "windows_audit"
         assert rule.original_sql == ""
 
-    def test_compound_and(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="High-Value Critical",
-                cel_filter='severity == "critical" && amount > 10000',
-                source="payment_events",
-            ),
-            rule_id="hv_01",
-        )
-        assert "severity = 'critical'" in rule.where_clause
-        assert "amount > 10000" in rule.where_clause
-        assert "AND" in rule.where_clause
-
-    def test_compound_or(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Multi-Status",
-                cel_filter='status == "error" || status == "failed"',
-                source="app_logs",
-            ),
-            rule_id="ms_01",
-        )
-        assert "status = 'error'" in rule.where_clause
-        assert "status = 'failed'" in rule.where_clause
-        assert "OR" in rule.where_clause
-
     def test_negation(self):
         rule = Rule.from_create(
             RuleCreate(
@@ -122,150 +96,6 @@ class TestCelOnlyRules:
             rule_id="neg_01",
         )
         assert rule.where_clause == "NOT is_test"
-
-    def test_membership_in_list(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Blocked Status",
-                cel_filter='status in ["blocked", "banned", "suspended"]',
-                source="users",
-            ),
-            rule_id="block_01",
-        )
-        assert "IN" in rule.where_clause
-        assert "'blocked'" in rule.where_clause
-        assert "'banned'" in rule.where_clause
-        assert "'suspended'" in rule.where_clause
-
-    def test_string_contains(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Certutil Detection",
-                cel_filter='process_name.contains("certutil")',
-                source="windows_audit",
-            ),
-            rule_id="cert_01",
-        )
-        assert "position(process_name, 'certutil') > 0" in rule.where_clause
-
-    def test_string_startswith(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Admin Path",
-                cel_filter='path.startsWith("/admin")',
-                source="web_logs",
-            ),
-            rule_id="admin_01",
-        )
-        assert "startsWith(path, '/admin')" in rule.where_clause
-
-    def test_string_endswith(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="EXE Files",
-                cel_filter='filename.endsWith(".exe")',
-                source="file_events",
-            ),
-            rule_id="exe_01",
-        )
-        assert "endsWith(filename, '.exe')" in rule.where_clause
-
-    def test_string_matches(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="IP Pattern",
-                cel_filter=r'src_ip.matches("^10\\.0\\.")',
-                source="network",
-            ),
-            rule_id="ip_01",
-        )
-        assert "match(src_ip," in rule.where_clause
-
-    def test_arithmetic(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="High Ratio",
-                cel_filter="failed_count * 100 / total_count > 50",
-                source="auth_logs",
-            ),
-            rule_id="ratio_01",
-        )
-        # CEL divides two ints as integers, which ClickHouse's ``/`` does not.
-        assert "intDiv(failed_count * 100, total_count) > 50" in rule.where_clause
-
-    def test_ternary(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Conditional Check",
-                cel_filter='is_admin ? severity == "low" : severity == "critical"',
-                source="events",
-            ),
-            rule_id="tern_01",
-        )
-        assert "if(is_admin," in rule.where_clause
-
-    def test_type_cast_int(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Port Check",
-                cel_filter="int(port_str) > 1024",
-                source="network",
-            ),
-            rule_id="port_01",
-        )
-        assert "toInt64(port_str) > 1024" in rule.where_clause
-
-    def test_type_cast_double(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Float Check",
-                cel_filter="double(score_str) >= 0.95",
-                source="ml_results",
-            ),
-            rule_id="score_01",
-        )
-        assert "toFloat64(score_str) >= 0.95" in rule.where_clause
-
-    def test_size_function(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Long Message",
-                cel_filter="size(message) > 1000",
-                source="logs",
-            ),
-            rule_id="size_01",
-        )
-        assert "length(message) > 1000" in rule.where_clause
-
-    def test_boolean_literals(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Active Check",
-                cel_filter="is_active == true && is_deleted == false",
-                source="users",
-            ),
-            rule_id="bool_01",
-        )
-        assert "is_active = 1" in rule.where_clause
-        assert "is_deleted = 0" in rule.where_clause
-
-    def test_numeric_comparison_operators(self):
-        """All six comparison operators."""
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Range Check",
-                cel_filter="a > 1 && b >= 2 && c < 3 && d <= 4 && e == 5 && f != 6",
-                source="data",
-            ),
-            rule_id="cmp_01",
-        )
-        wc = rule.where_clause
-        assert "a > 1" in wc
-        assert "b >= 2" in wc
-        assert "c < 3" in wc
-        assert "d <= 4" in wc
-        assert "e = 5" in wc
-        assert "f != 6" in wc
 
     def test_no_source_table_without_sql(self):
         """CEL-only rules have no source_table extracted from SQL."""
@@ -280,16 +110,60 @@ class TestCelOnlyRules:
         assert rule.source_table is None
         assert rule.source == "my_source"
 
-    def test_dotted_identifier(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Dotted Field",
-                cel_filter='event.user.role == "admin"',
-                source="events",
-            ),
-            rule_id="dot_01",
-        )
-        assert "event.user.role = 'admin'" in rule.where_clause
+
+# A CEL filter and the SQL fragments its WHERE clause must contain.
+CEL_TO_SQL = [
+    (
+        'severity == "critical" && amount > 10000',
+        ("severity = 'critical'", "amount > 10000", "AND"),
+    ),
+    ('status == "error" || status == "failed"', ("status = 'error'", "status = 'failed'", "OR")),
+    (
+        'status in ["blocked", "banned", "suspended"]',
+        ("IN", "'blocked'", "'banned'", "'suspended'"),
+    ),
+    ('process_name.contains("certutil")', ("position(process_name, 'certutil') > 0",)),
+    ('path.startsWith("/admin")', ("startsWith(path, '/admin')",)),
+    ('filename.endsWith(".exe")', ("endsWith(filename, '.exe')",)),
+    ('src_ip.matches("^10\\\\.0\\\\.")', ("match(src_ip,",)),
+    ("failed_count * 100 / total_count > 50", ("intDiv(failed_count * 100, total_count) > 50",)),
+    ('is_admin ? severity == "low" : severity == "critical"', ("if(is_admin,",)),
+    ("int(port_str) > 1024", ("toInt64(port_str) > 1024",)),
+    ("double(score_str) >= 0.95", ("toFloat64(score_str) >= 0.95",)),
+    ("size(message) > 1000", ("length(message) > 1000",)),
+    ("is_active == true && is_deleted == false", ("is_active = 1", "is_deleted = 0")),
+    (
+        "a > 1 && b >= 2 && c < 3 && d <= 4 && e == 5 && f != 6",
+        ("a > 1", "b >= 2", "c < 3", "d <= 4", "e = 5", "f != 6"),
+    ),
+    ('event.user.role == "admin"', ("event.user.role = 'admin'",)),
+    ('message == "it\'s a test"', ("message = ", "it\\'s a test")),
+    (
+        '(severity == "high" || severity == "critical") && (status == "open" || status == "in_progress")',
+        ("severity = 'high'", "severity = 'critical'", "status = 'open'", "status = 'in_progress'"),
+    ),
+    (
+        'count > 100 && ratio >= 0.5 && name == "test" && is_active == true',
+        ("count > 100", "ratio >= 0.5", "name = 'test'", "is_active = 1"),
+    ),
+    ("a || b && c", ("OR", "AND")),
+    ("(a || b) && c", ("(a OR b)", "AND")),
+    ('!(status in ["blocked", "banned"])', ("NOT", "IN")),
+    (
+        'path.startsWith("/api") && path.contains("admin") && !path.endsWith(".css")',
+        ("startsWith(path, '/api')", "position(path, 'admin') > 0", "endsWith(path, '.css')"),
+    ),
+]
+
+
+@pytest.mark.parametrize(("cel", "fragments"), CEL_TO_SQL, ids=[cel for cel, _ in CEL_TO_SQL])
+def test_a_cel_filter_transpiles_into_the_where_clause(cel, fragments):
+    rule = Rule.from_create(
+        RuleCreate(name="Transpile", cel_filter=cel, source="events"), rule_id="t_01"
+    )
+
+    for fragment in fragments:
+        assert fragment in rule.where_clause
 
 
 # ── SQL-only rules (backward compatibility) ──────────────────────
@@ -397,116 +271,6 @@ class TestCombinedSqlCel:
         assert "_timestamp" not in rule.where_clause
         assert "event_type" in rule.where_clause
         assert "count > 100" in rule.where_clause
-
-
-# ── CEL transpilation edge cases ─────────────────────────────────
-
-
-class TestCelTranspilationEdgeCases:
-    """Edge cases in CEL-to-SQL transpilation within rules."""
-
-    def test_string_with_single_quotes(self):
-        """Single quotes in CEL strings are escaped for ClickHouse."""
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Quote Test",
-                cel_filter='message == "it\'s a test"',
-                source="logs",
-            ),
-            rule_id="quote_01",
-        )
-        assert "message = " in rule.where_clause
-        # ClickHouse accepts backslash-escaped single quotes
-        assert "it\\'s a test" in rule.where_clause
-
-    def test_deeply_nested_logic(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Nested",
-                cel_filter=(
-                    '(severity == "high" || severity == "critical") && '
-                    '(status == "open" || status == "in_progress")'
-                ),
-                source="tickets",
-            ),
-            rule_id="nest_01",
-        )
-        wc = rule.where_clause
-        assert "severity = 'high'" in wc
-        assert "severity = 'critical'" in wc
-        assert "status = 'open'" in wc
-        assert "status = 'in_progress'" in wc
-
-    def test_mixed_types(self):
-        """Integer, float, string, boolean all in one expression."""
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Mixed",
-                cel_filter=('count > 100 && ratio >= 0.5 && name == "test" && is_active == true'),
-                source="data",
-            ),
-            rule_id="mix_01",
-        )
-        wc = rule.where_clause
-        assert "count > 100" in wc
-        assert "ratio >= 0.5" in wc
-        assert "name = 'test'" in wc
-        assert "is_active = 1" in wc
-
-    def test_precedence_preserved(self):
-        """OR has lower precedence than AND — parens should appear."""
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Precedence",
-                cel_filter="a || b && c",
-                source="data",
-            ),
-            rule_id="prec_01",
-        )
-        # b && c should bind tighter than ||
-        assert "OR" in rule.where_clause
-        assert "AND" in rule.where_clause
-
-    def test_explicit_parens_override_precedence(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Explicit Parens",
-                cel_filter="(a || b) && c",
-                source="data",
-            ),
-            rule_id="paren_01",
-        )
-        wc = rule.where_clause
-        assert "(a OR b)" in wc
-        assert "AND" in wc
-
-    def test_negated_membership(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Not In",
-                cel_filter='!(status in ["blocked", "banned"])',
-                source="users",
-            ),
-            rule_id="notin_01",
-        )
-        assert "NOT" in rule.where_clause
-        assert "IN" in rule.where_clause
-
-    def test_multiple_string_methods(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Multi Method",
-                cel_filter=(
-                    'path.startsWith("/api") && path.contains("admin") && !path.endsWith(".css")'
-                ),
-                source="web_logs",
-            ),
-            rule_id="multi_01",
-        )
-        wc = rule.where_clause
-        assert "startsWith(path, '/api')" in wc
-        assert "position(path, 'admin') > 0" in wc
-        assert "endsWith(path, '.css')" in wc
 
 
 # ── Error handling ───────────────────────────────────────────────

@@ -258,3 +258,31 @@ def test_field_map_mappings_report_the_configuration(client, admin_headers):
     assert got.status_code == 200, got.text
     pairs = {row["sigma_field"]: row["column_name"] for row in got.json()["mappings"]}
     assert pairs == {"EventID": "_source", "Image": "process_executable"}
+
+
+def test_mappings_source_not_found(client, admin_headers):
+    """Returns 503 or 404 when source not configured/found."""
+    resp = client.get("/api/v1/sigma/mappings/nonexistent", headers=admin_headers)
+    # 503 if SourceRegistry not available for sigma, or 404 if source missing
+    assert resp.status_code in (404, 503)
+
+
+def test_generate_view_source_not_found(client, admin_headers):
+    resp = client.post("/api/v1/sigma/views/nonexistent", headers=admin_headers)
+    assert resp.status_code in (404, 503)
+
+
+def test_generate_all_views(client, admin_headers):
+    """Generate all views — may return empty list or 503."""
+    resp = client.post("/api/v1/sigma/views", headers=admin_headers)
+    # Either succeeds with empty list (no sources) or 503 (not configured)
+    assert resp.status_code in (200, 503)
+
+
+def test_logsource_search(client, admin_headers):
+    """Find sources for logsource — returns list (possibly empty)."""
+    resp = client.get(
+        "/api/v1/sigma/logsource?product=windows&category=process_creation",
+        headers=admin_headers,
+    )
+    assert resp.status_code in (200, 503)

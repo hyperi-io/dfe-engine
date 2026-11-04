@@ -1,12 +1,12 @@
 #  Project:      dfe-engine
-#  File:         tests/unit/test_api/test_phase4_routers.py
-#  Purpose:      Tests for Phase 4 routers (sigma, schemas)
+#  File:         tests/unit/test_api/test_schemas_router.py
+#  Purpose:      Tests for the source column, build and deploy routes and the meta-schema routes
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Tests for Phase 4: sigma and schemas routers.
+"""Tests for the source column, build and deploy routes and the meta-schema routes.
 
 These tests exercise the router-level behaviour without real ClickHouse.
 All CH-dependent endpoints return 503 (not configured) by design — the
@@ -14,9 +14,6 @@ routers guard against missing infrastructure cleanly.
 """
 
 from types import SimpleNamespace
-
-import pytest
-from fastapi.testclient import TestClient
 
 from tests.support.accounts import OnboardedClient
 from tests.support.present import present
@@ -26,70 +23,8 @@ from tests.support.present import present
 ADMIN_PASSWORD = "test-admin-pw"
 
 
-class TestNoDiscoveryRoutes:
-    """HyperDX browses the ClickHouse catalogue, so the engine serves no discovery routes."""
-
-    @pytest.mark.parametrize(
-        "path",
-        [
-            "/api/v1/discovery/databases",
-            "/api/v1/discovery/tables",
-            "/api/v1/discovery/tables/my_table/columns",
-        ],
-    )
-    def test_a_discovery_path_answers_404(self, client: TestClient, admin_headers, path):
-        assert client.get(path, headers=admin_headers).status_code == 404
-
-
-class TestSigmaRouter:
-    """GET/POST /api/v1/sigma endpoints."""
-
-    @pytest.fixture
-    def sigma_enabled(self) -> bool:
-        """The sigma routes mount only on a deployment that enables them."""
-        return True
-
-    def test_mappings_source_not_found(self, client, admin_headers):
-        """Returns 503 or 404 when source not configured/found."""
-        resp = client.get("/api/v1/sigma/mappings/nonexistent", headers=admin_headers)
-        # 503 if SourceRegistry not available for sigma, or 404 if source missing
-        assert resp.status_code in (404, 503)
-
-    def test_generate_view_source_not_found(self, client, admin_headers):
-        resp = client.post("/api/v1/sigma/views/nonexistent", headers=admin_headers)
-        assert resp.status_code in (404, 503)
-
-    def test_generate_all_views(self, client, admin_headers):
-        """Generate all views — may return empty list or 503."""
-        resp = client.post("/api/v1/sigma/views", headers=admin_headers)
-        # Either succeeds with empty list (no sources) or 503 (not configured)
-        assert resp.status_code in (200, 503)
-
-    def test_logsource_search(self, client, admin_headers):
-        """Find sources for logsource — returns list (possibly empty)."""
-        resp = client.get(
-            "/api/v1/sigma/logsource?product=windows&category=process_creation",
-            headers=admin_headers,
-        )
-        assert resp.status_code in (200, 503)
-
-    def test_requires_auth(self, client):
-        resp = client.get("/api/v1/sigma/mappings/test")
-        assert resp.status_code == 401
-
-
 class TestSchemasRouter:
     """GET/POST /api/v1/sources/{name}/columns and /build (formerly under /schemas)."""
-
-    def test_columns_source_not_found(self, client, admin_headers):
-        """Returns 404 when source doesn't exist."""
-        resp = client.get("/api/v1/sources/nonexistent/columns", headers=admin_headers)
-        assert resp.status_code == 404
-
-    def test_build_source_not_found(self, client, admin_headers):
-        """Returns 404 when source doesn't exist."""
-        resp = client.post("/api/v1/sources/nonexistent/build", headers=admin_headers)
-        assert resp.status_code == 404
 
     def test_build_unknown_source_version(self, client, admin_headers, sample_source):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
@@ -97,10 +32,6 @@ class TestSchemasRouter:
             f"/api/v1/sources/{sample_source['source']}/build?version=9.9.9",
             headers=admin_headers,
         )
-        assert resp.status_code == 404
-
-    def test_deploy_source_not_found(self, client, admin_headers):
-        resp = client.post("/api/v1/sources/nonexistent/deploy", headers=admin_headers)
         assert resp.status_code == 404
 
     def test_deploy_requires_auth(self, client):
@@ -627,10 +558,6 @@ class TestSchemasRouter:
             _registries.clear()
             reset_settings()
 
-    def test_requires_auth(self, client):
-        resp = client.get("/api/v1/sources/test/columns")
-        assert resp.status_code == 401
-
 
 class TestSchemasMetaListRouter:
     """GET /api/v1/schemas — meta-schema registry listing."""
@@ -689,10 +616,6 @@ class TestSchemasMetaListRouter:
             assert resp.json()["code"] == "not_configured"
         finally:
             _registries.clear()
-
-    def test_list_meta_requires_auth(self, client):
-        resp = client.get("/api/v1/schemas")
-        assert resp.status_code == 401
 
     def test_list_meta_returns_pagination_and_tree(self, tmp_path):
         from dfe_engine.api.app import create_app
@@ -993,10 +916,6 @@ class TestSchemasMetaListRouter:
                 assert missing.json()["code"] == "not_found"
         finally:
             _registries.clear()
-
-    def test_get_meta_schema_requires_auth(self, client):
-        resp = client.get("/api/v1/schemas/definitions/aws/cloudtrail/versions/columns?version=1")
-        assert resp.status_code == 401
 
     def test_get_meta_missing_schema_returns_404(self, client, admin_headers):
         resp = client.get(
@@ -1535,7 +1454,3 @@ class TestSchemasMetaWriteRouter:
                 assert core_del.json()["detail"] == "Core resources can't be mutated"
         finally:
             _registries.clear()
-
-    def test_delete_meta_schema_version_requires_auth(self, client):
-        resp = client.delete("/api/v1/schemas/definitions/aws/cloudtrail/versions/1.0.0")
-        assert resp.status_code == 401

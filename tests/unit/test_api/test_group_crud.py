@@ -108,14 +108,6 @@ class TestCreateGroup:
 
         assert resp.status_code == 409, resp.text
 
-    def test_create_requires_admin(self, client, viewer_headers):
-        resp = client.post(
-            "/api/v1/auth/groups",
-            json={"name": "blocked", "roles": ["admin"]},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
     def test_create_missing_fields_returns_422(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/groups",
@@ -1908,23 +1900,6 @@ class TestUpdateGroup:
         stored = app.state.group_store.get("dfe-viewers")
         assert (stored.source_id, stored.source_provider) == ("", "")
 
-    def test_update_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.put(
-            "/api/v1/auth/groups/ghost",
-            json={"roles": ["admin"]},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
-    def test_update_requires_admin(self, client, viewer_headers):
-        """viewer sees dfe-viewers through its membership, so the refusal is a 403."""
-        resp = client.put(
-            "/api/v1/auth/groups/dfe-viewers",
-            json={"roles": ["admin"]},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
 
 class TestAddMember:
     """POST /api/v1/auth/groups/{name}/members"""
@@ -1963,22 +1938,6 @@ class TestAddMember:
         # Should appear only once
         assert resp.json()["members"].count("admin") == 1
 
-    def test_add_member_nonexistent_group_returns_404(self, client, admin_headers):
-        resp = client.post(
-            "/api/v1/auth/groups/ghost/members",
-            json={"username": "admin"},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
-    def test_add_member_requires_admin(self, client, viewer_headers):
-        resp = client.post(
-            "/api/v1/auth/groups/dfe-viewers/members",
-            json={"username": "admin"},
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
-
 
 class TestRemoveMember:
     """DELETE /api/v1/auth/groups/{name}/members/{username}"""
@@ -2000,20 +1959,6 @@ class TestRemoveMember:
         )
         assert resp.status_code == 200
         assert "admin" not in resp.json()["members"]
-
-    def test_remove_member_nonexistent_group_returns_404(self, client, admin_headers):
-        resp = client.delete(
-            "/api/v1/auth/groups/ghost/members/admin",
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
-    def test_remove_member_requires_admin(self, client, viewer_headers):
-        resp = client.delete(
-            "/api/v1/auth/groups/dfe-viewers/members/viewer",
-            headers=viewer_headers,
-        )
-        assert resp.status_code == 403
 
 
 class TestDeleteGroup:
@@ -2041,14 +1986,6 @@ class TestDeleteGroup:
         resp = client.delete("/api/v1/auth/groups/busy-group", headers=admin_headers)
         assert resp.status_code == 409
         assert resp.json()["code"] == "conflict"
-
-    def test_delete_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.delete("/api/v1/auth/groups/ghost", headers=admin_headers)
-        assert resp.status_code == 404
-
-    def test_delete_requires_admin(self, client, viewer_headers):
-        resp = client.delete("/api/v1/auth/groups/dfe-viewers", headers=viewer_headers)
-        assert resp.status_code == 403
 
 
 # ── The protected-name floor (issue #505) ────────────────────

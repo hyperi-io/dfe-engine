@@ -8,7 +8,10 @@ purpose: a test that asked the same tree would agree with it whatever it got
 wrong, and a route that opens without a session deserves the edit below.
 """
 
+import json
+import re
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -34,6 +37,27 @@ PUBLIC_OPERATIONS = frozenset(
 # Public, but it refuses a bad login itself, so it declares both statuses by hand.
 LOGIN = "POST /api/v1/auth/login"
 
+# The committed spec lists the sigma routes and test_openapi_spec_committed.py keeps it equal to the app.
+COMMITTED_SPEC = json.loads(
+    (Path(__file__).resolve().parents[3] / "openapi" / "openapi.json").read_text()
+)
+
+# Routers that must stay mounted, held by hand so a regenerated spec cannot drop one.
+MOUNTED_ROUTERS = (
+    "/api/v1/auth/accounts",
+    "/api/v1/auth/me",
+    "/api/v1/auth/refresh",
+    "/api/v1/cel",
+    "/api/v1/orgs",
+    "/api/v1/pipeline",
+    "/api/v1/queries",
+    "/api/v1/rules",
+    "/api/v1/schemas",
+    "/api/v1/services",
+    "/api/v1/sigma",
+    "/api/v1/sources",
+)
+
 AUTH_STATUSES = ("401", "403")
 PROBLEM = {"application/problem+json": {"schema": {"$ref": "#/components/schemas/Problem"}}}
 BEARER = [{"BearerAuth": []}]
@@ -56,6 +80,27 @@ def spec(monkeypatch) -> dict[str, Any]:
     app = create_app(settings=settings)
     app.openapi_schema = None
     return app.openapi()
+
+
+@pytest.fixture
+def sigma_enabled() -> bool:
+    """Mount the sigma routes, which are off by default."""
+    return True
+
+
+def test_every_guarded_operation_answers_401_with_no_token(app, client):
+    """Every guarded operation answers 401 with no token, so a route needs no test of its own."""
+    guarded = {key for key, _ in _operations(app.openapi()) if key not in PUBLIC_OPERATIONS}
+    product = {key for key, _ in _operations(COMMITTED_SPEC) if key not in PUBLIC_OPERATIONS}
+    statuses = {}
+    for key in guarded:
+        method, path = key.split(" ", 1)
+        statuses[key] = client.request(method, re.sub(r"\{[^}]+\}", "x", path)).status_code
+
+    assert guarded >= product, "a router the product serves is not mounted here"
+    served = {key.split(" ", 1)[1] for key in guarded}
+    assert [r for r in MOUNTED_ROUTERS if not any(path.startswith(r) for path in served)] == []
+    assert {key: status for key, status in statuses.items() if status != 401} == {}
 
 
 def _operations(spec: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
