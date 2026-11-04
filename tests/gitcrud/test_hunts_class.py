@@ -27,12 +27,12 @@ from dulwich.repo import Repo
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitops.repo import GitopsRepo
-from dfe_engine.hunt_runner.rule_compiler import compile_hunt_queries
-from dfe_engine.hunt_runner.spec_loader import load_specs
 from dfe_engine.hunts.deploy_repo import DeployRepoStore
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError, HuntConfigRegistry
+from dfe_engine.hunts.rule_compiler import compile_hunt_queries
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleNotFoundError, RuleRegistry
+from dfe_engine.hunts.spec_loader import load_specs
 
 HUNT_CONFIG = {
     "display_name": "Certutil Abuse",

@@ -19,7 +19,9 @@ the ``dfe_db`` fixture.
 
 from __future__ import annotations
 
-from dfe_engine.hunt_runner import ChCoordinator, HuntSpec, due_count, publish_schedule
+from dfe_engine.hunts.ch_coordinator import ChCoordinator
+from dfe_engine.hunts.hunt_spec import HuntSpec
+from dfe_engine.hunts.schedule import due_count, publish_schedule
 
 
 def _spec(hunt_id: str, interval: int = 2) -> HuntSpec:

@@ -24,16 +24,13 @@ from collections.abc import Callable
 import pytest
 from common.hunt_files import write_hunt, write_rule
 
-from dfe_engine.hunt_runner import (
-    ChCoordinator,
-    HuntRunner,
-    HuntSpec,
-    HuntWorker,
-    load_specs,
-    read_run_status,
-)
-from dfe_engine.hunt_runner.ch_coordinator import Lease
-from dfe_engine.hunt_runner.spread import current_fire
+from dfe_engine.hunts.ch_coordinator import ChCoordinator, Lease
+from dfe_engine.hunts.hunt_spec import HuntSpec
+from dfe_engine.hunts.run_status import read_run_status
+from dfe_engine.hunts.runner import HuntRunner
+from dfe_engine.hunts.schedule import current_fire
+from dfe_engine.hunts.spec_loader import load_specs
+from dfe_engine.hunts.worker import HuntWorker
 
 
 @pytest.fixture

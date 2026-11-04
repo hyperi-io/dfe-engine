@@ -16,10 +16,10 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.hunt_runner import cli
-from dfe_engine.hunt_runner.spec_loader import load_specs
+from dfe_engine.hunts import runner_cli as cli
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.hunts.rule_registry import RuleRegistry
+from dfe_engine.hunts.spec_loader import load_specs
 
 pytestmark = pytest.mark.usefixtures("customer_orgs")
 

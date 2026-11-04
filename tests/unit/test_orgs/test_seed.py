@@ -109,7 +109,7 @@ class TestASeedBesideTheHunts:
 
     def test_a_hunt_naming_a_seeded_org_stays_refused_until_it_is_edited(self, registry, tmp_path):
         """A deleted org's hunt holds no ids for it, and the seed adds none, so it reads nothing."""
-        from dfe_engine.hunt_runner.spec_loader import load_specs
+        from dfe_engine.hunts.spec_loader import load_specs
 
         _hunts(tmp_path, {"acme": []})
 

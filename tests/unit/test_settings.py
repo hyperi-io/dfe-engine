@@ -910,7 +910,7 @@ class TestHuntDir:
             get_hunt_config_registry_optional,
             shutdown_registries,
         )
-        from dfe_engine.hunt_runner.spec_loader import load_specs
+        from dfe_engine.hunts.spec_loader import load_specs
 
         settings = DFESettings(env="test", hunts=HuntsSettings(hunt_dir=f" {tmp_path / 'hunts'} "))
         bootstrap_registries(settings)

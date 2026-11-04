@@ -17,7 +17,7 @@ not gate or defer firing - we nudge phases and let the fleet settle.
 > **Status: DESIGN -- not built, not an option in this release.** The adaptive loop on
 > this page does not exist in the engine. There is no `smoothing.enabled` setting and
 > nothing drifts phases. What ships is the static part: each rate hunt fires at a fixed
-> phase offset hashed from its id (`hunt_runner/spread.py`), that offset is written to
+> phase offset hashed from its id (`hunts/schedule.py`), that offset is written to
 > `hunt_schedule` for the KEDA due count, and every hunt query carries a JSON
 > `log_comment` that `query_log_archive` attributes back to the hunt. The adaptive loop
 > is tracked for a later version in hyperi-io/dfe-engine#864.
