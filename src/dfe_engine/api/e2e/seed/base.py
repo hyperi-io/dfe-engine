@@ -440,6 +440,10 @@ class Seed:
             source = self.sources.seed_searchable_source_columns()
             logger.info("e2e seed", script=script, source=source)
             return True
+        if script == "seed_searchable_system_defaults":
+            defaults = self.sources.seed_searchable_system_defaults()
+            logger.info("e2e seed", script=script, defaults=defaults)
+            return True
         if script == "seed_undeployed_source":
             source = self.sources.seed_undeployed_source()
             logger.info("e2e seed", script=script, source=source)

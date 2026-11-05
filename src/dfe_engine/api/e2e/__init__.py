@@ -96,6 +96,7 @@ class SeedRequest(BaseModel):
         "seed_searchable_roles",
         "seed_searchable_sources",
         "seed_searchable_source_columns",
+        "seed_searchable_system_defaults",
         "reset_all",
     ]
 

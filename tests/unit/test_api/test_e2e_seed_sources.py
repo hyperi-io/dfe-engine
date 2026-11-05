@@ -69,6 +69,55 @@ def test_searchable_source_columns_come_from_one_deployed_source(seeder, registr
         registry.get_source(SEARCHABLE_COLUMNS_SOURCE)
 
 
+def test_searchable_system_defaults_are_undeployed_drift(seeder, registry):
+    """Fifty sources storing a retention other than the default, so the drift list finds them."""
+    from dfe_engine.api.e2e.seed.sources import searchable_default_names
+    from dfe_engine.gitcrud.table_defaults import source_default_drift
+    from dfe_engine.source.models import DEFAULT_HEADER_TYPE, DEFAULT_HEADER_VERSION
+
+    assert seeder.seed_searchable_system_defaults() is True
+    assert seeder.seed_searchable_system_defaults() is False
+    names = searchable_default_names()
+    assert len(names) == 50
+    for num, name in enumerate(names):
+        source = registry.get_source(name)
+        assert source.display_name == f"Searchable Default {num}"
+        assert source.deployed_version is None
+        assert source.version().effective_schema().ttl_days == 1
+    report = source_default_drift(
+        registry.get_source(names[0]),
+        header_type=DEFAULT_HEADER_TYPE,
+        header_version=DEFAULT_HEADER_VERSION,
+        ttl_days=90,
+        engine="MergeTree",
+    )
+    assert report is not None
+    assert report.drifted == ("ttl_days",)
+
+    seeder.delete_all()
+    with pytest.raises(SourceNotFoundError):
+        registry.get_source(names[0])
+
+
+def test_searchable_system_defaults_avoid_the_deployment_ttl(registry):
+    """A deployment whose default is already one day gets zero, which still drifts."""
+    from types import SimpleNamespace
+
+    from dfe_engine.api.e2e.seed.sources import Sources, searchable_default_names
+
+    seeder = Sources(
+        account_store=Mock(),
+        group_store=Mock(),
+        org_registry=Mock(),
+        env="test",
+        source_registry=registry,
+        settings=SimpleNamespace(clickhouse=SimpleNamespace(default_ttl_days=1)),
+    )
+    assert seeder.seed_searchable_system_defaults() is True
+    source = registry.get_source(searchable_default_names()[0])
+    assert source.version().effective_schema().ttl_days == 0
+
+
 def test_seed_source_is_create_once(seeder, registry):
     assert seeder.seed_source("firstrun") is True
     assert seeder.seed_source("firstrun") is False

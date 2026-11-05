@@ -46,6 +46,24 @@ def searchable_source_names() -> list[str]:
     return [f"searchable-source-{num}" for num in range(50)]
 
 
+def searchable_default_names() -> list[str]:
+    """Source names ``seed_searchable_system_defaults`` writes."""
+    return [f"searchable-default-{num}" for num in range(50)]
+
+
+def _ttl_that_drifts(settings: object, crud: object) -> int:
+    """A retention the drift list will show, whatever the deployment default is.
+
+    With no settings the seed cannot read the default, so it stores one day.
+    """
+    if settings is None:
+        return 1
+    from dfe_engine.gitcrud.retention import resolve_state
+
+    effective = resolve_state(crud, settings).effective  # type: ignore[arg-type]
+    return 0 if effective != 0 else 1
+
+
 # A bare dotted path: the receiver splits the field on '.' and walks the raw
 # payload, so a '_json.' prefix is read as a first segment that no record has.
 _MATCH_FIELD = "tags.collector.type"
@@ -223,6 +241,30 @@ class Sources(Seed):
             display_name="Searchable Columns",
         )
 
+    def seed_searchable_system_defaults(self) -> bool:
+        """Seed fifty undeployed sources the defaults drift list can search.
+
+        A source is drift when it stores a retention, header or engine other than
+        the deployment default. Each of these stores a retention that differs from
+        that default, and stays undeployed so listing the drift does not read
+        ClickHouse for them. Returns True when any were written, False when all
+        fifty were already there. ``reset_all`` removes them with the other
+        operator sources.
+        """
+        ttl_days = _ttl_that_drifts(self._settings, self._gitcrud)
+        changed = False
+        for num, name in enumerate(searchable_default_names()):
+            changed |= self._ensure_source(
+                name,
+                fetched=False,
+                meta_schema=None,
+                transform=None,
+                display_name=f"Searchable Default {num}",
+                description=f"Searchable default {num}.",
+                ttl_days=ttl_days,
+            )
+        return changed
+
     def _ensure_source(
         self,
         name: str,
@@ -232,6 +274,7 @@ class Sources(Seed):
         transform: SourceTransform | None = None,
         display_name: str = "Seed Source",
         description: str = "Playwright fixture source.",
+        ttl_days: int | None = None,
     ) -> bool:
         """Create the source when absent, and reconcile an existing one's display name.
 
@@ -269,7 +312,7 @@ class Sources(Seed):
                 if fetched
                 else None,
                 header=SourceHeader(),
-                schema_config=SourceSchema(meta_schema=meta_schema),
+                schema_config=SourceSchema(meta_schema=meta_schema, ttl_days=ttl_days),
                 transform=transform,
             ),
             created_by=SEED_ACTOR,
