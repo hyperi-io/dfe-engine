@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from dfe_engine.api.e2e.seed.rules import Rules
     from dfe_engine.api.e2e.seed.schemas import Schemas
     from dfe_engine.api.e2e.seed.sources import Sources
+    from dfe_engine.auth.api_keys import APIKeyStore
     from dfe_engine.gitcrud import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
     from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
@@ -83,6 +84,7 @@ class Seed:
         hunt_registry: HuntConfigRegistry | None = None,
         rule_registry: RuleRegistry | None = None,
         schema_registry: SchemaRegistry | None = None,
+        api_key_store: APIKeyStore | None = None,
     ) -> None:
         resolved = (
             (env if env is not None else os.environ.get("DFE_ENGINE_ENV", "")).strip().lower()
@@ -95,6 +97,7 @@ class Seed:
         self._hunt_registry = hunt_registry
         self._rule_registry = rule_registry
         self._schema_registry = schema_registry
+        self._api_key_store = api_key_store
         self._gitcrud = gitcrud
         self._source_registry = source_registry
         self._settings = settings
@@ -117,6 +120,7 @@ class Seed:
             hunt_registry=self._hunt_registry,
             rule_registry=self._rule_registry,
             schema_registry=self._schema_registry,
+            api_key_store=self._api_key_store,
         )
 
     def _attach_seeders(self, env: str) -> None:
@@ -220,6 +224,12 @@ class Seed:
                 "configured; set DFE_ENGINE_SCHEMAS_DIR"
             )
         return self._schema_registry
+
+    def _require_api_key_store(self) -> APIKeyStore:
+        """The API-key store, or a named error saying it was not passed."""
+        if self._api_key_store is None:
+            raise RuntimeError("this e2e seed writes API keys, and no API key store is configured")
+        return self._api_key_store
 
     def _require_settings(self) -> DFESettings:
         """The engine settings, which the routing compilers read the data database from."""
@@ -366,6 +376,10 @@ class Seed:
             blocked = self.accounts.seed_searchable_blocked_accounts()
             logger.info("e2e seed", script=script, blocked=blocked)
             return True
+        if script == "seed_searchable_api_keys":
+            keys = self.accounts.seed_searchable_api_keys()
+            logger.info("e2e seed", script=script, keys=keys)
+            return True
         # ------------------------------------------------------------
         # Organisations
         # ------------------------------------------------------------
@@ -457,6 +471,7 @@ class Seed:
         if script == "reset_all":
             # Delete all accounts and organisations
             self.accounts.delete_all()
+            self.accounts.delete_searchable_api_keys()
             self.organisations.delete_all()
 
             # Then the deploy repo. Instances first: an overlay carries the

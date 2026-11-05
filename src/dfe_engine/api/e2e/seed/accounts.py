@@ -31,6 +31,11 @@ def searchable_blocked_account_names() -> list[str]:
     return [f"searchable-blocked-{num}" for num in range(_SEARCHABLE_COUNT)]
 
 
+def searchable_api_key_names() -> list[str]:
+    """Names one searchable API-key script writes."""
+    return [f"searchable-api-key-{num}" for num in range(_SEARCHABLE_COUNT)]
+
+
 def _break_glass_admin_password() -> str:
     """Break-glass password (same fallbacks as auth bootstrap)."""
     return _WELL_KNOWN_E2E_PASSWORD
@@ -119,6 +124,34 @@ class Accounts(Seed):
         were all already blocked. Same store-only rule as the unblocked script.
         """
         return self._seed_searchable(searchable_blocked_account_names(), blocked=True)
+
+    def seed_searchable_api_keys(self) -> bool:
+        """Seed fifty API keys a list search can filter.
+
+        Returns True when any key was written, False when they were all already there.
+        Keys stay in the API-key store. The full token is discarded, and nothing is
+        published to the deploy repo. They do not expire.
+        """
+        store = self._require_api_key_store()
+        self._ensure_group(_DFE_VIEWERS_GROUP)
+        changed = False
+        for num, name in enumerate(searchable_api_key_names()):
+            if store.get(name) is not None:
+                continue
+            store.create(name, groups=[_DFE_VIEWERS_GROUP], description=f"Searchable API Key {num}")
+            changed = True
+        return changed
+
+    def delete_searchable_api_keys(self) -> None:
+        """Revoke the keys this seeder writes. A no-op when no key store is configured."""
+        store = self._api_key_store
+        if store is None:
+            return
+        for name in searchable_api_key_names():
+            key = store.get(name)
+            if key is None:
+                continue
+            store.revoke(key.short_token)
 
     def delete_all(self) -> None:
         """Clear all accounts from the YAML account registry.

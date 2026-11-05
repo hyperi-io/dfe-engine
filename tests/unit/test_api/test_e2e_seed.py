@@ -550,6 +550,43 @@ def test_searchable_accounts_stay_in_the_account_store(tmp_path, monkeypatch):
     assert left == []
 
 
+def test_searchable_api_keys_stay_in_the_key_store(tmp_path, monkeypatch):
+    """Fifty keys the list can search, kept in the key store and removed by name."""
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.api.pagination import apply_search
+    from dfe_engine.auth.bootstrap import bootstrap_auth
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    account_store, group_store, api_key_store, *_ = bootstrap_auth(tmp_path / "config" / "auth")
+    seeder = Seed(
+        account_store=account_store,
+        group_store=group_store,
+        org_registry=OrgRegistry(tmp_path / "orgs"),
+        api_key_store=api_key_store,
+    )
+
+    assert seeder.accounts.seed_searchable_api_keys() is True
+    assert seeder.accounts.seed_searchable_api_keys() is False
+    rows = [{"name": key.name, "description": key.description} for key in api_key_store.list()]
+    found = apply_search(rows, "searchable", ["name", "description"])
+    assert len(found) == 50
+    assert all(key.key_hash.startswith("sha384:") for key in api_key_store.list())
+    assert all(not key.is_expired() for key in api_key_store.list())
+
+    seeder.accounts.delete_searchable_api_keys()
+    assert api_key_store.list() == []
+
+
+def test_searchable_api_keys_refuse_without_a_store(tmp_path, monkeypatch):
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+    with pytest.raises(RuntimeError, match="API key store"):
+        seeder.accounts.seed_searchable_api_keys()
+
+
 def test_no_seeded_match_rule_carries_the_json_column_prefix():
     """A seeded rule the receiver can never match is a fixture that proves nothing.
 
