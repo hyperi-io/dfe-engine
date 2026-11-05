@@ -31,6 +31,7 @@ from dfe_engine.api.conventions import CLI_HIDDEN
 from dfe_engine.api.deps import (
     get_hunt_config_registry_optional,
     get_rule_registry_optional,
+    get_schema_registry_optional,
     get_source_registry_optional,
 )
 from dfe_engine.api.e2e.seed import Seed
@@ -81,6 +82,10 @@ class SeedRequest(BaseModel):
         "seed_searchable_hunts",
         "seed_searchable_libraries",
         "seed_searchable_git_operation_logs",
+        "seed_searchable_rules",
+        "seed_searchable_meta_schemas",
+        "seed_searchable_common_headers",
+        "seed_searchable_hunt_schemas",
         "reset_all",
     ]
 
@@ -124,6 +129,7 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         metrics=getattr(request.app.state, "seed_metrics", None),
         hunt_registry=get_hunt_config_registry_optional(),
         rule_registry=get_rule_registry_optional(),
+        schema_registry=get_schema_registry_optional(),
     )
     try:
         success = await run_blocking(functools.partial(seeder.seed_static, body.script))

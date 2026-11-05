@@ -28,11 +28,13 @@ if TYPE_CHECKING:
     from dfe_engine.api.e2e.seed.logs import Logs
     from dfe_engine.api.e2e.seed.organisations import Organisations
     from dfe_engine.api.e2e.seed.rules import Rules
+    from dfe_engine.api.e2e.seed.schemas import Schemas
     from dfe_engine.api.e2e.seed.sources import Sources
     from dfe_engine.gitcrud import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
     from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
     from dfe_engine.hunts.rule_registry import RuleRegistry
+    from dfe_engine.schema.registry import SchemaRegistry
     from dfe_engine.settings import DFESettings
     from dfe_engine.source.registry import SourceRegistry
 
@@ -51,6 +53,7 @@ class Seed:
     as the org routes take it, and an org seeder moves the hunts naming an org
     whenever there is one. The rule registry is optional for the same reason:
     the hunt and rule scripts ask for theirs and raise when it was not passed.
+    The schema registry is optional the same way.
     """
 
     # Set by _attach_seeders, which binds a child seeder's own attribute to itself.
@@ -63,6 +66,7 @@ class Seed:
     hunts: Hunts
     rules: Rules
     logs: Logs
+    schemas: Schemas
 
     def __init__(
         self,
@@ -78,6 +82,7 @@ class Seed:
         metrics: SeedMetrics | None = None,
         hunt_registry: HuntConfigRegistry | None = None,
         rule_registry: RuleRegistry | None = None,
+        schema_registry: SchemaRegistry | None = None,
     ) -> None:
         resolved = (
             (env if env is not None else os.environ.get("DFE_ENGINE_ENV", "")).strip().lower()
@@ -89,6 +94,7 @@ class Seed:
         self._org_registry = org_registry
         self._hunt_registry = hunt_registry
         self._rule_registry = rule_registry
+        self._schema_registry = schema_registry
         self._gitcrud = gitcrud
         self._source_registry = source_registry
         self._settings = settings
@@ -110,6 +116,7 @@ class Seed:
             metrics=self._metrics,
             hunt_registry=self._hunt_registry,
             rule_registry=self._rule_registry,
+            schema_registry=self._schema_registry,
         )
 
     def _attach_seeders(self, env: str) -> None:
@@ -122,6 +129,7 @@ class Seed:
         from dfe_engine.api.e2e.seed.logs import Logs
         from dfe_engine.api.e2e.seed.organisations import Organisations
         from dfe_engine.api.e2e.seed.rules import Rules
+        from dfe_engine.api.e2e.seed.schemas import Schemas
         from dfe_engine.api.e2e.seed.sources import Sources
 
         if type(self) is Seed:
@@ -134,6 +142,7 @@ class Seed:
             self.hunts = self._child(Hunts, env)
             self.rules = self._child(Rules, env)
             self.logs = self._child(Logs, env)
+            self.schemas = self._child(Schemas, env)
             return
         # Child seeders stay leaf classes, or more than one of these would match.
         if isinstance(self, Accounts):
@@ -162,6 +171,9 @@ class Seed:
             return
         if isinstance(self, Logs):
             self.logs = self
+            return
+        if isinstance(self, Schemas):
+            self.schemas = self
             return
 
     def _require_gitcrud(self) -> GitCrud:
@@ -199,6 +211,15 @@ class Seed:
                 "configured; set DFE_ENGINE_HUNTS_RULES_DIR or enable gitops"
             )
         return self._rule_registry
+
+    def _require_schema_registry(self) -> SchemaRegistry:
+        """The schema registry, or a named error saying which setting is off."""
+        if self._schema_registry is None:
+            raise RuntimeError(
+                "this e2e seed writes meta schemas, and no schema registry is "
+                "configured; set DFE_ENGINE_SCHEMAS_DIR"
+            )
+        return self._schema_registry
 
     def _require_settings(self) -> DFESettings:
         """The engine settings, which the routing compilers read the data database from."""
@@ -320,6 +341,21 @@ class Seed:
             logger.info("e2e seed", script=script, logs=logs)
             return True
         # ------------------------------------------------------------
+        # Schemas
+        # ------------------------------------------------------------
+        if script == "seed_searchable_meta_schemas":
+            schemas = self.schemas.seed_searchable_meta_schemas()
+            logger.info("e2e seed", script=script, schemas=schemas)
+            return True
+        if script == "seed_searchable_common_headers":
+            headers = self.schemas.seed_searchable_common_headers()
+            logger.info("e2e seed", script=script, headers=headers)
+            return True
+        if script == "seed_searchable_hunt_schemas":
+            hunts = self.schemas.seed_searchable_hunt_schemas()
+            logger.info("e2e seed", script=script, hunts=hunts)
+            return True
+        # ------------------------------------------------------------
         # Organisations
         # ------------------------------------------------------------
         if script == "seed_organisation":
@@ -423,6 +459,7 @@ class Seed:
             self.sources.delete_all()
             self.hunts.delete_all()
             self.rules.delete_all()
+            self.schemas.delete_all()
 
             # The deploy-repo state no seeder creates but a spec can change --
             # the infra overlay and the auto-merge flag. Left behind, a

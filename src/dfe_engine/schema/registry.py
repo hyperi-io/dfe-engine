@@ -22,6 +22,7 @@ Usage:
     registry.save_schema(Schema(...))
 """
 
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -32,11 +33,30 @@ from scalo.logger import logger
 
 from dfe_engine.schema.models import MetaSchema
 from dfe_engine.schema.schema_loader import REGISTRIES_SUBDIR
-from dfe_engine.yaml_utils import yaml_dump
+from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
 class SchemaError(Exception):
     """Base exception for schema registry errors."""
+
+
+def _git_would_record(path: Path) -> bool:
+    """Whether *path* sits in a git checkout that does not ignore it.
+
+    An ignored scratch directory (``tmp/``) is not the worktree. A path with no
+    checkout above it is not one either. Anything else would be a file git can
+    add on the current branch.
+    """
+    for parent in (path, *path.parents):
+        if not (parent / ".git").exists():
+            continue
+        result = subprocess.run(
+            ["git", "-C", str(parent), "check-ignore", "-q", "--", str(path)],
+            capture_output=True,
+            check=False,
+        )
+        return result.returncode != 0
+    return False
 
 
 class SchemaNotFoundError(SchemaError):
@@ -106,9 +126,15 @@ class SchemaRegistry:
         schemas_directory: str | Path,
         writable: bool | None = None,
         refresh_interval: int = 30,
+        fixtures_directory: str | Path | None = None,
     ) -> None:
         self._directory = Path(schemas_directory).expanduser().resolve(strict=False)
         self._directory.mkdir(parents=True, exist_ok=True)
+        self._fixtures = (
+            Path(fixtures_directory).expanduser().resolve(strict=False)
+            if fixtures_directory
+            else None
+        )
 
         self._store = DirectoryConfigStore(
             directory=self._directory,
@@ -122,11 +148,26 @@ class SchemaRegistry:
         """Map path to a DirectoryConfigStore table name."""
         return f"{path}"
 
+    @property
+    def fixtures_directory(self) -> Path | None:
+        """Directory e2e schema fixtures write to, outside the schema tree."""
+        return self._fixtures
+
     def _yaml_path(self, table: str) -> Path:
         """Filesystem path for a schema table key (e.g. ``aws/cloudtrail`` -> ``.../aws/cloudtrail.yaml``).
 
         Slashes (and backslashes, normalized to slashes) separate nested directories so keys like `acme/cloudtrail` and `contoso/cloudtrail` map to different files.
         """
+        return self._yaml_under(self._directory, table)
+
+    def _fixture_yaml(self, table: str) -> Path | None:
+        """Path of one fixture schema, or None when no fixtures directory is configured."""
+        if self._fixtures is None:
+            return None
+        return self._yaml_under(self._fixtures, table)
+
+    def _yaml_under(self, root: Path, table: str) -> Path:
+        """Map a schema path onto ``root`` and refuse a path that escapes it."""
         parts = [part for part in table.replace("\\", "/").split("/") if (part)]
         if not (parts):
             raise SchemaValidationError("Invalid empty schema path")
@@ -139,15 +180,81 @@ class SchemaRegistry:
         if parts[0] == REGISTRIES_SUBDIR:
             raise SchemaValidationError(f"Schema path must not be under {REGISTRIES_SUBDIR}/")
         if len(parts) == 1:
-            candidate = self._directory / f"{parts[0]}.yaml"
+            candidate = root / f"{parts[0]}.yaml"
         else:
-            candidate = self._directory.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
+            candidate = root.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
 
-        base = self._directory.resolve(strict=False)
+        base = root.resolve(strict=False)
         resolved = candidate.resolve(strict=False)
         if not (resolved.is_relative_to(base)):
             raise SchemaValidationError("Schema path escapes schemas directory")
         return candidate
+
+    def _assert_fixtures_isolated(self) -> None:
+        """Refuse a fixture write that would land in the schema tree or a git worktree.
+
+        The schema directory is the environment's copy of the packaged schemas.
+        A fixture directory inside it, or inside a checkout git would record,
+        dirties that tree. An ignored scratch directory (the e2e workspace) is
+        the only place a fixture write is allowed.
+        """
+        fixtures = self._fixtures
+        if fixtures is None:
+            raise SchemaError(
+                "schema fixtures directory is not configured; refusing to write into the schema tree"
+            )
+        snapshot = self._directory.resolve(strict=False)
+        resolved = fixtures.resolve(strict=False)
+        inside_snapshot = resolved == snapshot or resolved.is_relative_to(snapshot)
+        if inside_snapshot or snapshot.is_relative_to(resolved):
+            raise SchemaError("schema fixtures must sit outside the schema tree")
+        if _git_would_record(resolved):
+            raise SchemaError("schema fixtures must not be written into a git worktree")
+
+    def _fixture_tables(self) -> list[str]:
+        """Schema paths stored in the fixtures directory."""
+        root = self._fixtures
+        if root is None or not root.is_dir():
+            return []
+        tables: list[str] = []
+        for path in sorted(root.rglob("*.yaml")):
+            relative = path.relative_to(root)
+            if any(part.startswith(".") for part in relative.parts):
+                continue
+            tables.append(relative.with_suffix("").as_posix())
+        return tables
+
+    def _fixture_data(self, table: str) -> dict[str, Any] | None:
+        """Parsed fixture YAML for *table*, or None when that fixture is absent."""
+        yaml_path = self._fixture_yaml(table)
+        if yaml_path is None or not yaml_path.is_file():
+            return None
+        data = yaml_load(yaml_path)
+        return data if isinstance(data, dict) else None
+
+    def _config(self, table: str) -> dict[str, Any] | None:
+        """Schema document from the tree, falling back to a fixture of the same path."""
+        data = self._store.get(table)
+        if isinstance(data, dict):
+            return data
+        return self._fixture_data(table)
+
+    def _known_tables(self) -> list[str]:
+        """Tree tables plus fixture paths the tree does not already have."""
+        tables = list(self._store.list_tables())
+        have = set(tables)
+        for table in self._fixture_tables():
+            if table not in have:
+                tables.append(table)
+        return tables
+
+    def _delete_fixture(self, path: str) -> bool:
+        """Remove one fixture file. Returns whether a file was removed. Never commits."""
+        yaml_path = self._fixture_yaml(path)
+        if yaml_path is None or not yaml_path.is_file():
+            return False
+        yaml_path.unlink()
+        return True
 
     @classmethod
     def get_instance(
@@ -227,10 +334,30 @@ class SchemaRegistry:
         logger.info(f"Saved schema {table!r} -> {yaml_path!r}")
         return meta_schema
 
+    def save_fixture(self, meta_schema: MetaSchema) -> MetaSchema:
+        """Write one schema into the fixtures directory. Never touches the schema tree or git.
+
+        The fixtures directory is the e2e scratch copy. A missing directory, a
+        directory inside the schema tree, or a directory git would record is
+        refused before any file is created.
+        """
+        self._assert_fixtures_isolated()
+        if not (meta_schema.path):
+            raise SchemaValidationError("'MetaSchema.path' is required when saving")
+        yaml_path = self._fixture_yaml(meta_schema.path)
+        if yaml_path is None:
+            raise SchemaError(
+                "schema fixtures directory is not configured; refusing to write into the schema tree"
+            )
+        yaml_path.parent.mkdir(parents=True, exist_ok=True)
+        yaml_dump(data=meta_schema.to_yaml_dict(), dest=yaml_path)
+        logger.info(f"Saved schema fixture {meta_schema.path!r} -> {yaml_path!r}")
+        return meta_schema
+
     def get_schema(self, path: str) -> MetaSchema:
         """Get a meta schema."""
         table = self._table_name(path)
-        config_data = self._store.get(table)
+        config_data = self._config(table)
         if config_data is None:
             desc = f"{path}"
             raise SchemaNotFoundError(f"Schema not found: {desc!r}")
@@ -253,10 +380,12 @@ class SchemaRegistry:
     def delete_schema(self, path: str) -> None:
         """Delete a meta schema."""
         table = self._table_name(path)
+        removed_fixture = self._delete_fixture(path)
         yaml_path = self._yaml_path(path)
 
         if not (yaml_path.exists()):
-            logger.warning(f"Schema file does not exist: {yaml_path!r}")
+            if not removed_fixture:
+                logger.warning(f"Schema file does not exist: {yaml_path!r}")
             return
         yaml_path.unlink(missing_ok=True)
 
@@ -272,7 +401,7 @@ class SchemaRegistry:
         match on-disk layout; ``MetaSchema.path`` is not persisted in YAML files.
         """
         parent, name = _schema_location(schema_path)
-        for table in self._store.list_tables():
+        for table in self._known_tables():
             existing_parent, existing_name = _schema_location(table)
             if existing_parent == parent and existing_name == name:
                 return table
@@ -288,11 +417,11 @@ class SchemaRegistry:
             List of schema metadata dicts.
         """
         results = []
-        for table in self._store.list_tables():
+        for table in self._known_tables():
             if path and table != path:
                 continue
 
-            config_data = self._store.get(table)
+            config_data = self._config(table)
             if config_data is None:
                 continue
 
@@ -311,6 +440,10 @@ class SchemaRegistry:
             # Resolve YAML path for modified-time (use store table key, not list_schemas filter)
             schema_rel = getattr(schema, "path", None) or table
             yaml_path = self._yaml_path(schema_rel)
+            if not yaml_path.is_file():
+                fixture = self._fixture_yaml(schema_rel)
+                if fixture is not None:
+                    yaml_path = fixture
             try:
                 stat = yaml_path.stat()
                 updated_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()

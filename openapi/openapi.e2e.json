@@ -137,6 +137,10 @@
               "seed_searchable_hunts",
               "seed_searchable_libraries",
               "seed_searchable_git_operation_logs",
+              "seed_searchable_rules",
+              "seed_searchable_meta_schemas",
+              "seed_searchable_common_headers",
+              "seed_searchable_hunt_schemas",
               "reset_all"
             ],
             "title": "Script"

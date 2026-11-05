@@ -1095,6 +1095,14 @@ class SchemasSettings(BaseModel):
         default="",
         description="Root of dfe-schemas directory (overrides the installed package)",
     )
+    e2e_schema_fixtures_dir: str = Field(
+        default="",
+        description=(
+            "Where the e2e schema seeds write. Outside the schema tree, so a seed "
+            "cannot add files to the packaged schemas or a git worktree. Unset "
+            "means those seeds refuse. DFE_ENGINE_E2E_SCHEMA_FIXTURES_DIR."
+        ),
+    )
 
 
 class SourceSettings(BaseModel):
@@ -2088,6 +2096,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_KEDA_SHIM_HOST": "keda_shim.host",
             "DFE_ENGINE_KEDA_SHIM_QUERY_CONFIG": "keda_shim.query_config",
             "DFE_ENGINE_SCHEMAS_DIR": "schemas.schemas_dir",
+            "DFE_ENGINE_E2E_SCHEMA_FIXTURES_DIR": "schemas.e2e_schema_fixtures_dir",
             "DFE_ENGINE_SOURCES_DIR": "source.sources_dir",
             "DFE_ENGINE_SOURCE_BUILDS_DIR": "source.builds_dir",
             "DFE_ENGINE_SOURCE_PLANS_DIR": "source.plans_dir",

@@ -127,14 +127,16 @@ e2e-server:
 	export DFE_ENGINE_API_PORT="$${E2E_PORT:-$${DFE_ENGINE_API_PORT:-8003}}"; \
 	$(e2e-port-guard); \
 	if [ -z "$(E2E_KEEP)" ]; then rm -rf "$(E2E_WORKSPACE)"; fi; \
-	mkdir -p "$(E2E_WORKSPACE)/config" "$(E2E_WORKSPACE)/schemas" "$(E2E_WORKSPACE)/secrets"; \
-	echo "Seeding schema snapshot from the dfe-schemas package (writes stay in tmp/e2e)"; \
+	mkdir -p "$(E2E_WORKSPACE)/config" "$(E2E_WORKSPACE)/schemas" \
+		"$(E2E_WORKSPACE)/schema-fixtures" "$(E2E_WORKSPACE)/secrets"; \
+	echo "Seeding schema snapshot from the dfe-schemas package (seeds write to schema-fixtures, not this copy)"; \
 	uv run python -c "import dfe_schemas, shutil, sys; shutil.copytree(dfe_schemas.schemas_root(), sys.argv[1], dirs_exist_ok=True)" "$(E2E_WORKSPACE)/schemas"; \
 	if [ -z "$(E2E_KEEP)" ]; then \
 		$(e2e-ch-wipe); \
 	fi; \
 	export DFE_CONFIG_DIR="$(E2E_WORKSPACE)/config"; \
 	export DFE_ENGINE_SCHEMAS_DIR="$(E2E_WORKSPACE)/schemas"; \
+	export DFE_ENGINE_E2E_SCHEMA_FIXTURES_DIR="$(E2E_WORKSPACE)/schema-fixtures"; \
 	export DFE_ENGINE_SECRETS_PATH="$(E2E_WORKSPACE)/secrets"; \
 	export DFE_ENGINE_STORAGE_PATH="$(E2E_WORKSPACE)/artifacts"; \
 	export DFE_ENGINE_GITOPS_LOCAL_PATH="$(E2E_WORKSPACE)/deploy-repo"; \
