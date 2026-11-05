@@ -145,6 +145,8 @@
               "seed_searchable_blocked_accounts",
               "seed_searchable_api_keys",
               "seed_searchable_groups",
+              "seed_searchable_oidc_providers",
+              "seed_searchable_oidc_users",
               "seed_searchable_roles",
               "reset_all"
             ],

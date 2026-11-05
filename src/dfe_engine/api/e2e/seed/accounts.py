@@ -46,6 +46,11 @@ def searchable_role_names() -> list[str]:
     return [f"searchable-role-{num}" for num in range(_SEARCHABLE_COUNT)]
 
 
+def searchable_oidc_provider_names() -> list[str]:
+    """Names one searchable OIDC-provider script writes."""
+    return [f"searchable-oidc-{num}" for num in range(_SEARCHABLE_COUNT)]
+
+
 def _break_glass_admin_password() -> str:
     """Break-glass password (same fallbacks as auth bootstrap)."""
     return _WELL_KNOWN_E2E_PASSWORD
@@ -215,6 +220,68 @@ class Accounts(Seed):
             if store.get(name) is None:
                 continue
             store.delete(name)
+
+    def seed_searchable_oidc_providers(self) -> bool:
+        """Seed fifty disabled OIDC providers a list search can filter.
+
+        Returns True when any provider was written, False when they were all already there.
+        They stay in the provider registry. Disabled, with no issuer and no secret, so
+        login and group sync leave them alone. Nothing is published to the deploy repo.
+        """
+        from dfe_engine.auth.oidc.models import OIDCProvider
+
+        registry = self._require_oidc_registry()
+        changed = False
+        for num, name in enumerate(searchable_oidc_provider_names()):
+            if registry.get(name) is not None:
+                continue
+            registry.create(
+                name,
+                OIDCProvider(enabled=False, display_name=f"Searchable Provider {num}"),
+            )
+            changed = True
+        return changed
+
+    def seed_searchable_oidc_users(self) -> bool:
+        """Attach every ordinary account to the first searchable OIDC provider.
+
+        Returns True when any account was attached, False when they already were.
+        The provider is ``searchable-oidc-0`` and must already be in the registry.
+        Recovery accounts stay local, so the admin and break-glass passwords keep
+        working. A local password on the others stays usable too: the attachment
+        is the provider stamp the account list filters on.
+        """
+        registry = self._require_oidc_registry()
+        provider = searchable_oidc_provider_names()[0]
+        if registry.get(provider) is None:
+            raise RuntimeError(
+                f"this e2e seed attaches accounts to {provider}, which is not in the "
+                "OIDC provider registry; run seed_searchable_oidc_providers first"
+            )
+        changed = False
+        for account in self._account_store.list():
+            protected = self._account_store.protected.is_protected(account.username)
+            if account.is_soft_deleted or protected:
+                continue
+            if account.oidc_id == provider and account.source_provider == provider:
+                continue
+            self._account_store.update(
+                account.username,
+                oidc_id=provider,
+                source_provider=provider,
+            )
+            changed = True
+        return changed
+
+    def delete_searchable_oidc_providers(self) -> None:
+        """Remove the providers this seeder writes. A no-op when no registry is configured."""
+        registry = self._oidc_registry
+        if registry is None:
+            return
+        for name in searchable_oidc_provider_names():
+            if registry.get(name) is None:
+                continue
+            registry.delete(name)
 
     def delete_all(self) -> None:
         """Clear all accounts from the YAML account registry.

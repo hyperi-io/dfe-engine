@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from dfe_engine.api.e2e.seed.schemas import Schemas
     from dfe_engine.api.e2e.seed.sources import Sources
     from dfe_engine.auth.api_keys import APIKeyStore
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
     from dfe_engine.auth.role_store import RoleStore
     from dfe_engine.gitcrud import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
@@ -87,6 +88,7 @@ class Seed:
         schema_registry: SchemaRegistry | None = None,
         api_key_store: APIKeyStore | None = None,
         role_store: RoleStore | None = None,
+        oidc_registry: OIDCProviderRegistry | None = None,
     ) -> None:
         resolved = (
             (env if env is not None else os.environ.get("DFE_ENGINE_ENV", "")).strip().lower()
@@ -101,6 +103,7 @@ class Seed:
         self._schema_registry = schema_registry
         self._api_key_store = api_key_store
         self._role_store = role_store
+        self._oidc_registry = oidc_registry
         self._gitcrud = gitcrud
         self._source_registry = source_registry
         self._settings = settings
@@ -125,6 +128,7 @@ class Seed:
             schema_registry=self._schema_registry,
             api_key_store=self._api_key_store,
             role_store=self._role_store,
+            oidc_registry=self._oidc_registry,
         )
 
     def _attach_seeders(self, env: str) -> None:
@@ -240,6 +244,14 @@ class Seed:
         if self._role_store is None:
             raise RuntimeError("this e2e seed writes roles, and no role store is configured")
         return self._role_store
+
+    def _require_oidc_registry(self) -> OIDCProviderRegistry:
+        """The OIDC provider registry, or a named error saying it was not passed."""
+        if self._oidc_registry is None:
+            raise RuntimeError(
+                "this e2e seed writes OIDC providers, and no provider registry is configured"
+            )
+        return self._oidc_registry
 
     def _require_settings(self) -> DFESettings:
         """The engine settings, which the routing compilers read the data database from."""
@@ -394,6 +406,14 @@ class Seed:
             groups = self.accounts.seed_searchable_groups()
             logger.info("e2e seed", script=script, groups=groups)
             return True
+        if script == "seed_searchable_oidc_providers":
+            providers = self.accounts.seed_searchable_oidc_providers()
+            logger.info("e2e seed", script=script, providers=providers)
+            return True
+        if script == "seed_searchable_oidc_users":
+            users = self.accounts.seed_searchable_oidc_users()
+            logger.info("e2e seed", script=script, users=users)
+            return True
         if script == "seed_searchable_roles":
             roles = self.accounts.seed_searchable_roles()
             logger.info("e2e seed", script=script, roles=roles)
@@ -491,6 +511,7 @@ class Seed:
             self.accounts.delete_all()
             self.accounts.delete_searchable_api_keys()
             self.accounts.delete_searchable_groups()
+            self.accounts.delete_searchable_oidc_providers()
             self.accounts.delete_searchable_roles()
             self.organisations.delete_all()
 

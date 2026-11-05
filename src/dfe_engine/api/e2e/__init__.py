@@ -90,6 +90,8 @@ class SeedRequest(BaseModel):
         "seed_searchable_blocked_accounts",
         "seed_searchable_api_keys",
         "seed_searchable_groups",
+        "seed_searchable_oidc_providers",
+        "seed_searchable_oidc_users",
         "seed_searchable_roles",
         "reset_all",
     ]
@@ -137,6 +139,7 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         schema_registry=get_schema_registry_optional(),
         api_key_store=getattr(request.app.state, "api_key_store", None),
         role_store=getattr(request.app.state, "role_store", None),
+        oidc_registry=getattr(request.app.state, "oidc_provider_registry", None),
     )
     try:
         success = await run_blocking(functools.partial(seeder.seed_static, body.script))

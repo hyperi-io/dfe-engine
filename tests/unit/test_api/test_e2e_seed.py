@@ -643,6 +643,101 @@ def test_searchable_roles_refuse_without_a_store(tmp_path, monkeypatch):
         seeder.accounts.seed_searchable_roles()
 
 
+def test_searchable_oidc_providers_stay_disabled_in_the_registry(tmp_path, monkeypatch):
+    """Fifty disabled providers the list can search, with no issuer and no secret."""
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.api.pagination import apply_search
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    registry = OIDCProviderRegistry(tmp_path / "oidc-providers")
+    seeder = Seed(
+        account_store=accounts,
+        group_store=groups,
+        org_registry=orgs,
+        oidc_registry=registry,
+    )
+
+    assert seeder.accounts.seed_searchable_oidc_providers() is True
+    assert seeder.accounts.seed_searchable_oidc_providers() is False
+    rows = [
+        {"name": name, "display_name": provider.display_name} for name, provider in registry.list()
+    ]
+    found = apply_search(rows, "searchable", ["name", "display_name"])
+    assert len(found) == 50
+    providers = [provider for _, provider in registry.list()]
+    assert all(not provider.enabled for provider in providers)
+    assert all(provider.issuer == "" for provider in providers)
+    assert all(provider.client_secret_env == "" for provider in providers)
+    assert all(provider.client_secret_path == "" for provider in providers)
+    assert all(provider.groups.mode != "api" for provider in providers)
+
+    seeder.accounts.delete_searchable_oidc_providers()
+    assert registry.list() == []
+
+
+def test_searchable_oidc_providers_refuse_without_a_registry(tmp_path, monkeypatch):
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+    with pytest.raises(RuntimeError, match="provider registry"):
+        seeder.accounts.seed_searchable_oidc_providers()
+
+
+def test_searchable_oidc_users_attach_to_the_first_provider(tmp_path, monkeypatch):
+    """Ordinary accounts take the first provider's stamp. Recovery accounts stay local."""
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.auth.oidc.models import OIDCProvider
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    registry = OIDCProviderRegistry(tmp_path / "oidc-providers")
+    registry.create(
+        "searchable-oidc-0", OIDCProvider(enabled=False, display_name="Searchable Provider 0")
+    )
+    for name in ("searchable-account-0", "searchable-blocked-0"):
+        accounts.create(name, "changeme", groups=["dfe-viewers"])
+    seeder = Seed(
+        account_store=accounts,
+        group_store=groups,
+        org_registry=orgs,
+        oidc_registry=registry,
+    )
+
+    assert seeder.accounts.seed_searchable_oidc_users() is True
+    assert seeder.accounts.seed_searchable_oidc_users() is False
+    for name in ("searchable-account-0", "searchable-blocked-0"):
+        account = present(accounts.get(name))
+        assert account.oidc_id == "searchable-oidc-0"
+        assert account.source_provider == "searchable-oidc-0"
+        assert account.external is False
+    admin = present(accounts.get("admin"))
+    assert admin.oidc_id == ""
+    assert admin.source_provider == ""
+
+
+def test_searchable_oidc_users_refuse_without_the_first_provider(tmp_path, monkeypatch):
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    accounts.create("searchable-account-0", "changeme", groups=["dfe-viewers"])
+    seeder = Seed(
+        account_store=accounts,
+        group_store=groups,
+        org_registry=orgs,
+        oidc_registry=OIDCProviderRegistry(tmp_path / "oidc-providers"),
+    )
+    with pytest.raises(RuntimeError, match="searchable-oidc-0"):
+        seeder.accounts.seed_searchable_oidc_users()
+    assert present(accounts.get("searchable-account-0")).oidc_id == ""
+
+
 def test_no_seeded_match_rule_carries_the_json_column_prefix():
     """A seeded rule the receiver can never match is a fixture that proves nothing.
 
