@@ -307,6 +307,38 @@ def test_seed_setup_complete_seeds_organisation(tmp_path, monkeypatch):
     assert orgs.get("organisation") is not None
 
 
+def test_searchable_organisations_are_local_and_fenced(tmp_path, monkeypatch):
+    """Fifty orgs, each holding only its own tenant id. A second call writes nothing."""
+    from dfe_engine.api.e2e.seed.organisations import (
+        Organisations,
+        searchable_organisation_names,
+    )
+    from dfe_engine.orgs.models import DEFAULT_ORG_NAME
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    orgs.create(DEFAULT_ORG_NAME, org_ids=["default"], display_name="Default")
+    seeder = Organisations(account_store=accounts, group_store=groups, org_registry=orgs)
+
+    assert seeder.seed_searchable_organisations() is True
+    assert seeder.seed_searchable_organisations() is False
+    names = searchable_organisation_names()
+    assert len(names) == 50
+    for num, name in enumerate(names):
+        org = orgs.get(name)
+        assert org is not None
+        assert org.display_name == f"Searchable Organisation {num}"
+        assert org.org_ids == [name]
+        assert org.enabled is True
+    default = orgs.get(DEFAULT_ORG_NAME)
+    assert default is not None
+    assert default.org_ids == ["default"]
+
+    seeder.delete_all()
+    assert orgs.get(DEFAULT_ORG_NAME) is not None
+    assert orgs.get(names[0]) is None
+
+
 def test_seed_organisation_dispatches_to_the_organisation_seeder(tmp_path, monkeypatch):
     """The script is offered in the request Literal, so it has to reach a seeder."""
     from dfe_engine.api.e2e.seed import Seed

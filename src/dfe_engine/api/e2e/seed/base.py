@@ -421,6 +421,10 @@ class Seed:
         # ------------------------------------------------------------
         # Organisations
         # ------------------------------------------------------------
+        if script == "seed_searchable_organisations":
+            organisations = self.organisations.seed_searchable_organisations()
+            logger.info("e2e seed", script=script, organisations=organisations)
+            return True
         if script == "seed_organisation":
             organisation = self.organisations.seed_organisation()
             logger.info("e2e seed", script=script, organisation=organisation)
