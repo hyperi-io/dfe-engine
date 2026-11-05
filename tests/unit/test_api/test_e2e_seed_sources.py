@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from dfe_engine.api.e2e.seed.sources import Sources
+from dfe_engine.settings import DFESettings
 from dfe_engine.source.registry import SourceNotFoundError, SourceRegistry
 
 
@@ -101,8 +102,6 @@ def test_searchable_system_defaults_are_undeployed_drift(seeder, registry):
 
 def test_searchable_system_defaults_avoid_the_deployment_ttl(registry):
     """A deployment whose default is already one day gets zero, which still drifts."""
-    from types import SimpleNamespace
-
     from dfe_engine.api.e2e.seed.sources import Sources, searchable_default_names
 
     seeder = Sources(
@@ -111,7 +110,7 @@ def test_searchable_system_defaults_avoid_the_deployment_ttl(registry):
         org_registry=Mock(),
         env="test",
         source_registry=registry,
-        settings=SimpleNamespace(clickhouse=SimpleNamespace(default_ttl_days=1)),
+        settings=DFESettings(env="test", clickhouse={"default_ttl_days": 1}),
     )
     assert seeder.seed_searchable_system_defaults() is True
     source = registry.get_source(searchable_default_names()[0])

@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from scalo.logger import logger
 
 from dfe_engine.api.e2e.seed.base import Seed
@@ -37,6 +39,10 @@ SEED_FETCHER_SOURCE_NAME = "seedfetch"
 SEED_ACTOR = "e2e-seed"
 """Commit attribution for every deploy-repo write a seeder makes."""
 
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud import GitCrud
+    from dfe_engine.settings import DFESettings
+
 SEARCHABLE_COLUMNS_SOURCE = "searchable-columns"
 """The one deployed source ``seed_searchable_source_columns`` writes."""
 
@@ -51,7 +57,7 @@ def searchable_default_names() -> list[str]:
     return [f"searchable-default-{num}" for num in range(50)]
 
 
-def _ttl_that_drifts(settings: object, crud: object) -> int:
+def _ttl_that_drifts(settings: DFESettings | None, crud: GitCrud | None) -> int:
     """A retention the drift list will show, whatever the deployment default is.
 
     With no settings the seed cannot read the default, so it stores one day.
@@ -60,7 +66,7 @@ def _ttl_that_drifts(settings: object, crud: object) -> int:
         return 1
     from dfe_engine.gitcrud.retention import resolve_state
 
-    effective = resolve_state(crud, settings).effective  # type: ignore[arg-type]
+    effective = resolve_state(crud, settings).effective
     return 0 if effective != 0 else 1
 
 

@@ -51,11 +51,7 @@ class Rules(Seed):
         for num, name in enumerate(searchable_rule_names()):
             if registry.name_exists(name):
                 continue
-            registry.save(
-                _rule(name, num),
-                created_by=SEED_ACTOR,
-                description=f"e2e: seed rule {name}",
-            )
+            registry.save(_rule(name, num), created_by=SEED_ACTOR)
             changed = True
         return changed
 

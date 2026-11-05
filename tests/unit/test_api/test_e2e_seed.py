@@ -7,6 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -541,6 +542,13 @@ def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
     assert groups.get("dfe-nonesuch") is None
 
 
+class _ListedAccount(TypedDict):
+    username: str
+    name: str
+    email: str
+    blocked: bool
+
+
 def test_searchable_accounts_stay_in_the_account_store(tmp_path, monkeypatch):
     """Fifty ordinary accounts and fifty blocked ones, searchable, and not published anywhere else."""
     from dfe_engine.api.conventions import apply_search
@@ -555,7 +563,7 @@ def test_searchable_accounts_stay_in_the_account_store(tmp_path, monkeypatch):
     assert seeder.accounts.seed_searchable_blocked_accounts() is True
     assert seeder.accounts.seed_searchable_blocked_accounts() is False
 
-    rows = [
+    rows: list[_ListedAccount] = [
         {
             "username": account.username,
             "name": account.name,
