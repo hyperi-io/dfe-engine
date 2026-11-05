@@ -94,6 +94,8 @@ class SeedRequest(BaseModel):
         "seed_searchable_oidc_users",
         "seed_searchable_organisations",
         "seed_searchable_roles",
+        "seed_searchable_sources",
+        "seed_searchable_source_columns",
         "reset_all",
     ]
 

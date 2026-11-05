@@ -432,6 +432,14 @@ class Seed:
         # ------------------------------------------------------------
         # Sources
         # ------------------------------------------------------------
+        if script == "seed_searchable_sources":
+            sources = self.sources.seed_searchable_sources()
+            logger.info("e2e seed", script=script, sources=sources)
+            return True
+        if script == "seed_searchable_source_columns":
+            source = self.sources.seed_searchable_source_columns()
+            logger.info("e2e seed", script=script, source=source)
+            return True
         if script == "seed_undeployed_source":
             source = self.sources.seed_undeployed_source()
             logger.info("e2e seed", script=script, source=source)

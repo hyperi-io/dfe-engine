@@ -6,7 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from dfe_engine.api.e2e.seed.sources import Sources
-from dfe_engine.source.registry import SourceRegistry
+from dfe_engine.source.registry import SourceNotFoundError, SourceRegistry
 
 
 @pytest.fixture
@@ -29,6 +29,44 @@ def seeder(registry) -> Sources:
         env="test",
         source_registry=registry,
     )
+
+
+def test_searchable_sources_stay_out_of_the_pipeline(seeder, registry):
+    """Fifty list rows, none deployed, so a second call writes nothing and routing is untouched."""
+    from dfe_engine.api.e2e.seed.sources import searchable_source_names
+
+    assert seeder.seed_searchable_sources() is True
+    assert seeder.seed_searchable_sources() is False
+    names = searchable_source_names()
+    assert len(names) == 50
+    for num, name in enumerate(names):
+        source = registry.get_source(name)
+        assert source.display_name == f"Searchable Source {num}"
+        assert source.description == f"Searchable source {num}."
+        assert source.deployed_version is None
+        assert source.transform is None
+        assert source.fetcher is None
+
+    seeder.delete_all()
+    for name in names:
+        with pytest.raises(SourceNotFoundError):
+            registry.get_source(name)
+
+
+def test_searchable_source_columns_come_from_one_deployed_source(seeder, registry):
+    """One deployed source naming a meta schema, so its columns page has rows."""
+    from dfe_engine.api.e2e.seed.sources import SEARCHABLE_COLUMNS_SOURCE
+
+    assert seeder.seed_searchable_source_columns() is True
+    assert seeder.seed_searchable_source_columns() is False
+    source = registry.get_source(SEARCHABLE_COLUMNS_SOURCE)
+    assert source.display_name == "Searchable Columns"
+    assert source.deployed_version == source.current
+    assert source.version().effective_schema().meta_schema == "meta/syslog"
+
+    seeder.delete_all()
+    with pytest.raises(SourceNotFoundError):
+        registry.get_source(SEARCHABLE_COLUMNS_SOURCE)
 
 
 def test_seed_source_is_create_once(seeder, registry):

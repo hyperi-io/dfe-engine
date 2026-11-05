@@ -37,6 +37,15 @@ SEED_FETCHER_SOURCE_NAME = "seedfetch"
 SEED_ACTOR = "e2e-seed"
 """Commit attribution for every deploy-repo write a seeder makes."""
 
+SEARCHABLE_COLUMNS_SOURCE = "searchable-columns"
+"""The one deployed source ``seed_searchable_source_columns`` writes."""
+
+
+def searchable_source_names() -> list[str]:
+    """Source names ``seed_searchable_sources`` writes."""
+    return [f"searchable-source-{num}" for num in range(50)]
+
+
 # A bare dotted path: the receiver splits the field on '.' and walks the raw
 # payload, so a '_json.' prefix is read as a first segment that no record has.
 _MATCH_FIELD = "tags.collector.type"
@@ -180,6 +189,40 @@ class Sources(Seed):
             display_name="Undeployed Source",
         )
 
+    def seed_searchable_sources(self) -> bool:
+        """Create fifty undeployed sources the list can search by name, label, or description.
+
+        Returns True when any were written, False when all fifty were already there.
+        They stay undeployed: a deployed source joins routing and gets topics, and
+        these exist so the sources page has rows to filter. ``reset_all`` removes
+        them with the other operator sources.
+        """
+        changed = False
+        for num, name in enumerate(searchable_source_names()):
+            changed |= self._ensure_source(
+                name,
+                fetched=False,
+                meta_schema=None,
+                transform=None,
+                display_name=f"Searchable Source {num}",
+                description=f"Searchable source {num}.",
+            )
+        return changed
+
+    def seed_searchable_source_columns(self) -> bool:
+        """Seed one deployed source whose meta schema gives it columns to search.
+
+        The columns page lists a source's columns only once the source names a
+        meta schema and is deployed. This one names ``meta/syslog``, which
+        carries many columns, and is marked deployed the same way a real deploy
+        is. Returns True when created, False when it was already there.
+        ``reset_all`` removes it with the other operator sources.
+        """
+        return self._ensure_deployed_source(
+            SEARCHABLE_COLUMNS_SOURCE,
+            display_name="Searchable Columns",
+        )
+
     def _ensure_source(
         self,
         name: str,
@@ -188,6 +231,7 @@ class Sources(Seed):
         meta_schema: str | None = None,
         transform: SourceTransform | None = None,
         display_name: str = "Seed Source",
+        description: str = "Playwright fixture source.",
     ) -> bool:
         """Create the source when absent, and reconcile an existing one's display name.
 
@@ -217,7 +261,7 @@ class Sources(Seed):
             SourceWriteRequest(
                 source=name,
                 display_name=display_name,
-                description="Playwright fixture source.",
+                description=description,
                 match=None
                 if fetched
                 else SourceMatch(field=_MATCH_FIELD, operator="equals", value=name),
