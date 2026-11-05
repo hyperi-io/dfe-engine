@@ -61,6 +61,13 @@ quality:
     vulture: blocking
     ty: blocking
     ruff_docstrings: blocking
+  dep_licenses:
+    # These wheels ship no licence file. The texts are upstream's, taken at the same version.
+    overrides:
+      - {name: dnspython, version: "2.9.0", licence: ISC, reason: "upstream LICENSE at tag v2.9.0", licence_file: third_party/dnspython-2.9.0-LICENSE}
+      - {name: loguru, version: "0.7.3", licence: MIT, reason: "upstream LICENSE at tag 0.7.3", licence_file: third_party/loguru-0.7.3-LICENSE}
+      - {name: scim2-models, version: "0.6.12", licence: Apache-2.0, reason: "LICENSE from the 0.6.12 sdist", licence_file: third_party/scim2-models-0.6.12-LICENSE}
+      - {name: pysigma-backend-clickhouse, version: "1.1.1", licence: LGPL-3.0-only, reason: "Q99 A: the wheel's LICENSE.md is the LGPL-3.0 text and the package metadata declares none"}
   ignore:
     - tool: pip-audit
       ids:
