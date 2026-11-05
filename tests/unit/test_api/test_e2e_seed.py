@@ -587,6 +587,62 @@ def test_searchable_api_keys_refuse_without_a_store(tmp_path, monkeypatch):
         seeder.accounts.seed_searchable_api_keys()
 
 
+def test_searchable_groups_and_roles_stay_beside_the_builtins(tmp_path, monkeypatch):
+    """Fifty groups and fifty custom roles, searchable, without touching the built-ins."""
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.api.pagination import apply_search
+    from dfe_engine.auth.bootstrap import bootstrap_auth
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    account_store, group_store, _api_keys, role_store, *_ = bootstrap_auth(
+        tmp_path / "config" / "auth"
+    )
+    core_before = [role.name for role in role_store.list() if role.resource_type == "core"]
+    seeder = Seed(
+        account_store=account_store,
+        group_store=group_store,
+        org_registry=OrgRegistry(tmp_path / "orgs"),
+        role_store=role_store,
+    )
+
+    assert seeder.accounts.seed_searchable_groups() is True
+    assert seeder.accounts.seed_searchable_groups() is False
+    assert seeder.accounts.seed_searchable_roles() is True
+    assert seeder.accounts.seed_searchable_roles() is False
+
+    groups = apply_search(
+        [{"name": group.name, "description": group.description} for group in group_store.list()],
+        "searchable",
+        ["name", "description"],
+    )
+    roles = apply_search(
+        [{"name": role.name, "description": role.description} for role in role_store.list()],
+        "searchable",
+        ["name", "description"],
+    )
+    assert len(groups) == 50
+    assert len(roles) == 50
+    seeded_roles = [role for role in role_store.list() if role.name.startswith("searchable-role-")]
+    assert all(role.resource_type == "custom" and role.permissions == [] for role in seeded_roles)
+
+    seeder.accounts.delete_searchable_groups()
+    seeder.accounts.delete_searchable_roles()
+    assert group_store.get("dfe-viewers") is not None
+    assert group_store.get("searchable-group-0") is None
+    assert role_store.get("searchable-role-0") is None
+    assert [role.name for role in role_store.list() if role.resource_type == "core"] == core_before
+
+
+def test_searchable_roles_refuse_without_a_store(tmp_path, monkeypatch):
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+    with pytest.raises(RuntimeError, match="role store"):
+        seeder.accounts.seed_searchable_roles()
+
+
 def test_no_seeded_match_rule_carries_the_json_column_prefix():
     """A seeded rule the receiver can never match is a fixture that proves nothing.
 

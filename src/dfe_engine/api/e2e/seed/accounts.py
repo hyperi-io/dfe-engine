@@ -36,6 +36,16 @@ def searchable_api_key_names() -> list[str]:
     return [f"searchable-api-key-{num}" for num in range(_SEARCHABLE_COUNT)]
 
 
+def searchable_group_names() -> list[str]:
+    """Names one searchable-group script writes."""
+    return [f"searchable-group-{num}" for num in range(_SEARCHABLE_COUNT)]
+
+
+def searchable_role_names() -> list[str]:
+    """Names one searchable-role script writes."""
+    return [f"searchable-role-{num}" for num in range(_SEARCHABLE_COUNT)]
+
+
 def _break_glass_admin_password() -> str:
     """Break-glass password (same fallbacks as auth bootstrap)."""
     return _WELL_KNOWN_E2E_PASSWORD
@@ -152,6 +162,59 @@ class Accounts(Seed):
             if key is None:
                 continue
             store.revoke(key.short_token)
+
+    def seed_searchable_groups(self) -> bool:
+        """Seed fifty groups a list search can filter.
+
+        Returns True when any group was written, False when they were all already there.
+        Each group grants nothing. They stay in the group store and are not published
+        to the deploy repo.
+        """
+        changed = False
+        for num, name in enumerate(searchable_group_names()):
+            if self._group_store.get(name) is not None:
+                continue
+            self._group_store.create(name, [], description=f"Searchable Group {num}")
+            changed = True
+        return changed
+
+    def delete_searchable_groups(self) -> None:
+        """Remove the groups this seeder writes. Bootstrap groups stay."""
+        for name in searchable_group_names():
+            group = self._group_store.get(name)
+            if group is None:
+                continue
+            for member in list(group.members):
+                self._group_store.remove_member(name, member)
+            self._group_store.delete(name)
+
+    def seed_searchable_roles(self) -> bool:
+        """Seed fifty custom roles a list search can filter.
+
+        Returns True when any role was written, False when they were all already there.
+        Each role grants nothing. Built-in roles in the same file stay as they are.
+        """
+        store = self._require_role_store()
+        changed = False
+        for num, name in enumerate(searchable_role_names()):
+            if store.get(name) is not None:
+                continue
+            store.create(name, description=f"Searchable Role {num}", permissions=[])
+            changed = True
+        return changed
+
+    def delete_searchable_roles(self) -> None:
+        """Remove the roles this seeder writes. A no-op when no role store is configured.
+
+        Built-in roles stay. A reset that cleared the roles file would take them too.
+        """
+        store = self._role_store
+        if store is None:
+            return
+        for name in searchable_role_names():
+            if store.get(name) is None:
+                continue
+            store.delete(name)
 
     def delete_all(self) -> None:
         """Clear all accounts from the YAML account registry.

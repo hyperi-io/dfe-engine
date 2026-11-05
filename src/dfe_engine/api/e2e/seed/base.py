@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from dfe_engine.api.e2e.seed.schemas import Schemas
     from dfe_engine.api.e2e.seed.sources import Sources
     from dfe_engine.auth.api_keys import APIKeyStore
+    from dfe_engine.auth.role_store import RoleStore
     from dfe_engine.gitcrud import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
     from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
@@ -85,6 +86,7 @@ class Seed:
         rule_registry: RuleRegistry | None = None,
         schema_registry: SchemaRegistry | None = None,
         api_key_store: APIKeyStore | None = None,
+        role_store: RoleStore | None = None,
     ) -> None:
         resolved = (
             (env if env is not None else os.environ.get("DFE_ENGINE_ENV", "")).strip().lower()
@@ -98,6 +100,7 @@ class Seed:
         self._rule_registry = rule_registry
         self._schema_registry = schema_registry
         self._api_key_store = api_key_store
+        self._role_store = role_store
         self._gitcrud = gitcrud
         self._source_registry = source_registry
         self._settings = settings
@@ -121,6 +124,7 @@ class Seed:
             rule_registry=self._rule_registry,
             schema_registry=self._schema_registry,
             api_key_store=self._api_key_store,
+            role_store=self._role_store,
         )
 
     def _attach_seeders(self, env: str) -> None:
@@ -230,6 +234,12 @@ class Seed:
         if self._api_key_store is None:
             raise RuntimeError("this e2e seed writes API keys, and no API key store is configured")
         return self._api_key_store
+
+    def _require_role_store(self) -> RoleStore:
+        """The role store, or a named error saying it was not passed."""
+        if self._role_store is None:
+            raise RuntimeError("this e2e seed writes roles, and no role store is configured")
+        return self._role_store
 
     def _require_settings(self) -> DFESettings:
         """The engine settings, which the routing compilers read the data database from."""
@@ -380,6 +390,14 @@ class Seed:
             keys = self.accounts.seed_searchable_api_keys()
             logger.info("e2e seed", script=script, keys=keys)
             return True
+        if script == "seed_searchable_groups":
+            groups = self.accounts.seed_searchable_groups()
+            logger.info("e2e seed", script=script, groups=groups)
+            return True
+        if script == "seed_searchable_roles":
+            roles = self.accounts.seed_searchable_roles()
+            logger.info("e2e seed", script=script, roles=roles)
+            return True
         # ------------------------------------------------------------
         # Organisations
         # ------------------------------------------------------------
@@ -472,6 +490,8 @@ class Seed:
             # Delete all accounts and organisations
             self.accounts.delete_all()
             self.accounts.delete_searchable_api_keys()
+            self.accounts.delete_searchable_groups()
+            self.accounts.delete_searchable_roles()
             self.organisations.delete_all()
 
             # Then the deploy repo. Instances first: an overlay carries the

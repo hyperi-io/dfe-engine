@@ -89,6 +89,8 @@ class SeedRequest(BaseModel):
         "seed_searchable_accounts",
         "seed_searchable_blocked_accounts",
         "seed_searchable_api_keys",
+        "seed_searchable_groups",
+        "seed_searchable_roles",
         "reset_all",
     ]
 
@@ -134,6 +136,7 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         rule_registry=get_rule_registry_optional(),
         schema_registry=get_schema_registry_optional(),
         api_key_store=getattr(request.app.state, "api_key_store", None),
+        role_store=getattr(request.app.state, "role_store", None),
     )
     try:
         success = await run_blocking(functools.partial(seeder.seed_static, body.script))
