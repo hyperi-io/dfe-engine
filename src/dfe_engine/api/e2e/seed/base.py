@@ -24,11 +24,14 @@ if TYPE_CHECKING:
     from dfe_engine.api.e2e.seed.apps import Apps
     from dfe_engine.api.e2e.seed.artefacts import Artefacts
     from dfe_engine.api.e2e.seed.backing import Backing
+    from dfe_engine.api.e2e.seed.hunts import Hunts
     from dfe_engine.api.e2e.seed.organisations import Organisations
+    from dfe_engine.api.e2e.seed.rules import Rules
     from dfe_engine.api.e2e.seed.sources import Sources
     from dfe_engine.gitcrud import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
     from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+    from dfe_engine.hunts.rule_registry import RuleRegistry
     from dfe_engine.settings import DFESettings
     from dfe_engine.source.registry import SourceRegistry
 
@@ -43,9 +46,10 @@ class Seed:
     repo, the source registry and the settings are optional, because the auth and
     setup scripts predate them and must keep working on a process with gitops
     off; the app-management scripts ask for them explicitly and raise a named
-    error when the deployment does not have them. The hunt registry is optional
+    error when the deployment does not have them.     The hunt registry is optional
     as the org routes take it, and an org seeder moves the hunts naming an org
-    whenever there is one.
+    whenever there is one. The rule registry is optional for the same reason:
+    the hunt and rule scripts ask for theirs and raise when it was not passed.
     """
 
     # Set by _attach_seeders, which binds a child seeder's own attribute to itself.
@@ -55,6 +59,8 @@ class Seed:
     apps: Apps
     artefacts: Artefacts
     backing: Backing
+    hunts: Hunts
+    rules: Rules
 
     def __init__(
         self,
@@ -69,6 +75,7 @@ class Seed:
         forge: ForgeProvider | None = None,
         metrics: SeedMetrics | None = None,
         hunt_registry: HuntConfigRegistry | None = None,
+        rule_registry: RuleRegistry | None = None,
     ) -> None:
         resolved = (
             (env if env is not None else os.environ.get("DFE_ENGINE_ENV", "")).strip().lower()
@@ -79,6 +86,7 @@ class Seed:
         self._group_store = group_store
         self._org_registry = org_registry
         self._hunt_registry = hunt_registry
+        self._rule_registry = rule_registry
         self._gitcrud = gitcrud
         self._source_registry = source_registry
         self._settings = settings
@@ -99,6 +107,7 @@ class Seed:
             forge=self._forge,
             metrics=self._metrics,
             hunt_registry=self._hunt_registry,
+            rule_registry=self._rule_registry,
         )
 
     def _attach_seeders(self, env: str) -> None:
@@ -107,7 +116,9 @@ class Seed:
         from dfe_engine.api.e2e.seed.apps import Apps
         from dfe_engine.api.e2e.seed.artefacts import Artefacts
         from dfe_engine.api.e2e.seed.backing import Backing
+        from dfe_engine.api.e2e.seed.hunts import Hunts
         from dfe_engine.api.e2e.seed.organisations import Organisations
+        from dfe_engine.api.e2e.seed.rules import Rules
         from dfe_engine.api.e2e.seed.sources import Sources
 
         if type(self) is Seed:
@@ -117,6 +128,8 @@ class Seed:
             self.apps = self._child(Apps, env)
             self.artefacts = self._child(Artefacts, env)
             self.backing = self._child(Backing, env)
+            self.hunts = self._child(Hunts, env)
+            self.rules = self._child(Rules, env)
             return
         # Child seeders stay leaf classes, or more than one of these would match.
         if isinstance(self, Accounts):
@@ -136,6 +149,13 @@ class Seed:
             return
         if isinstance(self, Backing):
             self.backing = self
+            return
+        if isinstance(self, Hunts):
+            self.hunts = self
+            return
+        if isinstance(self, Rules):
+            self.rules = self
+            return
 
     def _require_gitcrud(self) -> GitCrud:
         """The deploy repo, or a named error saying which setting is off."""
@@ -154,6 +174,24 @@ class Seed:
                 "configured; set DFE_ENGINE_SOURCES_DIR or enable gitops"
             )
         return self._source_registry
+
+    def _require_hunt_registry(self) -> HuntConfigRegistry:
+        """The hunt registry, or a named error saying which setting is off."""
+        if self._hunt_registry is None:
+            raise RuntimeError(
+                "this e2e seed writes hunt configurations, and no hunt registry is "
+                "configured; set DFE_ENGINE_HUNTS_DIR or enable gitops"
+            )
+        return self._hunt_registry
+
+    def _require_rule_registry(self) -> RuleRegistry:
+        """The rule registry, or a named error saying which setting is off."""
+        if self._rule_registry is None:
+            raise RuntimeError(
+                "this e2e seed writes detection rules, and no rule registry is "
+                "configured; set DFE_ENGINE_HUNTS_RULES_DIR or enable gitops"
+            )
+        return self._rule_registry
 
     def _require_settings(self) -> DFESettings:
         """The engine settings, which the routing compilers read the data database from."""
@@ -242,6 +280,20 @@ class Seed:
                 self.sources.seed_source(name)
             apps = self.apps.seed_searchable_apps()
             logger.info("e2e seed", script=script, apps=apps)
+            return True
+        # ------------------------------------------------------------
+        # Hunts
+        # ------------------------------------------------------------
+        if script == "seed_searchable_hunts":
+            hunts = self.hunts.seed_searchable_hunts()
+            logger.info("e2e seed", script=script, hunts=hunts)
+            return True
+        # ------------------------------------------------------------
+        # Rules
+        # ------------------------------------------------------------
+        if script == "seed_searchable_rules":
+            rules = self.rules.seed_searchable_rules()
+            logger.info("e2e seed", script=script, rules=rules)
             return True
         # ------------------------------------------------------------
         # Organisations
@@ -345,6 +397,8 @@ class Seed:
             self.apps.reset_pools()
             self.artefacts.delete_all()
             self.sources.delete_all()
+            self.hunts.delete_all()
+            self.rules.delete_all()
 
             # The deploy-repo state no seeder creates but a spec can change --
             # the infra overlay and the auto-merge flag. Left behind, a

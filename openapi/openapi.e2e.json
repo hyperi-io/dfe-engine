@@ -134,6 +134,8 @@
               "seed_app_scaling_state",
               "seed_managed_backing",
               "seed_searchable_apps",
+              "seed_searchable_hunts",
+              "seed_searchable_rules",
               "reset_all"
             ],
             "title": "Script"
