@@ -86,6 +86,8 @@ class SeedRequest(BaseModel):
         "seed_searchable_meta_schemas",
         "seed_searchable_common_headers",
         "seed_searchable_hunt_schemas",
+        "seed_searchable_accounts",
+        "seed_searchable_blocked_accounts",
         "reset_all",
     ]
 

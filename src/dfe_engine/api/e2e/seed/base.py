@@ -356,6 +356,17 @@ class Seed:
             logger.info("e2e seed", script=script, hunts=hunts)
             return True
         # ------------------------------------------------------------
+        # Accounts
+        # ------------------------------------------------------------
+        if script == "seed_searchable_accounts":
+            accounts = self.accounts.seed_searchable_accounts()
+            logger.info("e2e seed", script=script, accounts=accounts)
+            return True
+        if script == "seed_searchable_blocked_accounts":
+            blocked = self.accounts.seed_searchable_blocked_accounts()
+            logger.info("e2e seed", script=script, blocked=blocked)
+            return True
+        # ------------------------------------------------------------
         # Organisations
         # ------------------------------------------------------------
         if script == "seed_organisation":

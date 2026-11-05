@@ -509,6 +509,47 @@ def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
     assert groups.get("dfe-nonesuch") is None
 
 
+def test_searchable_accounts_stay_in_the_account_store(tmp_path, monkeypatch):
+    """Fifty ordinary accounts and fifty blocked ones, searchable, and not published anywhere else."""
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.api.pagination import apply_search
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+
+    assert seeder.accounts.seed_searchable_accounts() is True
+    assert seeder.accounts.seed_searchable_accounts() is False
+    assert seeder.accounts.seed_searchable_blocked_accounts() is True
+    assert seeder.accounts.seed_searchable_blocked_accounts() is False
+
+    rows = [
+        {
+            "username": account.username,
+            "name": account.name,
+            "email": account.email,
+            "blocked": account.blocked,
+        }
+        for account in accounts.list()
+    ]
+    found = apply_search(rows, "searchable", ["username", "name", "email"])
+    assert len(found) == 100
+    assert sum(1 for row in found if row["blocked"]) == 50
+    blocked = [row for row in found if row["username"].startswith("searchable-blocked-")]
+    ordinary = [row for row in found if row["username"].startswith("searchable-account-")]
+    assert len(blocked) == 50
+    assert all(row["blocked"] for row in blocked)
+    assert len(ordinary) == 50
+    assert all(not row["blocked"] for row in ordinary)
+    viewers = present(groups.get("dfe-viewers"))
+    assert "searchable-account-0" in viewers.members
+    assert "searchable-blocked-0" in viewers.members
+
+    seeder.accounts.delete_all()
+    left = [account.username for account in accounts.list() if "searchable" in account.username]
+    assert left == []
+
+
 def test_no_seeded_match_rule_carries_the_json_column_prefix():
     """A seeded rule the receiver can never match is a fixture that proves nothing.
 

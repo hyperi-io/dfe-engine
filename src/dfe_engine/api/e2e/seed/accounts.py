@@ -18,6 +18,17 @@ _DFE_INFRA_GROUP = "dfe-infra"
 _DFE_VIEWERS_GROUP = "dfe-viewers"
 _WELL_KNOWN_E2E_PASSWORD = "changeme"  # noqa: S105, RUF100 - e2e seed
 _SEED_ACTOR = "e2e-seed"
+_SEARCHABLE_COUNT = 50
+
+
+def searchable_account_names() -> list[str]:
+    """Usernames one searchable-account script writes."""
+    return [f"searchable-account-{num}" for num in range(_SEARCHABLE_COUNT)]
+
+
+def searchable_blocked_account_names() -> list[str]:
+    """Usernames the blocked searchable-account script writes."""
+    return [f"searchable-blocked-{num}" for num in range(_SEARCHABLE_COUNT)]
 
 
 def _break_glass_admin_password() -> str:
@@ -91,6 +102,23 @@ class Accounts(Seed):
         return self._ensure_dfe_viewers(
             name, password=_WELL_KNOWN_E2E_PASSWORD if password is None else password
         )
+
+    def seed_searchable_accounts(self) -> bool:
+        """Seed fifty local accounts a list search can filter.
+
+        Returns True when any account was written, False when they were all already there.
+        These stay in the account store. They are not the local admin, so nothing is
+        published to the deploy repo.
+        """
+        return self._seed_searchable(searchable_account_names(), blocked=False)
+
+    def seed_searchable_blocked_accounts(self) -> bool:
+        """Seed fifty blocked local accounts a list search can filter.
+
+        Returns True when any account was written or newly blocked, False when they
+        were all already blocked. Same store-only rule as the unblocked script.
+        """
+        return self._seed_searchable(searchable_blocked_account_names(), blocked=True)
 
     def delete_all(self) -> None:
         """Clear all accounts from the YAML account registry.
@@ -256,3 +284,35 @@ class Accounts(Seed):
     def _ensure_membership(self, group_name: str, username: str) -> None:
         """Idempotent group.members += username."""
         self._group_store.add_member(group_name, username)
+
+    def _seed_searchable(self, names: list[str], *, blocked: bool) -> bool:
+        """Write *names* into the viewers group. Returns whether any account changed."""
+        self._ensure_group(_DFE_VIEWERS_GROUP)
+        changed = False
+        for num, name in enumerate(names):
+            if self._upsert_searchable(name, num, blocked=blocked):
+                changed = True
+        return changed
+
+    def _upsert_searchable(self, name: str, num: int, *, blocked: bool) -> bool:
+        """Create one searchable account, or block an existing one. Returns whether it changed."""
+        label = "Searchable Blocked" if blocked else "Searchable Account"
+        existing = self._account_store.get(name)
+        if existing is None:
+            self._account_store.create(
+                name,
+                _WELL_KNOWN_E2E_PASSWORD,
+                groups=[_DFE_VIEWERS_GROUP],
+                email=f"{name}@e2e.local",
+                name=f"{label} {num}",
+            )
+            self._ensure_membership(_DFE_VIEWERS_GROUP, name)
+            if blocked:
+                self._account_store.update(name, blocked=True)
+            return True
+        if blocked and not existing.blocked:
+            self._account_store.update(name, blocked=True)
+            self._ensure_membership(_DFE_VIEWERS_GROUP, name)
+            return True
+        self._ensure_membership(_DFE_VIEWERS_GROUP, name)
+        return False
