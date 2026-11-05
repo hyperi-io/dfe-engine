@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from dfe_engine.api.e2e.seed.artefacts import Artefacts
     from dfe_engine.api.e2e.seed.backing import Backing
     from dfe_engine.api.e2e.seed.hunts import Hunts
+    from dfe_engine.api.e2e.seed.logs import Logs
     from dfe_engine.api.e2e.seed.organisations import Organisations
     from dfe_engine.api.e2e.seed.rules import Rules
     from dfe_engine.api.e2e.seed.sources import Sources
@@ -61,6 +62,7 @@ class Seed:
     backing: Backing
     hunts: Hunts
     rules: Rules
+    logs: Logs
 
     def __init__(
         self,
@@ -117,6 +119,7 @@ class Seed:
         from dfe_engine.api.e2e.seed.artefacts import Artefacts
         from dfe_engine.api.e2e.seed.backing import Backing
         from dfe_engine.api.e2e.seed.hunts import Hunts
+        from dfe_engine.api.e2e.seed.logs import Logs
         from dfe_engine.api.e2e.seed.organisations import Organisations
         from dfe_engine.api.e2e.seed.rules import Rules
         from dfe_engine.api.e2e.seed.sources import Sources
@@ -130,6 +133,7 @@ class Seed:
             self.backing = self._child(Backing, env)
             self.hunts = self._child(Hunts, env)
             self.rules = self._child(Rules, env)
+            self.logs = self._child(Logs, env)
             return
         # Child seeders stay leaf classes, or more than one of these would match.
         if isinstance(self, Accounts):
@@ -155,6 +159,9 @@ class Seed:
             return
         if isinstance(self, Rules):
             self.rules = self
+            return
+        if isinstance(self, Logs):
+            self.logs = self
             return
 
     def _require_gitcrud(self) -> GitCrud:
@@ -214,8 +221,11 @@ class Seed:
         Every deploy-repo write the script makes lands as one commit and one push.
         Written one at a time, each is its own round trip to the forge, and a reset
         also pushes the states in between -- among them a pool with no routing,
-        which a receiver refuses to start on.
+        which a receiver refuses to start on. The git-operation-log script is the
+        exception: the log is that history, so each operation is its own commit.
         """
+        if script == "seed_searchable_git_operation_logs":
+            return self._run(script)
         with self._deploy_repo_batch(script):
             return self._run(script)
 
@@ -301,6 +311,13 @@ class Seed:
         if script == "seed_searchable_libraries":
             libraries = self.artefacts.seed_searchable_libraries()
             logger.info("e2e seed", script=script, libraries=libraries)
+            return True
+        # ------------------------------------------------------------
+        # Git operation log
+        # ------------------------------------------------------------
+        if script == "seed_searchable_git_operation_logs":
+            logs = self.logs.seed_searchable_git_operation_logs()
+            logger.info("e2e seed", script=script, logs=logs)
             return True
         # ------------------------------------------------------------
         # Organisations

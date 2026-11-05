@@ -80,7 +80,7 @@ class SeedRequest(BaseModel):
         "seed_searchable_apps",
         "seed_searchable_hunts",
         "seed_searchable_libraries",
-        "seed_searchable_rules",
+        "seed_searchable_git_operation_logs",
         "reset_all",
     ]
 
