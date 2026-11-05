@@ -543,8 +543,8 @@ def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
 
 def test_searchable_accounts_stay_in_the_account_store(tmp_path, monkeypatch):
     """Fifty ordinary accounts and fifty blocked ones, searchable, and not published anywhere else."""
+    from dfe_engine.api.conventions import apply_search
     from dfe_engine.api.e2e.seed import Seed
-    from dfe_engine.api.pagination import apply_search
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
@@ -584,8 +584,8 @@ def test_searchable_accounts_stay_in_the_account_store(tmp_path, monkeypatch):
 
 def test_searchable_api_keys_stay_in_the_key_store(tmp_path, monkeypatch):
     """Fifty keys the list can search, kept in the key store and removed by name."""
+    from dfe_engine.api.conventions import apply_search
     from dfe_engine.api.e2e.seed import Seed
-    from dfe_engine.api.pagination import apply_search
     from dfe_engine.auth.bootstrap import bootstrap_auth
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
@@ -621,8 +621,8 @@ def test_searchable_api_keys_refuse_without_a_store(tmp_path, monkeypatch):
 
 def test_searchable_groups_and_roles_stay_beside_the_builtins(tmp_path, monkeypatch):
     """Fifty groups and fifty custom roles, searchable, without touching the built-ins."""
+    from dfe_engine.api.conventions import apply_search
     from dfe_engine.api.e2e.seed import Seed
-    from dfe_engine.api.pagination import apply_search
     from dfe_engine.auth.bootstrap import bootstrap_auth
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
@@ -677,8 +677,8 @@ def test_searchable_roles_refuse_without_a_store(tmp_path, monkeypatch):
 
 def test_searchable_oidc_providers_stay_disabled_in_the_registry(tmp_path, monkeypatch):
     """Fifty disabled providers the list can search, with no issuer and no secret."""
+    from dfe_engine.api.conventions import apply_search
     from dfe_engine.api.e2e.seed import Seed
-    from dfe_engine.api.pagination import apply_search
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
