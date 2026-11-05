@@ -296,6 +296,13 @@ class Seed:
             logger.info("e2e seed", script=script, rules=rules)
             return True
         # ------------------------------------------------------------
+        # Libraries
+        # ------------------------------------------------------------
+        if script == "seed_searchable_libraries":
+            libraries = self.artefacts.seed_searchable_libraries()
+            logger.info("e2e seed", script=script, libraries=libraries)
+            return True
+        # ------------------------------------------------------------
         # Organisations
         # ------------------------------------------------------------
         if script == "seed_organisation":

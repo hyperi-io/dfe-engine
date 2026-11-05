@@ -79,6 +79,7 @@ class SeedRequest(BaseModel):
         "seed_managed_backing",
         "seed_searchable_apps",
         "seed_searchable_hunts",
+        "seed_searchable_libraries",
         "seed_searchable_rules",
         "reset_all",
     ]
