@@ -99,6 +99,12 @@ _TRANSFORM_PROGRAM = (
     f'# Seeded transform program.\n.dfe_seeded = true\n.dfe_source = "{SEED_SOURCE_NAME}"\n'
 )
 
+
+def searchable_instance_names() -> list[str]:
+    """Instance names ``seed_searchable_apps`` deploys, one per source."""
+    return [f"searchable-app-{num}" for num in range(50)]
+
+
 # Non-default dials, so the Components page renders a set surface rather than the
 # chart defaults it cannot distinguish from an unset one.
 _MIN_REPLICAS = 2
@@ -274,6 +280,23 @@ class Apps(Seed):
                     SEED_ACTOR,
                     message=f"e2e: clear {cls_name}/{name}",
                 )
+
+    def seed_searchable_apps(self) -> bool:
+        """Deploy one transform instance for each searchable source.
+
+        The catalogue has no service named ``searchable_app``. A transform
+        instance is ``dfe-transform-vrl`` named for its source, and that name
+        is a DNS label, so the instances are ``searchable-app-0`` and on.
+        The sources themselves are written by the ``seed_searchable_apps``
+        script before this runs: an instance with no live source is removed
+        the next time derived state is reconciled.
+
+        Returns True when any instance was written.
+        """
+        changed = False
+        for name in searchable_instance_names():
+            changed |= self._ensure_instance(TRANSFORM_SERVICE, name)
+        return changed
 
     def _ensure_instance(self, service: str, instance: str) -> bool:
         """Create the instance's overlay when absent. Returns whether it was written."""

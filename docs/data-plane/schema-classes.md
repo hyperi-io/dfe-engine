@@ -154,8 +154,9 @@ CREATE's own text.
 ```python
 from dfe_engine.schema.applier import plan_source_table
 
-plan = plan_source_table(client, result.create_table_ddl, database="dfe",
-                         table=source.table_name, ttl_days=90)
+plan = plan_source_table(
+    client, result.create_table_ddl, database="dfe", table=source.table_name, ttl_days=90
+)
 plan.statements  # CREATE, or ADD COLUMN / index / TTL / settings moves
 ```
 

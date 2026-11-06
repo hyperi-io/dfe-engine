@@ -112,7 +112,10 @@ def bootstrap_registries(
     if settings.schemas.schemas_dir:
         from dfe_engine.schema.registry import SchemaRegistry
 
-        _registries["meta_schema"] = SchemaRegistry(schemas_directory=settings.schemas.schemas_dir)
+        _registries["meta_schema"] = SchemaRegistry(
+            schemas_directory=settings.schemas.schemas_dir,
+            fixtures_directory=settings.schemas.e2e_schema_fixtures_dir or None,
+        )
 
     # A derived schema is a deployment's own artefact, so it follows the sources
     # into the deploy repo when gitops is on and sits under the schemas tree
@@ -195,6 +198,11 @@ def get_schema_registry():
             code="not_configured",
         )
     return reg
+
+
+def get_schema_registry_optional():
+    """Optional SchemaRegistry (the e2e schema seed writes through it)."""
+    return _registries.get("meta_schema")
 
 
 def get_derived_schema_registry():

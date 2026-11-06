@@ -24,11 +24,20 @@ if TYPE_CHECKING:
     from dfe_engine.api.e2e.seed.apps import Apps
     from dfe_engine.api.e2e.seed.artefacts import Artefacts
     from dfe_engine.api.e2e.seed.backing import Backing
+    from dfe_engine.api.e2e.seed.hunts import Hunts
+    from dfe_engine.api.e2e.seed.logs import Logs
     from dfe_engine.api.e2e.seed.organisations import Organisations
+    from dfe_engine.api.e2e.seed.rules import Rules
+    from dfe_engine.api.e2e.seed.schemas import Schemas
     from dfe_engine.api.e2e.seed.sources import Sources
+    from dfe_engine.auth.api_keys import APIKeyStore
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+    from dfe_engine.auth.role_store import RoleStore
     from dfe_engine.gitcrud import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
     from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+    from dfe_engine.hunts.rule_registry import RuleRegistry
+    from dfe_engine.schema.registry import SchemaRegistry
     from dfe_engine.settings import DFESettings
     from dfe_engine.source.registry import SourceRegistry
 
@@ -43,9 +52,11 @@ class Seed:
     repo, the source registry and the settings are optional, because the auth and
     setup scripts predate them and must keep working on a process with gitops
     off; the app-management scripts ask for them explicitly and raise a named
-    error when the deployment does not have them. The hunt registry is optional
+    error when the deployment does not have them.     The hunt registry is optional
     as the org routes take it, and an org seeder moves the hunts naming an org
-    whenever there is one.
+    whenever there is one. The rule registry is optional for the same reason:
+    the hunt and rule scripts ask for theirs and raise when it was not passed.
+    The schema registry is optional the same way.
     """
 
     # Set by _attach_seeders, which binds a child seeder's own attribute to itself.
@@ -55,6 +66,10 @@ class Seed:
     apps: Apps
     artefacts: Artefacts
     backing: Backing
+    hunts: Hunts
+    rules: Rules
+    logs: Logs
+    schemas: Schemas
 
     def __init__(
         self,
@@ -69,6 +84,11 @@ class Seed:
         forge: ForgeProvider | None = None,
         metrics: SeedMetrics | None = None,
         hunt_registry: HuntConfigRegistry | None = None,
+        rule_registry: RuleRegistry | None = None,
+        schema_registry: SchemaRegistry | None = None,
+        api_key_store: APIKeyStore | None = None,
+        role_store: RoleStore | None = None,
+        oidc_registry: OIDCProviderRegistry | None = None,
     ) -> None:
         resolved = (
             (env if env is not None else os.environ.get("DFE_ENGINE_ENV", "")).strip().lower()
@@ -79,6 +99,11 @@ class Seed:
         self._group_store = group_store
         self._org_registry = org_registry
         self._hunt_registry = hunt_registry
+        self._rule_registry = rule_registry
+        self._schema_registry = schema_registry
+        self._api_key_store = api_key_store
+        self._role_store = role_store
+        self._oidc_registry = oidc_registry
         self._gitcrud = gitcrud
         self._source_registry = source_registry
         self._settings = settings
@@ -99,6 +124,11 @@ class Seed:
             forge=self._forge,
             metrics=self._metrics,
             hunt_registry=self._hunt_registry,
+            rule_registry=self._rule_registry,
+            schema_registry=self._schema_registry,
+            api_key_store=self._api_key_store,
+            role_store=self._role_store,
+            oidc_registry=self._oidc_registry,
         )
 
     def _attach_seeders(self, env: str) -> None:
@@ -107,7 +137,11 @@ class Seed:
         from dfe_engine.api.e2e.seed.apps import Apps
         from dfe_engine.api.e2e.seed.artefacts import Artefacts
         from dfe_engine.api.e2e.seed.backing import Backing
+        from dfe_engine.api.e2e.seed.hunts import Hunts
+        from dfe_engine.api.e2e.seed.logs import Logs
         from dfe_engine.api.e2e.seed.organisations import Organisations
+        from dfe_engine.api.e2e.seed.rules import Rules
+        from dfe_engine.api.e2e.seed.schemas import Schemas
         from dfe_engine.api.e2e.seed.sources import Sources
 
         if type(self) is Seed:
@@ -117,6 +151,10 @@ class Seed:
             self.apps = self._child(Apps, env)
             self.artefacts = self._child(Artefacts, env)
             self.backing = self._child(Backing, env)
+            self.hunts = self._child(Hunts, env)
+            self.rules = self._child(Rules, env)
+            self.logs = self._child(Logs, env)
+            self.schemas = self._child(Schemas, env)
             return
         # Child seeders stay leaf classes, or more than one of these would match.
         if isinstance(self, Accounts):
@@ -136,6 +174,19 @@ class Seed:
             return
         if isinstance(self, Backing):
             self.backing = self
+            return
+        if isinstance(self, Hunts):
+            self.hunts = self
+            return
+        if isinstance(self, Rules):
+            self.rules = self
+            return
+        if isinstance(self, Logs):
+            self.logs = self
+            return
+        if isinstance(self, Schemas):
+            self.schemas = self
+            return
 
     def _require_gitcrud(self) -> GitCrud:
         """The deploy repo, or a named error saying which setting is off."""
@@ -154,6 +205,53 @@ class Seed:
                 "configured; set DFE_ENGINE_SOURCES_DIR or enable gitops"
             )
         return self._source_registry
+
+    def _require_hunt_registry(self) -> HuntConfigRegistry:
+        """The hunt registry, or a named error saying which setting is off."""
+        if self._hunt_registry is None:
+            raise RuntimeError(
+                "this e2e seed writes hunt configurations, and no hunt registry is "
+                "configured; set DFE_ENGINE_HUNTS_DIR or enable gitops"
+            )
+        return self._hunt_registry
+
+    def _require_rule_registry(self) -> RuleRegistry:
+        """The rule registry, or a named error saying which setting is off."""
+        if self._rule_registry is None:
+            raise RuntimeError(
+                "this e2e seed writes detection rules, and no rule registry is "
+                "configured; set DFE_ENGINE_HUNTS_RULES_DIR or enable gitops"
+            )
+        return self._rule_registry
+
+    def _require_schema_registry(self) -> SchemaRegistry:
+        """The schema registry, or a named error saying which setting is off."""
+        if self._schema_registry is None:
+            raise RuntimeError(
+                "this e2e seed writes meta schemas, and no schema registry is "
+                "configured; set DFE_ENGINE_SCHEMAS_DIR"
+            )
+        return self._schema_registry
+
+    def _require_api_key_store(self) -> APIKeyStore:
+        """The API-key store, or a named error saying it was not passed."""
+        if self._api_key_store is None:
+            raise RuntimeError("this e2e seed writes API keys, and no API key store is configured")
+        return self._api_key_store
+
+    def _require_role_store(self) -> RoleStore:
+        """The role store, or a named error saying it was not passed."""
+        if self._role_store is None:
+            raise RuntimeError("this e2e seed writes roles, and no role store is configured")
+        return self._role_store
+
+    def _require_oidc_registry(self) -> OIDCProviderRegistry:
+        """The OIDC provider registry, or a named error saying it was not passed."""
+        if self._oidc_registry is None:
+            raise RuntimeError(
+                "this e2e seed writes OIDC providers, and no provider registry is configured"
+            )
+        return self._oidc_registry
 
     def _require_settings(self) -> DFESettings:
         """The engine settings, which the routing compilers read the data database from."""
@@ -176,8 +274,11 @@ class Seed:
         Every deploy-repo write the script makes lands as one commit and one push.
         Written one at a time, each is its own round trip to the forge, and a reset
         also pushes the states in between -- among them a pool with no routing,
-        which a receiver refuses to start on.
+        which a receiver refuses to start on. The git-operation-log script is the
+        exception: the log is that history, so each operation is its own commit.
         """
+        if script == "seed_searchable_git_operation_logs":
+            return self._run(script)
         with self._deploy_repo_batch(script):
             return self._run(script)
 
@@ -189,26 +290,9 @@ class Seed:
 
     def _run(self, script: str) -> bool:
         """The body of ``seed_static``: dispatch *script*, False when unknown."""
-        if script == "seed_dfe_admin_user":
-            account = self.accounts.seed_dfe_admin_user()
-            logger.info("e2e seed", script=script, account=account)
-            return True
-        if script == "seed_dfe_analyst_user":
-            account = self.accounts.seed_dfe_analyst_user()
-            logger.info("e2e seed", script=script, account=account)
-            return True
-        if script == "seed_dfe_infra_user":
-            account = self.accounts.seed_dfe_infra_user()
-            logger.info("e2e seed", script=script, account=account)
-            return True
-        if script == "seed_dfe_viewers_user":
-            account = self.accounts.seed_dfe_viewers_user()
-            logger.info("e2e seed", script=script, account=account)
-            return True
-        if script == "seed_organisation":
-            organisation = self.organisations.seed_organisation()
-            logger.info("e2e seed", script=script, organisation=organisation)
-            return True
+        # ------------------------------------------------------------
+        # Initial
+        # ------------------------------------------------------------
         if script == "seed_setup_complete":
             # ------------------------------------------------------------
             # Pre-requisites before seeding the setup complete account
@@ -227,6 +311,142 @@ class Seed:
                 initial_user=initial_user,
                 organisation=organisation,
             )
+            return True
+        # ------------------------------------------------------------
+        # Accounts
+        # ------------------------------------------------------------
+        if script == "seed_dfe_admin_user":
+            account = self.accounts.seed_dfe_admin_user()
+            logger.info("e2e seed", script=script, account=account)
+            return True
+        if script == "seed_dfe_analyst_user":
+            account = self.accounts.seed_dfe_analyst_user()
+            logger.info("e2e seed", script=script, account=account)
+            return True
+        if script == "seed_dfe_infra_user":
+            account = self.accounts.seed_dfe_infra_user()
+            logger.info("e2e seed", script=script, account=account)
+            return True
+        if script == "seed_dfe_viewers_user":
+            account = self.accounts.seed_dfe_viewers_user()
+            logger.info("e2e seed", script=script, account=account)
+            return True
+        # ------------------------------------------------------------
+        # Apps
+        # ------------------------------------------------------------
+        if script == "seed_searchable_apps":
+            # A transform instance is named for a live source. Write the sources
+            # first, or the next reconcile removes the instances this deploys.
+            from dfe_engine.api.e2e.seed.apps import searchable_instance_names
+
+            for name in searchable_instance_names():
+                self.sources.seed_source(name)
+            apps = self.apps.seed_searchable_apps()
+            logger.info("e2e seed", script=script, apps=apps)
+            return True
+        # ------------------------------------------------------------
+        # Hunts
+        # ------------------------------------------------------------
+        if script == "seed_searchable_hunts":
+            hunts = self.hunts.seed_searchable_hunts()
+            logger.info("e2e seed", script=script, hunts=hunts)
+            return True
+        # ------------------------------------------------------------
+        # Rules
+        # ------------------------------------------------------------
+        if script == "seed_searchable_rules":
+            rules = self.rules.seed_searchable_rules()
+            logger.info("e2e seed", script=script, rules=rules)
+            return True
+        # ------------------------------------------------------------
+        # Libraries
+        # ------------------------------------------------------------
+        if script == "seed_searchable_libraries":
+            libraries = self.artefacts.seed_searchable_libraries()
+            logger.info("e2e seed", script=script, libraries=libraries)
+            return True
+        # ------------------------------------------------------------
+        # Git operation log
+        # ------------------------------------------------------------
+        if script == "seed_searchable_git_operation_logs":
+            logs = self.logs.seed_searchable_git_operation_logs()
+            logger.info("e2e seed", script=script, logs=logs)
+            return True
+        # ------------------------------------------------------------
+        # Schemas
+        # ------------------------------------------------------------
+        if script == "seed_searchable_meta_schemas":
+            schemas = self.schemas.seed_searchable_meta_schemas()
+            logger.info("e2e seed", script=script, schemas=schemas)
+            return True
+        if script == "seed_searchable_common_headers":
+            headers = self.schemas.seed_searchable_common_headers()
+            logger.info("e2e seed", script=script, headers=headers)
+            return True
+        if script == "seed_searchable_hunt_schemas":
+            hunts = self.schemas.seed_searchable_hunt_schemas()
+            logger.info("e2e seed", script=script, hunts=hunts)
+            return True
+        # ------------------------------------------------------------
+        # Accounts
+        # ------------------------------------------------------------
+        if script == "seed_searchable_accounts":
+            accounts = self.accounts.seed_searchable_accounts()
+            logger.info("e2e seed", script=script, accounts=accounts)
+            return True
+        if script == "seed_searchable_blocked_accounts":
+            blocked = self.accounts.seed_searchable_blocked_accounts()
+            logger.info("e2e seed", script=script, blocked=blocked)
+            return True
+        if script == "seed_searchable_api_keys":
+            keys = self.accounts.seed_searchable_api_keys()
+            logger.info("e2e seed", script=script, keys=keys)
+            return True
+        if script == "seed_searchable_groups":
+            groups = self.accounts.seed_searchable_groups()
+            logger.info("e2e seed", script=script, groups=groups)
+            return True
+        if script == "seed_searchable_oidc_providers":
+            providers = self.accounts.seed_searchable_oidc_providers()
+            logger.info("e2e seed", script=script, providers=providers)
+            return True
+        if script == "seed_searchable_oidc_users":
+            users = self.accounts.seed_searchable_oidc_users()
+            logger.info("e2e seed", script=script, users=users)
+            return True
+        if script == "seed_searchable_roles":
+            roles = self.accounts.seed_searchable_roles()
+            logger.info("e2e seed", script=script, roles=roles)
+            return True
+        # ------------------------------------------------------------
+        # Organisations
+        # ------------------------------------------------------------
+        if script == "seed_searchable_organisations":
+            organisations = self.organisations.seed_searchable_organisations()
+            logger.info("e2e seed", script=script, organisations=organisations)
+            return True
+        if script == "seed_organisation":
+            organisation = self.organisations.seed_organisation()
+            logger.info("e2e seed", script=script, organisation=organisation)
+            return True
+        # ------------------------------------------------------------
+        # Sources
+        # ------------------------------------------------------------
+        if script == "seed_searchable_sources":
+            sources = self.sources.seed_searchable_sources()
+            logger.info("e2e seed", script=script, sources=sources)
+            return True
+        if script == "seed_searchable_source_columns":
+            source = self.sources.seed_searchable_source_columns()
+            logger.info("e2e seed", script=script, source=source)
+            return True
+        if script == "seed_searchable_system_defaults":
+            defaults = self.sources.seed_searchable_system_defaults()
+            logger.info("e2e seed", script=script, defaults=defaults)
+            return True
+        if script == "seed_undeployed_source":
+            source = self.sources.seed_undeployed_source()
+            logger.info("e2e seed", script=script, source=source)
             return True
         if script == "seed_source_with_transform":
             # ------------------------------------------------------------
@@ -271,6 +491,9 @@ class Seed:
                 pools=pools,
             )
             return True
+        # ------------------------------------------------------------
+        # Artefacts
+        # ------------------------------------------------------------
         if script == "seed_library_artefact":
             # The link needs a file set to resolve into, so the instance that
             # consumes the artefact is seeded before the artefact itself.
@@ -295,9 +518,17 @@ class Seed:
             providers = self.backing.seed_managed_backing()
             logger.info("e2e seed", script=script, providers=providers)
             return True
+
+        # ------------------------------------------------------------
+        # Reset
+        # ------------------------------------------------------------
         if script == "reset_all":
             # Delete all accounts and organisations
             self.accounts.delete_all()
+            self.accounts.delete_searchable_api_keys()
+            self.accounts.delete_searchable_groups()
+            self.accounts.delete_searchable_oidc_providers()
+            self.accounts.delete_searchable_roles()
             self.organisations.delete_all()
 
             # Then the deploy repo. Instances first: an overlay carries the
@@ -309,6 +540,9 @@ class Seed:
             self.apps.reset_pools()
             self.artefacts.delete_all()
             self.sources.delete_all()
+            self.hunts.delete_all()
+            self.rules.delete_all()
+            self.schemas.delete_all()
 
             # The deploy-repo state no seeder creates but a spec can change --
             # the infra overlay and the auto-merge flag. Left behind, a
