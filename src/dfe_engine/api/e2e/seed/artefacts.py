@@ -34,6 +34,12 @@ _ARTIFACT_GROUP = "seed"
 _ARTIFACT_DESCRIPTION = "Playwright fixture artefact."
 _ARTIFACT_LABELS = {"team": "platform", "tier": "gold"}
 
+
+def searchable_library_names() -> list[str]:
+    """Artefact names ``seed_searchable_libraries`` writes."""
+    return [f"searchable-library-{num}" for num in range(50)]
+
+
 _TAGGED_VERSION = 1
 _V1 = "# Seeded artefact, version 1.\n.dfe_artefact = 1\n"
 _V2 = "# Seeded artefact, version 2.\n.dfe_artefact = 2\n.dfe_enriched = true\n"
@@ -57,6 +63,19 @@ class Artefacts(Seed):
         changed |= self._ensure_version(name, version=2, content=_V2)
         changed |= self._ensure_tag(name, SEED_ARTIFACT_TAG, _TAGGED_VERSION)
         changed |= self._ensure_link(name, instance, version=_TAGGED_VERSION)
+        return changed
+
+    def seed_searchable_libraries(self) -> bool:
+        """Seed fifty artefacts a library search can filter.
+
+        Each is an empty vrl artefact. The list matches a substring of the name
+        or the description, and neither needs a published version.
+
+        Returns True when any artefact was written, False when they were all already there.
+        """
+        changed = False
+        for num, name in enumerate(searchable_library_names()):
+            changed |= self._ensure_searchable_artifact(name, num)
         return changed
 
     def delete_all(self) -> None:
@@ -93,6 +112,22 @@ class Artefacts(Seed):
         ):
             return False
         return self._put(name, doc, "edit metadata")
+
+    def _ensure_searchable_artifact(self, name: str, num: int) -> bool:
+        """Create one searchable artefact when absent. Returns whether it was written."""
+        gc = self._require_gitcrud()
+        try:
+            gc.get(links.LIBRARY_CLASS, name)
+        except ResourceNotFoundError:
+            pass
+        else:
+            return False
+        doc = library.new_artifact(
+            library.kind(SEED_ARTIFACT_KIND),
+            group="searchable",
+            description=f"Searchable Library {num}",
+        )
+        return self._put(name, doc, "create artefact")
 
     def _ensure_version(self, name: str, *, version: int, content: str) -> bool:
         """Publish content at an exact version.

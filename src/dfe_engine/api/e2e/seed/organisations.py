@@ -20,6 +20,12 @@ from dfe_engine.api.v1.orgs import refuse_held_tenant_ids, store_hunt_tenant_ids
 from dfe_engine.orgs.models import DEFAULT_ORG_NAME
 
 _DEFAULT_ORGANISATION_NAME = "organisation"
+_SEARCHABLE_COUNT = 50
+
+
+def searchable_organisation_names() -> list[str]:
+    """Org names ``seed_searchable_organisations`` writes."""
+    return [f"searchable-org-{num}" for num in range(_SEARCHABLE_COUNT)]
 
 
 class Organisations(Seed):
@@ -32,6 +38,22 @@ class Organisations(Seed):
     ) -> bool:
         """Seed a local organisation. Returns True when created, False when reset."""
         return self._ensure_organisation(name, display_name=display_name)
+
+    def seed_searchable_organisations(self) -> bool:
+        """Create fifty local organisations the list can search by name or label.
+
+        Returns True when any were written, False when all fifty were already there.
+        Each takes its own name as its only tenant id, so none shares a fence with
+        the reserved default org or with ``seed_organisation``. A second call leaves
+        an existing org as it is. ``reset_all`` removes them with every other org.
+        """
+        changed = False
+        for num, name in enumerate(searchable_organisation_names()):
+            if self._org_registry.get(name) is not None:
+                continue
+            self._ensure_organisation(name, display_name=f"Searchable Organisation {num}")
+            changed = True
+        return changed
 
     def delete_all(self) -> None:
         """Clear every org but the reserved default one, and the hunts' ids for each.

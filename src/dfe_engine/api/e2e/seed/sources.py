@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from scalo.logger import logger
 
 from dfe_engine.api.e2e.seed.base import Seed
@@ -36,6 +38,37 @@ SEED_FETCHER_SOURCE_NAME = "seedfetch"
 
 SEED_ACTOR = "e2e-seed"
 """Commit attribution for every deploy-repo write a seeder makes."""
+
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud import GitCrud
+    from dfe_engine.settings import DFESettings
+
+SEARCHABLE_COLUMNS_SOURCE = "searchable-columns"
+"""The one deployed source ``seed_searchable_source_columns`` writes."""
+
+
+def searchable_source_names() -> list[str]:
+    """Source names ``seed_searchable_sources`` writes."""
+    return [f"searchable-source-{num}" for num in range(50)]
+
+
+def searchable_default_names() -> list[str]:
+    """Source names ``seed_searchable_system_defaults`` writes."""
+    return [f"searchable-default-{num}" for num in range(50)]
+
+
+def _ttl_that_drifts(settings: DFESettings | None, crud: GitCrud | None) -> int:
+    """A retention the drift list will show, whatever the deployment default is.
+
+    With no settings the seed cannot read the default, so it stores one day.
+    """
+    if settings is None:
+        return 1
+    from dfe_engine.gitcrud.retention import resolve_state
+
+    effective = resolve_state(crud, settings).effective
+    return 0 if effective != 0 else 1
+
 
 # A bare dotted path: the receiver splits the field on '.' and walks the raw
 # payload, so a '_json.' prefix is read as a first segment that no record has.
@@ -167,6 +200,77 @@ class Sources(Seed):
                 continue
             registry.delete_source(str(entry["source"]), created_by=SEED_ACTOR)
 
+    def seed_undeployed_source(self) -> bool:
+        """Seed a source that is not deployed.
+
+        Returns True when created.
+        """
+        return self._ensure_source(
+            name="undeployedsource",
+            fetched=False,
+            meta_schema=None,
+            transform=None,
+            display_name="Undeployed Source",
+        )
+
+    def seed_searchable_sources(self) -> bool:
+        """Create fifty undeployed sources the list can search by name, label, or description.
+
+        Returns True when any were written, False when all fifty were already there.
+        They stay undeployed: a deployed source joins routing and gets topics, and
+        these exist so the sources page has rows to filter. ``reset_all`` removes
+        them with the other operator sources.
+        """
+        changed = False
+        for num, name in enumerate(searchable_source_names()):
+            changed |= self._ensure_source(
+                name,
+                fetched=False,
+                meta_schema=None,
+                transform=None,
+                display_name=f"Searchable Source {num}",
+                description=f"Searchable source {num}.",
+            )
+        return changed
+
+    def seed_searchable_source_columns(self) -> bool:
+        """Seed one deployed source whose meta schema gives it columns to search.
+
+        The columns page lists a source's columns only once the source names a
+        meta schema and is deployed. This one names ``meta/syslog``, which
+        carries many columns, and is marked deployed the same way a real deploy
+        is. Returns True when created, False when it was already there.
+        ``reset_all`` removes it with the other operator sources.
+        """
+        return self._ensure_deployed_source(
+            SEARCHABLE_COLUMNS_SOURCE,
+            display_name="Searchable Columns",
+        )
+
+    def seed_searchable_system_defaults(self) -> bool:
+        """Seed fifty undeployed sources the defaults drift list can search.
+
+        A source is drift when it stores a retention, header or engine other than
+        the deployment default. Each of these stores a retention that differs from
+        that default, and stays undeployed so listing the drift does not read
+        ClickHouse for them. Returns True when any were written, False when all
+        fifty were already there. ``reset_all`` removes them with the other
+        operator sources.
+        """
+        ttl_days = _ttl_that_drifts(self._settings, self._gitcrud)
+        changed = False
+        for num, name in enumerate(searchable_default_names()):
+            changed |= self._ensure_source(
+                name,
+                fetched=False,
+                meta_schema=None,
+                transform=None,
+                display_name=f"Searchable Default {num}",
+                description=f"Searchable default {num}.",
+                ttl_days=ttl_days,
+            )
+        return changed
+
     def _ensure_source(
         self,
         name: str,
@@ -175,6 +279,8 @@ class Sources(Seed):
         meta_schema: str | None = None,
         transform: SourceTransform | None = None,
         display_name: str = "Seed Source",
+        description: str = "Playwright fixture source.",
+        ttl_days: int | None = None,
     ) -> bool:
         """Create the source when absent, and reconcile an existing one's display name.
 
@@ -204,7 +310,7 @@ class Sources(Seed):
             SourceWriteRequest(
                 source=name,
                 display_name=display_name,
-                description="Playwright fixture source.",
+                description=description,
                 match=None
                 if fetched
                 else SourceMatch(field=_MATCH_FIELD, operator="equals", value=name),
@@ -212,7 +318,7 @@ class Sources(Seed):
                 if fetched
                 else None,
                 header=SourceHeader(),
-                schema_config=SourceSchema(meta_schema=meta_schema),
+                schema_config=SourceSchema(meta_schema=meta_schema, ttl_days=ttl_days),
                 transform=transform,
             ),
             created_by=SEED_ACTOR,

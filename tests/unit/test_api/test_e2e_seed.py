@@ -7,6 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 from pathlib import Path
+from typing import TypedDict
 
 import pytest
 
@@ -307,6 +308,38 @@ def test_seed_setup_complete_seeds_organisation(tmp_path, monkeypatch):
     assert orgs.get("organisation") is not None
 
 
+def test_searchable_organisations_are_local_and_fenced(tmp_path, monkeypatch):
+    """Fifty orgs, each holding only its own tenant id. A second call writes nothing."""
+    from dfe_engine.api.e2e.seed.organisations import (
+        Organisations,
+        searchable_organisation_names,
+    )
+    from dfe_engine.orgs.models import DEFAULT_ORG_NAME
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    orgs.create(DEFAULT_ORG_NAME, org_ids=["default"], display_name="Default")
+    seeder = Organisations(account_store=accounts, group_store=groups, org_registry=orgs)
+
+    assert seeder.seed_searchable_organisations() is True
+    assert seeder.seed_searchable_organisations() is False
+    names = searchable_organisation_names()
+    assert len(names) == 50
+    for num, name in enumerate(names):
+        org = orgs.get(name)
+        assert org is not None
+        assert org.display_name == f"Searchable Organisation {num}"
+        assert org.org_ids == [name]
+        assert org.enabled is True
+    default = orgs.get(DEFAULT_ORG_NAME)
+    assert default is not None
+    assert default.org_ids == ["default"]
+
+    seeder.delete_all()
+    assert orgs.get(DEFAULT_ORG_NAME) is not None
+    assert orgs.get(names[0]) is None
+
+
 def test_seed_organisation_dispatches_to_the_organisation_seeder(tmp_path, monkeypatch):
     """The script is offered in the request Literal, so it has to reach a seeder."""
     from dfe_engine.api.e2e.seed import Seed
@@ -507,6 +540,242 @@ def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="dfe-nonesuch does not exist"):
         seeder._ensure_group("dfe-nonesuch")
     assert groups.get("dfe-nonesuch") is None
+
+
+class _ListedAccount(TypedDict):
+    username: str
+    name: str
+    email: str
+    blocked: bool
+
+
+def test_searchable_accounts_stay_in_the_account_store(tmp_path, monkeypatch):
+    """Fifty ordinary accounts and fifty blocked ones, searchable, and not published anywhere else."""
+    from dfe_engine.api.conventions import apply_search
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+
+    assert seeder.accounts.seed_searchable_accounts() is True
+    assert seeder.accounts.seed_searchable_accounts() is False
+    assert seeder.accounts.seed_searchable_blocked_accounts() is True
+    assert seeder.accounts.seed_searchable_blocked_accounts() is False
+
+    rows: list[_ListedAccount] = [
+        {
+            "username": account.username,
+            "name": account.name,
+            "email": account.email,
+            "blocked": account.blocked,
+        }
+        for account in accounts.list()
+    ]
+    found = apply_search(rows, "searchable", ["username", "name", "email"])
+    assert len(found) == 100
+    assert sum(1 for row in found if row["blocked"]) == 50
+    blocked = [row for row in found if row["username"].startswith("searchable-blocked-")]
+    ordinary = [row for row in found if row["username"].startswith("searchable-account-")]
+    assert len(blocked) == 50
+    assert all(row["blocked"] for row in blocked)
+    assert len(ordinary) == 50
+    assert all(not row["blocked"] for row in ordinary)
+    viewers = present(groups.get("dfe-viewers"))
+    assert "searchable-account-0" in viewers.members
+    assert "searchable-blocked-0" in viewers.members
+
+    seeder.accounts.delete_all()
+    left = [account.username for account in accounts.list() if "searchable" in account.username]
+    assert left == []
+
+
+def test_searchable_api_keys_stay_in_the_key_store(tmp_path, monkeypatch):
+    """Fifty keys the list can search, kept in the key store and removed by name."""
+    from dfe_engine.api.conventions import apply_search
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.auth.bootstrap import bootstrap_auth
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    account_store, group_store, api_key_store, *_ = bootstrap_auth(tmp_path / "config" / "auth")
+    seeder = Seed(
+        account_store=account_store,
+        group_store=group_store,
+        org_registry=OrgRegistry(tmp_path / "orgs"),
+        api_key_store=api_key_store,
+    )
+
+    assert seeder.accounts.seed_searchable_api_keys() is True
+    assert seeder.accounts.seed_searchable_api_keys() is False
+    rows = [{"name": key.name, "description": key.description} for key in api_key_store.list()]
+    found = apply_search(rows, "searchable", ["name", "description"])
+    assert len(found) == 50
+    assert all(key.key_hash.startswith("sha384:") for key in api_key_store.list())
+    assert all(not key.is_expired() for key in api_key_store.list())
+
+    seeder.accounts.delete_searchable_api_keys()
+    assert api_key_store.list() == []
+
+
+def test_searchable_api_keys_refuse_without_a_store(tmp_path, monkeypatch):
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+    with pytest.raises(RuntimeError, match="API key store"):
+        seeder.accounts.seed_searchable_api_keys()
+
+
+def test_searchable_groups_and_roles_stay_beside_the_builtins(tmp_path, monkeypatch):
+    """Fifty groups and fifty custom roles, searchable, without touching the built-ins."""
+    from dfe_engine.api.conventions import apply_search
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.auth.bootstrap import bootstrap_auth
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    account_store, group_store, _api_keys, role_store, *_ = bootstrap_auth(
+        tmp_path / "config" / "auth"
+    )
+    core_before = [role.name for role in role_store.list() if role.resource_type == "core"]
+    seeder = Seed(
+        account_store=account_store,
+        group_store=group_store,
+        org_registry=OrgRegistry(tmp_path / "orgs"),
+        role_store=role_store,
+    )
+
+    assert seeder.accounts.seed_searchable_groups() is True
+    assert seeder.accounts.seed_searchable_groups() is False
+    assert seeder.accounts.seed_searchable_roles() is True
+    assert seeder.accounts.seed_searchable_roles() is False
+
+    groups = apply_search(
+        [{"name": group.name, "description": group.description} for group in group_store.list()],
+        "searchable",
+        ["name", "description"],
+    )
+    roles = apply_search(
+        [{"name": role.name, "description": role.description} for role in role_store.list()],
+        "searchable",
+        ["name", "description"],
+    )
+    assert len(groups) == 50
+    assert len(roles) == 50
+    seeded_roles = [role for role in role_store.list() if role.name.startswith("searchable-role-")]
+    assert all(role.resource_type == "custom" and role.permissions == [] for role in seeded_roles)
+
+    seeder.accounts.delete_searchable_groups()
+    seeder.accounts.delete_searchable_roles()
+    assert group_store.get("dfe-viewers") is not None
+    assert group_store.get("searchable-group-0") is None
+    assert role_store.get("searchable-role-0") is None
+    assert [role.name for role in role_store.list() if role.resource_type == "core"] == core_before
+
+
+def test_searchable_roles_refuse_without_a_store(tmp_path, monkeypatch):
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+    with pytest.raises(RuntimeError, match="role store"):
+        seeder.accounts.seed_searchable_roles()
+
+
+def test_searchable_oidc_providers_stay_disabled_in_the_registry(tmp_path, monkeypatch):
+    """Fifty disabled providers the list can search, with no issuer and no secret."""
+    from dfe_engine.api.conventions import apply_search
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    registry = OIDCProviderRegistry(tmp_path / "oidc-providers")
+    seeder = Seed(
+        account_store=accounts,
+        group_store=groups,
+        org_registry=orgs,
+        oidc_registry=registry,
+    )
+
+    assert seeder.accounts.seed_searchable_oidc_providers() is True
+    assert seeder.accounts.seed_searchable_oidc_providers() is False
+    rows = [
+        {"name": name, "display_name": provider.display_name} for name, provider in registry.list()
+    ]
+    found = apply_search(rows, "searchable", ["name", "display_name"])
+    assert len(found) == 50
+    providers = [provider for _, provider in registry.list()]
+    assert all(not provider.enabled for provider in providers)
+    assert all(provider.issuer == "" for provider in providers)
+    assert all(provider.client_secret_env == "" for provider in providers)
+    assert all(provider.client_secret_path == "" for provider in providers)
+    assert all(provider.groups.mode != "api" for provider in providers)
+
+    seeder.accounts.delete_searchable_oidc_providers()
+    assert registry.list() == []
+
+
+def test_searchable_oidc_providers_refuse_without_a_registry(tmp_path, monkeypatch):
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+    with pytest.raises(RuntimeError, match="provider registry"):
+        seeder.accounts.seed_searchable_oidc_providers()
+
+
+def test_searchable_oidc_users_attach_to_the_first_provider(tmp_path, monkeypatch):
+    """Ordinary accounts take the first provider's stamp. Recovery accounts stay local."""
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.auth.oidc.models import OIDCProvider
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    registry = OIDCProviderRegistry(tmp_path / "oidc-providers")
+    registry.create(
+        "searchable-oidc-0", OIDCProvider(enabled=False, display_name="Searchable Provider 0")
+    )
+    for name in ("searchable-account-0", "searchable-blocked-0"):
+        accounts.create(name, "changeme", groups=["dfe-viewers"])
+    seeder = Seed(
+        account_store=accounts,
+        group_store=groups,
+        org_registry=orgs,
+        oidc_registry=registry,
+    )
+
+    assert seeder.accounts.seed_searchable_oidc_users() is True
+    assert seeder.accounts.seed_searchable_oidc_users() is False
+    for name in ("searchable-account-0", "searchable-blocked-0"):
+        account = present(accounts.get(name))
+        assert account.oidc_id == "searchable-oidc-0"
+        assert account.source_provider == "searchable-oidc-0"
+        assert account.external is False
+    admin = present(accounts.get("admin"))
+    assert admin.oidc_id == ""
+    assert admin.source_provider == ""
+
+
+def test_searchable_oidc_users_refuse_without_the_first_provider(tmp_path, monkeypatch):
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    accounts.create("searchable-account-0", "changeme", groups=["dfe-viewers"])
+    seeder = Seed(
+        account_store=accounts,
+        group_store=groups,
+        org_registry=orgs,
+        oidc_registry=OIDCProviderRegistry(tmp_path / "oidc-providers"),
+    )
+    with pytest.raises(RuntimeError, match="searchable-oidc-0"):
+        seeder.accounts.seed_searchable_oidc_users()
+    assert present(accounts.get("searchable-account-0")).oidc_id == ""
 
 
 def test_no_seeded_match_rule_carries_the_json_column_prefix():

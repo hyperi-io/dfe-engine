@@ -28,7 +28,12 @@ from scalo.concurrency import run_blocking
 from scalo.logger import logger
 
 from dfe_engine.api.conventions import CLI_HIDDEN
-from dfe_engine.api.deps import get_hunt_config_registry_optional, get_source_registry_optional
+from dfe_engine.api.deps import (
+    get_hunt_config_registry_optional,
+    get_rule_registry_optional,
+    get_schema_registry_optional,
+    get_source_registry_optional,
+)
 from dfe_engine.api.e2e.seed import Seed
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt.routing import RoutingNotApplicableError
@@ -69,9 +74,29 @@ class SeedRequest(BaseModel):
         "seed_dfe_viewers_user",
         "seed_source_with_transform",
         "seed_three_transforms",
+        "seed_undeployed_source",
         "seed_library_artefact",
         "seed_app_scaling_state",
         "seed_managed_backing",
+        "seed_searchable_apps",
+        "seed_searchable_hunts",
+        "seed_searchable_libraries",
+        "seed_searchable_git_operation_logs",
+        "seed_searchable_rules",
+        "seed_searchable_meta_schemas",
+        "seed_searchable_common_headers",
+        "seed_searchable_hunt_schemas",
+        "seed_searchable_accounts",
+        "seed_searchable_blocked_accounts",
+        "seed_searchable_api_keys",
+        "seed_searchable_groups",
+        "seed_searchable_oidc_providers",
+        "seed_searchable_oidc_users",
+        "seed_searchable_organisations",
+        "seed_searchable_roles",
+        "seed_searchable_sources",
+        "seed_searchable_source_columns",
+        "seed_searchable_system_defaults",
         "reset_all",
     ]
 
@@ -114,6 +139,11 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         forge=getattr(request.app.state, "forge", None),
         metrics=getattr(request.app.state, "seed_metrics", None),
         hunt_registry=get_hunt_config_registry_optional(),
+        rule_registry=get_rule_registry_optional(),
+        schema_registry=get_schema_registry_optional(),
+        api_key_store=getattr(request.app.state, "api_key_store", None),
+        role_store=getattr(request.app.state, "role_store", None),
+        oidc_registry=getattr(request.app.state, "oidc_provider_registry", None),
     )
     try:
         success = await run_blocking(functools.partial(seeder.seed_static, body.script))
