@@ -135,6 +135,8 @@ class SchemaRegistry:
             if fixtures_directory
             else None
         )
+        if self._fixtures is not None and self._fixtures_overlap_tree():
+            raise SchemaError("schema fixtures must sit outside the schema tree")
 
         self._store = DirectoryConfigStore(
             directory=self._directory,
@@ -203,13 +205,18 @@ class SchemaRegistry:
             raise SchemaError(
                 "schema fixtures directory is not configured; refusing to write into the schema tree"
             )
-        snapshot = self._directory.resolve(strict=False)
-        resolved = fixtures.resolve(strict=False)
-        inside_snapshot = resolved == snapshot or resolved.is_relative_to(snapshot)
-        if inside_snapshot or snapshot.is_relative_to(resolved):
+        if self._fixtures_overlap_tree():
             raise SchemaError("schema fixtures must sit outside the schema tree")
-        if _git_would_record(resolved):
+        if _git_would_record(fixtures.resolve(strict=False)):
             raise SchemaError("schema fixtures must not be written into a git worktree")
+
+    def _fixtures_overlap_tree(self) -> bool:
+        """Whether the fixtures directory is the schema tree, inside it, or holds it."""
+        if self._fixtures is None:
+            return False
+        snapshot = self._directory.resolve(strict=False)
+        resolved = self._fixtures.resolve(strict=False)
+        return resolved.is_relative_to(snapshot) or snapshot.is_relative_to(resolved)
 
     def _fixture_tables(self) -> list[str]:
         """Schema paths stored in the fixtures directory."""
@@ -248,8 +255,11 @@ class SchemaRegistry:
                 tables.append(table)
         return tables
 
-    def _delete_fixture(self, path: str) -> bool:
-        """Remove one fixture file. Returns whether a file was removed. Never commits."""
+    def delete_fixture(self, path: str) -> bool:
+        """Remove one fixture file and nothing in the schema tree.
+
+        Returns whether a file was removed. Never commits.
+        """
         yaml_path = self._fixture_yaml(path)
         if yaml_path is None or not yaml_path.is_file():
             return False
@@ -380,7 +390,7 @@ class SchemaRegistry:
     def delete_schema(self, path: str) -> None:
         """Delete a meta schema."""
         table = self._table_name(path)
-        removed_fixture = self._delete_fixture(path)
+        removed_fixture = self.delete_fixture(path)
         yaml_path = self._yaml_path(path)
 
         if not (yaml_path.exists()):

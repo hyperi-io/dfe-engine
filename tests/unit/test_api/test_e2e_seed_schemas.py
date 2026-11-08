@@ -51,11 +51,43 @@ def test_searchable_schemas_stay_out_of_the_schema_tree(tmp_path, monkeypatch):
             if str(row.get("path", "")).strip("/").split("/")[0] == "meta"
         ]
         assert len(rows) == 50
+        same_path_in_tree = snapshot / "meta" / "searchable-0.yaml"
+        same_path_in_tree.write_text("current: '1.0.0'\n")
         seeder.schemas.delete_all()
         assert list(fixtures.rglob("searchable-*.yaml")) == []
         assert kept.is_file()
+        assert same_path_in_tree.is_file()
     finally:
         registry.close()
+
+
+@pytest.mark.parametrize(
+    ("env", "e2e_server", "attached"),
+    [
+        ("test", True, True),
+        ("dev", True, True),
+        ("test", False, False),
+        ("dev", False, False),
+    ],
+)
+def test_fixture_schemas_are_visible_only_on_the_e2e_server(tmp_path, env, e2e_server, attached):
+    from dfe_engine.api.deps import bootstrap_registries, get_schema_registry, shutdown_registries
+    from dfe_engine.settings import DFESettings, SchemasSettings
+
+    fixtures = tmp_path / "schema-fixtures"
+    settings = DFESettings(
+        env=env,
+        e2e_server=e2e_server,
+        schemas=SchemasSettings(
+            schemas_dir=str(tmp_path / "schemas"), e2e_schema_fixtures_dir=str(fixtures)
+        ),
+    )
+    bootstrap_registries(settings)
+    try:
+        expected = fixtures.resolve() if attached else None
+        assert get_schema_registry().fixtures_directory == expected
+    finally:
+        shutdown_registries()
 
 
 def test_searchable_schemas_refuse_without_a_fixtures_directory(tmp_path, monkeypatch):
@@ -74,17 +106,15 @@ def test_searchable_schemas_refuse_without_a_fixtures_directory(tmp_path, monkey
 def test_searchable_schemas_refuse_the_schema_tree_and_the_worktree(tmp_path, monkeypatch):
     monkeypatch.setenv("DFE_ENGINE_ENV", "test")
     snapshot = tmp_path / "schemas"
-    inside = SchemaRegistry(schemas_directory=snapshot, fixtures_directory=snapshot)
+    for overlapping in (snapshot, snapshot / "fixtures", tmp_path):
+        with pytest.raises(SchemaError, match="schema tree"):
+            SchemaRegistry(schemas_directory=snapshot, fixtures_directory=overlapping)
     worktree = SchemaRegistry(schemas_directory=snapshot, fixtures_directory=_REPO / "src")
     try:
-        seeder = _seeder(tmp_path, inside)
-        with pytest.raises(SchemaError, match="schema tree"):
-            seeder.seed_static("seed_searchable_hunt_schemas")
         seeder = _seeder(tmp_path, worktree)
         with pytest.raises(SchemaError, match="worktree"):
             seeder.seed_static("seed_searchable_hunt_schemas")
         assert list(snapshot.rglob("searchable-*.yaml")) == []
         assert list((_REPO / "src").rglob("searchable-*.yaml")) == []
     finally:
-        inside.close()
         worktree.close()

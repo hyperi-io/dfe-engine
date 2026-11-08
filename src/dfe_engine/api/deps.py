@@ -111,10 +111,13 @@ def bootstrap_registries(
 
     if settings.schemas.schemas_dir:
         from dfe_engine.schema.registry import SchemaRegistry
+        from dfe_engine.settings import e2e_routes_enabled
 
+        # Fixture schemas are visible only where the e2e seed routes are mounted.
+        fixtures = settings.schemas.e2e_schema_fixtures_dir if e2e_routes_enabled(settings) else ""
         _registries["meta_schema"] = SchemaRegistry(
             schemas_directory=settings.schemas.schemas_dir,
-            fixtures_directory=settings.schemas.e2e_schema_fixtures_dir or None,
+            fixtures_directory=fixtures or None,
         )
 
     # A derived schema is a deployment's own artefact, so it follows the sources

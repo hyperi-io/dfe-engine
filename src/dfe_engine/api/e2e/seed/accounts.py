@@ -243,13 +243,13 @@ class Accounts(Seed):
         return changed
 
     def seed_searchable_oidc_users(self) -> bool:
-        """Attach every ordinary account to the first searchable OIDC provider.
+        """Attach the searchable accounts to the first searchable OIDC provider.
 
         Returns True when any account was attached, False when they already were.
-        The provider is ``searchable-oidc-0`` and must already be in the registry.
-        Recovery accounts stay local, so the admin and break-glass passwords keep
-        working. A local password on the others stays usable too: the attachment
-        is the provider stamp the account list filters on.
+        The provider is ``searchable-oidc-0`` and must already be in the registry,
+        and the accounts come from the searchable and blocked searchable account
+        seeds. No other account is touched. A local password on these stays usable: the attachment is the
+        provider stamp the account list filters on.
         """
         registry = self._require_oidc_registry()
         provider = searchable_oidc_provider_names()[0]
@@ -259,9 +259,10 @@ class Accounts(Seed):
                 "OIDC provider registry; run seed_searchable_oidc_providers first"
             )
         changed = False
-        for account in self._account_store.list():
-            protected = self._account_store.protected.is_protected(account.username)
-            if account.is_soft_deleted or protected:
+        seeded = [*searchable_account_names(), *searchable_blocked_account_names()]
+        for name in seeded:
+            account = self._account_store.get(name)
+            if account is None or account.is_soft_deleted:
                 continue
             if account.oidc_id == provider and account.source_provider == provider:
                 continue

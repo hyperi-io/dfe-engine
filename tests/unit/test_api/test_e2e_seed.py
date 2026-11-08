@@ -728,7 +728,7 @@ def test_searchable_oidc_providers_refuse_without_a_registry(tmp_path, monkeypat
 
 
 def test_searchable_oidc_users_attach_to_the_first_provider(tmp_path, monkeypatch):
-    """Ordinary accounts take the first provider's stamp. Recovery accounts stay local."""
+    """The seeded accounts take the first provider's stamp. No other account changes."""
     from dfe_engine.api.e2e.seed import Seed
     from dfe_engine.auth.oidc.models import OIDCProvider
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
@@ -739,7 +739,7 @@ def test_searchable_oidc_users_attach_to_the_first_provider(tmp_path, monkeypatc
     registry.create(
         "searchable-oidc-0", OIDCProvider(enabled=False, display_name="Searchable Provider 0")
     )
-    for name in ("searchable-account-0", "searchable-blocked-0"):
+    for name in ("searchable-account-0", "searchable-blocked-0", "alice"):
         accounts.create(name, "changeme", groups=["dfe-viewers"])
     seeder = Seed(
         account_store=accounts,
@@ -755,9 +755,10 @@ def test_searchable_oidc_users_attach_to_the_first_provider(tmp_path, monkeypatc
         assert account.oidc_id == "searchable-oidc-0"
         assert account.source_provider == "searchable-oidc-0"
         assert account.external is False
-    admin = present(accounts.get("admin"))
-    assert admin.oidc_id == ""
-    assert admin.source_provider == ""
+    for name in ("admin", "alice"):
+        untouched = present(accounts.get(name))
+        assert untouched.oidc_id == ""
+        assert untouched.source_provider == ""
 
 
 def test_searchable_oidc_users_refuse_without_the_first_provider(tmp_path, monkeypatch):
