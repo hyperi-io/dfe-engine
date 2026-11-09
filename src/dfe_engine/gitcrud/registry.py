@@ -17,6 +17,21 @@ from collections.abc import Iterable
 from .models import Layout, ResourceClass
 
 
+def _check_app_overlay(name: str, doc: dict) -> None:
+    """Refuse a deployed instance overlay holding a null its app's parser refuses.
+
+    Judged by the ApplicationSet's own selection, so a hand-named overlay is judged
+    too, while a parked copy, which it does not select, is not. The app is the one
+    the overlay's ``deploy.service`` names.
+    """
+    # At call time: appmgmt reads the deploy repo through this package.
+    from dfe_engine.appmgmt.contract import check_overlay
+    from dfe_engine.appmgmt.instances import is_deployed_overlay
+
+    if is_deployed_overlay(name):
+        check_overlay(doc)
+
+
 class UnknownResourceClassError(KeyError):
     """Raised when a resource-class name is not registered."""
 
@@ -68,7 +83,7 @@ def default_registry() -> ResourceClassRegistry:
     return ResourceClassRegistry(
         [
             # helmvars class - deployment overlays
-            ResourceClass("helmvars", "values", rbac_prefix="helmvars"),
+            ResourceClass("helmvars", "values", rbac_prefix="helmvars", check=_check_app_overlay),
             # The same class for the charts that are NOT app instances - the
             # substrate and platform overlays. A separate DIRECTORY because
             # anything under values/ becomes an Argo application: the appset's

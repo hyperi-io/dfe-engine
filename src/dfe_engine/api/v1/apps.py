@@ -983,6 +983,9 @@ def create_instance(
     """
     app = _resolve(service, body.instance)
     values = _restored({}, body.values)
+    app_contract = read_contract(service)
+    for path, value in values.items():
+        _refuse_nulls(app_contract, path, value)
     gc = _gitcrud(request)
     if instances.exists(gc, app):
         raise ProblemError(
@@ -1315,8 +1318,16 @@ def _checked_changes(
             reason = contract.check_value(option, value)
             if reason:
                 raise _refuse(400, "invalid_value", path, reason)
+        _refuse_nulls(found, path, value)
         config_changes[path] = value
     return config_changes, env_changes
+
+
+def _refuse_nulls(found: contract.AppContract, path: str, value: Any) -> None:
+    """Refuse a write holding a null, at any depth, that the app's parser refuses."""
+    refused = contract.refused_nulls(found, path, value)
+    if refused:
+        raise _refuse(400, "invalid_value", path, f"{', '.join(refused)} does not accept a null")
 
 
 def _restored(doc: dict, changes: dict[str, Any]) -> dict[str, Any]:

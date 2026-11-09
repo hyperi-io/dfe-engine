@@ -210,16 +210,32 @@ class GitCrud:
     def _file(self, cls: ResourceClass, name: str) -> Path:
         return self._repo.path / self._rel(cls, name)
 
+    def check(self, cls_name: str, name: str, doc: dict) -> None:
+        """Run the class's own ``check`` on a doc about to be written, where it names one.
+
+        Every write runs it, so a caller that builds a doc before committing it can
+        ask first and refuse in its own terms.
+
+        Raises:
+            Exception: Whatever the class's check raises for a doc its reader refuses.
+        """
+        refuse = self._cls(cls_name).check
+        if refuse is not None:
+            refuse(name, doc)
+
     @staticmethod
-    def _yaml(rel: str, doc: dict) -> str:
+    def _yaml(resource_class: ResourceClass, name: str, rel: str, doc: dict) -> str:
         """*doc* as YAML that reads back as *doc*, the one way a resource reaches a commit.
 
+        The class's ``check`` runs first, so no writer commits a doc its reader refuses.
         A refusal raises before anything is staged, so the deploy repo keeps the old
         file and the file is reported degraded until it next writes.
 
         Raises:
             YamlWriteError: The doc did not dump, or its YAML does not read back as it.
         """
+        if resource_class.check is not None:
+            resource_class.check(name, doc)
         return yaml_dump_string(doc, target=f"deploy-repo:{rel}")
 
     def reading(self) -> AbstractContextManager[None]:
@@ -403,7 +419,7 @@ class GitCrud:
         return self._publish(
             cls_name,
             name,
-            {rel: self._yaml(rel, doc)},
+            {rel: self._yaml(cls, name, rel, doc)},
             msg,
             base_revision=base_revision,
             branch=branch,
@@ -424,8 +440,9 @@ class GitCrud:
         """
         artifacts: dict[str, str] = {}
         for cls_name, name, doc in items:
-            rel = self._rel(self._cls(cls_name), name)
-            artifacts[rel] = self._yaml(rel, doc)
+            cls = self._cls(cls_name)
+            rel = self._rel(cls, name)
+            artifacts[rel] = self._yaml(cls, name, rel, doc)
         return self._repo.publish(artifacts, message, branch=branch or None)
 
     def payloads(self, cls_name: str, name: str) -> builtins.list[str]:
@@ -479,7 +496,7 @@ class GitCrud:
         """
         cls = self._require_bundle(cls_name)
         rel = self._rel(cls, name)
-        artifacts: dict[str, str | bytes] = {rel: self._yaml(rel, doc)}
+        artifacts: dict[str, str | bytes] = {rel: self._yaml(cls, name, rel, doc)}
         for relpath, content in (writes or {}).items():
             artifacts[self._rel_payload(cls, name, relpath)] = content
         deletions = [self._rel_payload(cls, name, r) for r in (removals or [])]
@@ -523,7 +540,7 @@ class GitCrud:
         return self._publish(
             cls_name,
             name,
-            {rel: self._yaml(rel, doc)},
+            {rel: self._yaml(cls, name, rel, doc)},
             msg,
             base_revision=base_revision,
             branch=branch,

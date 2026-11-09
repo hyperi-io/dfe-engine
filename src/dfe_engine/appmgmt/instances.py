@@ -123,6 +123,11 @@ def fit_subject(app: AppInstance, summary: str) -> tuple[str, str]:
     return scope, summary[: max(1, budget - len(scope))]
 
 
+def is_deployed_overlay(name: str) -> bool:
+    """Whether the ApplicationSet deploys a values file of this resource name, whoever named it."""
+    return name.endswith(_OVERLAY_SUFFIX)
+
+
 def parse_overlay_name(name: str) -> AppInstance | None:
     """Recover the instance identity from an overlay resource name.
 

@@ -103,8 +103,10 @@ def seed_default_instances(gc: GitCrud, settings: Any) -> list[str]:
         if service in offered:
             continue
         app = instances.instance_of(service, SEED_INSTANCE)
-        overlay = yaml_dump_string(instances.initial_overlay(app))
-        artifacts[instances.overlay_file(gc, app)] = overlay
+        doc = instances.initial_overlay(app)
+        # Published below in one commit with the marker, past the write that runs the check.
+        gc.check(instances.HELMVARS_CLASS, app.overlay_name, doc)
+        artifacts[instances.overlay_file(gc, app)] = yaml_dump_string(doc)
         seeded.append(service)
 
     if not seeded:

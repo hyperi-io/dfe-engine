@@ -419,6 +419,66 @@ class TestWritingConfig:
         assert resp.json()["code"] == "chart_derived"
         assert "DFE_LOADER_CLICKHOUSE_HOSTS" in resp.json()["detail"]
 
+    @pytest.mark.parametrize(
+        ("changes", "refused"),
+        [
+            (
+                {"config.batch_processing": {"max_chunk_size": None}},
+                "config.batch_processing.max_chunk_size",
+            ),
+            (
+                {"config.routing.source_to_table": {"edr": None}},
+                "config.routing.source_to_table.edr",
+            ),
+            ({"config.routing.table_fields": ["_source", None]}, "config.routing.table_fields[1]"),
+        ],
+        ids=["inside-a-section", "map-value", "list-entry"],
+    )
+    def test_a_null_the_app_refuses_at_any_depth_is_refused_before_anything_is_committed(
+        self, client, app, admin_headers, tmp_path, changes, refused
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        before = gc.head_revision()
+        resp = _write(client, admin_headers, changes)
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_value"
+        assert refused in resp.json()["detail"]
+        assert gc.head_revision() == before
+
+    def test_a_raw_var_write_with_a_null_the_app_refuses_is_refused_by_path(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        before = gc.head_revision()
+        resp = client.put(
+            f"/api/v1/helm/files/{LOADER}-default-values/vars/config.routing.default_db",
+            json={"value": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_value"
+        assert resp.json()["paths"] == ["config.routing.default_db"]
+        assert gc.head_revision() == before
+
+    def test_a_null_an_optional_field_takes_is_written(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = _write(client, admin_headers, {"config.routing.org_id_field": None})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["changed"] is True
+
+    def test_a_new_instance_with_a_null_the_app_refuses_is_not_deployed(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        before = gc.head_revision()
+        resp = _deploy(client, admin_headers, {"config.batch_processing.max_chunk_size": None})
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_value"
+        assert gc.head_revision() == before
+
     def test_a_secret_is_written_and_still_never_read_back(
         self, client, app, admin_headers, tmp_path
     ):

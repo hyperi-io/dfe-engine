@@ -514,15 +514,23 @@ class ActionStore:
                 if not collect:
                     raise violation
                 errors.append(f"{cls}/{name}: {violation}")
-            refusal = self._document_refusal(cls, doc)
+            refusal = self._document_refusal(cls, name, doc)
             if refusal is not None:
                 if not collect:
                     raise InvalidDocumentError(f"{cls}/{name}: {refusal}")
                 errors.append(f"{cls}/{name}: {refusal}")
         return docs, diff, errors
 
-    def _document_refusal(self, cls: str, doc: dict) -> str | None:
-        """Why the hunts API would refuse ``doc``, or None; a class it does not write is None."""
+    def _document_refusal(self, cls: str, name: str, doc: dict) -> str | None:
+        """Why ``doc`` would be refused at write, or None.
+
+        The hunts API's checks for a hunt or a rule, and the class's own write check
+        for any class, such as a null an app's parser refuses in an instance overlay.
+        """
+        try:
+            self._crud.check(cls, name, doc)
+        except contract.RefusedNullError as exc:
+            return str(exc)
         try:
             if cls == HUNT_CLASS:
                 checkpoint = doc.get("checkpoint_timestamp_field") or TIMESTAMP_FIELD
@@ -599,14 +607,14 @@ class ActionStore:
             stored = self._target(ch)
             default = keda_by_default(ch.cls, ch.name)
             shown = {str(v) for v in added_violations(stored, landed, keda_by_default=default)}
-            landed_document = self._document_refusal(ch.cls, landed)
+            landed_document = self._document_refusal(ch.cls, ch.name, landed)
             for label, branch_value in branches:
                 branch = copy.deepcopy(landed)
                 _apply(branch, ch.path, branch_value)
                 for violation in added_violations(stored, branch, keda_by_default=default):
                     if str(violation) not in shown:
                         errors.append(f"{where}: {label}: {violation}")
-                branch_document = self._document_refusal(ch.cls, branch)
+                branch_document = self._document_refusal(ch.cls, ch.name, branch)
                 if branch_document is not None and branch_document != landed_document:
                     errors.append(f"{where}: {label}: {branch_document}")
                 if guard is None:
