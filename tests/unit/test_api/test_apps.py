@@ -1434,3 +1434,47 @@ class TestDryRun:
 
         assert resp.status_code == 200, resp.text
         assert held == {"checked": ["test_org"], "ran": ["test_org"]}
+
+
+_DAY = 86_400
+
+
+@pytest.mark.parametrize(
+    ("bucket_seconds", "retention_seconds", "window_seconds", "expected"),
+    [
+        (0, 90 * _DAY, 3600, (3600, 0)),
+        (0, 90 * _DAY, 0, (90 * _DAY, 0)),
+        (0, 90 * _DAY, 365 * _DAY, (90 * _DAY, 0)),
+        (0, None, 0, (36_500 * _DAY, 0)),
+        (0, 90 * _DAY, 5, (60, 0)),
+        (60, 90 * _DAY, 30 * _DAY, (7 * _DAY, 60)),
+        (60, 2 * _DAY, 0, (2 * _DAY, 60)),
+        (5, None, 3600, (3600, 10)),
+        (7200, None, 3600, (3600, 3600)),
+        (-1, None, 3600, (3600, 10)),
+    ],
+    ids=[
+        "whole-hour",
+        "whole-retention",
+        "whole-past-retention",
+        "whole-no-ttl",
+        "whole-under-a-minute",
+        "bucketed-past-a-week",
+        "bucketed-retention-under-a-week",
+        "bucket-under-ten-seconds",
+        "bucket-past-the-window",
+        "negative-bucket",
+    ],
+)
+def test_a_series_read_is_bounded_by_what_the_gauge_table_holds(
+    bucket_seconds, retention_seconds, window_seconds, expected
+):
+    from dfe_engine.api.v1.apps import _series_window
+
+    window = _series_window(
+        bucket_seconds=bucket_seconds,
+        retention_seconds=retention_seconds,
+        window_seconds=window_seconds,
+    )
+
+    assert window == expected

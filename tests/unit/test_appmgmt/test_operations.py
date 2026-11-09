@@ -191,6 +191,29 @@ def test_the_series_query_buckets_pressure_under_that_same_one_name():
     assert "GROUP BY bucket, metric" in sql
 
 
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        (
+            [
+                (
+                    "MergeTree ORDER BY TimeUnix TTL _timestamp_load + toIntervalDay(90) SETTINGS a = 1",
+                )
+            ],
+            90 * 86_400,
+        ),
+        ([("MergeTree ORDER BY TimeUnix SETTINGS index_granularity = 8192",)], None),
+        ([("MergeTree ORDER BY TimeUnix TTL _timestamp_load + toIntervalHour(6)",)], None),
+        ([], None),
+    ],
+    ids=["ninety-days", "no-ttl", "part-of-a-day", "no-table"],
+)
+def test_the_retention_is_the_gauge_tables_ttl(rows, expected):
+    reader, _ = _reader(rows)
+
+    assert reader.retention_seconds() == expected
+
+
 # ── liveness: max() over no rows is the epoch, not NULL ─────────
 
 

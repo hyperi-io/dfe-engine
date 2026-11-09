@@ -678,7 +678,16 @@ class ResourceSeriesResponse(BaseModel):
 
     telemetry_name: str
     window_seconds: int
-    bucket_seconds: int
+    bucket_seconds: int = Field(
+        description="0 when the whole window is one bucket, starting at its first second."
+    )
+    retention_seconds: int | None = Field(
+        default=None,
+        description=(
+            "How long the gauge table keeps a reading, so the longest window a "
+            "whole-window read reaches; null when its TTL is unset."
+        ),
+    )
     buckets: list[ResourceBucketModel] = Field(
         description=(
             "One entry per metric per time bucket, aggregated across every pod "
@@ -2283,6 +2292,25 @@ def _reader(request: Request, client: Any) -> OperationalReader:
     return OperationalReader(client, settings.clickhouse.effective_data_database)
 
 
+# One-minute buckets over a week stay about ten thousand rows a metric.
+_BUCKETED_WINDOW_SECONDS = 7 * 24 * 3600
+# A century spans every reading a table with no TTL keeps and still fits the query's UInt32.
+_UNBOUNDED_WINDOW_SECONDS = 36_500 * 24 * 3600
+
+
+def _series_window(
+    *, bucket_seconds: int, retention_seconds: int | None, window_seconds: int
+) -> tuple[int, int]:
+    """The window and bucket a resource series read runs with, bounded by what the gauge table holds."""
+    whole = bucket_seconds == 0
+    longest = retention_seconds or _UNBOUNDED_WINDOW_SECONDS
+    if not (whole):
+        longest = min(longest, _BUCKETED_WINDOW_SECONDS)
+    window = longest if window_seconds <= 0 else min(max(window_seconds, 60), longest)
+    bucket = 0 if whole else min(max(bucket_seconds, 10), window)
+    return window, bucket
+
+
 def metrics_unavailable(exc: MetricsUnavailableError) -> ProblemError:
     """The 503 for an otel read ClickHouse refused, its text logged rather than sent."""
     return backend_failure(
@@ -2353,20 +2381,28 @@ def get_resource_series(
     Each bucket aggregates across every pod reporting for this instance. A
     per-config app deploys each config under its own service name, so one instance
     is already one config.
+
+    A ``bucket_seconds`` of 0 reads the window as one bucket and may reach back over the gauge table's whole retention, which a ``window_seconds`` of 0 asks for. A bucketed read stops at a week.
     """
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
-    window = min(max(window_seconds, 60), 7 * 24 * 3600)
-    bucket = min(max(bucket_seconds, 10), window)
+    reader = _reader(request, client)
     try:
-        buckets = _reader(request, client).resource_series(
-            app.telemetry_name, window_seconds=window, bucket_seconds=bucket
+        retention = reader.retention_seconds()
+        window, bucket = _series_window(
+            bucket_seconds=bucket_seconds,
+            retention_seconds=retention,
+            window_seconds=window_seconds,
+        )
+        buckets = reader.resource_series(
+            app.telemetry_name, bucket_seconds=bucket, window_seconds=window
         )
     except MetricsUnavailableError as exc:
         raise metrics_unavailable(exc) from exc
     return ResourceSeriesResponse(
-        telemetry_name=app.telemetry_name,
-        window_seconds=window,
         bucket_seconds=bucket,
         buckets=[ResourceBucketModel(**asdict(b)) for b in buckets],
+        retention_seconds=retention,
+        telemetry_name=app.telemetry_name,
+        window_seconds=window,
     )

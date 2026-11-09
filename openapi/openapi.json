@@ -29336,7 +29336,7 @@
           "App Management"
         ],
         "summary": "Get Resource Series",
-        "description": "CPU and memory over time as min, max, average and p95 per bucket.\n\nEach bucket aggregates across every pod reporting for this instance. A\nper-config app deploys each config under its own service name, so one instance\nis already one config.",
+        "description": "CPU and memory over time as min, max, average and p95 per bucket.\n\nEach bucket aggregates across every pod reporting for this instance. A\nper-config app deploys each config under its own service name, so one instance\nis already one config.\n\nA ``bucket_seconds`` of 0 reads the window as one bucket and may reach back over the gauge table's whole retention, which a ``window_seconds`` of 0 asks for. A bucketed read stops at a week.",
         "operationId": "apps.metrics.series",
         "parameters": [
           {
@@ -47408,7 +47408,20 @@
           },
           "bucket_seconds": {
             "type": "integer",
-            "title": "Bucket Seconds"
+            "title": "Bucket Seconds",
+            "description": "0 when the whole window is one bucket, starting at its first second."
+          },
+          "retention_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Seconds",
+            "description": "How long the gauge table keeps a reading, so the longest window a whole-window read reaches; null when its TTL is unset."
           },
           "buckets": {
             "items": {

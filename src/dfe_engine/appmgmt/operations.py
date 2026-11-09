@@ -25,7 +25,10 @@ from pathlib import Path
 from typing import Any
 
 from dfe_engine import scaling_pressure
+from dfe_engine.schema.applier import ttl_from_engine_full
 from dfe_engine.yaml_utils import yaml_load
+
+_DAY_SECONDS = 86_400
 
 _QUERIES = Path(__file__).parent / "queries.yaml"
 
@@ -247,6 +250,13 @@ class OperationalReader:
             )
             for bucket, name, lo, hi, mean, p95, samples in rows
         ]
+
+    def retention_seconds(self) -> int | None:
+        """How long the gauge table keeps a reading, or None when its TTL is unset or not whole days."""
+        rows = self._run("gauge_retention", {"database": self._database})
+        ttl = ttl_from_engine_full(engine_full=str(rows[0][0])) if rows else None
+        days = ttl.days if ttl is not None else None
+        return days * _DAY_SECONDS if days else None
 
     def source_signals(self, table: str, loaders: Sequence[str]) -> SourceSignals:
         """Throughput and last arrival for the table one source's records land in.

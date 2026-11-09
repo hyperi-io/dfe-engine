@@ -33,6 +33,7 @@ from dfe_engine.api.deps import _registries, get_clickhouse_client
 from dfe_engine.appmgmt import instances
 from dfe_engine.appmgmt.operations import (
     CPU_SECONDS,
+    OPEN_FDS,
     RECORDS_DELIVERED,
     RECORDS_DLQ,
     RECORDS_PROCESSED,
@@ -501,24 +502,127 @@ def test_an_instance_that_is_not_deployed_is_not_found(ch_client, otel_db, conso
     assert resp.json()["code"] == "not_deployed"
 
 
+# -- Latest gauges: a stuck stream beside the live one -----------------------
+
+
+def _gauge(*, age: int = 0, base: int, ch_client, db: str, started: int, value: float) -> None:
+    """One ``process_open_fds`` reading ``age`` seconds before ``base``, from a stream begun ``started`` seconds before ``base``."""
+    ch_client.command(
+        f"INSERT INTO `{db}`.otel_metrics_gauge "
+        "(ServiceName, MetricName, ResourceAttributes, StartTimeUnix, TimeUnix, Value) "
+        "SELECT {service:String}, {metric:String}, "
+        "mapFromArrays(['service.instance.id'], ['pod-a']), "
+        "toDateTime({base:UInt32} - {started:UInt32}), "
+        "toDateTime({base:UInt32} - {age:UInt32}), {value:Float64}",
+        parameters={
+            "age": age,
+            "base": base,
+            "metric": OPEN_FDS,
+            "service": _SERVICE,
+            "started": started,
+            "value": value,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("stuck", "written_first"),
+    [(13.0, "stuck"), (13.0, "live"), (99.0, "stuck"), (99.0, "live")],
+    ids=["lower-stuck-first", "lower-live-first", "higher-stuck-first", "higher-live-first"],
+)
+def test_a_stuck_stream_on_one_pod_never_wins_a_gauge_reading(
+    ch_client, manager_client, otel_db, base, stuck, written_first
+):
+    """A scalo-rs pod exports a gauge's stuck first stream in the same second as its live one."""
+    streams = {"stuck": (7200, stuck), "live": (7185, 26.0)}
+    other = "live" if written_first == "stuck" else "stuck"
+    for name in (written_first, other):
+        started, value = streams[name]
+        _gauge(base=base, ch_client=ch_client, db=otel_db, started=started, value=value)
+
+    gauges = OperationalReader(manager_client, otel_db).metrics(_SERVICE).gauges
+
+    assert gauges[OPEN_FDS] == 26.0
+
+
+def test_the_hour_table_reads_only_the_live_stream(ch_client, manager_client, otel_db, base):
+    _gauge(base=base, ch_client=ch_client, db=otel_db, started=7200, value=13.0)
+    _gauge(base=base, ch_client=ch_client, db=otel_db, started=7185, value=26.0)
+
+    buckets = OperationalReader(manager_client, otel_db).resource_series(
+        _SERVICE, window_seconds=3600, bucket_seconds=3600, metrics=(OPEN_FDS,)
+    )
+
+    assert [(bucket.minimum, bucket.maximum, bucket.samples) for bucket in buckets] == [
+        (26.0, 26.0, 1)
+    ]
+
+
+def test_a_whole_window_read_is_one_bucket_over_every_reading(
+    ch_client, manager_client, otel_db, base
+):
+    # Readings in three different hours, and a stuck stream beside the newest one.
+    for age, value in ((5400, 10.0), (1800, 30.0), (0, 20.0)):
+        _gauge(age=age, base=base, ch_client=ch_client, db=otel_db, started=7185, value=value)
+    _gauge(base=base, ch_client=ch_client, db=otel_db, started=7200, value=13.0)
+
+    buckets = OperationalReader(manager_client, otel_db).resource_series(
+        _SERVICE, bucket_seconds=0, metrics=(OPEN_FDS,), window_seconds=7200
+    )
+
+    assert [(b.minimum, b.maximum, b.average, b.samples) for b in buckets] == [
+        (10.0, 30.0, 20.0, 3)
+    ]
+    assert buckets[0].bucket_epoch == pytest.approx(base - 7200, abs=5)
+
+
+@pytest.mark.parametrize(
+    ("ttl", "expected"),
+    [("_timestamp_load + toIntervalDay(90)", 90 * 86_400), (None, None)],
+    ids=["ninety-days", "no-ttl"],
+)
+def test_a_whole_retention_read_reaches_back_as_far_as_the_gauge_table_keeps(
+    ch_client, console, otel_db, ttl, expected
+):
+    # The fixture renders the table with no TTL.
+    if ttl:
+        ch_client.command(f"ALTER TABLE `{otel_db}`.otel_metrics_gauge MODIFY TTL {ttl}")
+
+    resp = console.client.get(
+        f"/api/v1/apps/{_SERVICE}/{_INSTANCE}/metrics/series",
+        headers=console.headers,
+        params={"bucket_seconds": 0, "window_seconds": 0},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["retention_seconds"] == expected
+    assert body["window_seconds"] == (expected or 36_500 * 86_400)
+    assert body["bucket_seconds"] == 0
+
+
 # -- CPU seconds: a cumulative gauge read as cores used ----------------------
 
 
-def _cpu(ch_client, db: str, base: int, *points: tuple[int, float], pod: str) -> None:
-    """One cumulative ``process_cpu_seconds_total`` gauge reading per ``(age_seconds, value)``."""
+def _cpu(
+    ch_client, db: str, base: int, *points: tuple[int, float], pod: str, start: int = 0
+) -> None:
+    """One cumulative ``process_cpu_seconds_total`` gauge reading per ``(age_seconds, value)``, from a stream begun at epoch ``start``."""
     for age, value in points:
         ch_client.command(
             f"INSERT INTO `{db}`.otel_metrics_gauge "
-            "(ServiceName, MetricName, ResourceAttributes, TimeUnix, Value) "
+            "(ServiceName, MetricName, ResourceAttributes, StartTimeUnix, TimeUnix, Value) "
             "SELECT {service:String}, {metric:String}, "
             "mapFromArrays(['service.instance.id'], [{pod:String}]), "
+            "toDateTime({start:UInt32}), "
             "toDateTime({base:UInt32} - {age:UInt32}), {value:Float64}",
             parameters={
-                "service": _SERVICE,
+                "age": age,
+                "base": base,
                 "metric": CPU_SECONDS,
                 "pod": pod,
-                "base": base,
-                "age": age,
+                "service": _SERVICE,
+                "start": start,
                 "value": value,
             },
         )
@@ -560,3 +664,20 @@ def test_cpu_seconds_read_as_cores_used_per_interval(
     if expected:
         assert min(b.minimum for b in buckets) == pytest.approx(min(expected))
         assert max(b.maximum for b in buckets) == pytest.approx(max(expected))
+
+
+def test_cpu_cores_come_from_the_live_stream_beside_a_stuck_one(
+    ch_client, manager_client, otel_db, base
+):
+    # Without the newer start winning each timestamp, every step is zero-length or negative and drops out.
+    points = ((300, 1000.0), (240, 1030.0), (180, 1060.0))
+    _cpu(ch_client, otel_db, base, *points, pod="pod-a", start=base - 7185)
+    _cpu(
+        ch_client, otel_db, base, (300, 0.5), (240, 0.5), (180, 0.5), pod="pod-a", start=base - 7200
+    )
+
+    buckets = _cores(manager_client, otel_db)
+
+    assert sum(bucket.samples for bucket in buckets) == 2
+    assert min(b.minimum for b in buckets) == pytest.approx(0.5)
+    assert max(b.maximum for b in buckets) == pytest.approx(0.5)
