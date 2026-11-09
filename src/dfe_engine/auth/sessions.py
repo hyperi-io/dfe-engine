@@ -31,26 +31,34 @@ AUTH_TIME_CLAIM = "auth_time"
 """When the token's owner last signed in, as epoch seconds (the OIDC claim name)."""
 
 
-def session_claims(account: Account | None, *, auth_time: int) -> dict[str, object]:
+def session_claims(
+    account: Account | None, *, auth_time: int, marker: str | None = None
+) -> dict[str, object]:
     """The session claims a token minted now for *account* carries.
 
     Args:
         account: The account the token is for. None names no account, and a
             token carrying the empty marker that results is refused on use.
         auth_time: When the owner signed in, as epoch seconds.
+        marker: The marker of the record the owner was authenticated against,
+            stamped instead of *account*'s current one. A change made since then
+            leaves the token refused on first use.
 
     Returns:
         The claims to merge into the token.
     """
-    marker = account.session_marker() if account is not None else ""
+    if account is None:
+        marker = ""
+    elif marker is None:
+        marker = account.session_marker()
     return {SESSION_CLAIM: marker, AUTH_TIME_CLAIM: auth_time}
 
 
 def session_ended(account: Account | None, claims: Mapping[str, Any]) -> bool:
     """Whether the session a verified token belongs to has ended.
 
-    A token minted before tokens carried a marker is accepted only while its
-    account has never ended its sessions, which bounds it by its own expiry.
+    A token that binds no account, or carries no marker, names no session and is
+    refused.
 
     Args:
         account: The account the token's subject binds, or None.
@@ -60,10 +68,8 @@ def session_ended(account: Account | None, claims: Mapping[str, Any]) -> bool:
         True when the token must be refused.
     """
     claimed = claims.get(SESSION_CLAIM)
-    if account is None:
-        return claimed is not None
-    if claimed is None:
-        return bool(account.session_epoch)
+    if account is None or not isinstance(claimed, str):
+        return True
     return claimed != account.session_marker()
 
 

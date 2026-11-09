@@ -5,7 +5,20 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import _registries
 from dfe_engine.appmgmt.contract import REDACTED
-from tests.support.accounts import admin_on_its_own_password
+from dfe_engine.settings import APISettings, DFESettings
+from tests.support.accounts import admin_on_its_own_password, session_token
+
+_SETTINGS = DFESettings(
+    env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
+)
+
+
+def _session_headers(app, sub: str) -> dict[str, str]:
+    """Headers for a session of *sub*, made an account with no groups if it has none."""
+    if app.state.account_store.get(sub) is None:
+        app.state.account_store.create(sub, f"{sub}-pw-4901")
+    token = session_token(app, _SETTINGS, {"sub": sub, "org_id": "test-org"})
+    return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
@@ -58,18 +71,8 @@ def alert_client(app_with_alerts):
 
 
 @pytest.fixture
-def alert_admin_headers(app_with_alerts):
-    from dfe_engine.api.deps import create_access_token
-    from dfe_engine.settings import APISettings, DFESettings
-
-    settings = DFESettings(
-        env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
-    )
-    token = create_access_token(
-        data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-        settings=settings,
-    )
-    return {"Authorization": f"Bearer {token}"}
+def alert_admin_headers(app_with_alerts, alert_client):
+    return _session_headers(app_with_alerts, "admin")
 
 
 @pytest.fixture
@@ -433,33 +436,13 @@ class TestAlertDestinationsCRUD:
         assert resp.json()["code"] == "conflict"
 
     def test_viewer_read_allowed(self, alert_client, alert_admin_headers):
-        from dfe_engine.api.deps import create_access_token
-        from dfe_engine.settings import APISettings, DFESettings
-
-        settings = DFESettings(
-            env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
-        )
-        token = create_access_token(
-            data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
-            settings=settings,
-        )
-        viewer_headers = {"Authorization": f"Bearer {token}"}
+        viewer_headers = _session_headers(alert_client.app, "viewer")
 
         resp = alert_client.get("/api/v1/alerts/destinations", headers=viewer_headers)
         assert resp.status_code == 403
 
     def test_viewer_write_forbidden(self, alert_client, sample_destination):
-        from dfe_engine.api.deps import create_access_token
-        from dfe_engine.settings import APISettings, DFESettings
-
-        settings = DFESettings(
-            env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
-        )
-        token = create_access_token(
-            data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
-            settings=settings,
-        )
-        viewer_headers = {"Authorization": f"Bearer {token}"}
+        viewer_headers = _session_headers(alert_client.app, "viewer")
 
         resp = alert_client.post(
             "/api/v1/alerts/destinations",
@@ -477,9 +460,6 @@ class TestTheDestinationUrlIsACredential:
     @pytest.fixture
     def analyst_headers(self, app_with_alerts, alert_client):
         """A session holding data_analyst_viewer, the read-only role that reaches alert:read."""
-        from dfe_engine.api.deps import create_access_token
-        from dfe_engine.settings import APISettings, DFESettings
-
         groups = app_with_alerts.state.group_store
         if groups.get("dfe-analyst-viewers") is None:
             groups.create("dfe-analyst-viewers", roles=["data_analyst_viewer"])
@@ -487,13 +467,7 @@ class TestTheDestinationUrlIsACredential:
             "analyst", "analyst-pw-4901", groups=["dfe-analyst-viewers"]
         )
         groups.add_member("dfe-analyst-viewers", "analyst")
-        token = create_access_token(
-            data={"sub": "analyst", "org_id": "test-org"},
-            settings=DFESettings(
-                env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
-            ),
-        )
-        return {"Authorization": f"Bearer {token}"}
+        return _session_headers(app_with_alerts, "analyst")
 
     @pytest.fixture
     def stored(self, alert_client, alert_admin_headers):

@@ -21,7 +21,7 @@ from confluent_kafka.admin import AdminClient
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -37,7 +37,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 from tests.support.core_sources import write_landing_definition
 
 # How long TopicAdmin.list_topic_names, the ensure pass's broker call, waits for an answer.
@@ -88,9 +88,6 @@ def _settings(tmp_path: Path, *, ensure_topics: bool | None) -> DFESettings:
 def _carry_a_source(settings: DFESettings) -> None:
     """Write one source into the deploy repo, as a restart finds it."""
     app = create_app(settings=settings)
-    token = create_access_token(
-        data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]}, settings=settings
-    )
     body = {
         "source": NAME,
         "display_name": "Syslog",
@@ -100,6 +97,9 @@ def _carry_a_source(settings: DFESettings) -> None:
     }
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
+            token = session_token(
+                app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+            )
             admin_on_its_own_password(app)
             created = client.post(
                 "/api/v1/sources", json=body, headers={"Authorization": f"Bearer {token}"}

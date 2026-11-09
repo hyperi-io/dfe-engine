@@ -12,6 +12,7 @@ from __future__ import annotations
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
+from tests.support.accounts import session_token
 
 
 def _wire_gitcrud(app, tmp_path):
@@ -23,8 +24,6 @@ def _wire_gitcrud(app, tmp_path):
 
 
 def _scoped_headers(app, api_settings, *, username, role, permissions):
-    from dfe_engine.api.deps import create_access_token
-
     role_store = app.state.role_store
     group_store = app.state.group_store
     account_store = app.state.account_store
@@ -39,9 +38,10 @@ def _scoped_headers(app, api_settings, *, username, role, permissions):
     if account_store.get(username) is None:
         account_store.create(username, "pw-12345", groups=[gname])
     group_store.add_member(gname, username)
-    token = create_access_token(
-        data={"sub": username, "org_id": "test-org", "roles": [role], "groups": [gname]},
-        settings=api_settings,
+    token = session_token(
+        app,
+        api_settings,
+        {"sub": username, "org_id": "test-org", "roles": [role], "groups": [gname]},
     )
     return {"Authorization": f"Bearer {token}"}
 

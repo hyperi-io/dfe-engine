@@ -1,6 +1,7 @@
 """Tests for auth router — login, me, permissions, 401/403."""
 
 import secrets
+from pathlib import Path
 
 import jwt as pyjwt
 import pytest
@@ -11,14 +12,58 @@ from scalo.metrics import create_metrics
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries, create_access_token
 from dfe_engine.auth import hyperdx_role
+from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.groups import GROUPS_SKIPPED
+from dfe_engine.auth.local_provider import LocalAuthProvider
+from dfe_engine.auth.sessions import SESSION_CLAIM
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
+from tests.support.accounts import session_token
 from tests.support.held_callers import caller_in_group, define_role
 
 
 def _claims(token: str) -> dict:
     """Read a token the way a peer reads it, signature checked elsewhere."""
     return pyjwt.decode(token, options={"verify_signature": False})
+
+
+def _new_password(store: AccountStore, username: str) -> None:
+    store.reset_password(username, "a-later-password")
+
+
+def _end_sessions(store: AccountStore, username: str) -> None:
+    store.end_sessions(username)
+
+
+def _disable(store: AccountStore, username: str) -> None:
+    store.update(username, enabled=False)
+
+
+_LATER_CHANGES = [
+    pytest.param(_new_password, id="new-password"),
+    pytest.param(_end_sessions, id="sessions-ended"),
+]
+
+
+class _ChangesAfterRead(AccountStore):
+    """A real store where another writer changes the record just after its *read*-th read.
+
+    The read itself returns the record as it was, so the caller judged the old one.
+    """
+
+    def __init__(self, accounts_dir: Path, change, *, read: int) -> None:
+        super().__init__(accounts_dir)
+        self._change = change
+        self._change_on = read
+        self._reads = 0
+        self.changed = False
+
+    def get(self, username: str):
+        account = super().get(username)
+        self._reads += 1
+        if self._reads == self._change_on:
+            self.changed = True
+            self._change(self, username)
+        return account
 
 
 class TestLogin:
@@ -92,12 +137,99 @@ class TestLogin:
             assert resp.status_code == 200, f"Login failed for {user}"
             assert resp.json()["user_id"] == user
 
+    @pytest.mark.parametrize("change", _LATER_CHANGES)
+    def test_a_change_after_the_checks_leaves_the_token_refused(
+        self, client: TestClient, app, api_settings, change
+    ):
+        """The token carries the record the password was checked against, not a later one."""
+        accounts_dir = Path(api_settings.auth.auth_dir) / "accounts"
+        # Login's second read is the one that confirms the record still stands.
+        racing = _ChangesAfterRead(accounts_dir, change, read=2)
+        app.state.auth_provider = LocalAuthProvider(racing, app.state.group_store)
+
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "viewer", "password": "test-viewer-pw"}
+        )
+        assert login.status_code == 200, login.text
+        assert racing.changed
+        me = client.get(
+            "/api/v1/auth/me", headers={"Authorization": f"Bearer {login.json()['access_token']}"}
+        )
+
+        assert me.status_code == 401, me.text
+        assert me.json()["code"] == "session_ended"
+
 
 class TestRefresh:
     """POST /api/v1/auth/refresh"""
 
-    def test_refresh_success(self, client: TestClient, admin_headers: dict):
-        resp = client.post("/api/v1/auth/refresh", headers=admin_headers)
+    def test_a_token_carrying_no_session_marker_is_not_renewed(
+        self, client: TestClient, api_settings
+    ):
+        """It names no session to carry forward, so its owner signs in again."""
+        token = create_access_token(data={"sub": "viewer", "roles": []}, settings=api_settings)
+        headers = {"Authorization": f"Bearer {token}"}
+
+        resp = client.post("/api/v1/auth/refresh", headers=headers)
+
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["code"] == "session_ended"
+
+    # A token request's session check is its 1st account read and refresh's own is its 3rd.
+    # A proxy request misses the raw subject on the 1st and binds the stem on the 2nd.
+    @pytest.mark.parametrize(
+        ("proxied", "change", "after_read", "refused"),
+        [
+            pytest.param(False, _new_password, 1, True, id="token-new-password-before-refresh"),
+            pytest.param(False, _end_sessions, 1, True, id="token-sessions-ended-before-refresh"),
+            pytest.param(False, _disable, 1, True, id="token-disabled-before-refresh"),
+            pytest.param(False, _new_password, 3, False, id="token-new-password-in-refresh"),
+            pytest.param(False, _end_sessions, 3, False, id="token-sessions-ended-in-refresh"),
+            pytest.param(True, _end_sessions, 2, False, id="proxy-sessions-ended-before-refresh"),
+        ],
+    )
+    def test_a_change_after_the_session_check_leaves_no_working_token(
+        self, client: TestClient, app, api_settings, proxied, change, after_read, refused
+    ):
+        """Refresh mints with the marker the session was checked with, never a later read's.
+
+        A refresh that sees the session ended answers only that, never the account's state.
+        """
+        if proxied:
+            _link(app, "dfe-analysts")
+            headers = {"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"}
+            assert client.get("/api/v1/auth/me", headers=headers).status_code == 200
+        else:
+            login = client.post(
+                "/api/v1/auth/login", json={"username": "viewer", "password": "test-viewer-pw"}
+            )
+            assert login.status_code == 200, login.text
+            headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        accounts_dir = Path(api_settings.auth.auth_dir) / "accounts"
+        racing = _ChangesAfterRead(accounts_dir, change, read=after_read)
+        app.state.account_store = racing
+
+        refreshed = client.post("/api/v1/auth/refresh", headers=headers)
+
+        assert racing.changed
+        if refused:
+            assert refreshed.status_code == 401, refreshed.text
+            assert refreshed.json()["code"] == "session_ended"
+        else:
+            assert refreshed.status_code == 200, refreshed.text
+            me = client.get(
+                "/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {refreshed.json()['access_token']}"},
+            )
+            assert me.status_code == 401, me.text
+            assert me.json()["code"] == "session_ended"
+
+    def test_refresh_success(self, client: TestClient):
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "test-admin-pw"}
+        )
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        resp = client.post("/api/v1/auth/refresh", headers=headers)
         assert resp.status_code == 200
         data = resp.json()
         assert data["access_token"]
@@ -118,15 +250,10 @@ class TestRefresh:
         )
         assert disable.status_code == 200
 
+        # Disabling ends the account's sessions, so the token learns only that.
         resp = client.post("/api/v1/auth/refresh", headers=viewer_headers)
         assert resp.status_code == 401
-        assert resp.json()["detail"] == "Account disabled"
-
-        client.put(
-            "/api/v1/auth/accounts/viewer",
-            json={"enabled": True},
-            headers=admin_headers,
-        )
+        assert resp.json()["code"] == "session_ended"
 
 
 class TestMe:
@@ -147,14 +274,11 @@ class TestMe:
         assert data["blocked_at"] == ""
 
     def test_me_oidc_user_surfaces_external_true(self, client: TestClient, app, api_settings):
-        from dfe_engine.api.deps import create_access_token
-
         store = app.state.account_store
         store.create("sso-user", "", groups=["dfe-viewers"])
         store.update("sso-user", external=True, source_provider="entra")
-        token = create_access_token(
-            data={"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]},
-            settings=api_settings,
+        token = session_token(
+            app, api_settings, {"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]}
         )
         resp = client.get(
             "/api/v1/auth/me",
@@ -173,21 +297,20 @@ class TestMe:
     def test_me_reflects_group_removal_without_relogin(
         self, client: TestClient, admin_headers: dict, api_settings
     ):
-        from dfe_engine.api.deps import create_access_token
-
         client.post(
             "/api/v1/auth/groups",
             json={"name": "me-live-group", "roles": ["admin"], "members": ["viewer"]},
             headers=admin_headers,
         )
-        token = create_access_token(
-            data={
+        token = session_token(
+            client.app,
+            api_settings,
+            {
                 "sub": "viewer",
                 "org_id": "test-org",
                 "roles": ["admin"],
                 "groups": ["me-live-group", "dfe-admins"],
             },
-            settings=api_settings,
         )
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -207,65 +330,90 @@ class TestMe:
         assert "admin" not in data["roles"]
         assert "data_viewer" in data["roles"]
 
-    def test_me_rejects_disabled_account(self, client: TestClient, admin_headers: dict):
+    @pytest.mark.parametrize(
+        ("change", "code", "detail"),
+        [
+            pytest.param(
+                "disable",
+                "session_ended",
+                "This session has ended; sign in again",
+                id="disabled-by-an-admin",
+            ),
+            pytest.param(
+                "block",
+                "session_ended",
+                "This session has ended; sign in again",
+                id="blocked-by-an-admin",
+            ),
+            pytest.param(
+                "logout-then-block",
+                "session_ended",
+                "This session has ended; sign in again",
+                id="blocked-after-logout",
+            ),
+            pytest.param("block-live", "account_blocked", "Account blocked", id="live-session"),
+            pytest.param(
+                "block-markerless",
+                "session_ended",
+                "This session has ended; sign in again",
+                id="signed-token-without-a-marker",
+            ),
+        ],
+    )
+    def test_only_a_live_session_learns_its_accounts_state(
+        self,
+        client: TestClient,
+        app,
+        api_settings,
+        admin_headers: dict,
+        change: str,
+        code: str,
+        detail: str,
+    ):
         login = client.post(
             "/api/v1/auth/login",
             json={"username": "viewer", "password": "test-viewer-pw"},
         )
         assert login.status_code == 200
         viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+        store = app.state.account_store
+        if change == "block-markerless":
+            # Validly signed, for an account that has never ended a session.
+            assert not store.get("viewer").session_epoch
+            token = create_access_token(data={"sub": "viewer"}, settings=api_settings)
+            viewer_headers = {"Authorization": f"Bearer {token}"}
 
-        client.put(
-            "/api/v1/auth/accounts/viewer",
-            json={"enabled": False},
-            headers=admin_headers,
-        )
-
-        resp = client.get("/api/v1/auth/me", headers=viewer_headers)
-        assert resp.status_code == 401
-        assert resp.json()["detail"] == "Account disabled"
-
-        client.put(
-            "/api/v1/auth/accounts/viewer",
-            json={"enabled": True},
-            headers=admin_headers,
-        )
-
-    def test_me_rejects_blocked_account(self, client: TestClient, admin_headers: dict):
-        login = client.post(
-            "/api/v1/auth/login",
-            json={"username": "viewer", "password": "test-viewer-pw"},
-        )
-        assert login.status_code == 200
-        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-        client.put(
-            "/api/v1/auth/accounts/viewer",
-            json={"blocked": True},
-            headers=admin_headers,
-        )
+        if change == "disable":
+            client.put(
+                "/api/v1/auth/accounts/viewer", json={"enabled": False}, headers=admin_headers
+            )
+        elif change == "block":
+            client.put(
+                "/api/v1/auth/accounts/viewer", json={"blocked": True}, headers=admin_headers
+            )
+        else:
+            if change == "logout-then-block":
+                assert client.post("/api/v1/auth/logout", headers=viewer_headers).status_code == 204
+            # Written verbatim, so the block itself ends no session.
+            store.put(store.get("viewer").model_copy(update={"blocked": True}))
 
         resp = client.get("/api/v1/auth/me", headers=viewer_headers)
         assert resp.status_code == 401
-        assert resp.json()["detail"] == "Account blocked"
-
-        client.put(
-            "/api/v1/auth/accounts/viewer",
-            json={"blocked": False},
-            headers=admin_headers,
-        )
+        assert resp.json()["code"] == code
+        assert resp.json()["detail"] == detail
 
     def test_me_rejects_disabled_external_jwt_by_sanitised_name(
         self, client: TestClient, app, api_settings
     ):
-        from dfe_engine.api.deps import create_access_token
-
         store = app.state.account_store
         store.create("alice-example-com", "", groups=["dfe-viewers"])
-        store.update("alice-example-com", external=True, source_provider="entra", enabled=False)
-        token = create_access_token(
-            data={"sub": "alice@example.com", "org_id": "test-org", "groups": ["dfe-viewers"]},
-            settings=api_settings,
+        store.update("alice-example-com", external=True, source_provider="entra")
+        # Written verbatim, so the disable ends no session and the state is what answers.
+        store.put(store.get("alice-example-com").model_copy(update={"enabled": False}))
+        token = session_token(
+            app,
+            api_settings,
+            {"sub": "alice@example.com", "org_id": "test-org", "groups": ["dfe-viewers"]},
         )
         resp = client.get(
             "/api/v1/auth/me",
@@ -293,16 +441,16 @@ class TestMe:
 
     def test_permissions_ignore_stale_jwt_roles(self, client: TestClient, api_settings):
         """Roles in the JWT are not used; group membership is authoritative."""
-        from dfe_engine.api.deps import create_access_token
 
-        token = create_access_token(
-            data={
+        token = session_token(
+            client.app,
+            api_settings,
+            {
                 "sub": "viewer",
                 "org_id": "test-org",
                 "roles": ["admin"],
                 "groups": ["dfe-admins"],
             },
-            settings=api_settings,
         )
         resp = client.get(
             "/api/v1/auth/permissions",
@@ -317,8 +465,6 @@ class TestMe:
     def test_me_ignores_stale_jwt_when_account_has_no_groups(
         self, client: TestClient, admin_headers: dict, api_settings
     ):
-        from dfe_engine.api.deps import create_access_token
-
         client.post(
             "/api/v1/auth/accounts",
             json={
@@ -329,14 +475,15 @@ class TestMe:
             },
             headers=admin_headers,
         )
-        token = create_access_token(
-            data={
+        token = session_token(
+            client.app,
+            api_settings,
+            {
                 "sub": "nogrp",
                 "org_id": "test-org",
                 "roles": ["admin"],
                 "groups": ["dfe-admins"],
             },
-            settings=api_settings,
         )
         resp = client.get(
             "/api/v1/auth/me",
@@ -374,11 +521,18 @@ class TestTheHyperdxRoleClaim:
         assert claim not in hyperdx_role.FORK_ACCEPTS
 
     def test_a_refresh_resolves_the_claim_again_rather_than_copying_it(
-        self, client: TestClient, viewer_headers: dict
+        self, client: TestClient, app, api_settings
     ):
         # The viewer's own groups carry no team-admin role, so the refreshed
         # token refuses whatever the presented one claimed.
-        resp = client.post("/api/v1/auth/refresh", headers=viewer_headers)
+        marker = app.state.account_store.get("viewer").session_marker()
+        headers = _bearer(
+            app,
+            api_settings,
+            "viewer",
+            **{hyperdx_role.CLAIM: hyperdx_role.TEAM_ADMIN, SESSION_CLAIM: marker},
+        )
+        resp = client.post("/api/v1/auth/refresh", headers=headers)
         assert resp.status_code == 200
         assert _claims(resp.json()["access_token"])[hyperdx_role.CLAIM] == hyperdx_role.VIEWER
 
@@ -461,7 +615,7 @@ class TestTheHyperdxSessionFields:
             "acme-leads", ["org_viewer", "admin"], members=["acme-lead"], scope="org:acme"
         )
 
-        me = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "acme-lead"))
+        me = client.get("/api/v1/auth/me", headers=_bearer(app, api_settings, "acme-lead"))
 
         assert me.status_code == 200, me.text
         assert me.json()["hyperdx_role"] == hyperdx_role.MEMBER
@@ -481,18 +635,16 @@ class TestTheHyperdxSessionFields:
             headers=admin_headers,
         )
 
-        me = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "hdx-nogrp"))
+        me = client.get("/api/v1/auth/me", headers=_bearer(client.app, api_settings, "hdx-nogrp"))
 
         assert me.status_code == 200, me.text
         assert me.json()["hyperdx_identity"] == ""
         assert me.json()["hyperdx_role"] == hyperdx_role.VIEWER
 
 
-def _bearer(api_settings, sub: str, **claims) -> dict[str, str]:
+def _bearer(app, api_settings, sub: str, **claims) -> dict[str, str]:
     """Headers for an engine token with *sub* and whatever claims the test names."""
-    token = create_access_token(
-        data={"sub": sub, "org_id": "test-org", **claims}, settings=api_settings
-    )
+    token = session_token(app, api_settings, {"sub": sub, "org_id": "test-org", **claims})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -521,11 +673,10 @@ class TestRolesFollowTheBoundAccount:
             app.state.account_store.update("alice-smith-corp", groups=[])
             app.state.group_store.add_member("dfe-admins", "alice-smith-corp")
 
-        resp = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "alice-smith-corp"))
+        resp = client.get("/api/v1/auth/me", headers=_bearer(app, api_settings, "alice-smith-corp"))
 
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["roles"] == []
-        assert resp.json()["groups"] == []
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["code"] == "session_ended"
 
     def test_a_token_whose_subject_is_anothers_stem_sees_none_of_their_groups(
         self, client: TestClient, app, api_settings
@@ -538,10 +689,12 @@ class TestRolesFollowTheBoundAccount:
         )
         app.state.group_store.add_member("dfe-analysts", "alice-smith-corp")
 
-        resp = client.get("/api/v1/auth/groups", headers=_bearer(api_settings, "alice-smith-corp"))
+        resp = client.get(
+            "/api/v1/auth/groups", headers=_bearer(app, api_settings, "alice-smith-corp")
+        )
 
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["items"] == []
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["code"] == "session_ended"
 
     def test_a_proxied_user_with_no_local_account_gets_its_claim_groups(
         self, client: TestClient, app
@@ -558,15 +711,14 @@ class TestRolesFollowTheBoundAccount:
     def test_a_token_with_no_account_behind_it_gets_no_roles_from_its_claim(
         self, client: TestClient, app, api_settings
     ):
-        """Every real login binds an account, so a claim alone is a token nothing vouches for."""
-        headers = _bearer(api_settings, "omar@example.com", groups=["dfe-analysts"])
+        """Every real login binds an account, so a token for none names no session."""
+        headers = _bearer(app, api_settings, "omar@example.com", groups=["dfe-analysts"])
 
         resp = client.get("/api/v1/auth/me", headers=headers)
 
         assert app.state.account_store.get("omar-example-com") is None
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["roles"] == []
-        assert resp.json()["groups"] == []
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["code"] == "session_ended"
 
     def test_a_deleted_accounts_live_token_is_refused(self, client: TestClient, app):
         password = secrets.token_urlsafe(16)
@@ -595,7 +747,7 @@ class TestRolesFollowTheBoundAccount:
 
         resp = client.get(
             "/api/v1/auth/me",
-            headers=_bearer(api_settings, "Alice.Smith@corp", groups=["dfe-admins"]),
+            headers=_bearer(app, api_settings, "Alice.Smith@corp", groups=["dfe-admins"]),
         )
 
         assert resp.status_code == 200, resp.text
@@ -644,7 +796,7 @@ class TestRolesFollowTheBoundAccount:
         # SCIM lists its members in the group, which is what a SCIM group grants by.
         app.state.group_store.add_member("dfe-analysts", "jane-doe")
 
-        resp = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "jane.doe"))
+        resp = client.get("/api/v1/auth/me", headers=_bearer(app, api_settings, "jane.doe"))
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["roles"] == ["data_analyst"]
@@ -660,14 +812,14 @@ class TestRolesFollowTheBoundAccount:
     def test_a_token_minted_for_an_api_key_gets_no_roles(
         self, client: TestClient, app, api_settings
     ):
-        """An API-key subject binds no account; the key's groups belong to the key's own session."""
+        """An API-key subject binds no account, so a token for one names no session."""
         app.state.api_key_store.create("ci-analyst", groups=["dfe-analysts"])
-        headers = _bearer(api_settings, "apikey:ci-analyst", groups=["dfe-analysts"])
+        headers = _bearer(app, api_settings, "apikey:ci-analyst", groups=["dfe-analysts"])
 
         resp = client.get("/api/v1/auth/me", headers=headers)
 
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["roles"] == []
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["code"] == "session_ended"
 
     @pytest.mark.parametrize("state", ["live", "revoked", "disabled", "expired"])
     def test_a_token_minted_for_an_api_key_holds_nothing_whatever_the_key(
@@ -684,6 +836,7 @@ class TestRolesFollowTheBoundAccount:
         elif state == "expired":
             yaml_dump({**yaml_load(key_file), "expires_at": "2020-01-01T00:00:00+00:00"}, key_file)
         headers = _bearer(
+            app,
             api_settings,
             "apikey:ci-admin",
             roles=["admin"],
@@ -694,9 +847,8 @@ class TestRolesFollowTheBoundAccount:
         me = client.get("/api/v1/auth/me", headers=headers)
         keys = client.get("/api/v1/auth/api-keys", headers=headers)
 
-        assert me.status_code == 200, me.text
-        assert (me.json()["roles"], me.json()["groups"], me.json()["org_ids"]) == ([], [], [])
-        assert keys.status_code == 403, keys.text
+        assert (me.status_code, keys.status_code) == (401, 401), me.text
+        assert me.json()["code"] == keys.json()["code"] == "session_ended"
 
     @pytest.mark.parametrize(
         "content",
@@ -775,7 +927,7 @@ class TestRolesFollowTheBoundAccount:
         )
         assert added.status_code == 200, added.text
 
-        resp = client.get("/api/v1/auth/me", headers=_bearer(api_settings, "jane@example.com"))
+        resp = client.get("/api/v1/auth/me", headers=_bearer(app, api_settings, "jane@example.com"))
 
         assert resp.status_code == 200, resp.text
         assert "admin" in resp.json()["roles"]
@@ -795,14 +947,13 @@ class TestATokenWhoseSubjectNamesAnAccountItDoesNotBind:
             headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-admins"},
         )
         assert signed_in.status_code == 200, signed_in.text
-        return _bearer(api_settings, "alice-smith-corp", groups=["dfe-admins"])
+        return _bearer(app, api_settings, "alice-smith-corp", groups=["dfe-admins"])
 
-    def test_its_claim_groups_give_it_no_roles(self, client: TestClient, laundered):
+    def test_its_claim_groups_give_it_no_session(self, client: TestClient, laundered):
         resp = client.get("/api/v1/auth/me", headers=laundered)
 
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["roles"] == []
-        assert resp.json()["groups"] == []
+        assert resp.status_code == 401, resp.text
+        assert resp.json()["code"] == "session_ended"
 
     def test_it_cannot_refresh(self, client: TestClient, laundered):
         """Each refresh issues a new expiry, so a refreshable token here never expires."""
@@ -833,7 +984,7 @@ class TestAMemberSeesTheGroupsItHolds:
             headers={"X-Oidc-Subject": "nia@example.com", "X-Oidc-Groups": "dfe-analysts"},
         )
 
-        assert _listed(client, _bearer(api_settings, "nia@example.com")) == ["dfe-analysts"]
+        assert _listed(client, _bearer(app, api_settings, "nia@example.com")) == ["dfe-analysts"]
 
     def test_a_group_the_idp_names_by_its_provider_id_is_listed(self, client: TestClient, app):
         """Entra asserts object GUIDs, which the sync records as the group's source_id."""
@@ -905,7 +1056,7 @@ class TestOnlyASessionBoundToAnAccountRefreshes:
         meta, _ = app.state.api_key_store.create("ci-admin", groups=["dfe-admins"])
         if revoked:
             app.state.api_key_store.revoke(meta.short_token)
-        headers = _bearer(api_settings, "apikey:ci-admin", groups=["dfe-admins"])
+        headers = _bearer(app, api_settings, "apikey:ci-admin", groups=["dfe-admins"])
 
         resp = client.post("/api/v1/auth/refresh", headers=headers)
 
@@ -944,6 +1095,24 @@ class TestOnlyASessionBoundToAnAccountRefreshes:
         assert resp.status_code == 200, resp.text
         assert sorted(resp.json()["roles"]) == ["data_analyst", "infra_admin"]
 
+    def test_a_proxy_session_refresh_mints_a_token_that_works_as_a_bearer(
+        self, client: TestClient, app
+    ):
+        """The proxy asserted the identity on the request, so the account as it stands is the session."""
+        _link(app, "dfe-analysts")
+        proxy = {"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"}
+        assert client.get("/api/v1/auth/me", headers=proxy).status_code == 200
+
+        refreshed = client.post("/api/v1/auth/refresh", headers=proxy)
+        assert refreshed.status_code == 200, refreshed.text
+        me = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {refreshed.json()['access_token']}"},
+        )
+
+        assert me.status_code == 200, me.text
+        assert me.json()["user_id"] == "Alice.Smith@corp"
+
     def test_a_bound_idp_user_still_refreshes(self, client: TestClient, app, api_settings):
         """Alice.Smith@corp binds alice-smith-corp through the stem, which records her."""
         _link(app, "dfe-analysts")
@@ -952,9 +1121,16 @@ class TestOnlyASessionBoundToAnAccountRefreshes:
             headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-analysts"},
         )
 
+        marker = app.state.account_store.get("alice-smith-corp").session_marker()
         resp = client.post(
             "/api/v1/auth/refresh",
-            headers=_bearer(api_settings, "Alice.Smith@corp", groups=["dfe-analysts"]),
+            headers=_bearer(
+                app,
+                api_settings,
+                "Alice.Smith@corp",
+                groups=["dfe-analysts"],
+                **{SESSION_CLAIM: marker},
+            ),
         )
 
         assert resp.status_code == 200, resp.text
@@ -1074,7 +1250,7 @@ def test_an_unloadable_group_file_is_counted_on_the_engines_metrics(api_settings
             (app.state.group_store._dir / "climber.yaml").write_text(
                 "roles: [admin\n", encoding="utf-8"
             )
-            headers = _bearer(api_settings, "counted")
+            headers = _bearer(app, api_settings, "counted")
             first = client.get("/api/v1/auth/me", headers=headers)
             client.get("/api/v1/auth/me", headers=headers)
     finally:

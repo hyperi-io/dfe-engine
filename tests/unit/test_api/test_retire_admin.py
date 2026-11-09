@@ -22,7 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.auth import admin_retirement
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
@@ -39,6 +39,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
+from tests.support.accounts import session_token
 
 MINTED_ADMIN = secrets.token_urlsafe(16)
 MINTED_USER = secrets.token_urlsafe(16)
@@ -74,11 +75,9 @@ def _deploy_repo_crud(tmp_path: Path) -> GitCrud:
     return GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry())
 
 
-def _token(settings: DFESettings, username: str) -> dict[str, str]:
+def _token(app, settings: DFESettings, username: str) -> dict[str, str]:
     """Headers for *username*; roles resolve live from group membership."""
-    token = create_access_token(
-        data={"sub": username, "org_id": "acme", "roles": []}, settings=settings
-    )
+    token = session_token(app, settings, {"sub": username, "org_id": "acme", "roles": []})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -88,7 +87,7 @@ def _admin_after_its_change(client: TestClient, settings: DFESettings) -> dict[s
     resp = client.post(
         "/api/v1/auth/accounts/reset-password",
         json={"current_password": MINTED_ADMIN, "new_password": chosen},
-        headers=_token(settings, "admin"),
+        headers=_token(client.app, settings, "admin"),
     )
     assert resp.status_code == 200, resp.text
     # The change ends every session the admin held, so it signs in again.
@@ -127,7 +126,9 @@ class TestRetireAdmin:
         assert before["admin_retired"] is False
         assert before["retire_admin_available"] is True
 
-        resp = client.post("/api/v1/auth/setup/retire-admin", headers=_token(settings, "alice"))
+        resp = client.post(
+            "/api/v1/auth/setup/retire-admin", headers=_token(app, settings, "alice")
+        )
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["admin_retired"] is True
@@ -137,7 +138,7 @@ class TestRetireAdmin:
     def test_it_disables_the_account_and_records_the_fact(self, wired, tmp_path):
         app, client, settings = wired
 
-        client.post("/api/v1/auth/setup/retire-admin", headers=_token(settings, "alice"))
+        client.post("/api/v1/auth/setup/retire-admin", headers=_token(app, settings, "alice"))
 
         assert app.state.account_store.get("admin").enabled is False
         crud = _deploy_repo_crud(tmp_path)
@@ -148,7 +149,7 @@ class TestRetireAdmin:
     def test_the_retired_admin_can_no_longer_log_in(self, wired, tmp_path):
         app, client, settings = wired
 
-        client.post("/api/v1/auth/setup/retire-admin", headers=_token(settings, "alice"))
+        client.post("/api/v1/auth/setup/retire-admin", headers=_token(app, settings, "alice"))
 
         resp = client.post(
             "/api/v1/auth/login", json={"username": "admin", "password": MINTED_ADMIN}
@@ -168,7 +169,9 @@ class TestRetireAdmin:
     def test_the_admin_changes_its_issued_password_before_retiring_itself(self, wired, tmp_path):
         app, client, settings = wired
 
-        resp = client.post("/api/v1/auth/setup/retire-admin", headers=_token(settings, "admin"))
+        resp = client.post(
+            "/api/v1/auth/setup/retire-admin", headers=_token(app, settings, "admin")
+        )
 
         assert resp.status_code == 403
         assert resp.json()["code"] == "password_change_required"
@@ -176,7 +179,7 @@ class TestRetireAdmin:
 
     def test_a_second_call_is_a_no_op(self, wired, tmp_path):
         app, client, settings = wired
-        headers = _token(settings, "alice")
+        headers = _token(app, settings, "alice")
         client.post("/api/v1/auth/setup/retire-admin", headers=headers)
 
         resp = client.post("/api/v1/auth/setup/retire-admin", headers=headers)
@@ -189,7 +192,7 @@ class TestRetireAdmin:
         app.state.account_store.create("bob", MINTED_USER, groups=["dfe-viewers"])
         app.state.group_store.add_member("dfe-viewers", "bob")
 
-        resp = client.post("/api/v1/auth/setup/retire-admin", headers=_token(settings, "bob"))
+        resp = client.post("/api/v1/auth/setup/retire-admin", headers=_token(app, settings, "bob"))
 
         assert resp.status_code == 403
         assert admin_retirement.is_retired(_deploy_repo_crud(tmp_path)) is False
@@ -228,7 +231,7 @@ class TestRetireAdmin:
                     is False
                 )
                 resp = client.post(
-                    "/api/v1/auth/setup/retire-admin", headers=_token(settings, "alice")
+                    "/api/v1/auth/setup/retire-admin", headers=_token(app, settings, "alice")
                 )
 
                 assert resp.status_code == 409
@@ -241,7 +244,7 @@ class TestRetiredDeploymentBoots:
     def test_it_starts_with_the_minted_password_deleted(self, wired, tmp_path):
         """The whole point: a production rebuild with no admin password in the Secret."""
         app, client, settings = wired
-        client.post("/api/v1/auth/setup/retire-admin", headers=_token(settings, "alice"))
+        client.post("/api/v1/auth/setup/retire-admin", headers=_token(app, settings, "alice"))
         _registries.clear()
 
         # A rebuilt pod: a fresh auth dir, the same deploy repo, no injected password.

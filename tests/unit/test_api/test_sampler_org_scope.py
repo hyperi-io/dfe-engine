@@ -18,8 +18,9 @@ real-ClickHouse proof that the binding returns only those rows is
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token, get_clickhouse_client
+from dfe_engine.api.deps import get_clickhouse_client
 from dfe_engine.sampling.clickhouse_reader import build_where
+from tests.support.accounts import session_token
 
 MULTI_ORGS = ["test_org", "test_org_2"]
 ROUTES = ["/api/v1/sample", "/api/v1/sources/filebeat/sample"]
@@ -66,7 +67,7 @@ def viewer_of(client, app, api_settings):
         app.state.group_store.update(group, org_ids=org_ids)
         app.state.account_store.create(name, f"{name}-password", groups=[group])
         app.state.group_store.add_member(group, name)
-        token = create_access_token(data={"sub": name}, settings=api_settings)
+        token = session_token(app, api_settings, {"sub": name})
         caller = TestClient(app, raise_server_exceptions=False)
         caller.headers.update({"Authorization": f"Bearer {token}"})
         return caller

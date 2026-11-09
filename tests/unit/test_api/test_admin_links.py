@@ -28,9 +28,9 @@ from scalo.metrics import create_metrics
 
 from dfe_engine.admin_links import LINKS_DROPPED
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.settings import DeploymentSettings, DFESettings
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 from tests.support.loopback import stop_server
 
 ADMIN_LINKS = "/api/v1/deployment/admin-links"
@@ -153,8 +153,8 @@ def _serve(settings: DFESettings, manager=None) -> tuple[int, Any, FastAPI]:
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             admin_on_its_own_password(app)
-            token = create_access_token(
-                data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]}, settings=settings
+            token = session_token(
+                app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
             )
             resp = client.get(ADMIN_LINKS, headers={"Authorization": f"Bearer {token}"})
     finally:

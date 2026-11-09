@@ -6,10 +6,10 @@ import shutil
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.jit import JitProvisioner
 from dfe_engine.settings import DFESettings
+from tests.support.accounts import session_token
 from tests.support.failing_stores import StampFailingAccountStore
 from tests.unit.test_auth.factories import make_oidc_provider
 
@@ -124,7 +124,7 @@ class TestOidcAuthentication:
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "quinn@example.com", "X-Oidc-Groups": "dfe-infra"},
         )
-        token = create_access_token(data={"sub": "quinn@example.com"}, settings=api_settings)
+        token = session_token(app, api_settings, {"sub": "quinn@example.com"})
 
         bearer = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
 
@@ -358,9 +358,8 @@ class TestOidcAuthentication:
         """OIDC headers take precedence even when a valid Bearer token is present."""
         _link(app, "dfe-viewers")
         # Create a JWT with different identity
-        jwt_token = create_access_token(
-            data={"sub": "jwt-user", "org_id": "jwt-org", "roles": ["admin"]},
-            settings=api_settings,
+        jwt_token = session_token(
+            app, api_settings, {"sub": "jwt-user", "org_id": "jwt-org", "roles": ["admin"]}
         )
         resp = client.get(
             "/api/v1/auth/me",
@@ -378,21 +377,19 @@ class TestOidcAuthentication:
     def test_a_disabled_account_refuses_a_token_for_its_name_that_another_subject_holds(
         self, client: TestClient, api_settings, app
     ):
-        """Roles resolve from the account stored under the token's subject, so its disable bites."""
+        """The bare name binds no account, so the token names no session and learns no state."""
         _link(app, "dfe-admins")
         client.get(
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "Alice.Smith@corp", "X-Oidc-Groups": "dfe-admins"},
         )
         app.state.account_store.update("alice-smith-corp", enabled=False)
-        token = create_access_token(
-            data={"sub": "alice-smith-corp", "org_id": "test-org"}, settings=api_settings
-        )
+        token = session_token(app, api_settings, {"sub": "alice-smith-corp", "org_id": "test-org"})
 
         resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
 
         assert resp.status_code == 401, resp.text
-        assert resp.json()["detail"] == "Account disabled"
+        assert resp.json()["code"] == "session_ended"
 
     def test_oidc_whitespace_in_groups_stripped(self, client: TestClient, app):
         """Whitespace around group names is stripped."""
@@ -624,7 +621,7 @@ class TestAGroupLinkedThroughTheGroupsApi:
             "/api/v1/auth/me",
             headers={"X-Oidc-Subject": "jane@corp.example", "X-Oidc-Groups": "SOC Analysts"},
         )
-        token = create_access_token(data={"sub": "jane@corp.example"}, settings=api_settings)
+        token = session_token(client.app, api_settings, {"sub": "jane@corp.example"})
         bound = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
 
         assert created.status_code == 201, created.text
@@ -679,7 +676,7 @@ class TestAGroupLinkedThroughTheGroupsApi:
             source_provider="okta",
             user_id="kate@corp.example",
         )
-        token = create_access_token(data={"sub": "kate@corp.example"}, settings=api_settings)
+        token = session_token(app, api_settings, {"sub": "kate@corp.example"})
 
         resp = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
 

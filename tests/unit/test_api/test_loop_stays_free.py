@@ -295,7 +295,7 @@ _PASSWORD_CHECK_CASES: list[tuple[str, str, dict]] = [
 def test_the_loop_answers_while_a_password_is_checked(seeded, monkeypatch, method, path, body):
     """A bcrypt check is a quarter of a second of CPU; on the loop it stalls every caller."""
     client, headers = seeded
-    park = _Park.on_function(client.app.state.account_store, "verify_password", monkeypatch)
+    park = _Park.on_function(client.app.state.account_store, "verify_account_password", monkeypatch)
 
     status = _assert_the_loop_answers(client, park, method, path, body, headers)
 

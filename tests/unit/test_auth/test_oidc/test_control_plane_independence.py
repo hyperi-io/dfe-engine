@@ -23,7 +23,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.auth.bootstrap import bootstrap_auth
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.oidc.models import OIDCProvider
@@ -37,7 +37,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 from dfe_engine.yaml_utils import yaml_dump
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 
 # ---------------------------------------------------------------------------
 # Shared fixtures
@@ -91,11 +91,10 @@ def client(app, auth_settings: DFESettings) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def admin_headers(auth_settings: DFESettings) -> dict[str, str]:
+def admin_headers(app, client: TestClient, auth_settings: DFESettings) -> dict[str, str]:
     """JWT Bearer headers for admin."""
-    token = create_access_token(
-        data={"sub": "admin", "org_id": "default", "roles": ["admin"]},
-        settings=auth_settings,
+    token = session_token(
+        app, auth_settings, {"sub": "admin", "org_id": "default", "roles": ["admin"]}
     )
     return {"Authorization": f"Bearer {token}"}
 
