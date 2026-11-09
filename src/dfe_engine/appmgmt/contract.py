@@ -30,6 +30,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from scalo.logger import logger
 from scalo.logger.filters import MASK_VALUE, mask_url_userinfo
 
 from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
@@ -150,6 +151,21 @@ class MaskedValueError(ValueError):
 
     code = "masked_value"
     """The refusal code a route answers with."""
+
+
+class RefusedNullError(ValueError):
+    """Raised when an app's config would carry a null its parser refuses.
+
+    The app stops at startup on such a null, so the write is refused before it
+    reaches the deploy repo.
+    """
+
+    code = "invalid_value"
+    """The refusal code a route answers with."""
+
+    def __init__(self, paths: list[str]) -> None:
+        self.paths = paths
+        super().__init__(f"{', '.join(paths)} does not accept a null")
 
 
 class CredentialReentryError(MaskedValueError):
@@ -329,6 +345,9 @@ def load_contract(service: str, root: Path | str | None = None) -> AppContract:
 
 _HELD: dict[str, AppContract] = {}
 
+# Apps whose overlays were written with no contract to judge them, warned about once each.
+_UNJUDGED: set[str] = set()
+
 
 def contract(service: str, root: Path | str | None = None) -> AppContract:
     """The mounted contract, read once and held. An explicit root is never held."""
@@ -342,6 +361,7 @@ def contract(service: str, root: Path | str | None = None) -> AppContract:
 def reload_contracts() -> None:
     """Drop what is held, so a remounted directory takes effect."""
     _HELD.clear()
+    _UNJUDGED.clear()
 
 
 # --- the schema, flattened to options ---
@@ -1286,6 +1306,122 @@ def check_value(option: DeclaredOption, value: Any) -> str:
         offered = ", ".join(repr(v) for v in option.enum)
         return f"{option.path} takes one of {offered}, not {value!r}"
     return ""
+
+
+def _schema_child(node: dict | None, key: str, root: dict) -> dict | None:
+    """The schema a mapping holds its ``key`` to, or None where the schema does not say."""
+    if node is None:
+        return None
+    for branch in _branches(node, root):
+        props = branch.get("properties")
+        if isinstance(props, dict) and key in props:
+            return _deref(props[key], root)
+        extra = branch.get("additionalProperties")
+        if isinstance(extra, dict):
+            return _deref(extra, root)
+    return None
+
+
+def _schema_items(node: dict | None, root: dict) -> dict | None:
+    """The schema a list holds its entries to, or None where the schema does not say."""
+    if node is None:
+        return None
+    for branch in _branches(node, root):
+        items = branch.get("items")
+        if isinstance(items, dict):
+            return _deref(items, root)
+    return None
+
+
+# A schema node carrying none of these places no constraint, so it takes a null.
+_CONSTRAINING = ("type", "anyOf", "oneOf", "allOf", "properties", "enum", "const")
+
+
+def _takes_null(node: dict, root: dict) -> bool:
+    """Whether a value held to ``node`` may be null."""
+    if _nullable(node, root) or None in (node.get("enum") or ()):
+        return True
+    if "const" in node:
+        return node["const"] is None
+    return not any(key in node for key in _CONSTRAINING)
+
+
+def _refused_nulls(value: Any, node: dict | None, root: dict, path: str) -> list[str]:
+    """Every path in ``value`` holding a null ``node`` declares a field that takes none."""
+    if value is None:
+        return [path] if node is not None and not _takes_null(node, root) else []
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            found += _refused_nulls(
+                item, _schema_child(node, str(key), root), root, f"{path}.{key}"
+            )
+    elif isinstance(value, list):
+        items = _schema_items(node, root)
+        for index, item in enumerate(value):
+            # A null entry in a list of required values is refused like a null field.
+            found += _refused_nulls(item, items, root, f"{path}[{index}]")
+    return found
+
+
+def refused_nulls(app_contract: AppContract, path: str, value: Any) -> list[str]:
+    """Every place in a write of ``value`` at ``path`` where the app refuses the null it holds.
+
+    The apps refuse a null for any field that is not optional, at any depth, so a
+    map value, a struct inside a list or a whole section written with one stops
+    the app at startup. A key the schema does not declare is not judged here,
+    because the app takes or refuses it whatever it holds. With no contract
+    mounted nothing is judged.
+
+    Args:
+        app_contract: The app's mounted contract.
+        path: The overlay path written, ``config`` or ``config.<option>``.
+        value: The value written there.
+
+    Returns:
+        The overlay path of each refused null, empty when the app takes the write.
+    """
+    if not app_contract.available or path.split(".")[0] != CONFIG_ROOT:
+        return []
+    root = app_contract.schema
+    node: dict | None = root
+    for part in path.split(".")[1:]:
+        node = _schema_child(node, part, root)
+    return _refused_nulls(value, node, root, path)
+
+
+def check_overlay(doc: dict) -> None:
+    """Refuse an instance overlay whose ``config:`` block holds a null its app refuses.
+
+    The app's chart renders that block as the app's file verbatim, nulls
+    included, so the refusal has to happen before the overlay is written. An
+    overlay naming no app in the manifest is not an app's config and passes.
+
+    With no contract mounted for the app the overlay passes, and the first such
+    write warns, because nothing then stops a refused null reaching the pod.
+
+    Raises:
+        RefusedNullError: The block holds a null a declared field does not take.
+    """
+    service = str(get_path(doc, DEPLOY_SERVICE_PATH, default="") or "")
+    config = doc.get(CONFIG_ROOT)
+    # A null or absent block renders as an empty config, which the app reads as defaults.
+    if service not in APP_CATALOGUE or not isinstance(config, dict):
+        return
+    found = contract(service)
+    if not found.available:
+        if service not in _UNJUDGED:
+            _UNJUDGED.add(service)
+            logger.warning(
+                "no config contract is mounted for this app, so its overlay writes are "
+                "not checked for a null the app refuses at startup",
+                app=service,
+                contract_dir=str(contract_root() or ""),
+            )
+        return
+    refused = refused_nulls(found, CONFIG_ROOT, config)
+    if refused:
+        raise RefusedNullError(refused)
 
 
 def check_env_value(value: Any) -> str:
