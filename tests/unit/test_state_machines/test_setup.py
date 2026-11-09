@@ -7,6 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import secrets
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -113,8 +114,9 @@ def test_disabled_oidc_provider_does_not_satisfy_the_step(ctx):
 
     assert STEP_OIDC_PROVIDER not in state.completed_steps
 
+    # A context is one request's snapshot: it lists the providers once, so a change needs a new one.
     ctx.oidc_registry.update("entra", enabled=True)
-    assert STEP_OIDC_PROVIDER in SETUP_MACHINE.evaluate(ctx).completed_steps
+    assert STEP_OIDC_PROVIDER in SETUP_MACHINE.evaluate(replace(ctx)).completed_steps
 
 
 def test_the_local_admin_does_not_count_as_the_first_user(ctx):

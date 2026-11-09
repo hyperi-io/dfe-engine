@@ -40,7 +40,7 @@ from dfe_engine.orgs.models import (
     ReservedOrgError,
 )
 from dfe_engine.orgs.tenant_scope import colliding_org, org_tenant_ids
-from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump, yaml_load
+from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump, yaml_load_cached
 
 
 class OrgBoundError(ValueError):
@@ -278,7 +278,7 @@ class OrgRegistry:
         The name is derived from the filename stem -- it is not stored
         inside the YAML body.
         """
-        data: dict = yaml_load(path)
+        data: dict = yaml_load_cached(path)
         data["name"] = path.stem
         return Org.model_validate(data)
 

@@ -29,7 +29,7 @@ from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.store_names import store_key
 from dfe_engine.http_errors import describe_http_error
 from dfe_engine.names import VALID_NAME
-from dfe_engine.yaml_utils import YAMLError, yaml_dump, yaml_load
+from dfe_engine.yaml_utils import YAMLError, yaml_dump, yaml_load_cached
 
 PROVIDERS_SKIPPED = "auth_oidc_providers_skipped_total"
 
@@ -106,7 +106,7 @@ class OIDCProviderRegistry:
             return None
         if not path.exists():
             return None
-        data = yaml_load(path)
+        data = yaml_load_cached(path)
         if data is None:
             data = {}
         # Name is the filename stem -- not stored in the YAML body
