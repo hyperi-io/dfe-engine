@@ -41875,7 +41875,7 @@
           "complete": {
             "type": "boolean",
             "title": "Complete",
-            "description": "True when every required step is satisfied."
+            "description": "True when every required step is satisfied, or setup has already finished once."
           },
           "current_step": {
             "anyOf": [
