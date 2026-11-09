@@ -130,7 +130,7 @@ def test_the_overlap_alone_detects_every_late_row_exactly_once(
     db, writer, reader = cluster
     hunt, org, specs = _hunt(tmp_path, db)
     spec = specs[hunt]
-    coord = ChCoordinator(reader, database=db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(reader, database=db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     notifications = _Notifications()
     worker = _worker(reader, coord, notifications, overlap_seconds=overlap, safe_horizon=False)
     fire = int(time.time()) // _INTERVAL * _INTERVAL
@@ -153,7 +153,7 @@ def test_a_fire_waits_for_the_safe_horizon_then_the_cap_and_the_overlap_finish_t
 ):
     db, writer, reader = cluster
     hunt, org, specs = _hunt(tmp_path, db)
-    coord = ChCoordinator(reader, database=db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(reader, database=db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     manager = RecordingManager()
     notifications = _Notifications()
     worker = _worker(
@@ -218,7 +218,7 @@ def test_rows_a_capped_fire_could_not_read_are_detected_once_by_the_next_fire(cl
     db, writer, reader = cluster
     hunt, org, specs = _hunt(tmp_path, db)
     spec = specs[hunt]
-    coord = ChCoordinator(reader, database=db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(reader, database=db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     manager = RecordingManager()
     worker = _worker(
         reader,

@@ -78,7 +78,7 @@ def _specs(tmp_path, **kwargs) -> dict:
 
 
 def _tick(ch_client, db: str, specs: dict, metrics: HuntRunnerMetrics, fire: int) -> ChCoordinator:
-    coord = ChCoordinator(ch_client, database=db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     runner = HuntRunner(coord, HuntWorker(ch_client, coord, metrics=metrics), specs, cap=8)
     assert runner.tick(fire + 1) == 1

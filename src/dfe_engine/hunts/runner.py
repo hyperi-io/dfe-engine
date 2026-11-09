@@ -8,11 +8,12 @@
 """One cycle of the multi-pod hunt runner, coordinated entirely through ClickHouse.
 
 ``tick`` is the unit a long-running worker repeats: for each due hunt that has not
-already completed this fire and is not already running, claim it (insert-and-resolve
-lease -> never double-run) and execute it, up to the global cap. Pull-based -> no
-hunt is assigned to a pod; add a pod and it just competes for claims; kill one and
-its lease expires and is reclaimed. The daemon loop is a thin ``while: tick(); sleep``
-wrapper around this.
+already completed this fire and is not already running, claim it (the shared lease
+-> never double-run) and execute it, up to the global cap. A refused claim means
+another worker holds the hunt, or this claim landed too late and lapses unrun.
+Pull-based -> no hunt is assigned to a pod. Add a pod and it competes for claims.
+Kill one and its lease expires and is reclaimed. The daemon loop is a thin
+``while: tick(); sleep`` wrapper around this.
 
 A due fire the safe horizon has not reached yet is skipped before its claim and
 stays due, so the next poll checks again. It is neither a failure nor a back-off.
@@ -334,7 +335,7 @@ class HuntRunner:
                 continue
             self._metrics.claim(spec.hunt_id, won=claimed)
             if not claimed:
-                continue  # lost the settle-window race -> another worker has it
+                continue  # another worker has it, or our claim landed too late and was dropped
             run_began = time.monotonic()
             started += 1
             try:

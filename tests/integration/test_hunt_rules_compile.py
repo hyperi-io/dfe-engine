@@ -56,7 +56,7 @@ def test_a_hunt_created_through_the_api_writes_detections(ch_client, dfe_db, tmp
     assert set(specs) == {hunt}
     assert specs[hunt].queries, "the hunt's rules compiled to nothing to run"
 
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
     assert runner.tick(fire + 1) == 1
@@ -93,7 +93,7 @@ def test_a_hunt_writes_only_the_matches_of_the_orgs_its_customers_name(ch_client
         f"(toDateTime64({fire - 1}, 3), toDateTime64({fire - 1}, 3), '{other}')"
     )
 
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
     runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
@@ -134,7 +134,7 @@ def test_a_hunt_for_an_org_with_tenant_ids_reads_those_ids_and_not_its_name(
         f"INSERT INTO `{dfe_db}`.`main` (_timestamp_load, _timestamp, _org_id) VALUES {values}"
     )
 
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
     runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
@@ -173,7 +173,7 @@ def test_one_customer_with_no_stored_tenant_ids_stops_the_whole_hunt(ch_client, 
         f"INSERT INTO `{dfe_db}`.`main` (_timestamp_load, _timestamp, _org_id) VALUES {values}"
     )
 
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
     runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
@@ -205,7 +205,7 @@ def test_a_rule_name_with_a_quote_and_a_trailing_backslash_lands_verbatim(
         f"(toDateTime64({fire - 1}, 3), toDateTime64({fire - 1}, 3), '{marker}')"
     )
 
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
     runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)

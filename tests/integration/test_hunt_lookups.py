@@ -50,7 +50,7 @@ def lookup_db(ch_client):
 
 def _fire_one(ch_client, dfe_db, tmp_path, lookups: tuple[str, ...], fire: int) -> int:
     """Tick the runner just past *fire*, the slot the caller wrote its rows for."""
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules", lookup_databases=lookups)
     runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)

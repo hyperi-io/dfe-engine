@@ -75,7 +75,7 @@ def _land(ch_client, db: str, at: int, row_uuid: str, *, hit: bool) -> None:
 
 
 def _tick(ch_client, db: str, specs: dict, fire: int) -> ChCoordinator:
-    coord = ChCoordinator(ch_client, database=db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     runner = HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8)
     assert runner.tick(fire + 1) == 1

@@ -42,6 +42,7 @@ import clickhouse_connect
 import pytest
 from dfe_schemas.clickhouse import Platform, create_database
 
+from dfe_engine.clickhouse.lease import SETTLE_SECONDS, SlowClaimError
 from dfe_engine.schema import lock as lock_module
 from dfe_engine.schema import phase
 from dfe_engine.schema.ledger import MigrationLedger
@@ -225,7 +226,7 @@ class _FirstClaimMisses(SchemaLock):
         claimed = super()._claim(now)
         miss, self._miss = self._miss, "none"
         if miss == "slow":
-            time.sleep(lock_module._SETTLE_SECONDS)
+            time.sleep(SETTLE_SECONDS)
         elif miss == "quorum":
             raise lock_module.SchemaLockQuorumError(
                 "Code: 319. DB::Exception: UNKNOWN_STATUS_OF_INSERT"
@@ -546,7 +547,7 @@ def test_a_claim_short_of_its_quorum_is_not_taken_and_is_once_the_replica_return
 def test_a_claim_that_lands_slower_than_the_settle_does_not_stand(two_replicas, replicated_lease):
     """A rival's re-read may have missed a slow claim, so it is not kept, and it holds nobody back."""
     lease = replicated_lease
-    held_back = lock_module._SETTLE_SECONDS + 1.0
+    held_back = SETTLE_SECONDS + 1.0
     lease.fetches("STOP", two_replicas.second)
     # Replica 2 resumes fetching after the claim is written, so its quorum lands that late.
     resume = threading.Timer(held_back, lease.fetches, args=("START", two_replicas.second))
@@ -583,7 +584,7 @@ def test_a_slow_claim_is_recognised_as_its_own_and_stands_within_a_settle(
     lease = replicated_lease
     lease.fetches("STOP", two_replicas.second)
     resume = threading.Timer(
-        lock_module._SETTLE_SECONDS + 1.0, lease.fetches, args=("START", two_replicas.second)
+        SETTLE_SECONDS + 1.0, lease.fetches, args=("START", two_replicas.second)
     )
     slow = lease.lock(two_replicas.first, "pod-slow")
     resume.start()
@@ -598,7 +599,7 @@ def test_a_slow_claim_is_recognised_as_its_own_and_stands_within_a_settle(
     elapsed = time.monotonic() - started
 
     assert taken is True, "the lock waited on its own claim"
-    assert elapsed < 2 * lock_module._SETTLE_SECONDS + 1.0, f"stood after {elapsed:.1f}s"
+    assert elapsed < 2 * SETTLE_SECONDS + 1.0, f"stood after {elapsed:.1f}s"
     slow.release()
 
 
@@ -674,7 +675,7 @@ def test_a_slow_claim_never_frees_a_rival_that_stood(two_replicas, replicated_le
     x_claims.join()
 
     assert outcomes["y"] is True, outcomes
-    assert isinstance(outcomes["x"], lock_module._SlowClaim), outcomes
+    assert isinstance(outcomes["x"], SlowClaimError), outcomes
     taken = lease.lock(two_replicas.first, "pod-z").acquire(wait_seconds=0.0)
     holders = [name for name, held in (("pod-y", outcomes["y"]), ("pod-z", taken)) if held is True]
     assert holders == ["pod-y"], f"two holders: {holders}"
