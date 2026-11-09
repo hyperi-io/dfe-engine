@@ -739,7 +739,7 @@ def test_searchable_oidc_users_attach_to_the_first_provider(tmp_path, monkeypatc
     registry.create(
         "searchable-oidc-0", OIDCProvider(enabled=False, display_name="Searchable Provider 0")
     )
-    for name in ("searchable-account-0", "searchable-blocked-0", "alice"):
+    for name in ("searchable-account-0", "searchable-blocked-0", "dfe_admin", "alice"):
         accounts.create(name, "changeme", groups=["dfe-viewers"])
     seeder = Seed(
         account_store=accounts,
@@ -750,7 +750,7 @@ def test_searchable_oidc_users_attach_to_the_first_provider(tmp_path, monkeypatc
 
     assert seeder.accounts.seed_searchable_oidc_users() is True
     assert seeder.accounts.seed_searchable_oidc_users() is False
-    for name in ("searchable-account-0", "searchable-blocked-0"):
+    for name in ("searchable-account-0", "searchable-blocked-0", "dfe_admin"):
         account = present(accounts.get(name))
         assert account.oidc_id == "searchable-oidc-0"
         assert account.source_provider == "searchable-oidc-0"

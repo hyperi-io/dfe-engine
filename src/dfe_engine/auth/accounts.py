@@ -30,6 +30,7 @@ import os
 import secrets
 import tempfile
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from functools import cache
 from pathlib import Path
@@ -319,9 +320,25 @@ class AccountStore:
         """Return all accounts in the store.
 
         Returns:
-            List of Account objects (order is filesystem-dependent).
+            List of Account objects, ordered by filename. An account deleted while
+            the list is read is absent from it.
         """
-        return [self._read(p) for p in sorted(self._dir.glob("*.yaml"))]
+        return builtins.list(self.scan())
+
+    def scan(self) -> Iterator[Account]:
+        """Yield accounts one file at a time, so a caller that stops early reads no more.
+
+        A file deleted between the directory listing and its read (a soft-delete
+        renames the account) is skipped, not raised.
+
+        Yields:
+            Each stored Account, ordered by filename.
+        """
+        for path in sorted(self._dir.glob("*.yaml")):
+            try:
+                yield self._read(path)
+            except FileNotFoundError:
+                continue
 
     def update(self, username: str, *, allow_protected: bool = False, **fields: object) -> Account:
         """Update mutable fields on an existing account.

@@ -135,7 +135,7 @@ def other_usable_admin_exists(
     groups = group_store.list()
     if not _system_admin_group_names(groups):
         return False
-    for account in account_store.list():
+    for account in account_store.scan():
         if account.username == excluding:
             continue
         if not _usable_admin_session(account):
@@ -230,7 +230,7 @@ def locks_out_last_admin_by_member_removals(
     ]
     if not _system_admin_group_names(groups):
         return False
-    for account in account_store.list():
+    for account in account_store.scan():
         if not _usable_admin_session(account):
             continue
         if account_holds_system_admin(account, groups, bindings=bindings):
@@ -266,7 +266,7 @@ def another_admin_exists(
     if not _system_admin_group_names(groups):
         return False
     seeded = {admin_name, BREAKGLASS_USERNAME}
-    for account in account_store.list():
+    for account in account_store.scan():
         if account.username in seeded or not _usable_admin_session(account):
             continue
         if account_holds_system_admin(account, groups, bindings=bindings):

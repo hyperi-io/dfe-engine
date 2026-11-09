@@ -410,7 +410,7 @@ def _has_real_user(ctx: SetupContext) -> bool:
         return False
     seeded = {ctx.bootstrap_admin_name, BREAKGLASS_USERNAME}
     return any(
-        account.enabled and account.username not in seeded for account in ctx.account_store.list()
+        account.enabled and account.username not in seeded for account in ctx.account_store.scan()
     )
 
 
