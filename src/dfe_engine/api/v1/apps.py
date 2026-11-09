@@ -697,12 +697,20 @@ class ResourceSeriesResponse(BaseModel):
 
 
 class MetricsResponse(BaseModel):
-    """An instance's current gauges and rates over a window."""
+    """An instance's current gauges and its rates over a window."""
 
     telemetry_name: str
     window_seconds: int
     gauges: dict[str, float]
     rates: dict[str, float]
+
+
+class TotalsResponse(BaseModel):
+    """How much an instance did over a window, counted across every run of every pod."""
+
+    telemetry_name: str
+    window_seconds: int
+    totals: dict[str, float]
 
 
 # --- shared plumbing ---
@@ -2363,6 +2371,36 @@ def get_metrics(
         window_seconds=found.window_seconds,
         gauges=found.gauges,
         rates=found.rates,
+    )
+
+
+@router.get("/{service}/{instance}/metrics/totals")
+def get_totals(
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    client: ClickHouseClient,
+    window_seconds: int = 3600,
+) -> TotalsResponse:
+    """Counter, request and CPU totals over the window, across every run of every pod.
+
+    A window of 0 counts everything the metrics tables still keep.
+    """
+    app = _resolve(service, instance)
+    _require_metrics_read(request, user, service)
+    _overlay(_gitcrud(request), app)
+    window = _UNBOUNDED_WINDOW_SECONDS if window_seconds <= 0 else max(window_seconds, 60)
+    try:
+        found = _reader(request, client).totals(
+            app.telemetry_name,
+            carries_records=bool(app.descriptor.transports),
+            window_seconds=window,
+        )
+    except MetricsUnavailableError as exc:
+        raise metrics_unavailable(exc) from exc
+    return TotalsResponse(
+        telemetry_name=found.telemetry_name, totals=found.totals, window_seconds=window
     )
 
 

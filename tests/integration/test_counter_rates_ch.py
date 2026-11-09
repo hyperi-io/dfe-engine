@@ -36,6 +36,7 @@ from dfe_engine.appmgmt.operations import (
     OPEN_FDS,
     RECORDS_DELIVERED,
     RECORDS_DLQ,
+    RECORDS_ERROR,
     RECORDS_PROCESSED,
     RECORDS_RECEIVED,
     OperationalReader,
@@ -146,6 +147,7 @@ def _write(
     metric: str = RECORDS_RECEIVED,
     attributes: dict[str, str] | None = None,
     started: int | None = None,
+    description: str = "",
 ) -> None:
     """Write one cumulative reading per ``(age_seconds, value)``, stamped that long before ``base``.
 
@@ -159,9 +161,9 @@ def _write(
     for age, value in points:
         ch_client.command(
             f"INSERT INTO `{db}`.otel_metrics_sum "
-            "(ServiceName, MetricName, Attributes, ResourceAttributes, StartTimeUnix, "
-            "TimeUnix, Value, AggregationTemporality, IsMonotonic) "
-            "SELECT {service:String}, {metric:String}, "
+            "(ServiceName, MetricName, MetricDescription, Attributes, ResourceAttributes, "
+            "StartTimeUnix, TimeUnix, Value, AggregationTemporality, IsMonotonic) "
+            "SELECT {service:String}, {metric:String}, {description:String}, "
             "mapFromArrays({attr_keys:Array(String)}, {attr_values:Array(String)}), "
             "mapFromArrays({res_keys:Array(String)}, {res_values:Array(String)}), "
             "toDateTime({start:UInt32}), "
@@ -169,6 +171,7 @@ def _write(
             parameters={
                 "service": service,
                 "metric": metric,
+                "description": description,
                 "attr_keys": list(attributes),
                 "attr_values": list(attributes.values()),
                 "res_keys": list(resource),
@@ -183,6 +186,75 @@ def _write(
 
 def _rate(manager_client, db: str) -> float:
     return OperationalReader(manager_client, db).metrics(_SERVICE).rates[RECORDS_RECEIVED]
+
+
+def _total(manager_client, db: str) -> float:
+    reader = OperationalReader(manager_client, db)
+    return reader.totals(_SERVICE, window_seconds=3600).totals[RECORDS_RECEIVED]
+
+
+@pytest.mark.parametrize(
+    ("streams", "expected"),
+    [
+        # Two pods from before the hour, each counted from its first reading in it
+        (
+            [
+                ("pod-a", None, "", [(240, 1000.0), (60, 1060.0)]),
+                ("pod-b", None, "", [(233, 50.0), (53, 170.0)]),
+            ],
+            180.0,
+        ),
+        # A restart in the hour: the new run counts from zero beside the old run's rise
+        (
+            [
+                ("pod-a", 4000, "", [(300, 880.0), (240, 900.0)]),
+                ("pod-a", 200, "", [(120, 3.0), (60, 33.0)]),
+            ],
+            53.0,
+        ),
+        # A run that started in the hour counts its first export too
+        (
+            [("pod-a", 300, "", [(240, 40.0), (60, 70.0)])],
+            70.0,
+        ),
+        # A reading older than the hour is left out
+        (
+            [("pod-a", None, "", [(5000, 100.0), (120, 400.0), (60, 450.0)])],
+            50.0,
+        ),
+        # A scalo-rs pod's counter split by description: both halves count
+        (
+            [
+                ("pod-a", 7200, "described", [(120, 1.0), (60, 2.0)]),
+                ("pod-a", 7185, "", [(120, 500.0), (60, 560.0)]),
+            ],
+            61.0,
+        ),
+        # A replaced pod's single reading in the hour adds nothing
+        (
+            [
+                ("pod-a", None, "", [(240, 1000.0)]),
+                ("pod-b", None, "", [(120, 2.0), (60, 5.0)]),
+            ],
+            3.0,
+        ),
+    ],
+    ids=[
+        "two-pods",
+        "restart",
+        "started-in-window",
+        "older-reading",
+        "split-stream",
+        "replaced-pod",
+    ],
+)
+def test_a_counter_total_is_its_rise_over_the_window_across_runs(
+    ch_client, manager_client, otel_db, base, streams, expected
+):
+    for pod, started, description, points in streams:
+        _write(ch_client, otel_db, base, *points, description=description, pod=pod, started=started)
+
+    assert _total(manager_client, otel_db) == expected
 
 
 def _landing(
@@ -461,10 +533,11 @@ def _console_rates(console, service: str) -> dict[str, float]:
 def test_a_reporting_app_on_the_data_path_reads_an_unrecorded_counter_as_zero(
     ch_client, otel_db, base, console
 ):
-    """The receiver reports and receives 100 over 60s, but has processed, delivered and dead-lettered nothing.
+    """The receiver reports and receives 100 over 60s, but has processed, delivered, dead-lettered and failed nothing.
 
-    A push carries only counters that have been recorded, so the other three have no
-    rows; the scrape served them as 0.
+    A push carries only counters that have been recorded, so the other four have no
+    rows; the scrape served them as 0. An app-specific error counter it never sent
+    stays absent.
     """
     _info(ch_client, otel_db, service=_SERVICE, pod="dfe-receiver-a")
     _write(ch_client, otel_db, base, (60, 1000), (30, 1050), (0, 1100), pod="dfe-receiver-a")
@@ -475,6 +548,7 @@ def test_a_reporting_app_on_the_data_path_reads_an_unrecorded_counter_as_zero(
             RECORDS_PROCESSED: 0.0,
             RECORDS_DELIVERED: 0.0,
             RECORDS_DLQ: 0.0,
+            RECORDS_ERROR: 0.0,
         },
         rel=1e-3,
     )
@@ -605,14 +679,21 @@ def test_a_whole_retention_read_reaches_back_as_far_as_the_gauge_table_keeps(
 
 
 def _cpu(
-    ch_client, db: str, base: int, *points: tuple[int, float], pod: str, start: int = 0
+    ch_client,
+    db: str,
+    base: int,
+    *points: tuple[int, float],
+    description: str = "",
+    pod: str,
+    start: int = 0,
 ) -> None:
     """One cumulative ``process_cpu_seconds_total`` gauge reading per ``(age_seconds, value)``, from a stream begun at epoch ``start``."""
     for age, value in points:
         ch_client.command(
             f"INSERT INTO `{db}`.otel_metrics_gauge "
-            "(ServiceName, MetricName, ResourceAttributes, StartTimeUnix, TimeUnix, Value) "
-            "SELECT {service:String}, {metric:String}, "
+            "(ServiceName, MetricName, MetricDescription, ResourceAttributes, StartTimeUnix, "
+            "TimeUnix, Value) "
+            "SELECT {service:String}, {metric:String}, {description:String}, "
             "mapFromArrays(['service.instance.id'], [{pod:String}]), "
             "toDateTime({start:UInt32}), "
             "toDateTime({base:UInt32} - {age:UInt32}), {value:Float64}",
@@ -620,6 +701,7 @@ def _cpu(
                 "age": age,
                 "base": base,
                 "metric": CPU_SECONDS,
+                "description": description,
                 "pod": pod,
                 "service": _SERVICE,
                 "start": start,
@@ -681,3 +763,46 @@ def test_cpu_cores_come_from_the_live_stream_beside_a_stuck_one(
     assert sum(bucket.samples for bucket in buckets) == 2
     assert min(b.minimum for b in buckets) == pytest.approx(0.5)
     assert max(b.maximum for b in buckets) == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        ([(300, 1000.0), (240, 1030.0), (180, 1060.0)], [(293, 50.0), (233, 170.0)], 180.0),
+        # The drop is a restart, so the new run counts from zero
+        ([(300, 900.0), (240, 3.0), (180, 33.0)], [], 33.0),
+        ([(300, 1000.0)], [], 0.0),
+    ],
+    ids=["two-pods", "restart", "single-reading"],
+)
+def test_cpu_seconds_total_is_their_rise_over_the_window(
+    ch_client, manager_client, otel_db, base, first, second, expected
+):
+    _cpu(ch_client, otel_db, base, *first, pod="pod-a")
+    _cpu(ch_client, otel_db, base, *second, pod="pod-b")
+
+    found = OperationalReader(manager_client, otel_db).totals(_SERVICE, window_seconds=3600)
+
+    assert found.totals[CPU_SECONDS] == pytest.approx(expected)
+
+
+def test_cpu_seconds_split_by_description_count_each_half_once(
+    ch_client, manager_client, otel_db, base
+):
+    # A scalo-rs pod exports a described half stuck near zero beside the real one
+    described = "Total user and system CPU time spent in seconds"
+    _cpu(
+        ch_client,
+        otel_db,
+        base,
+        (300, 0.03),
+        (240, 0.03),
+        (180, 0.03),
+        description=described,
+        pod="pod-a",
+    )
+    _cpu(ch_client, otel_db, base, (300, 5541.72), (240, 5542.97), (180, 5544.22), pod="pod-a")
+
+    found = OperationalReader(manager_client, otel_db).totals(_SERVICE, window_seconds=3600)
+
+    assert found.totals[CPU_SECONDS] == pytest.approx(2.5)

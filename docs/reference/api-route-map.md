@@ -12,15 +12,15 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | merged into | 9 | Folded into the operation **New** names |
 | unchanged | 41 | Same method and path |
 | frozen | 54 | Kept as it is |
-| decide | 128 | Not placed yet: see its question |
+| decide | 129 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 319 | |
+| total | 320 | |
 
 ## Questions
 
 | Question | Operations |
 |---|---|
-| [apps-depth](#apps-depth) | 21 |
+| [apps-depth](#apps-depth) | 22 |
 | [groups-scope](#groups-scope) | 11 |
 | [compute-helpers](#compute-helpers) | 10 |
 | [detection-rules](#detection-rules) | 7 |
@@ -320,6 +320,7 @@ An instance's children sit 4 levels deep under the `deployment` root: drop `depl
 | `GET /api/v1/apps/{service}/{instance}/history` | - | - | - | - | decide | ui 2 |  |
 | `GET /api/v1/apps/{service}/{instance}/metrics` | - | - | - | - | decide | ui 2 |  |
 | `GET /api/v1/apps/{service}/{instance}/metrics/series` | - | - | - | - | decide | ui 2 |  |
+| `GET /api/v1/apps/{service}/{instance}/metrics/totals` | - | - | - | - | decide | 0 |  |
 | `GET /api/v1/apps/{service}/{instance}/routing` | - | - | - | - | decide | ui 2 |  |
 | `POST /api/v1/apps/{service}/{instance}/routing/sync` | - | - | - | - | decide | ui 2 |  |
 | `GET /api/v1/apps/{service}/{instance}/scaling` | - | - | - | - | decide | ui 5 |  |

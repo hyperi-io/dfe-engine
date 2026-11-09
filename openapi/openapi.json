@@ -29330,6 +29330,118 @@
         }
       }
     },
+    "/api/v1/apps/{service}/{instance}/metrics/totals": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Totals",
+        "description": "Counter, request and CPU totals over the window, across every run of every pod.\n\nA window of 0 counts everything the metrics tables still keep.",
+        "operationId": "apps.metrics.totals",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "window_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 3600,
+              "title": "Window Seconds"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotalsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "apps",
+          "resource": "metrics",
+          "hierarchy": [
+            "apps",
+            "metrics"
+          ],
+          "verb": "totals",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          }
+        }
+      }
+    },
     "/api/v1/apps/{service}/{instance}/metrics/series": {
       "get": {
         "tags": [
@@ -43313,7 +43425,7 @@
           "rates"
         ],
         "title": "MetricsResponse",
-        "description": "An instance's current gauges and rates over a window."
+        "description": "An instance's current gauges and its rates over a window."
       },
       "NonEmptyDict_str_SchemaVersionCreate_": {
         "additionalProperties": {
@@ -54308,6 +54420,33 @@
         "type": "object",
         "title": "TopicUpdateResponse",
         "description": "Outcome of a converge pass.\n\n``refused`` is what DFE declined to do (a partition decrease, a replication\nfactor change); ``failed`` is what the broker rejected. They are different\nproblems with different fixes, so they are different lists."
+      },
+      "TotalsResponse": {
+        "properties": {
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "window_seconds": {
+            "type": "integer",
+            "title": "Window Seconds"
+          },
+          "totals": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Totals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "telemetry_name",
+          "window_seconds",
+          "totals"
+        ],
+        "title": "TotalsResponse",
+        "description": "How much an instance did over a window, counted across every run of every pod."
       },
       "TransformDetect": {
         "properties": {

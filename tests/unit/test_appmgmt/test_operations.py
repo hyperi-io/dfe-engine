@@ -20,15 +20,19 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from dfe_engine.appmgmt.operations import (
+    CPU_SECONDS,
     GAUGE_METRICS,
     HTTP_P95,
     HTTP_REQUESTS,
     HTTP_SERVER_ERRORS,
+    HUNT_COUNTERS,
+    RECORDS_RECEIVED,
     RESOURCE_METRICS,
     SCALING_PRESSURE,
     MetricsUnavailableError,
     OperationalReader,
     http_readings,
+    http_totals,
 )
 
 LOADERS = ["dfe-loader-main"]
@@ -241,6 +245,42 @@ def test_an_instance_that_never_emitted_is_not_reporting():
     assert status.last_seen_epoch is None
 
 
+def test_the_runner_counters_are_asked_for_by_every_counter_read():
+    reader, ch = _reader([])
+
+    reader.metrics("dfe-hunt-runner")
+    reader.totals("dfe-hunt-runner", window_seconds=3600)
+
+    asked = [params["names"] for _sql, params, _settings in ch.calls if "names" in params]
+    assert sum(set(HUNT_COUNTERS) <= set(names) for names in asked) == 2
+
+
+def test_an_unrecorded_runner_counter_is_never_read_as_zero():
+    ch = PerQueryClickHouse({"AS last_seen": [(1757000000.0, 12)]})
+
+    found = OperationalReader(ch, "dfe").totals(
+        "dfe-loader", carries_records=True, window_seconds=3600
+    )
+
+    assert found.totals[RECORDS_RECEIVED] == 0.0
+    assert set(HUNT_COUNTERS).isdisjoint(found.totals)
+
+
+def test_totals_add_cpu_time_from_both_tables_over_the_window():
+    # A scalo app reports CPU seconds as a gauge, a scraped app as a counter
+    ch = PerQueryClickHouse(
+        {
+            "AS points": [(RECORDS_RECEIVED, 10.0), (CPU_SECONDS, 2.0)],
+            "HAVING count() > 0": [(3.0,)],
+        }
+    )
+
+    found = OperationalReader(ch, "dfe").totals("dfe-loader", window_seconds=600)
+
+    assert found.totals == {RECORDS_RECEIVED: 10.0, CPU_SECONDS: 5.0}
+    assert found.window_seconds == 600
+
+
 def test_an_instance_with_telemetry_is_reporting():
     ch = PerQueryClickHouse({"AS last_seen": [(1757000000.0, 12)]})
 
@@ -364,6 +404,35 @@ def test_metrics_carries_the_http_readings():
 
     assert readings.rates[HTTP_REQUESTS] == 24 / 240
     assert readings.gauges[HTTP_P95] == pytest.approx(0.095)
+
+
+@pytest.mark.parametrize(
+    ("rows", "expected"),
+    [
+        ([], {}),
+        (
+            [
+                _series(first=[10, 0, 0, 0], last=[40, 0, 0, 0]),
+                _series(first=[0, 0, 0, 0], last=[6, 0, 0, 0], server_error=True),
+            ],
+            {HTTP_REQUESTS: 36.0, HTTP_SERVER_ERRORS: 6.0},
+        ),
+        (
+            [_series(first=[10, 0, 0, 0], last=[40, 0, 0, 0], started_in_window=True)],
+            {HTTP_REQUESTS: 40.0, HTTP_SERVER_ERRORS: 0.0},
+        ),
+        (
+            [
+                _series(first=[0, 0, 0, 0], last=[12, 0, 0, 0]),
+                _series(first=[50, 0, 0, 0], last=[5, 0, 0, 0]),
+            ],
+            {HTTP_REQUESTS: 12.0, HTTP_SERVER_ERRORS: 0.0},
+        ),
+    ],
+    ids=["no-histogram", "older-series", "started-in-window", "went-backwards"],
+)
+def test_http_totals_count_requests_over_the_window(rows, expected):
+    assert http_totals(rows=rows) == expected
 
 
 def test_a_series_born_in_the_window_counts_its_first_export():
