@@ -21,6 +21,7 @@ from dfe_engine.auth import breakglass
 from dfe_engine.auth.accounts import Account
 from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
 from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import (
@@ -476,8 +477,9 @@ def test_setup_status_does_not_reparse_unchanged_account_files(tmp_path, monkeyp
     """The public probe runs on every console page load, so its cost cannot scale with accounts.
 
     With setup complete and a deploy repo, the retire-admin hint walks every account
-    when none of them is an admin. The walk reuses each file's parse from the last
-    call and parses again only a file that changed.
+    when none of them is an admin, and the OIDC registry is read for the wizard, the
+    login options and the step state. Each call lists the providers once and reuses
+    every file's parse from the last call, parsing again only a file that changed.
     """
     settings = _with_deploy_repo(_settings(tmp_path), tmp_path)
     app = create_app(settings=settings)
@@ -486,6 +488,10 @@ def test_setup_status_does_not_reparse_unchanged_account_files(tmp_path, monkeyp
             app.state.org_registry.create("acme", display_name="Acme")
             for n in range(25):
                 app.state.account_store.put(Account(username=f"user{n:02d}", password_hash="x"))
+            for n in range(20):
+                app.state.oidc_provider_registry.create(
+                    f"idp{n:02d}", OIDCProvider(enabled=n % 2 == 0, issuer=f"https://idp{n}")
+                )
             week_ago = time.time() - 7 * 86400
             for path in tmp_path.rglob("*.yaml"):
                 os.utime(path, (week_ago, week_ago))
@@ -500,9 +506,19 @@ def test_setup_status_does_not_reparse_unchanged_account_files(tmp_path, monkeyp
                 return load(self, stream)
 
             monkeypatch.setattr(YAML, "load", counting_load)
+            listings: list[int] = []
+            list_providers = OIDCProviderRegistry.list
+
+            def counting_list(self):
+                listings.append(1)
+                return list_providers(self)
+
+            monkeypatch.setattr(OIDCProviderRegistry, "list", counting_list)
             for _ in range(5):
                 assert client.get("/api/v1/auth/setup-status").json() == warm
             assert [name for name in parsed if "/accounts/" in name] == []
+            assert [name for name in parsed if "/oidc-providers/" in name] == []
+            assert len(listings) == 5
 
             app.state.account_store.update("user07", enabled=False)
             client.get("/api/v1/auth/setup-status")

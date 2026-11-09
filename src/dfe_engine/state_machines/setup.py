@@ -51,6 +51,7 @@ it can be evaluated in a unit test with hand-built stores.
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, Field
@@ -131,6 +132,14 @@ class SetupContext:
     gitops_enabled: bool = False
     # auth.source_provider_bindings, which decide the groups an IdP-owned account holds.
     provider_bindings: Mapping[str, str] = field(default_factory=dict)
+
+    @cached_property
+    def oidc_providers(self) -> list[tuple[str, OIDCProvider]]:
+        """The OIDC registry's providers, listed once per context.
+
+        A listing reads every provider file, and one status evaluates three views of it.
+        """
+        return [] if self.oidc_registry is None else self.oidc_registry.list()
 
     @classmethod
     def from_app_state(cls, state: Any) -> Self:
@@ -379,9 +388,7 @@ class StepDefinition:
 
 
 def _has_enabled_oidc_provider(ctx: SetupContext) -> bool:
-    if ctx.oidc_registry is None:
-        return False
-    return any(provider.enabled for _, provider in ctx.oidc_registry.list())
+    return any(provider.enabled for _, provider in ctx.oidc_providers)
 
 
 def _customer_orgs(ctx: SetupContext) -> list[Org]:
@@ -586,20 +593,16 @@ class SetupStateMachine:
 
     @staticmethod
     def _oidc_providers(ctx: SetupContext) -> list[OIDCProviderSummary]:
-        if ctx.oidc_registry is None:
-            return []
         return [
             OIDCProviderSummary(name=name, **provider.model_dump())
-            for name, provider in ctx.oidc_registry.list()
+            for name, provider in ctx.oidc_providers
         ]
 
     @staticmethod
     def _enabled_oidc_login_options(ctx: SetupContext) -> list[OIDCProviderLoginOption]:
-        if ctx.oidc_registry is None:
-            return []
         return [
             OIDCProviderLoginOption(name=name, display_name=provider.display_name)
-            for name, provider in ctx.oidc_registry.list()
+            for name, provider in ctx.oidc_providers
             if provider.enabled
         ]
 
