@@ -2116,3 +2116,72 @@ class TestTheMountIsReadByTheManifestName:
 
         assert found.available is False
         assert found.source == contract.ContractSource.ABSENT
+
+
+class TestANullTheAppRefusesIsFound:
+    """A null is refused wherever the schema declares a field that takes none, at any depth."""
+
+    # The loader fixture: org_id_field is ["string", "null"], default_db a plain
+    # string, source_to_table a map of strings, table_fields a list of strings and
+    # external_topics a list of structs whose topic is a plain string.
+    @pytest.mark.parametrize(
+        ("path", "value", "refused"),
+        [
+            ("config.routing.org_id_field", None, []),
+            ("config.routing.default_db", None, ["config.routing.default_db"]),
+            (
+                "config.routing.source_to_table",
+                {"edr": None, "dns": "dns"},
+                ["config.routing.source_to_table.edr"],
+            ),
+            (
+                "config.routing",
+                {"default_db": None, "org_id_field": None},
+                ["config.routing.default_db"],
+            ),
+            ("config.routing", None, ["config.routing"]),
+            ("config.routing.table_fields", ["_source", None], ["config.routing.table_fields[1]"]),
+            (
+                "config.routing.external_topics",
+                [{"topic": None, "org_id": "o"}],
+                ["config.routing.external_topics[0].topic"],
+            ),
+            ("config", {"routing": {"default_db": None}}, ["config.routing.default_db"]),
+            ("config.routing.not_declared", None, []),
+            ("config.routing.source_to_table", {"edr": "edr"}, []),
+            ("extraEnv.DFE_LOADER_X", None, []),
+        ],
+        ids=[
+            "optional",
+            "plain-string",
+            "map-value",
+            "inside-a-section",
+            "whole-section",
+            "list-entry",
+            "list-of-structs",
+            "whole-block",
+            "undeclared",
+            "no-null",
+            "not-config",
+        ],
+    )
+    def test_the_schema_decides_which_null_is_refused(self, path, value, refused):
+        assert contract.refused_nulls(_contract("dfe-loader"), path, value) == refused
+
+    def test_an_unconstrained_field_takes_a_null(self, tmp_path):
+        mount = tmp_path / "dfe-loader"
+        mount.mkdir()
+        schema = {"type": "object", "properties": {"extra": {"description": "any value"}}}
+        (mount / contract.SCHEMA_FILE).write_text(json.dumps(schema))
+
+        assert (
+            contract.refused_nulls(
+                contract.load_contract("dfe-loader", tmp_path), "config.extra", None
+            )
+            == []
+        )
+
+    def test_with_no_contract_mounted_nothing_is_judged(self, tmp_path):
+        absent = contract.load_contract("dfe-loader", tmp_path)
+
+        assert contract.refused_nulls(absent, "config.routing.default_db", None) == []
