@@ -11,12 +11,16 @@ import secrets
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from ruamel.yaml import YAML
 
+from dfe_engine import yaml_utils
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.auth import breakglass
+from dfe_engine.auth.accounts import Account
 from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
 from dfe_engine.auth.oidc.models import OIDCProvider
+from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import (
@@ -464,5 +468,61 @@ def test_setup_status_keeps_oidc_login_options_once_complete(tmp_path):
                 {"name": "entra", "display_name": "Microsoft Entra"},
             ]
             assert "https://idp" not in json.dumps(body)
+    finally:
+        _registries.clear()
+
+
+def test_setup_status_does_not_reparse_unchanged_account_files(tmp_path, monkeypatch):
+    """The public probe runs on every console page load, so its cost cannot scale with accounts.
+
+    With setup complete and a deploy repo, the retire-admin hint walks every account
+    when none of them is an admin, and the OIDC registry is read for the wizard, the
+    login options and the step state. Each call lists the providers once and reuses
+    every file's parse from the last call, parsing again only a file that changed.
+    """
+    settings = _with_deploy_repo(_settings(tmp_path), tmp_path)
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            app.state.org_registry.create("acme", display_name="Acme")
+            for n in range(25):
+                app.state.account_store.put(Account(username=f"user{n:02d}", password_hash="x"))
+            for n in range(20):
+                app.state.oidc_provider_registry.create(
+                    f"idp{n:02d}", OIDCProvider(enabled=n % 2 == 0, issuer=f"https://idp{n}")
+                )
+            # The files were written moments ago, and os.utime cannot age their ctime.
+            monkeypatch.setattr(yaml_utils, "_FRESH_FILE_NS", -1)
+            warm = client.get("/api/v1/auth/setup-status").json()
+            assert warm["initial_setup"]["complete"] is True
+
+            parsed: list[str] = []
+            load = YAML.load
+
+            def counting_load(self, stream):
+                parsed.append(getattr(stream, "name", ""))
+                return load(self, stream)
+
+            monkeypatch.setattr(YAML, "load", counting_load)
+            listings: list[int] = []
+            list_providers = OIDCProviderRegistry.list
+
+            def counting_list(self):
+                listings.append(1)
+                return list_providers(self)
+
+            monkeypatch.setattr(OIDCProviderRegistry, "list", counting_list)
+            store_dir = f"{app.state.account_store._dir}/"
+            for _ in range(5):
+                assert client.get("/api/v1/auth/setup-status").json() == warm
+            assert [name for name in parsed if name.startswith(store_dir)] == []
+            assert [name for name in parsed if "/oidc-providers/" in name] == []
+            assert len(listings) == 5
+
+            app.state.account_store.update("user07", enabled=False)
+            client.get("/api/v1/auth/setup-status")
+            assert {Path(name).name for name in parsed if name.startswith(store_dir)} == {
+                "user07.yaml"
+            }
     finally:
         _registries.clear()

@@ -18,10 +18,13 @@ Usage:
     deep_merge(base, overrides)  # mutates base in-place
 """
 
+import copy
 import math
 import os
 import tempfile
 import threading
+import time
+from collections import OrderedDict
 from collections.abc import Mapping
 from io import StringIO
 from pathlib import Path
@@ -88,6 +91,91 @@ def yaml_load(source: str | Path) -> Any:
     path = Path(source)
     with open(path, encoding="utf-8") as f:
         return _safe().load(f)
+
+
+type _FileKey = tuple[int, int, int, int]
+"""A file's identity as the filesystem reports it: inode, mtime and ctime in ns, size.
+
+ctime is in the key because no writer can set it back, unlike an mtime copied over by
+``touch -r``, ``rsync -t`` or a tar restore.
+"""
+
+_PARSED_MAX_BYTES = 4 * 1024 * 1024
+"""Source bytes of the files :func:`yaml_load_cached` keeps, least recently used out first.
+
+A parse holds about 12 times its source, so this keeps the cache near 50 MiB.
+"""
+
+_PARSED_MAX_FILE_BYTES = 16 * 1024
+"""Larger files are parsed every time."""
+
+_PARSED_MIN_CHARGE = 512
+"""What each kept file counts against the budget at least, so empty files still evict."""
+
+_FRESH_FILE_NS = 2_000_000_000
+"""A file modified this recently is parsed every time and never kept.
+
+File timestamps tick coarsely, so a rewrite inside the tick of an earlier read can
+leave the same size and mtime. Past this age no such rewrite can still be hiding.
+"""
+
+_parsed: OrderedDict[str, tuple[_FileKey, Any]] = OrderedDict()
+_parsed_bytes = 0
+_parsed_lock = threading.Lock()
+
+
+def yaml_load_cached(source: str | Path) -> Any:
+    """Load YAML from a file, reusing the last parse while the file is unchanged.
+
+    A file counts as unchanged while its inode, mtime, ctime and size all match the
+    read that was kept. Files up to 16 KiB are kept, 4 MiB of them in all.
+    :func:`yaml_dump` replaces the file, which changes the inode, so a write through
+    this module is seen on the next call, and so is any other writer.
+    Each caller gets its own copy, so mutating the result never reaches the cache.
+
+    Args:
+        source: Path to the YAML file
+
+    Returns:
+        Parsed YAML content
+
+    Raises:
+        YAMLError: If the YAML is invalid
+        FileNotFoundError: If the file doesn't exist
+    """
+    global _parsed_bytes
+    path = Path(source)
+    name = str(path)
+    stat = path.stat()
+    key = (stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
+    with _parsed_lock:
+        hit = _parsed.get(name)
+        if hit is not None and hit[0] == key:
+            _parsed.move_to_end(name)
+            return copy.deepcopy(hit[1])
+    data = yaml_load(path)
+    changed_ns = max(stat.st_mtime_ns, stat.st_ctime_ns)
+    if stat.st_size > _PARSED_MAX_FILE_BYTES or time.time_ns() - changed_ns <= _FRESH_FILE_NS:
+        return data
+    after = path.stat()
+    if (after.st_ino, after.st_mtime_ns, after.st_ctime_ns, after.st_size) != key:
+        return data  # Replaced mid-read: the parse may not be the file the key describes.
+    if b"&" in path.read_bytes():
+        return data  # An anchor lets aliases expand a small file far past its charged size.
+    with _parsed_lock:
+        old = _parsed.pop(name, None)
+        if old is not None:
+            _parsed_bytes -= _charge(old[0])
+        _parsed[name] = (key, copy.deepcopy(data))
+        _parsed_bytes += _charge(key)
+        while _parsed_bytes > _PARSED_MAX_BYTES:
+            _, (evicted, _) = _parsed.popitem(last=False)
+            _parsed_bytes -= _charge(evicted)
+    return data
+
+
+def _charge(key: _FileKey) -> int:
+    return max(key[3], _PARSED_MIN_CHARGE)
 
 
 def yaml_load_string(content: str) -> Any:
