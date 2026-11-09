@@ -30,7 +30,7 @@ def _spec(hunt_id: str, interval: int = 2) -> HuntSpec:
 
 
 def test_due_count_counts_exactly_the_runnable_hunts(ch_client, dfe_db):
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()  # hunt_lease / hunt_watermark / hunt_state (the LEFT JOINs)
 
     server_now = int(ch_client.query("SELECT toInt64(now())").result_rows[0][0])
@@ -52,7 +52,7 @@ def test_due_count_counts_exactly_the_runnable_hunts(ch_client, dfe_db):
 
 def test_due_count_is_zero_when_all_caught_up(ch_client, dfe_db):
     """Scale-to-zero: when every hunt's fire is completed, the backlog is 0."""
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     server_now = int(ch_client.query("SELECT toInt64(now())").result_rows[0][0])
 
@@ -72,7 +72,7 @@ def test_a_hunt_removed_then_added_back_is_scheduled_again(ch_client, dfe_db):
     filled in by the server, so without the insert settings the tombstone wins. A hunt
     disabled and enabled again leaves and rejoins the specs, so it is this sequence.
     """
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     specs = {h: _spec(h) for h in ("kept", "back")}
     publish_schedule(ch_client, dfe_db, specs)

@@ -59,7 +59,7 @@ def test_loaded_hunt_runs_windowed_insert_and_is_attributed(ch_client, dfe_db, t
     spec = specs["scratch_hunt"]
     assert spec.interval_seconds == 60
 
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     # Pin the window to [100, 200) by pre-setting the watermark -> deterministic.
     coord.set_watermark("scratch_hunt", 100)
@@ -96,7 +96,7 @@ def test_loaded_hunt_runs_windowed_insert_and_is_attributed(ch_client, dfe_db, t
 def test_a_hunt_with_no_query_fails_and_leaves_its_watermark_where_it_was(ch_client, dfe_db):
     # A hunt whose rules compiled to nothing has not run. Advancing the watermark
     # would move it past a window nothing scanned, and every fire would look clean.
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     from dfe_engine.hunts.hunt_spec import HuntSpec
     from dfe_engine.hunts.worker import EmptyHuntQuery
@@ -141,7 +141,7 @@ def test_daemon_loop_fires_a_loaded_hunt_once_against_live_ch(ch_client, dfe_db,
     specs = load_specs(tmp_path)
     assert specs["live_hunt"].interval_seconds == 2
 
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     # materialise the KEDA schedule + confirm the hunt is due before we run.
     publish_schedule(ch_client, dfe_db, specs)

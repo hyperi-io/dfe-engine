@@ -218,7 +218,7 @@ def test_a_sigmahq_rule_runs_as_a_hunt_over_the_sigma_view(ch_client, dfe_db, si
             column_names=["_timestamp_load", "_timestamp", "_org_id", "_json"],
         )
     specs = load_specs(tmp_path / "hunts", rules_dir=tmp_path / "rules")
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
 
     assert HuntRunner(coord, HuntWorker(ch_client, coord), specs, cap=8).tick(fire + 1) == 1

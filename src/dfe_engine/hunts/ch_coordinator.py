@@ -14,31 +14,40 @@ removes the PG dependency which would otherwise make hunts mission-critical on a
 convenience store, and keeps the runner working on a non-k8s single deploy
 (dfe-docker) where the only thing guaranteed present is ClickHouse.
 
-CH has no row locks / SELECT ... FOR UPDATE, so the per-hunt claim is optimistic
-(insert-and-resolve): insert a claim, wait a short settle window, re-read, and the
-latest claim (max claimed, then min owner) is the winner. The latest claim is also
-the row a merge keeps, since hunt_lease collapses to one row per hunt, so the answer
-does not change when parts merge. The claim INSERT itself checks the hunt's newest
-lease row and inserts nothing when another owner's is live, so a worker that read
-the hunt as free cannot then steal it from one that claimed it in the meantime.
+CH has no row locks / SELECT ... FOR UPDATE, so the per-hunt claim follows the
+shared lease discipline (:mod:`dfe_engine.clickhouse.lease`): read the hunt free,
+insert a claim, wait a settle, and keep the claim only if it landed within that
+settle and is still the latest row. Lease writes reach a majority of replicas and
+lease reads go through ``FINAL`` on a replica holding them all, so every worker names
+the same winner, before and after a merge. Exclusion has to hold, because no INSERT
+... SELECT is deduplicated on 26.3 and a window run twice writes its rows twice.
 
-A single worker (the dfe-docker case and most deploys) is exactly-once. With many
-workers, two claims can still both land if their conditional inserts run at the
-same moment on the server; the settle window gives both the same winner as long as
-both inserts commit inside it. A duplicate run is NOT absorbed: on 26.3 no INSERT
-... SELECT is deduplicated, so the same window run twice writes its rows twice. The
-watermark gives crash-safe incremental resume, and
-hunt_state carries the too_aggressive / overrun signal for the UI.
+hunt_lease keeps one row per hunt, so a later row can hide a holder. Each claim also
+writes a marker under ``<hunt_id>#claim/<owner>``, which no other worker's row
+collapses into, and a live marker blocks every other worker's claim.
+
+A claim that misses has its marker ended and its row left in place, never released,
+since that row can sit over a rival that stood. A row whose marker has ended holds
+nothing, so the next poll by any worker can claim the hunt unless a rival's live
+marker still holds it.
 
 A claimed run is held under :meth:`ChCoordinator.held`, which renews the lease on its
-own thread every third of the lease, so a run longer than the lease is never
-claimable by a peer while it executes. A renewal and a release land only while this
-worker's row for that fire is still the newest, so an owner whose lease ran out
-cannot extend or free the lease a successor took. The renewals share the runner's
-client, which must therefore not use a ClickHouse session.
+own thread every third of the lease, so a run longer than the lease stays held while
+its renewals land. A renewal lands only while this worker's marker for that fire
+has more than a settle and a quorum wait left on the server's clock, and a release
+frees the hunt only while this worker's row for that fire is the newest. So an owner
+whose lease ran out cannot extend or free the lease a successor took.
+
+The lease does not fence the run's own writes: a run whose renewals stop landing
+keeps writing after a peer may have claimed the hunt. The renewals share the
+runner's client, which must therefore not use a ClickHouse session.
+
+The watermark gives crash-safe incremental resume, and hunt_state carries the
+too_aggressive / overrun signal for the UI.
 
 Tables (all ReplacingMergeTree; the first three bounded to ~1 row/hunt after merge):
-  hunt_lease     - who holds a hunt now, until when (mutual exclusion + cap input)
+  hunt_lease     - who holds a hunt now, until when (mutual exclusion + cap input),
+                   plus one marker row per hunt and claiming worker
   hunt_watermark - last committed window end per hunt (incremental resume)
   hunt_state     - overrun_count / too_aggressive (UI signal)
   hunt_run       - one row per FIRE: an operator's run-now request, then what that
@@ -59,9 +68,23 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.clickhouse.inserts import keep_identical_rows
+from dfe_engine.clickhouse.lease import (
+    QUORUM_TIMEOUT_MS,
+    READ_SETTINGS,
+    SETTLE_SECONDS,
+    SlowClaimError,
+    is_quorum_refusal,
+    settle_claim,
+    write_settings,
+)
 from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.hunts.schedule import due_count
 from dfe_engine.schema.require import require_objects
+
+_LEASE_COLUMNS = ["hunt_id", "owner", "fire", "lease_until"]
+
+# A hunt id never holds "#", so a marker's key never names a hunt.
+_MARKER = "#claim/"
 
 # The coordination objects this worker reads and writes, by manifest id. The
 # engine's schema phase creates them; nothing here does.
@@ -103,9 +126,16 @@ class ChCoordinator:
             NEVER hardcode 'dfe' here - the caller passes the resolved name.
         worker_id: this worker's stable id, used as the lease owner.
         lease_seconds: how long a claim is held before it becomes reclaimable.
-        settle_seconds: the insert-and-resolve settle window.
+        settle_seconds: how soon a claim must land after its free read, and how long
+            it waits before the re-read.
         clock: injectable epoch-seconds source (defaults to time.time).
         sleep: injectable sleep for the settle window (defaults to time.sleep).
+        monotonic: injectable clock a claim's landing is timed on (defaults to
+            time.monotonic).
+
+    Raises:
+        ValueError: No database was named, or the lease is too short to renew: a
+            renewal comes every third of it and needs a settle and a quorum wait left.
     """
 
     def __init__(
@@ -115,12 +145,21 @@ class ChCoordinator:
         *,
         worker_id: str = "worker-0",
         lease_seconds: int = 300,
-        settle_seconds: float = 0.75,
+        settle_seconds: float = SETTLE_SECONDS,
         clock: Callable[[], float] = time.time,
         sleep: Callable[[float], None] = time.sleep,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         if not database:
             raise ValueError("ChCoordinator requires an explicit data database")
+        # A renewal held up by its quorum wait must still land before the marker lapses.
+        margin = settle_seconds + QUORUM_TIMEOUT_MS / 1000
+        if lease_seconds <= 3 * margin:
+            raise ValueError(
+                f"a {lease_seconds}s hunt lease never renews: renewals come every third of "
+                f"it and each needs {margin:g}s left, so it must exceed {3 * margin:g}s"
+            )
+        self._margin = margin
         self._ch = ch
         self._db = database
         self._qdb = quote_identifier(database)
@@ -129,6 +168,7 @@ class ChCoordinator:
         self._settle = settle_seconds
         self._clock = clock
         self._sleep = sleep
+        self._monotonic = monotonic
         self._lease_settings: dict[str, Any] | None = None
 
     @property
@@ -161,16 +201,22 @@ class ChCoordinator:
     # ---- lease (claim) ------------------------------------------------
 
     def current_lease(self, hunt_id: str) -> Lease | None:
-        """The current lease = the deterministic latest claim for the hunt.
+        """The current lease: the hunt's latest row, read through ``FINAL``.
 
-        Ordered by (claimed DESC, owner ASC) so two concurrent readers agree on the
-        single winner. It is also the row a merge keeps, so the answer holds whatever
-        the table's merge state.
+        ``FINAL`` keeps the row a merge keeps, so every reader names the same claim of a
+        same-millisecond tie, before and after that merge. A replica missing an
+        acknowledged lease write refuses the read rather than answer without it. A row
+        whose owner's marker for that fire has ended reads as released, lease_until 0.
         """
         rows = self._ch.query(
-            f"SELECT owner, fire, lease_until FROM {self._qdb}.hunt_lease "  # noqa: S608 - quoted configured database; values bound
-            "WHERE hunt_id = {h:String} ORDER BY claimed DESC, owner ASC LIMIT 1",
-            parameters={"h": hunt_id},
+            "SELECT l.owner, l.fire, if(m.owner = l.owner AND m.fire = l.fire, "  # noqa: S608 - quoted configured database; values bound
+            "least(l.lease_until, m.lease_until), 0) "
+            f"FROM (SELECT owner, fire, lease_until FROM {self._qdb}.hunt_lease FINAL "
+            "WHERE hunt_id = {h:String}) AS l "
+            f"LEFT JOIN (SELECT owner, fire, lease_until FROM {self._qdb}.hunt_lease FINAL "
+            "WHERE startsWith(hunt_id, {prefix:String})) AS m ON m.owner = l.owner",
+            parameters={"h": hunt_id, "prefix": f"{hunt_id}{_MARKER}"},
+            settings=READ_SETTINGS,
         ).result_rows
         if not rows:
             return None
@@ -181,89 +227,178 @@ class ChCoordinator:
             lease_until=int(rows[0][2]),
         )
 
-    def _keep_lease_rows(self) -> dict[str, Any]:
+    def _lease_writes(self) -> dict[str, Any]:
         """Insert settings for every lease write, read from the server once.
 
         A re-claim or a release of the same fire repeats an earlier row, and it has to
         land. A Replicated table drops an INSERT VALUES identical to a recent one, and
-        an older server (24.8) drops an identical INSERT ... SELECT too.
+        an older server (24.8) drops an identical INSERT ... SELECT too. Every write
+        also waits for the lease quorum.
         """
         if self._lease_settings is None:
-            self._lease_settings = keep_identical_rows(self._ch)
+            self._lease_settings = {
+                **keep_identical_rows(self._ch),
+                **write_settings(self._ch, database=self._db, table="hunt_lease"),
+            }
         return self._lease_settings
 
-    def _insert_if_still_ours(self, hunt_id: str, fire: int, lease_until: int) -> None:
-        """Write a lease row for *fire* only while this worker's row for it is the newest.
+    def _marker(self, hunt_id: str) -> str:
+        """The key of this worker's marker on *hunt_id*."""
+        return f"{hunt_id}{_MARKER}{self._worker_id}"
 
-        The check and the insert are one statement, so an owner whose lease ran out
-        and was claimed by a peer writes nothing over the peer's lease.
-        """
-        self._ch.command(
-            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database; values bound
-            "SELECT {h:String}, {o:String}, {f:Int64}, {u:Int64} "
-            "WHERE (SELECT count() FROM ("
-            f"SELECT owner, fire FROM {self._qdb}.hunt_lease "
-            "WHERE hunt_id = {h:String} ORDER BY claimed DESC, owner ASC LIMIT 1"
-            ") WHERE owner = {o:String} AND fire = {f:Int64}) = 1",
-            parameters={"h": hunt_id, "o": self._worker_id, "f": fire, "u": lease_until},
-            settings=self._keep_lease_rows(),
+    def _write_lease(self, rows: list[list[Any]]) -> None:
+        """Write *rows* to hunt_lease in one insert."""
+        self._ch.insert(
+            "hunt_lease",
+            rows,
+            column_names=_LEASE_COLUMNS,
+            database=self._db,
+            settings=self._lease_writes(),
         )
 
-    def _insert_claim_if_free(self, hunt_id: str, fire: int, now: int) -> None:
-        """Insert this worker's claim unless another owner's newest lease row is live.
+    def _end_marker(self, hunt_id: str, fire: int) -> None:
+        """Mark this worker's claim on *hunt_id* as holding nothing, leaving its row alone."""
+        self._write_lease([[self._marker(hunt_id), self._worker_id, fire, 0]])
 
-        The check and the insert are one statement, so the hunt is re-read at the
-        moment the claim would land rather than when this worker last looked.
-        """
-        self._ch.command(
-            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database; values bound
-            "SELECT {h:String}, {o:String}, {f:Int64}, {u:Int64} "
-            "WHERE (SELECT count() FROM ("
-            f"SELECT owner, lease_until FROM {self._qdb}.hunt_lease "
-            "WHERE hunt_id = {h:String} ORDER BY claimed DESC, owner ASC LIMIT 1"
-            ") WHERE lease_until > {now:Int64} AND owner != {o:String}) = 0",
-            parameters={
-                "h": hunt_id,
-                "o": self._worker_id,
-                "f": fire,
-                "u": now + self._lease_seconds,
-                "now": now,
-            },
-            settings=self._keep_lease_rows(),
-        )
+    def _end_marker_quietly(self, hunt_id: str, fire: int) -> None:
+        """End this worker's marker, or log that peers wait out its lease when that write fails."""
+        try:
+            self._end_marker(hunt_id, fire)
+        except Exception as exc:  # the claim already missed, so a failed end only delays peers
+            logger.warning(
+                "missed hunt claim not marked ended; peers wait out its lease",
+                hunt_id=hunt_id,
+                fire=fire,
+                error=str(exc),
+            )
+
+    def _peer_holds(self, hunt_id: str, now: int) -> bool:
+        """Whether another worker's marker on *hunt_id* is live at *now*."""
+        rows = self._ch.query(
+            f"SELECT count() FROM {self._qdb}.hunt_lease FINAL "  # noqa: S608 - quoted configured database; values bound
+            "WHERE startsWith(hunt_id, {prefix:String}) AND owner != {o:String} "
+            "AND lease_until > {now:Int64}",
+            parameters={"prefix": f"{hunt_id}{_MARKER}", "o": self._worker_id, "now": now},
+            settings=READ_SETTINGS,
+        ).result_rows
+        return bool(rows) and int(rows[0][0]) > 0
+
+    def _own_marker(self, hunt_id: str) -> tuple[int, int] | None:
+        """This worker's marker on *hunt_id* as ``(fire, lease_until)``, 0 once ended."""
+        rows = self._ch.query(
+            f"SELECT fire, lease_until FROM {self._qdb}.hunt_lease FINAL "  # noqa: S608 - quoted configured database; values bound
+            "WHERE hunt_id = {m:String}",
+            parameters={"m": self._marker(hunt_id)},
+            settings=READ_SETTINGS,
+        ).result_rows
+        return (int(rows[0][0]), int(rows[0][1])) if rows else None
+
+    def _latest_is_ours(self, hunt_id: str) -> bool:
+        """Whether the hunt's latest row is this worker's."""
+        lease = self.current_lease(hunt_id)
+        return lease is not None and lease.owner == self._worker_id
 
     def try_claim(self, hunt_id: str, fire: int, now: int | None = None) -> bool:
-        """Claim a hunt for this worker (insert-and-resolve). True if we own it.
+        """Claim a hunt for this worker under the shared lease discipline. True if we own it.
 
-        Returns False if another worker holds an active lease (an overrun - the
-        caller records it and does NOT run) or if we lost the settle-window race.
+        Returns False if another worker holds an active lease (an overrun - the caller
+        records it and does NOT run), if we lost the settle race, or if our claim landed
+        a settle or more after its free read. That last claim holds nothing once its
+        marker has ended, so the next poll claims the hunt again.
         """
         now = self.now() if now is None else now
+        # Read once per coordinator, before the clock starts, so it never makes a claim slow.
+        self._lease_writes()
         current = self.current_lease(hunt_id)
         if current is not None and current.lease_until > now and current.owner != self._worker_id:
             return False  # someone else is running this hunt -> never double-run
-        self._insert_claim_if_free(hunt_id, fire, now)
-        self._sleep(self._settle)
-        winner = self.current_lease(hunt_id)
-        return winner is not None and winner.owner == self._worker_id
+        # Timed from the last free read, the one a rival's claim must have landed after.
+        started = self._monotonic()
+        if self._peer_holds(hunt_id, now):
+            return False
+        until = now + self._lease_seconds
+        claim = [hunt_id, self._worker_id, fire, until]
+        marker = [self._marker(hunt_id), self._worker_id, fire, until]
+        try:
+            self._write_lease([claim, marker])
+        except Exception as exc:
+            if is_quorum_refusal(exc):
+                self._end_marker_quietly(hunt_id, fire)
+            raise
+        try:
+            return settle_claim(
+                started,
+                stands=lambda: self._latest_is_ours(hunt_id),
+                end=lambda: self._end_marker_quietly(hunt_id, fire),
+                settle=self._settle,
+                monotonic=self._monotonic,
+                sleep=self._sleep,
+            )
+        except SlowClaimError as exc:
+            logger.warning(
+                f"hunt claim landed {exc.landed:.3f}s after its free read, too late to stand",
+                hunt_id=hunt_id,
+                fire=fire,
+                landed_seconds=round(exc.landed, 3),
+            )
+            return False
 
     def renew(self, hunt_id: str, fire: int, now: int | None = None) -> bool:
-        """Extend our claim on *fire* by a full lease. False once a peer holds the hunt."""
+        """Extend our claim on *fire* by a full lease from *now* while our marker has time left.
+
+        The check runs on the server's clock when the statement starts, and needs more
+        than a settle and a quorum wait left. A renewal delayed in transit, or held up by
+        its quorum, cannot land after the marker lapsed and a peer claimed. The claim row
+        is written again beside the marker, so it is the latest row once more after a
+        missed claim landed over it.
+
+        Returns:
+            Whether our marker now carries this renewal. False once it had lapsed, had
+            too little left, or had ended, when a peer may hold the hunt.
+        """
         now = self.now() if now is None else now
-        self._insert_if_still_ours(hunt_id, fire, now + self._lease_seconds)
-        lease = self.current_lease(hunt_id)
-        return lease is not None and lease.owner == self._worker_id and lease.fire == fire
+        until = now + self._lease_seconds
+        self._ch.command(
+            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database; values bound
+            "SELECT arrayJoin([{h:String}, {m:String}]), {o:String}, {f:Int64}, {u:Int64} "
+            f"WHERE (SELECT count() FROM {self._qdb}.hunt_lease FINAL "
+            "WHERE hunt_id = {m:String} AND fire = {f:Int64} "
+            "AND lease_until > toUnixTimestamp(now64()) + {margin:Float64}) = 1",
+            parameters={
+                "h": hunt_id,
+                "m": self._marker(hunt_id),
+                "o": self._worker_id,
+                "f": fire,
+                "u": until,
+                "margin": self._margin,
+            },
+            settings={**self._lease_writes(), **READ_SETTINGS},
+        )
+        return self._own_marker(hunt_id) == (fire, until)
 
     def release(self, hunt_id: str, fire: int) -> None:
-        """Release our claim (lease_until=0) so the slot frees immediately, if it is still ours."""
-        self._insert_if_still_ours(hunt_id, fire, 0)
+        """Free the hunt if our row for *fire* is still the newest, and end our marker for it.
+
+        The check and the insert are one statement, so an owner whose lease ran out and
+        was claimed by a peer writes nothing over the peer's lease.
+        """
+        self._ch.command(
+            f"INSERT INTO {self._qdb}.hunt_lease (hunt_id, owner, fire, lease_until) "  # noqa: S608 - quoted configured database; values bound
+            "SELECT {h:String}, {o:String}, {f:Int64}, 0 "
+            f"WHERE (SELECT count() FROM {self._qdb}.hunt_lease FINAL "
+            "WHERE hunt_id = {h:String} AND owner = {o:String} AND fire = {f:Int64}) = 1",
+            parameters={"h": hunt_id, "o": self._worker_id, "f": fire},
+            settings={**self._lease_writes(), **READ_SETTINGS},
+        )
+        self._end_marker(hunt_id, fire)
 
     @contextmanager
     def held(self, hunt_id: str, fire: int) -> Generator[None]:
         """Keep our claim on *fire* live while the body runs, then release it.
 
         Renewals run on their own thread every third of the lease, so one statement
-        outlasting the lease does not leave the hunt claimable.
+        outlasting the lease does not leave the hunt claimable while they land. Once
+        they stop landing the body runs on unfenced, and a peer may claim the hunt.
         """
         stop = threading.Event()
         renewer = threading.Thread(
@@ -281,7 +416,7 @@ class ChCoordinator:
             self.release(hunt_id, fire)
 
     def _keep_renewing(self, hunt_id: str, fire: int, stop: threading.Event) -> None:
-        """Renew until *stop* is set or a peer holds the hunt, logging a failing streak once."""
+        """Renew until *stop* is set or our marker has lapsed, logging a failing streak once."""
         failing = False
         while not stop.wait(self._lease_seconds / 3):
             try:
@@ -298,7 +433,7 @@ class ChCoordinator:
             failing = False
             if not still_ours:
                 logger.error(
-                    "hunt lease taken by another runner mid-run",
+                    "hunt lease lapsed mid-run; another runner may claim the hunt",
                     hunt_id=hunt_id,
                     fire=fire,
                     owner=self._worker_id,
@@ -306,13 +441,16 @@ class ChCoordinator:
                 return
 
     def active_count(self, now: int | None = None) -> int:
-        """Hunts with an active lease right now - the input to the global cap."""
+        """Hunts with a live claim marker right now - the input to the global cap.
+
+        A dropped claim's row is not counted, since its ended marker holds nothing.
+        """
         now = self.now() if now is None else now
         rows = self._ch.query(
-            "SELECT countIf(lu > {now:Int64}) FROM ("  # noqa: S608 - quoted configured database; values bound
-            f"SELECT hunt_id, argMax(lease_until, claimed) AS lu "
-            f"FROM {self._qdb}.hunt_lease GROUP BY hunt_id)",
-            parameters={"now": now},
+            "SELECT uniqExact(substring(hunt_id, 1, position(hunt_id, {marker:String}) - 1)) "  # noqa: S608 - quoted configured database; values bound
+            f"FROM {self._qdb}.hunt_lease FINAL "
+            "WHERE position(hunt_id, {marker:String}) > 0 AND lease_until > {now:Int64}",
+            parameters={"now": now, "marker": _MARKER},
         ).result_rows
         return int(rows[0][0]) if rows else 0
 

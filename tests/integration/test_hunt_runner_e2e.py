@@ -53,8 +53,8 @@ def _coord(ch, db, worker_id="w1", clock=None):
         ch,
         database=db,
         worker_id=worker_id,
-        settle_seconds=0.0,
         sleep=lambda _s: None,
+        monotonic=lambda: 0.0,
         **({"clock": clock} if clock is not None else {}),
     )
 
@@ -171,8 +171,8 @@ def test_a_fire_a_peer_finishes_mid_tick_is_not_run_again(ch_client, dfe_db, tmp
         ch_client,
         database=dfe_db,
         worker_id="runner-b",
-        settle_seconds=0.0,
         sleep=lambda _s: None,
+        monotonic=lambda: 0.0,
         before_first_lease_read=lambda: ran_a.append(runner_a.tick(now)),
     )
     runner_b = HuntRunner(coord_b, HuntWorker(ch_client, coord_b), specs, cap=8)

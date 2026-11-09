@@ -89,7 +89,7 @@ def test_scheduling_cadence_and_incremental_resume(ch_client, dfe_db):
     )
     ch_client.command(f"CREATE TABLE `{db}`.tgt (ev String) ENGINE = MergeTree ORDER BY ev")
     coord = ChCoordinator(
-        ch_client, database=db, worker_id="w", settle_seconds=0.0, sleep=lambda _s: None
+        ch_client, database=db, worker_id="w", sleep=lambda _s: None, monotonic=lambda: 0.0
     )
     coord.ensure_schema()
     worker = HuntWorker(ch_client, coord)
@@ -167,6 +167,7 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, dfe_db):
     # single tick always terminates - no free-running loop that could zombie past the
     # fixture's DROP DATABASE. Daemon threads are the backstop if a tick somehow hangs.
     start = threading.Barrier(n)
+    settle, lease = 1.0, 34  # the shortest lease a 1s settle allows
 
     def pod(k: int) -> None:
         wid = f"w{k}"
@@ -174,7 +175,12 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, dfe_db):
         try:
             client = clickhouse_connect.get_client(**ch_params)
             coord = ChCoordinator(
-                client, database=db, worker_id=wid, settle_seconds=0.2, sleep=time.sleep
+                client,
+                database=db,
+                worker_id=wid,
+                lease_seconds=lease,
+                settle_seconds=settle,
+                sleep=time.sleep,
             )
             worker = HuntWorker(client, coord)
             # Round 1: claim my OWN distinct hunt, hold at the barrier until all N have.
@@ -198,9 +204,33 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, dfe_db):
         t.join(timeout=30)
     assert not any(t.is_alive() for t in threads), "pod threads did not terminate"
 
+    def ran_counts() -> dict[str, int]:
+        rows = ch_client.query(
+            f"SELECT hunt_id, count() FROM `{db}`.runs GROUP BY hunt_id"
+        ).result_rows
+        return {r[0]: int(r[1]) for r in rows}
+
+    # A claim dropped for landing late holds its hunt until it lapses, then a later tick owes it.
+    late = ChCoordinator(
+        ch_client,
+        database=db,
+        worker_id="w-late",
+        lease_seconds=lease,
+        settle_seconds=settle,
+        sleep=time.sleep,
+    )
+    late_runner = HuntRunner(late, HuntWorker(ch_client, late), specs, cap=m)
+    deadline = time.monotonic() + 3 * (lease + 10)
+    while held := sorted(set(specs) - set(ran_counts())):
+        assert time.monotonic() < deadline, f"hunts still held after three leases: {held}"
+        leases = [late.current_lease(hid) for hid in held]
+        if any(row is not None and row.lease_until > late.now() for row in leases):
+            time.sleep(1)
+            continue
+        late_runner.tick(now)
+
     # exactly-once: every hunt ran exactly once - none lost, none double-run
-    rows = ch_client.query(f"SELECT hunt_id, count() FROM `{db}`.runs GROUP BY hunt_id").result_rows
-    counts = {r[0]: int(r[1]) for r in rows}
+    counts = ran_counts()
     assert len(counts) == m, f"not all hunts ran: {sorted(counts)}"
     assert all(c == 1 for c in counts.values()), f"double-run detected: {counts}"
     assert _count(ch_client, f"`{db}`.runs") == m
@@ -214,7 +244,7 @@ def test_global_cap_is_never_exceeded(ch_client, dfe_db):
     """The runner runs nothing when the global cap is already saturated."""
     db = dfe_db
     coord = ChCoordinator(
-        ch_client, database=db, worker_id="w", settle_seconds=0.0, sleep=lambda _s: None
+        ch_client, database=db, worker_id="w", sleep=lambda _s: None, monotonic=lambda: 0.0
     )
     coord.ensure_schema()
     other = ChCoordinator(
@@ -222,8 +252,8 @@ def test_global_cap_is_never_exceeded(ch_client, dfe_db):
         database=db,
         worker_id="other",
         lease_seconds=100_000,
-        settle_seconds=0.0,
         sleep=lambda _s: None,
+        monotonic=lambda: 0.0,
     )
     now, cap = 1_000_000, 3
     # another worker holds `cap` active leases -> the pool is saturated
