@@ -326,6 +326,37 @@ class TestList:
         for account in store.list():
             assert isinstance(account, Account)
 
+    @pytest.mark.parametrize("read", ["list", "scan"])
+    def test_an_account_deleted_mid_read_is_absent_not_an_error(self, store, monkeypatch, read):
+        for name in ("alice", "bob", "carol"):
+            store.create(name, "pw")
+        real_read = AccountStore._read
+
+        def delete_bob_as_it_is_read(self, path):
+            if path.stem == "bob":
+                path.unlink()
+            return real_read(self, path)
+
+        monkeypatch.setattr(AccountStore, "_read", delete_bob_as_it_is_read)
+
+        assert [a.username for a in getattr(store, read)()] == ["alice", "carol"]
+
+    def test_scan_reads_a_file_only_when_the_caller_asks_for_it(self, store, monkeypatch):
+        for name in ("alice", "bob", "carol"):
+            store.create(name, "pw")
+        reads: list[str] = []
+        real_read = AccountStore._read
+        monkeypatch.setattr(
+            AccountStore,
+            "_read",
+            lambda self, path: reads.append(path.stem) or real_read(self, path),
+        )
+
+        first = next(store.scan())
+
+        assert first.username == "alice"
+        assert reads == ["alice"]
+
 
 # ---------------------------------------------------------------------------
 # AccountStore.verify_password
