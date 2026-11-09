@@ -460,7 +460,7 @@ class TestYamlLoadCached:
             path = tmp_path / f"{name}.yaml"
             path.write_text(f"k: {name}\n", encoding="utf-8")
             paths.append(path)
-        monkeypatch.setattr(yaml_utils, "_PARSED_MAX_BYTES", 2 * paths[0].stat().st_size)
+        monkeypatch.setattr(yaml_utils, "_PARSED_MAX_BYTES", 2 * yaml_utils._PARSED_MIN_CHARGE)
         for path in paths:
             yaml_load_cached(path)
         parsed = self._parses(monkeypatch)
@@ -470,6 +470,35 @@ class TestYamlLoadCached:
 
         assert parsed == [str(paths[0])]
         assert yaml_utils._parsed_bytes <= yaml_utils._PARSED_MAX_BYTES
+
+    def test_empty_files_still_count_against_the_budget(self, tmp_path, monkeypatch):
+        import dfe_engine.yaml_utils as yaml_utils
+
+        monkeypatch.setattr(yaml_utils, "_parsed", type(yaml_utils._parsed)())
+        monkeypatch.setattr(yaml_utils, "_parsed_bytes", 0)
+        monkeypatch.setattr(yaml_utils, "_PARSED_MAX_BYTES", 4 * yaml_utils._PARSED_MIN_CHARGE)
+        for n in range(20):
+            path = tmp_path / f"{n}.yaml"
+            path.write_text("", encoding="utf-8")
+            yaml_load_cached(path)
+
+        assert len(yaml_utils._parsed) == 4
+
+    def test_a_file_replaced_during_the_parse_is_not_kept(self, tmp_path, monkeypatch):
+        import dfe_engine.yaml_utils as yaml_utils
+
+        path = tmp_path / "a.yaml"
+        path.write_text("k: small\n", encoding="utf-8")
+        load = yaml_utils.yaml_load
+
+        def replace_then_load(source):
+            yaml_dump({"k": "x" * 100}, path)
+            return load(source)
+
+        monkeypatch.setattr(yaml_utils, "yaml_load", replace_then_load)
+        assert yaml_load_cached(path) == {"k": "x" * 100}
+
+        assert str(path) not in yaml_utils._parsed
 
     def test_a_recently_written_file_is_never_kept(self, tmp_path, monkeypatch):
         import dfe_engine.yaml_utils as yaml_utils

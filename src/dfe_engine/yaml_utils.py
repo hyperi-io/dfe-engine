@@ -109,6 +109,9 @@ A parse holds about 12 times its source, so this keeps the cache near 50 MiB.
 _PARSED_MAX_FILE_BYTES = 16 * 1024
 """Larger files are parsed every time."""
 
+_PARSED_MIN_CHARGE = 512
+"""What each kept file counts against the budget at least, so empty files still evict."""
+
 _FRESH_FILE_NS = 2_000_000_000
 """A file modified this recently is parsed every time and never kept.
 
@@ -152,17 +155,25 @@ def yaml_load_cached(source: str | Path) -> Any:
             return copy.deepcopy(hit[1])
     data = yaml_load(path)
     changed_ns = max(stat.st_mtime_ns, stat.st_ctime_ns)
-    if stat.st_size <= _PARSED_MAX_FILE_BYTES and time.time_ns() - changed_ns > _FRESH_FILE_NS:
-        with _parsed_lock:
-            old = _parsed.pop(name, None)
-            if old is not None:
-                _parsed_bytes -= old[0][3]
-            _parsed[name] = (key, copy.deepcopy(data))
-            _parsed_bytes += stat.st_size
-            while _parsed_bytes > _PARSED_MAX_BYTES:
-                _, (evicted, _) = _parsed.popitem(last=False)
-                _parsed_bytes -= evicted[3]
+    if stat.st_size > _PARSED_MAX_FILE_BYTES or time.time_ns() - changed_ns <= _FRESH_FILE_NS:
+        return data
+    after = path.stat()
+    if (after.st_ino, after.st_mtime_ns, after.st_ctime_ns, after.st_size) != key:
+        return data  # Replaced mid-read: the parse may not be the file the key describes.
+    with _parsed_lock:
+        old = _parsed.pop(name, None)
+        if old is not None:
+            _parsed_bytes -= _charge(old[0])
+        _parsed[name] = (key, copy.deepcopy(data))
+        _parsed_bytes += _charge(key)
+        while _parsed_bytes > _PARSED_MAX_BYTES:
+            _, (evicted, _) = _parsed.popitem(last=False)
+            _parsed_bytes -= _charge(evicted)
     return data
+
+
+def _charge(key: _FileKey) -> int:
+    return max(key[3], _PARSED_MIN_CHARGE)
 
 
 def yaml_load_string(content: str) -> Any:
