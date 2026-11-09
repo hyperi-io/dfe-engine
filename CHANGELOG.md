@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.84](https://github.com/hyperi-io/dfe-engine/compare/v1.22.83...v1.22.84) (2026-11-09)
+
+### Bug Fixes
+
+* **config:** reject writes with nulls the app rejects ([#1098](https://github.com/hyperi-io/dfe-engine/issues/1098)) ([2ed5d2e](https://github.com/hyperi-io/dfe-engine/commit/2ed5d2e9d33ca67c17ede0085149e8bc4cf9be28))
+
 ## [1.22.83](https://github.com/hyperi-io/dfe-engine/compare/v1.22.82...v1.22.83) (2026-11-09)
 
 ### Bug Fixes
