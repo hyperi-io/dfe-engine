@@ -2216,22 +2216,39 @@ class TestEveryOverlayWriteRefusesANullTheAppRefuses:
             crud.set_key(
                 "helmvars", self.OVERLAY, "config.routing.source_to_table.edr", None, "alice"
             )
+        # The ApplicationSet deploys a hand-named overlay too, so its deploy block decides.
+        with pytest.raises(contract.RefusedNullError):
+            crud.put(
+                "helmvars", "custom-loader-values", self._overlay({"default_db": None}), "alice"
+            )
 
         assert refused.value.paths == ["config.routing.default_db"]
         assert crud.head_revision() == before
         assert crud.get("helmvars", self.OVERLAY)["config"]["routing"] == {"default_db": "dfe"}
 
     @pytest.mark.parametrize(
-        ("name", "routing"),
+        ("name", "doc"),
         [
-            (OVERLAY, {"org_id_field": None}),
-            ("dfe-loader-default-parked", {"default_db": None}),
-            ("not-an-app-values", {"default_db": None}),
+            (
+                OVERLAY,
+                {
+                    "deploy": {"service": "dfe-loader"},
+                    "config": {"routing": {"org_id_field": None}},
+                },
+            ),
+            (
+                "dfe-loader-default-parked",
+                {"deploy": {"service": "dfe-loader"}, "config": {"routing": {"default_db": None}}},
+            ),
+            (
+                "platform-values",
+                {"deploy": {"service": "not-an-app"}, "config": {"routing": {"default_db": None}}},
+            ),
         ],
         ids=["optional-field", "parked-copy", "not-an-app"],
     )
-    def test_a_null_the_app_takes_or_nothing_deploys_is_written(self, crud, name, routing):
-        assert crud.put("helmvars", name, self._overlay(routing), actor="alice").changed is True
+    def test_a_null_the_app_takes_or_nothing_deploys_is_written(self, crud, name, doc):
+        assert crud.put("helmvars", name, doc, actor="alice").changed is True
 
     def test_with_no_contract_mounted_the_write_passes_and_warns_once(self, monkeypatch, tmp_path):
         monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(tmp_path / "none"))

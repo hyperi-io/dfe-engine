@@ -20,13 +20,15 @@ from .models import Layout, ResourceClass
 def _check_app_overlay(name: str, doc: dict) -> None:
     """Refuse a deployed instance overlay holding a null its app's parser refuses.
 
-    A parked copy deploys nothing, so only a name the ApplicationSet deploys is judged.
+    Judged by the ApplicationSet's own selection, so a hand-named overlay is judged
+    too, while a parked copy, which it does not select, is not. The app is the one
+    the overlay's ``deploy.service`` names.
     """
     # At call time: appmgmt reads the deploy repo through this package.
     from dfe_engine.appmgmt.contract import check_overlay
-    from dfe_engine.appmgmt.instances import parse_overlay_name
+    from dfe_engine.appmgmt.instances import is_deployed_overlay
 
-    if parse_overlay_name(name) is not None:
+    if is_deployed_overlay(name):
         check_overlay(doc)
 
 
