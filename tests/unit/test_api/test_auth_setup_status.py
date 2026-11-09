@@ -7,14 +7,13 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import json
-import os
 import secrets
-import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 from ruamel.yaml import YAML
 
+from dfe_engine import yaml_utils
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.auth import breakglass
@@ -492,9 +491,8 @@ def test_setup_status_does_not_reparse_unchanged_account_files(tmp_path, monkeyp
                 app.state.oidc_provider_registry.create(
                     f"idp{n:02d}", OIDCProvider(enabled=n % 2 == 0, issuer=f"https://idp{n}")
                 )
-            week_ago = time.time() - 7 * 86400
-            for path in tmp_path.rglob("*.yaml"):
-                os.utime(path, (week_ago, week_ago))
+            # The files were written moments ago, and os.utime cannot age their ctime.
+            monkeypatch.setattr(yaml_utils, "_FRESH_FILE_NS", -1)
             warm = client.get("/api/v1/auth/setup-status").json()
             assert warm["initial_setup"]["complete"] is True
 
@@ -514,14 +512,17 @@ def test_setup_status_does_not_reparse_unchanged_account_files(tmp_path, monkeyp
                 return list_providers(self)
 
             monkeypatch.setattr(OIDCProviderRegistry, "list", counting_list)
+            store_dir = f"{app.state.account_store._dir}/"
             for _ in range(5):
                 assert client.get("/api/v1/auth/setup-status").json() == warm
-            assert [name for name in parsed if "/accounts/" in name] == []
+            assert [name for name in parsed if name.startswith(store_dir)] == []
             assert [name for name in parsed if "/oidc-providers/" in name] == []
             assert len(listings) == 5
 
             app.state.account_store.update("user07", enabled=False)
             client.get("/api/v1/auth/setup-status")
-            assert {Path(name).name for name in parsed if "/accounts/" in name} == {"user07.yaml"}
+            assert {Path(name).name for name in parsed if name.startswith(store_dir)} == {
+                "user07.yaml"
+            }
     finally:
         _registries.clear()

@@ -93,11 +93,18 @@ def yaml_load(source: str | Path) -> Any:
         return _safe().load(f)
 
 
-type _FileKey = tuple[int, int, int]
-"""A file's identity as the filesystem reports it: inode, mtime in ns, size."""
+type _FileKey = tuple[int, int, int, int]
+"""A file's identity as the filesystem reports it: inode, mtime and ctime in ns, size.
+
+ctime is in the key because no writer can set it back, unlike an mtime copied over by
+``touch -r``, ``rsync -t`` or a tar restore.
+"""
 
 _PARSED_MAX = 4096
 """Files whose parse :func:`yaml_load_cached` keeps, least recently used out first."""
+
+_PARSED_MAX_FILE_BYTES = 16 * 1024
+"""Larger files are parsed every time, so the cache stays a few tens of MiB at most."""
 
 _FRESH_FILE_NS = 2_000_000_000
 """A file modified this recently is parsed every time and never kept.
@@ -113,8 +120,8 @@ _parsed_lock = threading.Lock()
 def yaml_load_cached(source: str | Path) -> Any:
     """Load YAML from a file, reusing the last parse while the file is unchanged.
 
-    A file counts as unchanged while its inode, mtime and size all match the read
-    that was kept. :func:`yaml_dump` replaces the file, which changes the inode, so a
+    A file counts as unchanged while its inode, mtime, ctime and size all match the
+    read that was kept. Only files up to 16 KiB are kept. :func:`yaml_dump` replaces the file, which changes the inode, so a
     write through this module is seen on the next call, and so is any other writer.
     Each caller gets its own copy, so mutating the result never reaches the cache.
 
@@ -131,14 +138,15 @@ def yaml_load_cached(source: str | Path) -> Any:
     path = Path(source)
     name = str(path)
     stat = path.stat()
-    key = (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+    key = (stat.st_ino, stat.st_mtime_ns, stat.st_ctime_ns, stat.st_size)
     with _parsed_lock:
         hit = _parsed.get(name)
         if hit is not None and hit[0] == key:
             _parsed.move_to_end(name)
             return copy.deepcopy(hit[1])
     data = yaml_load(path)
-    if time.time_ns() - stat.st_mtime_ns > _FRESH_FILE_NS:
+    changed_ns = max(stat.st_mtime_ns, stat.st_ctime_ns)
+    if stat.st_size <= _PARSED_MAX_FILE_BYTES and time.time_ns() - changed_ns > _FRESH_FILE_NS:
         with _parsed_lock:
             _parsed[name] = (key, copy.deepcopy(data))
             _parsed.move_to_end(name)

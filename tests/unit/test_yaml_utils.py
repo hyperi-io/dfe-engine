@@ -363,6 +363,13 @@ class TestDeepMerge:
 class TestYamlLoadCached:
     """A cached parse is reused only while the file is demonstrably the one parsed."""
 
+    @pytest.fixture(autouse=True)
+    def _every_file_counts_as_old(self, monkeypatch):
+        # os.utime cannot move ctime back, so a test file is never old by the clock.
+        import dfe_engine.yaml_utils as yaml_utils
+
+        monkeypatch.setattr(yaml_utils, "_FRESH_FILE_NS", -1)
+
     @staticmethod
     def _age(path, seconds=3600):
         old = time.time() - seconds
@@ -412,7 +419,41 @@ class TestYamlLoadCached:
 
         assert yaml_load_cached(path) == {"k": "two"}
 
+    def test_an_in_place_rewrite_with_its_old_mtime_put_back_is_read_again(self, tmp_path):
+        path = tmp_path / "a.yaml"
+        path.write_text("k: one\n", encoding="utf-8")
+        self._age(path)
+        before = path.stat()
+        assert yaml_load_cached(path) == {"k": "one"}
+
+        path.write_text("k: two\n", encoding="utf-8")
+        os.utime(path, ns=(before.st_atime_ns, before.st_mtime_ns))
+        after = path.stat()
+        assert (after.st_ino, after.st_mtime_ns, after.st_size) == (
+            before.st_ino,
+            before.st_mtime_ns,
+            before.st_size,
+        )
+
+        assert yaml_load_cached(path) == {"k": "two"}
+
+    def test_a_large_file_is_never_kept(self, tmp_path, monkeypatch):
+        import dfe_engine.yaml_utils as yaml_utils
+
+        path = tmp_path / "a.yaml"
+        path.write_text("k: " + "x" * yaml_utils._PARSED_MAX_FILE_BYTES + "\n", encoding="utf-8")
+        self._age(path)
+        parsed = self._parses(monkeypatch)
+
+        yaml_load_cached(path)
+        yaml_load_cached(path)
+
+        assert parsed == [str(path)] * 2
+
     def test_a_recently_written_file_is_never_kept(self, tmp_path, monkeypatch):
+        import dfe_engine.yaml_utils as yaml_utils
+
+        monkeypatch.setattr(yaml_utils, "_FRESH_FILE_NS", 2_000_000_000)
         path = tmp_path / "a.yaml"
         path.write_text("k: v\n", encoding="utf-8")
         parsed = self._parses(monkeypatch)
