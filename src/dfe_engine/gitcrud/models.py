@@ -14,7 +14,8 @@ the class level - never per file or per field (see docs/architecture.md, "Govern
 Ops").
 """
 
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 
@@ -54,6 +55,8 @@ class ResourceClass:
     nested      opt-in: a name may carry ``/`` segments, so the class's resources
                 live in a tree (``beats/filebeat_auth``). Every segment still goes
                 through the same name rule; only the separator is permitted.
+    check       opt-in: called with a resource's name and doc on every write of
+                the class, and raises to refuse a doc its reader would refuse.
     """
 
     name: str
@@ -64,6 +67,7 @@ class ResourceClass:
     layout: Layout = Layout.FILE
     manifest: str = "manifest.yaml"
     nested: bool = False
+    check: Callable[[str, dict], None] | None = field(default=None, compare=False)
 
     @property
     def is_bundle(self) -> bool:

@@ -188,6 +188,7 @@ def install_exception_handlers(app: FastAPI) -> None:
     from dfe_engine.api.password_floor import count_floor_refusal, is_floor_refusal
     from dfe_engine.api.task_manager import TaskCapacityError
     from dfe_engine.api.v1.scim import SCIM_ROOT, scim_error
+    from dfe_engine.appmgmt.contract import RefusedNullError
     from dfe_engine.auth.models import AuthenticationError, AuthorizationError
     from dfe_engine.auth.protected_accounts import ProtectedAccountError
     from dfe_engine.gitcrud.engine import ResourceNotFoundError
@@ -271,6 +272,11 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(InvalidNameError)
     async def invalid_name(_request: Request, exc: InvalidNameError):
         return _answer(400, ErrorCode.INVALID_NAME, str(exc))
+
+    # Any write path that reaches the deploy repo with a null the app refuses, named by path.
+    @app.exception_handler(RefusedNullError)
+    async def refused_null(_request: Request, exc: RefusedNullError):
+        return _answer(400, exc.code, str(exc), paths=exc.paths)
 
     @app.exception_handler(ResourceNotFoundError)
     async def resource_not_found(_request: Request, _exc: ResourceNotFoundError):

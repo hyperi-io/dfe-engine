@@ -20,7 +20,9 @@ import pytest
 from scalo.logger.filters import is_credential_name
 
 from dfe_engine.appmgmt import catalogue, contract
+from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.engine import set_path
+from dfe_engine.gitops.repo import GitopsRepo
 
 FIXTURES = Path(__file__).parents[2] / "fixtures" / "contract"
 
@@ -2185,3 +2187,60 @@ class TestANullTheAppRefusesIsFound:
         absent = contract.load_contract("dfe-loader", tmp_path)
 
         assert contract.refused_nulls(absent, "config.routing.default_db", None) == []
+
+
+class TestEveryOverlayWriteRefusesANullTheAppRefuses:
+    """The deploy repo's write path judges a deployed overlay, whichever caller wrote it."""
+
+    OVERLAY = "dfe-loader-default-values"
+
+    @pytest.fixture
+    def crud(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(FIXTURES))
+        return GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False))
+
+    @staticmethod
+    def _overlay(routing: dict) -> dict:
+        return {
+            "deploy": {"service": "dfe-loader", "instance": "default"},
+            "config": {"routing": routing},
+        }
+
+    def test_a_raw_write_with_a_refused_null_commits_nothing(self, crud):
+        crud.put("helmvars", self.OVERLAY, self._overlay({"default_db": "dfe"}), actor="alice")
+        before = crud.head_revision()
+
+        with pytest.raises(contract.RefusedNullError) as refused:
+            crud.put("helmvars", self.OVERLAY, self._overlay({"default_db": None}), actor="alice")
+        with pytest.raises(contract.RefusedNullError):
+            crud.set_key(
+                "helmvars", self.OVERLAY, "config.routing.source_to_table.edr", None, "alice"
+            )
+
+        assert refused.value.paths == ["config.routing.default_db"]
+        assert crud.head_revision() == before
+        assert crud.get("helmvars", self.OVERLAY)["config"]["routing"] == {"default_db": "dfe"}
+
+    @pytest.mark.parametrize(
+        ("name", "routing"),
+        [
+            (OVERLAY, {"org_id_field": None}),
+            ("dfe-loader-default-parked", {"default_db": None}),
+            ("not-an-app-values", {"default_db": None}),
+        ],
+        ids=["optional-field", "parked-copy", "not-an-app"],
+    )
+    def test_a_null_the_app_takes_or_nothing_deploys_is_written(self, crud, name, routing):
+        assert crud.put("helmvars", name, self._overlay(routing), actor="alice").changed is True
+
+    def test_with_no_contract_mounted_the_write_passes_and_warns_once(self, monkeypatch, tmp_path):
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(tmp_path / "none"))
+        crud = GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False))
+        warned: list[str] = []
+        monkeypatch.setattr(contract.logger, "warning", lambda message, **_: warned.append(message))
+
+        crud.put("helmvars", self.OVERLAY, self._overlay({"default_db": None, "x": 1}), actor="a")
+        crud.put("helmvars", self.OVERLAY, self._overlay({"default_db": None, "x": 2}), actor="a")
+
+        assert len(warned) == 1
+        assert "no config contract is mounted" in warned[0]

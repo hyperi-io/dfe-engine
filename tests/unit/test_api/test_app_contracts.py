@@ -446,6 +446,22 @@ class TestWritingConfig:
         assert refused in resp.json()["detail"]
         assert gc.head_revision() == before
 
+    def test_a_raw_var_write_with_a_null_the_app_refuses_is_refused_by_path(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        before = gc.head_revision()
+        resp = client.put(
+            f"/api/v1/helm/files/{LOADER}-default-values/vars/config.routing.default_db",
+            json={"value": None},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_value"
+        assert resp.json()["paths"] == ["config.routing.default_db"]
+        assert gc.head_revision() == before
+
     def test_a_null_an_optional_field_takes_is_written(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         _deploy(client, admin_headers)

@@ -30,6 +30,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+from scalo.logger import logger
 from scalo.logger.filters import MASK_VALUE, mask_url_userinfo
 
 from dfe_engine.appmgmt.appconfig import CONFIG_ROOT, ENV_ROOT, custom_env
@@ -150,6 +151,21 @@ class MaskedValueError(ValueError):
 
     code = "masked_value"
     """The refusal code a route answers with."""
+
+
+class RefusedNullError(ValueError):
+    """Raised when an app's config would carry a null its parser refuses.
+
+    The app stops at startup on such a null, so the write is refused before it
+    reaches the deploy repo.
+    """
+
+    code = "invalid_value"
+    """The refusal code a route answers with."""
+
+    def __init__(self, paths: list[str]) -> None:
+        self.paths = paths
+        super().__init__(f"{', '.join(paths)} does not accept a null")
 
 
 class CredentialReentryError(MaskedValueError):
@@ -329,6 +345,9 @@ def load_contract(service: str, root: Path | str | None = None) -> AppContract:
 
 _HELD: dict[str, AppContract] = {}
 
+# Apps whose overlays were written with no contract to judge them, warned about once each.
+_UNJUDGED: set[str] = set()
+
 
 def contract(service: str, root: Path | str | None = None) -> AppContract:
     """The mounted contract, read once and held. An explicit root is never held."""
@@ -342,6 +361,7 @@ def contract(service: str, root: Path | str | None = None) -> AppContract:
 def reload_contracts() -> None:
     """Drop what is held, so a remounted directory takes effect."""
     _HELD.clear()
+    _UNJUDGED.clear()
 
 
 # --- the schema, flattened to options ---
@@ -1368,6 +1388,40 @@ def refused_nulls(app_contract: AppContract, path: str, value: Any) -> list[str]
     for part in path.split(".")[1:]:
         node = _schema_child(node, part, root)
     return _refused_nulls(value, node, root, path)
+
+
+def check_overlay(doc: dict) -> None:
+    """Refuse an instance overlay whose ``config:`` block holds a null its app refuses.
+
+    The app's chart renders that block as the app's file verbatim, nulls
+    included, so the refusal has to happen before the overlay is written. An
+    overlay naming no app in the manifest is not an app's config and passes.
+
+    With no contract mounted for the app the overlay passes, and the first such
+    write warns, because nothing then stops a refused null reaching the pod.
+
+    Raises:
+        RefusedNullError: The block holds a null a declared field does not take.
+    """
+    service = str(get_path(doc, DEPLOY_SERVICE_PATH, default="") or "")
+    config = doc.get(CONFIG_ROOT)
+    # A null or absent block renders as an empty config, which the app reads as defaults.
+    if service not in APP_CATALOGUE or not isinstance(config, dict):
+        return
+    found = contract(service)
+    if not found.available:
+        if service not in _UNJUDGED:
+            _UNJUDGED.add(service)
+            logger.warning(
+                "no config contract is mounted for this app, so its overlay writes are "
+                "not checked for a null the app refuses at startup",
+                app=service,
+                contract_dir=str(contract_root() or ""),
+            )
+        return
+    refused = refused_nulls(found, CONFIG_ROOT, config)
+    if refused:
+        raise RefusedNullError(refused)
 
 
 def check_env_value(value: Any) -> str:

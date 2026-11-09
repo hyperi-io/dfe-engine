@@ -7,9 +7,18 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Defined actions over a real local gitops repo (no mocks)."""
 
+from pathlib import Path
+
 import pytest
 
-from dfe_engine.gitcrud import GitCrud, ResourceClass, ResourceClassRegistry, get_path
+from dfe_engine.appmgmt import contract
+from dfe_engine.gitcrud import (
+    GitCrud,
+    ResourceClass,
+    ResourceClassRegistry,
+    default_registry,
+    get_path,
+)
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import (
     ActionDef,
@@ -20,9 +29,12 @@ from dfe_engine.governance import (
     ProtectedVarError,
     VarChange,
 )
+from dfe_engine.governance.actions import InvalidDocumentError
 from dfe_engine.governance.policies import _POLICY_CLASS
 from dfe_engine.governance.seed import ACTIONS_SUBDIR, pending_seed
 from dfe_engine.yaml_utils import yaml_load_string
+
+CONTRACT_FIXTURES = Path(__file__).parents[1] / "fixtures" / "contract"
 
 
 @pytest.fixture
@@ -473,3 +485,36 @@ def test_invoke_protected_allowed_with_override(store, crud):
     res = store.invoke("scale-receiver", actor="bob", policy=policy, override=True)
     assert res.changed is True
     assert crud.get("helmvars", "receiver-default")["keda"]["minReplicas"] == 3
+
+
+def test_an_action_leaving_a_null_the_app_refuses_commits_nothing(monkeypatch, tmp_path):
+    monkeypatch.setenv(contract.CONTRACT_DIR_ENV, str(CONTRACT_FIXTURES))
+    contract.reload_contracts()
+    crud = GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry())
+    overlay = "dfe-loader-default-values"
+    deploy = {"service": "dfe-loader", "instance": "default"}
+    crud.put("helmvars", overlay, {"deploy": deploy, "config": {"routing": {}}}, actor="admin")
+    store = ActionStore(crud)
+    store.save(
+        ActionDef(
+            name="clear-db",
+            description="Clear the loader's database",
+            required_action="action:invoke:clear-db",
+            changes=[
+                VarChange(
+                    cls="helmvars", name=overlay, path="config.routing.default_db", value=None
+                )
+            ],
+        ),
+        actor="admin",
+    )
+    before = crud.head_revision()
+
+    for dry_run in (True, False):
+        with pytest.raises(
+            InvalidDocumentError, match=r"config\.routing\.default_db does not accept"
+        ):
+            store.invoke("clear-db", actor="bob", dry_run=dry_run)
+
+    assert crud.head_revision() == before
+    contract.reload_contracts()
