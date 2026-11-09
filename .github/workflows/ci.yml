@@ -57,4 +57,8 @@ jobs:
       runner-test: arc-native-16cpu
       # The producer-contract pin checks read GitHub; anonymous calls from shared runners hit the rate limit.
       test-github-token: true
+      runner-mode: free
+      branch-build: "true"
+      build-timeout-minutes: 360
+      test-timeout-minutes: 360
     secrets: inherit
