@@ -17,8 +17,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.settings import DFESettings
+from tests.support.accounts import session_token
 from tests.unit.test_query.view_fakes import RecordingClient
 
 ACCOUNTS = "/api/v1/auth/accounts"
@@ -84,9 +84,7 @@ class TestALocalAccountIsBoundToItsOrg:
         orgs: None,
     ):
         assert _create(client, admin_headers, org="acme").status_code == 201
-        token = create_access_token(
-            data={"sub": "alice", "org_id": "globex"}, settings=api_settings
-        )
+        token = session_token(client.app, api_settings, {"sub": "alice", "org_id": "globex"})
 
         assert _session_org(client, {"Authorization": f"Bearer {token}"}) == "acme"
 

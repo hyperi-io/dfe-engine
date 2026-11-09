@@ -17,16 +17,16 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.settings import DFESettings
+from tests.support.accounts import session_token
 
 ROLES = "/api/v1/auth/roles"
 GROUPS = "/api/v1/auth/groups"
 API_KEYS = "/api/v1/auth/api-keys"
 
 
-def _bearer(api_settings: DFESettings, subject: str) -> dict[str, str]:
-    token = create_access_token(data={"sub": subject}, settings=api_settings)
+def _bearer(app, api_settings: DFESettings, subject: str) -> dict[str, str]:
+    token = session_token(app, api_settings, {"sub": subject})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -58,7 +58,7 @@ def mallory(
         headers=admin_headers,
     )
     assert resp.status_code == 201, resp.text
-    return _bearer(api_settings, "mallory")
+    return _bearer(app, api_settings, "mallory")
 
 
 class TestARoleWriteHoldsToTheCallersPermissions:
@@ -228,7 +228,7 @@ class TestAScopedRoleDoesNotBecomeAPlatformOne:
             headers=admin_headers,
         )
         assert resp.status_code == 201, resp.text
-        return _bearer(api_settings, "trent")
+        return _bearer(app, api_settings, "trent")
 
     def test_an_unscoped_role_from_scoped_permissions_is_refused(
         self, app: FastAPI, client: TestClient, tenant_manager: dict[str, str]

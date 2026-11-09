@@ -8,8 +8,8 @@ from fastapi.testclient import TestClient
 
 import dfe_engine.yaml_utils as yu
 from dfe_engine.api import deps
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.jit import API_KEY_SUBJECT_PREFIX
+from tests.support.accounts import session_token
 
 
 @pytest.fixture
@@ -61,9 +61,8 @@ class TestApiKeyAuthentication:
         self, client: TestClient, test_api_key: str, api_settings
     ):
         """API key takes precedence over Bearer token when both present."""
-        jwt_token = create_access_token(
-            data={"sub": "jwt-user", "org_id": "jwt-org", "roles": ["admin"]},
-            settings=api_settings,
+        jwt_token = session_token(
+            client.app, api_settings, {"sub": "jwt-user", "org_id": "jwt-org", "roles": ["admin"]}
         )
         resp = client.get(
             "/api/v1/auth/me",

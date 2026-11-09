@@ -17,16 +17,16 @@ Proves the two load-bearing properties:
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.settings import DFESettings
+from tests.support.accounts import session_token
 
 GROUPS = "/api/v1/auth/groups"
 ORGS = "/api/v1/orgs"
 
 
-def _headers(api_settings: DFESettings, username: str) -> dict[str, str]:
-    token = create_access_token(data={"sub": username, "org_id": "default"}, settings=api_settings)
+def _headers(app, api_settings: DFESettings, username: str) -> dict[str, str]:
+    token = session_token(app, api_settings, {"sub": username, "org_id": "default"})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -73,21 +73,25 @@ class TestOrgGroupVisibility:
         assert "globex-analysts" in by_name
 
     def test_member_sees_only_own_groups(self, scoped_setup, api_settings):
-        resp = scoped_setup.get(GROUPS, headers=_headers(api_settings, "orguser"))
+        resp = scoped_setup.get(GROUPS, headers=_headers(scoped_setup.app, api_settings, "orguser"))
         assert resp.status_code == 200
         assert [g["name"] for g in resp.json()["items"]] == ["acme-analysts"]
 
     def test_org_group_invisible_cross_org(self, scoped_setup, api_settings):
-        headers = _headers(api_settings, "orgadmin")
+        headers = _headers(scoped_setup.app, api_settings, "orgadmin")
         resp = scoped_setup.get(f"{GROUPS}/globex-analysts", headers=headers)
         assert resp.status_code == 404
 
     def test_system_group_invisible_without_grant(self, scoped_setup, api_settings):
-        resp = scoped_setup.get(f"{GROUPS}/dfe-admins", headers=_headers(api_settings, "orguser"))
+        resp = scoped_setup.get(
+            f"{GROUPS}/dfe-admins", headers=_headers(scoped_setup.app, api_settings, "orguser")
+        )
         assert resp.status_code == 404
 
     def test_org_admin_sees_own_org_groups(self, scoped_setup, api_settings):
-        resp = scoped_setup.get(GROUPS, headers=_headers(api_settings, "orgadmin"))
+        resp = scoped_setup.get(
+            GROUPS, headers=_headers(scoped_setup.app, api_settings, "orgadmin")
+        )
         assert resp.status_code == 200
         names = {g["name"] for g in resp.json()["items"]}
         assert names == {"acme-admins", "acme-analysts"}
@@ -95,7 +99,7 @@ class TestOrgGroupVisibility:
 
 class TestOrgLocalAdmin:
     def test_can_crud_own_org_groups(self, scoped_setup, api_settings):
-        headers = _headers(api_settings, "orgadmin")
+        headers = _headers(scoped_setup.app, api_settings, "orgadmin")
         resp = scoped_setup.post(
             GROUPS,
             json={"name": "acme-eng", "roles": ["data_viewer"], "scope": "org:acme"},
@@ -116,7 +120,7 @@ class TestOrgLocalAdmin:
         resp = scoped_setup.post(
             GROUPS,
             json={"name": "sneaky", "roles": ["admin"], "scope": "system"},
-            headers=_headers(api_settings, "orgadmin"),
+            headers=_headers(scoped_setup.app, api_settings, "orgadmin"),
         )
         assert resp.status_code == 403
 
@@ -124,7 +128,7 @@ class TestOrgLocalAdmin:
         resp = scoped_setup.post(
             GROUPS,
             json={"name": "sneaky", "roles": ["admin"], "scope": "org:globex"},
-            headers=_headers(api_settings, "orgadmin"),
+            headers=_headers(scoped_setup.app, api_settings, "orgadmin"),
         )
         assert resp.status_code == 403
 
@@ -133,25 +137,27 @@ class TestOrgLocalAdmin:
         resp = scoped_setup.put(
             f"{GROUPS}/dfe-viewers",
             json={"roles": ["admin"]},
-            headers=_headers(api_settings, "orgadmin"),
+            headers=_headers(scoped_setup.app, api_settings, "orgadmin"),
         )
         assert resp.status_code == 404
 
     def test_org_wildcard_does_not_reach_system_endpoints(self, scoped_setup, api_settings):
         resp = scoped_setup.post(
-            ORGS, json={"name": "evil"}, headers=_headers(api_settings, "orgadmin")
+            ORGS,
+            json={"name": "evil"},
+            headers=_headers(scoped_setup.app, api_settings, "orgadmin"),
         )
         assert resp.status_code == 403
 
 
 class TestOrgReads:
     def test_org_admin_lists_only_own_org(self, scoped_setup, api_settings):
-        resp = scoped_setup.get(ORGS, headers=_headers(api_settings, "orgadmin"))
+        resp = scoped_setup.get(ORGS, headers=_headers(scoped_setup.app, api_settings, "orgadmin"))
         assert resp.status_code == 200
         assert [o["name"] for o in resp.json()["items"]] == ["acme"]
 
     def test_org_admin_reads_own_org_not_others(self, scoped_setup, api_settings):
-        headers = _headers(api_settings, "orgadmin")
+        headers = _headers(scoped_setup.app, api_settings, "orgadmin")
         assert scoped_setup.get(f"{ORGS}/acme", headers=headers).status_code == 200
         assert scoped_setup.get(f"{ORGS}/globex", headers=headers).status_code == 403
 

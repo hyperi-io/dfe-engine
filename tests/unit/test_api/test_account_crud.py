@@ -15,6 +15,7 @@ import pytest
 
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.bootstrap import MIN_ADMIN_PASSWORD_LENGTH
+from tests.support.accounts import session_token
 from tests.support.racing_stores import RacingAccountStore
 
 _PASSWORD = secrets.token_urlsafe(16)
@@ -480,17 +481,14 @@ class TestAccountExternalFlag:
         assert got.json()["external"] is False
 
     def test_oidc_account_surfaces_external_true(self, client, app, admin_headers, api_settings):
-        from dfe_engine.api.deps import create_access_token
-
         store = app.state.account_store
         store.create("sso-user", "", groups=["dfe-viewers"])
         store.update("sso-user", external=True, source_provider="entra")
         got = client.get("/api/v1/auth/accounts/sso-user", headers=admin_headers)
         assert got.status_code == 200
         assert got.json()["external"] is True
-        token = create_access_token(
-            data={"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]},
-            settings=api_settings,
+        token = session_token(
+            app, api_settings, {"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]}
         )
         me = client.get(
             "/api/v1/auth/accounts/me",
@@ -765,7 +763,6 @@ class TestTheGroupsAnAccountShows:
         self, recovery_accounts, client, admin_headers, app
     ):
         """When only one usable system admin remains, dropping dfe-admins is refused."""
-        from dfe_engine.api.deps import create_access_token
 
         store = recovery_accounts.state.account_store
         created = client.post(
@@ -779,9 +776,10 @@ class TestTheGroupsAnAccountShows:
         ops_headers = {
             "Authorization": (
                 "Bearer "
-                + create_access_token(
-                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
-                    settings=app.state.settings,
+                + session_token(
+                    app,
+                    app.state.settings,
+                    {"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
                 )
             )
         }
@@ -816,7 +814,6 @@ class TestTheGroupsAnAccountShows:
 
     def test_deactivate_own_account_is_refused(self, recovery_accounts, client, admin_headers, app):
         """Even with another admin still usable, an account cannot disable itself."""
-        from dfe_engine.api.deps import create_access_token
 
         store = recovery_accounts.state.account_store
         created = client.post(
@@ -828,9 +825,10 @@ class TestTheGroupsAnAccountShows:
         ops_headers = {
             "Authorization": (
                 "Bearer "
-                + create_access_token(
-                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
-                    settings=app.state.settings,
+                + session_token(
+                    app,
+                    app.state.settings,
+                    {"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
                 )
             )
         }
@@ -846,8 +844,6 @@ class TestTheGroupsAnAccountShows:
         assert store.get("ops").enabled is True
 
     def test_block_own_account_is_refused(self, recovery_accounts, client, admin_headers, app):
-        from dfe_engine.api.deps import create_access_token
-
         store = recovery_accounts.state.account_store
         created = client.post(
             "/api/v1/auth/accounts",
@@ -858,9 +854,10 @@ class TestTheGroupsAnAccountShows:
         ops_headers = {
             "Authorization": (
                 "Bearer "
-                + create_access_token(
-                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
-                    settings=app.state.settings,
+                + session_token(
+                    app,
+                    app.state.settings,
+                    {"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
                 )
             )
         }
@@ -1117,14 +1114,11 @@ class TestResetOwnPassword:
         assert re.search(r"last \d+", body["detail"]) is None
 
     def test_oidc_user_cannot_reset_own_password(self, client, app, api_settings):
-        from dfe_engine.api.deps import create_access_token
-
         store = app.state.account_store
         store.create("sso-user", "", groups=["dfe-viewers"])
         store.update("sso-user", external=True, source_provider="entra")
-        token = create_access_token(
-            data={"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]},
-            settings=api_settings,
+        token = session_token(
+            app, api_settings, {"sub": "sso-user", "org_id": "test-org", "groups": ["dfe-viewers"]}
         )
         resp = client.post(
             "/api/v1/auth/accounts/reset-password",
@@ -1160,13 +1154,9 @@ class TestTheSessionOwnsOnlyItsOwnAccount:
     def test_a_subject_that_folds_onto_a_local_account_does_not_own_it(
         self, client, app, api_settings
     ):
-        from dfe_engine.api.deps import create_access_token
-
         store = app.state.account_store
         store.create("bob", _PASSWORD, phone="+61 2 5550 0001")
-        token = create_access_token(
-            data={"sub": "Bob", "org_id": "test-org"}, settings=api_settings
-        )
+        token = session_token(app, api_settings, {"sub": "Bob", "org_id": "test-org"})
         headers = {"Authorization": f"Bearer {token}"}
         new_password = secrets.token_urlsafe(16)
 
@@ -1180,7 +1170,8 @@ class TestTheSessionOwnsOnlyItsOwnAccount:
             headers=headers,
         )
 
-        assert (me.status_code, put.status_code, reset.status_code) == (404, 404, 404)
+        # A subject that binds no account names no session at all.
+        assert (me.status_code, put.status_code, reset.status_code) == (401, 401, 401)
         assert store.get("bob").phone == "+61 2 5550 0001"
         assert store.verify_password("bob", _PASSWORD)
 
@@ -1443,7 +1434,6 @@ class TestDeleteAccount:
         self, recovery_accounts, client, admin_headers, app
     ):
         """The sole usable admin cannot remove itself; self_delete wins over last_admin."""
-        from dfe_engine.api.deps import create_access_token
 
         store = recovery_accounts.state.account_store
         created = client.post(
@@ -1457,9 +1447,10 @@ class TestDeleteAccount:
         ops_headers = {
             "Authorization": (
                 "Bearer "
-                + create_access_token(
-                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
-                    settings=app.state.settings,
+                + session_token(
+                    app,
+                    app.state.settings,
+                    {"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
                 )
             )
         }

@@ -22,7 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
+from dfe_engine.api.deps import _registries, get_clickhouse_client
 from dfe_engine.schema.core_schema import landing_table_name
 from dfe_engine.settings import (
     APISettings,
@@ -36,7 +36,7 @@ from dfe_engine.settings import (
 )
 from dfe_engine.source.models import Source, SourceHeader, SourceSchema, SourceVersion
 from dfe_engine.yaml_utils import yaml_dump
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 from tests.support.core_sources import write_landing_definition
 
 PROMO_SOURCE = "promo-source"
@@ -273,19 +273,18 @@ def client(app) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def admin_headers(settings: DFESettings) -> dict[str, str]:
-    token = create_access_token(
-        data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-        settings=settings,
-    )
+def admin_headers(app, client: TestClient, settings: DFESettings) -> dict[str, str]:
+    token = session_token(app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]})
     return {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
-def viewer_headers(settings: DFESettings) -> dict[str, str]:
-    token = create_access_token(
-        data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
-        settings=settings,
+def viewer_headers(app, client: TestClient, settings: DFESettings) -> dict[str, str]:
+    """A session of an account that holds no group, so no write."""
+    if app.state.account_store.get("viewer") is None:
+        app.state.account_store.create("viewer", "viewer-pw-4901")
+    token = session_token(
+        app, settings, {"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]}
     )
     return {"Authorization": f"Bearer {token}"}
 

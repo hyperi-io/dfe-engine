@@ -25,7 +25,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.governance.ch.bootstrap import TENANT_ISOLATION_ENV
 from dfe_engine.governance.ch.models import DEFAULT_SERVICE_ROLES, meta_projection
@@ -41,7 +41,7 @@ from dfe_engine.settings import (
     QueryViewSettings,
     SecretsSettings,
 )
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 
 pytestmark = pytest.mark.integration
 
@@ -120,7 +120,7 @@ def test_the_hunt_runner_user_appears_once_a_late_clickhouse_answers(
 
             # The API is up for configuration work while ClickHouse is absent.
             admin_on_its_own_password(app)
-            token = create_access_token(data={"sub": "admin"}, settings=settings)
+            token = session_token(app, settings, {"sub": "admin"})
             orgs = api.get("/api/v1/orgs", headers={"Authorization": f"Bearer {token}"})
             assert orgs.status_code == 200, orgs.text
 

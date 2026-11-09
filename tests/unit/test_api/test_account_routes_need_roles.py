@@ -17,10 +17,10 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.breakglass import GROUP as BREAKGLASS_GROUP
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.settings import DFESettings
+from tests.support.accounts import session_token
 from tests.support.case_twins import store_case_twin_group
 
 ACCOUNTS = "/api/v1/auth/accounts"
@@ -29,8 +29,8 @@ SCIM_USERS = "/api/v1/scim/v2/Users"
 _PASSWORD = secrets.token_urlsafe(16)
 
 
-def _bearer(api_settings, sub: str) -> dict[str, str]:
-    token = create_access_token(data={"sub": sub}, settings=api_settings)
+def _bearer(app, api_settings, sub: str) -> dict[str, str]:
+    token = session_token(app, api_settings, {"sub": sub})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -49,7 +49,7 @@ def mgr(client: TestClient, app, api_settings) -> dict[str, str]:
     app.state.role_config = app.state.role_store.load_config()
     app.state.account_store.create("mgr", _PASSWORD, groups=["account-managers"])
     app.state.group_store.create("account-managers", ["account_manager"], members=["mgr"])
-    headers = _bearer(api_settings, "mgr")
+    headers = _bearer(app, api_settings, "mgr")
     assert _roles(client, headers) == ["account_manager"]
     return headers
 
@@ -125,7 +125,7 @@ class TestAnAccountsGroupsNeedTheirRoles:
 
         assert resp.status_code == 403, resp.text
         assert app.state.account_store.get("jane-corp-com").groups == ["dfe-viewers"]
-        jane = _bearer(api_settings=api_settings, sub="jane-corp-com")
+        jane = _bearer(app, api_settings=api_settings, sub="jane-corp-com")
         assert "admin" not in _roles(client=client, headers=jane)
 
     def test_a_roleless_group_is_accepted_for_an_idp_account(
@@ -282,4 +282,4 @@ class TestADeletedAccountLeavesItsGroups:
         assert deleted.status_code == 204, deleted.text
         assert recreated.status_code == 201, recreated.text
         assert "ghost" not in app.state.group_store.get("dfe-admins").members
-        assert _roles(client, _bearer(api_settings, "ghost")) == []
+        assert _roles(client, _bearer(app, api_settings, "ghost")) == []

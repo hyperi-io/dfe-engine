@@ -29,7 +29,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
+from dfe_engine.api.deps import _registries, get_clickhouse_client
 from dfe_engine.appmgmt import instances
 from dfe_engine.appmgmt.operations import (
     CPU_SECONDS,
@@ -56,7 +56,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 
 pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
@@ -110,13 +110,13 @@ def console(ch_params, manager_client, otel_db, monkeypatch, tmp_path):
     monkeypatch.setattr("dfe_engine.settings._settings", settings)
     app = create_app(settings=settings)
     app.dependency_overrides[get_clickhouse_client] = lambda: manager_client
-    token = create_access_token(
-        data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]}, settings=settings
-    )
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             # Off the issued password, which refuses every other call until changed.
             admin_on_its_own_password(app)
+            token = session_token(
+                app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+            )
             gc = GitCrud(
                 GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry()
             )
