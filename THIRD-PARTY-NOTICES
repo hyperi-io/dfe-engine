@@ -1110,7 +1110,7 @@ Copyright 2022-2024 ClickHouse, Inc.
    See the License for the specific language governing permissions and
    limitations under the License.
 ------------------------------------------------------------------------------
-cloudpickle 3.1.2 (BSD License)
+cloudpickle 3.1.2 (BSD-3-Clause)
 ------------------------------------------------------------------------------
 
 This module was extracted from the `cloud` package, developed by
@@ -4331,7 +4331,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 ------------------------------------------------------------------------------
-google-re2 1.1.20251105 (BSD License)
+google-re2 1.1.20251105 (BSD-3-Clause)
 ------------------------------------------------------------------------------
 
 // Copyright (c) 2009 The RE2 Authors. All rights reserved.
@@ -12220,7 +12220,7 @@ NOTICE:
 Requests
 Copyright 2019 Kenneth Reitz
 ------------------------------------------------------------------------------
-requests-oauthlib 2.0.0 (BSD License)
+requests-oauthlib 2.0.0 (ISC)
 ------------------------------------------------------------------------------
 
 ISC License
@@ -13055,7 +13055,7 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 ------------------------------------------------------------------------------
-scipy 1.18.1 (BSD License)
+scipy 1.18.1 (BSD-3-Clause)
 ------------------------------------------------------------------------------
 
 Copyright (c) 2001-2002 Enthought, Inc. 2003, SciPy Developers.
