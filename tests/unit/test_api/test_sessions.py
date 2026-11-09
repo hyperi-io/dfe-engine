@@ -190,29 +190,6 @@ class TestAccountAccess:
         _assert_ended(client, held)
 
 
-class TestTokensFromBeforeTheClaim:
-    """A token minted before tokens carried a marker lives out its expiry, no further."""
-
-    def test_it_is_accepted_while_the_account_has_never_ended_a_session(
-        self, client, api_settings, alice
-    ):
-        legacy = create_access_token(data={"sub": "alice"}, settings=api_settings)
-
-        resp = client.get(_ME, headers={"Authorization": f"Bearer {legacy}"})
-
-        assert resp.status_code == 200, resp.text
-
-    def test_it_is_refused_once_the_account_logs_out(self, client, api_settings, alice):
-        legacy = {
-            "Authorization": "Bearer "
-            + create_access_token(data={"sub": "alice"}, settings=api_settings)
-        }
-
-        client.post(_LOGOUT, headers=_bearer(_login(client, "alice", alice)))
-
-        _assert_ended(client, legacy)
-
-
 class TestMaximumSessionAge:
     """A refresh reads the clock once; the tests freeze that reading so every expiry is exact."""
 
@@ -293,10 +270,13 @@ class TestMaximumSessionAge:
         assert body["expires_in"] == 600
         assert claims["exp"] - claims[AUTH_TIME_CLAIM] == 600
 
-    def test_a_legacy_token_refreshes_from_when_it_was_issued(
+    def test_a_token_without_a_sign_in_time_refreshes_from_when_it_was_issued(
         self, client, app, api_settings, alice
     ):
-        legacy = create_access_token(data={"sub": "alice"}, settings=api_settings)
+        marker = app.state.account_store.get("alice").session_marker()
+        legacy = create_access_token(
+            data={"sub": "alice", SESSION_CLAIM: marker}, settings=api_settings
+        )
 
         resp = client.post(_REFRESH, headers={"Authorization": f"Bearer {legacy}"})
         claims = app.state.jwt_authority.verify(resp.json()["access_token"])

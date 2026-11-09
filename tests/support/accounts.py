@@ -18,7 +18,28 @@ from typing import Any, Self, override
 
 from fastapi.testclient import TestClient
 
+from dfe_engine.api.deps import account_for_session_subject, create_access_token
 from dfe_engine.auth.bootstrap import admin_account_name
+from dfe_engine.auth.sessions import SESSION_CLAIM
+
+
+def session_token(app: Any, settings: Any, data: dict[str, Any]) -> str:
+    """A token for ``data["sub"]`` carrying the session marker its account holds now.
+
+    A token for a subject that binds no account carries the empty marker, which every
+    route refuses, as it refuses a real session for no account.
+
+    Args:
+        app: A FastAPI app whose lifespan has run, so its account store exists.
+        settings: The settings the app signs its tokens with.
+        data: The claims, ``sub`` included.
+
+    Returns:
+        The signed token.
+    """
+    account = account_for_session_subject(app.state.account_store, data["sub"])
+    marker = account.session_marker() if account is not None else ""
+    return create_access_token(data={**data, SESSION_CLAIM: marker}, settings=settings)
 
 
 def admin_on_its_own_password(app: Any) -> None:

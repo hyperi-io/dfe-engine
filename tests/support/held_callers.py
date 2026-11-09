@@ -15,8 +15,8 @@ live from the group on every request.
 
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.roles import RoleDefinition
+from tests.support.accounts import session_token
 
 
 def define_role(app, name: str, permissions: list[str], *, scoped: bool) -> None:
@@ -41,7 +41,7 @@ def caller_in_group(
     app.state.group_store.update(group, org_ids=org_ids)
     app.state.account_store.create(name, f"{name}-password-2026", groups=[group])
     app.state.group_store.add_member(group, name)
-    token = create_access_token(data={"sub": name}, settings=settings)
+    token = session_token(app, settings, {"sub": name})
     caller = TestClient(app, raise_server_exceptions=False)
     caller.headers.update({"Authorization": f"Bearer {token}"})
     return caller

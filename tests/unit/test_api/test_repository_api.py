@@ -20,10 +20,11 @@ import pytest
 from common.fake_repository_ch import FakeRepositoryCH
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token, get_clickhouse_client
+from dfe_engine.api.deps import get_clickhouse_client
 from dfe_engine.repository.store import RepositoryStore
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import DFESettings
+from tests.support.accounts import session_token
 
 PREFS = "/api/v1/repository/preferences"
 OBJECTS = "/api/v1/repository/objects"
@@ -31,8 +32,11 @@ GROUPS = "/api/v1/auth/groups"
 ORGS = "/api/v1/orgs"
 
 
-def _headers(api_settings: DFESettings, username: str) -> dict[str, str]:
-    token = create_access_token(data={"sub": username, "org_id": "default"}, settings=api_settings)
+def _headers(app, api_settings: DFESettings, username: str) -> dict[str, str]:
+    """Headers for a session of *username*, made an account with no groups if it has none."""
+    if app.state.account_store.get(username) is None:
+        app.state.account_store.create(username, f"pw-{username}")
+    token = session_token(app, api_settings, {"sub": username, "org_id": "default"})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -85,7 +89,7 @@ def repo_setup(client: TestClient, app, fake_ch, admin_headers: dict[str, str]) 
 
 class TestPreferences:
     def test_get_empty(self, client: TestClient, fake_ch, api_settings):
-        resp = client.get(PREFS, headers=_headers(api_settings, "user1"))
+        resp = client.get(PREFS, headers=_headers(client.app, api_settings, "user1"))
         assert resp.status_code == 200
         assert resp.json() == {"preferences": {}, "etag": None}
 
@@ -110,7 +114,7 @@ class TestPreferences:
         )
         assert resp.status_code == 200, resp.text
 
-        orguser = _headers(api_settings, "orguser")
+        orguser = _headers(client.app, api_settings, "orguser")
         resp = client.get(PREFS, headers=orguser)
         assert resp.status_code == 200
         assert resp.json()["preferences"] == {"theme": "corporate", "brand": "hyperi"}
@@ -132,7 +136,7 @@ class TestPreferences:
         assert resp.json()["preferences"] == {"theme": "corporate", "brand": "hyperi"}
 
     def test_if_match_mismatch_412(self, client: TestClient, fake_ch, api_settings):
-        user1 = _headers(api_settings, "user1")
+        user1 = _headers(client.app, api_settings, "user1")
         resp = client.patch(PREFS, json={"a": 1}, headers=user1)
         assert resp.status_code == 200
         etag = resp.json()["etag"]
@@ -149,7 +153,9 @@ class TestPreferences:
 
     def test_prefs_size_cap_413(self, client: TestClient, app, fake_ch, api_settings):
         app.state.settings.repository.max_prefs_bytes = 32
-        resp = client.patch(PREFS, json={"big": "x" * 100}, headers=_headers(api_settings, "user1"))
+        resp = client.patch(
+            PREFS, json={"big": "x" * 100}, headers=_headers(app, api_settings, "user1")
+        )
         assert resp.status_code == 413
         assert resp.json()["code"] == "payload_too_large"
 
@@ -167,7 +173,7 @@ class TestObjectsRbac:
         )
         assert resp.status_code == 200, resp.text
         resp = client.get(
-            f"{OBJECTS}/org/acme/ui/welcome", headers=_headers(api_settings, "orguser")
+            f"{OBJECTS}/org/acme/ui/welcome", headers=_headers(client.app, api_settings, "orguser")
         )
         assert resp.status_code == 200
         assert resp.content == b"hello acme"
@@ -178,7 +184,8 @@ class TestObjectsRbac:
         client = repo_setup
         client.put(f"{OBJECTS}/org/acme/ui/welcome", content=b"hello", headers=admin_headers)
         resp = client.get(
-            f"{OBJECTS}/org/acme/ui/welcome", headers=_headers(api_settings, "globexuser")
+            f"{OBJECTS}/org/acme/ui/welcome",
+            headers=_headers(client.app, api_settings, "globexuser"),
         )
         assert resp.status_code == 404
 
@@ -186,7 +193,7 @@ class TestObjectsRbac:
         resp = repo_setup.put(
             f"{OBJECTS}/org/acme/ui/welcome",
             content=b"nope",
-            headers=_headers(api_settings, "globexuser"),
+            headers=_headers(repo_setup.app, api_settings, "globexuser"),
         )
         assert resp.status_code == 403
 
@@ -194,7 +201,7 @@ class TestObjectsRbac:
         resp = repo_setup.put(
             f"{OBJECTS}/system/-/ui/banner",
             content=b"nope",
-            headers=_headers(api_settings, "user1"),
+            headers=_headers(repo_setup.app, api_settings, "user1"),
         )
         assert resp.status_code == 403
 
@@ -206,12 +213,14 @@ class TestObjectsRbac:
             ).status_code
             == 200
         )
-        resp = client.get(f"{OBJECTS}/system/-/ui/banner", headers=_headers(api_settings, "user1"))
+        resp = client.get(
+            f"{OBJECTS}/system/-/ui/banner", headers=_headers(client.app, api_settings, "user1")
+        )
         assert resp.status_code == 200
         assert resp.content == b"welcome"
 
     def test_owner_rw_own_user_object(self, client: TestClient, fake_ch, api_settings):
-        user1 = _headers(api_settings, "user1")
+        user1 = _headers(client.app, api_settings, "user1")
         resp = client.put(f"{OBJECTS}/user/user1/notes/todo", content=b"do it", headers=user1)
         assert resp.status_code == 200
         body = resp.json()
@@ -222,8 +231,8 @@ class TestObjectsRbac:
         assert client.get(f"{OBJECTS}/user/user1/notes/todo", headers=user1).status_code == 404
 
     def test_other_users_object_hidden(self, client: TestClient, fake_ch, api_settings):
-        user1 = _headers(api_settings, "user1")
-        user2 = _headers(api_settings, "user2")
+        user1 = _headers(client.app, api_settings, "user1")
+        user2 = _headers(client.app, api_settings, "user2")
         client.put(f"{OBJECTS}/user/user1/notes/todo", content=b"secret", headers=user1)
         assert client.get(f"{OBJECTS}/user/user1/notes/todo", headers=user2).status_code == 404
         assert (
@@ -239,7 +248,7 @@ class TestObjectsRbac:
         client.put(
             f"{OBJECTS}/user/user1/notes/todo",
             content=b"secret",
-            headers=_headers(api_settings, "user1"),
+            headers=_headers(client.app, api_settings, "user1"),
         )
         assert (
             client.get(f"{OBJECTS}/user/user1/notes/todo", headers=admin_headers).status_code == 200
@@ -247,7 +256,7 @@ class TestObjectsRbac:
 
     def test_org_wildcard_admin_scope_fence(self, repo_setup, api_settings):
         client = repo_setup
-        orgadmin = _headers(api_settings, "orgadmin")
+        orgadmin = _headers(client.app, api_settings, "orgadmin")
         # Can write the own-org layer...
         assert (
             client.put(
@@ -279,14 +288,14 @@ class TestObjectsRbac:
         assert resp.status_code == 200, resp.text
         resp = client.get(
             f"{OBJECTS}/group/acme-analysts/ui/dashboard",
-            headers=_headers(api_settings, "orguser"),
+            headers=_headers(client.app, api_settings, "orguser"),
         )
         assert resp.status_code == 200
         assert resp.json() == {"layout": "grid"}
         # Non-member outside the owning org: hidden.
         resp = client.get(
             f"{OBJECTS}/group/acme-analysts/ui/dashboard",
-            headers=_headers(api_settings, "globexuser"),
+            headers=_headers(client.app, api_settings, "globexuser"),
         )
         assert resp.status_code == 404
 
@@ -298,17 +307,21 @@ class TestObjectsRbac:
         client = repo_setup
         client.put(f"{OBJECTS}/org/acme/ui/a", content=b"aa", headers=admin_headers)
         client.put(f"{OBJECTS}/org/acme/ui/b", content=b"bbb", headers=admin_headers)
-        resp = client.get(f"{OBJECTS}/org/acme/ui", headers=_headers(api_settings, "orguser"))
+        resp = client.get(
+            f"{OBJECTS}/org/acme/ui", headers=_headers(client.app, api_settings, "orguser")
+        )
         assert resp.status_code == 200
         entries = resp.json()["items"]
         assert [e["key"] for e in entries] == ["a", "b"]
         assert entries[1]["size"] == 3
         # Cross-org list is hidden too.
-        resp = client.get(f"{OBJECTS}/org/acme/ui", headers=_headers(api_settings, "globexuser"))
+        resp = client.get(
+            f"{OBJECTS}/org/acme/ui", headers=_headers(client.app, api_settings, "globexuser")
+        )
         assert resp.status_code == 404
 
     def test_put_if_match_conflict_412(self, client: TestClient, fake_ch, api_settings):
-        user1 = _headers(api_settings, "user1")
+        user1 = _headers(client.app, api_settings, "user1")
         resp = client.put(f"{OBJECTS}/user/user1/notes/todo", content=b"v1", headers=user1)
         etag = resp.headers["ETag"]
         resp = client.put(
@@ -347,7 +360,7 @@ class TestOrgAccessComesOnlyFromTheBoundAccount:
     @pytest.mark.parametrize(
         ("sub", "own_orgs"),
         [
-            pytest.param("nobody-at-all", [], id="no-account"),
+            pytest.param("nobody-at-all", None, id="no-account"),
             pytest.param("globexuser", ["globex"], id="account-in-another-org"),
         ],
     )
@@ -359,8 +372,8 @@ class TestOrgAccessComesOnlyFromTheBoundAccount:
             f"{OBJECTS}/org/acme/ui/welcome", content=b"acme only", headers=admin_headers
         )
         assert put.status_code == 200, put.text
-        token = create_access_token(
-            data={"sub": sub, "org_id": "default", "org_ids": ["acme"]}, settings=api_settings
+        token = session_token(
+            client.app, api_settings, {"sub": sub, "org_id": "default", "org_ids": ["acme"]}
         )
         headers = {"Authorization": f"Bearer {token}"}
 
@@ -368,6 +381,10 @@ class TestOrgAccessComesOnlyFromTheBoundAccount:
         listing = client.get(f"{OBJECTS}/org/acme/ui", headers=headers)
         me = client.get("/api/v1/auth/me", headers=headers)
 
+        if own_orgs is None:
+            # A token for no account names no session at all.
+            assert (obj.status_code, listing.status_code, me.status_code) == (401, 401, 401)
+            return
         assert obj.status_code == 404, obj.text
         assert listing.status_code == 404, listing.text
         assert me.json()["org_ids"] == own_orgs
@@ -489,7 +506,7 @@ class TestValidation:
         assert resp.status_code == 404
 
     def test_default_content_type(self, client: TestClient, fake_ch, api_settings):
-        user1 = _headers(api_settings, "user1")
+        user1 = _headers(client.app, api_settings, "user1")
         resp = client.put(
             f"{OBJECTS}/user/user1/blobs/raw",
             content=b"\x00\x01binary",

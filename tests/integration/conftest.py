@@ -71,6 +71,7 @@ from typing import Any, NoReturn
 
 import pytest
 
+from tests.support.accounts import session_token
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 from tests.support.dockerhub import dockerhub_image
 from tests.support.producer_contract import in_ci
@@ -1059,20 +1060,20 @@ def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Iterator
     from fastapi.testclient import TestClient
 
     from dfe_engine.api.app import create_app
-    from dfe_engine.api.deps import _registries, create_access_token
+    from dfe_engine.api.deps import _registries
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
     from dfe_engine.gitcrud import GitCrud, default_registry
     from dfe_engine.gitops.repo import GitopsRepo
     from tests.support.accounts import admin_on_its_own_password
 
     app = create_app(settings=settings)
-    token = create_access_token(
-        data={"org_id": "test-org", "roles": ["admin"], "sub": "admin"}, settings=settings
-    )
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             # Off the issued password, which refuses every other call until changed.
             admin_on_its_own_password(app)
+            token = session_token(
+                app, settings, {"org_id": "test-org", "roles": ["admin"], "sub": "admin"}
+            )
             crud = app.state.gitcrud
             if crud is None:
                 crud = GitCrud(

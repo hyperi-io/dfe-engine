@@ -26,9 +26,10 @@ from dfe_engine.api.deps import (
     check_action,
     create_access_token,
     get_role_config,
-    require_local_account_enabled,
+    refuse_denied_account,
     resolve_live_grants_for_user,
     resolve_live_groups_for_user,
+    session_accounts,
 )
 from dfe_engine.api.metrics import ApiMetrics
 from dfe_engine.api.password_change import PASSWORD_CHANGE_CLAIM
@@ -50,9 +51,11 @@ from dfe_engine.auth.models import AuthenticationError, ScopedGrant, held_grants
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.auth.sessions import (
+    SESSION_CLAIM,
     remaining_seconds,
     session_auth_time,
     session_claims,
+    session_ended,
     token_lifetime,
 )
 from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
@@ -237,11 +240,14 @@ def _mint(
     *,
     auth_time: int,
     now: int,
+    marker: str,
 ) -> tuple[str, int]:
     """Sign *data* with the session claims, returning the token and its lifetime in seconds.
 
     The token is issued at *now*, the reading its lifetime is capped against, so its
     ``exp`` is ``min(now + api.jwt_expire_minutes, auth_time + api.max_session_minutes)``.
+    *marker* is the session marker of the record the caller was authenticated against,
+    never *account* as read now (see :func:`~dfe_engine.auth.sessions.session_claims`).
     """
     lifetime = token_lifetime(
         auth_time,
@@ -249,7 +255,7 @@ def _mint(
         expire_minutes=settings.api.jwt_expire_minutes,
         max_session_minutes=settings.api.max_session_minutes,
     )
-    claims = {**data, **session_claims(account, auth_time=auth_time)}
+    claims = {**data, **session_claims(account, auth_time=auth_time, marker=marker)}
     token = create_access_token(
         data=claims, settings=settings, expires_delta=timedelta(seconds=lifetime), now=now
     )
@@ -268,7 +274,8 @@ def _mint(
             "description": "Invalid username or password, or the account is disabled or blocked",
         },
         403: {
-            "description": "The break-glass account is disabled in governance settings",
+            "description": "The break-glass password is right, but the account is "
+            "disabled in governance settings",
         },
         429: {
             "description": "Too many failed sign-ins for this username or from this "
@@ -292,22 +299,12 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         audit_login_denied(body.username, "jwt", client_ip, "throttled")
         raise throttled(request, wait)
 
-    # The break-glass account bypasses the IdP, so every attempt is audited and the
-    # governance switch is consulted before the password is even checked.
+    # The break-glass account bypasses the IdP, so every attempt is audited.
+    breakglass_off = False
     if body.username == breakglass.USERNAME:
         gc = getattr(request.app.state, "gitcrud", None)
-        allowed = breakglass.is_enabled(gc)
-        audit_breakglass_login(client_ip, allowed, "" if allowed else "disabled")
-        if not allowed:
-            # Only a deploy repo can turn the account off, so there is one to name.
-            where = request.app.state.gitcrud.resource_class(breakglass.CLASS)
-            raise ProblemError(
-                403,
-                "The break-glass account is turned off. To turn it back on, set "
-                f"{breakglass.KEY_ENABLED} to true in "
-                f"{where.directory}/{breakglass.NAME}{where.suffix} in the deploy repo.",
-                code="breakglass_disabled",
-            )
+        breakglass_off = not breakglass.is_enabled(gc)
+        audit_breakglass_login(client_ip, not breakglass_off, "disabled" if breakglass_off else "")
 
     try:
         auth_ctx = await run_blocking(
@@ -324,6 +321,18 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         # expired tokens on ordinary requests - those are already audited in deps.py.
         audit_login_denied(body.username, "jwt", client_ip, str(exc))
         raise
+    if breakglass_off:
+        # Only after the password passed, so a guesser gets the generic 401 and a failed
+        # count, while the operator holding the password is told the switch is off.
+        # Only a deploy repo can turn the account off, so there is one to name.
+        where = request.app.state.gitcrud.resource_class(breakglass.CLASS)
+        raise ProblemError(
+            403,
+            "The break-glass account is turned off. To turn it back on, set "
+            f"{breakglass.KEY_ENABLED} to true in "
+            f"{where.directory}/{breakglass.NAME}{where.suffix} in the deploy repo.",
+            code="breakglass_disabled",
+        )
     throttle.succeeded(body.username)
 
     # The password is exchanged for a token here, so this is the login the
@@ -344,8 +353,14 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
         role_config=get_role_config(request),
     )
     now = int(time.time())
+    # Stamped with the record the password was checked against, never a later read.
     token, lifetime = _mint(
-        data, bound_account(request, auth_ctx.user_id), settings, auth_time=now, now=now
+        data,
+        bound_account(request, auth_ctx.user_id),
+        settings,
+        auth_time=now,
+        now=now,
+        marker=auth_ctx.session_marker or "",
     )
 
     return TokenResponse(
@@ -374,7 +389,23 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings,
     The new token keeps the session's sign-in time, so a session renews only until
     it is ``api.max_session_minutes`` old, and no token outlives that.
     """
-    account = require_local_account_enabled(request, user.user_id)
+    account, named = session_accounts(request, user.user_id)
+    claims = getattr(request.state, "token_claims", None)
+    if claims is None:
+        # The proxy path took it from the record it checked on this request.
+        marker = user.session_marker or ""
+    else:
+        # Ended before any state check, so an ended session learns nothing of the
+        # account. A token without a marker has no session to carry forward.
+        marker = claims.get(SESSION_CLAIM)
+        if not isinstance(marker, str) or session_ended(account, claims):
+            raise ProblemError(
+                401,
+                "This session has ended; sign in again",
+                code="session_ended",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    refuse_denied_account(named)
     # Each refresh issues a new expiry, so only a session an account backs may renew.
     if account is None and settings.auth.enabled:
         raise ProblemError(
@@ -383,7 +414,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings,
             code="unauthorized",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    auth_time = session_auth_time(getattr(request.state, "token_claims", None), now=now)
+    auth_time = session_auth_time(claims, now=now)
     left = remaining_seconds(
         auth_time, now=now, max_session_minutes=settings.api.max_session_minutes
     )
@@ -407,7 +438,7 @@ async def refresh_token(user: CurrentUser, request: Request, settings: Settings,
         change_required=change_required,
         role_config=get_role_config(request),
     )
-    token, lifetime = _mint(data, account, settings, auth_time=auth_time, now=now)
+    token, lifetime = _mint(data, account, settings, auth_time=auth_time, now=now, marker=marker)
 
     return TokenResponse(
         access_token=token,

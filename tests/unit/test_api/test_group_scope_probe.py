@@ -17,8 +17,8 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.settings import DFESettings
+from tests.support.accounts import session_token
 
 GROUPS = "/api/v1/auth/groups"
 ORGS = "/api/v1/orgs"
@@ -47,7 +47,7 @@ def orgadmin(
     ):
         resp = client.post(GROUPS, json=body, headers=admin_headers)
         assert resp.status_code == 201, resp.text
-    token = create_access_token(data={"sub": "orgadmin"}, settings=api_settings)
+    token = session_token(app, api_settings, {"sub": "orgadmin"})
     return {"Authorization": f"Bearer {token}"}
 
 

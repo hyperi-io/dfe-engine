@@ -15,9 +15,9 @@ check, so a 400 proves the caller got past it without a ClickHouse to query.
 
 import pytest
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.rbac_scopes import casbin_scopes_for_role_configuration, scopes_dict
 from dfe_engine.auth.roles import RoleConfig
+from tests.support.accounts import session_token
 
 RAW = "/api/v1/queries/raw"
 BODY = {"datasource": "nonexistent:default", "query": "SELECT currentUser()"}
@@ -28,7 +28,7 @@ def _session_holding(app, api_settings, role: str) -> dict[str, str]:
     name = f"raw-probe-{role.replace('_', '-')}"
     app.state.group_store.create(f"{name}-group", roles=[role], members=[name])
     app.state.account_store.create(name, "raw-probe-password-2026", groups=[f"{name}-group"])
-    token = create_access_token(data={"sub": name}, settings=api_settings)
+    token = session_token(app, api_settings, {"sub": name})
     return {"Authorization": f"Bearer {token}"}
 
 

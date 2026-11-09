@@ -1,7 +1,11 @@
 """Tests for the local authentication provider (store-backed)."""
 
+import sys
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
+import bcrypt
 import pytest
 
 from dfe_engine.auth import (
@@ -9,7 +13,7 @@ from dfe_engine.auth import (
     AuthenticationError,
     authorize,
 )
-from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.accounts import Account, AccountStore, _dummy_hash, soft_delete_account
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.local_provider import LocalAuthProvider
 from tests.support.present import present
@@ -120,34 +124,142 @@ class TestAuthentication:
 # ---------------------------------------------------------------------------
 
 
+@contextmanager
+def _bcrypt_calls() -> Iterator[list[str]]:
+    """Name each real ``bcrypt.checkpw`` and ``bcrypt.hashpw`` call made inside the block.
+
+    Read from the profiler, so the functions themselves are not replaced.
+    """
+    seen: list[str] = []
+
+    def profile(_frame: object, event: str, arg: object) -> None:
+        if event == "c_call" and (arg is bcrypt.checkpw or arg is bcrypt.hashpw):
+            seen.append(arg.__name__)
+
+    previous = sys.getprofile()
+    sys.setprofile(profile)
+    try:
+        yield seen
+    finally:
+        sys.setprofile(previous)
+
+
+def _unknown(_store: AccountStore) -> str:
+    return "nobody"
+
+
+def _active(_store: AccountStore) -> str:
+    return "viewer"
+
+
+def _blocked(store: AccountStore) -> str:
+    store.update("viewer", blocked=True)
+    return "viewer"
+
+
+def _disabled(store: AccountStore) -> str:
+    store.update("viewer", enabled=False)
+    return "viewer"
+
+
+def _soft_deleted(store: AccountStore) -> str:
+    return soft_delete_account(store, "viewer").username
+
+
+def _external(store: AccountStore) -> str:
+    store.update("viewer", external=True)
+    return "viewer"
+
+
+_GENERIC = "Invalid username or password"
+
+
 class TestAuthenticationFailure:
-    def test_wrong_password(self, provider: LocalAuthProvider):
-        with pytest.raises(AuthenticationError, match="Invalid username or password"):
-            provider.authenticate("admin", "wrong-password")
+    @pytest.mark.parametrize(
+        ("state", "password", "message"),
+        [
+            pytest.param(_unknown, "viewer-secret", _GENERIC, id="unknown-user"),
+            pytest.param(_active, "wrong-password", _GENERIC, id="active-wrong-password"),
+            pytest.param(_blocked, "wrong-password", _GENERIC, id="blocked-wrong-password"),
+            pytest.param(_disabled, "wrong-password", _GENERIC, id="disabled-wrong-password"),
+            pytest.param(_soft_deleted, "wrong-password", _GENERIC, id="soft-deleted-wrong"),
+            pytest.param(_soft_deleted, "viewer-secret", _GENERIC, id="soft-deleted-right"),
+            pytest.param(_external, "viewer-secret", _GENERIC, id="external-right-password"),
+            pytest.param(_blocked, "viewer-secret", "Account blocked", id="blocked-right"),
+            pytest.param(_disabled, "viewer-secret", "Account disabled", id="disabled-right"),
+        ],
+    )
+    def test_account_state_is_reported_only_to_the_right_password(
+        self,
+        stores: tuple[AccountStore, GroupStore],
+        state: Callable[[AccountStore], str],
+        password: str,
+        message: str,
+    ):
+        account_store, group_store = stores
+        username = state(account_store)
+        provider = LocalAuthProvider(account_store, group_store)
+        with _bcrypt_calls() as calls, pytest.raises(AuthenticationError) as refused:
+            provider.authenticate(username, password)
+        assert str(refused.value) == message
+        # Exactly one bcrypt check on every path keeps them in one timing class.
+        assert calls == ["checkpw"]
 
-    def test_unknown_username(self, provider: LocalAuthProvider):
-        with pytest.raises(AuthenticationError, match="Invalid username or password"):
+    def test_a_cold_process_first_unknown_name_costs_one_check(self, auth_dirs: tuple[Path, Path]):
+        """The dummy hash is made with the store, so the first login does no hashing of its own."""
+        accounts_dir, groups_dir = auth_dirs
+        _dummy_hash.cache_clear()
+        provider = LocalAuthProvider(AccountStore(accounts_dir), GroupStore(groups_dir))
+        with _bcrypt_calls() as calls, pytest.raises(AuthenticationError, match=_GENERIC):
             provider.authenticate("nobody", "any-password")
+        assert calls == ["checkpw"]
 
-    def test_disabled_account(
+    @pytest.mark.parametrize(
+        ("change", "password"),
+        [
+            pytest.param(
+                lambda s, u: s.put(present(s.get(u)).model_copy(update={"blocked": True})),
+                "viewer-secret",
+                id="blocked-verbatim",
+            ),
+            pytest.param(lambda s, u: s.update(u, enabled=False), "viewer-secret", id="disabled"),
+            pytest.param(
+                lambda s, u: s.reset_password(u, "changed-secret"),
+                "changed-secret",
+                id="new-password",
+            ),
+            pytest.param(lambda s, u: s.delete(u), "viewer-secret", id="deleted"),
+        ],
+    )
+    def test_a_change_landing_mid_login_refuses_it(
         self,
         stores: tuple[AccountStore, GroupStore],
+        auth_dirs: tuple[Path, Path],
+        change: Callable[[AccountStore, str], object],
+        password: str,
     ):
-        account_store, group_store = stores
-        account_store.update("viewer", enabled=False)
-        provider = LocalAuthProvider(account_store, group_store)
-        with pytest.raises(AuthenticationError, match="Account disabled"):
-            provider.authenticate("viewer", "viewer-secret")
+        accounts_dir, _groups_dir = auth_dirs
+        racing = _ChangesAfterFirstRead(accounts_dir, change)
+        provider = LocalAuthProvider(racing, stores[1])
+        with pytest.raises(AuthenticationError, match=_GENERIC):
+            provider.authenticate("viewer", password)
+        assert racing.changed
 
-    def test_blocked_account(
-        self,
-        stores: tuple[AccountStore, GroupStore],
-    ):
-        account_store, group_store = stores
-        account_store.update("viewer", blocked=True)
-        provider = LocalAuthProvider(account_store, group_store)
-        with pytest.raises(AuthenticationError, match="Account blocked"):
-            provider.authenticate("viewer", "viewer-secret")
+
+class _ChangesAfterFirstRead(AccountStore):
+    """A real store where another writer changes the record just after its first read."""
+
+    def __init__(self, accounts_dir: Path, change: Callable[[AccountStore, str], object]) -> None:
+        super().__init__(accounts_dir)
+        self._change = change
+        self.changed = False
+
+    def get(self, username: str) -> Account | None:
+        account = super().get(username)
+        if account is not None and not self.changed:
+            self.changed = True
+            self._change(self, username)
+        return account
 
 
 # ---------------------------------------------------------------------------
@@ -190,18 +302,6 @@ class TestAccountStoreHashing:
         provider = LocalAuthProvider(account_store, group_store)
         auth = provider.authenticate("admin", "new-password")
         assert auth.user_id == "admin"
-
-
-# ---------------------------------------------------------------------------
-# Timing safety
-# ---------------------------------------------------------------------------
-
-
-class TestTimingSafety:
-    def test_nonexistent_user_still_takes_time(self, provider: LocalAuthProvider):
-        """Unknown username should still do a bcrypt check (timing-safe)."""
-        with pytest.raises(AuthenticationError):
-            provider.authenticate("nonexistent", "any-password")
 
 
 # ---------------------------------------------------------------------------
