@@ -7,14 +7,18 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 import json
+import os
 import secrets
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from ruamel.yaml import YAML
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
 from dfe_engine.auth import breakglass
+from dfe_engine.auth.accounts import Account
 from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.gitcrud import GitCrud, default_registry
@@ -464,5 +468,44 @@ def test_setup_status_keeps_oidc_login_options_once_complete(tmp_path):
                 {"name": "entra", "display_name": "Microsoft Entra"},
             ]
             assert "https://idp" not in json.dumps(body)
+    finally:
+        _registries.clear()
+
+
+def test_setup_status_does_not_reparse_unchanged_account_files(tmp_path, monkeypatch):
+    """The public probe runs on every console page load, so its cost cannot scale with accounts.
+
+    With setup complete and a deploy repo, the retire-admin hint walks every account
+    when none of them is an admin. The walk reuses each file's parse from the last
+    call and parses again only a file that changed.
+    """
+    settings = _with_deploy_repo(_settings(tmp_path), tmp_path)
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            app.state.org_registry.create("acme", display_name="Acme")
+            for n in range(25):
+                app.state.account_store.put(Account(username=f"user{n:02d}", password_hash="x"))
+            week_ago = time.time() - 7 * 86400
+            for path in tmp_path.rglob("*.yaml"):
+                os.utime(path, (week_ago, week_ago))
+            warm = client.get("/api/v1/auth/setup-status").json()
+            assert warm["initial_setup"]["complete"] is True
+
+            parsed: list[str] = []
+            load = YAML.load
+
+            def counting_load(self, stream):
+                parsed.append(getattr(stream, "name", ""))
+                return load(self, stream)
+
+            monkeypatch.setattr(YAML, "load", counting_load)
+            for _ in range(5):
+                assert client.get("/api/v1/auth/setup-status").json() == warm
+            assert [name for name in parsed if "/accounts/" in name] == []
+
+            app.state.account_store.update("user07", enabled=False)
+            client.get("/api/v1/auth/setup-status")
+            assert {Path(name).name for name in parsed if "/accounts/" in name} == {"user07.yaml"}
     finally:
         _registries.clear()

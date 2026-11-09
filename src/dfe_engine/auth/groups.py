@@ -20,7 +20,7 @@ from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import case_twin, store_key
 from dfe_engine.names import VALID_NAME
 from dfe_engine.orgs.models import ORG_NAME_PATTERN
-from dfe_engine.yaml_utils import YAMLError, yaml_dump, yaml_load
+from dfe_engine.yaml_utils import YAMLError, yaml_dump, yaml_load_cached
 
 GROUP_SCOPE_SYSTEM = "system"
 _ORG_SCOPE_PREFIX = "org:"
@@ -317,7 +317,7 @@ class GroupStore:
         file whose ``source_id`` names no provider loads unlinked (:meth:`_Skips.unlink`).
         """
         try:
-            data = yaml_load(path)
+            data = yaml_load_cached(path)
         except FileNotFoundError:
             return None
         # A file nested past the parser's recursion limit raises RecursionError, not YAMLError.

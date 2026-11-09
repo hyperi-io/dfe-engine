@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from enum import StrEnum
 
 import pytest
@@ -19,6 +20,7 @@ from dfe_engine.yaml_utils import (
     yaml_dump,
     yaml_dump_string,
     yaml_load,
+    yaml_load_cached,
     yaml_load_string,
 )
 
@@ -356,3 +358,103 @@ class TestDeepMerge:
         base = {}
         deep_merge(base, {"a": 1})
         assert base == {"a": 1}
+
+
+class TestYamlLoadCached:
+    """A cached parse is reused only while the file is demonstrably the one parsed."""
+
+    @staticmethod
+    def _age(path, seconds=3600):
+        old = time.time() - seconds
+        os.utime(path, (old, old))
+
+    @staticmethod
+    def _parses(monkeypatch):
+        from ruamel.yaml import YAML
+
+        parsed = []
+        load = YAML.load
+
+        def counting_load(self, stream):
+            parsed.append(stream.name)
+            return load(self, stream)
+
+        monkeypatch.setattr(YAML, "load", counting_load)
+        return parsed
+
+    def test_an_unchanged_file_is_parsed_once(self, tmp_path, monkeypatch):
+        path = tmp_path / "a.yaml"
+        path.write_text("k: v\n", encoding="utf-8")
+        self._age(path)
+        parsed = self._parses(monkeypatch)
+
+        assert [yaml_load_cached(path) for _ in range(3)] == [{"k": "v"}] * 3
+        assert parsed == [str(path)]
+
+    def test_a_replaced_file_of_the_same_size_is_read_again(self, tmp_path):
+        path = tmp_path / "a.yaml"
+        path.write_text("k: one\n", encoding="utf-8")
+        self._age(path)
+        assert yaml_load_cached(path) == {"k": "one"}
+
+        yaml_dump({"k": "two"}, path)
+
+        assert yaml_load_cached(path) == {"k": "two"}
+
+    def test_an_in_place_edit_is_read_again(self, tmp_path):
+        path = tmp_path / "a.yaml"
+        path.write_text("k: one\n", encoding="utf-8")
+        self._age(path)
+        assert yaml_load_cached(path) == {"k": "one"}
+
+        path.write_text("k: two\n", encoding="utf-8")
+        self._age(path, 1800)
+
+        assert yaml_load_cached(path) == {"k": "two"}
+
+    def test_a_recently_written_file_is_never_kept(self, tmp_path, monkeypatch):
+        path = tmp_path / "a.yaml"
+        path.write_text("k: v\n", encoding="utf-8")
+        parsed = self._parses(monkeypatch)
+
+        yaml_load_cached(path)
+        yaml_load_cached(path)
+
+        assert parsed == [str(path)] * 2
+
+    def test_a_caller_cannot_change_what_the_next_caller_gets(self, tmp_path):
+        path = tmp_path / "a.yaml"
+        path.write_text("k: [1, 2]\n", encoding="utf-8")
+        self._age(path)
+
+        first = yaml_load_cached(path)
+        first["k"].append(3)
+        first["extra"] = True
+
+        assert yaml_load_cached(path) == {"k": [1, 2]}
+
+    def test_a_missing_file_raises(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            yaml_load_cached(tmp_path / "gone.yaml")
+
+    def test_a_removed_file_is_not_served_from_the_cache(self, tmp_path):
+        path = tmp_path / "a.yaml"
+        path.write_text("k: v\n", encoding="utf-8")
+        self._age(path)
+        yaml_load_cached(path)
+
+        path.rename(tmp_path / "moved.yaml")
+
+        with pytest.raises(FileNotFoundError):
+            yaml_load_cached(path)
+
+    def test_invalid_yaml_raises_every_time(self, tmp_path):
+        from ruamel.yaml import YAMLError
+
+        path = tmp_path / "a.yaml"
+        path.write_text("k: [unclosed\n", encoding="utf-8")
+        self._age(path)
+
+        for _ in range(2):
+            with pytest.raises(YAMLError):
+                yaml_load_cached(path)

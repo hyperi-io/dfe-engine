@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from dfe_engine.gitops.repo import GitopsHeadMovedError, GitopsRepo, PublishResult
-from dfe_engine.yaml_utils import yaml_dump_string, yaml_load, yaml_load_string
+from dfe_engine.yaml_utils import yaml_dump_string, yaml_load_cached, yaml_load_string
 
 from .commit_policy import validate_name, validate_resource_path
 from .registry import ResourceClass, ResourceClassRegistry, default_registry
@@ -295,7 +295,7 @@ class GitCrud:
         f = self._file(cls, name)
         if not f.is_file():
             raise ResourceNotFoundError(self._rel(cls, name))
-        return yaml_load(f) or {}
+        return yaml_load_cached(f) or {}
 
     def get_remote(self, cls_name: str, name: str) -> dict:
         """Read a resource's YAML doc as the REMOTE deploy repo holds it right now.

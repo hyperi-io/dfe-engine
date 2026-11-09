@@ -43,7 +43,7 @@ from scalo.logger import logger
 from dfe_engine.auth.protected_accounts import resolve_floor
 from dfe_engine.auth.store_names import case_twin, store_key
 from dfe_engine.names import VALID_NAME, InvalidNameError
-from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string, yaml_load
+from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string, yaml_load_cached
 
 BCRYPT_ROUNDS = 12
 """The bcrypt cost every stored password hash is made at."""
@@ -528,9 +528,10 @@ class AccountStore:
         """Load an Account from a YAML file.
 
         The username is derived from the filename stem -- it is not stored
-        inside the YAML body.
+        inside the YAML body. Parses are reused while the file is unchanged
+        (:func:`yaml_load_cached`), so scanning N accounts costs N stats, not N parses.
         """
-        data: dict = yaml_load(path)
+        data: dict = yaml_load_cached(path)
         data["username"] = path.stem
         return Account.model_validate(data)
 

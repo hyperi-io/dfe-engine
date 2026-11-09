@@ -18,10 +18,13 @@ Usage:
     deep_merge(base, overrides)  # mutates base in-place
 """
 
+import copy
 import math
 import os
 import tempfile
 import threading
+import time
+from collections import OrderedDict
 from collections.abc import Mapping
 from io import StringIO
 from pathlib import Path
@@ -88,6 +91,60 @@ def yaml_load(source: str | Path) -> Any:
     path = Path(source)
     with open(path, encoding="utf-8") as f:
         return _safe().load(f)
+
+
+type _FileKey = tuple[int, int, int]
+"""A file's identity as the filesystem reports it: inode, mtime in ns, size."""
+
+_PARSED_MAX = 4096
+"""Files whose parse :func:`yaml_load_cached` keeps, least recently used out first."""
+
+_FRESH_FILE_NS = 2_000_000_000
+"""A file modified this recently is parsed every time and never kept.
+
+File timestamps tick coarsely, so a rewrite inside the tick of an earlier read can
+leave the same size and mtime. Past this age no such rewrite can still be hiding.
+"""
+
+_parsed: OrderedDict[str, tuple[_FileKey, Any]] = OrderedDict()
+_parsed_lock = threading.Lock()
+
+
+def yaml_load_cached(source: str | Path) -> Any:
+    """Load YAML from a file, reusing the last parse while the file is unchanged.
+
+    A file counts as unchanged while its inode, mtime and size all match the read
+    that was kept. :func:`yaml_dump` replaces the file, which changes the inode, so a
+    write through this module is seen on the next call, and so is any other writer.
+    Each caller gets its own copy, so mutating the result never reaches the cache.
+
+    Args:
+        source: Path to the YAML file
+
+    Returns:
+        Parsed YAML content
+
+    Raises:
+        YAMLError: If the YAML is invalid
+        FileNotFoundError: If the file doesn't exist
+    """
+    path = Path(source)
+    name = str(path)
+    stat = path.stat()
+    key = (stat.st_ino, stat.st_mtime_ns, stat.st_size)
+    with _parsed_lock:
+        hit = _parsed.get(name)
+        if hit is not None and hit[0] == key:
+            _parsed.move_to_end(name)
+            return copy.deepcopy(hit[1])
+    data = yaml_load(path)
+    if time.time_ns() - stat.st_mtime_ns > _FRESH_FILE_NS:
+        with _parsed_lock:
+            _parsed[name] = (key, copy.deepcopy(data))
+            _parsed.move_to_end(name)
+            while len(_parsed) > _PARSED_MAX:
+                _parsed.popitem(last=False)
+    return data
 
 
 def yaml_load_string(content: str) -> Any:
