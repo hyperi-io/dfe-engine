@@ -3,6 +3,23 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.82](https://github.com/hyperi-io/dfe-engine/compare/v1.22.81...v1.22.82) (2026-11-09)
+
+### Bug Fixes
+
+* **auth:** check credentials before revealing account state ([ddeaa87](https://github.com/hyperi-io/dfe-engine/commit/ddeaa873f8b71e33cfc2bf072391bc296bbaa77f))
+* **auth:** refuse account and group names that differ only in case ([0b16eb1](https://github.com/hyperi-io/dfe-engine/commit/0b16eb15f5322048d3bdb9d37888ac6842bc34c7))
+* **deps:** raise the oauthlib floor to 4.0.1 for CVE-2026-49272 ([a635099](https://github.com/hyperi-io/dfe-engine/commit/a6350990cde8d92d29cdada057de0889718aefe5))
+* **deps:** update dependency node to v26 ([9ad2c9d](https://github.com/hyperi-io/dfe-engine/commit/9ad2c9d65cb401faab3a249e7f522f3ae776b793))
+* **e2e:** keep the seeds to the data they write ([3d280d2](https://github.com/hyperi-io/dfe-engine/commit/3d280d2228e88accf7666a5ddc36537785523764))
+* **engine:** stop setup-status scan early, restore e2e admin link ([#1092](https://github.com/hyperi-io/dfe-engine/issues/1092)) ([cc46d3e](https://github.com/hyperi-io/dfe-engine/commit/cc46d3eb1de8466960bef7c6d9138ebec318aec3))
+* **gitops:** stop deploy-repo batches blocking reads until commit ([4e13c76](https://github.com/hyperi-io/dfe-engine/commit/4e13c767d3b994d4827f6f20f9ac866c60084592))
+* **hunts:** stop two pods both winning one claim ([685392b](https://github.com/hyperi-io/dfe-engine/commit/685392b9c2fbac459e99f6adaa46f37f21e23a35))
+* **image:** ship third-party notices for every Python dependency ([7074b7b](https://github.com/hyperi-io/dfe-engine/commit/7074b7b2d31454231e2cd8a365852b702de94529))
+* **licences:** name exact licences for four shipped dependencies ([#1096](https://github.com/hyperi-io/dfe-engine/issues/1096)) ([1fdd49e](https://github.com/hyperi-io/dfe-engine/commit/1fdd49e7b6d019631cfe6ca438ef9a6b6541004b))
+* **licences:** ship GPL/LGPL texts and pass dfe-schemas licence gate ([b84313d](https://github.com/hyperi-io/dfe-engine/commit/b84313db65e34e70261aed22dfbfd10f3ef1e864))
+* **sigma:** convert through pysigma-backend-clickhouse on pySigma 2 ([7690cd1](https://github.com/hyperi-io/dfe-engine/commit/7690cd1e8abfe010d3f0d189ef9baee3dbba2705))
+
 ## [1.22.81](https://github.com/hyperi-io/dfe-engine/compare/v1.22.80...v1.22.81) (2026-11-04)
 
 ### Bug Fixes
