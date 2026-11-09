@@ -160,6 +160,8 @@ def yaml_load_cached(source: str | Path) -> Any:
     after = path.stat()
     if (after.st_ino, after.st_mtime_ns, after.st_ctime_ns, after.st_size) != key:
         return data  # Replaced mid-read: the parse may not be the file the key describes.
+    if b"&" in path.read_bytes():
+        return data  # An anchor lets aliases expand a small file far past its charged size.
     with _parsed_lock:
         old = _parsed.pop(name, None)
         if old is not None:

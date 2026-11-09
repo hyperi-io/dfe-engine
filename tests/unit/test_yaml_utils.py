@@ -500,6 +500,20 @@ class TestYamlLoadCached:
 
         assert str(path) not in yaml_utils._parsed
 
+    def test_a_file_with_anchors_is_never_kept(self, tmp_path, monkeypatch):
+        path = tmp_path / "a.yaml"
+        path.write_text(
+            "base: &b {a: 1, b: 2}\n" + "".join(f"m{n}: {{<<: *b}}\n" for n in range(50)),
+            encoding="utf-8",
+        )
+        parsed = self._parses(monkeypatch)
+
+        first = yaml_load_cached(path)
+        yaml_load_cached(path)
+
+        assert first["m49"] == {"a": 1, "b": 2}
+        assert parsed == [str(path)] * 2
+
     def test_a_recently_written_file_is_never_kept(self, tmp_path, monkeypatch):
         import dfe_engine.yaml_utils as yaml_utils
 
