@@ -33,6 +33,7 @@ from scalo.logger import logger
 
 from dfe_engine import __version__ as engine_version
 from dfe_engine.clickhouse.errors import is_retryable_error, parse_code
+from dfe_engine.clickhouse.lease import is_quorum_refusal
 from dfe_engine.schema.applier import (
     ManifestApplier,
     ManifestReport,
@@ -44,7 +45,6 @@ from dfe_engine.schema.lock import (
     SchemaLock,
     SchemaLockError,
     holder_name,
-    is_quorum_refusal,
     lease_seconds,
 )
 from dfe_engine.schema.plan import (

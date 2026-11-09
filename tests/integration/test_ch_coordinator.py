@@ -25,16 +25,16 @@ from dfe_engine.hunts.runner import HuntRunner
 
 
 def _coord(ch_client, db, worker_id, *, now=None, lease_seconds=300):
-    """A coordinator with a fixed clock and no-op settle sleep (deterministic)."""
+    """A coordinator with a no-op settle and a still landing clock, so server load drops no claim."""
     clock = (lambda: now) if now is not None else __import__("time").time
     return ChCoordinator(
         ch_client,
         database=db,
         worker_id=worker_id,
         lease_seconds=lease_seconds,
-        settle_seconds=0.0,
         clock=clock,
         sleep=lambda _s: None,
+        monotonic=lambda: 0.0,
     )
 
 
@@ -63,8 +63,8 @@ def test_lease_expiry_allows_reclaim(ch_client, dfe_db):
         )
         is True
     )  # lease_until default+100
-    w1_short = _coord(ch_client, dfe_db, "w1", lease_seconds=10)
-    assert w1_short.try_claim("h2", fire=1000, now=100) is True  # lease_until=110
+    w1_short = _coord(ch_client, dfe_db, "w1", lease_seconds=40)
+    assert w1_short.try_claim("h2", fire=1000, now=100) is True  # lease_until=140
     # still held before expiry
     assert w2.try_claim("h2", fire=1000, now=105) is False
     # after the lease expires, another worker reclaims it
@@ -183,8 +183,8 @@ def _late_claimant(ch_client, db: str, holder: ChCoordinator, won: list[bool]):
         ch_client,
         database=db,
         worker_id="b",
-        settle_seconds=0.0,
         sleep=lambda _s: None,
+        monotonic=lambda: 0.0,
         peer_claims=lambda: won.append(holder.try_claim("h", fire=1000, now=1001)),
     )
 
@@ -220,7 +220,7 @@ def test_a_refused_claim_leaves_nothing_that_holds_the_hunt(ch_client, dfe_db):
 
 def test_a_stale_owner_releasing_late_leaves_the_successors_lease(ch_client, dfe_db):
     """a's lease ran out and b took the hunt, so a's late release must not free it for c."""
-    a = _coord(ch_client, dfe_db, "a", lease_seconds=10)
+    a = _coord(ch_client, dfe_db, "a", lease_seconds=40)
     a.ensure_schema()
     assert a.try_claim("h", fire=1000, now=100) is True
     b = _coord(ch_client, dfe_db, "b")
@@ -233,7 +233,7 @@ def test_a_stale_owner_releasing_late_leaves_the_successors_lease(ch_client, dfe
 
 
 def test_a_stale_owner_cannot_renew_a_lease_a_successor_holds(ch_client, dfe_db):
-    a = _coord(ch_client, dfe_db, "a", lease_seconds=10)
+    a = _coord(ch_client, dfe_db, "a", lease_seconds=40)
     a.ensure_schema()
     assert a.try_claim("h", fire=1000, now=100) is True
     b = _coord(ch_client, dfe_db, "b")
@@ -243,12 +243,69 @@ def test_a_stale_owner_cannot_renew_a_lease_a_successor_holds(ch_client, dfe_db)
     assert b.current_lease("h").owner == "b"
 
 
-class _LongWorker:
-    """A worker whose one statement outlasts the lease, then asks whether a peer could claim."""
+def test_a_missed_claim_over_the_holder_neither_frees_the_hunt_nor_blocks_its_renewal(
+    ch_client, dfe_db
+):
+    """b's claim landed over a's after a stood, too late to keep: its marker is ended.
 
-    def __init__(self, client, peer: ChCoordinator) -> None:
+    Its row is the latest and lapses first, yet a's live marker still keeps c out, and
+    a's renewal lands and writes a's row over it. Real time, since a renewal is judged on
+    the server's clock.
+    """
+    now = int(time.time())
+    a = _coord(ch_client, dfe_db, "a")
+    a.ensure_schema()
+    assert a.try_claim("h", fire=1000, now=now) is True
+    columns = ["hunt_id", "owner", "fire", "lease_until"]
+    ch_client.insert(
+        "hunt_lease",
+        [["h", "b", 1000, now + 50], ["h#claim/b", "b", 1000, now + 50]],
+        column_names=columns,
+        database=dfe_db,
+    )
+    ch_client.insert(
+        "hunt_lease", [["h#claim/b", "b", 1000, 0]], column_names=columns, database=dfe_db
+    )
+    assert a.current_lease("h").owner == "b"
+
+    assert _coord(ch_client, dfe_db, "c").try_claim("h", fire=1000, now=now + 100) is False
+    assert a.renew("h", fire=1000, now=now + 1) is True
+    assert a.current_lease("h") == Lease(hunt_id="h", owner="a", fire=1000, lease_until=now + 301)
+    assert _coord(ch_client, dfe_db, "c").try_claim("h", fire=1000, now=now + 250) is False
+
+
+@pytest.mark.parametrize(
+    ("claimed", "renewed", "lands"),
+    [
+        pytest.param(-1000, -900, False, id="statement-run-after-the-lapse"),
+        pytest.param(-290, 0, False, id="inside-the-settle-and-quorum-wait"),
+        pytest.param(0, 1, True, id="time-to-spare"),
+    ],
+)
+def test_a_renewal_is_judged_on_the_server_clock(ch_client, dfe_db, claimed, renewed, lands):
+    """A renewal's own time can be stale by the time the server runs it, so it is not trusted.
+
+    a claims *claimed* seconds from now, then renews with a time *renewed* seconds from
+    now. The renewal lands only while the server finds more than a settle and a quorum
+    wait left, 12s, so a claim 10s short of lapsing is not renewed.
+    """
+    now = int(time.time())
+    a = _coord(ch_client, dfe_db, "a")
+    a.ensure_schema()
+    assert a.try_claim("h", fire=1000, now=now + claimed) is True
+
+    assert a.renew("h", fire=1000, now=now + renewed) is lands
+    held_until = now + (renewed if lands else claimed) + 300
+    assert a.current_lease("h") == Lease(hunt_id="h", owner="a", fire=1000, lease_until=held_until)
+
+
+class _LongWorker:
+    """A worker whose statements outlast the lease, then asks whether a peer could claim."""
+
+    def __init__(self, client, peer: ChCoordinator, *, outlast: int) -> None:
         self._client = client
         self._peer = peer
+        self._outlast = outlast
         self.peer_claimed: list[bool] = []
 
     def hold_for_safe_horizon(self, spec: HuntSpec, fire: int) -> bool:
@@ -256,7 +313,9 @@ class _LongWorker:
 
     def run(self, spec: HuntSpec, fire: int) -> None:
         # The runner's own client, as a hunt statement uses it, while the lease is renewed.
-        self._client.command("SELECT sleep(3)")
+        # ClickHouse caps one sleep() at 3s, so the run is several of them.
+        for _ in range(self._outlast // 3 + 1):
+            self._client.command("SELECT sleep(3)")
         self.peer_claimed.append(self._peer.try_claim(spec.hunt_id, fire))
 
 
@@ -264,12 +323,21 @@ def test_a_run_longer_than_its_lease_keeps_the_hunt_from_peers(ch_params, ch_cli
     import clickhouse_connect
 
     client = clickhouse_connect.get_client(**ch_params, autogenerate_session_id=False)
+    # Near the shortest lease the coordinator accepts, three times a settle and a quorum wait.
+    lease = 40
     holder = ChCoordinator(
-        client, database=dfe_db, worker_id="holder", lease_seconds=2, settle_seconds=0.0
+        client,
+        database=dfe_db,
+        worker_id="holder",
+        lease_seconds=lease,
+        sleep=lambda _s: None,
+        monotonic=lambda: 0.0,
     )
     holder.ensure_schema()
-    peer = ChCoordinator(ch_client, database=dfe_db, worker_id="peer", settle_seconds=0.0)
-    worker = _LongWorker(client, peer)
+    peer = ChCoordinator(
+        ch_client, database=dfe_db, worker_id="peer", sleep=lambda _s: None, monotonic=lambda: 0.0
+    )
+    worker = _LongWorker(client, peer, outlast=lease)
     spec = HuntSpec(hunt_id="long", interval_seconds=60, queries=["SELECT 1"])
     runner = HuntRunner(holder, worker, {"long": spec})  # ty: ignore[invalid-argument-type]  # a worker carrying only run() and the hold
 

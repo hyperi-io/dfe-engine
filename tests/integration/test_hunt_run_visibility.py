@@ -55,7 +55,7 @@ def _spec(hunt_id: str, db: str) -> HuntSpec:
 
 
 def _coord(ch_client, db: str) -> ChCoordinator:
-    coord = ChCoordinator(ch_client, database=db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     return coord
 

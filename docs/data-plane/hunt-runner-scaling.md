@@ -97,12 +97,7 @@ thing from the same inputs:
    `pollingInterval + pod-start`. For hunts (minute-plus intervals) that is
    immaterial. This is the "gate on the real condition" rule from the testing
    standard applied to autoscaling.
-4. **Self-healing.** If a worker claims a hunt then dies before writing the
-   watermark, its lease expires (`lease_seconds`, default 300) and the fire is
-   still owed (`watermark < fire`), so the scaler keeps >=1 worker and the hunt is
-   reclaimed. Nothing is lost and nothing double-runs (the lease gives mutual
-   exclusion, and a rare settle-window race is absorbed by the idempotent windowed
-   INSERT).
+4. **Self-healing.** If a worker claims a hunt then dies before writing the watermark, its lease expires (`lease_seconds`, default 300) and the fire is still owed (`watermark < fire`), so the scaler keeps >=1 worker and the hunt is reclaimed. Nothing double-runs (a hunt run twice writes and notifies twice): a claim stands only if acknowledged within a settle of its free read and still the latest row after it. A later claim is never released, as it may sit over the winner, but it holds nothing, so the next poll claims again.
 5. **No thundering herd.** The phase offset spreads same-interval hunts across the
    interval, so `due_count` rises gradually and KEDA scales out smoothly rather
    than all-at-once at the boundary.

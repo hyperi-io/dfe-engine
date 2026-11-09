@@ -126,7 +126,7 @@ def test_a_hunt_runs_as_the_runner_user(runner_world, ch_client, tmp_path):
         f"'{org}' FROM numbers(3)"
     )
     coord = ChCoordinator(
-        runner_client, database=db, worker_id="ident", settle_seconds=0.0, sleep=lambda _s: None
+        runner_client, database=db, worker_id="ident", sleep=lambda _s: None, monotonic=lambda: 0.0
     )
     coord.ensure_schema()
     coord.heartbeat(now, 15.0)

@@ -78,7 +78,7 @@ def test_hunt_added_after_the_loop_started_runs_without_a_restart(ch_client, dfe
         f"(toDateTime64({fixed_now - 30}, 3), toDateTime64({fixed_now - 30}, 3), '{marker}')"
     )
 
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     worker = HuntWorker(ch_client, coord)
 
@@ -157,7 +157,7 @@ def test_a_hunt_removed_while_the_loop_runs_stops_running(ch_client, dfe_db, tmp
     marker = f"org-{uuid.uuid4().hex[:8]}"
     fixed_now = int(time.time()) // 2 * 2
 
-    coord = ChCoordinator(ch_client, database=dfe_db, settle_seconds=0.0, sleep=lambda _s: None)
+    coord = ChCoordinator(ch_client, database=dfe_db, sleep=lambda _s: None, monotonic=lambda: 0.0)
     coord.ensure_schema()
     worker = HuntWorker(ch_client, coord)
     path = hunts_dir / f"{hunt}.yaml"
@@ -221,8 +221,8 @@ def test_an_idle_loop_still_reads_as_a_live_runner(ch_client, dfe_db, tmp_path):
     coord = ChCoordinator(
         ch_client,
         database=dfe_db,
-        settle_seconds=0.0,
         sleep=lambda _s: None,
+        monotonic=lambda: 0.0,
         worker_id=f"runner-{uuid.uuid4().hex[:8]}",
     )
     coord.ensure_schema()
