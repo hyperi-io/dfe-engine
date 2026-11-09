@@ -19,6 +19,7 @@ _DFE_VIEWERS_GROUP = "dfe-viewers"
 _WELL_KNOWN_E2E_PASSWORD = "changeme"  # noqa: S105, RUF100 - e2e seed
 _SEED_ACTOR = "e2e-seed"
 _SEARCHABLE_COUNT = 50
+_OIDC_LINKED_ADMIN = "dfe_admin"
 
 
 def searchable_account_names() -> list[str]:
@@ -243,13 +244,15 @@ class Accounts(Seed):
         return changed
 
     def seed_searchable_oidc_users(self) -> bool:
-        """Attach the searchable accounts to the first searchable OIDC provider.
+        """Attach the searchable accounts and ``dfe_admin`` to the first searchable OIDC provider.
 
         Returns True when any account was attached, False when they already were.
         The provider is ``searchable-oidc-0`` and must already be in the registry,
         and the accounts come from the searchable and blocked searchable account
-        seeds. No other account is touched. A local password on these stays usable: the attachment is the
-        provider stamp the account list filters on.
+        seeds. ``dfe_admin`` is linked too, because the provider-deletion e2e spec
+        needs a signed-in admin that goes with it. No other account is touched. A
+        local password on these stays usable: the attachment is the provider stamp
+        the account list filters on.
         """
         registry = self._require_oidc_registry()
         provider = searchable_oidc_provider_names()[0]
@@ -259,7 +262,11 @@ class Accounts(Seed):
                 "OIDC provider registry; run seed_searchable_oidc_providers first"
             )
         changed = False
-        seeded = [*searchable_account_names(), *searchable_blocked_account_names()]
+        seeded = [
+            *searchable_account_names(),
+            *searchable_blocked_account_names(),
+            _OIDC_LINKED_ADMIN,
+        ]
         for name in seeded:
             account = self._account_store.get(name)
             if account is None or account.is_soft_deleted:

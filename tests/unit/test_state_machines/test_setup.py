@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from dfe_engine.auth.account_durability import AccountGitState
-from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.bootstrap import admin_account_password
 from dfe_engine.auth.breakglass import USERNAME as BREAKGLASS_USERNAME
 from dfe_engine.auth.oidc.models import OIDCProvider
@@ -152,6 +152,44 @@ def test_external_account_counts_as_the_first_user(ctx):
     ctx.account_store.update("bob", external=True, source_provider="entra")
 
     assert STEP_FIRST_USER in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+
+def _seed_users(store: AccountStore, count: int) -> None:
+    """*count* enabled, password-less accounts named user-00 upward (no bcrypt, no cost)."""
+    for i in range(count):
+        store.put(Account(username=f"user-{i:02}", password_hash="!", external=True))
+
+
+def test_the_first_user_check_stops_at_the_first_real_account(ctx, monkeypatch):
+    """setup-status is unauthenticated and probed on every page load, so it reads no more than it must."""
+    _seed_users(ctx.account_store, 50)
+    reads: list[str] = []
+    real_read = AccountStore._read
+    monkeypatch.setattr(
+        AccountStore, "_read", lambda self, path: reads.append(path.stem) or real_read(self, path)
+    )
+
+    state = SETUP_MACHINE.evaluate(ctx)
+
+    assert STEP_FIRST_USER in state.completed_steps
+    assert reads == ["admin", "user-00"]
+
+
+def test_an_account_deleted_while_setup_is_read_is_not_an_error(ctx, monkeypatch):
+    """A soft-delete renames a file while setup-status scans the directory."""
+    _seed_users(ctx.account_store, 3)
+    real_read = AccountStore._read
+
+    def delete_user_00_as_it_is_read(self, path):
+        if path.stem == "user-00":
+            path.unlink()
+        return real_read(self, path)
+
+    monkeypatch.setattr(AccountStore, "_read", delete_user_00_as_it_is_read)
+
+    state = SETUP_MACHINE.evaluate(ctx)
+
+    assert STEP_FIRST_USER in state.completed_steps
 
 
 def test_default_credentials_reads_the_config_not_the_stored_hash(ctx):
