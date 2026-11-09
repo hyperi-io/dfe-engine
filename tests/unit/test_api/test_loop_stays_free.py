@@ -145,6 +145,7 @@ def _assert_the_loop_answers(
     path: str,
     body: dict | None,
     headers: dict[str, str],
+    probe_path: str = _PROBE,
 ) -> int:
     """Park one request, probe the loop, release; returns the parked request's status."""
     handled: list[int] = []
@@ -154,7 +155,7 @@ def _assert_the_loop_answers(
         handled.append(client.request(method, path, json=body, headers=headers).status_code)
 
     def probe() -> None:
-        answered.append(client.get(_PROBE).status_code)
+        answered.append(client.get(probe_path, headers=headers).status_code)
 
     worker = threading.Thread(target=call, daemon=True)
     prober = threading.Thread(target=probe, daemon=True)
@@ -163,7 +164,7 @@ def _assert_the_loop_answers(
         assert park.entered.wait(timeout=_WAIT_SECONDS), f"{method} {path} never reached the park"
         prober.start()
         prober.join(timeout=_PROBE_SECONDS)
-        assert answered == [200], f"{method} {path} held the event loop while it waited"
+        assert answered == [200], f"{method} {path} held GET {probe_path} while it waited"
         assert handled == []
     finally:
         park.release.set()
@@ -309,6 +310,35 @@ def test_the_loop_answers_while_the_source_catalogue_is_read(seeded, monkeypatch
 
     status = _assert_the_loop_answers(
         client, park, "GET", "/api/v1/sources/catalogue", None, headers
+    )
+
+    assert status == 200
+
+
+_SEED_READ_CASES: list[tuple[str, str]] = [
+    ("seed_searchable_accounts", "/api/v1/auth/setup-status"),
+    ("seed_searchable_accounts", "/api/v1/sources"),
+]
+
+
+@pytest.mark.parametrize(
+    ("script", "probe_path"),
+    _SEED_READ_CASES,
+    ids=[f"{s} -> GET {p}" for s, p in _SEED_READ_CASES],
+)
+def test_a_deploy_repo_read_answers_while_a_seed_runs(seeded, monkeypatch, script, probe_path):
+    """A seed's batch stays open for the whole script, fifty bcrypt hashes of it here."""
+    client, headers = seeded
+    park = _Park.on_function(client.app.state.account_store, "create", monkeypatch)
+
+    status = _assert_the_loop_answers(
+        client,
+        park,
+        "POST",
+        "/api/e2e/seed-static",
+        {"script": script},
+        headers,
+        probe_path=probe_path,
     )
 
     assert status == 200

@@ -1101,10 +1101,12 @@ class GitopsRepo:
         """Land every publish in the block as ONE commit and ONE push.
 
         Each publish inside the block writes and stages its files as usual, so a read
-        in the same block sees them, but nothing is committed until the block exits.
-        The commit carries ``message``, with the subject of every write that changed a
-        file listed in its body. The block holds the working tree until its commit and
-        the writer lock until its push, and a read in the block never refreshes.
+        sees them, but nothing is committed until the block exits. The commit carries
+        ``message``, with the subject of every write that changed a file listed in its
+        body. The block holds the writer lock until its push, and the working tree
+        only while it stages, commits or discards: a read on another thread waits for
+        one staged write, never for the caller's own work between writes. A read in
+        the block never refreshes.
 
         An exception inside the block discards everything it staged, so the deploy
         repo takes all of the block or none of it. A write routed to a review branch
@@ -1121,14 +1123,16 @@ class GitopsRepo:
             with self._lock:
                 self._settle_onto(remote_head)
                 self._batch = _Batch(message=message, owner=threading.get_ident())
-                try:
-                    yield
-                except BaseException:
+            # Every read takes the tree lock, so it is never held across the caller's own work.
+            try:
+                yield
+            except BaseException:
+                with self._lock:
                     batch, self._batch = self._batch, None
                     self._discard_staged(batch.artifacts)
-                    self._metrics.batch("discarded")
-                    raise
-                batch, self._batch = self._batch, None
+                self._metrics.batch("discarded")
+                raise
+            batch, self._batch = self._batch, None
             try:
                 landed = self._land(batch)
             except BaseException:
