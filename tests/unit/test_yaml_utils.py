@@ -450,6 +450,27 @@ class TestYamlLoadCached:
 
         assert parsed == [str(path)] * 2
 
+    def test_the_byte_budget_drops_the_least_recently_used_file(self, tmp_path, monkeypatch):
+        import dfe_engine.yaml_utils as yaml_utils
+
+        monkeypatch.setattr(yaml_utils, "_parsed", type(yaml_utils._parsed)())
+        monkeypatch.setattr(yaml_utils, "_parsed_bytes", 0)
+        paths = []
+        for name in ("a", "b", "c"):
+            path = tmp_path / f"{name}.yaml"
+            path.write_text(f"k: {name}\n", encoding="utf-8")
+            paths.append(path)
+        monkeypatch.setattr(yaml_utils, "_PARSED_MAX_BYTES", 2 * paths[0].stat().st_size)
+        for path in paths:
+            yaml_load_cached(path)
+        parsed = self._parses(monkeypatch)
+
+        yaml_load_cached(paths[2])
+        yaml_load_cached(paths[0])
+
+        assert parsed == [str(paths[0])]
+        assert yaml_utils._parsed_bytes <= yaml_utils._PARSED_MAX_BYTES
+
     def test_a_recently_written_file_is_never_kept(self, tmp_path, monkeypatch):
         import dfe_engine.yaml_utils as yaml_utils
 

@@ -100,11 +100,14 @@ ctime is in the key because no writer can set it back, unlike an mtime copied ov
 ``touch -r``, ``rsync -t`` or a tar restore.
 """
 
-_PARSED_MAX = 4096
-"""Files whose parse :func:`yaml_load_cached` keeps, least recently used out first."""
+_PARSED_MAX_BYTES = 4 * 1024 * 1024
+"""Source bytes of the files :func:`yaml_load_cached` keeps, least recently used out first.
+
+A parse holds about 12 times its source, so this keeps the cache near 50 MiB.
+"""
 
 _PARSED_MAX_FILE_BYTES = 16 * 1024
-"""Larger files are parsed every time, so the cache stays a few tens of MiB at most."""
+"""Larger files are parsed every time."""
 
 _FRESH_FILE_NS = 2_000_000_000
 """A file modified this recently is parsed every time and never kept.
@@ -114,6 +117,7 @@ leave the same size and mtime. Past this age no such rewrite can still be hiding
 """
 
 _parsed: OrderedDict[str, tuple[_FileKey, Any]] = OrderedDict()
+_parsed_bytes = 0
 _parsed_lock = threading.Lock()
 
 
@@ -121,8 +125,9 @@ def yaml_load_cached(source: str | Path) -> Any:
     """Load YAML from a file, reusing the last parse while the file is unchanged.
 
     A file counts as unchanged while its inode, mtime, ctime and size all match the
-    read that was kept. Only files up to 16 KiB are kept. :func:`yaml_dump` replaces the file, which changes the inode, so a
-    write through this module is seen on the next call, and so is any other writer.
+    read that was kept. Files up to 16 KiB are kept, 4 MiB of them in all.
+    :func:`yaml_dump` replaces the file, which changes the inode, so a write through
+    this module is seen on the next call, and so is any other writer.
     Each caller gets its own copy, so mutating the result never reaches the cache.
 
     Args:
@@ -135,6 +140,7 @@ def yaml_load_cached(source: str | Path) -> Any:
         YAMLError: If the YAML is invalid
         FileNotFoundError: If the file doesn't exist
     """
+    global _parsed_bytes
     path = Path(source)
     name = str(path)
     stat = path.stat()
@@ -148,10 +154,14 @@ def yaml_load_cached(source: str | Path) -> Any:
     changed_ns = max(stat.st_mtime_ns, stat.st_ctime_ns)
     if stat.st_size <= _PARSED_MAX_FILE_BYTES and time.time_ns() - changed_ns > _FRESH_FILE_NS:
         with _parsed_lock:
+            old = _parsed.pop(name, None)
+            if old is not None:
+                _parsed_bytes -= old[0][3]
             _parsed[name] = (key, copy.deepcopy(data))
-            _parsed.move_to_end(name)
-            while len(_parsed) > _PARSED_MAX:
-                _parsed.popitem(last=False)
+            _parsed_bytes += stat.st_size
+            while _parsed_bytes > _PARSED_MAX_BYTES:
+                _, (evicted, _) = _parsed.popitem(last=False)
+                _parsed_bytes -= evicted[3]
     return data
 
 
