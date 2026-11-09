@@ -11,7 +11,6 @@ from dataclasses import replace
 
 import pytest
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.appmgmt import catalogue
 from dfe_engine.auth.roles import RoleDefinition
 from dfe_engine.gitcrud import GitCrud, default_registry
@@ -20,6 +19,7 @@ from dfe_engine.governance import PolicyStore
 from dfe_engine.orgs.ingest_credentials import IngestCredential
 from dfe_engine.sampling.models import SampleResult
 from dfe_engine.settings import SecretsSettings
+from tests.support.accounts import session_token
 
 VRL = "dfe-transform-vrl"
 BASE = f"/api/v1/apps/{VRL}/edge"
@@ -1424,7 +1424,7 @@ class TestDryRun:
         app.state.group_store.update("dry-runners", org_ids=["test_org"])
         app.state.account_store.create("runner", "runner-password", groups=["dry-runners"])
         app.state.group_store.add_member("dry-runners", "runner")
-        token = create_access_token(data={"sub": "runner"}, settings=api_settings)
+        token = session_token(app, api_settings, {"sub": "runner"})
 
         resp = client.post(
             f"{BASE}/files/transforms/dry-run",

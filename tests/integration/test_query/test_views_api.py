@@ -22,7 +22,7 @@ from fastapi.testclient import TestClient
 from scalo.logger import logger
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.governance.ch.bootstrap import TENANT_ISOLATION_ENV
 from dfe_engine.governance.ch.models import DEFAULT_SERVICE_ROLES
@@ -36,7 +36,7 @@ from dfe_engine.settings import (
     LocalAuthSettings,
     SecretsSettings,
 )
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 
 pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
 
@@ -115,7 +115,7 @@ def stack(ch_params, ch_client, tmp_path, monkeypatch):
         with TestClient(app, raise_server_exceptions=False) as client:
             admin_on_its_own_password(app)
             app.state.account_store.update("admin", org="default")
-            token = create_access_token(data={"sub": "admin"}, settings=settings)
+            token = session_token(app, settings, {"sub": "admin"})
             yield SimpleNamespace(
                 app=app,
                 client=client,

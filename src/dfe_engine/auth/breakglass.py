@@ -22,10 +22,11 @@ A password reset through the accounts API replaces the committed hash
 (:func:`dfe_engine.auth.account_durability.publish_breakglass_hash`), which is
 what keeps the new password through a restart.
 
-``breakglass.enabled`` (default true) turns the account off once OIDC is verified;
-a login attempt against a disabled account is refused with a reason rather than
-the generic invalid-credentials answer, because the caller is an operator who
-needs to know the account was switched off, not that they mistyped.
+``breakglass.enabled`` (default true) turns the account off once OIDC is verified.
+A login with the right password against a disabled account is refused with a reason
+rather than the generic invalid-credentials answer, because the caller is an operator
+who needs to know the account was switched off. A wrong password gets the generic
+answer, so the switch is never told to someone without the password.
 
 With gitops disabled there is nowhere durable to hold the hash, so no break-glass
 account is seeded at all -- the deployment has only ``admin``.

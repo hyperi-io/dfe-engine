@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from tests.support.accounts import session_token
+
 
 class TestListTableEngines:
     def test_lists_every_registry_engine_with_its_argument_rule(
@@ -30,8 +32,6 @@ class TestListTableEngines:
         assert client.get("/api/v1/sources/engines").status_code == 401
 
     def test_requires_source_read(self, api_settings, app, client: TestClient):
-        from dfe_engine.api.deps import create_access_token
-
         app.state.role_store.create(
             "no-sources", description="test", permissions=["lifecycle:read"]
         )
@@ -39,14 +39,15 @@ class TestListTableEngines:
         app.state.group_store.create("grp-no-sources", roles=["no-sources"])
         app.state.account_store.create("nosrc", "pw-12345", groups=["grp-no-sources"])
         app.state.group_store.add_member("grp-no-sources", "nosrc")
-        token = create_access_token(
-            data={
+        token = session_token(
+            app,
+            api_settings,
+            {
                 "groups": ["grp-no-sources"],
                 "org_id": "test-org",
                 "roles": ["no-sources"],
                 "sub": "nosrc",
             },
-            settings=api_settings,
         )
 
         resp = client.get("/api/v1/sources/engines", headers={"Authorization": f"Bearer {token}"})

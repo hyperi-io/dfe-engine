@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 import pytest
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
+from tests.support.accounts import session_token
 
 
 @dataclass(frozen=True)
@@ -110,10 +110,7 @@ def client_as(client: TestClient, app, api_settings) -> Callable[[str], TestClie
             raise KeyError(
                 f"unknown fixture identity {identity!r}; known: {', '.join(sorted(FIXTURE_USERS))}"
             )
-        token = create_access_token(
-            data={"sub": identity, "org_id": "test_org"},
-            settings=api_settings,
-        )
+        token = session_token(app, api_settings, {"sub": identity, "org_id": "test_org"})
         client = TestClient(app, raise_server_exceptions=False)
         client.headers.update({"Authorization": f"Bearer {token}"})
         return client

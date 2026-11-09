@@ -577,18 +577,29 @@ def require_local_account_enabled(request: Request, user_id: str) -> Any:
     Returns:
         The session's store account, or None when it has none.
     """
+    bound, named = session_accounts(request, user_id)
+    refuse_denied_account(named)
+    return bound
+
+
+def session_accounts(request: Request, user_id: str) -> tuple[Any, Any]:
+    """The account *user_id*'s session binds, and the one its state is read from.
+
+    A disabled or blocked account refuses every token that names it, bound or not,
+    so the second is the bound account, else the one stored under the raw subject.
+    """
     account_store = getattr(request.app.state, "account_store", None)
     if account_store is None:
-        return None
-
+        return None, None
     bound = account_for_session_subject(account_store, user_id)
-    # A disabled or blocked account refuses every token that names it, bound or not.
-    account = bound or account_store.get(user_id)
-    if account is None:
-        return None
-    denied = account.session_denied()
+    return bound, bound or account_store.get(user_id)
+
+
+def refuse_denied_account(account: Any) -> None:
+    """Raise the 401 naming why *account* may not hold a session, when it may not."""
+    denied = account.session_denied() if account is not None else None
     if denied is None:
-        return bound
+        return
     code, message = denied
     raise ProblemError(
         status.HTTP_401_UNAUTHORIZED, message, code=code, headers={"WWW-Authenticate": "Bearer"}
@@ -691,6 +702,8 @@ async def get_current_user(request: Request) -> AuthContext:
             request_id=request_id,
             client_ip=client_ip,
             user_agent=user_agent,
+            # From the record checked above, so a refresh never mints from a later read.
+            session_marker=bound.session_marker() if bound is not None else None,
         )
 
     # -- Path 2: API key -----------------------------------------
@@ -763,7 +776,8 @@ async def get_current_user(request: Request) -> AuthContext:
 
         jwt_user_id = payload.get("sub", "")
         jwt_email = payload.get("email") or None
-        account = require_local_account_enabled(request, jwt_user_id)
+        account, named = session_accounts(request, jwt_user_id)
+        # Ended first: a token whose session is over learns nothing of the account's state.
         if session_ended(account, payload):
             audit_login_denied(jwt_user_id, "jwt", client_ip, "session_ended")
             raise ProblemError(
@@ -772,6 +786,7 @@ async def get_current_user(request: Request) -> AuthContext:
                 code="session_ended",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        refuse_denied_account(named)
         # The refresh route carries the session's sign-in time forward from these.
         request.state.token_claims = payload
         refuse_until_password_changed(request, account)

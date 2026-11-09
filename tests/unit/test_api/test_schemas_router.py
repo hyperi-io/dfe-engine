@@ -15,7 +15,7 @@ routers guard against missing infrastructure cleanly.
 
 from types import SimpleNamespace
 
-from tests.support.accounts import OnboardedClient
+from tests.support.accounts import OnboardedClient, session_token
 from tests.support.present import present
 
 # These apps run the production posture, which refuses to start on the shipped
@@ -52,7 +52,6 @@ class TestSchemasRouter:
         import shutil
 
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import create_access_token
         from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
         from dfe_engine.settings import (
             APISettings,
@@ -128,13 +127,12 @@ class TestSchemasRouter:
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-deploy"),
         )
         app = create_app(settings)
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 resp = tc.post("/api/v1/sources/dep-src/deploy?dry_run=true", headers=headers)
                 assert resp.status_code == 200, resp.text
                 body = resp.json()
@@ -150,7 +148,6 @@ class TestSchemasRouter:
         from unittest.mock import MagicMock
 
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import create_access_token
         from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
         from dfe_engine.settings import (
             APISettings,
@@ -265,13 +262,12 @@ class TestSchemasRouter:
             "dfe_engine.settings.get_settings",
             lambda: settings,
         )
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 resp = tc.post("/api/v1/sources/dep-src/deploy", headers=headers)
                 assert resp.status_code == 200, resp.text
                 assert resp.json()["applied"] is True
@@ -321,7 +317,7 @@ class TestSchemasRouter:
         import shutil
 
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
         from dfe_engine.settings import (
             APISettings,
@@ -408,15 +404,14 @@ class TestSchemasRouter:
         )
         app = create_app(settings)
 
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
         base_url = "/api/v1/sources/cols-src/columns"
 
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 resp = tc.get(base_url, headers=headers)
                 assert resp.status_code == 200
                 body = resp.json()
@@ -447,7 +442,7 @@ class TestSchemasRouter:
         import shutil
 
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
+        from dfe_engine.api.deps import _registries, get_clickhouse_client
         from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
         from dfe_engine.settings import (
             APISettings,
@@ -535,14 +530,12 @@ class TestSchemasRouter:
         app = create_app(settings)
         app.dependency_overrides[get_clickhouse_client] = lambda: _FakeCh()
 
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
-
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 plan_resp = tc.post("/api/v1/sources/plan-src/plan", headers=headers)
                 assert plan_resp.status_code == 200
                 body = plan_resp.json()
@@ -571,7 +564,7 @@ class TestSchemasMetaListRouter:
 
     def test_list_meta_not_configured_returns_503(self, tmp_path):
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -603,14 +596,12 @@ class TestSchemasMetaListRouter:
         )
         app = create_app(settings)
 
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
-
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 resp = tc.get("/api/v1/schemas", headers=headers)
             assert resp.status_code == 503
             assert resp.json()["code"] == "not_configured"
@@ -619,7 +610,7 @@ class TestSchemasMetaListRouter:
 
     def test_list_meta_returns_pagination_and_tree(self, tmp_path):
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -671,14 +662,12 @@ class TestSchemasMetaListRouter:
         )
         app = create_app(settings)
 
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
-
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 resp = tc.get("/api/v1/schemas?page_size=10", headers=headers)
             assert resp.status_code == 200
             body = resp.json()
@@ -691,7 +680,7 @@ class TestSchemasMetaListRouter:
 
     def test_list_meta_filters_by_schema_type(self, tmp_path):
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -749,14 +738,12 @@ class TestSchemasMetaListRouter:
         )
         app = create_app(settings)
 
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
-
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 all_resp = tc.get("/api/v1/schemas?page_size=1000", headers=headers)
                 meta_resp = tc.get(
                     "/api/v1/schemas?schema_type=meta&page_size=1000",
@@ -790,7 +777,7 @@ class TestSchemasMetaListRouter:
 
     def test_get_meta_schema_returns_full_definition(self, tmp_path):
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -850,14 +837,12 @@ class TestSchemasMetaListRouter:
         )
         app = create_app(settings)
 
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
-
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 columns_url = "/api/v1/schemas/definitions/aws/cloudtrail/versions/columns"
                 resp = tc.get(f"{columns_url}?version=1", headers=headers)
                 assert resp.status_code == 200
@@ -952,7 +937,7 @@ class TestSchemasMetaWriteRouter:
 
     def test_create_delete_round_trip(self, tmp_path):
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -986,15 +971,13 @@ class TestSchemasMetaWriteRouter:
         )
         app = create_app(settings)
 
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
-
         url = "/api/v1/schemas/definitions/gcp/audit_log"
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 invalid_cols = tc.post(
                     "/api/v1/schemas/definitions/gcp/bad_columns",
                     json={
@@ -1080,7 +1063,7 @@ class TestSchemasMetaWriteRouter:
 
     def test_create_canonicalizes_schema_path(self, tmp_path):
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -1109,14 +1092,13 @@ class TestSchemasMetaWriteRouter:
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-write"),
         )
         app = create_app(settings)
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
 
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 messy_url = "/api/v1/schemas/definitions/gcp//audit_log"
                 post = tc.post(
                     messy_url,
@@ -1156,7 +1138,7 @@ class TestSchemasMetaWriteRouter:
 
     def test_create_forbidden_for_readonly_role(self, tmp_path):
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -1186,18 +1168,20 @@ class TestSchemasMetaWriteRouter:
         )
         app = create_app(settings)
 
-        token = create_access_token(
-            data={
-                "sub": "viewer",
-                "org_id": "test-org",
-                "roles": ["data_analyst_viewer"],
-            },
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
-
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                # An account in no group: the role claim grants nothing.
+                app.state.account_store.create("viewer", "viewer-pw-4901")
+                token = session_token(
+                    app,
+                    settings,
+                    {
+                        "sub": "viewer",
+                        "org_id": "test-org",
+                        "roles": ["data_analyst_viewer"],
+                    },
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 resp = tc.post(
                     "/api/v1/schemas/definitions/x/y",
                     json=self._minimal_schema_body(),
@@ -1214,7 +1198,7 @@ class TestSchemasMetaWriteRouter:
 
     def test_patch_meta_schema_current_and_summary(self, tmp_path):
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -1268,15 +1252,14 @@ class TestSchemasMetaWriteRouter:
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-patch"),
         )
         app = create_app(settings)
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
         base = "/api/v1/schemas/definitions/aws/cloudtrail"
 
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 set_current = tc.patch(base, json={"current": "1.1.0"}, headers=headers)
                 assert set_current.status_code == 200
                 set_body = set_current.json()
@@ -1341,7 +1324,7 @@ class TestSchemasMetaWriteRouter:
 
     def test_delete_meta_schema_version(self, tmp_path):
         from dfe_engine.api.app import create_app
-        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.api.deps import _registries
         from dfe_engine.settings import (
             APISettings,
             AuthSettings,
@@ -1417,15 +1400,14 @@ class TestSchemasMetaWriteRouter:
             api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-delver"),
         )
         app = create_app(settings)
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        headers = {"Authorization": f"Bearer {token}"}
         base = "/api/v1/schemas/definitions/aws/cloudtrail"
 
         try:
             with OnboardedClient(app, raise_server_exceptions=False) as tc:
+                token = session_token(
+                    app, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+                )
+                headers = {"Authorization": f"Bearer {token}"}
                 deleted = tc.delete(f"{base}/versions/1.0.0", headers=headers)
                 assert deleted.status_code == 204
                 gone = tc.get(f"{base}/versions/columns?version=1.0.0", headers=headers)

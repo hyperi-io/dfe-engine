@@ -28,7 +28,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.auth import breakglass
 from dfe_engine.auth.accounts import matches_digest
 from dfe_engine.gitcrud.forge import PullRequest
@@ -42,11 +42,13 @@ from dfe_engine.settings import (
     GitopsSettings,
     HuntsSettings,
     LocalAuthSettings,
+    LoginThrottleSettings,
     SchemasSettings,
     SecretsSettings,
     ServicesSettings,
     SourceSettings,
 )
+from tests.support.accounts import session_token
 
 MINTED_ADMIN = secrets.token_urlsafe(16)
 MINTED_BREAKGLASS = secrets.token_urlsafe(16)
@@ -114,11 +116,9 @@ def _booted(settings: DFESettings) -> Iterator[tuple[FastAPI, TestClient]]:
         _registries.clear()
 
 
-def _headers(settings: DFESettings, username: str) -> dict[str, str]:
+def _headers(app, settings: DFESettings, username: str) -> dict[str, str]:
     """Headers for *username*; roles resolve live from group membership."""
-    token = create_access_token(
-        data={"sub": username, "org_id": "acme", "roles": []}, settings=settings
-    )
+    token = session_token(app, settings, {"sub": username, "org_id": "acme", "roles": []})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -128,7 +128,7 @@ def _alice(app: FastAPI, settings: DFESettings) -> dict[str, str]:
     if store.get("alice") is None:
         store.create("alice", MINTED_USER, groups=["dfe-admins"])
         app.state.group_store.add_member("dfe-admins", "alice")
-    return _headers(settings, "alice")
+    return _headers(app, settings, "alice")
 
 
 def _reset(client: TestClient, headers: dict[str, str], username: str, new: str) -> dict:
@@ -159,6 +159,48 @@ class _RecordingForge:
     def open_pull_request(self, *, head: str, base: str, title: str, body: str) -> PullRequest:
         self.opened.append(head)
         return PullRequest(number=9, url=_PR_URL, branch=head)
+
+
+# ── breakglass: the switch answers only the right password ───
+
+
+def _login(client: TestClient, username: str, password: str):
+    return client.post("/api/v1/auth/login", json={"username": username, "password": password})
+
+
+class TestBreakglassSwitchAtLogin:
+    """A wrong password learns nothing of the switch, and counts as a failed sign-in."""
+
+    @pytest.mark.parametrize(
+        ("enabled", "right", "status", "counted"),
+        [
+            pytest.param(True, True, 200, False, id="enabled-right-password"),
+            pytest.param(True, False, 401, True, id="enabled-wrong-password"),
+            pytest.param(False, False, 401, True, id="disabled-wrong-password"),
+            pytest.param(False, True, 403, False, id="disabled-right-password"),
+        ],
+    )
+    def test_the_switch_is_told_only_to_the_right_password(
+        self, tmp_path, enabled: bool, right: bool, status: int, counted: bool
+    ):
+        settings = _settings(tmp_path, gitops=True)
+        # One failure is enough to make the next sign-in for the name wait.
+        settings.auth.login_throttle = LoginThrottleSettings(username_failures=1)
+        password = MINTED_BREAKGLASS if right else secrets.token_urlsafe(16)
+        with _booted(settings) as (app, client):
+            breakglass.set_enabled(app.state.gitcrud, enabled, "tester")
+            generic = _login(client, "nobody", secrets.token_urlsafe(16))
+            resp = _login(client, breakglass.USERNAME, password)
+            # Waits (429) only when the attempt before it was counted as failed.
+            following = _login(client, breakglass.USERNAME, MINTED_BREAKGLASS)
+
+        assert resp.status_code == status, resp.text
+        if status == 401:
+            assert resp.json() == generic.json()
+        if status == 403:
+            assert resp.json()["code"] == "breakglass_disabled"
+            assert "turned off" in resp.json()["detail"]
+        assert (following.status_code == 429) is counted, following.text
 
 
 # ── breakglass: its hash lives in the deploy repo ────────────
@@ -217,7 +259,7 @@ class TestBreakglassOnADirectCommitDeployment:
             resp = client.post(
                 f"{_ACCOUNTS}/reset-password",
                 json={"current_password": MINTED_BREAKGLASS, "new_password": new},
-                headers=_headers(settings, "breakglass"),
+                headers=_headers(app, settings, "breakglass"),
             )
             assert resp.status_code == 200, resp.text
 

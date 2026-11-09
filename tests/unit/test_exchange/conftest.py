@@ -13,16 +13,15 @@ are a process-wide bootstrap, so a test builds one app, finishes with it, and
 then builds the next.
 """
 
-from __future__ import annotations
-
 from collections.abc import Callable
 from pathlib import Path
+from typing import Self, override
 
 import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -36,7 +35,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 from dfe_engine.yaml_utils import yaml_dump
-from tests.support.accounts import OnboardedClient
+from tests.support.accounts import OnboardedClient, session_token
 from tests.support.core_sources import write_landing_definition
 
 ADMIN_PASSWORD = "test-admin-pw"
@@ -110,19 +109,32 @@ def _settings(root: Path, *, schemas: dict[str, dict]) -> DFESettings:
 type Deployment = Callable[..., tuple[TestClient, dict[str, str]]]
 
 
+class _AdminClient(OnboardedClient):
+    """Fills in the admin's headers once the app is up, on the session its account holds."""
+
+    def __init__(self, settings: DFESettings, headers: dict[str, str]) -> None:
+        super().__init__(create_app(settings=settings), raise_server_exceptions=False)
+        self._settings = settings
+        self._admin_headers = headers
+
+    @override
+    def __enter__(self) -> Self:
+        client = super().__enter__()
+        claims = {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
+        token = session_token(self.app, self._settings, claims)
+        self._admin_headers["Authorization"] = f"Bearer {token}"
+        return client
+
+
 @pytest.fixture
 def deployment(tmp_path: Path) -> Deployment:
-    """Build a named deployment: returns its client and the admin headers for it."""
+    """Build a named deployment: returns its client and the admin headers, set on entering it."""
 
     def build(name: str, *, schemas: dict[str, dict]) -> tuple[TestClient, dict[str, str]]:
         _registries.clear()
-        settings = _settings(tmp_path / name, schemas=schemas)
-        token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=settings,
-        )
-        client = OnboardedClient(create_app(settings=settings), raise_server_exceptions=False)
-        return client, {"Authorization": f"Bearer {token}"}
+        headers: dict[str, str] = {}
+        client = _AdminClient(_settings(tmp_path / name, schemas=schemas), headers)
+        return client, headers
 
     return build
 

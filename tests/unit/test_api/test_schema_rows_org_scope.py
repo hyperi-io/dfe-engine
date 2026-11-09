@@ -19,10 +19,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
+from dfe_engine.api.deps import _registries, get_clickhouse_client
 from dfe_engine.schema.core_schema import landing_table_name
 from dfe_engine.settings import DFESettings
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 from tests.support.held_callers import caller_in_group, define_role
 from tests.unit.test_api.test_json_promotion import (
     NOMETA_SOURCE,
@@ -93,8 +93,8 @@ def client(app) -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def admin_headers(settings) -> dict[str, str]:
-    token = create_access_token(data={"sub": "admin"}, settings=settings)
+def admin_headers(app, client, settings) -> dict[str, str]:
+    token = session_token(app, settings, {"sub": "admin"})
     return {"Authorization": f"Bearer {token}"}
 
 

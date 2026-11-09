@@ -54,13 +54,13 @@ def test_a_waiting_attempt_checks_no_password(client, app, monkeypatch):
     for _ in range(5):
         _attempt(client, "carol", "wrong-password")
     checked: list[str] = []
-    real = app.state.account_store.verify_password
+    real = app.state.account_store.verify_account_password
 
-    def counting(username, password):
-        checked.append(username)
-        return real(username, password)
+    def counting(account, password):
+        checked.append(account.username if account is not None else "")
+        return real(account, password)
 
-    monkeypatch.setattr(app.state.account_store, "verify_password", counting)
+    monkeypatch.setattr(app.state.account_store, "verify_account_password", counting)
 
     for _ in range(20):
         assert _attempt(client, "carol", "wrong-password").status_code == 429

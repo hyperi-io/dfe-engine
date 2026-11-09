@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 
 
 @pytest.fixture
@@ -53,14 +53,12 @@ def fm_client(app_with_fieldmaps):
 
 
 @pytest.fixture
-def fm_admin_headers(app_with_fieldmaps):
-    from dfe_engine.api.deps import create_access_token
+def fm_admin_headers(app_with_fieldmaps, fm_client):
     from dfe_engine.settings import APISettings, DFESettings
 
     settings = DFESettings(api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"))
-    token = create_access_token(
-        data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-        settings=settings,
+    token = session_token(
+        app_with_fieldmaps, settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
     )
     return {"Authorization": f"Bearer {token}"}
 

@@ -56,8 +56,10 @@ def _dummy_hash() -> bytes:
     """The hash an unknown or passwordless account is checked against.
 
     Made at the stored hashes' own cost, so a login for an account that does not
-    exist takes as long as one for an account that does. Built on first use rather
-    than at import, because a hash at that cost takes a noticeable fraction of a second.
+    exist takes as long as one for an account that does. Built when the first
+    :class:`AccountStore` is made rather than at import, because a hash at that cost
+    takes a noticeable fraction of a second, and not on first login, where the extra
+    hash would time the first unknown name apart from a real one.
     """
     return bcrypt.hashpw(b"dummy-timing-protection", bcrypt.gensalt(rounds=BCRYPT_ROUNDS))
 
@@ -201,6 +203,7 @@ class AccountStore:
         self._dir.mkdir(parents=True, exist_ok=True)
         self.protected = resolve_floor(admin_name)
         self._ignores_case = _ignores_case(self._dir)
+        _dummy_hash()
 
     # ------------------------------------------------------------------
     # Public API
@@ -455,17 +458,25 @@ class AccountStore:
         Returns:
             True if the password matches, False otherwise.
         """
-        account = self.get(username)
-        if account is None:
-            # Timing-safe rejection: still run bcrypt to prevent oracle attacks
-            _checkpw(password, _dummy_hash())
-            return False
+        return self.verify_account_password(self.get(username), password)
 
-        # An empty password never authenticates, and an account carrying the
-        # unusable-password sentinel (external / IdP-owned / JIT) has no valid
-        # bcrypt hash - reject both, timing-safely. Prevents an empty or
-        # placeholder password from ever matching a stored account.
-        if not password or not account.password_hash.startswith("$2"):
+    @staticmethod
+    def verify_account_password(account: Account | None, password: str) -> bool:
+        """Check *password* against the hash on *account*, a record the caller already holds.
+
+        Reads nothing, so the password is judged against the same record as the
+        caller's other checks. Every path runs one bcrypt check: a missing account,
+        an empty password, and an account with no usable hash (the external
+        sentinel) are checked against the dummy hash and refused.
+
+        Args:
+            account: The stored record, or None when there is none.
+            password: Plaintext password to verify.
+
+        Returns:
+            True if the password matches, False otherwise.
+        """
+        if account is None or not password or not account.password_hash.startswith("$2"):
             _checkpw(password, _dummy_hash())
             return False
         return _checkpw(password, account.password_hash.encode("utf-8"))

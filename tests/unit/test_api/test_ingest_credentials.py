@@ -24,7 +24,7 @@ from scalo.logger import logger
 from scalo.secrets import SecretsError
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.api.v1 import ingest_credentials as ingest_credentials_api
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
@@ -38,6 +38,7 @@ from dfe_engine.orgs.ingest_tokens import (
     store_token,
 )
 from dfe_engine.settings import IngestSettings, SecretsSettings
+from tests.support.accounts import session_token
 from tests.support.local_kube_api import local_kube_api, mirror_for
 
 BASE = "/api/v1/orgs/acme/ingest-credentials"
@@ -336,9 +337,7 @@ def acme_admin(client, app, admin_headers, api_settings, orgs) -> dict[str, str]
         headers=admin_headers,
     )
     assert resp.status_code == 201, resp.text
-    token = create_access_token(
-        data={"sub": "acme-admin", "org_id": "default"}, settings=api_settings
-    )
+    token = session_token(app, api_settings, {"sub": "acme-admin", "org_id": "default"})
     return {"Authorization": f"Bearer {token}"}
 
 

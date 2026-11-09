@@ -46,7 +46,7 @@
             }
           },
           "403": {
-            "description": "The break-glass account is disabled in governance settings",
+            "description": "The break-glass password is right, but the account is disabled in governance settings",
             "content": {
               "application/problem+json": {
                 "schema": {

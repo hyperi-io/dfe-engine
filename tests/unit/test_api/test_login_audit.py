@@ -145,10 +145,14 @@ class TestTokenValidationWritesNothing:
         assert resp.status_code == 200
         assert _login_successes(mock_logger) == []
 
-    def test_token_refresh_writes_no_event(self, client: TestClient, admin_headers: dict):
+    def test_token_refresh_writes_no_event(self, client: TestClient):
         """Refresh re-mints from a token already held, so no credential is exchanged."""
+        login = client.post(
+            "/api/v1/auth/login", json={"username": "admin", "password": "test-admin-pw"}
+        )
+        headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
         with patch(AUDIT_LOGGER) as mock_logger:
-            resp = client.post("/api/v1/auth/refresh", headers=admin_headers)
+            resp = client.post("/api/v1/auth/refresh", headers=headers)
 
         assert resp.status_code == 200
         assert _login_successes(mock_logger) == []

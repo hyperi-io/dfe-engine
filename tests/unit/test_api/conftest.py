@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.query.executor import ViewExecutor
 from dfe_engine.settings import (
@@ -27,7 +27,7 @@ from dfe_engine.settings import (
     SigmaSettings,
     SourceSettings,
 )
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 from tests.support.core_sources import write_landing_definition
 from tests.unit.test_query.view_fakes import OneViewCatalog, RecordingClient, view_definition
 
@@ -205,28 +205,28 @@ def recovery_accounts(app, client):
 
 
 @pytest.fixture
-def admin_token(api_settings: DFESettings) -> str:
-    """JWT token for admin user."""
-    return create_access_token(
-        data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-        settings=api_settings,
+def admin_token(app, client: TestClient, api_settings: DFESettings) -> str:
+    """JWT token for admin user, on the session its account holds once the app is up."""
+    return session_token(
+        app, api_settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
     )
 
 
 @pytest.fixture
-def viewer_token(api_settings: DFESettings) -> str:
+def viewer_token(app, client: TestClient, api_settings: DFESettings) -> str:
     """JWT token for viewer user (read-only).
 
     Claims may be stale; get_current_user resolves roles from dfe-viewers membership.
     """
-    return create_access_token(
-        data={
+    return session_token(
+        app,
+        api_settings,
+        {
             "sub": "viewer",
             "org_id": "test-org",
             "roles": ["data_viewer"],
             "groups": ["dfe-viewers"],
         },
-        settings=api_settings,
     )
 
 
@@ -243,16 +243,15 @@ def viewer_headers(viewer_token: str) -> dict[str, str]:
 
 
 @pytest.fixture
-def operator_token(api_settings: DFESettings) -> str:
+def operator_token(app, client: TestClient, api_settings: DFESettings) -> str:
     """JWT for operator (data_analyst + infra_admin via group membership).
 
     infra_admin grants group:* but NOT role:* - so operator can manage groups
     yet cannot assign roles it does not itself hold. Roles resolve from group
     membership, so the claim here only carries the subject.
     """
-    return create_access_token(
-        data={"sub": "operator", "org_id": "test-org", "roles": ["infra_admin"]},
-        settings=api_settings,
+    return session_token(
+        app, api_settings, {"sub": "operator", "org_id": "test-org", "roles": ["infra_admin"]}
     )
 
 

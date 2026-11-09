@@ -22,7 +22,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.settings import (
     APISettings,
@@ -37,7 +37,7 @@ from dfe_engine.settings import (
     SeedOrg,
     SourceSettings,
 )
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 from tests.support.clickhouse_cleanup import drop_database_and_policies
 
 pytestmark = [pytest.mark.integration, pytest.mark.own_clickhouse]
@@ -75,8 +75,8 @@ def _settings(tmp_path: Path, ch_params: dict) -> DFESettings:
     )
 
 
-def _bearer(sub: str, settings: DFESettings) -> dict[str, str]:
-    token = create_access_token(data={"sub": sub}, settings=settings)
+def _bearer(app, sub: str, settings: DFESettings) -> dict[str, str]:
+    token = session_token(app, settings, {"sub": sub})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -114,8 +114,8 @@ def stack(ch_params, ch_client, tmp_path):
             yield SimpleNamespace(
                 client=client,
                 database=database,
-                admin=_bearer("admin", settings),
-                viewer=_bearer("viewer", settings),
+                admin=_bearer(app, "admin", settings),
+                viewer=_bearer(app, "viewer", settings),
             )
     finally:
         _registries.clear()

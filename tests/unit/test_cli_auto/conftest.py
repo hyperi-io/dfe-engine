@@ -16,7 +16,7 @@ from scalo.cli.openapi import Credential, Response, SpecCli, Store
 from typer.testing import CliRunner
 
 from dfe_engine.api.app import create_app
-from dfe_engine.api.deps import _registries, create_access_token
+from dfe_engine.api.deps import _registries
 from dfe_engine.cli.auto.app import build_cli
 from dfe_engine.settings import (
     APISettings,
@@ -27,7 +27,7 @@ from dfe_engine.settings import (
     ServicesSettings,
     SourceSettings,
 )
-from tests.support.accounts import admin_on_its_own_password
+from tests.support.accounts import admin_on_its_own_password, session_token
 
 # The admin password these fixtures inject, as a deployment's secret store would.
 ADMIN_PASSWORD = "test-admin-pw"
@@ -129,9 +129,8 @@ def harness(api_settings: DFESettings, tmp_path: Path, monkeypatch):
             "cli-admin", groups=["dfe-admins"], description="CLI test key"
         )
 
-        admin_token = create_access_token(
-            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
-            settings=api_settings,
+        admin_token = session_token(
+            app, api_settings, {"sub": "admin", "org_id": "test-org", "roles": ["admin"]}
         )
 
         store = Store(tmp_path / "dfe-config-home")

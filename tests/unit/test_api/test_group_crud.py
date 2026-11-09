@@ -15,9 +15,9 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from dfe_engine.api.deps import create_access_token
 from dfe_engine.auth.scim_mapping import SCIM_SOURCE_PROVIDER
 from dfe_engine.settings import DFESettings
+from tests.support.accounts import session_token
 from tests.support.case_twins import store_case_twin_group
 from tests.unit.test_api.group_crud_cases import (
     ADMINS_SOURCE_ID,
@@ -201,9 +201,9 @@ class TestGroupRoleEscalation:
         assert resp.json()["code"] == "forbidden"
 
 
-def _bearer(*, api_settings: DFESettings, subject: str) -> dict[str, str]:
+def _bearer(app, *, api_settings: DFESettings, subject: str) -> dict[str, str]:
     """Return the Authorization header of a session token for account *subject*."""
-    token = create_access_token(data={"sub": subject}, settings=api_settings)
+    token = session_token(app, api_settings, {"sub": subject})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -424,8 +424,7 @@ class TestJoiningAnOrgGroupNeedsItsRolesInThatOrg:
             app.state.group_store.create(group, [role], members=[username], scope="org:acme")
         return {
             username: {
-                "Authorization": "Bearer "
-                + create_access_token(data={"sub": username}, settings=api_settings)
+                "Authorization": "Bearer " + session_token(app, api_settings, {"sub": username})
             }
             for username in ("orgadmin", "orgop")
         }
@@ -458,8 +457,7 @@ class TestJoiningAnOrgGroupNeedsItsRolesInThatOrg:
         )
         app.state.group_store.add_member("acme-infra", "crosser")
         headers = {
-            "Authorization": "Bearer "
-            + create_access_token(data={"sub": "crosser"}, settings=api_settings)
+            "Authorization": "Bearer " + session_token(app, api_settings, {"sub": "crosser"})
         }
 
         resp = client.post(
@@ -949,7 +947,7 @@ class TestAGroupNameIsNoOtherGroupsSourceId:
             groups=["kg-group"], password=secrets.token_urlsafe(16), username="kg"
         )
         app.state.group_store.create(members=["kg"], name="kg-group", roles=["keygroup"])
-        headers = _bearer(api_settings=api_settings, subject="kg")
+        headers = _bearer(app, api_settings=api_settings, subject="kg")
 
         shadow = client.post(
             "/api/v1/auth/groups", headers=headers, json={"name": ADMINS_SOURCE_ID, "roles": []}
@@ -996,9 +994,9 @@ class TestAMembershipWriteLeavesAnIdpAccountsOwnList:
             members=["orgop"], name="acme-infra", roles=["infra_admin"], scope="org:acme"
         )
         return {
-            "jane": _bearer(api_settings=api_settings, subject=IDP_ACCOUNT),
+            "jane": _bearer(app, api_settings=api_settings, subject=IDP_ACCOUNT),
             "operator": operator_headers,
-            "orgop": _bearer(api_settings=api_settings, subject="orgop"),
+            "orgop": _bearer(app, api_settings=api_settings, subject="orgop"),
         }
 
     @pytest.mark.parametrize(
@@ -2046,8 +2044,6 @@ class TestLastAdminGroupMembership:
     def test_remove_member_is_refused_when_sole_usable_admin(
         self, recovery_accounts, client, admin_headers, app
     ):
-        from dfe_engine.api.deps import create_access_token
-
         store = recovery_accounts.state.account_store
         created = client.post(
             "/api/v1/auth/accounts",
@@ -2064,9 +2060,10 @@ class TestLastAdminGroupMembership:
         ops_headers = {
             "Authorization": (
                 "Bearer "
-                + create_access_token(
-                    data={"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
-                    settings=app.state.settings,
+                + session_token(
+                    app,
+                    app.state.settings,
+                    {"sub": "ops", "org_id": "test-org", "roles": ["admin"]},
                 )
             )
         }
