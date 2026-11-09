@@ -137,6 +137,12 @@ class TestCatalogue:
         assert labels["hyperdx"] == "Search"
         assert labels["dfe-loader"] is None
 
+    def test_only_the_engine_lists_processes_of_its_own(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
+        processes = {e["service"]: e["processes"] for e in listed if e["processes"]}
+        assert processes == {"dfe-engine": ["dfe-hunt-runner"]}
+
     def test_the_instance_summary_carries_the_display_name(
         self, client, app, admin_headers, tmp_path
     ):
@@ -1478,3 +1484,44 @@ def test_a_series_read_is_bounded_by_what_the_gauge_table_holds(
     )
 
     assert window == expected
+
+
+@pytest.mark.parametrize(
+    ("service", "process", "expected"),
+    [
+        ("dfe-engine", None, "dfe-engine"),
+        ("dfe-engine", "dfe-hunt-runner", "dfe-hunt-runner"),
+        ("dfe-loader", None, "dfe-loader"),
+    ],
+    ids=["engine-api", "engine-hunt-runner", "other-app"],
+)
+def test_a_process_reads_under_its_own_telemetry_name(service, process, expected):
+    from dfe_engine.api.v1.apps import _telemetry_name
+    from dfe_engine.appmgmt import instances
+
+    app = instances.instance_of(service, "default")
+
+    assert _telemetry_name(app=app, process=process) == expected
+
+
+@pytest.mark.parametrize(
+    ("service", "process"),
+    [
+        ("dfe-loader", "dfe-hunt-runner"),
+        ("dfe-engine", "hunt-runner"),
+        ("dfe-engine", ""),
+    ],
+    ids=["process-on-another-app", "unknown-process", "empty-process"],
+)
+def test_a_process_the_app_does_not_run_is_404(service, process):
+    from scalo.api import ProblemError
+
+    from dfe_engine.api.v1.apps import _telemetry_name
+    from dfe_engine.appmgmt import instances
+
+    app = instances.instance_of(service, "default")
+
+    with pytest.raises(ProblemError) as refused:
+        _telemetry_name(app=app, process=process)
+    assert refused.value.status == 404
+    assert refused.value.problem.code == "unknown_process"

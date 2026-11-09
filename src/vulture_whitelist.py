@@ -58,7 +58,7 @@ _.directory_setting, _.editable, _.expires_in, _.explain_queries, _.field_count,
 _.has_schema, _.header_fields, _.highest, _.highest_7d, _.highest_7d_label, _.hunt_count
 _.json_column, _.json_derived_count, _.landed_in_default, _.mapping_count, _.member_count
 _.min_interval_seconds, _.orphaned_groups, _.peak_memory, _.pending_reconcile, _.per_source_apps
-_.preferences, _.principal, _.principals, _.provider_idle_scaling
+_.preferences, _.principal, _.principals, _.processes, _.provider_idle_scaling
 _.provider_max_replica_memory_gb, _.provider_min_replica_memory_gb, _.provider_replicas
 _.python_version, _.queued, _.read_rows, _.relinked, _.requested_fire, _.rule_errors, _.runnable
 _.runnable_intakes, _.runnable_reason, _.sampled, _.service_account_json, _.services_config_dir

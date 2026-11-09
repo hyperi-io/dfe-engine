@@ -29132,7 +29132,7 @@
           "App Management"
         ],
         "summary": "Get Status",
-        "description": "Whether the instance is reporting telemetry, and since when.",
+        "description": "Whether the instance, or a process deployed from its image, is reporting, and since when.",
         "operationId": "apps.status.list",
         "parameters": [
           {
@@ -29151,6 +29151,22 @@
             "schema": {
               "type": "string",
               "title": "Instance"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
             }
           }
         ],
@@ -29234,7 +29250,7 @@
           "App Management"
         ],
         "summary": "Get Metrics",
-        "description": "Throughput, CPU, memory and saturation for the instance.",
+        "description": "Throughput, CPU, memory and saturation for the instance or a process deployed from its image.",
         "operationId": "apps.metrics.list",
         "parameters": [
           {
@@ -29253,6 +29269,22 @@
             "schema": {
               "type": "string",
               "title": "Instance"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
             }
           }
         ],
@@ -29366,6 +29398,22 @@
               "default": 3600,
               "title": "Window Seconds"
             }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
+            }
           }
         ],
         "responses": {
@@ -29448,7 +29496,7 @@
           "App Management"
         ],
         "summary": "Get Resource Series",
-        "description": "CPU and memory over time as min, max, average and p95 per bucket.\n\nEach bucket aggregates across every pod reporting for this instance. A\nper-config app deploys each config under its own service name, so one instance\nis already one config.\n\nA ``bucket_seconds`` of 0 reads the window as one bucket and may reach back over the gauge table's whole retention, which a ``window_seconds`` of 0 asks for. A bucketed read stops at a week.",
+        "description": "CPU and memory over time as min, max, average and p95 per bucket.\n\nEach bucket aggregates across every pod reporting for this instance, or for\nthe named process. A per-config app deploys each config under its own\nservice name, so one instance is already one config.\n\nA ``bucket_seconds`` of 0 reads the window as one bucket and may reach back over the gauge table's whole retention, which a ``window_seconds`` of 0 asks for. A bucketed read stops at a week.",
         "operationId": "apps.metrics.series",
         "parameters": [
           {
@@ -29487,6 +29535,22 @@
               "type": "integer",
               "default": 60,
               "title": "Bucket Seconds"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
             }
           }
         ],
@@ -36870,6 +36934,14 @@
             },
             "type": "array",
             "title": "Instances"
+          },
+          "processes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Processes",
+            "description": "The processes deployed on their own from the engine's image, by the OTel name each reports under. Pass one as process= to the status, metrics, series and totals routes. Empty for every other app."
           }
         },
         "type": "object",

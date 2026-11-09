@@ -198,6 +198,9 @@ def test_create_registers_the_process_gauges_without_the_products_prefix(monkeyp
     hunt_metrics.create()
 
     gauges = {name for kind, name in fake.registered if kind == "observable_gauge"}
+    identity = {name for kind, name in fake.registered if kind == "gauge"}
     assert "process_resident_memory_bytes" in gauges
     assert [name for name in gauges if name.startswith("dfe_")] == []
+    # The engine reads liveness from info and uptime from start_time_seconds
+    assert {"info", "start_time_seconds"} <= identity
     assert fake.metric_prefix == "dfe"
