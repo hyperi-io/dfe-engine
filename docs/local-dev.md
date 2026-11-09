@@ -91,6 +91,33 @@ use` and no port named. The knob is scalo's, not `DFE_ENGINE_`-prefixed:
 env METRICS_ADDR=127.0.0.1:9197 DFE_ENGINE_ENV=dev uv run dfe-engine run
 ```
 
+## On a Mac, in VS Code
+
+Front-end developers run the engine and the console as plain processes on a Mac
+and keep the Rust apps in docker. The engine needs `uv` (it fetches Python 3.14)
+and `make`. One command boots it with the e2e helpers the console journeys call:
+
+```sh
+cp .env.e2e.example .env.e2e                       # once
+make e2e-server E2E_NO_CLICKHOUSE=1                # no docker: ClickHouse pages answer 503
+docker compose -f docker-compose.dev.yaml up -d --wait clickhouse && make e2e-server   # with docker
+```
+
+`.vscode/launch.json` and `tasks.json` carry both, plus the seed. dfe-ui has the
+`Engine + Console` compound. Three things to know on macOS:
+
+- Set `DFE_ENGINE_API_HOST=127.0.0.1` in `.env.e2e` and point clients at
+  `127.0.0.1`, not `localhost`. Node resolves `localhost` to `::1` first and the
+  engine listens on IPv4 only. A `0.0.0.0` bind also makes macOS ask to accept
+  incoming connections.
+- Ports 5000 and 7000 belong to AirPlay Receiver. The engine uses 8003 and 9090,
+  so nothing here collides.
+- `METRICS_ADDR=127.0.0.1:19090` moves the health listener if 9090 is busy.
+
+dfe-ui's `scripts/macos-dev-smoke.sh` runs the whole loop and ends in one PASS
+or FAIL line. Its `macOS dev smoke` workflow runs it on a GitHub macOS arm64
+runner.
+
 ## No collector running
 
 The OTLP exporters aim at `localhost:4317` and log `Transient error ... retrying`
