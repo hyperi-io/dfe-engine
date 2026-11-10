@@ -1,6 +1,6 @@
 # RBAC, Multi-Tenant ClickHouse, and Auth Architecture
 
-**Scope:** Auth, granular RBAC, multi-tenant CH with row-level security, OIDC group sync, HyperDX integration, Argo CD RBAC export
+**Scope:** Auth, granular RBAC, multi-tenant CH with row-level security, OIDC group sync, dfe-hyperdx integration, Argo CD RBAC export
 
 ---
 
@@ -10,7 +10,7 @@
 |-------|-------|--------|
 | **Phase 1** | RBAC foundation, account/group/API key CRUD, 4 auth paths, audit | Done |
 | **Phase 2** | Per-org pinned ClickHouse users, shared tenant row policies, quota tiers | Done |
-| **Phase 3** | OrgRegistry, HyperDX team/connection sync | Done |
+| **Phase 3** | OrgRegistry, dfe-hyperdx team/connection sync | Done |
 | **Phase 4** | Schema-less service discovery | Not pursued - see section 13 |
 
 ---
@@ -256,7 +256,7 @@ A `scoped` role grants only `...:read` patterns and `query:execute`, as at syste
 | Domain | Actions | Scoped by service? |
 |--------|---------|---------------------|
 | `hunt` | `read`, `write`, `delete`, `execute`, `*` | No |
-| `query` | `read`, `execute`, `write` (save searches and dashboards in HyperDX, section 7.2), `*` | No |
+| `query` | `read`, `execute`, `write` (save searches and dashboards in Observe, section 7.2), `*` | No |
 | `source` | `read`, `write`, `delete`, `deploy`, `*` | No |
 | `fieldmap` | `read`, `write`, `delete`, `*` | No |
 | `alert` | `read`, `write`, `delete`, `*` | No |
@@ -577,7 +577,7 @@ flowchart TD
     ORG -->|no| DENY["403 no_single_org<br/>fails closed"]
 ```
 
-`platform_grants` (`auth/models.py`) is the one filter for "every org". The ClickHouse group bindings, the sampler, the HyperDX connection read, the fork's role claim and JIT team assignment all go through it. A role bound at an org's scope covers that org alone, a role marked `scoped` in `roles.yaml` is held to its holder's orgs wherever it is bound, a role `roles.yaml` does not declare unfences nothing, and `org_viewer` never unfences anyone.
+`platform_grants` (`auth/models.py`) is the one filter for "every org". The ClickHouse group bindings, the sampler, the dfe-hyperdx connection read, the fork's role claim and JIT team assignment all go through it. A role bound at an org's scope covers that org alone, a role marked `scoped` in `roles.yaml` is held to its holder's orgs wherever it is bound, a role `roles.yaml` does not declare unfences nothing, and `org_viewer` never unfences anyone.
 
 Group bindings (`governance/ch/bindings.py`) follow the same rule. An org-scoped group binds to its org's pinned user whatever roles it holds. A system group holding a platform role reads unrestricted, and an `admin` or `infra_admin` group also reads the otel database. A group's claimed org markers resolve to a registered org by name or, failing that, by the one org that declares the marker as a tenant id (`orgs/tenant_scope.py::resolve_orgs`); a marker no org declares, or a tenant id two orgs both declare, resolves to none, so the group gets no ClickHouse user at all -- the alternative is an unrestricted one.
 
@@ -611,7 +611,7 @@ sequenceDiagram
 
     Note over API: The team's ClickHouse connection is the<br/>fork's to create, from GET /api/v1/hyperdx/connection
 
-    Note over HDX: HyperDX failures are non-fatal<br/>Background retry reconciliation
+    Note over HDX: dfe-hyperdx failures are non-fatal<br/>Background retry reconciliation
 ```
 
 Creating an org does not create its ClickHouse user. The CH RBAC reconcile does, and it runs at engine startup, in the background after every org or group change, and on `POST /api/v1/governance/ch-rbac/reconcile` (the console's "Reconcile Clickhouse RBAC" drawer). Until one of those runs, the org's users get `503 org_unprovisioned` from `GET /api/v1/hyperdx/connection`. The row policies need no change for a new org.
@@ -632,19 +632,19 @@ Each hunt rewritten emits `resource.hunt.updated` naming the org.
 
 ---
 
-## 7. HyperDX Integration
+## 7. dfe-hyperdx Integration
 
 ### 7.1 Strategy
 
 - **Connections:** the fork asks `GET /api/v1/hyperdx/connection` with the user's own token and seeds that one per-org credential on their team; the engine writes none itself
-- **Runtime:** `HyperDXClient` calls the HyperDX internal API for the team and for per-DFE-source CRUD
+- **Runtime:** `HyperDXClient` calls the dfe-hyperdx internal API for the team and for per-DFE-source CRUD
 - **Failures:** Non-fatal. First failure sets `_connected=False`, subsequent calls logged as warnings
 
 ### 7.2 Teams and Connections
 
 - **Team name.** JIT picks it from the caller's grants (`auth/jit.py`, `resolve_hyperdx_team`): `dfe-admin` for `admin` or `infra_admin` at system scope, `dfe-analysts` for `data_analyst` at system scope, else `customer-<org>` for the caller's first org, else none.
 - **Connection.** A team's ClickHouse connection is whatever `GET /api/v1/hyperdx/connection` returned to the user whose token seeded it (section 5.2): the platform reader, or that user's org's pinned user.
-- **Role.** `GET /api/v1/auth/me` hands the fork `hyperdx_role` (`auth/hyperdx_role.py`). `admin` goes to `admin` or `infra_admin` at system scope and may change what a whole team sees. `member` goes to anyone whose roles allow `query:write`, the HyperDX authoring permission, and may save searches and dashboards in the observe embed. Everyone else is `viewer`, and the fork refuses it every write. So `admin` and `data_analyst` author, and the other shipped roles read.
+- **Role.** `GET /api/v1/auth/me` hands the fork `hyperdx_role` (`auth/hyperdx_role.py`). `admin` goes to `admin` or `infra_admin` at system scope and may change what a whole team sees. `member` goes to anyone whose roles allow `query:write`, the dfe-hyperdx authoring permission, and may save searches and dashboards in the observe embed. Everyone else is `viewer`, and the fork refuses it every write. So `admin` and `data_analyst` author, and the other shipped roles read.
 
 ---
 
@@ -668,7 +668,7 @@ Logins, denied authorisation decisions and admin changes are logged for complian
 | Group change | `auth.group.{change}` -- `created`, `updated`, `deleted`, `member_added`, `member_removed`, `attributes_updated`, `sensitive_attributes_updated` | info |
 | API key change | `auth.api_key.{change}` -- `created`, `revoked` | info |
 | Role change | `auth.role.{change}` -- `created`, `updated`, `deleted` | info |
-| JIT provisioning | `auth.jit.{event}` -- account created, groups updated, login refused, team assigned, HyperDX invite, failure | info / warning |
+| JIT provisioning | `auth.jit.{event}` -- account created, groups updated, login refused, team assigned, dfe-hyperdx invite, failure | info / warning |
 | Org change | `org.{change}` | info |
 | Resource change | `resource.{type}.{change}` -- OIDC providers, sources, fieldmaps and other config resources | info |
 
@@ -676,7 +676,7 @@ A refused bearer token emits `auth.login.denied` with `login_method: jwt`, the v
 
 Every account, group, API key and role write through `/api/v1/auth` emits one event naming the actor (`admin_id`), the change and the target. Its `details` carry the roles, groups, members or permissions the write set, and the names of contact fields changed, never their values. No event carries a password, a hash, an attribute value or an API key's secret half.
 
-Events flow through the OTel pipeline → JSON → ClickHouse → HyperDX.
+Events flow through the OTel pipeline → JSON → ClickHouse → Observe.
 No custom ClickHouse audit table — standard OTel log ingestion is used.
 
 ---
@@ -815,7 +815,7 @@ Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
 | Scenario | Behaviour |
 |----------|-----------|
 | Multi-role user | A platform grant with `query:execute` reads as the platform user; otherwise the caller must resolve to exactly one org, or gets `403 no_single_org` (section 5.2) |
-| HyperDX unavailable | Non-fatal. Org CRUD succeeds. Sync retried in background |
+| dfe-hyperdx unavailable | Non-fatal. Org CRUD succeeds. Sync retried in background |
 | ClickHouse unavailable | `/readyz` reports NotReady while its ping fails. Liveness is untouched, so the pod is not restarted. The CH RBAC reconcile retries in the background (section 6.2) |
 | Unknown OIDC group | No linked group with a role, so the sign-in is refused with `401 no_role_granted` and no account is created (section 2.1) |
 | OIDC adapter failure | Failsafe: returns empty results, auth continues with available info |
@@ -827,7 +827,7 @@ Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
 
 - Per-metric RBAC granularity (access is per-service, not per-metric)
 - Per-setting RBAC granularity (access is per-service config, not per-key)
-- HyperDX per-user RBAC (solved at dfe-engine layer via teams)
+- dfe-hyperdx per-user RBAC (solved at dfe-engine layer via teams)
 - Dynamic K8s service discovery (future enhancement)
 - Envoy Gateway SecurityPolicy CRD generation (managed by dfe-infra)
 - ClickHouse cluster provisioning (managed by dfe-infra)

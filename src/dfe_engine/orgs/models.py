@@ -44,8 +44,8 @@ class Org(BaseModel):
         display_name: Human-readable label for UI display.
         org_ids: Tenant IDs used for ClickHouse row-level security filters.
         enabled: Whether this org is active.
-        hyperdx_team_id: HyperDX team ID for this org's connection sync.
-        hyperdx_team_api_key_env: Environment variable name holding the org's HyperDX team API key.
+        hyperdx_team_id: dfe-hyperdx team ID for this org's connection sync.
+        hyperdx_team_api_key_env: Environment variable name holding the org's dfe-hyperdx team API key.
         ch_password_env: Environment variable name holding the ClickHouse password.
         created_at: ISO 8601 timestamp of creation.
         updated_at: ISO 8601 timestamp of last update.

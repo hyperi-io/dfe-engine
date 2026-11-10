@@ -412,7 +412,7 @@ A caller whose grant reads every org sees the whole deployment and may name any 
 
 Events per second over more than one tenant id (several orgs, or an org that declares several) is the busiest minute of their sum. The minute table keeps 7 days, so days older than that have no entry.
 
-The CLI generates `dfe usage list` for `/usage` and `dfe usage overview list` for `/usage/overview`. The HyperDX "Overview" dashboard (`src/dfe_engine/hyperdx/dashboards/dfe-overview.json`) reads the same rollup for the whole deployment, without going through the API.
+The CLI generates `dfe usage list` for `/usage` and `dfe usage overview list` for `/usage/overview`. The Observe "Overview" dashboard (`src/dfe_engine/hyperdx/dashboards/dfe-overview.json`) reads the same rollup for the whole deployment, without going through the API.
 
 ## Repository (UI preferences + small objects)
 

@@ -363,5 +363,5 @@ apps-depth = "An instance's children sit 4 levels deep under the `deployment` ro
 gitops-classes = "The resource-class enumeration generated clients build their selects from: no root holds it."
 lifecycle = "Lifecycle state covers apps and backing services: an action on each, or a collection of its own."
 client-config = "The console's runtime bootstrap: `system/client-config`, or where the console first reads it."
-hyperdx = "The HyperDX fork's reads for the caller's org: under `orgs/{org}`, or a root of their own."
+hyperdx = "The Search reads for the caller's org: under `orgs/{org}`, or a root of their own."
 repository = "Console preferences and small objects scoped system, org or user: no root holds them."

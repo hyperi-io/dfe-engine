@@ -32,7 +32,7 @@ flowchart TB
         CH[(ClickHouse)]
         KAFKA[(Kafka - optional)]
         PG[(Postgres + FerretDB)]
-        HDX[HyperDX]
+        HDX[Observe]
     end
     subgraph L2["Layer 2 - apps + config"]
         RUST[dfe-* Rust apps]
@@ -62,7 +62,7 @@ exactly what detect-or-install handles.
 
 ### Layer 1 - backing services
 
-ClickHouse, optionally Kafka, Postgres+FerretDB, and HyperDX, deployed by
+ClickHouse, optionally Kafka, Postgres+FerretDB, and Observe (dfe-hyperdx), deployed by
 DFE's Argo via ApplicationSets. DFE deploys its OWN backing services; it
 never piggybacks a shared one. The backing services are decoupled from the
 deploy repo: layer2-data is a single source (base chart + profile/cloud
@@ -115,7 +115,7 @@ the overlay; `off` = not deployed.
 |-----------|:---:|:---:|:---:|:---:|
 | dfe-engine (control plane) | on | on | on | on |
 | dfe-ui | on | on | on | on |
-| HyperDX (explore UI + self-telemetry sink) | on | on | on | on |
+| Observe (explore UI + self-telemetry sink) | on | on | on | on |
 | dfe-receiver (ingest) | on | on | on | on |
 | dfe-loader (ingest) | on | on | on | on |
 | dfe-hunt-runner (detection hunts) | on [1] | **off** | on [2] | on [2] |
@@ -149,15 +149,15 @@ The deployer lists the admin UIs it stood up in `DFE_ENGINE_ADMIN_LINKS`, a JSON
 
 `dfe-hunt-runner` is OFF for slim because slim is the bare-minimum k8s tier -
 the ingest path (receiver -> loader -> ClickHouse) plus the engine, UI, and
-HyperDX. Scheduled detection is real recurring ClickHouse load, so it is
+Observe. Scheduled detection is real recurring ClickHouse load, so it is
 opt-in there and on-by-default everywhere else. Enabling it is one overlay
 dial because the runner is deployed-capable on every tier.
 
-**HyperDX is ALWAYS present, in EVERY tier - never optional.** Two purposes,
+**Observe is ALWAYS present, in EVERY tier - never optional.** Two purposes,
 which is why DFE ships an extended fork: (1) a separate self-monitoring
 telemetry sink, deliberately independent of the data pipeline; (2) the
 data-discovery UI over ALL DFE data in ClickHouse, embedded in dfe-ui - the
-fork exists precisely to point HyperDX at the DFE tables, not only its own
+fork exists precisely to point Observe at the DFE tables, not only its own
 telemetry schema.
 
 Implementation: tier behaviour lives in `argocd/values/profile-<tier>.yaml`
@@ -207,7 +207,7 @@ cluster-secret annotations). Full swap matrix:
   by an ESO Password generator - no external secret backend required.
 - **Kafka** - Strimzi by default, Redpanda opt-in (BSL licence gate), or
   external (incl. MSK IAM). With gRPC transport, Kafka is omitted entirely.
-- **FerretDB** - provides the Mongo wire protocol for HyperDX on its own
+- **FerretDB** - provides the Mongo wire protocol for Observe on its own
   single-instance Postgres with the DocumentDB extension. Nothing else in the
   stack uses Postgres.
 
