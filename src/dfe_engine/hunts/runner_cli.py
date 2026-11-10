@@ -57,6 +57,7 @@ from dfe_engine.hunts.runner import HuntFailures, HuntRunner
 from dfe_engine.hunts.schedule import publish_schedule
 from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.hunts.worker import HuntWorker
+from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import DFESettings, load_settings
 
 app = typer.Typer(help="dfe-hunt-runner: CH-coordinated pull-based hunt execution.")
@@ -173,18 +174,13 @@ class _ReloadingRunner:
 
 
 def _match_notifier(settings: DFESettings) -> MatchNotifier:
-    """The notifier over the destinations the settings name.
+    """The notifier over the destinations the engine API stores in the secrets backend.
 
-    The directory wins when set, since the API writes there. The inline map is the
-    fallback for a deployment with no directory. The runner only reads either.
+    The runner reads each destination by name from the same ``settings.secrets``
+    backend the engine writes, so it shares no volume with the engine.
     """
-    hunts = settings.hunts
-    if hunts.alert_destinations_dir:
-        registry = AlertDestinationRegistry(directory=hunts.alert_destinations_dir)
-    else:
-        registry = AlertDestinationRegistry()
-        registry.load_from_dict(hunts.alert_destinations)
-    return MatchNotifier(registry, global_channels=hunts.alert_channels)
+    registry = AlertDestinationRegistry(secrets=build_secrets(settings.secrets))
+    return MatchNotifier(registry, global_channels=settings.hunts.alert_channels)
 
 
 @app.command("materialise")

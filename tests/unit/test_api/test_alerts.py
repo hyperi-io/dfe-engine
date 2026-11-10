@@ -1,23 +1,21 @@
 """Tests for the alerts router — alert destination CRUD."""
 
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.deps import _registries
 from dfe_engine.appmgmt.contract import REDACTED
-from dfe_engine.settings import APISettings, DFESettings
+from dfe_engine.settings import HuntsSettings
 from tests.support.accounts import admin_on_its_own_password, session_token
-
-_SETTINGS = DFESettings(
-    env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
-)
 
 
 def _session_headers(app, sub: str) -> dict[str, str]:
     """Headers for a session of *sub*, made an account with no groups if it has none."""
     if app.state.account_store.get(sub) is None:
         app.state.account_store.create(sub, f"{sub}-pw-4901")
-    token = session_token(app, _SETTINGS, {"sub": sub, "org_id": "test-org"})
+    token = session_token(app, app.state.settings, {"sub": sub, "org_id": "test-org"})
     return {"Authorization": f"Bearer {token}"}
 
 
@@ -31,6 +29,7 @@ def app_with_alerts(tmp_path):
         AuthSettings,
         DFESettings,
         HuntsSettings,
+        SecretsSettings,
         ServicesSettings,
         SourceSettings,
     )
@@ -53,6 +52,7 @@ def app_with_alerts(tmp_path):
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
         ),
+        secrets=SecretsSettings(provider="file", path=str(tmp_path / "secrets")),
         api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"),
     )
     for d in ["sources", "services"]:
@@ -88,12 +88,14 @@ def sample_destination():
 class TestAlertDestinationsBootstrap:
     def test_bootstrap_creates_missing_directory(self, tmp_path):
         from dfe_engine.api.deps import _registries, bootstrap_registries, shutdown_registries
-        from dfe_engine.settings import DFESettings, HuntsSettings
+        from dfe_engine.settings import DFESettings, SecretsSettings
 
         dest_dir = tmp_path / "config" / "alert-destinations"
         assert not dest_dir.exists()
         settings = DFESettings(
-            env="test", hunts=HuntsSettings(alert_destinations_dir=str(dest_dir))
+            env="test",
+            hunts=HuntsSettings(alert_destinations_dir=str(dest_dir)),
+            secrets=SecretsSettings(provider="file", path=str(tmp_path / "secrets")),
         )
         try:
             bootstrap_registries(settings)
@@ -102,10 +104,11 @@ class TestAlertDestinationsBootstrap:
         finally:
             shutdown_registries()
 
-    def test_api_created_destination_is_hunt_engine_readable(
-        self, alert_admin_headers, alert_client, sample_destination, tmp_path
+    def test_the_runner_resolves_an_api_created_destination_without_the_engine_directory(
+        self, alert_admin_headers, alert_client, sample_destination, app_with_alerts
     ):
-        from dfe_engine.hunts.alert import AlertDestinationRegistry
+        """The runner shares only the secrets backend with the engine, never its volume."""
+        from dfe_engine.hunts.runner_cli import _match_notifier
 
         resp = alert_client.post(
             "/api/v1/alerts/destinations",
@@ -114,15 +117,30 @@ class TestAlertDestinationsBootstrap:
         )
         assert resp.status_code == 201
 
-        # A fresh registry (as the hunt engine builds it) must resolve the
-        # API-written file — proving both layers share one on-disk format.
-        hunt_engine_registry = AlertDestinationRegistry(
-            directory=str(tmp_path / "alert-destinations")
+        runner_settings = SimpleNamespace(
+            hunts=HuntsSettings(), secrets=app_with_alerts.state.settings.secrets
         )
-        try:
-            assert hunt_engine_registry.resolve("slack-alerts") == sample_destination["url"]
-        finally:
-            hunt_engine_registry.close()
+        notifier = _match_notifier(runner_settings)  # ty: ignore[invalid-argument-type]  # only .hunts and .secrets are read
+
+        assert notifier._registry is not None
+        assert notifier._registry.resolve("slack-alerts") == sample_destination["url"]
+
+    def test_the_url_is_kept_in_the_secrets_backend_and_never_in_the_engine_directory(
+        self, alert_admin_headers, alert_client, sample_destination, tmp_path
+    ):
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json=sample_destination,
+            headers=alert_admin_headers,
+        )
+        assert resp.status_code == 201
+
+        url = sample_destination["url"]
+        on_disk = [p for p in (tmp_path / "alert-destinations").rglob("*") if p.is_file()]
+        assert on_disk, "the destination's description and owner stay in the engine directory"
+        assert [p.name for p in on_disk if url in p.read_text(encoding="utf-8")] == []
+        stored = tmp_path / "secrets" / "alert-destinations" / "slack-alerts"
+        assert url in stored.read_text(encoding="utf-8")
 
 
 class TestAlertDestinationsList:

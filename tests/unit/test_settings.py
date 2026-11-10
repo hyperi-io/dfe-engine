@@ -617,11 +617,6 @@ class TestEnvOverrides:
         with pytest.raises(ValidationError):
             HuntsSettings(**{field: value})
 
-    def test_hunt_alert_destinations_json_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_ENGINE_HUNTS_ALERT_DESTINATIONS", '{"email": "alert@test.com"}')
-        settings = load_settings()
-        assert settings.hunts.alert_destinations == {"email": "alert@test.com"}
-
     def test_multiple_overrides_at_once(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", "ch1.example.com")
         monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PORT", "9000")

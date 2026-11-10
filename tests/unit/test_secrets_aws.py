@@ -20,6 +20,7 @@ from scalo.secrets.exceptions import ProviderError, SecretAlreadyExistsError
 from dfe_engine.api.deps import jwt_authority_for
 from dfe_engine.auth.jwt_authority import JwtAuthority
 from dfe_engine.governance.ch.reconciler import ChRbacReconciler
+from dfe_engine.hunts.alert import AlertDestination, AlertDestinationRegistry
 from dfe_engine.secrets import SecretNameHeldError, build_secrets, warn_on_aws_managed_key
 from dfe_engine.settings import DFESettings, SecretsSettings
 from tests.support.racing_stores import RacingSecrets
@@ -84,6 +85,20 @@ def test_a_secret_round_trips_under_the_prefix(aws):
     # Window 0 deletes with no recovery window, so a re-created org gets the name back.
     store.put("ch/orgs/acme", "again")
     assert store.get("ch/orgs/acme") == "again"
+
+
+def test_an_alert_destination_lands_under_the_prefix_and_the_runner_reads_it(aws, tmp_path):
+    engine = AlertDestinationRegistry(
+        secrets=build_secrets(_settings()), directory=str(tmp_path / "alerts")
+    )
+    engine.add(AlertDestination(name="ops", url="slack://t/b/c", description="Ops"))
+    engine.close()
+
+    runner = AlertDestinationRegistry(secrets=build_secrets(_settings()))
+
+    names = [s["Name"] for s in _client().list_secrets()["SecretList"]]
+    assert names == [f"{PREFIX}/alert-destinations/ops"]
+    assert runner.resolve("ops") == "slack://t/b/c"
 
 
 def test_a_secret_lands_in_the_configured_region_only(aws):

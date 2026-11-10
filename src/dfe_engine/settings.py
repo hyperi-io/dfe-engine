@@ -14,7 +14,6 @@ environment winning. ``_ENV_FIELDS`` lists every environment variable that sets 
 the engine's own, not scalo's: moving onto scalo's is #600.
 """
 
-import contextlib
 import json
 import os
 import re
@@ -374,16 +373,14 @@ class HuntsSettings(BaseModel):
         default_factory=list,
         description="Global Apprise notification URLs applied to all hunts (e.g. slack://token/#channel)",
     )
-    alert_destinations: dict[str, str] = Field(
-        default_factory=dict,
-        description=(
-            "Named alert destinations: {name: apprise_url}."
-            " Inline bootstrap; prefer alert_destinations_dir."
-        ),
-    )
     alert_destinations_dir: str = Field(
         default="",
-        description="YAML directory for alert destination definitions (DirectoryConfigStore SSoT)",
+        description=(
+            "The engine's directory of alert destination descriptions and owning hunts, the "
+            "index the API lists from. Each URL is a secret under alert-destinations/<name> "
+            "in the secrets backend, which the hunt runner reads by name. Empty turns the "
+            "alert destinations API off."
+        ),
     )
     max_detections_per_run: int = Field(
         default=MAX_DETECTIONS_PER_RUN,
@@ -2345,10 +2342,6 @@ def _get_env_overrides() -> dict:
     # An empty list is the operator saying there is no broker, so it overrides the dev default.
     if (servers := os.environ.get("DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS")) is not None:
         _set_path(overrides, "kafka.bootstrap_servers", servers)
-    # JSON of {name: apprise_url}. A malformed value is ignored.
-    if value := os.getenv("DFE_ENGINE_HUNTS_ALERT_DESTINATIONS"):
-        with contextlib.suppress(json.JSONDecodeError):
-            _set_path(overrides, "hunts.alert_destinations", json.loads(value))
 
     # The TLS escape valves are scalo's: one setting relaxes every scalo-minted client (ClickHouse,
     # scalo.http, scalo.secrets), and an explicit SCALO_* variable wins.

@@ -1,11 +1,10 @@
 """Alerts router -- alert destination CRUD.
 
-Alert destinations are Apprise notification URLs persisted one YAML file
-per destination via the ``AlertDestinationRegistry`` (top-level fields:
-``url``, ``description``, ``enabled``, optional ``hunt_name``; the name
-comes from the filename). This is the same registry the hunt engine reads
-when dispatching alerts, so a destination created here is resolvable by a
-hunt straight away.
+Alert destinations are Apprise notification URLs kept by the
+``AlertDestinationRegistry``: the URL and enabled flag in the secrets backend,
+the description and owning hunt in the engine's destinations directory. The
+hunt runner reads the same secrets backend by name, so a destination created
+here is resolvable by a hunt straight away.
 
 An Apprise URL carries its own credential -- a Slack token, an SMTP password, a
 webhook secret -- and it is whole: the token sits wherever that service's scheme
