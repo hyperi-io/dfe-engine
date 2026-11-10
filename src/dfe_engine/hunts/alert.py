@@ -43,7 +43,7 @@ from scalo.expression import (
     validate as validate_expression,
 )
 from scalo.logger import logger
-from scalo.secrets import SecretsManager
+from scalo.secrets import SecretsError, SecretsManager
 
 from dfe_engine.names import MAX_NAME_LENGTH, VALID_NAME
 from dfe_engine.secrets import MIRROR_PROVIDER, DfeSecrets, mirror_put, mirror_remove
@@ -202,6 +202,7 @@ class AlertDestinationRegistry:
 
         Raises:
             KeyError: No destination is stored under *name*.
+            SecretsError: The stored secret is not a destination.
         """
         if self._secrets is None:
             return self._memory[name]
@@ -211,7 +212,10 @@ class AlertDestinationRegistry:
         if stored is None:
             raise KeyError(name)
         metadata = (_stored(self._store, name) if self._store is not None else None) or {}
-        return AlertDestination.model_validate({**metadata, **json.loads(stored), "name": name})
+        try:
+            return AlertDestination.model_validate({**metadata, **json.loads(stored), "name": name})
+        except (TypeError, ValueError) as exc:
+            raise SecretsError(f"alert destination {name!r} holds no readable destination") from exc
 
     def resolve(self, name: str) -> str | None:
         """Resolve a destination name to its Apprise URL. Returns None if not found or disabled."""

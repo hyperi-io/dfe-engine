@@ -253,6 +253,50 @@ class TestAlertDestinationsCRUD:
             == 404
         )
 
+    def test_a_hunt_delete_the_secrets_backend_refuses_answers_503(
+        self, alert_client, alert_admin_headers, app_with_alerts, tmp_path
+    ):
+        """Its owned destination's mirror key cannot be removed: the Secret does not exist."""
+        from dfe_engine.api.deps import _registries
+        from dfe_engine.hunts.alert import AlertDestinationRegistry
+        from dfe_engine.secrets import build_secrets
+        from tests.support.local_kube_api import local_kube_api, mirror_for
+
+        _registries["hunt_configs"].save(
+            "refused_hunt",
+            {
+                "display_name": "Refused",
+                "cron": "* * * * *",
+                "log_buffer": 60,
+                "global_target_table_name": "logs_alerts",
+                "customers": ["org_a"],
+                "rules": [{"rule_name": "r1"}],
+            },
+        )
+        dest = {"name": "refused-slack", "url": "slack://t", "hunt_name": "refused_hunt"}
+        assert (
+            alert_client.post(
+                "/api/v1/alerts/destinations", json=dest, headers=alert_admin_headers
+            ).status_code
+            == 201
+        )
+        token_file = tmp_path / "sa-token"
+        token_file.write_text("sa-token-placeholder", encoding="utf-8")
+        with local_kube_api("sa-token-placeholder") as kube:
+            settings = app_with_alerts.state.settings
+            refusing = AlertDestinationRegistry(
+                secrets=build_secrets(settings.secrets),
+                directory=settings.hunts.alert_destinations_dir,
+                mirror=mirror_for(kube, token_file),
+            )
+            _registries["alert_destinations"].close()
+            _registries["alert_destinations"] = refusing
+
+            resp = alert_client.delete("/api/v1/hunts/refused_hunt", headers=alert_admin_headers)
+
+        assert resp.status_code == 503
+        assert resp.json()["code"] == "secrets_unavailable"
+
     def test_delete_hunt_keeps_destination_shared_across_hunts(
         self, alert_client, alert_admin_headers
     ):

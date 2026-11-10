@@ -157,6 +157,17 @@ class TestSyncMirror:
         ]
         assert engine.sync_mirror() == []
 
+    def test_a_stored_value_that_is_no_destination_is_a_secrets_error(self, tmp_path, kube, engine):
+        # Startup catches SecretsError, so a corrupted secret is logged and the engine still boots.
+        kube.create_empty(SECRET)
+        engine.add(AlertDestination(name="ops", url="slack://t"))
+        (tmp_path / "engine" / "alert-destinations" / "ops").write_text(
+            "not json", encoding="utf-8"
+        )
+
+        with pytest.raises(SecretsError, match="no readable destination"):
+            engine.sync_mirror()
+
     def test_a_key_no_destination_has_is_removed(self, kube, engine, token_file):
         kube.create_empty(SECRET)
         engine.add(AlertDestination(name="ops", url="slack://t"))

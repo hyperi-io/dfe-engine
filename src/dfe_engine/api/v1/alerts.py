@@ -255,7 +255,7 @@ async def update_destination(
 )
 async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Delete an alert destination."""
-    with _secrets_answered():
+    with secrets_answered():
         removed = registry.remove(name)
     if not removed:
         raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")
@@ -300,7 +300,7 @@ def _typed_url(written: str, stored: str) -> str:
 
 
 @contextmanager
-def _secrets_answered() -> Iterator[None]:
+def secrets_answered() -> Iterator[None]:
     """Answer a secrets backend or mirror Secret that refuses a write with 503.
 
     Raises:
@@ -325,7 +325,7 @@ def _write_destination(
     hunt_name: str | None = None,
 ) -> None:
     """Persist a destination via the registry (overwrites if the name exists)."""
-    with _secrets_answered():
+    with secrets_answered():
         registry.add(
             RegistryAlertDestination(
                 name=dest.name,
