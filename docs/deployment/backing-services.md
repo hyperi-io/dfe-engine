@@ -101,7 +101,7 @@ implementation deferred (YAGNI).
 | Registry | OCI ref | Harbor | ECR | GAR | ACR | Docker Hub / local |
 | Block storage | StorageClass | Longhorn / local-path | EBS | PD | Azure Disk | docker volumes |
 | DNS | external-dns / zone | CoreDNS / site DNS | Route 53 | Cloud DNS | Azure DNS | /etc/hosts |
-| Observability sink | OTel exporter -> dest | HyperDX + CH | HyperDX (keep) or CloudWatch | HyperDX (keep) or Cloud Monitoring | HyperDX (keep) or Azure Monitor | HyperDX / console |
+| Observability sink | OTel exporter -> dest | dfe-hyperdx + CH | dfe-hyperdx (keep) or CloudWatch | dfe-hyperdx (keep) or Cloud Monitoring | dfe-hyperdx (keep) or Azure Monitor | dfe-hyperdx / console |
 
 Priority backing services for the first swap passes: secrets, DNS,
 PCA/TLS, k8s, Kafka, ClickHouse. The rest are mostly dfe-infra config with little or
@@ -134,7 +134,7 @@ dfe-receiver reads its ingest bearer tokens from the same backend, so the backen
 
 dfe-docker is the primary developer-desktop use case and is Kaz's repo (changes go
 via branch + PR). It must stay as small as possible: it is never production, so
-every seam takes its lightest backend - no OpenBao, no ESO, no Argo, no HyperDX
+every seam takes its lightest backend - no OpenBao, no ESO, no Argo, no dfe-hyperdx
 dependency unless a dev opts in.
 
 ```mermaid
@@ -163,7 +163,7 @@ push weight to the k8s profiles, not the desktop.
 | Object store | ready (S3 API) | MinIO | S3 / GCS / Blob |
 | Auth / OIDC | ready (X-Oidc-* contract) | Keycloak / local | cloud IdPs |
 | Ingress, TLS, DNS, storage, registry, reconciler | ready (standard k8s interfaces) | on-prem wiring | cloud wiring in dfe-infra |
-| Observability | ready (OTel exporter) | HyperDX + CH | keep HyperDX or cloud sink |
+| Observability | ready (OTel exporter) | dfe-hyperdx + CH | keep dfe-hyperdx or cloud sink |
 
 Only the ClickHouse gateway (the consolidation that also carries RBAC + audit) needs
 real engine work. Everything else is "use the standard interface + dfe-infra config".

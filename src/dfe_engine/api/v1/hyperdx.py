@@ -55,7 +55,7 @@ from dfe_engine.api.v1.sources import held_source_orgs
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch.models import org_user_name
 
-router = APIRouter(prefix="/hyperdx", tags=["HyperDX"])
+router = APIRouter(prefix="/hyperdx", tags=["Search"])
 
 # The minted platform reader (a service role, no tenant role -> reads across orgs,
 # tier-limited). Handed only to a caller that passes _reads_every_org.
@@ -146,6 +146,7 @@ def hyperdx_identity(request: Request, user) -> str:
 @router.get(
     "/connection",
     response_model=HyperDXConnection,
+    summary="Get Search Connection",
 )
 async def hyperdx_connection(
     request: Request,
@@ -188,10 +189,10 @@ async def hyperdx_connection(
 
 
 class HyperDXTeamSource(BaseModel):
-    """One HyperDX source on one team, as the fork holds it."""
+    """One Search source on one team, as dfe-hyperdx holds it."""
 
-    id: str = Field(description="HyperDX source id on that team")
-    name: str = Field(description="DFE source name; the HyperDX source carries the same one")
+    id: str = Field(description="Search source id on that team")
+    name: str = Field(description="DFE source name; the Search source carries the same one")
     table: dict[str, str] = Field(
         default_factory=dict,
         description="The ClickHouse table the source reads (databaseName, tableName)",
@@ -199,15 +200,15 @@ class HyperDXTeamSource(BaseModel):
 
 
 class HyperDXTeamSources(BaseModel):
-    """One HyperDX team and the DFE sources it holds."""
+    """One Search team and the DFE sources it holds."""
 
-    team: str = Field(description="HyperDX team id")
-    team_name: str = Field(description="HyperDX team name: the ClickHouse user its members read as")
+    team: str = Field(description="Search team id")
+    team_name: str = Field(description="Search team name: the ClickHouse user its members read as")
     sources: list[HyperDXTeamSource] = Field(default_factory=list)
 
 
 class HyperDXSourcesResponse(BaseModel):
-    """Where every deployed DFE source actually landed in HyperDX."""
+    """Where every deployed DFE source actually landed in Search."""
 
     teams: list[HyperDXTeamSources] = Field(default_factory=list)
 
@@ -226,16 +227,17 @@ def _require_every_org_reader(request: Request, user: CurrentUser) -> None:
 @router.get(
     "/sources",
     response_model=HyperDXSourcesResponse,
+    summary="List Search Sources",
     dependencies=[
         Depends(require_action(scopes_dict["source_read"])),
         Depends(_require_every_org_reader),
     ],
 )
 async def hyperdx_sources(request: Request) -> HyperDXSourcesResponse:
-    """List every HyperDX team and the DFE sources on it.
+    """List every Search team and the DFE sources on it.
 
     A deploy writes its source to every team, so this is the read that says where
-    it landed. 503 when HyperDX is not deployed or not answering -- an empty list
+    it landed. 503 when Search is not deployed or not answering -- an empty list
     would read as "the source is missing", which is a different fault.
     """
     client = getattr(request.app.state, "hyperdx_client", None)

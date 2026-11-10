@@ -54,15 +54,15 @@ def _module(request: Request, module_type: AIModuleType):
 
 
 class FromHyperdxRequest(BaseModel):
-    """Body for turning a HyperDX query into rule SQL."""
+    """Body for turning a Search query into rule SQL."""
 
     query: str
     time_fields: list[str] | None = None
 
 
-@router.post("/from-hyperdx", dependencies=[_READ])
+@router.post("/from-hyperdx", summary="Strip Search Query Time Bounds", dependencies=[_READ])
 async def from_hyperdx(body: FromHyperdxRequest, user: CurrentUser) -> dict[str, Any]:
-    """Strip a HyperDX query's time bounds -> {window}, ready to save as a rule."""
+    """Strip a Search query's time bounds -> {window}, ready to save as a rule."""
     return strip_hyperdx(body.query, body.time_fields)
 
 

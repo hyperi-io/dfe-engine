@@ -178,13 +178,13 @@ class SchemaDeployResult(BaseModel):
     )
     hyperdx_source_teams: int | None = Field(
         default=None,
-        description="How many HyperDX teams now carry a source over this source's table",
+        description="How many Search teams now carry a source over this source's table",
     )
     hyperdx_source_error: str | None = Field(
         default=None,
         description=(
-            "Why HyperDX was not pointed at the table. Never fails the deploy - "
-            "the schema is live and HyperDX may be down or not deployed at all."
+            "Why Search was not pointed at the table. Never fails the deploy - "
+            "the schema is live and Search may be down or not deployed at all."
         ),
     )
     restart_required: list[str] = Field(

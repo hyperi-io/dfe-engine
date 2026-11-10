@@ -114,7 +114,7 @@ class UserResponse(BaseModel):
     groups: list[str] = Field(default_factory=list)
     org_ids: list[str] = Field(
         default_factory=list,
-        description="Orgs this user can browse in the data plane (HyperDX). Empty "
+        description="Orgs this user can browse in the data plane (Search). Empty "
         "means no org-scoped data access.",
     )
     external: bool = Field(
@@ -479,7 +479,7 @@ async def get_me(user: CurrentUser, request: Request):
 
     ``hyperdx_role`` and ``hyperdx_identity`` are what dfe-hyperdx takes a
     session's dashboard role and team from; it caches this answer for 30 seconds,
-    so a group change reaches HyperDX in that window rather than at token expiry.
+    so a group change reaches dfe-hyperdx in that window rather than at token expiry.
     """
     role_config = get_role_config(request)
     permissions = sorted(role_config.resolve_permissions(user.roles))

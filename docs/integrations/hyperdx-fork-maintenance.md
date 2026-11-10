@@ -1,5 +1,5 @@
 <!-- Project: dfe-engine (governs the hyperi-hyperdx fork) -->
-# HyperDX Fork Maintenance Standard
+# dfe-hyperdx Fork Maintenance Standard
 
 Status: PROPOSED. How we carry DFE changes on the hyperi-hyperdx fork with the
 MINIMUM ongoing cost of tracking upstream HyperDX.

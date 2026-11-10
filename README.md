@@ -49,7 +49,7 @@ acceptance path that proves each stage. Read it before the architecture.
 
 DFE is a product suite that any organisation deploys to run its own data-fusion
 engine. Our own hosted instance is just ONE deployment, not "the product". Every
-core DFE repo (engine, infra, schemas, ui, hyperdx, and the Rust data-plane apps)
+core DFE repo (engine, infra, schemas, ui, dfe-hyperdx, and the Rust data-plane apps)
 is public by design.
 
 What that means for the code here:

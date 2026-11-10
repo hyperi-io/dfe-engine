@@ -227,7 +227,7 @@ runbook line -- what it does, and which action reverts it.
 
 ## ClickHouse data RBAC -- one user per group
 
-`governance/ch_rbac.py`. Access control in HyperDX's app layer cannot contain a bad
+`governance/ch_rbac.py`. Access control in dfe-hyperdx's app layer cannot contain a bad
 query. Quotas and resource limits can, and those live on the ClickHouse user. So a
 group maps to exactly one ClickHouse user carrying three controls:
 
@@ -250,7 +250,7 @@ graph LR
 CH name). The primary path is `ddl_artifact`, which emits that as a gitops DDL file
 under `ddl/ch-rbac/<group>.sql` -- applied by the same migration runner as the schema
 DDL, with the read-only core tiers supplied from dfe-schemas. The imperative
-`GroupChProvisioner` is the secondary, direct path. HyperDX then selects the
+`GroupChProvisioner` is the secondary, direct path. dfe-hyperdx then selects the
 connection bound to the user's group, so every query runs as that user and CH itself
 is the enforcing boundary.
 
@@ -261,7 +261,7 @@ dumb or runaway hunt query (a full-table scan, an unbounded join) is killed by t
 quota or the `max_memory_usage`/`max_execution_time`/`max_rows_to_read` limits
 rather than taking the cluster down. The grants are a security scope on top if a
 hunt should only ever see certain data. So the per-group CH user has two consumers --
-interactive queries through HyperDX, and hunt execution -- and CH is the safety
+interactive queries through Observe, and hunt execution -- and CH is the safety
 boundary for both.
 
 ## The hunt runner
@@ -359,7 +359,7 @@ disjoint claims, lease reclaim, and incremental resume with no duplicate rows.
 ## The smaller pieces
 
 - **Runtime config** -- `GET /api/v1/config/client` (authenticated, any role) hands the UI
-  its API base, HyperDX URL, auth mode, and feature flags at runtime. This is what
+  its API base, Observe URL, auth mode, and feature flags at runtime. This is what
   lets one UI image run in every environment instead of baking the URLs in at build
   time.
 - **Alerting** -- a scaffold only, deferred by design. A rule model (threshold over a

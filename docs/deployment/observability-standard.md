@@ -1,7 +1,7 @@
 <!-- Project: dfe-engine (applies across dfe-infra, dfe-engine, dfe-ui, rust apps) -->
 # DFE Observability Standard
 
-One telemetry contract for the whole deployment: the dfe-infra platform services, dfe-engine, dfe-ui and the Rust apps (receiver, loader, fetcher, archiver, transforms). Every component reports to one OpenTelemetry Collector, the collector writes ClickHouse, and HyperDX reads those tables. Nothing pushes to HyperDX.
+One telemetry contract for the whole deployment: the dfe-infra platform services, dfe-engine, dfe-ui and the Rust apps (receiver, loader, fetcher, archiver, transforms). Every component reports to one OpenTelemetry Collector, the collector writes ClickHouse, and Observe reads those tables. Nothing pushes to Observe.
 
 ## Where telemetry lands
 
@@ -12,18 +12,18 @@ flowchart LR
     stdout["container stdout"] --> ds["otel-collector daemonset"]
     ds -->|OTLP| gw
     gw -->|"ClickHouse exporter"| ch[("otel_* tables<br/>in the DFE database")]
-    ch -.->|queries| hdx["HyperDX"]
+    ch -.->|queries| hdx["Observe"]
     ch -.->|ScalingPressure| keda["engine KEDA shim"]
 ```
 
-The collector's ClickHouse exporter writes `otel_logs`, `otel_traces` and the `otel_metrics_*` tables into the DFE database. HyperDX, the engine's app-management queries and its KEDA shim all read them there. The dfe-hyperdx image has no OTLP listener, so the collector's `otlp/hyperdx` exporter is off by default.
+The collector's ClickHouse exporter writes `otel_logs`, `otel_traces` and the `otel_metrics_*` tables into the DFE database. Observe, the engine's app-management queries and its KEDA shim all read them there. The dfe-hyperdx image has no OTLP listener, so the collector's `otlp/hyperdx` exporter is off by default.
 
 | Deployment | Collector | Database | Set by |
 | --- | --- | --- | --- |
 | Kubernetes (dfe-infra) | `otel-collector` gateway and daemonset, in the `otel` namespace | `dfe` | `clickhouse.database` in `argocd/values/common.yaml` |
 | Docker (dfe-docker) | the bundled `otel-collector`, on a profile that declares `otel` or with `DFE_OTEL_ENABLED=true` | `dfe` | `DFE_OTEL_DATABASE` |
 
-Both write `dfe.otel_*` by default, not HyperDX's `default` database. dfe-schemas declares the tables and dfe-engine applies them at its startup. The collector runs with `create_schema: false`, so it only inserts.
+Both write `dfe.otel_*` by default, not dfe-hyperdx's `default` database. dfe-schemas declares the tables and dfe-engine applies them at its startup. The collector runs with `create_schema: false`, so it only inserts.
 
 On Kubernetes the gateway also reads ClickHouse system tables, the Kubernetes API and the data operators' metrics endpoints. It re-exposes every metric on a Prometheus exporter for an external scraper.
 
@@ -40,7 +40,7 @@ On Kubernetes the gateway also reads ClickHouse system tables, the Kubernetes AP
 
 Any other value resolves to an empty endpoint, and an app with an empty endpoint exports nothing over OTLP. Nothing rejects an unknown mode, so a misspelt one fails silently. So does `external` with no `externalEndpoint`.
 
-An endpoint with no scheme gets `http://`, or `https://` when `otel.tls` is true. `otel.endpoint` overrides the resolved value for one deployment. It is exported as written, so it must carry its scheme, and scalo-service sets `OTEL_EXPORTER_OTLP_PROTOCOL` beside it (default `grpc`). dfe-ui and HyperDX export over OTLP/HTTP, so they take the resolved endpoint on port 4318.
+An endpoint with no scheme gets `http://`, or `https://` when `otel.tls` is true. `otel.endpoint` overrides the resolved value for one deployment. It is exported as written, so it must carry its scheme, and scalo-service sets `OTEL_EXPORTER_OTLP_PROTOCOL` beside it (default `grpc`). dfe-ui and dfe-hyperdx export over OTLP/HTTP, so they take the resolved endpoint on port 4318.
 
 In `receiver` mode, apps export to dfe-receiver's OTLP listener. It binds 4317 and 4318 only while the receiver's `config.otlp.enabled` is true, and with no `telemetry.receiverEndpoint` dfe-infra refuses to render the receiver until it is. Turning it on also serves OTLP on the receiver's load balancer. The receiver converts each record to JSON in the ClickHouse exporter's row shape (its default `otlp.mode: hyperdx`) and sends it down the normal data path. It lands wherever the receiver's routing and the loader's table mapping send it. No shipped rule sends it to the `otel_*` tables.
 

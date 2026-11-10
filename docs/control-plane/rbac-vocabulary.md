@@ -31,7 +31,7 @@ modelling mistake:
 - **Control plane** - what you can DO. Static roles granting API actions:
   configure sources, run hunts, deploy services, manage groups.
 - **Data plane** - what you can SEE. Dynamic, driven by `org_ids`, and
-  restricted to data browsing (HyperDX, Kibana-style). A user can be a powerful
+  restricted to data browsing (Observe, Kibana-style). A user can be a powerful
   analyst on the control plane and see exactly one org's rows.
 
 A role is not "more senior" than another across planes. `org_viewer` is not
@@ -74,7 +74,7 @@ it stands, because a parallel name would mean two groups granting one role.
 
 ## org_viewer -- the org-tied exception role
 
-`org_viewer` (renamed from `customer_viewer`) is the one role hard-tied to the org_id CRUD: a user or group carrying it is associated with one or more `org_ids`, and that association IS the grant. When such a user browses data through the HyperDX iframe inside dfe-ui, HyperDX connects as that org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to the org's `_org_id` values, always. There is no unfiltered path: the scoping lives in the ClickHouse user, not in anything the UI or the user sends. See [rbac.md](rbac.md) sections 5-6 for the mechanism.
+`org_viewer` (renamed from `customer_viewer`) is the one role hard-tied to the org_id CRUD: a user or group carrying it is associated with one or more `org_ids`, and that association IS the grant. When such a user browses data through the Observe iframe inside dfe-ui, dfe-hyperdx connects as that org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to the org's `_org_id` values, always. There is no unfiltered path: the scoping lives in the ClickHouse user, not in anything the UI or the user sends. See [rbac.md](rbac.md) sections 5-6 for the mechanism.
 
 ## Naming conventions
 
