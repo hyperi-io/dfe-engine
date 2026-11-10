@@ -1712,6 +1712,7 @@ class APISettings(BaseModel):
 
 # GCP Secret Manager and Azure Key Vault names allow letters, digits, '-' and (GCP only) '_'.
 _UNNAMEABLE_SECRET_PROVIDERS = frozenset({"gcp", "azure"})
+SecretsProvider = Literal["file", "openbao", "vault", "aws"]
 # Amazon MSK reads SCRAM credentials only from secrets whose names start with this.
 _MSK_NAME_PREFIX = "AmazonMSK_"
 # AWS Secrets Manager's CreateSecret takes these characters in a name, at most 512 of them.
@@ -1728,15 +1729,15 @@ class SecretsSettings(BaseModel):
     The engine reads runtime config secrets from env; this is the WRITE seam for
     secrets it generates (the JWT signing key, ClickHouse passwords, OIDC client
     secrets). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
-    product: 'file' by default (a directory on the engine's volume), 'ansible_vault',
-    'openbao'/'vault' where a deployment runs one, and 'aws' for AWS Secrets Manager.
+    product: 'file' by default (a directory on the engine's volume), 'openbao'/'vault'
+    where a deployment runs one, and 'aws' for AWS Secrets Manager.
     'gcp' and 'azure' are refused: their secret names allow no '/', and every path
     the engine mints carries one. See docs/deployment/backing-services.md.
 
     """
 
-    provider: str = Field(default="file", description="scalo.secrets backend provider")
-    path: str = Field(default="./.secrets", description="file/ansible_vault root path")
+    provider: SecretsProvider = Field(default="file", description="scalo.secrets backend provider")
+    path: str = Field(default="./.secrets", description="file provider root path")
     addr: str = Field(default="", description="openbao/vault address")
     mount: str = Field(default="dfe", description="kv mount / key prefix")
     role: str = Field(default="", description="openbao AppRole role id")
@@ -1767,14 +1768,19 @@ class SecretsSettings(BaseModel):
         except json.JSONDecodeError as exc:
             raise ValueError(f"DFE_ENGINE_SECRETS_TAGS is not valid JSON: {exc}") from exc
 
+    @field_validator("provider", mode="before")
+    @classmethod
+    def _nameable_provider(cls, value: object) -> object:
+        if value in _UNNAMEABLE_SECRET_PROVIDERS:
+            raise ValueError(
+                f"DFE_ENGINE_SECRETS_PROVIDER={value} is not supported yet for the secrets "
+                "the engine mints: its secret names cannot hold the '/' every engine path "
+                "carries. Use file, openbao or aws"
+            )
+        return value
+
     @model_validator(mode="after")
     def _check_provider(self) -> SecretsSettings:
-        if self.provider in _UNNAMEABLE_SECRET_PROVIDERS:
-            raise ValueError(
-                f"DFE_ENGINE_SECRETS_PROVIDER={self.provider} is not supported yet for the secrets "
-                "the engine mints: its secret names cannot hold the '/' every engine path "
-                "carries. Use file, ansible_vault, openbao or aws"
-            )
         if self.provider == "aws":
             self._check_aws()
         return self

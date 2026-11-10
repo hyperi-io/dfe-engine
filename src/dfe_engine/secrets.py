@@ -11,7 +11,7 @@ The engine reads runtime config secrets from env (ESO or compose fills it). This
 is the WRITE seam for secrets the engine generates (the JWT signing key, the ClickHouse
 service, org and group passwords, OIDC client secrets): they go to ``scalo.secrets``,
 provider selected by ``settings.secrets``. ``file`` is the default, a directory on the
-engine's volume. ``ansible_vault`` is an encrypted local file, ``openbao``/``vault`` a
+engine's volume, ``openbao``/``vault`` a
 KV mount the deployment configures, and ``aws`` AWS Secrets Manager with every name
 under the configured name prefix.
 
@@ -36,7 +36,7 @@ from scalo.secrets.exceptions import (
 from dfe_engine.settings import SecretsSettings
 
 # Providers whose "path" is a real filesystem path - prefix with the configured root.
-_ROOTED = {"file", "ansible_vault"}
+_ROOTED = {"file"}
 
 # AWS finishes a forced delete in the background, so a write to that name waits up to 30s for it.
 FORCED_DELETE_BACKOFF: tuple[float, ...] = (1.0, 2.0, 4.0, 8.0, 15.0)
@@ -89,7 +89,7 @@ class DfeSecrets:
         Args:
             manager: The scalo secrets manager holding the provider.
             provider: The provider every call goes to.
-            root: The file and ansible_vault root directory.
+            root: The file provider's root directory.
             mount: The openbao KV mount.
             name_prefix: The aws name prefix.
             tags: Tags each secret the engine creates on aws carries.
@@ -226,9 +226,6 @@ def _to_scalo_config(cfg: SecretsSettings) -> dict[str, Any]:
         if cfg.kms_key_id:
             aws["kms_key_id"] = cfg.kms_key_id
         scfg["aws"] = aws
-    elif cfg.provider == "ansible_vault":
-        # the vault password comes from the env
-        scfg["ansible_vault"] = {}
     # "file" needs no config block (always available).
     return scfg
 

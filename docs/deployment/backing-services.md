@@ -89,7 +89,7 @@ implementation deferred (YAGNI).
 | Backing service | Seam | on-prem / Rancher (now) | AWS | GCP | Azure | dfe-docker |
 |---|---|---|---|---|---|---|
 | Cluster / compute | k8s API | RKE2 / Rancher | EKS | GKE | AKS | single host |
-| Secrets | `scalo.secrets` provider | **OpenBao** | Secrets Manager | Secret Manager | Key Vault | `file` / `ansible_vault` |
+| Secrets | `scalo.secrets` provider | **OpenBao** | Secrets Manager | Secret Manager | Key Vault | `file` |
 | Data store (CH) | CH gateway + `effective_data_database` | DFE CH (single/cluster) | ClickHouse Cloud / self-mgd | ClickHouse Cloud / self-mgd | ClickHouse Cloud / self-mgd | CH container |
 | Streaming | `scalo.kafka` | Strimzi / Redpanda | MSK / Confluent | Confluent / Pub-Sub bridge | Event Hubs (Kafka API) | Redpanda (or grpc-direct) |
 | Object store | S3 API | MinIO | S3 | GCS | Blob | MinIO / local FS |
@@ -116,7 +116,6 @@ the provider per target. This is the whole trick, applied to every row above.
 flowchart LR
     E["dfe-engine<br/>SecretsManager.from_config(settings.secrets)"] --> P{"provider<br/>(from config)"}
     P -->|file, the default| F["a directory on the engine's volume<br/>(0 extra service)"]
-    P -->|ansible_vault| AV["a local encrypted file"]
     P -->|openbao| O["OpenBao, where the deployment configures it"]
     P -->|aws| AWS["AWS Secrets Manager<br/>(name prefix, region, KMS key, tags)"]
     P -.->|gcp / azure| NO["refused at startup"]
@@ -128,7 +127,7 @@ The engine's JWT signing key, ClickHouse passwords and the OIDC client secrets a
 
 `openbao` is used where the deployment configures it. `gcp` and `azure` are refused: their secret names allow no `/`, and every engine path has one.
 
-dfe-receiver reads its ingest bearer tokens from the same backend, so the backend has to be one the receiver reaches too. On `openbao` and `aws` it reads them where the engine wrote them, given a policy or role granting `ingest/bearer-tokens/*` and nothing else. The `file` directory sits on the engine's own volume, so the deployment mounts `<DFE_ENGINE_SECRETS_PATH>/ingest/bearer-tokens` read-only into the receiver at `/var/run/secrets/dfe/ingest-bearer-tokens`, as a directory so a rewrite reaches it, never the whole secrets root. On Kubernetes no receiver pod can mount the engine's volume. There `DFE_ENGINE_INGEST_BEARER_SECRET` names a Secret the engine also writes each listener's lines into, one key per listener, through scalo's `kubernetes` provider with `get` and `update` on that one Secret, and the receiver mounts the Secret read-only at the same path. `ansible_vault` cannot serve the receiver, and an ingest credential on it fails the receiver compile.
+dfe-receiver reads its ingest bearer tokens from the same backend, so the backend has to be one the receiver reaches too. On `openbao` and `aws` it reads them where the engine wrote them, given a policy or role granting `ingest/bearer-tokens/*` and nothing else. The `file` directory sits on the engine's own volume, so the deployment mounts `<DFE_ENGINE_SECRETS_PATH>/ingest/bearer-tokens` read-only into the receiver at `/var/run/secrets/dfe/ingest-bearer-tokens`, as a directory so a rewrite reaches it, never the whole secrets root. On Kubernetes no receiver pod can mount the engine's volume. There `DFE_ENGINE_INGEST_BEARER_SECRET` names a Secret the engine also writes each listener's lines into, one key per listener, through scalo's `kubernetes` provider with `get` and `update` on that one Secret, and the receiver mounts the Secret read-only at the same path.
 
 ## The dfe-docker special case - keep it small
 
@@ -144,7 +143,7 @@ flowchart TB
         k["Kafka: Redpanda (or grpc-direct, no bus)"]
         ing["receiver -> loader -> ClickHouse"]
         fa["fetcher / archiver / transforms (optional)"]
-        sec["secrets: file / ansible_vault (no OpenBao)"]
+        sec["secrets: file (no OpenBao)"]
     end
 ```
 

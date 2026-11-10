@@ -20,7 +20,6 @@ from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, Settings, require
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError
 from dfe_engine.services.registry import ConfigNotFoundError, stored_form
 
 router = APIRouter(prefix="/services", tags=["Services"])
@@ -237,9 +236,6 @@ async def validate_service_config(
 )
 async def seed_service_configs(user: CurrentUser, registry: ServiceConfigReg, settings: Settings):
     """Seed built-in default service configs. Non-destructive."""
-    try:
-        count = registry.seed_defaults(overwrite=False, settings=settings)
-    except BearerSourceUnreadableError as exc:
-        raise ProblemError(409, str(exc), code="receiver_auth_unreadable") from exc
+    count = registry.seed_defaults(overwrite=False, settings=settings)
     audit_resource_change(user.user_id, "service_config", "all", "seeded")
     return SeedResponse(seeded=count)

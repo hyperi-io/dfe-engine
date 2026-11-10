@@ -66,8 +66,6 @@ from dfe_engine.orgs.ingest_credentials import (
     IngestListener,
 )
 from dfe_engine.orgs.ingest_tokens import (
-    BearerSourceUnreadableError,
-    bearer_secret_source,
     credential_secret_path,
     drop_token,
     mint_token,
@@ -77,7 +75,6 @@ from dfe_engine.orgs.ingest_tokens import (
 )
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.secrets import DfeSecrets
-from dfe_engine.settings import SecretsSettings, get_settings
 
 router = APIRouter(
     prefix="/orgs/{org}/ingest-credentials",
@@ -217,15 +214,13 @@ def _desired(
     org: str,
     name: str,
     spec: IngestCredentialSpec,
-    backend: SecretsSettings,
 ) -> IngestCredential:
     """The credential *spec* describes, refused where the receiver could not hold it.
 
     Raises:
         ProblemError: 422 ``invalid_binding`` with one field error per problem: an
             org that is not registered or is listed twice, an ``orgs`` without the
-            owning org, a ``default_org`` outside ``orgs``, a listener listed twice,
-            or listeners on a secrets *backend* the receiver cannot read its tokens from.
+            owning org, a ``default_org`` outside ``orgs``, or a listener listed twice.
     """
     orgs = spec.orgs if spec.orgs is not None else [org]
     default_org = spec.default_org if spec.default_org is not None else org
@@ -248,10 +243,6 @@ def _desired(
         )
     if len(set(spec.listeners)) != len(spec.listeners):
         errors.append(_field("listeners", "a listener is listed twice"))
-    try:
-        bearer_secret_source(spec.listeners[0], backend)
-    except BearerSourceUnreadableError as exc:
-        errors.append(_field("listeners", str(exc)))
     if errors:
         raise ProblemError(
             422,
@@ -554,7 +545,7 @@ async def apply_ingest_credential(
             "across every org because the receiver keys its bindings on them",
             code="credential_id_taken",
         )
-    desired = _desired(registry, org, credential, body, get_settings().secrets)
+    desired = _desired(registry, org, credential, body)
     _check_bound_orgs(request, user, desired)
     response.headers["ETag"] = credential_etag(desired)
 

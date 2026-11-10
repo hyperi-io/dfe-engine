@@ -121,7 +121,6 @@ from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, get_path,
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 from dfe_engine.hunts import runner_metrics
-from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError
 from dfe_engine.sampling import SampleMode, SampleRequest, SamplerError
 from dfe_engine.settings import DFESettings
 from dfe_engine.source.flow import stage_instance_ceiling
@@ -2132,8 +2131,6 @@ def _routing_status(request: Request, app: AppInstance, doc: dict, source_regist
         )
     except routing.RoutingNotApplicableError as exc:
         raise ProblemError(409, str(exc), code="routing_not_applicable") from exc
-    except BearerSourceUnreadableError as exc:
-        raise ProblemError(409, str(exc), code="receiver_auth_unreadable") from exc
     except routing.UnknownRoutingCompilerError as exc:
         raise ProblemError(
             500,

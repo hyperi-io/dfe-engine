@@ -159,6 +159,12 @@ def test_a_provider_whose_names_allow_no_slash_is_refused(provider):
         SecretsSettings(provider=provider)
 
 
+@pytest.mark.parametrize("provider", ["ansible_vault", "keychain", ""])
+def test_a_provider_the_engine_does_not_mint_on_is_refused(provider):
+    with pytest.raises(ValidationError, match="'file', 'openbao', 'vault' or 'aws'"):
+        SecretsSettings(provider=provider)
+
+
 def test_the_file_provider_ignores_the_aws_fields(tmp_path):
     """No aws check runs for the file provider, and its secrets land under its root, unprefixed."""
     settings = SecretsSettings(
