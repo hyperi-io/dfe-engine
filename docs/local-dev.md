@@ -5,8 +5,6 @@ The fastest way to work on the engine is to run it as a plain local process -- a
 setup a contributor uses to iterate on an endpoint, and the one the auth/attributes
 and rule-authoring work is developed against.
 
-## The 30-second boot
-
 ```sh
 make dev                         # -> Swagger UI at http://localhost:8003/docs
 ```
@@ -33,7 +31,7 @@ Two things trip people up on a fresh clone:
   cluster -- set `DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES=false` and the engine boots with
   no ClickHouse at all.
 
-## The no-dependencies auth spike
+## With and without ClickHouse
 
 To exercise the auth, accounts, groups or attributes endpoints with nothing else
 running -- no ClickHouse, no deploy repo:
@@ -48,19 +46,17 @@ env DFE_ENGINE_ENV=dev \
     uv run dfe-engine run
 ```
 
-- **No token needed.** `DFE_ENGINE_AUTH_ENABLED=false` with `DFE_ENGINE_ENV=dev` hands every
+- No token is needed. `DFE_ENGINE_AUTH_ENABLED=false` with `DFE_ENGINE_ENV=dev` hands every
   unauthenticated request the `admin` role, so you can call any endpoint straight
   from `curl`/Swagger. The engine still mints an ephemeral ES384 JWT authority at
-  boot; you just do not need it on this path. (The offline `auth` subcommands live
+  boot. You just don't need it on this path. (The offline `auth` subcommands live
   on the separate `dfe` CLI, not the `dfe-engine` daemon.)
-- **Accounts and groups are YAML files** under `DFE_CONFIG_DIR/auth`.
-- **Attribute request bodies are wrapped.** `PUT
+- Accounts and groups are YAML files under `DFE_CONFIG_DIR/auth`.
+- Attribute request bodies are wrapped. `PUT
   /api/v1/auth/accounts/{username}/attributes` takes `{"attributes": {...}}`, not
   the bare object, and the `GET` returns the same shape. A bare object is a 422.
 
-## A local ClickHouse
-
-The client is clickhouse-connect over HTTP, so the port is the HTTP one and a
+With a local ClickHouse, the client is clickhouse-connect over HTTP, so the port is the HTTP one and a
 plain docker ClickHouse is not TLS:
 
 ```sh
@@ -80,7 +76,7 @@ serves degraded with `/readyz` answering 503 `{"clickhouse": false}` while
 `SQL_` prefix; dfe-docker's `clickhouse/server-custom.xml` declares that prefix
 and a stock image does not.
 
-## Port collisions
+## Port and collector snags
 
 `dfe-engine run` binds the observability listener (`/metrics`, `/livez`,
 `/readyz`) on `0.0.0.0:9090` before the API. With the dfe-docker stack up that
@@ -89,6 +85,14 @@ use` and no port named. The knob is scalo's, not `DFE_ENGINE_`-prefixed:
 
 ```sh
 env METRICS_ADDR=127.0.0.1:9197 DFE_ENGINE_ENV=dev uv run dfe-engine run
+```
+
+With no collector running, the OTLP exporters aim at `localhost:4317` and log
+`Transient error ... retrying` every few seconds. scalo reads a whitespace-only
+endpoint as "no endpoint", which is its off switch:
+
+```sh
+env OTEL_EXPORTER_OTLP_ENDPOINT=" " DFE_ENGINE_ENV=dev uv run dfe-engine run
 ```
 
 ## On a Mac, in VS Code
@@ -114,19 +118,9 @@ docker compose -f docker-compose.dev.yaml up -d --wait clickhouse && make e2e-se
   so nothing here collides.
 - `METRICS_ADDR=127.0.0.1:19090` moves the health listener if 9090 is busy.
 
-dfe-ui's `scripts/macos-dev-smoke.py` runs the whole loop and ends in one PASS
+dfe-ui's [`scripts/macos-dev-smoke.py`](https://github.com/hyperi-io/dfe-ui/blob/main/scripts/macos-dev-smoke.py) runs the whole loop and ends in one PASS <!-- doc-paths: ignore -->
 or FAIL line. Its `macOS dev smoke` workflow runs it on a GitHub macOS arm64
 runner.
-
-## No collector running
-
-The OTLP exporters aim at `localhost:4317` and log `Transient error ... retrying`
-every few seconds while nothing listens. scalo reads a whitespace-only endpoint
-as "no endpoint", which is its off switch:
-
-```sh
-env OTEL_EXPORTER_OTLP_ENDPOINT=" " DFE_ENGINE_ENV=dev uv run dfe-engine run
-```
 
 ## Running against the interdependent repos
 
