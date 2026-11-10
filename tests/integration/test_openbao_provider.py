@@ -116,6 +116,23 @@ def _secrets(addr: str) -> DfeSecrets:
     return DfeSecrets(mgr, provider="openbao", root="", mount="secret")
 
 
+def test_an_alert_destination_the_engine_writes_resolves_in_the_runner(openbao_addr, tmp_path):
+    from dfe_engine.hunts.alert import AlertDestination, AlertDestinationRegistry
+
+    engine = AlertDestinationRegistry(
+        secrets=_secrets(openbao_addr), directory=str(tmp_path / "alerts")
+    )
+    engine.add(AlertDestination(name="ops", url="slack://t/b/c"))
+    runner = AlertDestinationRegistry(secrets=_secrets(openbao_addr))
+    assert runner.resolve("ops") == "slack://t/b/c"
+
+    engine.add(AlertDestination(name="ops", url="slack://t/b/c", enabled=False))
+    assert runner.resolve("ops") is None
+    assert engine.remove("ops") is True
+    engine.close()
+    assert "ops" not in runner
+
+
 def test_openbao_round_trip(openbao_addr):
     sec = _secrets(openbao_addr)
     sec.put("dfe/groups/soc-ro", "hunter2")

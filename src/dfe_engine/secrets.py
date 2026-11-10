@@ -198,11 +198,92 @@ class DfeSecrets:
         """Whether a secret is stored at *path*."""
         return self.get_or_none(path) is not None
 
+    def ensure_directory(self, path: str) -> Path | None:
+        """Create the directory *path* names on the ``file`` provider, owner-only.
+
+        A reader that mounts one directory of the store, such as a compose subpath mount,
+        needs it in place before the first secret is written there.
+
+        Returns:
+            The directory on ``file``, None on any other provider.
+        """
+        if self._provider not in _ROOTED:
+            return None
+        directory = Path(self._full(path))
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return directory
+
     def delete(self, path: str) -> None:
         """Remove a secret (no error if it is already gone or already scheduled for deletion)."""
         with suppress(SecretNotFoundError, SecretPendingDeletionError):
             self._mgr.delete_sync(self._full(path), provider=self._provider)
         self._mgr.clear_cache()
+
+
+MIRROR_PROVIDER = "kubernetes"
+"""The scalo secrets provider that writes a mirror Secret's keys."""
+
+
+def build_secret_mirror(secret_name: str) -> SecretsManager | None:
+    """The scalo secrets manager writing the mirror Secret *secret_name*, None when it is unset.
+
+    A mirror is a Kubernetes Secret the engine copies some of its secrets into, one data
+    key each, for a pod that cannot mount the engine's volume. It authenticates as the
+    engine's own service account, in the engine's own namespace. Every read goes to the
+    API server, so a Secret reset under it is seen on the next write.
+    """
+    if not secret_name:
+        return None
+    return SecretsManager.from_config(
+        {MIRROR_PROVIDER: {"secret_name": secret_name}, "cache": {"enabled": False}}
+    )
+
+
+def mirror_put(mirror: SecretsManager, key: str, value: bytes) -> bool:
+    """Write *value* to the mirror Secret's *key* where the Secret holds something else.
+
+    Compared with the Secret itself, so a Secret reset or a write that failed earlier is
+    caught up.
+
+    Returns:
+        True when the key was written.
+
+    Raises:
+        SecretsError: The Secret does not exist, the engine may not read or update it,
+            or the API server could not be reached.
+    """
+    try:
+        held = mirror.get_sync(key, provider=MIRROR_PROVIDER).data
+    except SecretNotFoundError:
+        held = None
+    if held == value:
+        return False
+    if held is None:
+        try:
+            mirror.create_sync(key, value, provider=MIRROR_PROVIDER)
+        except SecretAlreadyExistsError:
+            mirror.update_sync(key, value, provider=MIRROR_PROVIDER)
+    else:
+        mirror.update_sync(key, value, provider=MIRROR_PROVIDER)
+    return True
+
+
+def mirror_remove(mirror: SecretsManager, key: str) -> bool:
+    """Remove *key* from the mirror Secret, which stays in place.
+
+    Returns:
+        True when the Secret held the key.
+
+    Raises:
+        SecretsError: The Secret does not exist, the engine may not read or update it,
+            or the API server could not be reached.
+    """
+    # A Secret that does not exist raises ProviderError, so SecretNotFoundError is the key.
+    try:
+        mirror.delete_sync(key, provider=MIRROR_PROVIDER)
+    except SecretNotFoundError:
+        return False
+    return True
 
 
 def _to_scalo_config(cfg: SecretsSettings) -> dict[str, Any]:

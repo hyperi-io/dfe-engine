@@ -37,16 +37,11 @@ from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, assert_never
 
 from scalo.logger import logger
-from scalo.secrets import (
-    SecretAlreadyExistsError,
-    SecretNotFoundError,
-    SecretsError,
-    SecretsManager,
-)
+from scalo.secrets import SecretsError, SecretsManager
 
 from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, IngestCredential, IngestListener
 from dfe_engine.orgs.tenancy import Tenancy
-from dfe_engine.secrets import DfeSecrets
+from dfe_engine.secrets import DfeSecrets, mirror_put
 
 if TYPE_CHECKING:
     from dfe_engine.orgs.registry import OrgRegistry
@@ -62,9 +57,6 @@ The ``file`` backend writes under the engine's own volume, so the receiver reads
 directory where the deployment mounts it rather than where the engine wrote it: the
 backend's ``ingest/bearer-tokens`` directory on docker, the mirror Secret on Kubernetes.
 """
-
-MIRROR_PROVIDER = "kubernetes"
-"""The scalo secrets provider that writes the mirror Secret's keys."""
 
 BEARER_REFRESH_SECONDS = 60
 """How often dfe-receiver re-reads a listener's bearer secret: a deleted, disabled or
@@ -202,19 +194,6 @@ def accepted_credentials(tenancy: Tenancy) -> list[IngestCredential]:
     return [c for c in tenancy.credentials if c.org in enabled]
 
 
-def build_bearer_mirror(secret_name: str) -> SecretsManager | None:
-    """The scalo secrets manager writing the mirror Secret *secret_name*, None when it is unset.
-
-    It authenticates as the engine's own service account, in the engine's own namespace.
-    Every read goes to the API server, so a Secret reset under it is seen on the next sync.
-    """
-    if not secret_name:
-        return None
-    return SecretsManager.from_config(
-        {MIRROR_PROVIDER: {"secret_name": secret_name}, "cache": {"enabled": False}}
-    )
-
-
 def mirror_bearer_tokens(entries: dict[str, str], mirror: SecretsManager) -> list[str]:
     """Write each listener's content into the mirror Secret where the Secret holds something else.
 
@@ -224,7 +203,7 @@ def mirror_bearer_tokens(entries: dict[str, str], mirror: SecretsManager) -> lis
 
     Args:
         entries: Content by listener, as :func:`bearer_entries` builds it.
-        mirror: The manager :func:`build_bearer_mirror` returned.
+        mirror: The manager :func:`~dfe_engine.secrets.build_secret_mirror` returned.
 
     Returns:
         The listeners whose key was written.
@@ -233,23 +212,11 @@ def mirror_bearer_tokens(entries: dict[str, str], mirror: SecretsManager) -> lis
         SecretsError: The Secret does not exist, the engine may not read or update it,
             or the API server could not be reached.
     """
-    written = []
-    for listener, content in entries.items():
-        value = content.encode("utf-8")
-        try:
-            held = mirror.get_sync(listener, provider=MIRROR_PROVIDER).data
-        except SecretNotFoundError:
-            held = None
-        if held == value:
-            continue
-        if held is None:
-            try:
-                mirror.create_sync(listener, value, provider=MIRROR_PROVIDER)
-            except SecretAlreadyExistsError:
-                mirror.update_sync(listener, value, provider=MIRROR_PROVIDER)
-        else:
-            mirror.update_sync(listener, value, provider=MIRROR_PROVIDER)
-        written.append(listener)
+    written = [
+        listener
+        for listener, content in entries.items()
+        if mirror_put(mirror, listener, content.encode("utf-8"))
+    ]
     if written:
         logger.info("receiver bearer tokens written to the mirror Secret", listeners=written)
     return written

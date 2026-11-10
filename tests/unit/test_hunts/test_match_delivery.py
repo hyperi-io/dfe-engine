@@ -28,6 +28,8 @@ from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.hunts.runner import HuntRunner
 from dfe_engine.hunts.spec_loader import load_specs
 from dfe_engine.hunts.worker import HuntWorker
+from dfe_engine.secrets import build_secrets
+from dfe_engine.settings import SecretsSettings
 
 HUNT_YAML = """\
 cron: "*/5 * * * *"
@@ -133,20 +135,23 @@ def _hunts_dir(tmp_path: Path, yaml_text: str = HUNT_YAML) -> Path:
 
 
 def _tick(tmp_path: Path, rows: int, webhook_url: str, yaml_text: str = HUNT_YAML) -> int:
-    registry = AlertDestinationRegistry(directory=str(tmp_path / "destinations"))
-    registry.add(AlertDestination(name="ops-webhook", url=webhook_url))
-    try:
-        specs = load_specs(_hunts_dir(tmp_path, yaml_text))
-        coord = _Coordinator()
-        worker = HuntWorker(
-            _Ch(rows),
-            coord,  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the calls this path makes
-            notifier=MatchNotifier(registry),
-        )
-        runner = HuntRunner(coord, worker, specs)  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the calls this path makes
-        return runner.tick(now=1_000_000)
-    finally:
-        registry.close()
+    secrets = SecretsSettings(provider="file", path=str(tmp_path / "secrets"))
+    engine = AlertDestinationRegistry(
+        secrets=build_secrets(secrets), directory=str(tmp_path / "destinations")
+    )
+    engine.add(AlertDestination(name="ops-webhook", url=webhook_url))
+    engine.close()
+    # The runner's registry shares only the secrets backend with the engine's.
+    runner_registry = AlertDestinationRegistry(secrets=build_secrets(secrets))
+    specs = load_specs(_hunts_dir(tmp_path, yaml_text))
+    coord = _Coordinator()
+    worker = HuntWorker(
+        _Ch(rows),
+        coord,  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the calls this path makes
+        notifier=MatchNotifier(runner_registry),
+    )
+    runner = HuntRunner(coord, worker, specs)  # ty: ignore[invalid-argument-type]  # a stand-in carrying only the calls this path makes
+    return runner.tick(now=1_000_000)
 
 
 def test_a_match_lands_at_the_webhook_destination(tmp_path):

@@ -92,6 +92,37 @@ def applies_routing(deployment: dict[str, Any]) -> bool:
     return bool(fact)
 
 
+def app_instance(engine: EngineAPI, service: str) -> str:
+    """The stack's single instance of a stack-scoped app."""
+    entry = next(a for a in engine.json("GET", "/apps") if a["service"] == service)
+    assert entry["instances"], f"the deployment carries no {service} instance"
+    return str(entry["instances"][0])
+
+
+def catchall_names(engine: EngineAPI) -> tuple[str, str]:
+    """The catch-all's two names on this deployment: (source label, table).
+
+    Two reads because they are two facts, each owned by a different app: the
+    receiver stamps the label, the loader picks the table. Read rather than
+    assumed - the name is being changed, so a suite that hardcoded either one
+    would assert against a table the deployment does not have the moment it
+    moved, and reading only one hides a rename that landed on one side.
+    """
+    receiver = engine.json(
+        "GET", f"/apps/dfe-receiver/{app_instance(engine, 'dfe-receiver')}/routing"
+    )
+    loader = engine.json("GET", f"/apps/dfe-loader/{app_instance(engine, 'dfe-loader')}/routing")
+    label = ((receiver.get("deployed") or {}).get("routing") or {}).get("default_source")
+    table = ((loader.get("deployed") or {}).get("routing") or {}).get("default_table")
+    return str(label or shapes.CATCHALL), str(table or shapes.CATCHALL)
+
+
+@pytest.fixture(scope="session")
+def catchall(engine: EngineAPI) -> tuple[str, str]:
+    """The catch-all's (source label, table) on this deployment, read once."""
+    return catchall_names(engine)
+
+
 @pytest.fixture(scope="session")
 def offered(engine: EngineAPI) -> tuple[str, ...]:
     """The apps this deployment offers, judged against its own profile by the engine.

@@ -1,11 +1,10 @@
 """Alerts router -- alert destination CRUD.
 
-Alert destinations are Apprise notification URLs persisted one YAML file
-per destination via the ``AlertDestinationRegistry`` (top-level fields:
-``url``, ``description``, ``enabled``, optional ``hunt_name``; the name
-comes from the filename). This is the same registry the hunt engine reads
-when dispatching alerts, so a destination created here is resolvable by a
-hunt straight away.
+Alert destinations are Apprise notification URLs kept by the
+``AlertDestinationRegistry``: the URL and enabled flag in the secrets backend,
+the description and owning hunt in the engine's destinations directory. The
+hunt runner reads the same secrets backend by name, so a destination created
+here is resolvable by a hunt straight away.
 
 An Apprise URL carries its own credential -- a Slack token, an SMTP password, a
 webhook secret -- and it is whole: the token sits wherever that service's scheme
@@ -38,6 +37,7 @@ from scalo.api import (
 from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
 from dfe_engine.api.review import apply_review_headers
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -49,7 +49,9 @@ from dfe_engine.hunts.alert_hunt_link import (
 )
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
 
-router = APIRouter(prefix="/alerts", tags=["Alerts"])
+# Writes take the engine's write turn: each one syncs the whole mirror Secret, and a
+# hunt write or delete changes destinations too, so two in flight could land an older view.
+router = APIRouter(prefix="/alerts", tags=["Alerts"], dependencies=[WRITE_TURN])
 
 
 def _get_hunt_config_registry_optional() -> Any | None:
@@ -107,7 +109,7 @@ DestinationsList = Annotated[
     response_model=Page[AlertDestinationSummary],
     dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
-async def list_destinations(
+def list_destinations(
     user: CurrentUser,
     registry: AlertDestRegistry,
     hunt_registry: OptionalHuntConfigReg,
@@ -166,7 +168,7 @@ async def list_destinations(
     dependencies=[Depends(require_action(scopes_dict["alert_write"]))],
     openapi_extra=scalo_extra(verb="create-destination"),
 )
-async def create_destination(
+def create_destination(
     body: AlertDestination,
     user: CurrentUser,
     registry: AlertDestRegistry,
@@ -185,6 +187,8 @@ async def create_destination(
             code="validation_error",
         )
     if body.name in registry:
+        # A retry of a create the mirror refused lands here, so it still repairs the mirror.
+        registry.sync_mirror()
         raise ProblemError(409, f"Alert destination '{body.name}' already exists", code="conflict")
     # Nothing is stored yet, so the mask has nothing to restore from and is refused.
     body.url = _typed_url(body.url, "")
@@ -204,7 +208,7 @@ async def create_destination(
     response_model=AlertDestination,
     dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
-async def get_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
+def get_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Get an alert destination by name."""
     if name not in registry:
         raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")
@@ -216,7 +220,7 @@ async def get_destination(name: str, user: CurrentUser, registry: AlertDestRegis
     response_model=AlertDestination,
     dependencies=[Depends(require_action(scopes_dict["alert_write"]))],
 )
-async def update_destination(
+def update_destination(
     name: str,
     body: AlertDestination,
     user: CurrentUser,
@@ -250,7 +254,7 @@ async def update_destination(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["alert_delete"]))],
 )
-async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
+def delete_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Delete an alert destination."""
     if not registry.remove(name):
         raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")

@@ -27,11 +27,12 @@ Observe's own alerting is switched off for DFE rules, so its webhooks and alert 
 
 A destination is a name and an [Apprise](https://github.com/caronc/apprise) URL, which covers Slack, email, PagerDuty, Teams and about 90 other services. The URL carries its own credential, so the API masks it on every read.
 
-Create destinations one of three ways:
+Create destinations through `POST /api/v1/alerts/destinations`, then `PUT` and `DELETE` on `/api/v1/alerts/destinations/{name}`. A name starts with a letter or digit and holds letters, digits, `.`, `_` and `-`, at most 128 characters.
 
-- `POST /api/v1/alerts/destinations`, then `PUT` and `DELETE` on `/api/v1/alerts/destinations/{name}`.
-- A directory of YAML files, one per destination, named by `hunts.alert_destinations_dir` (`DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR`).
-- A JSON map of `{name: apprise_url}` in `hunts.alert_destinations` (`DFE_ENGINE_HUNTS_ALERT_DESTINATIONS`), for a first boot only.
+The engine keeps a destination in two places:
+
+- The URL and the enabled flag, as JSON `{"url": ..., "enabled": ...}`, in the secrets backend (`settings.secrets`) at `alert-destinations/<name>`. With the `file` provider that is `<secrets.path>/alert-destinations/<name>`, with `aws` it is `<name_prefix>/alert-destinations/<name>`, and with `openbao` it is `alert-destinations/<name>` in the KV mount.
+- The description and owning hunt, one YAML file per destination in `hunts.alert_destinations_dir` (`DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR`). The API lists destinations from this directory, and an empty value turns the API off.
 
 A hunt lists the destinations it wants under `alerts.destinations`, with CEL triggers over `result_count`, the rows the fire wrote:
 
@@ -51,8 +52,9 @@ After a fire commits its rows and its watermark, the runner checks the hunt's `a
 
 - One message per fire, however many rows it wrote. 10,000 matches in a window is one message.
 - Triggers see `result_count` only. The runner does not read the matched rows back, so a trigger over a row field such as `severity` never fires.
-- Destinations are looked up on every fire. A directory change reaches the runner within 30 seconds, with no restart.
-- A destination that is down is logged and the fire stands. The rows are already written, and re-running the window would write them twice.
-- The runner reads the destinations from `hunts.alert_destinations_dir`, falling back to `hunts.alert_destinations`. The directory the API writes to has to be mounted into the runner pod.
+- Destinations are read from the secrets backend on every fire, so a change through the API reaches the next fire with no restart.
+- A destination that is down, or a secrets backend that cannot be read, is logged and the fire stands. The rows are already written, and re-running the window would write them twice.
+- The runner reads each destination by name from the secrets backend its own `settings.secrets` names, which has to be the engine's. On `openbao` and `aws` it needs read access to `alert-destinations/*` and nothing of the engine's volume.
+- The `file` directory sits on the engine's own volume. On docker the runner mounts `<secrets.path>/alert-destinations` read-only at the same path, and the engine creates that directory at startup so the mount finds it. On Kubernetes no runner pod can mount the engine's volume, so `hunts.alert_destinations_secret` (`DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_SECRET`) names a Secret the engine also writes each destination into, one key per name. The engine needs `get` and `update` on that one Secret, and the runner mounts it read-only at `<secrets.path>/alert-destinations` with the `file` provider. Every engine startup brings the Secret back into step, so one recreated empty is refilled.
 
 There is no cooldown yet: a hunt that matches on every fire sends a message on every fire.

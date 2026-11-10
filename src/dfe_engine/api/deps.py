@@ -19,6 +19,7 @@ from fastapi.dependencies.models import Dependant
 from fastapi.routing import APIRoute, iter_route_contexts
 from scalo.api import ProblemError, permission
 from scalo.logger import logger
+from scalo.secrets import SecretsError
 from starlette.routing import BaseRoute
 
 from dfe_engine.api.errors import backend_failure
@@ -47,7 +48,7 @@ from dfe_engine.gitcrud.retention import effective_settings
 from dfe_engine.http_errors import describe_http_error, failure_reference
 from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.orgs.tenant_scope import org_tenant_ids, resolve_orgs
-from dfe_engine.secrets import DfeSecrets
+from dfe_engine.secrets import DfeSecrets, build_secret_mirror, build_secrets
 from dfe_engine.settings import DFESettings, is_dev_posture
 
 if TYPE_CHECKING:
@@ -178,9 +179,17 @@ def bootstrap_registries(
     if settings.hunts.alert_destinations_dir:
         from dfe_engine.hunts.alert import AlertDestinationRegistry
 
-        _registries["alert_destinations"] = AlertDestinationRegistry(
+        # The URLs go to the secrets backend the hunt runner reads, and the directory keeps the rest.
+        alerts = AlertDestinationRegistry(
+            secrets=build_secrets(settings.secrets),
             directory=settings.hunts.alert_destinations_dir,
+            mirror=build_secret_mirror(settings.hunts.alert_destinations_secret),
         )
+        _registries["alert_destinations"] = alerts
+        try:
+            alerts.sync_mirror()
+        except SecretsError as exc:  # the API server may come up after the engine
+            logger.warning("alert destinations not mirrored at startup", error=str(exc))
 
 
 def shutdown_registries() -> None:
@@ -1197,7 +1206,6 @@ _authority_cache: dict[tuple, JwtAuthority] = {}
 def jwt_authority_for(settings: DFESettings) -> JwtAuthority:
     """Get (or build) the ES384 JWT authority for these settings."""
     from dfe_engine.auth.jwt_authority import JwtAuthority
-    from dfe_engine.secrets import build_secrets
 
     s = settings.secrets
     a = settings.api

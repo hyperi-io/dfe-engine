@@ -54,6 +54,7 @@ from tests.e2e.conftest import (
 )
 from tests.e2e.engine_api import EngineAPI
 from tests.e2e.flows import shapes
+from tests.e2e.flows.conftest import app_instance
 
 # Argo polls the deploy repo every 300 s with up to 60 s of jitter, and the pod
 # then rolls on the new ConfigMap checksum, so a routing change is minutes away.
@@ -104,32 +105,9 @@ def _delete(engine: EngineAPI, names: tuple[str, ...]) -> None:
         )
 
 
-def _catchall(engine: EngineAPI) -> tuple[str, str]:
-    """The catch-all's two names on this deployment: (source label, table).
-
-    Two reads because they are two facts, each owned by a different app: the
-    receiver stamps the label, the loader picks the table. Read rather than
-    assumed - the name is being changed, so a suite that hardcoded either one
-    would assert against a table the deployment does not have the moment it
-    moved, and reading only one hides a rename that landed on one side.
-    """
-    receiver = engine.json("GET", f"/apps/dfe-receiver/{_receiver_instance(engine)}/routing")
-    loader = engine.json("GET", f"/apps/dfe-loader/{_instance(engine, 'dfe-loader')}/routing")
-    label = ((receiver.get("deployed") or {}).get("routing") or {}).get("default_source")
-    table = ((loader.get("deployed") or {}).get("routing") or {}).get("default_table")
-    return str(label or shapes.CATCHALL), str(table or shapes.CATCHALL)
-
-
-def _instance(engine: EngineAPI, service: str) -> str:
-    """The stack's single instance of a stack-scoped app."""
-    entry = next(a for a in engine.json("GET", "/apps") if a["service"] == service)
-    assert entry["instances"], f"the deployment carries no {service} instance"
-    return str(entry["instances"][0])
-
-
 def _receiver_instance(engine: EngineAPI) -> str:
     """The stack's single receiver instance, as the catalogue names it."""
-    return _instance(engine, "dfe-receiver")
+    return app_instance(engine, "dfe-receiver")
 
 
 def _instances(engine: EngineAPI, service: str) -> list[str]:
@@ -264,12 +242,6 @@ def _wait_until_routed(e2e, ch_client, shape: shapes.FlowShape, expectation) -> 
         interval=20.0,
         desc=f"the receiver to route {expectation.source} into {table}",
     )
-
-
-@pytest.fixture(scope="session")
-def catchall(engine: EngineAPI) -> tuple[str, str]:
-    """The catch-all's (source label, table) on this deployment, read once."""
-    return _catchall(engine)
 
 
 @pytest.fixture

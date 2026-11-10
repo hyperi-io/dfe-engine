@@ -6,7 +6,7 @@ other services via URL-based configuration.
 
 Alert destinations are defined once and referenced by name:
 
-    # Register a destination (control-plane or settings)
+    # Register a destination through the engine API, its URL kept in the secrets backend
     registry.add(AlertDestination(
         name="slack-dfe-alerts",
         url="slack://TokenA/TokenB/TokenC/#alerts",
@@ -30,6 +30,7 @@ Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
 """
 
 import builtins
+import json
 from pathlib import Path
 from typing import Any
 
@@ -42,35 +43,52 @@ from scalo.expression import (
     validate as validate_expression,
 )
 from scalo.logger import logger
+from scalo.secrets import SecretsError, SecretsManager
 
+from dfe_engine.names import MAX_NAME_LENGTH, VALID_NAME
+from dfe_engine.secrets import MIRROR_PROVIDER, DfeSecrets, mirror_put, mirror_remove
 from dfe_engine.yaml_utils import contained_yaml_file, yaml_dump
 
 # -- Destination Registry ------------------------------------------
 
 
 class AlertDestinationNameError(ValueError):
-    """A destination name whose file would sit outside the destinations directory."""
+    """A destination name no secrets backend or destinations directory can hold."""
 
 
-_NAME_REFUSED_CHARACTERS = ("/", "\\", "\x00")
-"""A separator would place the file outside the directory, and a NUL cannot name a file."""
+DESTINATION_NAME_RULE = (
+    "a letter or digit, then letters, digits, '.', '_' or '-', "
+    f"at most {MAX_NAME_LENGTH} characters"
+)
+"""What a destination name must be, worded for a refusal."""
 
-DESTINATION_NAME_RULE = "one file name: not empty, not '.' or '..', and no '/', '\\' or NUL"
-"""What a new destination name must be, worded for a refusal."""
+DESTINATION_SECRETS_DIR = "alert-destinations"
+"""The secrets path each destination is stored under, as ``alert-destinations/<name>``."""
 
 
 def is_destination_name(name: str) -> bool:
-    """Whether *name* can name a new destination, one file ``<directory>/<name>.yaml``.
+    """Whether *name* can name a destination.
+
+    The name is a secret name on every backend (AWS allows no space, a file no '/') and a
+    file stem in the destinations directory, so it takes the store-name rule.
 
     Args:
         name: The destination name, often straight off a request.
 
     Returns:
-        True when *name* is a single file name, per :data:`DESTINATION_NAME_RULE`.
+        True when *name* matches :data:`DESTINATION_NAME_RULE`.
     """
-    if not name or name in (".", ".."):
-        return False
-    return not any(c in name for c in _NAME_REFUSED_CHARACTERS)
+    return VALID_NAME.match(name) is not None
+
+
+def destination_secret_path(name: str) -> str:
+    """The secrets path holding destination *name*'s URL and enabled flag."""
+    return f"{DESTINATION_SECRETS_DIR}/{name}"
+
+
+def _secret_value(destination: AlertDestination) -> str:
+    """The JSON a destination's secret and mirror key hold: its URL and enabled flag."""
+    return json.dumps({"url": destination.url, "enabled": destination.enabled})
 
 
 def _stored(store: Any, name: str) -> dict[str, Any] | None:
@@ -95,54 +113,76 @@ class AlertDestination(BaseModel):
 
 
 class AlertDestinationRegistry:
-    """Registry of named alert destinations backed by DirectoryConfigStore.
+    """Named alert destinations, each URL kept in the secrets backend.
 
-    When a ``directory`` is provided, destinations are persisted as YAML files
-    (one per destination) and the store handles caching and background refresh.
-    Without a directory the registry operates
-    as an in-memory dict (useful for tests and bootstrap).
+    A destination's URL and enabled flag are one secret at
+    :func:`destination_secret_path`, read by name, so the hunt runner needs the
+    secrets backend and nothing of the engine's. With a ``directory`` the engine also
+    keeps each destination's description and owning hunt there, one YAML file per
+    destination, and that directory is the index :meth:`list` walks. With a ``mirror``
+    every add and remove also brings that Kubernetes Secret into step with the whole
+    index, keyed by name, for a runner that mounts it in place of reaching the
+    engine's volume. With no ``secrets`` the registry holds destinations in memory.
 
     Usage:
-        # File-backed (production)
-        registry = AlertDestinationRegistry(directory="/config/alert-destinations")
+        # Engine API: secrets plus the metadata directory it lists from
+        registry = AlertDestinationRegistry(secrets=store, directory="/config/alerts")
 
-        # In-memory (tests / bootstrap from settings dict)
-        registry = AlertDestinationRegistry()
-        registry.load_from_dict({"slack-dfe": "slack://..."})
+        # Hunt runner: reads by name, lists nothing
+        registry = AlertDestinationRegistry(secrets=store)
 
         url = registry.resolve("slack-dfe")
+
+    Raises:
+        ValueError: A ``directory`` or ``mirror`` was given with no ``secrets``, or a
+            ``mirror`` with no ``directory`` to index what it copies.
     """
 
-    def __init__(self, directory: str | None = None) -> None:
+    def __init__(
+        self,
+        secrets: DfeSecrets | None = None,
+        directory: str | None = None,
+        mirror: SecretsManager | None = None,
+    ) -> None:
+        self._secrets = secrets
         self._store = None
+        self._mirror = mirror
         self._memory: dict[str, AlertDestination] = {}
 
-        if directory:
+        if secrets is None and (directory or mirror is not None):
+            raise ValueError("an alert destinations directory or mirror needs a secrets backend")
+        if mirror is not None and not directory:
+            raise ValueError("an alert destinations mirror needs the directory that indexes it")
+        if directory and secrets is not None:
+            from scalo.config import DirectoryConfigStore
+
             dir_path = Path(directory)
             dir_path.mkdir(parents=True, exist_ok=True)
-            try:
-                from scalo.config import DirectoryConfigStore
-
-                self._store = DirectoryConfigStore(
-                    directory=str(dir_path),
-                    refresh_interval=30,
-                )
-                self._store.start()
-                logger.info(f"AlertDestinationRegistry: DirectoryConfigStore at {dir_path}")
-            except Exception as e:
-                logger.warning(
-                    f"AlertDestinationRegistry: failed to init DirectoryConfigStore ({e}), "
-                    "falling back to in-memory"
-                )
+            self._store = DirectoryConfigStore(directory=str(dir_path), refresh_interval=30)
+            self._store.start()
+            # A runner mounting this one directory of a file store needs it before any write.
+            secrets.ensure_directory(DESTINATION_SECRETS_DIR)
+            logger.info("alert destination metadata directory opened", directory=str(dir_path))
 
     def add(self, destination: AlertDestination) -> None:
-        """Register a destination (overwrites if name exists).
+        """Register a destination, overwriting one of the same name.
 
-        Persists to YAML when backed by DirectoryConfigStore.
+        The metadata is written before the secret, so a failed secret write leaves a
+        destination that reads as absent rather than one no listing shows. The mirror
+        is synced last and whole, so a refused mirror leaves the backend current and
+        the next add or remove repairs every key it missed.
 
         Raises:
-            AlertDestinationNameError: The name's file would sit outside the directory.
+            AlertDestinationNameError: The name breaks :data:`DESTINATION_NAME_RULE`.
+            SecretsError: The secrets backend or the mirror Secret refused the write.
         """
+        if not is_destination_name(destination.name):
+            raise AlertDestinationNameError(
+                f"alert destination name {destination.name!r} must be {DESTINATION_NAME_RULE}"
+            )
+        if self._secrets is None:
+            self._memory[destination.name] = destination
+            return
         if self._store is not None:
             yaml_path = contained_yaml_file(self._store._directory, destination.name)
             if yaml_path is None:
@@ -150,24 +190,33 @@ class AlertDestinationRegistry:
                     f"alert destination name {destination.name!r} resolves outside the "
                     "destinations directory"
                 )
-            # Store url/description/enabled/hunt_name -- name comes from the filename.
-            # exclude_none drops hunt_name when unset so unowned destinations stay clean.
-            data = destination.model_dump(exclude={"name"}, exclude_none=True)
-            yaml_dump(data, yaml_path)
+            metadata = destination.model_dump(
+                include={"description", "hunt_name"}, exclude_none=True
+            )
+            yaml_dump(metadata, yaml_path)
             self._store._refresh_all()
-        else:
-            self._memory[destination.name] = destination
+        self._secrets.put(destination_secret_path(destination.name), _secret_value(destination))
+        self.sync_mirror()
 
     def get(self, name: str) -> AlertDestination:
-        """Get a destination by name. Raises KeyError if not found."""
-        if self._store is not None:
-            data = _stored(self._store, name)
-            if data is None:
-                raise KeyError(name)
-            # Inject name from table key (filename) -- not stored inside YAML
-            data["name"] = name
-            return AlertDestination.model_validate(data)
-        return self._memory[name]
+        """Get a destination by name.
+
+        Raises:
+            KeyError: No destination is stored under *name*.
+            SecretsError: The stored secret is not a destination.
+        """
+        if self._secrets is None:
+            return self._memory[name]
+        if not is_destination_name(name):
+            raise KeyError(name)
+        stored = self._secrets.get_or_none(destination_secret_path(name))
+        if stored is None:
+            raise KeyError(name)
+        metadata = (_stored(self._store, name) if self._store is not None else None) or {}
+        try:
+            return AlertDestination.model_validate({**metadata, **json.loads(stored), "name": name})
+        except (TypeError, ValueError) as exc:
+            raise SecretsError(f"alert destination {name!r} holds no readable destination") from exc
 
     def resolve(self, name: str) -> str | None:
         """Resolve a destination name to its Apprise URL. Returns None if not found or disabled."""
@@ -180,33 +229,79 @@ class AlertDestinationRegistry:
         return None
 
     def remove(self, name: str) -> bool:
-        """Remove a destination by name. Returns True if it existed."""
+        """Remove a destination by name: the secret, then its metadata, then sync the mirror.
+
+        Returns:
+            True when the secret or the metadata existed.
+
+        Raises:
+            SecretsError: The secrets backend or the mirror Secret refused the removal.
+        """
+        if self._secrets is None:
+            return self._memory.pop(name, None) is not None
+        if not is_destination_name(name):
+            return False
+        path = destination_secret_path(name)
+        existed = self._secrets.exists(path)
+        self._secrets.delete(path)
         if self._store is not None:
             yaml_path = contained_yaml_file(self._store._directory, name)
             if yaml_path is not None and yaml_path.exists():
                 yaml_path.unlink()
-                # Clear stale cache entry (_refresh_all only picks up new/changed files)
-                with self._store._lock:
-                    self._store._cache.pop(name, None)
-                return True
-            return False
-        return self._memory.pop(name, None) is not None
+                existed = True
+            # _refresh_all only picks up new or changed files, so drop the cached entry.
+            with self._store._lock:
+                self._store._cache.pop(name, None)
+        self.sync_mirror()
+        return existed
+
+    def sync_mirror(self) -> builtins.list[str]:
+        """Bring the mirror Secret into step with the destinations the directory indexes.
+
+        Writes each destination whose key holds something else and removes every key no
+        destination has. Every add and remove runs it, and so does engine startup, so a
+        Secret recreated empty, or a write the mirror refused, is caught up by the next.
+        Callers serialise it with the writes it follows, so an older snapshot never lands
+        over a newer one.
+
+        Returns:
+            The keys written or removed, sorted. Empty with no mirror.
+
+        Raises:
+            SecretsError: The secrets backend or the mirror Secret refused.
+        """
+        if self._mirror is None:
+            return []
+        changed = []
+        wanted = {d.name: _secret_value(d) for d in self.list()}
+        for name, value in wanted.items():
+            if mirror_put(self._mirror, name, value.encode("utf-8")):
+                changed.append(name)
+        for key in self._mirror.list_sync(provider=MIRROR_PROVIDER):
+            if key not in wanted and mirror_remove(self._mirror, key):
+                changed.append(key)
+        if changed:
+            logger.info("alert destinations brought into step in the mirror Secret", keys=changed)
+        return sorted(changed)
 
     def list(self) -> builtins.list[AlertDestination]:
-        """List all registered destinations.
+        """List the destinations the metadata directory indexes, or those held in memory.
 
-        Return annotation is ``builtins.list`` because this method named ``list``
-        shadows the builtin for the type checker's annotation resolution.
+        A registry reading by name alone (the hunt runner's) lists none. An index entry
+        whose secret is gone is left out. Return annotation is ``builtins.list`` because
+        this method named ``list`` shadows the builtin for the type checker.
         """
-        if self._store is not None:
-            results = []
-            for table_name in self._store.list_tables():
-                data = self._store.get(table_name)
-                if data:
-                    data["name"] = table_name
-                    results.append(AlertDestination.model_validate(data))
-            return results
-        return list(self._memory.values())
+        if self._secrets is None:
+            return list(self._memory.values())
+        if self._store is None:
+            return []
+        results = []
+        for name in sorted(self._store.list_tables()):
+            try:
+                results.append(self.get(name))
+            except KeyError:
+                logger.warning("alert destination metadata has no stored secret", name=name)
+        return results
 
     def resolve_many(self, names: builtins.list[str]) -> builtins.list[str]:
         """Resolve a list of destination names to Apprise URLs.
@@ -222,25 +317,20 @@ class AlertDestinationRegistry:
                 logger.warning(f"Alert destination '{name}' not found or disabled, skipping")
         return urls
 
-    def load_from_dict(self, destinations: dict[str, str]) -> None:
-        """Bulk-load destinations from a {name: url} dict (e.g. from settings)."""
-        for name, url in destinations.items():
-            self.add(AlertDestination(name=name, url=url))
-
     def close(self) -> None:
-        """Stop the backing store's background refresh thread (no-op in-memory)."""
+        """Stop the metadata directory's background refresh thread, where there is one."""
         if self._store is not None:
             self._store.stop()
 
     def __len__(self) -> int:
-        if self._store is not None:
-            return len(list(self._store.list_tables()))
-        return len(self._memory)
+        return len(self.list())
 
     def __contains__(self, name: str) -> bool:
-        if self._store is not None:
-            return _stored(self._store, name) is not None
-        return name in self._memory
+        try:
+            self.get(name)
+        except KeyError:
+            return False
+        return True
 
 
 # -- Trigger Models -----------------------------------------------
@@ -456,9 +546,10 @@ def build_alert_config(
 
     # Resolve named destinations via registry
     destination_names = alerts_section.get("destinations", [])
-    if destination_names and destination_registry:
+    # Compared with None: a registry reading by name lists nothing, so its len() is 0.
+    if destination_names and destination_registry is not None:
         channels.extend(destination_registry.resolve_many(destination_names))
-    elif destination_names and not destination_registry:
+    elif destination_names:
         logger.warning(f"Hunt references destinations {destination_names} but no registry provided")
 
     # Raw channel URLs (backward compat)
