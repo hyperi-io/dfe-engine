@@ -130,7 +130,7 @@ class TestShippedManifest:
             "culvert": False,
             "dfe-engine": False,
             "dfe-ui": False,
-            "hyperdx": False,
+            "dfe-hyperdx": False,
         }
 
     def test_the_loader_names_the_key_that_turns_its_watcher_on(self):
@@ -271,7 +271,7 @@ class TestShippedManifest:
             "dfe-archiver",
             "dfe-engine",
             "dfe-ui",
-            "hyperdx",
+            "dfe-hyperdx",
         }
 
     def test_no_app_is_deployed_by_default_somewhere_it_may_not_be_deployed(self):
@@ -345,7 +345,7 @@ class TestShippedManifest:
             if app.display_name
         }
 
-        assert labelled == {"hyperdx": "Search"}
+        assert labelled == {"dfe-hyperdx": "Search"}
 
 
 class TestManifestParsing:

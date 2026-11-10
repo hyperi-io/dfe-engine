@@ -134,7 +134,7 @@ class TestCatalogue:
         _wire(app, tmp_path)
         listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
         labels = {e["service"]: e["display_name"] for e in listed}
-        assert labels["hyperdx"] == "Search"
+        assert labels["dfe-hyperdx"] == "Search"
         assert labels["dfe-loader"] is None
 
     def test_only_the_engine_lists_processes_of_its_own(self, client, app, admin_headers, tmp_path):
@@ -148,13 +148,13 @@ class TestCatalogue:
     ):
         _wire(app, tmp_path)
         client.post(
-            "/api/v1/apps/hyperdx/instances",
+            "/api/v1/apps/dfe-hyperdx/instances",
             json={"instance": "default"},
             headers=admin_headers,
         )
-        got = client.get("/api/v1/apps/hyperdx/default", headers=admin_headers)
+        got = client.get("/api/v1/apps/dfe-hyperdx/default", headers=admin_headers)
         assert got.status_code == 200, got.text
-        assert got.json()["service"] == "hyperdx"
+        assert got.json()["service"] == "dfe-hyperdx"
         assert got.json()["display_name"] == "Search"
 
     def test_the_routing_flag_matches_the_manifest(self, client, app, admin_headers, tmp_path):
