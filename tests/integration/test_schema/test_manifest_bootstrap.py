@@ -727,6 +727,38 @@ def test_an_unreadable_lease_table_fails_the_pass_rather_than_applying_unleased(
     assert (held.holder, held.released) == ("pod-a", False)
 
 
+def test_the_lease_holder_removes_a_ttl_left_on_the_lease_table(ch_client, empty_database, plan):
+    """A TTL that empties an idle lease table refuses every later read, so the holder drops it."""
+    apply_plan(ch_client, plan)
+    table = plan.by_id(LOCK_ID).name
+    ch_client.command(
+        f"ALTER TABLE `{empty_database}`.`{table}` MODIFY TTL expires_at + INTERVAL 7 DAY"
+    )
+
+    def engine_full() -> str:
+        return str(
+            ch_client.query(
+                "SELECT engine_full FROM system.tables WHERE database = {db:String} "
+                "AND name = {tbl:String}",
+                parameters={"db": empty_database, "tbl": table},
+            ).result_rows[0][0]
+        )
+
+    assert " TTL " in engine_full()
+    lock = SchemaLock(
+        ch_client, database=empty_database, table=table, holder="pod-a", lease_seconds=60
+    )
+    state = phase.SchemaBootstrapState(state=phase.STATE_RUNNING)
+
+    report = phase._apply_under_lock(
+        ch_client, plan, lock, wait=_RIDE_OUT, allow_drift=False, state=state
+    )
+
+    assert report is not None
+    assert " TTL " not in engine_full()
+    assert lock.drop_ttl() is False
+
+
 def test_a_release_that_fails_after_the_apply_keeps_the_apply(
     ch_client, ch_params, empty_database, plan
 ):
