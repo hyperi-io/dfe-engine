@@ -1,5 +1,6 @@
 """Tests for the alerts router — alert destination CRUD."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -155,6 +156,35 @@ class TestAlertDestinationsList:
         resp = alert_client.get("/api/v1/alerts/destinations")
         assert resp.status_code == 401
 
+    @pytest.mark.parametrize(
+        ("method", "path"),
+        [
+            pytest.param("GET", "/api/v1/alerts/destinations", id="list"),
+            pytest.param("GET", "/api/v1/alerts/destinations/slack-alerts", id="get"),
+            pytest.param("POST", "/api/v1/alerts/destinations", id="create-exists-check"),
+            pytest.param("PUT", "/api/v1/alerts/destinations/slack-alerts", id="update"),
+        ],
+    )
+    def test_a_read_the_secrets_backend_refuses_answers_503_without_its_text(
+        self, alert_client, alert_admin_headers, sample_destination, tmp_path, method, path
+    ):
+        """A directory where the secret file stood fails inside the real file provider."""
+        created = alert_client.post(
+            "/api/v1/alerts/destinations", json=sample_destination, headers=alert_admin_headers
+        )
+        assert created.status_code == 201
+        stored = tmp_path / "secrets" / "alert-destinations" / "slack-alerts"
+        stored.unlink()
+        stored.mkdir()
+
+        body = sample_destination if method in ("POST", "PUT") else None
+        resp = alert_client.request(method, path, json=body, headers=alert_admin_headers)
+
+        assert resp.status_code == 503, resp.text
+        assert resp.json()["code"] == "secrets_unavailable"
+        assert str(tmp_path) not in resp.text
+        assert "alert-destinations" not in resp.text
+
 
 class TestAlertDestinationsCRUD:
     def test_create_with_hunt_name_links_hunt(
@@ -256,7 +286,7 @@ class TestAlertDestinationsCRUD:
     def test_a_hunt_delete_the_secrets_backend_refuses_answers_503(
         self, alert_client, alert_admin_headers, app_with_alerts, tmp_path
     ):
-        """Its owned destination's mirror key cannot be removed: the Secret does not exist."""
+        """The mirror cannot be brought into step: the Role does not name its Secret."""
         from dfe_engine.api.deps import _registries
         from dfe_engine.hunts.alert import AlertDestinationRegistry
         from dfe_engine.secrets import build_secrets
@@ -283,11 +313,12 @@ class TestAlertDestinationsCRUD:
         token_file = tmp_path / "sa-token"
         token_file.write_text("sa-token-placeholder", encoding="utf-8")
         with local_kube_api("sa-token-placeholder") as kube:
+            kube.create_empty("someone-elses-secret")
             settings = app_with_alerts.state.settings
             refusing = AlertDestinationRegistry(
                 secrets=build_secrets(settings.secrets),
                 directory=settings.hunts.alert_destinations_dir,
-                mirror=mirror_for(kube, token_file),
+                mirror=mirror_for(kube, token_file, name="someone-elses-secret"),
             )
             _registries["alert_destinations"].close()
             _registries["alert_destinations"] = refusing
@@ -367,7 +398,7 @@ class TestAlertDestinationsCRUD:
     def test_a_mirror_secret_that_refuses_answers_503(
         self, alert_client, alert_admin_headers, sample_destination, app_with_alerts, tmp_path
     ):
-        """The Secret does not exist, so the mirror write fails after the backend holds it."""
+        """The Role does not name the Secret, so the mirror sync fails after the backend write."""
         from dfe_engine.hunts.alert import AlertDestinationRegistry
         from dfe_engine.secrets import build_secrets
         from tests.support.local_kube_api import local_kube_api, mirror_for
@@ -375,11 +406,12 @@ class TestAlertDestinationsCRUD:
         token_file = tmp_path / "sa-token"
         token_file.write_text("sa-token-placeholder", encoding="utf-8")
         with local_kube_api("sa-token-placeholder") as kube:
+            kube.create_empty("someone-elses-secret")
             settings = app_with_alerts.state.settings
             refusing = AlertDestinationRegistry(
                 secrets=build_secrets(settings.secrets),
                 directory=settings.hunts.alert_destinations_dir,
-                mirror=mirror_for(kube, token_file),
+                mirror=mirror_for(kube, token_file, name="someone-elses-secret"),
             )
             _registries["alert_destinations"].close()
             _registries["alert_destinations"] = refusing
@@ -393,8 +425,43 @@ class TestAlertDestinationsCRUD:
 
         assert created.status_code == 503
         assert created.json()["code"] == "secrets_unavailable"
-        assert "does not exist" not in created.text
+        assert "someone-elses-secret" not in created.text
+        assert "forbidden" not in created.text
         assert deleted.status_code == 503
+
+    def test_retrying_a_create_the_mirror_refused_repairs_the_mirror(
+        self, alert_client, alert_admin_headers, sample_destination, app_with_alerts, tmp_path
+    ):
+        """The retry finds the name taken and answers 409, after the runner's copy catches up."""
+        from dfe_engine.hunts.alert import AlertDestinationRegistry
+        from dfe_engine.secrets import build_secrets
+        from tests.support.local_kube_api import SECRET, local_kube_api, mirror_for
+
+        token_file = tmp_path / "sa-token"
+        token_file.write_text("sa-token-placeholder", encoding="utf-8")
+        with local_kube_api("sa-token-placeholder") as kube:
+            settings = app_with_alerts.state.settings
+            mirrored = AlertDestinationRegistry(
+                secrets=build_secrets(settings.secrets),
+                directory=settings.hunts.alert_destinations_dir,
+                mirror=mirror_for(kube, token_file),
+            )
+            _registries["alert_destinations"].close()
+            _registries["alert_destinations"] = mirrored
+
+            first = alert_client.post(
+                "/api/v1/alerts/destinations", json=sample_destination, headers=alert_admin_headers
+            )
+            kube.create_empty(SECRET)
+            retried = alert_client.post(
+                "/api/v1/alerts/destinations", json=sample_destination, headers=alert_admin_headers
+            )
+
+            mirror = kube.data(SECRET)
+
+        assert first.status_code == 503
+        assert retried.status_code == 409
+        assert json.loads(mirror["slack-alerts"])["url"] == sample_destination["url"]
 
     def test_create_then_list(self, alert_client, alert_admin_headers, sample_destination):
         alert_client.post(

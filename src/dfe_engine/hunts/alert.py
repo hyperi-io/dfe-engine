@@ -120,9 +120,9 @@ class AlertDestinationRegistry:
     secrets backend and nothing of the engine's. With a ``directory`` the engine also
     keeps each destination's description and owning hunt there, one YAML file per
     destination, and that directory is the index :meth:`list` walks. With a ``mirror``
-    every write also lands in that Kubernetes Secret, keyed by name, for a runner that
-    mounts it in place of reaching the engine's volume. With no ``secrets`` the
-    registry holds destinations in memory.
+    every add and remove also brings that Kubernetes Secret into step with the whole
+    index, keyed by name, for a runner that mounts it in place of reaching the
+    engine's volume. With no ``secrets`` the registry holds destinations in memory.
 
     Usage:
         # Engine API: secrets plus the metadata directory it lists from
@@ -134,7 +134,8 @@ class AlertDestinationRegistry:
         url = registry.resolve("slack-dfe")
 
     Raises:
-        ValueError: A ``directory`` or ``mirror`` was given with no ``secrets``.
+        ValueError: A ``directory`` or ``mirror`` was given with no ``secrets``, or a
+            ``mirror`` with no ``directory`` to index what it copies.
     """
 
     def __init__(
@@ -150,6 +151,8 @@ class AlertDestinationRegistry:
 
         if secrets is None and (directory or mirror is not None):
             raise ValueError("an alert destinations directory or mirror needs a secrets backend")
+        if mirror is not None and not directory:
+            raise ValueError("an alert destinations mirror needs the directory that indexes it")
         if directory and secrets is not None:
             from scalo.config import DirectoryConfigStore
 
@@ -166,8 +169,8 @@ class AlertDestinationRegistry:
 
         The metadata is written before the secret, so a failed secret write leaves a
         destination that reads as absent rather than one no listing shows. The mirror
-        is written last, so a refused mirror leaves the backend current for
-        :meth:`sync_mirror` to copy.
+        is synced last and whole, so a refused mirror leaves the backend current and
+        the next add or remove repairs every key it missed.
 
         Raises:
             AlertDestinationNameError: The name breaks :data:`DESTINATION_NAME_RULE`.
@@ -192,10 +195,8 @@ class AlertDestinationRegistry:
             )
             yaml_dump(metadata, yaml_path)
             self._store._refresh_all()
-        value = _secret_value(destination)
-        self._secrets.put(destination_secret_path(destination.name), value)
-        if self._mirror is not None:
-            mirror_put(self._mirror, destination.name, value.encode("utf-8"))
+        self._secrets.put(destination_secret_path(destination.name), _secret_value(destination))
+        self.sync_mirror()
 
     def get(self, name: str) -> AlertDestination:
         """Get a destination by name.
@@ -228,10 +229,10 @@ class AlertDestinationRegistry:
         return None
 
     def remove(self, name: str) -> bool:
-        """Remove a destination by name: the secret, then its metadata, then its mirror key.
+        """Remove a destination by name: the secret, then its metadata, then sync the mirror.
 
         Returns:
-            True when the secret, the metadata or the mirror key existed.
+            True when the secret or the metadata existed.
 
         Raises:
             SecretsError: The secrets backend or the mirror Secret refused the removal.
@@ -251,24 +252,25 @@ class AlertDestinationRegistry:
             # _refresh_all only picks up new or changed files, so drop the cached entry.
             with self._store._lock:
                 self._store._cache.pop(name, None)
-        if self._mirror is not None and mirror_remove(self._mirror, name):
-            existed = True
+        self.sync_mirror()
         return existed
 
     def sync_mirror(self) -> builtins.list[str]:
         """Bring the mirror Secret into step with the destinations the directory indexes.
 
         Writes each destination whose key holds something else and removes every key no
-        destination has, so a Secret recreated empty, or a write the mirror refused, is
-        caught up with no destination write.
+        destination has. Every add and remove runs it, and so does engine startup, so a
+        Secret recreated empty, or a write the mirror refused, is caught up by the next.
+        Callers serialise it with the writes it follows, so an older snapshot never lands
+        over a newer one.
 
         Returns:
-            The keys written or removed, sorted. Empty with no mirror or no directory.
+            The keys written or removed, sorted. Empty with no mirror.
 
         Raises:
             SecretsError: The secrets backend or the mirror Secret refused.
         """
-        if self._mirror is None or self._store is None:
+        if self._mirror is None:
             return []
         changed = []
         wanted = {d.name: _secret_value(d) for d in self.list()}

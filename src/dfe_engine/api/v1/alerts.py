@@ -20,8 +20,6 @@ PUT    /api/v1/alerts/destinations/{name}     -> Update destination
 DELETE /api/v1/alerts/destinations/{name}     -> Delete destination
 """
 
-from collections.abc import Iterator
-from contextlib import contextmanager
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -35,12 +33,11 @@ from scalo.api import (
     scalo_extra,
     sort_by_order,
 )
-from scalo.secrets import SecretsError
 
 from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
-from dfe_engine.api.errors import backend_failure
 from dfe_engine.api.review import apply_review_headers
+from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -52,7 +49,9 @@ from dfe_engine.hunts.alert_hunt_link import (
 )
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
 
-router = APIRouter(prefix="/alerts", tags=["Alerts"])
+# Writes take the engine's write turn: each one syncs the whole mirror Secret, and a
+# hunt write or delete changes destinations too, so two in flight could land an older view.
+router = APIRouter(prefix="/alerts", tags=["Alerts"], dependencies=[WRITE_TURN])
 
 
 def _get_hunt_config_registry_optional() -> Any | None:
@@ -110,7 +109,7 @@ DestinationsList = Annotated[
     response_model=Page[AlertDestinationSummary],
     dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
-async def list_destinations(
+def list_destinations(
     user: CurrentUser,
     registry: AlertDestRegistry,
     hunt_registry: OptionalHuntConfigReg,
@@ -169,7 +168,7 @@ async def list_destinations(
     dependencies=[Depends(require_action(scopes_dict["alert_write"]))],
     openapi_extra=scalo_extra(verb="create-destination"),
 )
-async def create_destination(
+def create_destination(
     body: AlertDestination,
     user: CurrentUser,
     registry: AlertDestRegistry,
@@ -188,6 +187,8 @@ async def create_destination(
             code="validation_error",
         )
     if body.name in registry:
+        # A retry of a create the mirror refused lands here, so it still repairs the mirror.
+        registry.sync_mirror()
         raise ProblemError(409, f"Alert destination '{body.name}' already exists", code="conflict")
     # Nothing is stored yet, so the mask has nothing to restore from and is refused.
     body.url = _typed_url(body.url, "")
@@ -207,7 +208,7 @@ async def create_destination(
     response_model=AlertDestination,
     dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
-async def get_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
+def get_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Get an alert destination by name."""
     if name not in registry:
         raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")
@@ -219,7 +220,7 @@ async def get_destination(name: str, user: CurrentUser, registry: AlertDestRegis
     response_model=AlertDestination,
     dependencies=[Depends(require_action(scopes_dict["alert_write"]))],
 )
-async def update_destination(
+def update_destination(
     name: str,
     body: AlertDestination,
     user: CurrentUser,
@@ -253,11 +254,9 @@ async def update_destination(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["alert_delete"]))],
 )
-async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
+def delete_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Delete an alert destination."""
-    with secrets_answered():
-        removed = registry.remove(name)
-    if not removed:
+    if not registry.remove(name):
         raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")
     audit_resource_change(user.user_id, "alert_destination", name, "deleted")
 
@@ -299,25 +298,6 @@ def _typed_url(written: str, stored: str) -> str:
         raise ProblemError(400, str(exc), code=exc.code) from exc
 
 
-@contextmanager
-def secrets_answered() -> Iterator[None]:
-    """Answer a secrets backend or mirror Secret that refuses a write with 503.
-
-    Raises:
-        ProblemError: 503 ``secrets_unavailable``, its reason in the engine log only.
-    """
-    try:
-        yield
-    except SecretsError as exc:
-        raise backend_failure(
-            503,
-            "secrets_unavailable",
-            "the secrets backend refused an alert destination; the engine log has the reason",
-            exc,
-            event="alert destination not written",
-        ) from exc
-
-
 def _write_destination(
     registry,
     dest: AlertDestination,
@@ -325,16 +305,15 @@ def _write_destination(
     hunt_name: str | None = None,
 ) -> None:
     """Persist a destination via the registry (overwrites if the name exists)."""
-    with secrets_answered():
-        registry.add(
-            RegistryAlertDestination(
-                name=dest.name,
-                url=dest.url,
-                description=dest.description,
-                enabled=dest.enabled,
-                hunt_name=hunt_name,
-            )
+    registry.add(
+        RegistryAlertDestination(
+            name=dest.name,
+            url=dest.url,
+            description=dest.description,
+            enabled=dest.enabled,
+            hunt_name=hunt_name,
         )
+    )
 
 
 def _ensure_hunt_for_link(hunt_registry: Any | None, hunt_name: str) -> None:

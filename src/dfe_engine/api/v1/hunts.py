@@ -40,7 +40,6 @@ from dfe_engine.api.deps import (
     require_action,
 )
 from dfe_engine.api.review import apply_review_headers, review_audit_detail
-from dfe_engine.api.v1.alerts import secrets_answered
 from dfe_engine.api.write_turn import WRITE_TURN
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -597,8 +596,7 @@ def delete_hunt(
     except HuntConfigNotFoundError:
         raise ProblemError(404, f"Hunt '{name}' not found", code="not_found") from None
     if alert_registry is not None:
-        with secrets_answered():
-            delete_destinations_owned_by_hunt(alert_registry, registry, name)
+        delete_destinations_owned_by_hunt(alert_registry, registry, name)
     outcome = registry.delete(name, created_by=user.user_id)
     apply_review_headers(response, outcome)
     audit_resource_change(user.user_id, "hunt", name, "deleted", review_audit_detail(outcome))

@@ -142,6 +142,47 @@ class TestMirror:
         with pytest.raises(ValueError, match="needs a secrets backend"):
             AlertDestinationRegistry(mirror=mirror_for(kube, token_file, name=SECRET))
 
+    def test_a_mirror_with_no_directory_to_index_it_is_refused(self, tmp_path, kube, token_file):
+        with pytest.raises(ValueError, match="needs the directory that indexes it"):
+            AlertDestinationRegistry(
+                secrets=build_secrets(SecretsSettings(provider="file", path=str(tmp_path / "e"))),
+                mirror=mirror_for(kube, token_file, name=SECRET),
+            )
+
+
+class TestDriftRepair:
+    """A write the mirror refused leaves the backend current, and the next write repairs it."""
+
+    def test_an_update_the_mirror_refused_is_repaired_by_the_next_add(self, kube, engine):
+        kube.create_empty(SECRET)
+        engine.add(AlertDestination(name="ops", url="slack://first"))
+        kube.granted.discard((NAMESPACE, SECRET))
+        with pytest.raises(SecretsError):
+            engine.add(AlertDestination(name="ops", url="slack://second", enabled=False))
+        kube.granted.add((NAMESPACE, SECRET))
+
+        engine.add(AlertDestination(name="other", url="slack://other"))
+
+        mirrored = {key: json.loads(value) for key, value in kube.data(SECRET).items()}
+        assert mirrored == {
+            "ops": {"url": "slack://second", "enabled": False},
+            "other": {"url": "slack://other", "enabled": True},
+        }
+
+    def test_a_delete_the_mirror_refused_is_repaired_by_the_next_remove(self, kube, engine):
+        kube.create_empty(SECRET)
+        engine.add(AlertDestination(name="gone", url="slack://g"))
+        engine.add(AlertDestination(name="kept", url="slack://k"))
+        engine.add(AlertDestination(name="later", url="slack://l"))
+        kube.granted.discard((NAMESPACE, SECRET))
+        with pytest.raises(SecretsError):
+            engine.remove("gone")
+        kube.granted.add((NAMESPACE, SECRET))
+
+        assert engine.remove("later") is True
+
+        assert sorted(kube.data(SECRET)) == ["kept"]
+
 
 class TestSyncMirror:
     def test_a_secret_recreated_empty_is_refilled(self, tmp_path, kube, engine):
