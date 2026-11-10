@@ -137,7 +137,7 @@ class TestWhetherItRunsAtAll:
         assert RECEIVER in rendered
         # The console carries no data-plane config, so nothing is rendered for it.
         assert "dfe-ui" not in rendered
-        assert "dfe-hyperdx" not in rendered
+        assert "hyperdx" not in rendered
 
     def test_the_elastic_transform_is_rendered_on_docker_single(self, tmp_path):
         # It reads config.yaml and the profile seeds it idle, so the stack writes
