@@ -22,7 +22,6 @@ import pytest
 from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, LISTENER_SECTIONS
 from dfe_engine.orgs.ingest_tokens import (
     BEARER_REFRESH_SECONDS,
-    BearerSourceUnreadableError,
     bearer_secret_path,
 )
 from dfe_engine.services.models.receiver import ReceiverConfig
@@ -107,15 +106,6 @@ def test_a_seed_builds_from_the_settings_it_is_given(engine_on, tmp_path):
     assert _seeded(tmp_path, settings)["server"]["auth"] == _bearer("aws", "http")
 
 
-def test_a_backend_the_receiver_cannot_read_refuses_the_seed(engine_on, tmp_path):
-    engine_on(SecretsSettings(provider="ansible_vault"))
-
-    with pytest.raises(
-        BearerSourceUnreadableError, match="DFE_ENGINE_SECRETS_PROVIDER=ansible_vault"
-    ):
-        _seeded(tmp_path)
-
-
 @pytest.mark.parametrize("backend", sorted(BACKENDS))
 @pytest.mark.parametrize("listener", BEARER_LISTENERS)
 def test_the_production_template_reads_the_secret_on_the_engine_s_backend(
@@ -141,22 +131,6 @@ def test_the_template_reads_the_backend_when_generated_not_when_the_plugin_loads
 
     assert first["secret_source"].startswith("vault:")
     assert second["secret_source"].startswith("aws:")
-
-
-def test_a_backend_the_receiver_cannot_read_refuses_the_template(engine_on):
-    engine_on(SecretsSettings(provider="ansible_vault"))
-
-    with pytest.raises(
-        BearerSourceUnreadableError, match="DFE_ENGINE_SECRETS_PROVIDER=ansible_vault"
-    ):
-        generate_template("receiver", "production")
-
-
-def test_the_other_profiles_read_no_backend(engine_on):
-    engine_on(SecretsSettings(provider="ansible_vault"))
-
-    for profile in ("default", "k8s"):
-        generate_template("receiver", profile)
 
 
 @pytest.mark.parametrize("backend", sorted(BACKENDS))

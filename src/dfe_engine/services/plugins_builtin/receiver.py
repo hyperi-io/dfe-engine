@@ -113,12 +113,7 @@ def _bearer_auth(backend: SecretsSettings) -> dict[str, dict[str, Any]]:
 
 
 def _settings_overrides(profile: str, settings: DFESettings) -> dict[str, Any]:
-    """The production profile's bearer listeners, on the engine's own secrets backend.
-
-    Raises:
-        BearerSourceUnreadableError: The engine's backend holds the tokens where
-            dfe-receiver cannot read them.
-    """
+    """The production profile's bearer listeners, on the engine's own secrets backend."""
     if profile != "production":
         return {}
     return _bearer_auth(settings.secrets)
