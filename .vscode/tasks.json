@@ -1,0 +1,71 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dfe-engine: create .env.e2e",
+      "type": "shell",
+      "command": "test -f .env.e2e || cp .env.e2e.example .env.e2e",
+      "problemMatcher": []
+    },
+    {
+      "label": "dfe-engine: local ClickHouse (docker)",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.dev.yaml up -d --wait clickhouse",
+      "problemMatcher": []
+    },
+    {
+      "label": "dfe-engine: stop local ClickHouse",
+      "type": "shell",
+      "command": "docker compose -f docker-compose.dev.yaml down",
+      "problemMatcher": []
+    },
+    {
+      "label": "dfe-engine: e2e server",
+      "type": "shell",
+      "command": "make e2e-server",
+      "dependsOn": ["dfe-engine: create .env.e2e"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": { "regexp": "^(error): (.*)$", "severity": 1, "message": 2 },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^e2e workspace",
+          "endsPattern": "Application startup complete"
+        }
+      }
+    },
+    {
+      "label": "dfe-engine: e2e server (no ClickHouse)",
+      "type": "shell",
+      "command": "make e2e-server E2E_NO_CLICKHOUSE=1",
+      "dependsOn": ["dfe-engine: create .env.e2e"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": { "regexp": "^(error): (.*)$", "severity": 1, "message": 2 },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^e2e workspace",
+          "endsPattern": "Application startup complete"
+        }
+      }
+    },
+    {
+      "label": "dfe-engine: e2e seed (setup complete)",
+      "type": "shell",
+      "command": "curl -fsS -X POST http://127.0.0.1:8003/api/e2e/seed-static -H 'Content-Type: application/json' -d '{\"script\":\"seed_setup_complete\"}'",
+      "problemMatcher": []
+    },
+    {
+      "label": "dfe-engine: sync",
+      "type": "shell",
+      "command": "uv sync",
+      "problemMatcher": []
+    },
+    {
+      "label": "dfe-engine: quality",
+      "type": "shell",
+      "command": "make quality",
+      "problemMatcher": []
+    }
+  ]
+}

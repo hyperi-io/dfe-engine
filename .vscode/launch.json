@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "dfe-engine: e2e server",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "test -f .env.e2e || cp .env.e2e.example .env.e2e; make e2e-server",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "dfe-engine: e2e server (no ClickHouse)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "test -f .env.e2e || cp .env.e2e.example .env.e2e; make e2e-server E2E_NO_CLICKHOUSE=1",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "dfe-engine: dev server (make dev)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "make dev",
+      "cwd": "${workspaceFolder}"
+    }
+  ]
+}
