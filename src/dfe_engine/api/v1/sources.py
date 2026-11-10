@@ -160,6 +160,7 @@ from dfe_engine.source.registry import (
     SourceCoreResourceError,
     SourceMatchConflictError,
     SourceNotFoundError,
+    SourceReservedTableError,
     SourceRuleError,
     SourceValidationError,
 )
@@ -238,7 +239,7 @@ def invalid_rule_problem(exc: SourceRuleError) -> ProblemError:
 def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
     """Map registry validation errors to HTTP responses (never 500)."""
     # 409, matching the core-resource guard's answer for roles, schemas and field maps.
-    if isinstance(exc, SourceCoreResourceError):
+    if isinstance(exc, (SourceCoreResourceError, SourceReservedTableError)):
         raise ProblemError(409, str(exc), code="conflict", source=exc.source) from exc
     if isinstance(exc, SourceMatchConflictError):
         raise ProblemError(
@@ -271,7 +272,7 @@ def _failure_code(exc: Exception) -> str:
     Ordered narrowest first: the two conflict errors both subclass
     ``SourceValidationError``.
     """
-    if isinstance(exc, SourceCoreResourceError):
+    if isinstance(exc, (SourceCoreResourceError, SourceReservedTableError)):
         return "conflict"
     if isinstance(exc, SourceMatchConflictError):
         return "match_conflict"
@@ -612,7 +613,7 @@ async def _register_hyperdx_all_sources(*, database: str, request: Request) -> N
         return
 
     from dfe_engine.http_errors import describe_http_error
-    from dfe_engine.hyperdx.all_sources import register_all_sources
+    from dfe_engine.hyperdx.engine_sources import register_all_sources
 
     try:
         await register_all_sources(client=client, database=database)
@@ -1649,7 +1650,9 @@ def _catalogue_failure(
             code = _failure_code(exc)
         else:
             code = "validation_error"
-    if isinstance(exc, (SourceCoreResourceError, SourceMatchConflictError)):
+    if isinstance(
+        exc, (SourceCoreResourceError, SourceMatchConflictError, SourceReservedTableError)
+    ):
         source = source or exc.source
     return CatalogueSourceFailure(entry=entry, source=source, code=code, message=str(exc))
 

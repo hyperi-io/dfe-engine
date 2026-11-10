@@ -8,7 +8,7 @@
 
 """The ``all_sources`` Merge table, so one HyperDX source reads every source's rows.
 
-A source with its own schema writes to its own table rather than the landing table, so a dashboard over the landing table alone never shows its events. ``all_sources`` is a ClickHouse Merge table over the landing table and every registry source's live table, rebuilt whenever that set changes. The HyperDX source over it is :mod:`dfe_engine.hyperdx.all_sources`.
+A source with its own schema writes to its own table rather than the landing table, so a dashboard over the landing table alone never shows its events. ``all_sources`` is a ClickHouse Merge table over the landing table and every registry source's live table, rebuilt whenever that set changes. The HyperDX source over it is registered by :mod:`dfe_engine.hyperdx.engine_sources`.
 
 The member list is explicit: the data database also holds the OTel tables, ``detection``, ``meta`` and per-source views, none of which belong in a source dashboard. A table without ``_org_id`` is left out too, since the tenant row policy on all_sources reads that column from every member. The landing table is the one the manifest names, and its live types give the shared header columns theirs.
 """
