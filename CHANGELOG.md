@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.86](https://github.com/hyperi-io/dfe-engine/compare/v1.22.85...v1.22.86) (2026-11-10)
+
+### Bug Fixes
+
+* **dev:** run the e2e server natively on a Mac, with or without ClickHouse ([e28d36b](https://github.com/hyperi-io/dfe-engine/commit/e28d36be7ceea49ec330187e85ec5a63c389e8b9))
+
 ## [1.22.85](https://github.com/hyperi-io/dfe-engine/compare/v1.22.84...v1.22.85) (2026-11-10)
 
 ### Bug Fixes
