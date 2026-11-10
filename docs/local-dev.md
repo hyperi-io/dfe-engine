@@ -114,7 +114,7 @@ docker compose -f docker-compose.dev.yaml up -d --wait clickhouse && make e2e-se
   so nothing here collides.
 - `METRICS_ADDR=127.0.0.1:19090` moves the health listener if 9090 is busy.
 
-dfe-ui's `scripts/macos-dev-smoke.sh` runs the whole loop and ends in one PASS
+dfe-ui's `scripts/macos-dev-smoke.py` runs the whole loop and ends in one PASS
 or FAIL line. Its `macOS dev smoke` workflow runs it on a GitHub macOS arm64
 runner.
 
