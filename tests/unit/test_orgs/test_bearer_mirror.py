@@ -20,7 +20,6 @@ from scalo.secrets import SecretPermissionError, SecretsError
 from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, IngestCredential
 from dfe_engine.orgs.ingest_tokens import (
     bearer_secret_path,
-    build_bearer_mirror,
     drop_token,
     resync_bearer_tokens,
     store_token,
@@ -28,7 +27,7 @@ from dfe_engine.orgs.ingest_tokens import (
 )
 from dfe_engine.orgs.registry import OrgRegistry
 from dfe_engine.orgs.seed import ensure_default_org
-from dfe_engine.secrets import build_secrets
+from dfe_engine.secrets import build_secret_mirror, build_secrets
 from dfe_engine.settings import IngestSettings, SecretsSettings, _get_env_overrides
 from tests.support.local_kube_api import LocalKubeApi, local_kube_api, mirror_for
 
@@ -182,13 +181,13 @@ class TestResync:
 
 class TestBuild:
     def test_unset_builds_no_mirror(self):
-        assert build_bearer_mirror("") is None
+        assert build_secret_mirror("") is None
 
     def test_set_builds_the_kubernetes_provider(self, monkeypatch):
         # Outside a pod the provider is configured but has no API server to reach.
         monkeypatch.delenv("KUBERNETES_SERVICE_HOST", raising=False)
         monkeypatch.delenv("KUBERNETES_SERVICE_PORT", raising=False)
-        mirror = build_bearer_mirror("dfe-ingest-bearer-tokens")
+        mirror = build_secret_mirror("dfe-ingest-bearer-tokens")
 
         assert mirror is not None
         with pytest.raises(SecretsError, match="KUBERNETES_SERVICE_HOST"):

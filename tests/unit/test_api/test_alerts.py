@@ -320,6 +320,38 @@ class TestAlertDestinationsCRUD:
         assert data["url_scheme"] == "slack"
         assert data["enabled"] is True
 
+    def test_a_mirror_secret_that_refuses_answers_503(
+        self, alert_client, alert_admin_headers, sample_destination, app_with_alerts, tmp_path
+    ):
+        """The Secret does not exist, so the mirror write fails after the backend holds it."""
+        from dfe_engine.hunts.alert import AlertDestinationRegistry
+        from dfe_engine.secrets import build_secrets
+        from tests.support.local_kube_api import local_kube_api, mirror_for
+
+        token_file = tmp_path / "sa-token"
+        token_file.write_text("sa-token-placeholder", encoding="utf-8")
+        with local_kube_api("sa-token-placeholder") as kube:
+            settings = app_with_alerts.state.settings
+            refusing = AlertDestinationRegistry(
+                secrets=build_secrets(settings.secrets),
+                directory=settings.hunts.alert_destinations_dir,
+                mirror=mirror_for(kube, token_file),
+            )
+            _registries["alert_destinations"].close()
+            _registries["alert_destinations"] = refusing
+
+            created = alert_client.post(
+                "/api/v1/alerts/destinations", json=sample_destination, headers=alert_admin_headers
+            )
+            deleted = alert_client.delete(
+                "/api/v1/alerts/destinations/slack-alerts", headers=alert_admin_headers
+            )
+
+        assert created.status_code == 503
+        assert created.json()["code"] == "secrets_unavailable"
+        assert "does not exist" not in created.text
+        assert deleted.status_code == 503
+
     def test_create_then_list(self, alert_client, alert_admin_headers, sample_destination):
         alert_client.post(
             "/api/v1/alerts/destinations",

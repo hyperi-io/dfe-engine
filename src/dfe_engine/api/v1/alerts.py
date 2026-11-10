@@ -20,6 +20,8 @@ PUT    /api/v1/alerts/destinations/{name}     -> Update destination
 DELETE /api/v1/alerts/destinations/{name}     -> Delete destination
 """
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -33,9 +35,11 @@ from scalo.api import (
     scalo_extra,
     sort_by_order,
 )
+from scalo.secrets import SecretsError
 
 from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
+from dfe_engine.api.errors import backend_failure
 from dfe_engine.api.review import apply_review_headers
 from dfe_engine.appmgmt import contract
 from dfe_engine.auth.audit import audit_resource_change
@@ -251,7 +255,9 @@ async def update_destination(
 )
 async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Delete an alert destination."""
-    if not registry.remove(name):
+    with _secrets_answered():
+        removed = registry.remove(name)
+    if not removed:
         raise ProblemError(404, f"Alert destination '{name}' not found", code="not_found")
     audit_resource_change(user.user_id, "alert_destination", name, "deleted")
 
@@ -293,6 +299,25 @@ def _typed_url(written: str, stored: str) -> str:
         raise ProblemError(400, str(exc), code=exc.code) from exc
 
 
+@contextmanager
+def _secrets_answered() -> Iterator[None]:
+    """Answer a secrets backend or mirror Secret that refuses a write with 503.
+
+    Raises:
+        ProblemError: 503 ``secrets_unavailable``, its reason in the engine log only.
+    """
+    try:
+        yield
+    except SecretsError as exc:
+        raise backend_failure(
+            503,
+            "secrets_unavailable",
+            "the secrets backend refused an alert destination; the engine log has the reason",
+            exc,
+            event="alert destination not written",
+        ) from exc
+
+
 def _write_destination(
     registry,
     dest: AlertDestination,
@@ -300,15 +325,16 @@ def _write_destination(
     hunt_name: str | None = None,
 ) -> None:
     """Persist a destination via the registry (overwrites if the name exists)."""
-    registry.add(
-        RegistryAlertDestination(
-            name=dest.name,
-            url=dest.url,
-            description=dest.description,
-            enabled=dest.enabled,
-            hunt_name=hunt_name,
+    with _secrets_answered():
+        registry.add(
+            RegistryAlertDestination(
+                name=dest.name,
+                url=dest.url,
+                description=dest.description,
+                enabled=dest.enabled,
+                hunt_name=hunt_name,
+            )
         )
-    )
 
 
 def _ensure_hunt_for_link(hunt_registry: Any | None, hunt_name: str) -> None:

@@ -382,6 +382,15 @@ class HuntsSettings(BaseModel):
             "alert destinations API off."
         ),
     )
+    alert_destinations_secret: str = Field(
+        default="",
+        description=(
+            "Kubernetes Secret, in the engine's own namespace, that the engine also writes each "
+            "alert destination into, one key per destination name, for the hunt runner to mount "
+            "at <secrets.path>/alert-destinations. Empty writes none. The engine needs get and "
+            "update on that one Secret."
+        ),
+    )
     max_detections_per_run: int = Field(
         default=MAX_DETECTIONS_PER_RUN,
         gt=0,
@@ -454,6 +463,11 @@ class HuntsSettings(BaseModel):
                 "and the hunt runner both read"
             )
         return directory
+
+    @field_validator("alert_destinations_secret")
+    @classmethod
+    def _alert_destinations_secret_is_a_secret_name(cls, value: str) -> str:
+        return _kubernetes_secret_name(value, "DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_SECRET")
 
     @field_validator("lookup_databases")
     @classmethod
@@ -1855,15 +1869,20 @@ class IngestSettings(BaseModel):
     @field_validator("bearer_secret")
     @classmethod
     def _bearer_secret_is_a_secret_name(cls, value: str) -> str:
-        if value:
-            # scalo's own check, so the engine refuses at startup what the API server would.
-            from scalo.secrets import KubernetesConfig
+        return _kubernetes_secret_name(value, "DFE_ENGINE_INGEST_BEARER_SECRET")
 
-            try:
-                KubernetesConfig(secret_name=value)
-            except ValueError as exc:
-                raise ValueError(f"DFE_ENGINE_INGEST_BEARER_SECRET: {exc}") from exc
-        return value
+
+def _kubernetes_secret_name(value: str, variable: str) -> str:
+    """*value* when empty or a Secret name the API server takes, else a ValueError naming *variable*."""
+    if value:
+        # scalo's own check, so the engine refuses at startup what the API server would.
+        from scalo.secrets import KubernetesConfig
+
+        try:
+            KubernetesConfig(secret_name=value)
+        except ValueError as exc:
+            raise ValueError(f"{variable}: {exc}") from exc
+    return value
 
 
 class OrgsSettings(BaseModel):
@@ -2071,6 +2090,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_HUNTS_RULES_DIR": "hunts.rules_dir",
             "DFE_ENGINE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD": "hunts.checkpoint_timestamp_field",
             "DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR": "hunts.alert_destinations_dir",
+            "DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_SECRET": "hunts.alert_destinations_secret",
             "DFE_ENGINE_ARTIFACTORY_URL": "artifactory.url",
             "DFE_ENGINE_ARTIFACTORY_USERNAME": "artifactory.username",
             "DFE_ENGINE_ARTIFACTORY_PASSWORD": "artifactory.password",
