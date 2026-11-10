@@ -39,7 +39,7 @@ Usage::
     from dfe_engine.hyperdx.client import HyperDXClient
 
     client = HyperDXClient(
-        base_url="http://hyperdx:8080",
+        base_url="http://dfe-hyperdx:8000",
         token_provider=machine_token_source.token,
     )
     team = await client.get_team()
