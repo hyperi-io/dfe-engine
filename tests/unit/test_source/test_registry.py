@@ -11,6 +11,7 @@ from dfe_engine.source.registry import (
     SourceMatchConflictError,
     SourceNotFoundError,
     SourceRegistry,
+    SourceReservedTableError,
     SourceRuleError,
     SourceValidationError,
 )
@@ -250,6 +251,22 @@ class TestList:
         )
         with pytest.raises(SourceValidationError, match="reserved for the 'main' source"):
             registry.save_source(greedy)
+
+    @pytest.mark.parametrize("name", ["dlq", "detection", "repository"])
+    def test_a_source_named_after_a_core_table_is_refused(
+        self, registry: SourceRegistry, name: str
+    ):
+        """Its table would be the core table, so its rows would land in dead letters or detections."""
+        with pytest.raises(SourceReservedTableError, match="which the core schema owns"):
+            registry.save_source(
+                Source.model_validate(
+                    {
+                        "source": name,
+                        "match": {"field": "_source", "operator": "equals", "value": name},
+                    }
+                )
+            )
+        assert not registry.source_exists(name)
 
     def test_the_main_source_may_match_everything(self, registry: SourceRegistry):
         registry.save_source(
