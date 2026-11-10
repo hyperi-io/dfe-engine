@@ -64,6 +64,7 @@ from dfe_engine.clickhouse.lease import (
     write_settings,
 )
 from dfe_engine.clickhouse.quoting import quote_identifier
+from dfe_engine.schema.applier import ttl_from_engine_full
 from dfe_engine.schema.plan import LOCK_ID, render_one
 
 LOCK_NAME = "schema_bootstrap"
@@ -198,6 +199,36 @@ class SchemaLock:
             released=bool(rows[0][2]),
             acquired_at=_utc(acquired),
         )
+
+    def drop_ttl(self) -> bool:
+        """Remove a TTL the lease table carries from an older schema, while holding the lease.
+
+        A TTL that empties an idle table deletes the last quorum-written part, and
+        every lease read then refuses, so no claimer reaches the write that would clear it.
+        Removing it expires and rewrites nothing. A failure is logged, not raised,
+        so the pass still applies and the next one tries again.
+
+        Returns:
+            Whether a TTL was removed.
+        """
+        target = f"{quote_identifier(self._database)}.{quote_identifier(self._table)}"
+        try:
+            rows = self._client.query(
+                "SELECT engine_full FROM system.tables WHERE database = {db:String} "
+                "AND name = {tbl:String}",
+                parameters={"db": self._database, "tbl": self._table},
+            ).result_rows
+            if not rows or ttl_from_engine_full(str(rows[0][0])) is None:
+                return False
+            self._client.command(f"ALTER TABLE {target} REMOVE TTL")
+        except Exception as exc:
+            logger.warning(
+                "schema lease table keeps its TTL; an idle week can wedge the lease",
+                error=str(exc),
+            )
+            return False
+        logger.info("schema lease table TTL removed", table=target)
+        return True
 
     def acquire(self, *, wait_seconds: float = 0.0) -> bool:
         """Take the lease, waiting up to *wait_seconds* for a live holder to finish.

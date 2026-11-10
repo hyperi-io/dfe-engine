@@ -638,6 +638,7 @@ def _apply_under_lock(
     is marked ``observed`` and transient: the holder may still be mid-apply, so
     readiness waits for a later pass that takes the lease itself. A release that
     fails after the apply keeps the apply's result: the lease lapses at its expiry.
+    The holder also removes any TTL an older schema left on the lease table.
 
     Raises:
         SchemaLockError: The lease table's presence or the lease could not be read.
@@ -657,6 +658,7 @@ def _apply_under_lock(
         )
         return None
     try:
+        lock.drop_ttl()
         return apply_plan(client, plan, allow_drift=allow_drift)
     finally:
         if not lock.release_or_lapse():
