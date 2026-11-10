@@ -25,10 +25,10 @@ ACTOR = "test"
 # deployment whose flows refuse every shape.
 EXPECTED = [
     "dfe-engine",
+    "dfe-hyperdx",
     "dfe-loader",
     "dfe-receiver",
     "dfe-ui",
-    "hyperdx",
 ]
 
 
