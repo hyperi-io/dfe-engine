@@ -26,15 +26,20 @@ services:
           cpus: "0.5"
           memory: 256M
 
-  # A local ClickHouse for `make e2e-server`: plain HTTP on 127.0.0.1:8123, the
-  # password .env.e2e.example carries. The multi-arch digest of the 26.3 LTS tag
-  # dfe-infra versions.yaml pins, so it runs native on Apple silicon.
+  # A local ClickHouse for `make e2e-server`: plain HTTP on 127.0.0.1:8123 with
+  # the password .env.e2e.example carries. One node with its own Keeper, which the
+  # replicated tables need. The multi-arch digest of the 26.3 LTS tag dfe-infra
+  # pins, so it runs natively on Apple silicon.
   clickhouse:
     image: clickhouse/clickhouse-server:26.3.17.56@sha256:422be85ae7344058369cdd366ac0efea9daa8428b55c9cf50258e83a7d12fcb3
     environment:
       CLICKHOUSE_PASSWORD: ${DFE_ENGINE_CLICKHOUSE_PASSWORD:-dfe-local-dev}
+      # The engine creates roles, quotas and row policies for each org.
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
     ports:
-      - "127.0.0.1:8123:8123"
+      - "127.0.0.1:${DFE_ENGINE_CLICKHOUSE_PORT:-8123}:8123"
+    volumes:
+      - ./dev/clickhouse/single-node.xml:/etc/clickhouse-server/config.d/single-node.xml:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8123/ping"]
       interval: 5s
