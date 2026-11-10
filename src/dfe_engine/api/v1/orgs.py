@@ -140,7 +140,7 @@ async def create_org(
 ):
     """Create a new customer organisation (admin only).
 
-    If HyperDX integration is enabled, the lifecycle manager handles
+    If the Search integration is enabled, the lifecycle manager handles
     team creation as part of org provisioning.  Failure is non-fatal.
 
     A hunt already naming the org, such as one whose org was deleted, has the new

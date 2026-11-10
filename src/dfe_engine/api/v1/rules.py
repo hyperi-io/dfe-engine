@@ -103,7 +103,7 @@ class RuleCreateRequest(_RuleWriteFields):
 
     source_type: Literal["raw", "hyperdx"] = Field(
         default="raw",
-        description="'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
+        description="'raw' (plain SQL) or 'hyperdx' (Search saved search format)",
     )
 
 
@@ -175,11 +175,11 @@ class RuleCreateResponse(BaseModel):
 
 
 class RuleFromHyperdxRequest(BaseModel):
-    """Create a hunt rule from the SQL a HyperDX view runs.
+    """Create a hunt rule from the SQL a Search view runs.
 
-    HyperDX renders the view to ``raw_sql`` and sends it here. The create
+    Search renders the view to ``raw_sql`` and sends it here. The create
     pipeline strips the UI meta (time bounds, LIMIT, ``__hdx_time_bucket``,
-    SETTINGS) via the HyperDX sanitizer, and the engine derives a unique rule id
+    SETTINGS) via the dfe-hyperdx sanitizer, and the engine derives a unique rule id
     from the saved-search name. The caller gets that id back and opens
     ``/rules/{id}`` -- no id to invent, no IndexedDB round-trip.
     """
@@ -188,10 +188,10 @@ class RuleFromHyperdxRequest(BaseModel):
 
     raw_sql: str = Field(
         min_length=1,
-        description="The ClickHouse SELECT the HyperDX view renders to",
+        description="The ClickHouse SELECT the Search view renders to",
     )
     saved_search_name: str | None = Field(
-        default=None, description="HyperDX saved-search name; seeds the rule id and label"
+        default=None, description="Search saved-search name; seeds the rule id and label"
     )
     severity: Severity = Field(default="medium", description="low|medium|high|critical")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
@@ -199,7 +199,7 @@ class RuleFromHyperdxRequest(BaseModel):
 
 
 class RuleFromHyperdxResponse(BaseModel):
-    """The rule created from a HyperDX query."""
+    """The rule created from a Search query."""
 
     id: str = Field(description="Created rule id (YAML stem); open at /rules/{id}")
     display_name: str
@@ -323,6 +323,7 @@ def create_rule(
 
 @router.post(
     "/from-hyperdx",
+    summary="Create Rule From Search",
     response_model=RuleFromHyperdxResponse,
     status_code=201,
     responses=_REFUSED_RULE_RESPONSES,
@@ -337,7 +338,7 @@ async def create_rule_from_hyperdx(
     response: Response,
     hunts: OptionalHuntConfigReg,
 ):
-    """Create a hunt rule from the SQL a HyperDX view renders to.
+    """Create a hunt rule from the SQL a Search view renders to.
 
     Wraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a
     unique rule id from the saved-search name, so the caller need not supply one.

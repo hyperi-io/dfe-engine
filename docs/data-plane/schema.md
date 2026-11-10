@@ -686,7 +686,7 @@ COLUMN` -- safe, non-destructive, and automated.
 
 ## The `all_sources` Merge Table
 
-`dfe.all_sources` is a ClickHouse Merge table over `main` and each registered source's MergeTree table, so one HyperDX source reads every source's rows. Core manifest tables other than `main` (even under a source's name) and tables without `_org_id` are never members.
+`dfe.all_sources` is a ClickHouse Merge table over `main` and each registered source's MergeTree table, so one Observe source reads every source's rows. Core manifest tables other than `main` (even under a source's name) and tables without `_org_id` are never members.
 
 It declares `_timestamp_load`, `_timestamp`, `_timestamp_received`, `_org_id`, `_source`, `_raw` and `_json`, typed as on `main`. A member lacking one reads its default: epoch 0 for a timestamp, NULL for a Nullable column. `_raw IS NULL` misreads a member without `_raw`, since ClickHouse answers it from the `_raw.null` subcolumn while `optimize_functions_to_subcolumns` is on; test `length(_raw)` or use `coalesce`. The virtual column `_table` names each row's member.
 
@@ -694,7 +694,7 @@ The engine rebuilds it after every source deploy or delete. At startup it rebuil
 
 Each rebuild applies the tenant row policy ([rbac.md](../control-plane/rbac.md)) to `all_sources` itself. Member tables keep their own policies, which also fence a read through it.
 
-The engine registers it on every team as the HyperDX source `all_sources`, timed on `_timestamp_load` because `_timestamp` reads as epoch 0 for a passthrough member. Registration retries with backoff from 60 s to 15 min until HyperDX accepts it.
+The engine registers it on every team as the Observe source `all_sources`, timed on `_timestamp_load` because `_timestamp` reads as epoch 0 for a passthrough member. Registration retries with backoff from 60 s to 15 min until dfe-hyperdx accepts it.
 
 ---
 

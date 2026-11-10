@@ -42,4 +42,4 @@ A view carries only the mappings whose column the source's table holds. ClickHou
 
 Zero storage overhead - views compute at query time. Consumers:
 [hunt-runner-scaling.md](hunt-runner-scaling.md) (detections),
-[query-api.md](query-api.md), and the HyperDX explore UI.
+[query-api.md](query-api.md), and the Observe explore UI.

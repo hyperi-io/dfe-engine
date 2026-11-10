@@ -24,7 +24,7 @@ router = APIRouter(prefix="/config", tags=["Client Config"])
 
 
 class HyperDXConfig(BaseModel):
-    """Whether the UI links to HyperDX, and where."""
+    """Whether the UI links to Search, and where."""
 
     enabled: bool = False
     url: str = ""
@@ -68,7 +68,7 @@ def _oidc_available(request: Request) -> bool:
 async def client_config(user: CurrentUser, request: Request) -> ClientConfig:
     """Runtime config for the web UI.
 
-    Authenticated but ungated: every console pane may read it, and the HyperDX URL
+    Authenticated but ungated: every console pane may read it, and the Search URL
     it returns is internal to the deployment.
     """
     settings = request.app.state.settings

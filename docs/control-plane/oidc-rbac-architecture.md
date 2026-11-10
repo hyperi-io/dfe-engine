@@ -74,9 +74,9 @@ engine machinery above it:
          infra_admin, ...)                             org_ids confers scoped
    [4a] dfe-engine authorization                       access - no named per-org
         roles -> permissions ->                        role)
-        what you can DO (manage                   [4b] HyperDX data browsing
+        what you can DO (manage                   [4b] Observe data browsing
         sources/hunts/config/deploy)                   (Kibana-style)
-                                                       org_ids -> HyperDX team +
+                                                       org_ids -> dfe-hyperdx team +
                                                        the org's pinned CH user
                                                        -> row-filtered DATA VIEW
                                                        ONLY (read, no control)
@@ -170,7 +170,7 @@ both. A group file carries `roles`, `org_ids`, and `scope`
 
 - **Control plane (3a/4a):** `roles.yaml` + wildcard `permission_matches` gate
   the dfe-engine API (manage sources/hunts/config/deploy). Static named roles.
-- **Data plane (3b/4b):** org_ids drive dynamic, data-only access. A caller fenced to one org (an `org_viewer`, or any role bound at that org's scope) browses HyperDX as the org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to that org (rbac.md section 5). Read-only; no control-plane power.
+- **Data plane (3b/4b):** org_ids drive dynamic, data-only access. A caller fenced to one org (an `org_viewer`, or any role bound at that org's scope) browses Observe as the org's pinned ClickHouse user, whose READONLY tenant setting and the shared RESTRICTIVE row policies filter every query to that org (rbac.md section 5). Read-only; no control-plane power.
 
 Both axes already resolve end to end. The re-minted token carries
 `{sub, email, groups}` plus the `role` claim dfe-hyperdx reads (see

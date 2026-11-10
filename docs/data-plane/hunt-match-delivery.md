@@ -18,10 +18,10 @@ Each run is capped at `hunts.max_detections_per_run` rows per rule (`DFE_ENGINE_
 
 ## Who sees it
 
-- Search the detection table in HyperDX, embedded in the console.
+- Search the detection table in Observe, embedded in the console.
 - Query it through the [query API](query-api.md).
 
-HyperDX's own alerting is switched off for DFE rules, so its webhooks and alert history stay empty.
+Observe's own alerting is switched off for DFE rules, so its webhooks and alert history stay empty.
 
 ## Alert destinations
 

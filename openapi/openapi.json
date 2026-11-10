@@ -243,7 +243,7 @@
           "Auth"
         ],
         "summary": "Get Me",
-        "description": "Get the current authenticated user's info.\n\nA session on an issued password reports the flag and no roles, permissions,\ngroups or orgs, because its token carries none until the change.\n\n``hyperdx_role`` and ``hyperdx_identity`` are what dfe-hyperdx takes a\nsession's dashboard role and team from; it caches this answer for 30 seconds,\nso a group change reaches HyperDX in that window rather than at token expiry.",
+        "description": "Get the current authenticated user's info.\n\nA session on an issued password reports the flag and no roles, permissions,\ngroups or orgs, because its token carries none until the change.\n\n``hyperdx_role`` and ``hyperdx_identity`` are what dfe-hyperdx takes a\nsession's dashboard role and team from; it caches this answer for 30 seconds,\nso a group change reaches dfe-hyperdx in that window rather than at token expiry.",
         "operationId": "auth.me.list",
         "responses": {
           "200": {
@@ -5241,7 +5241,7 @@
           "Organisations"
         ],
         "summary": "Create Org",
-        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, the lifecycle manager handles\nteam creation as part of org provisioning.  Failure is non-fatal.\n\nA hunt already naming the org, such as one whose org was deleted, has the new\norg's tenant ids stored first. A production+team posture routes that hunt\nchange to review, and the ``X-DFE-Review-Required`` header says so.",
+        "description": "Create a new customer organisation (admin only).\n\nIf the Search integration is enabled, the lifecycle manager handles\nteam creation as part of org provisioning.  Failure is non-fatal.\n\nA hunt already naming the org, such as one whose org was deleted, has the new\norg's tenant ids stored first. A production+team posture routes that hunt\nchange to review, and the ``X-DFE-Review-Required`` header says so.",
         "operationId": "orgs.create",
         "requestBody": {
           "required": true,
@@ -8400,7 +8400,7 @@
           "Sources"
         ],
         "summary": "Delete Source",
-        "description": "Delete a source by name. Its fetcher instance, receiver rule and topics go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.\n\nThe answer reports the reconcile as a create or an update does: on a\ndeployment that renders the app config itself, ``restart_required`` names the\ncommand that takes away the containers the source's instances ran in.\n\nA delete production+team sends to review answers ``review_required`` and\ntouches nothing else: main still carries the source, so its topics, records and\nHyperDX source stay until the branch is merged.",
+        "description": "Delete a source by name. Its fetcher instance, receiver rule and topics go with it.\n\nAn engine-owned source -- the landing table's own -- is refused with 409\n``conflict``, the same answer PUT and PATCH give.\n\nThe answer reports the reconcile as a create or an update does: on a\ndeployment that renders the app config itself, ``restart_required`` names the\ncommand that takes away the containers the source's instances ran in.\n\nA delete production+team sends to review answers ``review_required`` and\ntouches nothing else: main still carries the source, so its topics, records and\nSearch source stay until the branch is merged.",
         "operationId": "sources.delete",
         "parameters": [
           {
@@ -8689,7 +8689,7 @@
           "Sources"
         ],
         "summary": "Get Source Signals",
-        "description": "Whether this source's records are arriving, and how fast.\n\nReads the loader's per-table counter out of the otel tables over a bounded\nfive-minute window, so the console can put a number beside a source without\nthe operator opening HyperDX. It answers 200 with nulls where the series is\nabsent: a source that was only just defined has nothing to report, and that\nis not an error.",
+        "description": "Whether this source's records are arriving, and how fast.\n\nReads the loader's per-table counter out of the otel tables over a bounded\nfive-minute window, so the console can put a number beside a source without\nthe operator opening Search. It answers 200 with nulls where the series is\nabsent: a source that was only just defined has nothing to report, and that\nis not an error.",
         "operationId": "sources.signals",
         "parameters": [
           {
@@ -12163,8 +12163,8 @@
         "tags": [
           "Rules"
         ],
-        "summary": "Create Rule From Hyperdx",
-        "description": "Create a hunt rule from the SQL a HyperDX view renders to.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nA view whose SQL the hunt runner could not compile, or that matches every\nevent, is refused with 422. RBAC: ``rule:write`` (data_analyst) --\n``org_viewer`` has neither this grant nor the UI button.",
+        "summary": "Create Rule From Search",
+        "description": "Create a hunt rule from the SQL a Search view renders to.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nA view whose SQL the hunt runner could not compile, or that matches every\nevent, is refused with 422. RBAC: ``rule:write`` (data_analyst) --\n``org_viewer`` has neither this grant nor the UI button.",
         "operationId": "rules.from-hyperdx",
         "requestBody": {
           "content": {
@@ -33404,8 +33404,8 @@
         "tags": [
           "Rules: Authoring"
         ],
-        "summary": "From Hyperdx",
-        "description": "Strip a HyperDX query's time bounds -> {window}, ready to save as a rule.",
+        "summary": "Strip Search Query Time Bounds",
+        "description": "Strip a Search query's time bounds -> {window}, ready to save as a rule.",
         "operationId": "authoring.from-hyperdx",
         "requestBody": {
           "content": {
@@ -33967,7 +33967,7 @@
           "Client Config"
         ],
         "summary": "Client Config",
-        "description": "Runtime config for the web UI.\n\nAuthenticated but ungated: every console pane may read it, and the HyperDX URL\nit returns is internal to the deployment.",
+        "description": "Runtime config for the web UI.\n\nAuthenticated but ungated: every console pane may read it, and the Search URL\nit returns is internal to the deployment.",
         "operationId": "config.client",
         "responses": {
           "200": {
@@ -34035,9 +34035,9 @@
     "/api/v1/hyperdx/connection": {
       "get": {
         "tags": [
-          "HyperDX"
+          "Search"
         ],
-        "summary": "Hyperdx Connection",
+        "summary": "Get Search Connection",
         "description": "Return the caller's OWN org connection - never another org's.\n\nA caller granted ``query:execute`` at system scope by a declared, unscoped role\nother than ``org_viewer`` gets the platform reader. Any other caller gets its org's pinned\n``dfe_org_<org>`` user, whatever roles it holds at that org's scope. A caller\nthat resolves to zero or several separate orgs is refused (403) so isolation\nfails closed rather than guessing.",
         "operationId": "hyperdx.connection",
         "responses": {
@@ -34106,10 +34106,10 @@
     "/api/v1/hyperdx/sources": {
       "get": {
         "tags": [
-          "HyperDX"
+          "Search"
         ],
-        "summary": "Hyperdx Sources",
-        "description": "List every HyperDX team and the DFE sources on it.\n\nA deploy writes its source to every team, so this is the read that says where\nit landed. 503 when HyperDX is not deployed or not answering -- an empty list\nwould read as \"the source is missing\", which is a different fault.",
+        "summary": "List Search Sources",
+        "description": "List every Search team and the DFE sources on it.\n\nA deploy writes its source to every team, so this is the read that says where\nit landed. 503 when Search is not deployed or not answering -- an empty list\nwould read as \"the source is missing\", which is a different fault.",
         "operationId": "hyperdx.sources",
         "responses": {
           "200": {
@@ -40517,7 +40517,7 @@
           "query"
         ],
         "title": "FromHyperdxRequest",
-        "description": "Body for turning a HyperDX query into rule SQL."
+        "description": "Body for turning a Search query into rule SQL."
       },
       "GenerateRequest": {
         "properties": {
@@ -41725,7 +41725,7 @@
         },
         "type": "object",
         "title": "HyperDXConfig",
-        "description": "Whether the UI links to HyperDX, and where."
+        "description": "Whether the UI links to Search, and where."
       },
       "HyperDXConnection": {
         "properties": {
@@ -41768,19 +41768,19 @@
         },
         "type": "object",
         "title": "HyperDXSourcesResponse",
-        "description": "Where every deployed DFE source actually landed in HyperDX."
+        "description": "Where every deployed DFE source actually landed in Search."
       },
       "HyperDXTeamSource": {
         "properties": {
           "id": {
             "type": "string",
             "title": "Id",
-            "description": "HyperDX source id on that team"
+            "description": "Search source id on that team"
           },
           "name": {
             "type": "string",
             "title": "Name",
-            "description": "DFE source name; the HyperDX source carries the same one"
+            "description": "DFE source name; the Search source carries the same one"
           },
           "table": {
             "additionalProperties": {
@@ -41797,19 +41797,19 @@
           "name"
         ],
         "title": "HyperDXTeamSource",
-        "description": "One HyperDX source on one team, as the fork holds it."
+        "description": "One Search source on one team, as dfe-hyperdx holds it."
       },
       "HyperDXTeamSources": {
         "properties": {
           "team": {
             "type": "string",
             "title": "Team",
-            "description": "HyperDX team id"
+            "description": "Search team id"
           },
           "team_name": {
             "type": "string",
             "title": "Team Name",
-            "description": "HyperDX team name: the ClickHouse user its members read as"
+            "description": "Search team name: the ClickHouse user its members read as"
           },
           "sources": {
             "items": {
@@ -41825,7 +41825,7 @@
           "team_name"
         ],
         "title": "HyperDXTeamSources",
-        "description": "One HyperDX team and the DFE sources it holds."
+        "description": "One Search team and the DFE sources it holds."
       },
       "IngestCredentialResponse": {
         "properties": {
@@ -44010,7 +44010,7 @@
           "name"
         ],
         "title": "Org",
-        "description": "A customer organisation.\n\nAttributes:\n    name: Primary identifier (filename stem).\n    display_name: Human-readable label for UI display.\n    org_ids: Tenant IDs used for ClickHouse row-level security filters.\n    enabled: Whether this org is active.\n    hyperdx_team_id: HyperDX team ID for this org's connection sync.\n    hyperdx_team_api_key_env: Environment variable name holding the org's HyperDX team API key.\n    ch_password_env: Environment variable name holding the ClickHouse password.\n    created_at: ISO 8601 timestamp of creation.\n    updated_at: ISO 8601 timestamp of last update."
+        "description": "A customer organisation.\n\nAttributes:\n    name: Primary identifier (filename stem).\n    display_name: Human-readable label for UI display.\n    org_ids: Tenant IDs used for ClickHouse row-level security filters.\n    enabled: Whether this org is active.\n    hyperdx_team_id: dfe-hyperdx team ID for this org's connection sync.\n    hyperdx_team_api_key_env: Environment variable name holding the org's dfe-hyperdx team API key.\n    ch_password_env: Environment variable name holding the ClickHouse password.\n    created_at: ISO 8601 timestamp of creation.\n    updated_at: ISO 8601 timestamp of last update."
       },
       "OrgResponse": {
         "properties": {
@@ -48133,7 +48133,7 @@
               "hyperdx"
             ],
             "title": "Source Type",
-            "description": "'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
+            "description": "'raw' (plain SQL) or 'hyperdx' (Search saved search format)",
             "default": "raw"
           }
         },
@@ -48212,7 +48212,7 @@
             "type": "string",
             "minLength": 1,
             "title": "Raw Sql",
-            "description": "The ClickHouse SELECT the HyperDX view renders to"
+            "description": "The ClickHouse SELECT the Search view renders to"
           },
           "saved_search_name": {
             "anyOf": [
@@ -48224,7 +48224,7 @@
               }
             ],
             "title": "Saved Search Name",
-            "description": "HyperDX saved-search name; seeds the rule id and label"
+            "description": "Search saved-search name; seeds the rule id and label"
           },
           "severity": {
             "type": "string",
@@ -48263,7 +48263,7 @@
           "raw_sql"
         ],
         "title": "RuleFromHyperdxRequest",
-        "description": "Create a hunt rule from the SQL a HyperDX view runs.\n\nHyperDX renders the view to ``raw_sql`` and sends it here. The create\npipeline strips the UI meta (time bounds, LIMIT, ``__hdx_time_bucket``,\nSETTINGS) via the HyperDX sanitizer, and the engine derives a unique rule id\nfrom the saved-search name. The caller gets that id back and opens\n``/rules/{id}`` -- no id to invent, no IndexedDB round-trip."
+        "description": "Create a hunt rule from the SQL a Search view runs.\n\nSearch renders the view to ``raw_sql`` and sends it here. The create\npipeline strips the UI meta (time bounds, LIMIT, ``__hdx_time_bucket``,\nSETTINGS) via the dfe-hyperdx sanitizer, and the engine derives a unique rule id\nfrom the saved-search name. The caller gets that id back and opens\n``/rules/{id}`` -- no id to invent, no IndexedDB round-trip."
       },
       "RuleFromHyperdxResponse": {
         "properties": {
@@ -48302,7 +48302,7 @@
           "display_name"
         ],
         "title": "RuleFromHyperdxResponse",
-        "description": "The rule created from a HyperDX query."
+        "description": "The rule created from a Search query."
       },
       "RuleOrderRequest": {
         "properties": {
@@ -49816,7 +49816,7 @@
               }
             ],
             "title": "Hyperdx Source Teams",
-            "description": "How many HyperDX teams now carry a source over this source's table"
+            "description": "How many Search teams now carry a source over this source's table"
           },
           "hyperdx_source_error": {
             "anyOf": [
@@ -49828,7 +49828,7 @@
               }
             ],
             "title": "Hyperdx Source Error",
-            "description": "Why HyperDX was not pointed at the table. Never fails the deploy - the schema is live and HyperDX may be down or not deployed at all."
+            "description": "Why Search was not pointed at the table. Never fails the deploy - the schema is live and Search may be down or not deployed at all."
           },
           "restart_required": {
             "items": {
@@ -55348,7 +55348,7 @@
             },
             "type": "array",
             "title": "Org Ids",
-            "description": "Orgs this user can browse in the data plane (HyperDX). Empty means no org-scoped data access."
+            "description": "Orgs this user can browse in the data plane (Search). Empty means no org-scoped data access."
           },
           "external": {
             "type": "boolean",

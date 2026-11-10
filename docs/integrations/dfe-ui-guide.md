@@ -9,10 +9,10 @@ under the Governed Ops model.
 
 dfe-ui is a **web app that is just a window onto the dfe-engine API**. It holds no
 data of its own - it logs you in, then reads and writes config (sources, schemas,
-rules, hunts, deployment dials) by calling the engine over HTTP. HyperDX (the data
+rules, hunts, deployment dials) by calling the engine over HTTP. dfe-hyperdx (the data
 explorer) is a **separate web app sitting beside it**, not built into it. So the
 "product" the user sees is really three cooperating pieces: dfe-ui (control), the
-engine (the brain + API), and HyperDX (data exploration).
+engine (the brain + API), and dfe-hyperdx (data exploration).
 
 ## 2. What it is built from (the stack)
 
@@ -45,9 +45,9 @@ cookie, and attaches `Authorization: Bearer <token>` to every API call. On a 401
 signs you out. (In production the intent is OIDC at the edge via Envoy + the
 `X-Oidc-*` headers - the same seam the engine already supports.)
 
-## 4. How HyperDX "auto-integrates" (today)
+## 4. How dfe-hyperdx "auto-integrates" (today)
 
-HyperDX is a **sibling app**, embedded rather than linked out to. The integration
+dfe-hyperdx is a **sibling app**, embedded rather than linked out to. The integration
 is deliberately light:
 
 1. **Embedded views** - when `HYPERDX_URL` is set on the dfe-ui deployment, the
@@ -55,13 +55,13 @@ is deliberately light:
    iframe the chromeless dfe-hyperdx fork inside dfe-ui. The `(auth)` layout reads
    the variable server-side at request time, so it is a deployment setting, not a
    build-time one.
-2. **"Create rule from a HyperDX search"** - HyperDX can send the browser a
+2. **"Create rule from a Search"** - dfe-hyperdx can send the browser a
    cross-window message (`postMessage`); dfe-ui catches it, stores the search, and
    opens its rule-create screen pre-filled. The UI checks the message came from the
-   configured HyperDX origin.
+   configured dfe-hyperdx origin.
 
 So "auto-integration" today = **one environment variable** (`HYPERDX_URL`) plus a
-postMessage handshake. The engine does NOT tell the UI where HyperDX is - the
+postMessage handshake. The engine does NOT tell the UI where dfe-hyperdx is - the
 deployment does. `NEXT_PUBLIC_HYPERDX_URL` is read by nothing and setting it does
 nothing.
 
@@ -83,7 +83,7 @@ hyperi-ci renders the chart from dfe-ui's committed deployment contract,
 - **Engine address.** The image is built with `NEXT_PUBLIC_API_URL` empty, so the
   browser calls the engine on its own origin, and the server side reads
   `INTERNAL_API_URL` at request time. One image serves every environment.
-- **HyperDX address.** `HYPERDX_URL`, or `HYPERDX_PORT` on the UI's own host, is read
+- **dfe-hyperdx address.** `HYPERDX_URL`, or `HYPERDX_PORT` on the UI's own host, is read
   at request time (section 4).
 
 The `NEXT_PUBLIC_*` values left are the session refresh timings and a display suffix.
@@ -93,9 +93,9 @@ Next.js still inlines those at build, so changing one needs a rebuild.
 
 A Next.js quirk: public config (`NEXT_PUBLIC_*`) is **replaced with literal text
 inside the compiled JavaScript at build time**. So you cannot change the API URL or
-HyperDX URL of an already-built image - they are no longer variables, just baked-in
+dfe-hyperdx URL of an already-built image - they are no longer variables, just baked-in
 strings. Building a different image per environment is the anti-pattern everyone
-warns against, which is why dfe-ui reads its engine and HyperDX addresses at runtime
+warns against, which is why dfe-ui reads its engine and dfe-hyperdx addresses at runtime
 (section 5).
 
 ## 7. Where we take it (the fixes + improvements)
@@ -107,13 +107,13 @@ Detailed tasks live in `docs/superpowers/plans/2026-06-30-governed-ops-api.md`
 ### Track A - make it deploy
 
 Landed: health routes, `NEXTAUTH_SECRET` from the Secret, the published image and
-chart, and runtime engine and HyperDX addresses (section 5).
+chart, and runtime engine and dfe-hyperdx addresses (section 5).
 
 ### Track B - runtime config from the engine
 
 The engine serves `GET /api/v1/config/client`: the API base (same origin), the
-HyperDX URL and whether it is enabled, feature flags and the auth mode. dfe-ui shows
-it on the System Management page but still takes its HyperDX address from its own
+dfe-hyperdx URL and whether it is enabled, feature flags and the auth mode. dfe-ui shows
+it on the System Management page but still takes its dfe-hyperdx address from its own
 environment (section 4). Reading that address from the engine leaves one place to
 set it.
 
@@ -140,13 +140,13 @@ generation + can also generate mock data to test without a backend) or Hey API (
 modern `queryOptions()` pattern that composes well with Next.js server rendering).
 Either removes the boilerplate and keeps UI and engine in lockstep with the spec.
 
-### Track B - HyperDX: from "link" to genuinely integrated
+### Track B - dfe-hyperdx: from "link" to genuinely integrated
 
-- Serve the HyperDX URL + connection from the bootstrap endpoint (not a build-time
+- Serve the dfe-hyperdx URL + connection from the bootstrap endpoint (not a build-time
   env), so it is runtime + gitops-driven.
-- Put dfe-ui and HyperDX behind the **same Envoy gateway with shared OIDC**, so
-  there is one login and HyperDX feels part of the product (no separate sign-in).
-- Optionally embed HyperDX views (iframe on a shared origin, or its component
+- Put dfe-ui and dfe-hyperdx behind the **same Envoy gateway with shared OIDC**, so
+  there is one login and dfe-hyperdx feels part of the product (no separate sign-in).
+- Optionally embed dfe-hyperdx views (iframe on a shared origin, or its component
   library from the fork) for the in-product, Kibana-like data exploration we want -
   a design choice to weigh against keeping it a separate tab.
 

@@ -17,7 +17,7 @@ it writes (infra, runtime services, UIs).
 flowchart TB
     subgraph surface["Operator surface"]
         UI[dfe-ui]
-        HDX[dfe-hyperdx<br/>explore UI fork]
+        HDX[Observe<br/>dfe-hyperdx fork]
         CLI[dfe CLI]
     end
     subgraph control["Control plane"]
@@ -53,7 +53,7 @@ flowchart TB
 | dfe-engine | config control plane + API server | this repo |
 | dfe-infra | charts, ApplicationSets, bootstrap | consumes engine-authored overlays via the deploy repo |
 | dfe-ui | web UI | consumes the engine API only |
-| dfe-hyperdx | extended HyperDX fork - explore UI + telemetry sink | embedded in dfe-ui; reads ClickHouse |
+| dfe-hyperdx | the Observe view: our extended fork of the upstream HyperDX project, explore UI + telemetry sink | embedded in dfe-ui; reads ClickHouse |
 | dfe-schemas | every table, view, role and bootstrap topic, plus the apply manifest | the only place they are defined; the engine applies the manifest at boot ([schema bootstrap](data-plane/schema-bootstrap.md)) |
 | scalo-py / scalo-rs | shared libraries (neutral-identity OSS) | engine imports scalo-py; Rust services import scalo-rs |
 | dfe-receiver/loader/archiver/fetcher/transform-* | Rust runtime services | read YAML config the engine writes |
@@ -138,7 +138,7 @@ flowchart TB
         REG[Config registries<br/>git-native YAML CRUD]
         COMP[Compilers<br/>Helm values - DDL - Sigma - field maps]
         BRIDGE[GitOps bridge<br/>writes deploy repo]
-        PROV[Provisioners<br/>ClickHouse - HyperDX - orgs]
+        PROV[Provisioners<br/>ClickHouse - Observe - orgs]
     end
     subgraph repos["Git repos (SSoT)"]
         CONFIG[(config repo)]
@@ -149,7 +149,7 @@ flowchart TB
         ARGO2[DFE's Argo CD - dfe-system]
         APPSETS[ApplicationSets]
         RUST[Rust services]
-        SUB[(Backing services<br/>ClickHouse - Kafka - PG/FerretDB - HyperDX)]
+        SUB[(Backing services<br/>ClickHouse - Kafka - PG/FerretDB - Observe)]
     end
     CUI --> API
     CCLI --> API
@@ -214,11 +214,11 @@ different subtrees (`config/` and `values/` + `ddl/`).
 ## Layered deployment model (summary)
 
 Layer 0 platform baseline (DFE's own Argo + detect-or-install operators) ->
-Layer 1 backing services (ClickHouse, optional Kafka, PG+FerretDB, HyperDX) ->
+Layer 1 backing services (ClickHouse, optional Kafka, PG+FerretDB, Observe) ->
 Layer 2 apps + config (Rust services from pinned base charts + engine-authored
 overlays). Four tiers select defaults: **dfe-docker** (Compose), **slim**
 (gRPC, no Kafka), **single** (+ single-broker Kafka), **scale** (everything
-clustered). HyperDX ships in EVERY tier - it is the explore UI over all DFE
+clustered). Observe ships in EVERY tier - it is the explore UI over all DFE
 data and the self-monitoring sink, not an add-on. Full detail including the
 per-tier composition table, deploy-repo providers, backing-service modes, and
 the network model: [deployment/README.md](deployment/README.md).
@@ -234,7 +234,7 @@ flowchart LR
     LDR -->|schema-aware insert| CH[(ClickHouse)]
     CH --> VIEWS[standard views<br/>sigma_ - ecs_ - cim_]
     VIEWS --> HUNT[hunt runner]
-    VIEWS --> DASH[HyperDX explore]
+    VIEWS --> DASH[Observe]
     VIEWS --> QAPI[query API]
 ```
 
@@ -256,7 +256,7 @@ ReplacingMergeTree state table, fail-open.
 | Deploy repo | provider-agnostic (GitHub/GitLab/Forgejo) | no hard git-server dependency |
 | Backing services | DFE-owned, mode-driven (single/cluster/external) | never piggyback shared infra |
 | Secrets | External Secrets Operator (+ generators) | customer Vault, or in-cluster generators on bare |
-| Observability | OTel -> ClickHouse -> HyperDX | single storage backend |
+| Observability | OTel -> ClickHouse -> Observe | single storage backend |
 | Ingress / OIDC | Envoy Gateway (k8s) / oauth2-proxy (docker) | native OIDC at the edge |
 | Expression language | CEL (Python + Rust), DFE subset | one standard, tiered for performance |
 | Field mapping | YAML, two-tier (default + source) | human-editable, git-tracked, UI-editable |
@@ -269,7 +269,7 @@ ReplacingMergeTree state table, fail-open.
 | Control-plane surface | [control-plane/README.md](control-plane/README.md) | governed ops, gitops commit standard, RBAC, OIDC, CLI, UI API, type-safety sync |
 | Data plane | [data-plane/README.md](data-plane/README.md) | sources, schemas, field mapping, CEL, query API, hunts |
 | Deployment seam | [deployment/README.md](deployment/README.md) | tiers + composition, backing services, KEDA, observability, supply-chain pinning, e2e acceptance |
-| Integrations | [integrations/README.md](integrations/README.md) | dfe-ui guide, HyperDX fork maintenance |
+| Integrations | [integrations/README.md](integrations/README.md) | dfe-ui guide, dfe-hyperdx fork maintenance |
 | Archive | [archive/README.md](archive/README.md) | superseded research + snapshots, kept for the decision trail |
 
 Edge auth topology notes live in [auth-envoy-topology.md](auth-envoy-topology.md).

@@ -543,7 +543,7 @@ Sample tasks: fold into `system/operations/{operation}` with the result inline, 
 
 ### hyperdx
 
-The HyperDX fork's reads for the caller's org: under `orgs/{org}`, or a root of their own.
+The Search reads for the caller's org: under `orgs/{org}`, or a root of their own.
 
 | Old | New | Operation id | CLI | MCP tool | Status | Consumers | Note |
 |---|---|---|---|---|---|---|---|

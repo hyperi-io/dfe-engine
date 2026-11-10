@@ -3064,7 +3064,7 @@ def get_source_signals(
 
     Reads the loader's per-table counter out of the otel tables over a bounded
     five-minute window, so the console can put a number beside a source without
-    the operator opening HyperDX. It answers 200 with nulls where the series is
+    the operator opening Search. It answers 200 with nulls where the series is
     absent: a source that was only just defined has nothing to report, and that
     is not an error.
     """
@@ -3289,7 +3289,7 @@ async def delete_source(
 
     A delete production+team sends to review answers ``review_required`` and
     touches nothing else: main still carries the source, so its topics, records and
-    HyperDX source stay until the branch is merged.
+    Search source stay until the branch is merged.
     """
     routing = ReviewRouting()
     source = await run_blocking(
