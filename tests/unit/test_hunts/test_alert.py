@@ -1,5 +1,6 @@
 """Tests for hunt alert dispatcher (Apprise-based notifications)."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +14,8 @@ from dfe_engine.hunts.alert import (
     AlertTrigger,
     build_alert_config,
 )
+from dfe_engine.secrets import build_secrets
+from dfe_engine.settings import SecretsSettings
 
 # ── AlertTrigger ──────────────────────────────────────────────────
 
@@ -150,18 +153,6 @@ class TestAlertDestinationRegistry:
         r.add(AlertDestination(name="slack-alerts", url="slack://new/url/"))
         assert r.resolve("slack-alerts") == "slack://new/url/"
         assert len(r) == 2
-
-    def test_load_from_dict(self):
-        r = AlertDestinationRegistry()
-        r.load_from_dict(
-            {
-                "slack-dfe": "slack://t/b/c/",
-                "email-ops": "mailto://user:pass@smtp.example.com",
-            }
-        )
-        assert len(r) == 2
-        assert r.resolve("slack-dfe") == "slack://t/b/c/"
-        assert r.resolve("email-ops") == "mailto://user:pass@smtp.example.com"
 
     def test_contains(self):
         r = self._registry()
@@ -545,129 +536,171 @@ class TestBuildAlertConfigWithRegistry:
         assert config.channels == ["slack://g"]
 
 
-# ── AlertDestinationRegistry with DirectoryConfigStore ───────────
+# ── AlertDestinationRegistry over the secrets backend ────────────
 
 
-class TestAlertDestinationRegistryFileBacked:
-    """Tests for file-backed registry using DirectoryConfigStore."""
+def _secrets(tmp_path):
+    return build_secrets(SecretsSettings(provider="file", path=str(tmp_path / "secrets")))
 
-    def test_add_and_get_file_backed(self, tmp_path):
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        r.add(AlertDestination(name="slack-test", url="slack://t/b/c/"))
-        dest = r.get("slack-test")
-        assert dest.url == "slack://t/b/c/"
-        assert dest.name == "slack-test"
 
-    def test_persists_to_yaml(self, tmp_path):
-        dest_dir = tmp_path / "dests"
-        r = AlertDestinationRegistry(directory=str(dest_dir))
-        r.add(AlertDestination(name="slack-prod", url="slack://a/b/c/", description="Production"))
-        yaml_file = dest_dir / "slack-prod.yaml"
-        assert yaml_file.exists()
+def _engine_registry(tmp_path) -> AlertDestinationRegistry:
+    """The registry the engine API builds: the secrets backend plus its metadata directory."""
+    return AlertDestinationRegistry(secrets=_secrets(tmp_path), directory=str(tmp_path / "dests"))
 
-    def test_list_file_backed(self, tmp_path):
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        r.add(AlertDestination(name="slack-a", url="slack://a"))
+
+def _files(root) -> list[str]:
+    if not root.exists():
+        return []
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file())
+
+
+class TestAlertDestinationRegistrySecretsBacked:
+    """The URL lives in the secrets backend, the description and owner in the directory."""
+
+    def test_add_get_list_and_overwrite(self, tmp_path):
+        r = _engine_registry(tmp_path)
+        r.add(AlertDestination(name="slack-a", url="slack://a", description="A", hunt_name="h1"))
         r.add(AlertDestination(name="slack-b", url="slack://b"))
-        destinations = r.list()
-        names = {d.name for d in destinations}
-        assert names == {"slack-a", "slack-b"}
+        r.add(AlertDestination(name="slack-b", url="slack://b2", enabled=False))
+        try:
+            assert r.get("slack-a") == AlertDestination(
+                name="slack-a", url="slack://a", description="A", hunt_name="h1"
+            )
+            assert [d.name for d in r.list()] == ["slack-a", "slack-b"]
+            assert len(r) == 2
+            assert "slack-a" in r
+            assert "slack-c" not in r
+            assert r.resolve("slack-a") == "slack://a"
+            assert r.resolve("slack-b") is None
+        finally:
+            r.close()
 
-    def test_remove_file_backed(self, tmp_path):
-        dest_dir = tmp_path / "dests"
-        r = AlertDestinationRegistry(directory=str(dest_dir))
+    def test_the_secret_holds_the_url_and_the_directory_never_does(self, tmp_path):
+        r = _engine_registry(tmp_path)
+        r.add(AlertDestination(name="pd", url="pagerduty://key", description="On call"))
+        r.close()
+
+        secret = tmp_path / "secrets" / "alert-destinations" / "pd"
+        assert json.loads(secret.read_text(encoding="utf-8")) == {
+            "url": "pagerduty://key",
+            "enabled": True,
+        }
+        assert _files(tmp_path / "dests") == ["pd.yaml"]
+        assert "pagerduty://key" not in (tmp_path / "dests" / "pd.yaml").read_text(encoding="utf-8")
+
+    def test_the_runner_reads_by_name_and_lists_nothing(self, tmp_path):
+        engine = _engine_registry(tmp_path)
+        engine.add(AlertDestination(name="ops", url="json://ops", hunt_name="h1"))
+        engine.add(AlertDestination(name="off", url="json://off", enabled=False))
+        engine.close()
+
+        runner = AlertDestinationRegistry(secrets=_secrets(tmp_path))
+
+        assert runner.resolve_many(["ops", "off", "absent"]) == ["json://ops"]
+        assert runner.get("ops").hunt_name is None
+        assert runner.list() == []
+
+    def test_a_change_reaches_a_runner_already_reading(self, tmp_path):
+        """Each lookup reads the backend, so the runner needs no restart to see an edit."""
+        engine = _engine_registry(tmp_path)
+        runner = AlertDestinationRegistry(secrets=_secrets(tmp_path))
+        engine.add(AlertDestination(name="ops", url="json://first"))
+        assert runner.resolve("ops") == "json://first"
+
+        engine.add(AlertDestination(name="ops", url="json://second"))
+        assert runner.resolve("ops") == "json://second"
+        engine.add(AlertDestination(name="ops", url="json://second", enabled=False))
+        assert runner.resolve("ops") is None
+        engine.remove("ops")
+        engine.close()
+        assert "ops" not in runner
+
+    def test_remove_drops_the_secret_and_the_metadata(self, tmp_path):
+        r = _engine_registry(tmp_path)
         r.add(AlertDestination(name="slack-rm", url="slack://t"))
-        assert r.remove("slack-rm") is True
-        assert not (dest_dir / "slack-rm.yaml").exists()
-        assert r.resolve("slack-rm") is None
+        try:
+            assert r.remove("slack-rm") is True
+            assert r.remove("slack-rm") is False
+            assert r.resolve("slack-rm") is None
+            assert r.list() == []
+        finally:
+            r.close()
+        assert _files(tmp_path / "secrets") == []
+        assert _files(tmp_path / "dests") == []
 
-    def test_remove_nonexistent_file_backed(self, tmp_path):
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        assert r.remove("nope") is False
+    def test_metadata_whose_secret_is_gone_reads_as_absent(self, tmp_path):
+        r = _engine_registry(tmp_path)
+        r.add(AlertDestination(name="kept", url="slack://k"))
+        r.add(AlertDestination(name="orphan", url="slack://o"))
+        (tmp_path / "secrets" / "alert-destinations" / "orphan").unlink()
+        try:
+            assert [d.name for d in r.list()] == ["kept"]
+            assert "orphan" not in r
+            with pytest.raises(KeyError):
+                r.get("orphan")
+            assert r.remove("orphan") is True
+            assert _files(tmp_path / "dests") == ["kept.yaml"]
+        finally:
+            r.close()
 
-    def test_resolve_file_backed(self, tmp_path):
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        r.add(AlertDestination(name="pd", url="pagerduty://key"))
-        assert r.resolve("pd") == "pagerduty://key"
-
-    def test_resolve_disabled_file_backed(self, tmp_path):
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        r.add(AlertDestination(name="off", url="slack://t", enabled=False))
-        assert r.resolve("off") is None
-
-    def test_len_file_backed(self, tmp_path):
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        r.add(AlertDestination(name="a", url="slack://a"))
-        r.add(AlertDestination(name="b", url="slack://b"))
-        assert len(r) == 2
-
-    def test_contains_file_backed(self, tmp_path):
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        r.add(AlertDestination(name="x", url="slack://x"))
-        assert "x" in r
-        assert "y" not in r
-
-    def test_load_from_dict_file_backed(self, tmp_path):
-        dest_dir = tmp_path / "dests"
-        r = AlertDestinationRegistry(directory=str(dest_dir))
-        r.load_from_dict({"slack-a": "slack://a", "slack-b": "slack://b"})
-        assert len(r) == 2
-        assert (dest_dir / "slack-a.yaml").exists()
-        assert (dest_dir / "slack-b.yaml").exists()
-
-    def test_overwrite_file_backed(self, tmp_path):
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        r.add(AlertDestination(name="s", url="slack://old"))
-        r.add(AlertDestination(name="s", url="slack://new"))
-        assert r.resolve("s") == "slack://new"
-        assert len(r) == 1
+    def test_a_directory_with_no_secrets_backend_is_refused(self, tmp_path):
+        with pytest.raises(ValueError, match="needs a secrets backend"):
+            AlertDestinationRegistry(directory=str(tmp_path / "dests"))
 
 
-class TestAlertDestinationNameContainment:
-    """A destination is kept as ``<directory>/<name>.yaml``, and that file stays inside it."""
+class TestAlertDestinationNames:
+    """A name is a secret name on every backend and a file stem, so it takes the store-name rule."""
 
-    @pytest.mark.parametrize("name", ["../escape", "nested/../../escape", "nul\x00byte"])
-    def test_add_refuses_a_name_whose_file_leaves_the_directory(self, tmp_path, name):
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        with pytest.raises(AlertDestinationNameError):
+    @pytest.mark.parametrize(
+        "name",
+        [
+            pytest.param("../escape", id="parent"),
+            pytest.param("nested/../../escape", id="nested-parent"),
+            pytest.param("team/slack", id="separator"),
+            pytest.param("/abs/escape", id="absolute"),
+            pytest.param("nul\x00byte", id="nul"),
+            pytest.param(".", id="dot"),
+            pytest.param("..", id="dotdot"),
+            pytest.param(".hidden", id="leading-dot"),
+            pytest.param("has space", id="space"),
+            pytest.param("", id="empty"),
+            pytest.param("ops\n", id="trailing-newline"),
+            pytest.param("x" * 129, id="too-long"),
+        ],
+    )
+    def test_add_refuses_the_name_and_writes_nothing(self, tmp_path, name):
+        r = _engine_registry(tmp_path)
+        try:
+            with pytest.raises(AlertDestinationNameError):
+                r.add(AlertDestination(name=name, url="slack://x"))
+            with pytest.raises(AlertDestinationNameError):
+                AlertDestinationRegistry().add(AlertDestination(name=name, url="slack://x"))
+        finally:
+            r.close()
+        assert _files(tmp_path) == []
+
+    @pytest.mark.parametrize("name", ["a", "ops-webhook", "slack.alerts_2", "9" + "x" * 127])
+    def test_a_store_name_is_accepted(self, tmp_path, name):
+        r = _engine_registry(tmp_path)
+        try:
             r.add(AlertDestination(name=name, url="slack://x"))
-        assert sorted(p.name for p in tmp_path.iterdir()) == ["dests"]
-        assert list((tmp_path / "dests").iterdir()) == []
-
-    def test_add_refuses_an_absolute_name_and_writes_nothing_outside(self, tmp_path):
-        outside = tmp_path / "outside" / "escape"
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        with pytest.raises(AlertDestinationNameError):
-            r.add(AlertDestination(name=str(outside), url="slack://x"))
-        assert not (tmp_path / "outside").exists()
-
-    def test_add_refuses_a_symlink_that_points_out_of_the_directory(self, tmp_path):
-        dests = tmp_path / "dests"
-        r = AlertDestinationRegistry(directory=str(dests))
-        (tmp_path / "elsewhere").mkdir()
-        (dests / "linked").symlink_to(tmp_path / "elsewhere")
-        with pytest.raises(AlertDestinationNameError):
-            r.add(AlertDestination(name="linked/escape", url="slack://x"))
-        assert list((tmp_path / "elsewhere").iterdir()) == []
-
-    def test_a_name_inside_a_subdirectory_still_stores_and_resolves(self, tmp_path):
-        """A destination stored under a subdirectory stays readable and removable."""
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        r.add(AlertDestination(name="team/slack", url="slack://team"))
-        assert r.resolve("team/slack") == "slack://team"
-        assert r.remove("team/slack") is True
+            assert r.resolve(name) == "slack://x"
+        finally:
+            r.close()
 
     @pytest.mark.parametrize("form", ["absolute", "dotted"])
-    def test_a_name_outside_the_directory_is_found_nowhere_and_removes_nothing(
-        self, tmp_path, form
-    ):
-        planted = tmp_path / "planted.yaml"
-        planted.write_text("url: slack://kept\n")
-        r = AlertDestinationRegistry(directory=str(tmp_path / "dests"))
-        name = str(tmp_path / "planted") if form == "absolute" else "../planted"
-        assert name not in r
-        with pytest.raises(KeyError):
-            r.get(name)
-        assert r.resolve(name) is None
-        assert r.remove(name) is False
+    def test_a_name_outside_the_backend_is_found_nowhere_and_removes_nothing(self, tmp_path, form):
+        planted = tmp_path / "secrets" / "planted"
+        planted.parent.mkdir(parents=True)
+        planted.write_text('{"url": "slack://kept", "enabled": true}', encoding="utf-8")
+        r = _engine_registry(tmp_path)
+        name = str(planted) if form == "absolute" else "../planted"
+        try:
+            assert name not in r
+            with pytest.raises(KeyError):
+                r.get(name)
+            assert r.resolve(name) is None
+            assert r.remove(name) is False
+        finally:
+            r.close()
         assert planted.exists()

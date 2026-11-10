@@ -418,7 +418,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     )
     app.state.group_sensitive_attributes = AttributeStore(auth_dir / "sensitive-group-attributes")
 
-    from dfe_engine.secrets import build_secrets, warn_on_aws_managed_key
+    from dfe_engine.secrets import build_secret_mirror, build_secrets, warn_on_aws_managed_key
 
     # Ahead of the first store use, so a failed mint cannot hide which key it ran under.
     warn_on_aws_managed_key(settings.secrets)
@@ -432,9 +432,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # The one seam for secrets the engine mints - OIDC provider credentials and
     # sigma provider tokens resolve through it, never through a backend SDK.
     app.state.dfe_secrets = build_secrets(settings.secrets)
-    from dfe_engine.orgs.ingest_tokens import build_bearer_mirror
-
-    app.state.bearer_mirror = build_bearer_mirror(settings.ingest.bearer_secret)
+    app.state.bearer_mirror = build_secret_mirror(settings.ingest.bearer_secret)
     _keep_bearer_tokens_in_step(app)
 
     from dfe_engine.governance import PolicyStore

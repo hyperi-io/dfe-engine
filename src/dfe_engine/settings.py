@@ -14,7 +14,6 @@ environment winning. ``_ENV_FIELDS`` lists every environment variable that sets 
 the engine's own, not scalo's: moving onto scalo's is #600.
 """
 
-import contextlib
 import json
 import os
 import re
@@ -374,16 +373,23 @@ class HuntsSettings(BaseModel):
         default_factory=list,
         description="Global Apprise notification URLs applied to all hunts (e.g. slack://token/#channel)",
     )
-    alert_destinations: dict[str, str] = Field(
-        default_factory=dict,
-        description=(
-            "Named alert destinations: {name: apprise_url}."
-            " Inline bootstrap; prefer alert_destinations_dir."
-        ),
-    )
     alert_destinations_dir: str = Field(
         default="",
-        description="YAML directory for alert destination definitions (DirectoryConfigStore SSoT)",
+        description=(
+            "The engine's directory of alert destination descriptions and owning hunts, the "
+            "index the API lists from. Each URL is a secret under alert-destinations/<name> "
+            "in the secrets backend, which the hunt runner reads by name. Empty turns the "
+            "alert destinations API off."
+        ),
+    )
+    alert_destinations_secret: str = Field(
+        default="",
+        description=(
+            "Kubernetes Secret, in the engine's own namespace, that the engine also writes each "
+            "alert destination into, one key per destination name, for the hunt runner to mount "
+            "at <secrets.path>/alert-destinations. Empty writes none. The engine needs get and "
+            "update on that one Secret."
+        ),
     )
     max_detections_per_run: int = Field(
         default=MAX_DETECTIONS_PER_RUN,
@@ -457,6 +463,11 @@ class HuntsSettings(BaseModel):
                 "and the hunt runner both read"
             )
         return directory
+
+    @field_validator("alert_destinations_secret")
+    @classmethod
+    def _alert_destinations_secret_is_a_secret_name(cls, value: str) -> str:
+        return _kubernetes_secret_name(value, "DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_SECRET")
 
     @field_validator("lookup_databases")
     @classmethod
@@ -1858,15 +1869,20 @@ class IngestSettings(BaseModel):
     @field_validator("bearer_secret")
     @classmethod
     def _bearer_secret_is_a_secret_name(cls, value: str) -> str:
-        if value:
-            # scalo's own check, so the engine refuses at startup what the API server would.
-            from scalo.secrets import KubernetesConfig
+        return _kubernetes_secret_name(value, "DFE_ENGINE_INGEST_BEARER_SECRET")
 
-            try:
-                KubernetesConfig(secret_name=value)
-            except ValueError as exc:
-                raise ValueError(f"DFE_ENGINE_INGEST_BEARER_SECRET: {exc}") from exc
-        return value
+
+def _kubernetes_secret_name(value: str, variable: str) -> str:
+    """*value* when empty or a Secret name the API server takes, else a ValueError naming *variable*."""
+    if value:
+        # scalo's own check, so the engine refuses at startup what the API server would.
+        from scalo.secrets import KubernetesConfig
+
+        try:
+            KubernetesConfig(secret_name=value)
+        except ValueError as exc:
+            raise ValueError(f"{variable}: {exc}") from exc
+    return value
 
 
 class OrgsSettings(BaseModel):
@@ -2074,6 +2090,7 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_HUNTS_RULES_DIR": "hunts.rules_dir",
             "DFE_ENGINE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD": "hunts.checkpoint_timestamp_field",
             "DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_DIR": "hunts.alert_destinations_dir",
+            "DFE_ENGINE_HUNTS_ALERT_DESTINATIONS_SECRET": "hunts.alert_destinations_secret",
             "DFE_ENGINE_ARTIFACTORY_URL": "artifactory.url",
             "DFE_ENGINE_ARTIFACTORY_USERNAME": "artifactory.username",
             "DFE_ENGINE_ARTIFACTORY_PASSWORD": "artifactory.password",
@@ -2345,10 +2362,6 @@ def _get_env_overrides() -> dict:
     # An empty list is the operator saying there is no broker, so it overrides the dev default.
     if (servers := os.environ.get("DFE_ENGINE_KAFKA_BOOTSTRAP_SERVERS")) is not None:
         _set_path(overrides, "kafka.bootstrap_servers", servers)
-    # JSON of {name: apprise_url}. A malformed value is ignored.
-    if value := os.getenv("DFE_ENGINE_HUNTS_ALERT_DESTINATIONS"):
-        with contextlib.suppress(json.JSONDecodeError):
-            _set_path(overrides, "hunts.alert_destinations", json.loads(value))
 
     # The TLS escape valves are scalo's: one setting relaxes every scalo-minted client (ClickHouse,
     # scalo.http, scalo.secrets), and an explicit SCALO_* variable wins.

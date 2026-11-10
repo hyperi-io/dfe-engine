@@ -35,7 +35,7 @@ from dfe_engine.api import _DfeEngineApp
 from dfe_engine.clickhouse.tls import ClickHouseCaCertUnreadable
 from dfe_engine.hunts import runner_cli as cli
 from dfe_engine.hunts.lookups import LookupDatabaseError
-from dfe_engine.settings import DFESettings, HuntsSettings
+from dfe_engine.settings import DFESettings, HuntsSettings, SecretsSettings
 
 runner = CliRunner()
 
@@ -262,27 +262,23 @@ def test_a_reload_check_clickhouse_cannot_answer_fires_nothing_until_it_passes(
     assert run_events == ["tick", "check down", "check", "tick", "check", "tick", "check", "tick"]
 
 
-def test_the_notifier_reads_the_destination_directory_when_set(tmp_path):
+def test_the_notifier_reads_destinations_from_the_secrets_backend_alone(tmp_path):
+    """The engine's metadata directory is not the runner's, so only the backend is shared."""
     from dfe_engine.hunts.alert import AlertDestination, AlertDestinationRegistry
+    from dfe_engine.secrets import build_secrets
 
-    seed = AlertDestinationRegistry(directory=str(tmp_path))
-    seed.add(AlertDestination(name="ops", url="json://127.0.0.1:1/x"))
-    seed.close()
-    hunts = HuntsSettings(alert_destinations_dir=str(tmp_path), alert_channels=["json://g/x"])
+    secrets = SecretsSettings(provider="file", path=str(tmp_path / "secrets"))
+    engine = AlertDestinationRegistry(
+        secrets=build_secrets(secrets), directory=str(tmp_path / "engine-only")
+    )
+    engine.add(AlertDestination(name="ops", url="json://127.0.0.1:1/x"))
+    engine.close()
+    hunts = HuntsSettings(alert_channels=["json://g/x"])
 
-    notifier = cli._match_notifier(SimpleNamespace(hunts=hunts))  # ty: ignore[invalid-argument-type]  # only .hunts is read
+    notifier = cli._match_notifier(SimpleNamespace(hunts=hunts, secrets=secrets))  # ty: ignore[invalid-argument-type]  # only .hunts and .secrets are read
 
     registry = notifier._registry
     assert registry is not None
     assert registry.resolve("ops") == "json://127.0.0.1:1/x"
+    assert registry.list() == []
     assert notifier._global_channels == ["json://g/x"]
-    registry.close()
-
-
-def test_the_notifier_falls_back_to_the_inline_destinations():
-    hunts = HuntsSettings(alert_destinations={"ops": "json://127.0.0.1:1/x"})
-
-    notifier = cli._match_notifier(SimpleNamespace(hunts=hunts))  # ty: ignore[invalid-argument-type]  # only .hunts is read
-
-    assert notifier._registry is not None
-    assert notifier._registry.resolve("ops") == "json://127.0.0.1:1/x"

@@ -47,11 +47,15 @@ class ErrorCode:
     RULE_MATCHES_EVERYTHING = "rule_matches_everything"
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"
+    SECRETS_UNAVAILABLE = "secrets_unavailable"
     UNRESOLVED_REFERENCE = "unresolved_reference"
     TOO_MANY_TASKS = "too_many_tasks"
 
 
 SERVICE_UNAVAILABLE_MESSAGE = "Backing service is unreachable, retry shortly"
+SECRETS_UNAVAILABLE_MESSAGE = (
+    "The secrets backend refused the request, and the engine log has the reason"
+)
 GITOPS_UNAVAILABLE_MESSAGE = "The deploy repo is unreachable, retry after the Retry-After interval"
 
 
@@ -184,6 +188,7 @@ def _answer(
 def install_exception_handlers(app: FastAPI) -> None:
     """Answer the engine's domain exceptions as problems. Call it after :func:`scalo.api.install`."""
     from scalo.resilience import ServiceUnavailable
+    from scalo.secrets import SecretsError
 
     from dfe_engine.api.password_floor import count_floor_refusal, is_floor_refusal
     from dfe_engine.api.task_manager import TaskCapacityError
@@ -265,6 +270,20 @@ def install_exception_handlers(app: FastAPI) -> None:
             remote=exc.remote,
         )
 
+    # A provider's text can name paths, mounts and policies, so it reaches the log only.
+    @app.exception_handler(SecretsError)
+    async def secrets_unavailable(request: Request, exc: SecretsError):
+        error = backend_failure(
+            503,
+            ErrorCode.SECRETS_UNAVAILABLE,
+            SECRETS_UNAVAILABLE_MESSAGE,
+            exc,
+            event="secrets backend refused",
+            route=route_template(request.scope),
+        )
+        return problem_response(error.problem, error.headers)
+
+    # Starlette matches the most derived handler, so this wins over SecretsError.
     @app.exception_handler(SecretNameHeldError)
     async def secret_name_held(_request: Request, exc: SecretNameHeldError):
         return _answer(409, ErrorCode.CONFLICT, exc.message)
