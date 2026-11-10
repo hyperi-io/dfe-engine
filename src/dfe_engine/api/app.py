@@ -482,14 +482,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
         logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
 
         # In the background, because HyperDX may boot after the engine and startup must not wait on it.
-        from dfe_engine.hyperdx.all_sources import AllSourcesRegistration
+        from dfe_engine.hyperdx.engine_sources import EngineSourcesRegistration
 
-        registration = AllSourcesRegistration(
+        registration = EngineSourcesRegistration(
             client=app.state.hyperdx_client,
             database=settings.clickhouse.effective_data_database,
         )
-        app.state.all_sources_registration = asyncio.create_task(
-            registration.run(), name="hyperdx-all-sources"
+        app.state.engine_sources_registration = asyncio.create_task(
+            registration.run(), name="hyperdx-engine-sources"
         )
 
     # Reconciles the seeded quota tiers + service roles + per-org roles/row
@@ -663,10 +663,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     if gitops_consolidation is not None:
         gitops_consolidation.cancel()
         await asyncio.gather(gitops_consolidation, return_exceptions=True)
-    all_sources_registration = getattr(app.state, "all_sources_registration", None)
-    if all_sources_registration is not None:
-        all_sources_registration.cancel()
-        await asyncio.gather(all_sources_registration, return_exceptions=True)
+    engine_sources_registration = getattr(app.state, "engine_sources_registration", None)
+    if engine_sources_registration is not None:
+        engine_sources_registration.cancel()
+        await asyncio.gather(engine_sources_registration, return_exceptions=True)
     stranded_topic_sweep = getattr(app.state, "stranded_topic_sweep", None)
     if stranded_topic_sweep is not None:
         stranded_topic_sweep.cancel()

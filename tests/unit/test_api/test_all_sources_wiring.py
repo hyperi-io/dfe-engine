@@ -24,7 +24,7 @@ from dfe_engine.settings import DFESettings, HyperDXSettings
 
 GUARD_REFUSAL = "unit tests do not reconcile against a ClickHouse (conftest guard)"
 NOT_REBUILT = "all_sources not rebuilt"
-NOT_REGISTERED = "HyperDX all_sources source not registered; trying again until it is"
+NOT_REGISTERED = "HyperDX engine sources not registered, trying again until they are"
 
 
 def _create_source(*, client: TestClient, headers: dict[str, str], name: str) -> None:
@@ -103,9 +103,9 @@ class TestBulkAction:
 
 class TestLifespan:
     def test_without_hyperdx_registers_nothing(self, app: FastAPI, client: TestClient):
-        assert getattr(app.state, "all_sources_registration", None) is None
+        assert getattr(app.state, "engine_sources_registration", None) is None
 
-    def test_registers_all_sources_while_hyperdx_is_down(
+    def test_registers_engine_sources_while_hyperdx_is_down(
         self, api_settings: DFESettings, audit_events: list[dict]
     ):
         def warned() -> bool:
@@ -118,7 +118,7 @@ class TestLifespan:
         try:
             with TestClient(application, raise_server_exceptions=False):
                 started = _wait_for(condition=warned)
-                registration = application.state.all_sources_registration
+                registration = application.state.engine_sources_registration
         finally:
             _registries.clear()
 

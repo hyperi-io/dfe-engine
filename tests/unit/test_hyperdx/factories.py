@@ -11,22 +11,22 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from dfe_engine.hyperdx.all_sources import MAX_RETRY_SECONDS, AllSourcesRegistration
 from dfe_engine.hyperdx.client import RETRY_AFTER_SECONDS
+from dfe_engine.hyperdx.engine_sources import MAX_RETRY_SECONDS, EngineSourcesRegistration
 from dfe_engine.hyperdx.sources import DfeSourcesClient
 from tests.unit.test_hyperdx.fake_hyperdx import Exploding, FakeHyperDX
 
 
-def make_all_sources_registration(
+def make_engine_sources_registration(
     *,
     client: DfeSourcesClient,
     database: str = "dfe",
     first_retry_seconds: float = RETRY_AFTER_SECONDS,
     max_retry_seconds: float = MAX_RETRY_SECONDS,
     sleep: Callable[[float], Awaitable[object]] = asyncio.sleep,
-) -> AllSourcesRegistration:
-    """Build a hyperdx.all_sources.AllSourcesRegistration."""
-    return AllSourcesRegistration(
+) -> EngineSourcesRegistration:
+    """Build a hyperdx.engine_sources.EngineSourcesRegistration."""
+    return EngineSourcesRegistration(
         client=client,
         database=database,
         first_retry_seconds=first_retry_seconds,

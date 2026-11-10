@@ -1,14 +1,14 @@
 #  Project:      dfe-engine
-#  File:         hyperdx/all_sources.py
-#  Purpose:      The HyperDX source over the all_sources Merge table, on every team
+#  File:         hyperdx/engine_sources.py
+#  Purpose:      The HyperDX sources the engine owns, over all_sources and the dead-letter table, on every team
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""The ``all_sources`` HyperDX source, which the DFE Throughput dashboard reads every source's rows through.
+"""The HyperDX sources the engine owns rather than a DFE source: ``all_sources`` and ``dlq``.
 
-The fork skips a provisioned dashboard on any team missing a source it reads, so a HyperDX that boots after the engine must still end up with this source: :class:`AllSourcesRegistration` keeps trying, backing off while HyperDX stays away.
+The DFE Throughput dashboard reads every source's rows through ``all_sources``, and ``dlq`` shows the dead letters every app writes. The fork skips a provisioned dashboard on any team missing a source it reads, so a HyperDX that boots after the engine must still end up with both: :class:`EngineSourcesRegistration` keeps trying, backing off while HyperDX stays away.
 """
 
 import asyncio
@@ -24,19 +24,29 @@ from dfe_engine.clickhouse.all_sources import (
 from dfe_engine.http_errors import describe_http_error
 from dfe_engine.hyperdx.client import RETRY_AFTER_SECONDS
 from dfe_engine.hyperdx.sources import DfeSourcesClient, ensure_source
+from dfe_engine.schema.plan import object_names
 
 __all__ = [
+    "DLQ_TABLE_ID",
+    "DLQ_TIMESTAMP",
     "MAX_RETRY_SECONDS",
-    "AllSourcesRegistration",
+    "EngineSourcesRegistration",
     "register_all_sources",
+    "register_dlq_source",
 ]
 
 # The longest wait between registration attempts while HyperDX stays down or keeps refusing.
 MAX_RETRY_SECONDS = 900.0
 
+# The manifest id of the dead-letter table, whose name the HyperDX source also takes.
+DLQ_TABLE_ID = "data.dlq"
+
+# When the entry was dead-lettered, which every entry carries.
+DLQ_TIMESTAMP = "_timestamp"
+
 
 async def register_all_sources(*, client: DfeSourcesClient, database: str) -> list[str] | None:
-    """Create or update the all_sources HyperDX source on every team; None when HyperDX did not take it."""
+    """Create or update the all_sources HyperDX source on every team, or None when HyperDX did not take it."""
     return await ensure_source(
         client=client,
         columns=ALL_SOURCES_COLUMNS,
@@ -47,10 +57,26 @@ async def register_all_sources(*, client: DfeSourcesClient, database: str) -> li
     )
 
 
-class AllSourcesRegistration:
-    """Register the all_sources HyperDX source, trying again until HyperDX takes it.
+async def register_dlq_source(*, client: DfeSourcesClient, database: str) -> list[str] | None:
+    """Create or update the dlq HyperDX source on every team, or None when HyperDX did not take it."""
+    table = object_names(DLQ_TABLE_ID, data_database=database)[DLQ_TABLE_ID]
+    return await ensure_source(
+        client=client,
+        columns=(DLQ_TIMESTAMP,),
+        database=database,
+        name=table,
+        table=table,
+        timestamp=DLQ_TIMESTAMP,
+    )
 
-    The wait starts at *first_retry_seconds* and doubles after each failed attempt up to *max_retry_seconds*, so a HyperDX that is down, or refuses the source for good, costs one attempt every few minutes rather than one a minute.
+
+_REGISTRATIONS = (register_all_sources, register_dlq_source)
+
+
+class EngineSourcesRegistration:
+    """Register the engine's HyperDX sources, trying again until HyperDX takes every one.
+
+    The wait starts at *first_retry_seconds* and doubles after each failed attempt up to *max_retry_seconds*, so a HyperDX that is down, or refuses a source for good, costs one attempt every few minutes rather than one a minute.
     """
 
     def __init__(
@@ -62,7 +88,7 @@ class AllSourcesRegistration:
         max_retry_seconds: float = MAX_RETRY_SECONDS,
         sleep: Callable[[float], Awaitable[object]] = asyncio.sleep,
     ) -> None:
-        """Hold the client and the back-off; nothing runs until attempt or run."""
+        """Hold the client and the back-off. Nothing runs until attempt or run."""
         self._client = client
         self._database = database
         self._failing = False
@@ -74,7 +100,7 @@ class AllSourcesRegistration:
         """Warn on the first failure of a run of them, and stay quiet for the rest."""
         if not (self._failing):
             logger.warning(
-                "HyperDX all_sources source not registered; trying again until it is",
+                "HyperDX engine sources not registered, trying again until they are",
                 max_retry_seconds=self._max_retry_seconds,
                 retry_seconds=self._first_retry_seconds,
                 **fields,
@@ -82,16 +108,18 @@ class AllSourcesRegistration:
         self._failing = True
 
     async def attempt(self) -> bool:
-        """Try the registration once and report whether HyperDX took it."""
+        """Try every registration once and report whether HyperDX took them all."""
+        teams: list[list[str] | None] = []
         try:
-            teams = await register_all_sources(client=self._client, database=self._database)
+            for register in _REGISTRATIONS:
+                teams.append(await register(client=self._client, database=self._database))
         except Exception as exc:  # the retry outlives any one failure
             self._failed(fields=describe_http_error(exc=exc))
             return False
-        if teams is None:
+        if None in teams:
             self._failed(fields={})
             return False
-        logger.info("HyperDX all_sources source registered", teams=len(teams))
+        logger.info("HyperDX engine sources registered", teams=min(len(t or []) for t in teams))
         self._failing = False
         return True
 

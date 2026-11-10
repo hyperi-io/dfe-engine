@@ -121,6 +121,17 @@ class SourceCoreResourceError(SourceValidationError):
         )
 
 
+class SourceReservedTableError(SourceValidationError):
+    """An operator source is named after a table the core manifest owns in the data database."""
+
+    def __init__(self, *, source: str) -> None:
+        self.source = source
+        super().__init__(
+            f"source {source!r} would write to the {source!r} table, which the core schema owns. "
+            "Pick another name."
+        )
+
+
 class SourceMatchConflictError(SourceValidationError):
     """Two enabled sources share the same receiver condition.
 
@@ -959,11 +970,28 @@ class SourceRegistry:
     # Validation
     # -----------------------------------------------------------------
 
+    @staticmethod
+    def _refuse_reserved_table(source: Source) -> None:
+        """Refuse an operator source whose table is one the core manifest owns, such as ``dlq`` or ``detection``.
+
+        The landing table is the exception, because the ``main`` source writes to it.
+        """
+        from dfe_engine.schema.core_schema import landing_table_name
+        from dfe_engine.schema.plan import data_table_names
+        from dfe_engine.settings import get_settings
+
+        database = get_settings().clickhouse.effective_data_database
+        reserved = data_table_names(data_database=database) - {landing_table_name()}
+        if source.table_name in reserved:
+            raise SourceReservedTableError(source=source.source)
+
     def _validate_save(self, source: Source, *, core_reconcile: bool = False) -> None:
         """Validate before saving: not core, unique source, runnable flow, no match conflicts."""
         # Read the STORED doc, not the incoming one: an operator body claiming resource_type is rejected at the model, and a body that omits it must not be able to demote a core source by overwriting it.
         if not (core_reconcile) and self.is_core(source.source):
             raise SourceCoreResourceError(action="modify", source=source.source)
+        if not (core_reconcile):
+            self._refuse_reserved_table(source)
 
         candidate_version = source.versions.get(source.current)
         live = source.state != "disabled"

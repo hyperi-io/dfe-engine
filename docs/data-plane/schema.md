@@ -696,6 +696,10 @@ Each rebuild applies the tenant row policy ([rbac.md](../control-plane/rbac.md))
 
 The engine registers it on every team as the HyperDX source `all_sources`, timed on `_timestamp_load` because `_timestamp` reads as epoch 0 for a passthrough member. Registration retries with backoff from 60 s to 15 min until HyperDX accepts it.
 
+## The `dlq` Table
+
+`dfe.dlq` holds the dead letters every app writes, kept 30 days. The engine registers it on every team as the HyperDX source `dlq`, timed on `_timestamp`, alongside `all_sources` and with the same retry. A source cannot be named `dlq`, `detection` or `repository`, since its table would be the core table of that name.
+
 ---
 
 ## Sigma Column Mappings

@@ -16,7 +16,7 @@ class TestDataTableNames:
         names = data_table_names(data_database="dfe")
 
         assert {
-            "core tables": {"detection", "main", "repository"} <= names,
+            "core tables": {"detection", "dlq", "main", "repository"} <= names,
             "meta database table": "orgs" in names,
             "view": "dfe_v_system_health" in names,
         } == {"core tables": True, "meta database table": False, "view": False}
