@@ -3,6 +3,19 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.87](https://github.com/hyperi-io/dfe-engine/compare/v1.22.86...v1.22.87) (2026-11-10)
+
+### Bug Fixes
+
+* **api:** name the console feature in the API reference ([#1107](https://github.com/hyperi-io/dfe-engine/issues/1107)) ([a38768c](https://github.com/hyperi-io/dfe-engine/commit/a38768c351017bfd2860c23acca39128580611e9))
+* **apps:** count CPU totals per stream so a stuck one adds nothing ([223d5da](https://github.com/hyperi-io/dfe-engine/commit/223d5daa2f94f6ad9f14ff0dbc0c8f6944801d06))
+* **apps:** keep the hyperdx app id until dfe-infra renames it ([478be91](https://github.com/hyperi-io/dfe-engine/commit/478be91ee2c78c0f1c89de7fad000868db197671))
+* **apps:** name the search console app dfe-hyperdx ([9ee1999](https://github.com/hyperi-io/dfe-engine/commit/9ee199948ade727029cfdf1e1b6e0f2420d07a7a))
+* **apps:** rename search console from hyperdx to dfe-hyperdx ([acaa5f5](https://github.com/hyperi-io/dfe-engine/commit/acaa5f517e283970d9fa05121226177d1ffae0a6))
+* **apps:** serve the Components page's metrics, totals and history ([#1104](https://github.com/hyperi-io/dfe-engine/issues/1104)) ([cf7ab63](https://github.com/hyperi-io/dfe-engine/commit/cf7ab6301428d3cdcb843766a7d1dd6b5fe7013e))
+* **dlq:** show dead letters in console and block core source names ([7271c87](https://github.com/hyperi-io/dfe-engine/commit/7271c8755997d662d6635ed8bde1a96ecf798d7a))
+* **licences:** refresh third-party notices for dfe-schemas 0.2.24 ([2fa1d8c](https://github.com/hyperi-io/dfe-engine/commit/2fa1d8c39747e75fff406ff061d40d4e3d1cbe81))
+
 ## [1.22.86](https://github.com/hyperi-io/dfe-engine/compare/v1.22.85...v1.22.86) (2026-11-10)
 
 ### Bug Fixes
