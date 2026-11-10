@@ -32,7 +32,8 @@ queries:
   # window and the MAX across series is returned, so the hottest pod sets the value.
   # A pushed row names its pod in the resource (service.instance.id), a scraped row
   # in its attributes; rows that name no pod share one series. No matching row reads
-  # as 0, a successful answer that replaces the cached last-good value.
+  # as 0, a successful answer that replaces the cached last-good value. The window is
+  # two of scalo's 60 s export intervals, so every live pod has a reading inside it.
   pressure:
     database: otel
     sql: >
@@ -47,7 +48,7 @@ queries:
       )
     params: [service]
     binds:
-      window_seconds: 60
+      window_seconds: 120
     result_field: 0
     clamp_min: 0
     clamp_max: 100
