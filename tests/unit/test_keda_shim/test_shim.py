@@ -18,9 +18,10 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import pytest
+import yaml
 from clickhouse_connect.driver.exceptions import DatabaseError, OperationalError
 
-from dfe_engine.keda_shim.shim import QueryShim, _ch_client
+from dfe_engine.keda_shim.shim import _BUILTIN_QUERIES, QueryShim, _ch_client
 from dfe_engine.settings import DFESettings
 
 # Each message is the text clickhouse-connect raises for that failure against a live server.
@@ -455,8 +456,11 @@ def test_an_override_params_list_replaces_the_builtin_one(tmp_path):
         "    params: [app]\n",
     )
 
+    builtin = yaml.safe_load(_BUILTIN_QUERIES.read_text(encoding="utf-8"))
+    window = builtin["queries"]["pressure"]["binds"]["window_seconds"]
+
     assert shim.run("pressure", {"app": "dfe-receiver"}) == 42
-    assert client.calls[0][1] == {"window_seconds": 60, "app": "dfe-receiver"}
+    assert client.calls[0][1] == {"window_seconds": window, "app": "dfe-receiver"}
 
 
 def test_an_override_adds_a_query_beside_the_builtins(tmp_path):

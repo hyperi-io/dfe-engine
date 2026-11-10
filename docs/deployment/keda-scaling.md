@@ -37,11 +37,14 @@ flowchart LR
 
 scalo registers the composite as a bare `scaling_pressure` gauge. An app emits it under that name, or as `<namespace>_scaling_pressure` when its deployment sets a metrics namespace. The shim reads every series of the gauge for one service and returns the hottest:
 
-- **Name:** the bare `scaling_pressure`, plus any `<prefix>_scaling_pressure`. Nothing else matches, so a metric that merely ends in the words does not.
-- **Service:** `ServiceName` is the app instance, matched exactly.
-- **Series:** one metric name, one attribute set and one pod. A push over OTLP names the pod in the resource (`service.instance.id`), a Prometheus scrape names it in the data-point attributes, and rows that name no pod share one series.
-- **Reduction:** each series is averaged over the 60s window, then the MAX across series is returned, so the hottest pod sets the value. Averaging the pods together would report a busy pod and an idle one as one lukewarm number.
-- **No matching rows:** the query answers 0. That is a successful answer, so it replaces the cached value rather than holding it, and the CPU trigger sets the replica count. Only a failed query (ClickHouse unreachable, a timeout, a bad query) returns the last-good value, or the `cold_hold` of 0 when there is none yet.
+| Part | Rule |
+|---|---|
+| Name | The bare `scaling_pressure`, plus any `<prefix>_scaling_pressure`. Nothing else matches, so a metric that merely ends in the words does not. |
+| Service | `ServiceName` is the app instance, matched exactly. |
+| Series | One metric name, one attribute set and one pod. A push over OTLP names the pod in the resource (`service.instance.id`), a Prometheus scrape names it in the data-point attributes, and rows that name no pod share one series. |
+| Reduction | Each series is averaged over a 120s window, then the MAX across series is returned, so the hottest pod sets the value. The window is two of scalo's 60s export intervals, so every live pod has a reading in it. Averaging the pods together would report a busy pod and an idle one as one lukewarm number. |
+
+With no matching rows the query answers 0. That is a successful answer, so it replaces the cached value rather than holding it, and the CPU trigger sets the replica count. Only a failed query (ClickHouse unreachable, a timeout, a bad query) returns the last-good value, or the `cold_hold` of 0 when there is none yet.
 
 The rule lives in `src/dfe_engine/scaling_pressure.py` and is substituted into both query catalogues (the shim's and the app-management reader's), so the autoscaler and the console match the same rows. The contract settled on dfe-infra#302 is that the reader matches any prefix, so no app is released to rename its gauge.
 

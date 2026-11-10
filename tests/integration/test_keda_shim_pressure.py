@@ -115,6 +115,14 @@ def test_the_console_reads_each_pods_latest_and_reports_the_hotter_pod(
     assert gauges[SCALING_PRESSURE] == 80
 
 
+def test_a_pod_that_exports_once_a_minute_still_counts_between_exports(ch_client, gauge_db):
+    """Pod b, the hotter, last exported 90 s ago: one interval plus jitter, still live."""
+    _write(ch_client, gauge_db, 30, resource=_pod("dfe-receiver-a"), age_seconds=5)
+    _write(ch_client, gauge_db, 40, resource=_pod("dfe-receiver-b"), age_seconds=90)
+
+    assert _shim(ch_client, gauge_db).run("pressure", {"service": _SERVICE}) == 40
+
+
 def test_pushed_without_a_pod_beside_scraped_per_pod_reads_the_hottest_series(ch_client, gauge_db):
     """The merged push averages to 40 and the scraped pods to 35 and 50."""
     _write(ch_client, gauge_db, 30, 50, resource={"service.name": _SERVICE})
