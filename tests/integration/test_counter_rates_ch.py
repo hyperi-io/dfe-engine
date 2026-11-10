@@ -766,20 +766,43 @@ def test_cpu_cores_come_from_the_live_stream_beside_a_stuck_one(
 
 
 @pytest.mark.parametrize(
-    ("first", "second", "expected"),
+    ("streams", "expected"),
     [
-        ([(300, 1000.0), (240, 1030.0), (180, 1060.0)], [(293, 50.0), (233, 170.0)], 180.0),
+        (
+            [
+                ("pod-a", None, [(300, 1000.0), (240, 1030.0), (180, 1060.0)]),
+                ("pod-b", None, [(293, 50.0), (233, 170.0)]),
+            ],
+            180.0,
+        ),
         # The drop is a restart, so the new run counts from zero
-        ([(300, 900.0), (240, 3.0), (180, 33.0)], [], 33.0),
-        ([(300, 1000.0)], [], 0.0),
+        ([("pod-a", None, [(300, 900.0), (240, 3.0), (180, 33.0)])], 33.0),
+        ([("pod-a", None, [(300, 1000.0)])], 0.0),
+        # Interleaved with the live stream, the stuck one would read as a restart at every step
+        (
+            [
+                ("pod-a", 7185, [(300, 1000.0), (240, 1030.0), (180, 1060.0)]),
+                ("pod-a", 7200, [(300, 0.5), (240, 0.5), (180, 0.5)]),
+            ],
+            60.0,
+        ),
+        # A run that started inside the window counts its first reading from zero
+        (
+            [
+                ("pod-a", 7200, [(900, 1000.0), (840, 1030.0)]),
+                ("pod-a", 600, [(540, 3.0), (480, 33.0)]),
+            ],
+            63.0,
+        ),
     ],
-    ids=["two-pods", "restart", "single-reading"],
+    ids=["two-pods", "restart", "single-reading", "stuck-beside-live", "restart-new-start"],
 )
 def test_cpu_seconds_total_is_their_rise_over_the_window(
-    ch_client, manager_client, otel_db, base, first, second, expected
+    ch_client, manager_client, otel_db, base, streams, expected
 ):
-    _cpu(ch_client, otel_db, base, *first, pod="pod-a")
-    _cpu(ch_client, otel_db, base, *second, pod="pod-b")
+    for pod, started_ago, points in streams:
+        start = 0 if started_ago is None else base - started_ago
+        _cpu(ch_client, otel_db, base, *points, pod=pod, start=start)
 
     found = OperationalReader(manager_client, otel_db).totals(_SERVICE, window_seconds=3600)
 
