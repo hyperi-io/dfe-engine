@@ -60,6 +60,8 @@ def test_a_missed_quorum_is_its_own_failure(code):
 
     assert isinstance(error, SchemaLockQuorumError)
     assert str(error).startswith("could not write the schema lock: ")
+    # Only a refused read for a missing part is cleared by writing a new one.
+    assert error.missing_part is (code == 289)
 
 
 @pytest.mark.parametrize(

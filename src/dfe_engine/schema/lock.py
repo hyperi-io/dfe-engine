@@ -59,6 +59,7 @@ from scalo.logger import logger
 from dfe_engine.clickhouse.lease import (
     READ_SETTINGS,
     SlowClaimError,
+    is_missing_quorum_part,
     is_quorum_refusal,
     settle_claim,
     write_settings,
@@ -88,13 +89,23 @@ class SchemaLockBusyError(SchemaLockError):
 
 
 class SchemaLockQuorumError(SchemaLockError):
-    """A lease read or write missed its quorum of replicas, so that attempt did not complete."""
+    """A lease read or write missed its quorum of replicas, so that attempt did not complete.
+
+    Attributes:
+        missing_part: The replica lacks the last quorum part, so a read was refused for it.
+    """
+
+    def __init__(self, message: str, *, missing_part: bool = False) -> None:
+        super().__init__(message)
+        self.missing_part = missing_part
 
 
 def _lock_error(action: str, exc: Exception) -> SchemaLockError:
     """*exc* as a lease error, with a missed quorum kept apart so a claimer retries it."""
-    kind = SchemaLockQuorumError if is_quorum_refusal(exc) else SchemaLockError
-    return kind(f"{action}: {exc}")
+    message = f"{action}: {exc}"
+    if is_quorum_refusal(exc):
+        return SchemaLockQuorumError(message, missing_part=is_missing_quorum_part(exc))
+    return SchemaLockError(message)
 
 
 def lease_seconds(wait_seconds: float) -> int:
@@ -211,6 +222,7 @@ class SchemaLock:
         """
         deadline = time.monotonic() + max(wait_seconds, 0.0)
         missed: set[type[Exception]] = set()
+        renewed = False
         while True:
             state: LockState | None = None
             try:
@@ -231,6 +243,8 @@ class SchemaLock:
                         "schema lease attempt missed; retrying within the wait", reason=str(exc)
                     )
                 missed.add(type(exc))
+                if isinstance(exc, SchemaLockQuorumError) and exc.missing_part and not renewed:
+                    renewed = self._renew_quorum()
                 state = None
             if time.monotonic() >= deadline:
                 if state is not None:
@@ -296,6 +310,24 @@ class SchemaLock:
             return False
         self._claimed_at = claimed_at
         self.acquired = True
+        return True
+
+    def _renew_quorum(self) -> bool:
+        """Write a released row under a name of its own, so the last quorum part exists again.
+
+        TTL empties an idle lease table, and every sequential read then refuses until
+        the next quorum write. No claim or marker read matches the row's name.
+
+        Returns:
+            Whether the row landed. One that did not is tried again on the next refusal.
+        """
+        now = _millis(datetime.now(UTC))
+        logger.warning("schema lease reads refused for a missing quorum part; writing a new one")
+        try:
+            self._write(now, expires=now, released=1, lock_name=f"{LOCK_NAME}/quorum")
+        except SchemaLockError as exc:
+            logger.warning("schema lease quorum part not rewritten", error=str(exc))
+            return False
         return True
 
     def _marker(self, claimed_at: datetime) -> str:

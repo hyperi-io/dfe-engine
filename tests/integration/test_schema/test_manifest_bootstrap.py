@@ -26,6 +26,7 @@ Proven here:
 * every lease read and write carries the settings that make a claim visible on
   every replica once it is acknowledged, so claimers on two replicas, or on two
   replicas that cannot fetch from each other, never both hold
+* a lease table TTL has emptied, which refuses every sequential read, is taken again
 * a claim that cannot reach its quorum is not taken, and does not raise
 * a claim that lands slower than the settle does not stand, and is released
 * a lease release that fails after the apply keeps the apply's result
@@ -42,7 +43,12 @@ import clickhouse_connect
 import pytest
 from dfe_schemas.clickhouse import Platform, create_database
 
-from dfe_engine.clickhouse.lease import SETTLE_SECONDS, SlowClaimError
+from dfe_engine.clickhouse.lease import (
+    READ_SETTINGS,
+    SETTLE_SECONDS,
+    SlowClaimError,
+    is_missing_quorum_part,
+)
 from dfe_engine.schema import lock as lock_module
 from dfe_engine.schema import phase
 from dfe_engine.schema.ledger import MigrationLedger
@@ -484,6 +490,43 @@ def test_claimers_racing_across_two_replicas_leave_one_holder(two_replicas, repl
         client = clickhouse_connect.get_client(**params)
         queries += _lease_queries(client, lease.database, lease.table)
     _assert_consistent(queries, quorum="2")
+
+
+def test_a_lease_table_emptied_by_ttl_is_taken_again(two_replicas, replicated_lease):
+    """TTL drops the last quorum part, which refuses every sequential read until a quorum write."""
+    lease = replicated_lease
+    first = clickhouse_connect.get_client(**two_replicas.first)
+    target = f"`{lease.database}`.`{lease.table}`"
+    lapsed = datetime.now(UTC).replace(tzinfo=None, microsecond=0) - timedelta(days=30)
+    first.insert(
+        lease.table,
+        [["schema_bootstrap", "pod-gone", lapsed, lapsed, 1]],
+        column_names=["lock_name", "holder", "acquired_at", "expires_at", "released"],
+        database=lease.database,
+        settings={"insert_quorum": 2, "insert_quorum_parallel": 0, "async_insert": 0},
+    )
+    first.command(f"OPTIMIZE TABLE {target} FINAL")
+
+    def refused() -> bool:
+        try:
+            first.query(f"SELECT count() FROM {target}", settings=READ_SETTINGS)
+        except Exception as exc:
+            if is_missing_quorum_part(exc):
+                return True
+            raise
+        return False
+
+    deadline = time.monotonic() + 120
+    while not refused():
+        if time.monotonic() >= deadline:
+            pytest.fail("TTL never emptied the lease table, so reads were never refused")
+        time.sleep(1.0)
+
+    lock = lease.lock(two_replicas.second, "pod-new")
+    assert lock.acquire(wait_seconds=_RIDE_OUT) is True
+    assert lock.read().holder == "pod-new"
+    lock.release()
+    assert refused() is False
 
 
 def test_claimers_on_replicas_that_cannot_fetch_from_each_other_never_both_hold(

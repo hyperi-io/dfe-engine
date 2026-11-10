@@ -49,6 +49,9 @@ QUORUM_TIMEOUT_MS = 10_000
 # UNSATISFIED_QUORUM_FOR_PREVIOUS_WRITE, REPLICA_IS_NOT_IN_QUORUM, UNKNOWN_STATUS_OF_INSERT.
 _QUORUM_REFUSALS = frozenset({285, 286, 289, 319})
 
+# REPLICA_IS_NOT_IN_QUORUM: this replica lacks the part Keeper records as the last quorum write.
+_MISSING_QUORUM_PART = 289
+
 
 class SlowClaimError(Exception):
     """A claim acknowledged a settle or more after its free read, so it is not kept.
@@ -65,6 +68,15 @@ class SlowClaimError(Exception):
 def is_quorum_refusal(exc: BaseException) -> bool:
     """Whether *exc* is ClickHouse refusing a missed quorum, which a later attempt can clear."""
     return parse_code(exc) in _QUORUM_REFUSALS
+
+
+def is_missing_quorum_part(exc: BaseException) -> bool:
+    """Whether *exc* refuses a sequential read for want of the last quorum part.
+
+    A lagging replica says this until it fetches the part. So does every replica once
+    the part is gone, after TTL empties it, and that lasts until the next quorum write.
+    """
+    return parse_code(exc) == _MISSING_QUORUM_PART
 
 
 def majority(replicas: int) -> int:
