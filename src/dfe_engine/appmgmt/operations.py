@@ -25,7 +25,10 @@ from pathlib import Path
 from typing import Any
 
 from dfe_engine import scaling_pressure
+from dfe_engine.schema.applier import ttl_from_engine_full
 from dfe_engine.yaml_utils import yaml_load
+
+_DAY_SECONDS = 86_400
 
 _QUERIES = Path(__file__).parent / "queries.yaml"
 
@@ -49,6 +52,14 @@ SCALING_PRESSURE = scaling_pressure.GAUGE
 # cumulative CPU seconds: resource_series reports it as cores used.
 CPU_SECONDS = "process_cpu_seconds_total"
 
+# Gauges only some apps emit, read wherever they are present.
+ACTIVE_CONNECTIONS = "receiver_active_connections"
+CLICKHOUSE_CONNECTED = "clickhouse_connected"
+# Per partition, so the reading is the furthest-behind partition.
+CONSUMER_LAG = "consumer_lag"
+HUNT_BACKLOG = "dfe_hunt_backlog"
+PIPELINE_READY = "pipeline_ready"
+
 GAUGE_METRICS = (
     CPU_UTILISATION,
     MEMORY_USAGE,
@@ -59,6 +70,11 @@ GAUGE_METRICS = (
     START_TIME,
     SCALING_PRESSURE,
     CPU_SECONDS,
+    ACTIVE_CONNECTIONS,
+    CLICKHOUSE_CONNECTED,
+    CONSUMER_LAG,
+    HUNT_BACKLOG,
+    PIPELINE_READY,
 )
 
 # Counters forming the scalo pipeline contract, shared by every data-path app.
@@ -66,13 +82,43 @@ RECORDS_RECEIVED = "records_received_total"
 RECORDS_PROCESSED = "records_processed_total"
 RECORDS_DELIVERED = "records_delivered_total"
 RECORDS_DLQ = "records_dlq_total"
+RECORDS_ERROR = "records_error_total"
 
 COUNTER_METRICS = (
     RECORDS_RECEIVED,
     RECORDS_PROCESSED,
     RECORDS_DELIVERED,
     RECORDS_DLQ,
+    RECORDS_ERROR,
 )
+
+# Only an app with that sink has these, so a missing one is never read as 0.
+CLICKHOUSE_INSERT_ERRORS = "clickhouse_insert_errors_total"
+SINK_ERRORS = "sink_errors_total"
+
+ERROR_COUNTERS = (CLICKHOUSE_INSERT_ERRORS, SINK_ERRORS)
+
+# Only the hunt runner records these, so a missing one is never read as 0.
+HUNT_CLAIMS = "dfe_hunt_claims_total"
+HUNT_CLICKHOUSE_UNAVAILABLE = "dfe_hunt_clickhouse_unavailable_total"
+HUNT_DETECTIONS_DROPPED = "dfe_hunt_detections_dropped_total"
+HUNT_FIRE_FAILURES = "dfe_hunt_fire_failures_total"
+HUNT_OVERRUNS = "dfe_hunt_overruns_total"
+HUNT_ROWS_WRITTEN = "dfe_hunt_rows_written_total"
+HUNT_RUNS = "dfe_hunt_runs_total"
+
+HUNT_COUNTERS = (
+    HUNT_CLAIMS,
+    HUNT_CLICKHOUSE_UNAVAILABLE,
+    HUNT_DETECTIONS_DROPPED,
+    HUNT_FIRE_FAILURES,
+    HUNT_OVERRUNS,
+    HUNT_ROWS_WRITTEN,
+    HUNT_RUNS,
+)
+
+# Every counter a rate or total is read for
+_READ_COUNTERS = (*COUNTER_METRICS, *ERROR_COUNTERS, *HUNT_COUNTERS)
 
 # Readings derived from an HTTP service's request-duration histogram.
 HTTP_REQUESTS = "http_requests_total"
@@ -133,6 +179,15 @@ class AppMetrics:
     window_seconds: int
     gauges: dict[str, float] = field(default_factory=dict)
     rates: dict[str, float] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class AppTotals:
+    """How much the instance did over a window, counted across every run of every pod."""
+
+    telemetry_name: str
+    window_seconds: int
+    totals: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,7 +259,7 @@ class OperationalReader:
         rates = self._rates(service)
         unrecorded = [name for name in COUNTER_METRICS if name not in rates]
         if carries_records and unrecorded and self._last_seen(service) is not None:
-            rates |= dict.fromkeys(unrecorded, 0.0)
+            rates = dict.fromkeys(unrecorded, 0.0) | rates
         http_rates, http_gauges = http_readings(
             rows=self._run("http_request_histogram", {"service": service})
         )
@@ -213,6 +268,31 @@ class OperationalReader:
             rates=rates | http_rates,
             telemetry_name=telemetry_name,
             window_seconds=self._window,
+        )
+
+    def totals(
+        self, telemetry_name: str, *, carries_records: bool = False, window_seconds: int
+    ) -> AppTotals:
+        """How much the instance did over the window, counted across every run of every pod.
+
+        CPU time comes from the cumulative gauge scalo reports it as, or the counter a
+        scraped app serves, and requests from the request-duration histogram. A
+        reporting instance that ``carries_records`` reads each pipeline counter it has
+        no rows for as 0.
+        """
+        service = self._safe_identifier(telemetry_name)
+        window = {"service": service, "window_seconds": window_seconds}
+        counted = self._run("counter_increases", window | {"names": [*_READ_COUNTERS, CPU_SECONDS]})
+        totals = {str(name): float(value) for name, value in counted}
+        cpu = self._run("cpu_seconds_increase", window | {"cpu_seconds": CPU_SECONDS})
+        if cpu:
+            totals[CPU_SECONDS] = totals.get(CPU_SECONDS, 0.0) + float(cpu[0][0])
+        unrecorded = [name for name in COUNTER_METRICS if name not in totals]
+        if carries_records and unrecorded and self._last_seen(service) is not None:
+            totals = dict.fromkeys(unrecorded, 0.0) | totals
+        totals |= http_totals(rows=self._run("http_request_histogram", window))
+        return AppTotals(
+            telemetry_name=telemetry_name, totals=totals, window_seconds=window_seconds
         )
 
     def resource_series(
@@ -248,6 +328,13 @@ class OperationalReader:
             for bucket, name, lo, hi, mean, p95, samples in rows
         ]
 
+    def retention_seconds(self) -> int | None:
+        """How long the gauge table keeps a reading, or None when its TTL is unset or not whole days."""
+        rows = self._run("gauge_retention", {"database": self._database})
+        ttl = ttl_from_engine_full(engine_full=str(rows[0][0])) if rows else None
+        days = ttl.days if ttl is not None else None
+        return days * _DAY_SECONDS if days else None
+
     def source_signals(self, table: str, loaders: Sequence[str]) -> SourceSignals:
         """Throughput and last arrival for the table one source's records land in.
 
@@ -275,7 +362,7 @@ class OperationalReader:
         return {str(name): float(value) for name, value in rows}
 
     def _rates(self, service: str) -> dict[str, float]:
-        rows = self._run("counter_rates", {"service": service, "names": list(COUNTER_METRICS)})
+        rows = self._run("counter_rates", {"service": service, "names": list(_READ_COUNTERS)})
         return {str(name): float(value) for name, value in rows}
 
     def _last_seen(self, service: str) -> float | None:
@@ -357,6 +444,25 @@ def http_readings(*, rows: Sequence[tuple]) -> tuple[dict[str, float], dict[str,
     p95 = _percentile(bounds=reference_bounds or [], counts=buckets, quantile=0.95)
     gauges = {} if p95 is None else {HTTP_P95: p95}
     return rates, gauges
+
+
+def http_totals(*, rows: Sequence[tuple]) -> dict[str, float]:
+    """Requests and 5xx responses over the window from ``http_request_histogram`` rows.
+
+    Counted as ``http_readings`` counts them, a series born in the window from zero and one whose count went backwards left out. Empty when the service reported no histogram.
+    """
+    if not (rows):
+        return {}
+    requests = 0.0
+    server_errors = 0.0
+    for server_error, *_, first_count, last_count, _span_seconds, started_in_window in rows:
+        delta = float(last_count) - (0.0 if started_in_window else float(first_count))
+        if delta < 0:
+            continue
+        requests += delta
+        if server_error:
+            server_errors += delta
+    return {HTTP_REQUESTS: requests, HTTP_SERVER_ERRORS: server_errors}
 
 
 def _rate_per_minute(series: Sequence[tuple[float, float, float]]) -> float | None:

@@ -54,7 +54,13 @@ def _rows(exposition: str, prefix: str) -> list[str]:
 
 @pytest.mark.parametrize(
     "gauge",
-    ["process_cpu_seconds_total", "process_resident_memory_bytes", "process_virtual_memory_bytes"],
+    [
+        "info",
+        "process_cpu_seconds_total",
+        "process_resident_memory_bytes",
+        "process_virtual_memory_bytes",
+        "start_time_seconds",
+    ],
 )
 def test_the_process_gauges_are_unprefixed_from_the_runners_own_meter(exposition, gauge):
     assert [row for row in _rows(exposition, f"{gauge}{{") if RUNNER_SCOPE in row], exposition

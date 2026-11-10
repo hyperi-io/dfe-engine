@@ -56,7 +56,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from scalo.api import FieldError, ListParams, Page, ProblemError, paginate, scalo_extra
+from scalo.api import (
+    FieldError,
+    ListParams,
+    Page,
+    ProblemError,
+    decode_page_token,
+    paginate,
+    scalo_extra,
+)
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api import body_limits
@@ -101,6 +109,7 @@ from dfe_engine.appmgmt import (
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.deployment_contract import engine_deployment_contract
 from dfe_engine.gitcrud import ConcurrencyConflictError, GitCrud
 from dfe_engine.gitcrud.commit_policy import (
     CommitContext,
@@ -111,6 +120,7 @@ from dfe_engine.gitcrud.commit_policy import (
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, del_path, get_path, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
+from dfe_engine.hunts import runner_metrics
 from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError
 from dfe_engine.sampling import SampleMode, SampleRequest, SamplerError
 from dfe_engine.settings import DFESettings
@@ -346,6 +356,14 @@ class CatalogueEntry(BaseModel):
     )
     file_sets: list[FileSetSummary]
     instances: list[str]
+    processes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The processes deployed on their own from the engine's image, by the OTel "
+            "name each reports under. Pass one as process= to the status, metrics, "
+            "series and totals routes. Empty for every other app."
+        ),
+    )
 
 
 class ValuesResponse(BaseModel):
@@ -678,7 +696,16 @@ class ResourceSeriesResponse(BaseModel):
 
     telemetry_name: str
     window_seconds: int
-    bucket_seconds: int
+    bucket_seconds: int = Field(
+        description="0 when the whole window is one bucket, starting at its first second."
+    )
+    retention_seconds: int | None = Field(
+        default=None,
+        description=(
+            "How long the gauge table keeps a reading, so the longest window a "
+            "whole-window read reaches; null when its TTL is unset."
+        ),
+    )
     buckets: list[ResourceBucketModel] = Field(
         description=(
             "One entry per metric per time bucket, aggregated across every pod "
@@ -688,12 +715,20 @@ class ResourceSeriesResponse(BaseModel):
 
 
 class MetricsResponse(BaseModel):
-    """An instance's current gauges and rates over a window."""
+    """An instance's current gauges and its rates over a window."""
 
     telemetry_name: str
     window_seconds: int
     gauges: dict[str, float]
     rates: dict[str, float]
+
+
+class TotalsResponse(BaseModel):
+    """How much an instance did over a window, counted across every run of every pod."""
+
+    telemetry_name: str
+    window_seconds: int
+    totals: dict[str, float]
 
 
 # --- shared plumbing ---
@@ -962,6 +997,7 @@ def list_apps(
                 transform_engine=desc.transform_engine or None,
                 file_sets=_file_sets(service),
                 instances=[i.instance for i in deployed if i.service == service],
+                processes=list(_engine_processes(service=service)),
             )
         )
     return paginate(entries, query, bound={"profile": profile})
@@ -1129,9 +1165,8 @@ def get_history(
     user: CurrentUser,
     request: Request,
     applied_revision: str | None = None,
-    limit: int = 20,
 ) -> Page[HistoryEntry]:
-    """Every change to this instance, newest first.
+    """Every change to this instance, newest first, a page at a time.
 
     Supply the revision Argo has synced as ``applied_revision`` to see which
     commits have reached the cluster and which are still pending.
@@ -1139,11 +1174,13 @@ def get_history(
     app = _resolve(service, instance)
     gc = _gitcrud(request)
     _overlay(gc, app)
-    entries = instances.history(
-        gc, app, applied_revision=applied_revision, limit=min(max(limit, 1), 200)
-    )
+    bound = {"applied_revision": applied_revision}
+    # Walk one past this page, so paginate can tell whether another follows
+    wanted = decode_page_token(bound=bound, query=query) + query.skip + query.page_size + 1
+    entries = instances.history(app=app, applied_revision=applied_revision, gc=gc, limit=wanted)
     return paginate(
-        [
+        bound=bound,
+        items=[
             HistoryEntry(
                 sha=e.sha,
                 timestamp=e.timestamp,
@@ -1153,8 +1190,8 @@ def get_history(
             )
             for e in entries
         ],
-        query,
-        bound={"applied_revision": applied_revision, "limit": limit},
+        query=query,
+        with_total=False,
     )
 
 
@@ -2289,9 +2326,49 @@ async def dry_run_app_file(
 # --- operational surface ---
 
 
+def _engine_processes(*, service: str) -> tuple[str, ...]:
+    """The processes deployed on their own from the engine's image, by the OTel name each reports under.
+
+    Empty for every app but the engine's own.
+    """
+    if service != engine_deployment_contract().app_name:
+        return ()
+    return (runner_metrics.SERVICE_NAME,)
+
+
 def _reader(request: Request, client: Any) -> OperationalReader:
     settings = request.app.state.settings
     return OperationalReader(client, settings.clickhouse.effective_data_database)
+
+
+# One-minute buckets over a week stay about ten thousand rows a metric.
+_BUCKETED_WINDOW_SECONDS = 7 * 24 * 3600
+# A century spans every reading a table with no TTL keeps and still fits the query's UInt32.
+_UNBOUNDED_WINDOW_SECONDS = 36_500 * 24 * 3600
+
+
+def _series_window(
+    *, bucket_seconds: int, retention_seconds: int | None, window_seconds: int
+) -> tuple[int, int]:
+    """The window and bucket a resource series read runs with, bounded by what the gauge table holds."""
+    whole = bucket_seconds == 0
+    longest = retention_seconds or _UNBOUNDED_WINDOW_SECONDS
+    if not (whole):
+        longest = min(longest, _BUCKETED_WINDOW_SECONDS)
+    window = longest if window_seconds <= 0 else min(max(window_seconds, 60), longest)
+    bucket = 0 if whole else min(max(bucket_seconds, 10), window)
+    return window, bucket
+
+
+def _telemetry_name(*, app: AppInstance, process: str | None) -> str:
+    """The OTel name the instance reports under, or the named process."""
+    if process is None:
+        return app.telemetry_name
+    if process not in _engine_processes(service=app.service):
+        raise ProblemError(
+            404, f"{app.service!r} has no process {process!r}", code="unknown_process"
+        )
+    return process
 
 
 def metrics_unavailable(exc: MetricsUnavailableError) -> ProblemError:
@@ -2307,13 +2384,19 @@ def metrics_unavailable(exc: MetricsUnavailableError) -> ProblemError:
 
 @router.get("/{service}/{instance}/status")
 def get_status(
-    service: str, instance: str, user: CurrentUser, request: Request, client: ClickHouseClient
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    client: ClickHouseClient,
+    process: str | None = None,
 ) -> StatusResponse:
-    """Whether the instance is reporting telemetry, and since when."""
+    """Whether the instance, or a process deployed from its image, is reporting, and since when."""
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
+    telemetry_name = _telemetry_name(app=app, process=process)
     try:
-        status = _reader(request, client).status(app.telemetry_name)
+        status = _reader(request, client).status(telemetry_name)
     except MetricsUnavailableError as exc:
         raise metrics_unavailable(exc) from exc
     return StatusResponse(
@@ -2327,18 +2410,23 @@ def get_status(
 
 @router.get("/{service}/{instance}/metrics")
 def get_metrics(
-    service: str, instance: str, user: CurrentUser, request: Request, client: ClickHouseClient
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    client: ClickHouseClient,
+    process: str | None = None,
 ) -> MetricsResponse:
-    """Throughput, CPU, memory and saturation for the instance."""
+    """Throughput, CPU, memory and saturation for the instance or a process deployed from its image."""
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
+    telemetry_name = _telemetry_name(app=app, process=process)
     # A stack-wide app reports under its own name, so only the overlay says this instance exists.
     _overlay(_gitcrud(request), app)
+    # Only an app whose manifest declares a transport carries records to count.
+    carries_records = process is None and bool(app.descriptor.transports)
     try:
-        # An app whose manifest declares no transport carries no records to count.
-        found = _reader(request, client).metrics(
-            app.telemetry_name, carries_records=bool(app.descriptor.transports)
-        )
+        found = _reader(request, client).metrics(telemetry_name, carries_records=carries_records)
     except MetricsUnavailableError as exc:
         raise metrics_unavailable(exc) from exc
     return MetricsResponse(
@@ -2346,6 +2434,43 @@ def get_metrics(
         window_seconds=found.window_seconds,
         gauges=found.gauges,
         rates=found.rates,
+    )
+
+
+@router.get("/{service}/{instance}/metrics/totals")
+def get_totals(
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    client: ClickHouseClient,
+    window_seconds: int = 3600,
+    process: str | None = None,
+) -> TotalsResponse:
+    """Counter, request and CPU totals over the window, across every run of every pod.
+
+    A window of 0 counts everything the metrics tables still keep.
+    """
+    app = _resolve(service, instance)
+    _require_metrics_read(request, user, service)
+    telemetry_name = _telemetry_name(app=app, process=process)
+    _overlay(_gitcrud(request), app)
+    reader = _reader(request, client)
+    try:
+        window, _bucket = _series_window(
+            bucket_seconds=0,
+            retention_seconds=reader.retention_seconds(),
+            window_seconds=window_seconds,
+        )
+        found = reader.totals(
+            telemetry_name,
+            carries_records=process is None and bool(app.descriptor.transports),
+            window_seconds=window,
+        )
+    except MetricsUnavailableError as exc:
+        raise metrics_unavailable(exc) from exc
+    return TotalsResponse(
+        telemetry_name=found.telemetry_name, totals=found.totals, window_seconds=window
     )
 
 
@@ -2358,26 +2483,36 @@ def get_resource_series(
     client: ClickHouseClient,
     window_seconds: int = 3600,
     bucket_seconds: int = 60,
+    process: str | None = None,
 ) -> ResourceSeriesResponse:
     """CPU and memory over time as min, max, average and p95 per bucket.
 
-    Each bucket aggregates across every pod reporting for this instance. A
-    per-config app deploys each config under its own service name, so one instance
-    is already one config.
+    Each bucket aggregates across every pod reporting for this instance, or for
+    the named process. A per-config app deploys each config under its own
+    service name, so one instance is already one config.
+
+    A ``bucket_seconds`` of 0 reads the window as one bucket and may reach back over the gauge table's whole retention, which a ``window_seconds`` of 0 asks for. A bucketed read stops at a week.
     """
     app = _resolve(service, instance)
     _require_metrics_read(request, user, service)
-    window = min(max(window_seconds, 60), 7 * 24 * 3600)
-    bucket = min(max(bucket_seconds, 10), window)
+    telemetry_name = _telemetry_name(app=app, process=process)
+    reader = _reader(request, client)
     try:
-        buckets = _reader(request, client).resource_series(
-            app.telemetry_name, window_seconds=window, bucket_seconds=bucket
+        retention = reader.retention_seconds()
+        window, bucket = _series_window(
+            bucket_seconds=bucket_seconds,
+            retention_seconds=retention,
+            window_seconds=window_seconds,
+        )
+        buckets = reader.resource_series(
+            telemetry_name, bucket_seconds=bucket, window_seconds=window
         )
     except MetricsUnavailableError as exc:
         raise metrics_unavailable(exc) from exc
     return ResourceSeriesResponse(
-        telemetry_name=app.telemetry_name,
-        window_seconds=window,
         bucket_seconds=bucket,
         buckets=[ResourceBucketModel(**asdict(b)) for b in buckets],
+        retention_seconds=retention,
+        telemetry_name=telemetry_name,
+        window_seconds=window,
     )

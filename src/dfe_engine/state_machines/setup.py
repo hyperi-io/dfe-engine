@@ -47,6 +47,8 @@ from the Secret or ``.env``.
 
 The machine is pure. It reads a :class:`SetupContext` -- never a Request -- so
 it can be evaluated in a unit test with hand-built stores.
+
+Setup finishes once. :mod:`dfe_engine.auth.setup_marker` records it, and from then on the wizard stays closed whatever is later deleted.
 """
 
 from collections.abc import Callable, Mapping
@@ -56,7 +58,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, Field
 
-from dfe_engine.auth import admin_retirement
+from dfe_engine.auth import admin_retirement, setup_marker
 from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.bootstrap import (
     admin_account_name,
@@ -132,6 +134,8 @@ class SetupContext:
     gitops_enabled: bool = False
     # auth.source_provider_bindings, which decide the groups an IdP-owned account holds.
     provider_bindings: Mapping[str, str] = field(default_factory=dict)
+    # Setup finished here once, so the wizard stays closed
+    setup_recorded: bool = False
 
     @cached_property
     def oidc_providers(self) -> list[tuple[str, OIDCProvider]]:
@@ -196,6 +200,9 @@ class SetupContext:
             provider_bindings=dict(
                 _attr_path(state, "settings", "auth", "source_provider_bindings") or {}
             ),
+            setup_recorded=setup_marker.is_recorded(
+                config_dir=_attr_path(state, "settings", "config_dir") or ""
+            ),
         )
 
 
@@ -241,7 +248,7 @@ class InitialSetupState(BaseModel):
     """The machine's verdict on where first-run setup stands."""
 
     complete: bool = Field(
-        description="True when every required step is satisfied.",
+        description="True when every required step is satisfied, or setup has already finished once.",
     )
     current_step: str | None = Field(
         default=None,
@@ -472,6 +479,15 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
 # -- The machine ----------------------------------------------
 
 
+def first_run_finished(*, ctx: SetupContext, state: InitialSetupState) -> bool:
+    """Whether every required step is satisfied, which is what the marker records.
+
+    ``complete`` cannot say so: a step whose store is still bootstrapping does not apply, so nothing pending reads as complete.
+    """
+    required = {step.id for step in SETUP_STEPS if step.required(ctx)}
+    return required <= set(state.completed_steps)
+
+
 def retire_admin_available(ctx: SetupContext, setup_complete: bool) -> bool:
     """Whether retiring the bootstrap admin would be accepted right now.
 
@@ -521,6 +537,8 @@ class SetupStateMachine:
         ]
 
         pending = [s.id for s in details if s.required and not s.complete]
+        if ctx.setup_recorded:
+            pending = []
         return InitialSetupState(
             complete=not pending,
             current_step=pending[0] if pending else None,

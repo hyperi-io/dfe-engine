@@ -32,6 +32,7 @@ routes = [
   { old = "GET /api/v1/apps/{service}/{instance}/history", status = "decide", note = "apps-depth" },
   { old = "GET /api/v1/apps/{service}/{instance}/metrics", status = "decide", note = "apps-depth" },
   { old = "GET /api/v1/apps/{service}/{instance}/metrics/series", status = "decide", note = "apps-depth" },
+  { old = "GET /api/v1/apps/{service}/{instance}/metrics/totals", status = "decide", note = "apps-depth" },
   { old = "GET /api/v1/apps/{service}/{instance}/routing", status = "decide", note = "apps-depth" },
   { old = "POST /api/v1/apps/{service}/{instance}/routing/sync", status = "decide", note = "apps-depth" },
   { old = "GET /api/v1/apps/{service}/{instance}/scaling", status = "decide", note = "apps-depth" },

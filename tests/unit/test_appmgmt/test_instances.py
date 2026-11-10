@@ -138,6 +138,36 @@ def test_instances_are_found_by_the_compiler_that_routes_them(crud):
     assert [i.telemetry_name for i in found] == ["dfe-loader"]
 
 
+def test_history_finds_an_instance_under_a_busier_one(crud):
+    # 45 loader commits land after the receiver's 3, past the 40 a 2-row read once walked
+    receiver = instances.instance_of("dfe-receiver", "default")
+    loader = instances.instance_of("dfe-loader", "default")
+    for app in (receiver, loader):
+        crud.put(HELMVARS_CLASS, app.overlay_name, instances.initial_overlay(app), actor="alice")
+    for count in (2, 3):
+        crud.set_key(
+            actor="alice",
+            cls_name=HELMVARS_CLASS,
+            dotpath="keda.maxReplicaCount",
+            name=receiver.overlay_name,
+            value=count,
+        )
+    for count in range(45):
+        crud.set_key(
+            actor="alice",
+            cls_name=HELMVARS_CLASS,
+            dotpath="keda.maxReplicaCount",
+            name=loader.overlay_name,
+            value=count,
+        )
+
+    newest = instances.history(app=receiver, gc=crud, limit=2)
+    every = instances.history(app=receiver, gc=crud, limit=10)
+
+    assert [len(newest), len(every)] == [2, 3]
+    assert [e.sha for e in newest] == [e.sha for e in every[:2]]
+
+
 def test_unmanaged_values_file_is_not_listed_as_an_instance(crud):
     # A hand-written overlay for something outside the catalogue stays visible to
     # the raw helm API but must not masquerade as a managed instance.

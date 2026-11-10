@@ -27,6 +27,9 @@ runner's own tests need no metrics backend.
 from collections.abc import Iterable
 from typing import Any
 
+# The OTel service.name both deployers give the runner
+SERVICE_NAME = "dfe-hunt-runner"
+
 RUNS = "hunt_runs_total"
 RUN_DURATION = "hunt_run_duration_seconds"
 ROWS_WRITTEN = "hunt_rows_written_total"
@@ -303,7 +306,7 @@ class HuntRunnerMetrics:
             histogram.observe(value)
 
 
-def create(app_name: str = "dfe-hunt-runner") -> HuntRunnerMetrics:
+def create(app_name: str = SERVICE_NAME) -> HuntRunnerMetrics:
     """Build the instrument set on scalo's metrics backend.
 
     The namespace comes from the engine's deployment contract rather than a literal,
@@ -316,20 +319,25 @@ def create(app_name: str = "dfe-hunt-runner") -> HuntRunnerMetrics:
     from dfe_engine.deployment_contract import engine_deployment_contract
 
     manager = create_metrics(app_name, metric_prefix=engine_deployment_contract().metric_prefix)
-    _register_process_gauges(manager)
+    _register_unprefixed_groups(manager)
     return HuntRunnerMetrics(manager)
 
 
-def _register_process_gauges(manager: Any) -> None:
-    """Register scalo's process and container gauges on *manager* with no prefix.
+def _register_unprefixed_groups(manager: Any) -> None:
+    """Register scalo's identity, process and container metrics on *manager* with no prefix.
 
-    The dfe-services dashboard reads ``process_resident_memory_bytes`` unprefixed, as
-    the other apps emit it, and the manager would otherwise register ``dfe_process_*``.
+    The engine reads an app as reporting from its bare ``info`` gauge and its uptime from
+    ``start_time_seconds``, and the dfe-services dashboard reads
+    ``process_resident_memory_bytes``, all unprefixed as the other apps emit them. The
+    manager would otherwise register ``dfe_info`` and ``dfe_process_*``.
     """
-    from scalo.metrics.groups import ResourceMetrics
+    from scalo.metrics.groups import AppMetrics, ResourceMetrics
+
+    from dfe_engine import __version__
 
     prefix, manager.metric_prefix = manager.metric_prefix, ""
     try:
+        AppMetrics(commit="unknown", mgr=manager, version=__version__)
         ResourceMetrics(mgr=manager)
     finally:
         manager.metric_prefix = prefix

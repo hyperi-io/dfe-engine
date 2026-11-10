@@ -26759,7 +26759,7 @@
           "App Management"
         ],
         "summary": "Get History",
-        "description": "Every change to this instance, newest first.\n\nSupply the revision Argo has synced as ``applied_revision`` to see which\ncommits have reached the cluster and which are still pending.",
+        "description": "Every change to this instance, newest first, a page at a time.\n\nSupply the revision Argo has synced as ``applied_revision`` to see which\ncommits have reached the cluster and which are still pending.",
         "operationId": "apps.history.list",
         "parameters": [
           {
@@ -26794,16 +26794,6 @@
                 }
               ],
               "title": "Applied Revision"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 20,
-              "title": "Limit"
             }
           },
           {
@@ -29132,7 +29122,7 @@
           "App Management"
         ],
         "summary": "Get Status",
-        "description": "Whether the instance is reporting telemetry, and since when.",
+        "description": "Whether the instance, or a process deployed from its image, is reporting, and since when.",
         "operationId": "apps.status.list",
         "parameters": [
           {
@@ -29151,6 +29141,22 @@
             "schema": {
               "type": "string",
               "title": "Instance"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
             }
           }
         ],
@@ -29234,7 +29240,7 @@
           "App Management"
         ],
         "summary": "Get Metrics",
-        "description": "Throughput, CPU, memory and saturation for the instance.",
+        "description": "Throughput, CPU, memory and saturation for the instance or a process deployed from its image.",
         "operationId": "apps.metrics.list",
         "parameters": [
           {
@@ -29253,6 +29259,22 @@
             "schema": {
               "type": "string",
               "title": "Instance"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
             }
           }
         ],
@@ -29330,13 +29352,141 @@
         }
       }
     },
+    "/api/v1/apps/{service}/{instance}/metrics/totals": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Totals",
+        "description": "Counter, request and CPU totals over the window, across every run of every pod.\n\nA window of 0 counts everything the metrics tables still keep.",
+        "operationId": "apps.metrics.totals",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "window_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 3600,
+              "title": "Window Seconds"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TotalsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "apps",
+          "resource": "metrics",
+          "hierarchy": [
+            "apps",
+            "metrics"
+          ],
+          "verb": "totals",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          }
+        }
+      }
+    },
     "/api/v1/apps/{service}/{instance}/metrics/series": {
       "get": {
         "tags": [
           "App Management"
         ],
         "summary": "Get Resource Series",
-        "description": "CPU and memory over time as min, max, average and p95 per bucket.\n\nEach bucket aggregates across every pod reporting for this instance. A\nper-config app deploys each config under its own service name, so one instance\nis already one config.",
+        "description": "CPU and memory over time as min, max, average and p95 per bucket.\n\nEach bucket aggregates across every pod reporting for this instance, or for\nthe named process. A per-config app deploys each config under its own\nservice name, so one instance is already one config.\n\nA ``bucket_seconds`` of 0 reads the window as one bucket and may reach back over the gauge table's whole retention, which a ``window_seconds`` of 0 asks for. A bucketed read stops at a week.",
         "operationId": "apps.metrics.series",
         "parameters": [
           {
@@ -29375,6 +29525,22 @@
               "type": "integer",
               "default": 60,
               "title": "Bucket Seconds"
+            }
+          },
+          {
+            "name": "process",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Process"
             }
           }
         ],
@@ -36758,6 +36924,14 @@
             },
             "type": "array",
             "title": "Instances"
+          },
+          "processes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Processes",
+            "description": "The processes deployed on their own from the engine's image, by the OTel name each reports under. Pass one as process= to the status, metrics, series and totals routes. Empty for every other app."
           }
         },
         "type": "object",
@@ -41875,7 +42049,7 @@
           "complete": {
             "type": "boolean",
             "title": "Complete",
-            "description": "True when every required step is satisfied."
+            "description": "True when every required step is satisfied, or setup has already finished once."
           },
           "current_step": {
             "anyOf": [
@@ -43313,7 +43487,7 @@
           "rates"
         ],
         "title": "MetricsResponse",
-        "description": "An instance's current gauges and rates over a window."
+        "description": "An instance's current gauges and its rates over a window."
       },
       "NonEmptyDict_str_SchemaVersionCreate_": {
         "additionalProperties": {
@@ -47408,7 +47582,20 @@
           },
           "bucket_seconds": {
             "type": "integer",
-            "title": "Bucket Seconds"
+            "title": "Bucket Seconds",
+            "description": "0 when the whole window is one bucket, starting at its first second."
+          },
+          "retention_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Seconds",
+            "description": "How long the gauge table keeps a reading, so the longest window a whole-window read reaches; null when its TTL is unset."
           },
           "buckets": {
             "items": {
@@ -54295,6 +54482,33 @@
         "type": "object",
         "title": "TopicUpdateResponse",
         "description": "Outcome of a converge pass.\n\n``refused`` is what DFE declined to do (a partition decrease, a replication\nfactor change); ``failed`` is what the broker rejected. They are different\nproblems with different fixes, so they are different lists."
+      },
+      "TotalsResponse": {
+        "properties": {
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "window_seconds": {
+            "type": "integer",
+            "title": "Window Seconds"
+          },
+          "totals": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Totals"
+          }
+        },
+        "type": "object",
+        "required": [
+          "telemetry_name",
+          "window_seconds",
+          "totals"
+        ],
+        "title": "TotalsResponse",
+        "description": "How much an instance did over a window, counted across every run of every pod."
       },
       "TransformDetect": {
         "properties": {

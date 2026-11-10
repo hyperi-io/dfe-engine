@@ -16,9 +16,8 @@ state: committed, or applied/pending against a caller-supplied Argo-synced
 revision (the engine never calls Argo).
 """
 
-from __future__ import annotations
-
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
@@ -133,11 +132,15 @@ def _reachable(repo: Repo, revision: str) -> set[str]:
 def read_log(
     crud: GitCrud,
     *,
-    limit: int = 50,
-    before: str | None = None,
     applied_revision: str | None = None,
+    before: str | None = None,
+    limit: int = 50,
+    paths: Sequence[str] = (),
 ) -> tuple[list[LogEntry], str | None]:
     """Walk history newest-first; returns (entries, next_before cursor or None).
+
+    Given ``paths``, the walk keeps only the commits that touch one of them, so a
+    cursor pages through those files' history alone.
 
     Raises UnknownCursorError if ``before`` is given but never matched a commit
     during the walk - an unknown/bad cursor must not look like end-of-history.
@@ -152,7 +155,8 @@ def read_log(
         applied = _reachable(repo, applied_revision) if applied_revision else None
         skipping = before is not None
         exhausted = True
-        for walked in repo.get_walker():
+        walk_paths = [path.encode() for path in paths] or None
+        for walked in repo.get_walker(paths=walk_paths):
             sha = walked.commit.id.decode()
             if skipping:
                 if sha == before:

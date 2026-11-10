@@ -61,8 +61,6 @@ from dfe_engine.settings import DFESettings, load_settings
 
 app = typer.Typer(help="dfe-hunt-runner: CH-coordinated pull-based hunt execution.")
 
-_SERVICE_NAME = "dfe-hunt-runner"
-
 
 def _ch_params(settings: DFESettings) -> dict[str, Any]:
     """The clickhouse-connect kwargs for the raw client, derived from settings.
@@ -197,7 +195,7 @@ def materialise() -> None:
     hunt-config change so KEDA can answer "is any hunt due?" with zero workers
     running. Idempotent - re-materialising tombstones removed hunts.
     """
-    init_scalo_logger(_SERVICE_NAME, otel_tracing=False)
+    init_scalo_logger(runner_metrics.SERVICE_NAME, otel_tracing=False)
     settings = load_settings()
     ch, db = _build_ch(settings)
     specs = load_specs(settings.hunts.hunt_dir, **_spec_sources(settings, db))
@@ -227,7 +225,7 @@ def run(
     The poll interval defaults to the setting rather than a literal, because the API
     quotes that setting back to whoever queues an ad-hoc run as the wait to expect.
     """
-    init_scalo_logger(_SERVICE_NAME, otel_tracing=True)
+    init_scalo_logger(runner_metrics.SERVICE_NAME, otel_tracing=True)
     settings = load_settings()
     poll_seconds = settings.hunts.runner_poll_seconds if poll is None else poll
     # The long-running worker is the only entry point that reports telemetry; the

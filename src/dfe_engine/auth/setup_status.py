@@ -12,13 +12,13 @@ The UI calls this before login to decide whether to show the first-run wizard
 (configure OIDC, create the first organisation, create the first user).
 
 The rules live in :mod:`dfe_engine.state_machines.setup` -- this module is only
-the FastAPI adapter that feeds that machine live app state.
+the FastAPI adapter that feeds that machine live app state, and that records a
+finished setup, which the pure machine cannot.
 """
-
-from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from dfe_engine.auth import setup_marker
 from dfe_engine.state_machines.setup import (
     SETUP_MACHINE,
     STEP_FIRST_USER,
@@ -26,6 +26,7 @@ from dfe_engine.state_machines.setup import (
     STEP_ORGANISATIONS,
     SetupContext,
     SetupStatus,
+    first_run_finished,
 )
 
 if TYPE_CHECKING:
@@ -42,4 +43,8 @@ __all__ = [
 
 def evaluate_initial_setup(request: Request) -> SetupStatus:
     """Return the setup snapshot from bootstrapped app state (no authentication)."""
-    return SETUP_MACHINE.status(SetupContext.from_app_state(request.app.state))
+    ctx = SetupContext.from_app_state(request.app.state)
+    status = SETUP_MACHINE.status(ctx)
+    if not (ctx.setup_recorded) and first_run_finished(ctx=ctx, state=status.initial_setup):
+        setup_marker.record(config_dir=request.app.state.settings.config_dir)
+    return status
