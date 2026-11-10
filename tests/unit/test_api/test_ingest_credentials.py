@@ -16,7 +16,6 @@ import functools
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,7 +24,6 @@ from scalo.secrets import SecretsError
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
-from dfe_engine.api.v1 import ingest_credentials as ingest_credentials_api
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
@@ -37,7 +35,7 @@ from dfe_engine.orgs.ingest_tokens import (
     credential_secret_path,
     store_token,
 )
-from dfe_engine.settings import IngestSettings, SecretsSettings
+from dfe_engine.settings import IngestSettings
 from tests.support.accounts import session_token
 from tests.support.local_kube_api import local_kube_api, mirror_for
 
@@ -198,27 +196,6 @@ class TestClampRefusal:
     def test_a_refused_binding_mints_nothing(self, client, app, admin_headers, orgs):
         _create(client, admin_headers, orgs=["acme"], default_org="beta")
 
-        assert _stored_tokens(app, "agents") == []
-
-
-class TestUnreadableBackend:
-    """Listeners on a backend the receiver reads no secret from are refused at create."""
-
-    @pytest.fixture
-    def ansible_vault(self, monkeypatch) -> None:
-        settings = SimpleNamespace(secrets=SecretsSettings(provider="ansible_vault"))
-        monkeypatch.setattr(ingest_credentials_api, "get_settings", lambda: settings)
-
-    def test_listeners_on_ansible_vault_are_422_and_mint_nothing(
-        self, client, app, admin_headers, orgs, ansible_vault
-    ):
-        resp = _create(client, admin_headers, listeners=["http"])
-
-        assert resp.status_code == 422
-        body = resp.json()
-        assert body["code"] == "invalid_binding"
-        assert [e["field"] for e in body["errors"]] == ["listeners"]
-        assert "DFE_ENGINE_SECRETS_PROVIDER=ansible_vault" in body["errors"][0]["detail"]
         assert _stored_tokens(app, "agents") == []
 
 

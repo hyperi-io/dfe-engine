@@ -34,7 +34,7 @@ that mints it.
 
 import secrets as random_tokens
 from collections.abc import Iterable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, assert_never
 
 from scalo.logger import logger
 from scalo.secrets import (
@@ -76,10 +76,6 @@ _TOKEN_BYTES = 32
 _TOKEN_ID_BYTES = 8
 
 
-class BearerSourceUnreadableError(ValueError):
-    """The engine's secrets backend holds the bearer tokens where dfe-receiver cannot read them."""
-
-
 def credential_secret_path(credential: IngestCredential) -> str:
     """Where *credential*'s current token is stored: one secret per mint."""
     return f"{CREDENTIAL_SECRET_PREFIX}/{credential.name}@{credential.token_id}"
@@ -97,10 +93,6 @@ def bearer_secret_source(listener: str, backend: SecretsSettings) -> str:
     the KV mount on OpenBao, under the name prefix on AWS Secrets Manager. A ``file``
     secret is named under :data:`RECEIVER_BEARER_MOUNT`. An ``aws:`` spec resolves only
     in a receiver built with scalo's ``secrets-aws``.
-
-    Raises:
-        BearerSourceUnreadableError: *backend* is one of scalo-py's providers that
-            dfe-receiver reads no secret from, or no provider scalo-py has.
     """
     path = bearer_secret_path(listener)
     match backend.provider:
@@ -111,26 +103,12 @@ def bearer_secret_source(listener: str, backend: SecretsSettings) -> str:
             return f"aws:{backend.name_prefix}/{path}"
         case "file":
             return f"file:{RECEIVER_BEARER_MOUNT}/{listener}"
-        case "gcp" | "azure":
-            reason = "it has no provider for that backend"
-        case "ansible_vault":
-            reason = "it cannot decrypt an ansible-vault file"
         case _:
-            reason = "that is not a scalo secrets provider"
-    raise BearerSourceUnreadableError(
-        f"dfe-receiver cannot read the ingest bearer tokens on "
-        f"DFE_ENGINE_SECRETS_PROVIDER={backend.provider}: {reason}. Use openbao or aws, or file with "
-        f"the receiver mounting DFE_ENGINE_SECRETS_PATH/{BEARER_SECRET_PREFIX}, or on Kubernetes the "
-        f"DFE_ENGINE_INGEST_BEARER_SECRET Secret, at {RECEIVER_BEARER_MOUNT}"
-    )
+            assert_never(backend.provider)
 
 
 def bearer_auth(listener: str, backend: SecretsSettings) -> dict[str, Any]:
-    """*listener*'s dfe-receiver ``auth`` block in ``mode: bearer``, re-read every :data:`BEARER_REFRESH_SECONDS`.
-
-    Raises:
-        BearerSourceUnreadableError: *backend* holds the secret where dfe-receiver cannot read it.
-    """
+    """*listener*'s dfe-receiver ``auth`` block in ``mode: bearer``, re-read every :data:`BEARER_REFRESH_SECONDS`."""
     return {
         "mode": "bearer",
         "bearer": {
@@ -157,10 +135,6 @@ def compile_listener_auth(
 
     Returns:
         The block by listener, every listener present.
-
-    Raises:
-        BearerSourceUnreadableError: A listener needs its secret and *backend* holds it
-            where dfe-receiver cannot read it.
     """
     listed: set[str] = set()
     for credential in accepted_credentials(tenancy):

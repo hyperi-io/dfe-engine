@@ -15,7 +15,6 @@ from dfe_engine.orgs.ingest_credentials import (
     IngestCredential,
 )
 from dfe_engine.orgs.ingest_tokens import (
-    BearerSourceUnreadableError,
     accepted_credentials,
     bearer_entries,
     bearer_secret_path,
@@ -276,11 +275,6 @@ class TestTokens:
     )
     def test_the_receiver_reads_the_secret_where_the_backend_holds_it(self, backend, source):
         assert bearer_secret_source("http", backend) == source
-
-    def test_an_ansible_vault_backend_has_no_source_the_receiver_reads(self):
-        # The receiver cannot decrypt an ansible-vault file.
-        with pytest.raises(BearerSourceUnreadableError, match="cannot decrypt"):
-            bearer_secret_source("http", SecretsSettings(provider="ansible_vault"))
 
     def test_a_listener_no_credential_names_holds_no_token(self, secrets):
         # Never empty, so a backend that refuses an empty value still takes it.

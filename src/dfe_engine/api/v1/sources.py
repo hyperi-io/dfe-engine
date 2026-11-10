@@ -112,7 +112,7 @@ from dfe_engine.exchange.sources import apply_source_bundle, build_source_bundle
 from dfe_engine.git_identity import git_author
 from dfe_engine.gitcrud.routing import ReviewRouting
 from dfe_engine.manifest import ManifestError
-from dfe_engine.orgs.ingest_tokens import BearerSourceUnreadableError, resync_bearer_tokens
+from dfe_engine.orgs.ingest_tokens import resync_bearer_tokens
 from dfe_engine.orgs.models import DEFAULT_ORG_NAME
 from dfe_engine.schema.applier import SchemaApplyError, live_tables
 from dfe_engine.schema.derived_registry import derived_reference_root
@@ -517,10 +517,6 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
             hints += written.restart_required
             done.append(change.describe())
     except ProblemError as exc:
-        logger.warning(f"apps not reconciled with the sources: {exc}")
-        return AppsSync(changes=done, error=str(exc), restart_required=_one_per_app(hints))
-    except BearerSourceUnreadableError as exc:
-        # The engine's own text, naming the setting to change, so it reaches the caller.
         logger.warning(f"apps not reconciled with the sources: {exc}")
         return AppsSync(changes=done, error=str(exc), restart_required=_one_per_app(hints))
     except Exception as exc:

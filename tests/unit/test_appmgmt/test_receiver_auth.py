@@ -199,31 +199,6 @@ class TestLiveCredentials:
         assert doc["config"]["server"]["auth"] == _bearer("file", "http")
 
 
-class TestUnreadableBackend:
-    @pytest.mark.parametrize(
-        ("provider", "reason"),
-        [
-            ("ansible_vault", "cannot decrypt"),
-            ("gcp", "no provider"),
-            ("azure", "no provider"),
-            ("keychain", "not a scalo secrets provider"),
-        ],
-    )
-    def test_a_credential_on_a_backend_the_receiver_cannot_read_is_refused(
-        self, settings, provider, reason
-    ):
-        # gcp and azure are refused when settings load, so only a constructed one reaches here.
-        fields = {**SecretsSettings().model_dump(), "provider": provider}
-        backend = SecretsSettings.model_construct(**fields)
-
-        with pytest.raises(ValueError, match=f"DFE_ENGINE_SECRETS_PROVIDER={provider}: .*{reason}"):
-            _auth(_on(settings, backend), TENANCY)
-
-    def test_with_no_credential_it_compiles_none_rather_than_refusing(self, settings):
-        backend = SecretsSettings(provider="ansible_vault")
-        assert _auth(_on(settings, backend), NO_CREDENTIAL) == dict.fromkeys(BLOCKS, NONE)
-
-
 class TestFileMount:
     def test_the_file_source_is_the_engine_s_file_under_the_receiver_s_mount(
         self, tmp_path, settings
