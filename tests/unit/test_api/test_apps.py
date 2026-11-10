@@ -325,6 +325,39 @@ class TestLifecycle:
         assert resp.status_code == 404
         assert resp.json()["code"] == "unknown_app"
 
+    def test_history_pages_to_its_end_and_refuses_a_forged_token(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        gc.set_key(
+            actor="alice",
+            cls_name="helmvars",
+            dotpath="keda.maxReplicaCount",
+            name=f"{VRL}-edge-values",
+            value=4,
+        )
+        whole = client.get(f"{BASE}/history", headers=admin_headers).json()
+        paged = []
+        token = ""
+        for _ in whole["items"]:
+            page = client.get(
+                f"{BASE}/history?page_size=1&page_token={token}", headers=admin_headers
+            ).json()
+            paged.extend(entry["sha"] for entry in page["items"])
+            token = page["next_page_token"]
+            if token is None:
+                break
+
+        forged = client.get(f"{BASE}/history?page_token=forged", headers=admin_headers)
+
+        assert len(whole["items"]) >= 2
+        assert whole["next_page_token"] is None
+        assert paged == [entry["sha"] for entry in whole["items"]]
+        assert token is None
+        assert forged.status_code == 400
+        assert forged.json()["code"] == "invalid_page_token"
+
     def test_invalid_instance_name_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         resp = _deploy(client, admin_headers, instance="Not A Label")

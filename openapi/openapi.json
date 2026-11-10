@@ -26759,7 +26759,7 @@
           "App Management"
         ],
         "summary": "Get History",
-        "description": "Every change to this instance, newest first.\n\nSupply the revision Argo has synced as ``applied_revision`` to see which\ncommits have reached the cluster and which are still pending.",
+        "description": "Every change to this instance, newest first, a page at a time.\n\nSupply the revision Argo has synced as ``applied_revision`` to see which\ncommits have reached the cluster and which are still pending.",
         "operationId": "apps.history.list",
         "parameters": [
           {
@@ -26794,16 +26794,6 @@
                 }
               ],
               "title": "Applied Revision"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 20,
-              "title": "Limit"
             }
           },
           {

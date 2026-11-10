@@ -56,7 +56,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from scalo.api import FieldError, ListParams, Page, ProblemError, paginate, scalo_extra
+from scalo.api import (
+    FieldError,
+    ListParams,
+    Page,
+    ProblemError,
+    decode_page_token,
+    paginate,
+    scalo_extra,
+)
 from scalo.concurrency import run_blocking
 
 from dfe_engine.api import body_limits
@@ -1154,9 +1162,8 @@ def get_history(
     user: CurrentUser,
     request: Request,
     applied_revision: str | None = None,
-    limit: int = 20,
 ) -> Page[HistoryEntry]:
-    """Every change to this instance, newest first.
+    """Every change to this instance, newest first, a page at a time.
 
     Supply the revision Argo has synced as ``applied_revision`` to see which
     commits have reached the cluster and which are still pending.
@@ -1164,11 +1171,13 @@ def get_history(
     app = _resolve(service, instance)
     gc = _gitcrud(request)
     _overlay(gc, app)
-    entries = instances.history(
-        gc, app, applied_revision=applied_revision, limit=min(max(limit, 1), 200)
-    )
+    bound = {"applied_revision": applied_revision}
+    # Walk one past this page, so paginate can tell whether another follows
+    wanted = decode_page_token(bound=bound, query=query) + query.skip + query.page_size + 1
+    entries = instances.history(app=app, applied_revision=applied_revision, gc=gc, limit=wanted)
     return paginate(
-        [
+        bound=bound,
+        items=[
             HistoryEntry(
                 sha=e.sha,
                 timestamp=e.timestamp,
@@ -1178,8 +1187,8 @@ def get_history(
             )
             for e in entries
         ],
-        query,
-        bound={"applied_revision": applied_revision, "limit": limit},
+        query=query,
+        with_total=False,
     )
 
 
