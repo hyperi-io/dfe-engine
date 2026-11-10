@@ -189,6 +189,7 @@ hierarchy GET /api/v1/apps/{service}/{instance}/files/{set_name}/{filename}
 hierarchy GET /api/v1/apps/{service}/{instance}/history
 hierarchy GET /api/v1/apps/{service}/{instance}/metrics
 hierarchy GET /api/v1/apps/{service}/{instance}/metrics/series
+hierarchy GET /api/v1/apps/{service}/{instance}/metrics/totals
 hierarchy GET /api/v1/apps/{service}/{instance}/routing
 hierarchy GET /api/v1/apps/{service}/{instance}/scaling
 hierarchy GET /api/v1/apps/{service}/{instance}/status
@@ -456,6 +457,7 @@ permission DELETE /api/v1/auth/groups/{name}/members/{username}
 permission DELETE /api/v1/repository/objects/{scope}/{scope_id}/{namespace}/{key}
 permission GET /api/v1/apps/{service}/{instance}/metrics
 permission GET /api/v1/apps/{service}/{instance}/metrics/series
+permission GET /api/v1/apps/{service}/{instance}/metrics/totals
 permission GET /api/v1/apps/{service}/{instance}/status
 permission GET /api/v1/auth/accounts/me
 permission GET /api/v1/auth/groups

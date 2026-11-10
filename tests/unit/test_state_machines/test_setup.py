@@ -30,6 +30,7 @@ from dfe_engine.state_machines.setup import (
     STEP_ORGANISATIONS,
     OIDCProviderSummary,
     SetupContext,
+    first_run_finished,
 )
 from tests.support.present import present
 
@@ -396,6 +397,38 @@ def test_missing_stores_are_tolerated():
 
     assert state.steps == []
     assert state.complete is True
+
+
+def test_a_recorded_setup_stays_complete_with_nothing_left(ctx):
+    state = SETUP_MACHINE.evaluate(replace(ctx, setup_recorded=True))
+
+    assert state.complete is True
+    assert state.current_step is None
+    assert state.pending_steps == []
+    assert state.completed_steps == []
+
+
+@pytest.mark.parametrize(
+    ("has_org", "has_user", "accounts_loaded", "expected"),
+    [
+        (False, False, True, False),
+        (True, False, True, False),
+        (False, True, True, False),
+        (True, True, True, True),
+        # Still bootstrapping: first_user does not apply, so nothing is pending
+        (True, False, False, False),
+    ],
+)
+def test_first_run_finished_needs_every_required_step(
+    ctx, has_org, has_user, accounts_loaded, expected
+):
+    if has_org:
+        ctx.org_registry.create("acme")
+    if has_user:
+        ctx.account_store.create("alice", "a-strong-user-password")
+    live = ctx if accounts_loaded else replace(ctx, account_store=None)
+
+    assert first_run_finished(ctx=live, state=SETUP_MACHINE.evaluate(live)) is expected
 
 
 def test_status_projects_the_registries_the_wizard_renders(ctx):

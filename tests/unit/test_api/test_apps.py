@@ -137,6 +137,12 @@ class TestCatalogue:
         assert labels["hyperdx"] == "Search"
         assert labels["dfe-loader"] is None
 
+    def test_only_the_engine_lists_processes_of_its_own(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
+        processes = {e["service"]: e["processes"] for e in listed if e["processes"]}
+        assert processes == {"dfe-engine": ["dfe-hunt-runner"]}
+
     def test_the_instance_summary_carries_the_display_name(
         self, client, app, admin_headers, tmp_path
     ):
@@ -318,6 +324,39 @@ class TestLifecycle:
         )
         assert resp.status_code == 404
         assert resp.json()["code"] == "unknown_app"
+
+    def test_history_pages_to_its_end_and_refuses_a_forged_token(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        gc.set_key(
+            actor="alice",
+            cls_name="helmvars",
+            dotpath="keda.maxReplicaCount",
+            name=f"{VRL}-edge-values",
+            value=4,
+        )
+        whole = client.get(f"{BASE}/history", headers=admin_headers).json()
+        paged = []
+        token = ""
+        for _ in whole["items"]:
+            page = client.get(
+                f"{BASE}/history?page_size=1&page_token={token}", headers=admin_headers
+            ).json()
+            paged.extend(entry["sha"] for entry in page["items"])
+            token = page["next_page_token"]
+            if token is None:
+                break
+
+        forged = client.get(f"{BASE}/history?page_token=forged", headers=admin_headers)
+
+        assert len(whole["items"]) >= 2
+        assert whole["next_page_token"] is None
+        assert paged == [entry["sha"] for entry in whole["items"]]
+        assert token is None
+        assert forged.status_code == 400
+        assert forged.json()["code"] == "invalid_page_token"
 
     def test_invalid_instance_name_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
@@ -1434,3 +1473,88 @@ class TestDryRun:
 
         assert resp.status_code == 200, resp.text
         assert held == {"checked": ["test_org"], "ran": ["test_org"]}
+
+
+_DAY = 86_400
+
+
+@pytest.mark.parametrize(
+    ("bucket_seconds", "retention_seconds", "window_seconds", "expected"),
+    [
+        (0, 90 * _DAY, 3600, (3600, 0)),
+        (0, 90 * _DAY, 0, (90 * _DAY, 0)),
+        (0, 90 * _DAY, 365 * _DAY, (90 * _DAY, 0)),
+        (0, None, 0, (36_500 * _DAY, 0)),
+        (0, 90 * _DAY, 5, (60, 0)),
+        (60, 90 * _DAY, 30 * _DAY, (7 * _DAY, 60)),
+        (60, 2 * _DAY, 0, (2 * _DAY, 60)),
+        (5, None, 3600, (3600, 10)),
+        (7200, None, 3600, (3600, 3600)),
+        (-1, None, 3600, (3600, 10)),
+    ],
+    ids=[
+        "whole-hour",
+        "whole-retention",
+        "whole-past-retention",
+        "whole-no-ttl",
+        "whole-under-a-minute",
+        "bucketed-past-a-week",
+        "bucketed-retention-under-a-week",
+        "bucket-under-ten-seconds",
+        "bucket-past-the-window",
+        "negative-bucket",
+    ],
+)
+def test_a_series_read_is_bounded_by_what_the_gauge_table_holds(
+    bucket_seconds, retention_seconds, window_seconds, expected
+):
+    from dfe_engine.api.v1.apps import _series_window
+
+    window = _series_window(
+        bucket_seconds=bucket_seconds,
+        retention_seconds=retention_seconds,
+        window_seconds=window_seconds,
+    )
+
+    assert window == expected
+
+
+@pytest.mark.parametrize(
+    ("service", "process", "expected"),
+    [
+        ("dfe-engine", None, "dfe-engine"),
+        ("dfe-engine", "dfe-hunt-runner", "dfe-hunt-runner"),
+        ("dfe-loader", None, "dfe-loader"),
+    ],
+    ids=["engine-api", "engine-hunt-runner", "other-app"],
+)
+def test_a_process_reads_under_its_own_telemetry_name(service, process, expected):
+    from dfe_engine.api.v1.apps import _telemetry_name
+    from dfe_engine.appmgmt import instances
+
+    app = instances.instance_of(service, "default")
+
+    assert _telemetry_name(app=app, process=process) == expected
+
+
+@pytest.mark.parametrize(
+    ("service", "process"),
+    [
+        ("dfe-loader", "dfe-hunt-runner"),
+        ("dfe-engine", "hunt-runner"),
+        ("dfe-engine", ""),
+    ],
+    ids=["process-on-another-app", "unknown-process", "empty-process"],
+)
+def test_a_process_the_app_does_not_run_is_404(service, process):
+    from scalo.api import ProblemError
+
+    from dfe_engine.api.v1.apps import _telemetry_name
+    from dfe_engine.appmgmt import instances
+
+    app = instances.instance_of(service, "default")
+
+    with pytest.raises(ProblemError) as refused:
+        _telemetry_name(app=app, process=process)
+    assert refused.value.status == 404
+    assert refused.value.problem.code == "unknown_process"

@@ -296,6 +296,48 @@ def test_setup_status_complete_when_all_required_steps_done(tmp_path):
         _registries.clear()
 
 
+def test_setup_stays_complete_once_finished(tmp_path):
+    """Deleting the last org and user, then restarting, never reopens the wizard."""
+    settings = _settings(tmp_path)
+    app = create_app(settings=settings)
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            _complete_setup(app)
+            assert client.get("/api/v1/auth/setup-status").json()["initial_setup"]["complete"]
+
+            app.state.org_registry.delete("acme")
+            app.state.account_store.delete("alice")
+
+            setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
+            assert setup["complete"] is True
+            assert setup["current_step"] is None
+            assert setup["pending_steps"] == []
+            assert setup["completed_steps"] == []
+        _registries.clear()
+
+        with TestClient(create_app(settings=settings), raise_server_exceptions=False) as client:
+            assert client.get("/api/v1/auth/setup-status").json()["initial_setup"]["complete"]
+    finally:
+        _registries.clear()
+
+
+def test_setup_stays_open_until_it_finishes(tmp_path):
+    """An org with no user records nothing, so deleting it leaves the wizard where it was."""
+    app = create_app(settings=_settings(tmp_path))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            app.state.org_registry.create("acme", display_name="Acme")
+            assert not client.get("/api/v1/auth/setup-status").json()["initial_setup"]["complete"]
+
+            app.state.org_registry.delete("acme")
+
+            setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
+            assert setup["complete"] is False
+            assert setup["pending_steps"] == ["organisations", "first_user"]
+    finally:
+        _registries.clear()
+
+
 def test_setup_status_partial_completion(tmp_path):
     app = create_app(settings=_settings(tmp_path))
     try:

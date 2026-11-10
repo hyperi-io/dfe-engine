@@ -28,12 +28,13 @@ queries:
   # A pushed row names its pod in the resource (service.instance.id) once the app
   # runs scalo-rs#331 and none before it, a scraped row in its attributes; rows that
   # name no pod share one series.
+  # A scalo-rs pod exports a gauge's stuck first stream in the same second as its live one, so the newer start wins the tie.
   latest_gauges:
     database: otel
     sql: >
       SELECT metric, max(value) AS value
       FROM (
-        SELECT __PRESSURE_NAME__ AS metric, argMax(Value, TimeUnix) AS value
+        SELECT __PRESSURE_NAME__ AS metric, argMax(Value, (TimeUnix, StartTimeUnix)) AS value
         FROM __DB__.otel_metrics_gauge
         WHERE ServiceName = {service:String}
           AND (MetricName IN {names:Array(String)} OR __PRESSURE_MATCH__)
@@ -115,6 +116,57 @@ queries:
       window_seconds: 300
     timeout_seconds: 10
 
+  # Each counter's increase over the window, summed over every run of every pod. A
+  # stream is one start and description per series, as a scalo-rs pod splits a counter
+  # by description. A stream that started in the window counts from zero, an older one
+  # from its first reading in it, and a drop inside a stream is a reset.
+  counter_increases:
+    database: otel
+    sql: >
+      SELECT MetricName, sum(increase) AS value
+      FROM (
+        SELECT
+          MetricName,
+          arraySort(groupArray((TimeUnix, Value))) AS points,
+          arrayMap(point -> point.2, points) AS readings,
+          arraySum(arrayMap((diff, reading) -> if(diff < 0, reading, diff),
+                            arrayDifference(readings), readings))
+            + if(min(StartTimeUnix) >= now() - INTERVAL {window_seconds:UInt32} SECOND,
+                 readings[1], 0) AS increase
+        FROM __DB__.otel_metrics_sum
+        WHERE ServiceName = {service:String}
+          AND MetricName IN {names:Array(String)}
+          AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+        GROUP BY MetricName, cityHash64(Attributes), ResourceAttributes['service.instance.id'],
+                 cityHash64(StartTimeUnix, MetricDescription)
+      )
+      GROUP BY MetricName
+    params: [service]
+    timeout_seconds: 30
+
+  # CPU seconds over the window from the gauge scalo reports it as, per series and
+  # description, since a scalo-rs pod splits it by description. A drop is a restart,
+  # which counts from zero.
+  cpu_seconds_increase:
+    database: otel
+    sql: >
+      SELECT sum(increase) AS value
+      FROM (
+        SELECT
+          arrayMap(point -> point.2, arraySort(groupArray((TimeUnix, Value)))) AS readings,
+          arraySum(arrayMap((diff, reading) -> if(diff < 0, reading, diff),
+                            arrayDifference(readings), readings)) AS increase
+        FROM __DB__.otel_metrics_gauge
+        WHERE ServiceName = {service:String}
+          AND MetricName = {cpu_seconds:String}
+          AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+        GROUP BY cityHash64(Attributes), ResourceAttributes['service.instance.id'],
+                 MetricDescription
+      )
+      HAVING count() > 0
+    params: [service]
+    timeout_seconds: 30
+
   # Bucketed resource usage for graphing. Each bucket aggregates ACROSS every pod
   # reporting for this instance, so max_value is the hottest pod's sample in it.
   # A per-config app deploys each config as its own service name, so querying one
@@ -126,6 +178,8 @@ queries:
   # CPU seconds is cumulative, so each sample is cores used since the series' reading
   # before it: a series is keyed as latest_gauges keys it, and a drop (a restart) or a
   # repeated timestamp yields no sample.
+  # A scalo-rs pod's stuck first stream shares each timestamp with the live one, so both branches keep the newer start.
+  # A bucket_seconds of 0 reads the whole window as one bucket starting at its first second.
   resource_series:
     database: otel
     sql: >
@@ -139,17 +193,26 @@ queries:
         count() AS samples
       FROM (
         SELECT
-          toStartOfInterval(TimeUnix, INTERVAL {bucket_seconds:UInt32} SECOND) AS bucket,
+          if({bucket_seconds:UInt32} = 0,
+             now() - INTERVAL {window_seconds:UInt32} SECOND,
+             toStartOfInterval(TimeUnix, INTERVAL greatest({bucket_seconds:UInt32}, 1) SECOND)) AS bucket,
           __PRESSURE_NAME__ AS metric,
           Value AS value
-        FROM __DB__.otel_metrics_gauge
-        WHERE ServiceName = {service:String}
-          AND ((MetricName IN {names:Array(String)} AND MetricName != {cpu_seconds:String})
-               OR __PRESSURE_MATCH__)
-          AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+        FROM (
+          SELECT MetricName, Attributes, ResourceAttributes, TimeUnix,
+                 argMax(Value, StartTimeUnix) AS Value
+          FROM __DB__.otel_metrics_gauge
+          WHERE ServiceName = {service:String}
+            AND ((MetricName IN {names:Array(String)} AND MetricName != {cpu_seconds:String})
+                 OR __PRESSURE_MATCH__)
+            AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+          GROUP BY MetricName, Attributes, ResourceAttributes, TimeUnix
+        )
         UNION ALL
         SELECT
-          toStartOfInterval(sample.1, INTERVAL {bucket_seconds:UInt32} SECOND) AS bucket,
+          if({bucket_seconds:UInt32} = 0,
+             now() - INTERVAL {window_seconds:UInt32} SECOND,
+             toStartOfInterval(sample.1, INTERVAL greatest({bucket_seconds:UInt32}, 1) SECOND)) AS bucket,
           {cpu_seconds:String} AS metric,
           sample.2 AS value
         FROM (
@@ -161,11 +224,16 @@ queries:
             arrayJoin(arrayMap(step -> (step.1, step.2 / step.3),
                                arrayFilter(step -> step.3 > 0 AND step.2 >= 0,
                                            arrayZip(ends, used, spans)))) AS sample
-          FROM __DB__.otel_metrics_gauge
-          WHERE ServiceName = {service:String}
-            AND MetricName = {cpu_seconds:String}
-            AND has({names:Array(String)}, {cpu_seconds:String})
-            AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+          FROM (
+            SELECT Attributes, ResourceAttributes, TimeUnix,
+                   argMax(Value, StartTimeUnix) AS Value
+            FROM __DB__.otel_metrics_gauge
+            WHERE ServiceName = {service:String}
+              AND MetricName = {cpu_seconds:String}
+              AND has({names:Array(String)}, {cpu_seconds:String})
+              AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+            GROUP BY Attributes, ResourceAttributes, TimeUnix
+          )
           GROUP BY cityHash64(Attributes), ResourceAttributes['service.instance.id']
         )
       )
@@ -176,6 +244,15 @@ queries:
       window_seconds: 3600
       bucket_seconds: 60
     timeout_seconds: 20
+
+  # The gauge table's TTL clause, which bounds how far back resource_series can read.
+  gauge_retention:
+    database: otel
+    sql: >
+      SELECT engine_full FROM system.tables
+      WHERE database = {database:String} AND name = 'otel_metrics_gauge'
+    params: [database]
+    timeout_seconds: 5
 
   # The loader's per-table counter, one row per series, for the ONE table a
   # source's records land in. `loader_messages_by_table_total` carries the table as

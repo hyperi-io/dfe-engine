@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from scalo.logger import logger
 
 from dfe_engine.api.e2e.seed.metrics import SeedMetrics
+from dfe_engine.auth import setup_marker
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.orgs.registry import OrgRegistry
@@ -530,6 +531,10 @@ class Seed:
             self.accounts.delete_searchable_oidc_providers()
             self.accounts.delete_searchable_roles()
             self.organisations.delete_all()
+
+            # After both deletes, or a status poll between them records setup again
+            if self._settings is not None:
+                setup_marker.clear(config_dir=self._settings.config_dir)
 
             # Then the deploy repo. Instances first: an overlay carries the
             # content a library link resolved into it, so removing the artefact

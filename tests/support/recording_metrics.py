@@ -61,6 +61,7 @@ class RecordingManager:
     """Stands in for ``scalo.metrics.MetricsManager``."""
 
     def __init__(self) -> None:
+        self.app_name = "dfe-hunt-runner"
         self.registered: list[tuple[str, str]] = []
         self.observations: list[Observation] = []
         self.metric_prefix = ""

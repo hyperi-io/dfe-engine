@@ -249,10 +249,13 @@ def history(
     ``pending`` instead of the bare ``committed``, which is what tells a caller
     whether a change has actually reached the cluster yet.
     """
-    path = overlay_file(gc, app)
-    # Over-read, because the walk is repo-wide and most commits touch other files.
-    entries, _ = read_log(gc, limit=limit * 20, applied_revision=applied_revision)
-    return [e for e in entries if path in e.files][:limit]
+    entries, _ = read_log(
+        applied_revision=applied_revision,
+        crud=gc,
+        limit=limit,
+        paths=[overlay_file(app=app, gc=gc)],
+    )
+    return entries
 
 
 def read_overlay(gc: GitCrud, app: AppInstance) -> dict:

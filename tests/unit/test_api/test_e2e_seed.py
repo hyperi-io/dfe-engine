@@ -293,6 +293,22 @@ def test_reset_all_recreates_break_glass_admin(tmp_path, monkeypatch):
     assert accounts.verify_password(admin_name, admin_account_password())
 
 
+def test_reset_all_reopens_the_setup_wizard(tmp_path, monkeypatch):
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.auth import setup_marker
+    from dfe_engine.settings import DFESettings
+
+    monkeypatch.setenv("DFE_ENGINE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    settings = DFESettings(env="test", config_dir=str(tmp_path))
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs, settings=settings)
+    setup_marker.record(config_dir=settings.config_dir)
+
+    assert seeder.seed_static("reset_all") is True
+
+    assert setup_marker.is_recorded(config_dir=settings.config_dir) is False
+
+
 def test_seed_setup_complete_seeds_organisation(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 
