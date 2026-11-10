@@ -52,7 +52,14 @@ dev:
 # NOT swept: ClickHouse users/roles, which are server-global rather than
 # per-database. Only the governance reconcile creates those, and it runs
 # unless DFE_ENGINE_TENANT_ISOLATION_ENABLED is false.
-E2E_WORKSPACE := $(CURDIR)/tmp/e2e
+# E2E_NO_CLICKHOUSE=1 runs the engine with no ClickHouse at all: no table
+# bootstrap, no tenant-isolation reconcile, no wipe. Pages that read ClickHouse
+# answer 503 and the rest work. Use it where docker is not running.
+# E2E_ENV_FILE and E2E_WORKSPACE can be set on the command line or in the
+# environment (`make e2e-server E2E_ENV_FILE=/path/env`),
+# so a driver script can keep its env file and workspace outside the checkout.
+E2E_ENV_FILE ?= ./.env.e2e
+E2E_WORKSPACE ?= $(CURDIR)/tmp/e2e
 E2E_CH_PREFIX := dfe_e2e
 E2E_CH_DATA_DB := $(E2E_CH_PREFIX)
 E2E_CH_HUNTS_DB := $(E2E_CH_PREFIX)_hunts
@@ -110,20 +117,23 @@ endef
 # Teardown on demand: same wipe the next `make e2e-server` would do, for when a
 # run is finished with and should leave nothing behind.
 e2e-clean:
-	@test -f .env.e2e || { echo "Create .env.e2e first (copy .env and set DFE_ENGINE_ENV=test)"; exit 1; }
+	@test -f "$(E2E_ENV_FILE)" || { echo "Create $(E2E_ENV_FILE) first (copy .env.e2e.example and set DFE_ENGINE_ENV=test)"; exit 1; }
 	@echo "Removing $(E2E_WORKSPACE)"
-	set -a; . ./.env.e2e; set +a; \
+	set -a; . "$(E2E_ENV_FILE)"; set +a; \
 	rm -rf "$(E2E_WORKSPACE)"; \
 	$(e2e-ch-wipe)
 
 e2e-server:
-	@test -f .env.e2e || { echo "Create .env.e2e first (copy .env and set DFE_ENGINE_ENV=test)"; exit 1; }
+	@test -f "$(E2E_ENV_FILE)" || { echo "Create $(E2E_ENV_FILE) first (copy .env.e2e.example and set DFE_ENGINE_ENV=test)"; exit 1; }
 	@echo "e2e workspace (fresh) -> $(E2E_WORKSPACE)"
 	@echo "ClickHouse databases -> $(E2E_CH_PREFIX)* (data + audit archive)"
 	@echo "Swagger UI -> http://localhost:$${E2E_PORT:-8003}/docs  (select API or E2E)"
 	@echo "Playwright ready URL -> DFE_ENGINE_READY_URL=http://127.0.0.1:$${E2E_PORT:-8003}/readyz"
 	@echo "e2e seed -> POST http://localhost:$${E2E_PORT:-8003}/api/e2e/seed-static"
-	set -a; . ./.env.e2e; set +a; \
+	set -a; . "$(E2E_ENV_FILE)"; set +a; \
+	if [ -n "$(E2E_NO_CLICKHOUSE)" ]; then \
+		export DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_TABLES=false DFE_ENGINE_TENANT_ISOLATION_ENABLED=false; \
+	fi; \
 	export DFE_ENGINE_API_PORT="$${E2E_PORT:-$${DFE_ENGINE_API_PORT:-8003}}"; \
 	$(e2e-port-guard); \
 	if [ -z "$(E2E_KEEP)" ]; then rm -rf "$(E2E_WORKSPACE)"; fi; \
@@ -131,7 +141,7 @@ e2e-server:
 		"$(E2E_WORKSPACE)/schema-fixtures" "$(E2E_WORKSPACE)/secrets"; \
 	echo "Seeding schema snapshot from the dfe-schemas package (seeds write to schema-fixtures, not this copy)"; \
 	uv run python -c "import dfe_schemas, shutil, sys; shutil.copytree(dfe_schemas.schemas_root(), sys.argv[1], dirs_exist_ok=True)" "$(E2E_WORKSPACE)/schemas"; \
-	if [ -z "$(E2E_KEEP)" ]; then \
+	if [ -z "$(E2E_KEEP)" ] && [ -z "$(E2E_NO_CLICKHOUSE)" ]; then \
 		$(e2e-ch-wipe); \
 	fi; \
 	export DFE_CONFIG_DIR="$(E2E_WORKSPACE)/config"; \
@@ -142,5 +152,5 @@ e2e-server:
 	export DFE_ENGINE_GITOPS_LOCAL_PATH="$(E2E_WORKSPACE)/deploy-repo"; \
 	export DFE_ENGINE_CLICKHOUSE_DATA_DATABASE="$(E2E_CH_DATA_DB)"; \
 	export DFE_ENGINE_E2E_SERVER=true; \
-	export DFE_ENGINE_ENV_FILE=.env.e2e; \
+	export DFE_ENGINE_ENV_FILE="$(E2E_ENV_FILE)"; \
 	uv run dfe-engine run
