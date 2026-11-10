@@ -144,9 +144,11 @@ queries:
     params: [service]
     timeout_seconds: 30
 
-  # CPU seconds over the window from the gauge scalo reports it as, per series and
-  # description, since a scalo-rs pod splits it by description. A drop is a restart,
-  # which counts from zero.
+  # CPU seconds over the window from the gauge scalo reports it as. A stream is one
+  # start and description per series, as for counter_increases, so a stuck stream
+  # beside the live one adds nothing rather than reading as a restart at every
+  # step. A stream that started in the window counts from zero, and a drop inside
+  # a stream is a restart.
   cpu_seconds_increase:
     database: otel
     sql: >
@@ -155,13 +157,15 @@ queries:
         SELECT
           arrayMap(point -> point.2, arraySort(groupArray((TimeUnix, Value)))) AS readings,
           arraySum(arrayMap((diff, reading) -> if(diff < 0, reading, diff),
-                            arrayDifference(readings), readings)) AS increase
+                            arrayDifference(readings), readings))
+            + if(min(StartTimeUnix) >= now() - INTERVAL {window_seconds:UInt32} SECOND,
+                 readings[1], 0) AS increase
         FROM __DB__.otel_metrics_gauge
         WHERE ServiceName = {service:String}
           AND MetricName = {cpu_seconds:String}
           AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
         GROUP BY cityHash64(Attributes), ResourceAttributes['service.instance.id'],
-                 MetricDescription
+                 cityHash64(StartTimeUnix, MetricDescription)
       )
       HAVING count() > 0
     params: [service]
