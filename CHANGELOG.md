@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.85](https://github.com/hyperi-io/dfe-engine/compare/v1.22.84...v1.22.85) (2026-11-10)
+
+### Bug Fixes
+
+* **schema:** remove the TTL that wedges the schema lease ([86a476d](https://github.com/hyperi-io/dfe-engine/commit/86a476d38bf1fe4e8cce97a49bfb55cc08ca1285))
+
 ## [1.22.84](https://github.com/hyperi-io/dfe-engine/compare/v1.22.83...v1.22.84) (2026-11-09)
 
 ### Bug Fixes
