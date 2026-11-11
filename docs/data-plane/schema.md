@@ -530,7 +530,7 @@ combinations:
 | Use Case | Valid Primitives | Why |
 |----------|-----------------|-----|
 | `dimension` | `string`, `integer`, `boolean`, `enum`, `ip`, `uuid` | Exact match -- needs discrete values |
-| `exact_match` | `string`, `uuid` | Point lookups on high-cardinality identifiers |
+| `exact_match` | `string`, `uuid`, `integer`, `ip` | Point lookups on high-cardinality identifiers, numeric ids and addresses |
 | `range` | `integer`, `float`, `datetime`, `timestamp`, `date`, `ip` | Range queries -- needs orderable values |
 | `word_search` | `string`, `text` | Token search -- only applies to text |
 | `substring_search` | `string`, `text` | Substring matching -- only applies to text |
@@ -562,9 +562,14 @@ vocabulary.
 text index (inverted index, v26.2+) instead of the older bloom-filter based
 `tokenbf_v1` and `ngrambf_v1`. The text index is deterministic (no false
 positives), provides row-level filtering instead of granule-level, and is
-10-100x faster for text search workloads. `DDLGenerator` can still render the
-pre-25.10 bloom-filter indexes (`use_legacy_indexes=True`), but nothing in the
-engine sets it, so every table it creates gets the text index.
+10-100x faster for text search workloads. There is no pre-25.10 variant: every
+table gets the text index.
+
+Every index, partition and TTL clause comes from dfe-schemas, which owns the one
+table renderer and the DDL catalogue (`registries/ddl.yaml`). The engine builds
+a `TableSpec` from the source and calls it.
+
+An index whose answer changes is dropped and added again on the next apply. The new index covers parts written or merged after that, and existing parts gain it on merge: there is no `MATERIALIZE INDEX`.
 
 **Note on word_search vs substring_search:** Both use the text index but with
 different tokenizers. `word_search` uses word-level tokenization

@@ -146,23 +146,28 @@ class TestTheExactMatchIndex:
     @pytest.mark.parametrize(
         ("declared", "expected"),
         [
-            ("low", "INDEX idx_c `c` TYPE set(0) GRANULARITY 4"),
-            ("high", "INDEX idx_c `c` TYPE bloom_filter GRANULARITY 4"),
-            ("unknown", "INDEX idx_c `c` TYPE bloom_filter GRANULARITY 4"),
+            ("low", "INDEX `idx_c` `c` TYPE set(0) GRANULARITY 4"),
+            ("high", "INDEX `idx_c` `c` TYPE bloom_filter GRANULARITY 4"),
+            ("unknown", "INDEX `idx_c` `c` TYPE bloom_filter GRANULARITY 4"),
         ],
     )
     def test_exact_match_reads_the_same_declaration(self, generator, declared, expected):
-        col = column(use_case="exact_match", cardinality=declared)
+        col = column(use_case="exact_match", cardinality=declared, attribute=["not_null"])
         assert generator._index_defs(col) == [expected]
+
+    def test_a_nullable_low_column_takes_the_bloom_filter(self, generator):
+        """set(0) prunes nothing on a Nullable column on ClickHouse 26.3."""
+        col = column(use_case="exact_match", cardinality="low")
+        assert generator._index_defs(col) == ["INDEX `idx_c` `c` TYPE bloom_filter GRANULARITY 4"]
 
     def test_a_column_declaring_nothing_falls_to_the_bloom_filter(self, generator):
         """The safe way to be wrong: no dictionary, and a bounded index."""
         col = column(use_case="exact_match")
-        assert generator._index_defs(col) == ["INDEX idx_c `c` TYPE bloom_filter GRANULARITY 4"]
+        assert generator._index_defs(col) == ["INDEX `idx_c` `c` TYPE bloom_filter GRANULARITY 4"]
 
     def test_the_retired_attribute_still_gets_the_exact_index(self, generator):
-        col = column(use_case="exact_match", attribute=["lowcardinality"])
-        assert generator._index_defs(col) == ["INDEX idx_c `c` TYPE set(0) GRANULARITY 4"]
+        col = column(use_case="exact_match", attribute=["lowcardinality", "not_null"])
+        assert generator._index_defs(col) == ["INDEX `idx_c` `c` TYPE set(0) GRANULARITY 4"]
 
 
 # -- the two decisions, rendered together -----------------------------------
@@ -172,7 +177,7 @@ class TestTheExactMatchIndex:
 def rendered(generator):
     """One CREATE TABLE carrying a low, a high and an undeclared column."""
     columns = [
-        column(name="bounded", cardinality="low", use_case="exact_match"),
+        column(name="bounded", cardinality="low", use_case="exact_match", attribute=["not_null"]),
         column(name="unbounded", cardinality="high", use_case="exact_match"),
         column(name="unmeasured", use_case="exact_match"),
     ]
@@ -186,14 +191,14 @@ def line_for(statement: str, name: str, needle: str) -> str:
 
 class TestTheRenderedTable:
     def test_only_the_low_column_is_wrapped(self, rendered):
-        assert "LowCardinality(Nullable(String))" in line_for(rendered, "bounded", "`{name}`")
+        assert "LowCardinality(String)" in line_for(rendered, "bounded", "`{name}`")
         assert "LowCardinality" not in line_for(rendered, "unbounded", "`{name}`")
         assert "LowCardinality" not in line_for(rendered, "unmeasured", "`{name}`")
 
     def test_only_the_low_column_is_indexed_exactly(self, rendered):
-        assert "TYPE set(0)" in line_for(rendered, "bounded", "INDEX idx_{name} ")
-        assert "TYPE bloom_filter" in line_for(rendered, "unbounded", "INDEX idx_{name} ")
-        assert "TYPE bloom_filter" in line_for(rendered, "unmeasured", "INDEX idx_{name} ")
+        assert "TYPE set(0)" in line_for(rendered, "bounded", "INDEX `idx_{name}` ")
+        assert "TYPE bloom_filter" in line_for(rendered, "unbounded", "INDEX `idx_{name}` ")
+        assert "TYPE bloom_filter" in line_for(rendered, "unmeasured", "INDEX `idx_{name}` ")
 
 
 # -- the field survives a round trip ----------------------------------------

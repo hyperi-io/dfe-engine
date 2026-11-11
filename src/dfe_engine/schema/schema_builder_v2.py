@@ -119,7 +119,6 @@ class SchemaBuilderV2:
         *,
         schemas_base_dir: str | Path | None = None,
         derived_base_dir: str | Path | None = None,
-        use_legacy_indexes: bool = False,
         field_map_registry: FieldMapRegistry | None = None,
         default_engine: str = "MergeTree",
         default_ttl_days: int | None = None,
@@ -141,7 +140,6 @@ class SchemaBuilderV2:
                               roots differ; pass
                               ``DerivedSchemaRegistry.reference_root``. None keeps
                               them in the schemas tree.
-            use_legacy_indexes: Use tokenbf/ngrambf instead of GA text indexes.
             field_map_registry: Optional FieldMapRegistry for generating standard
                                 views (sigma, ecs, cim, ocsf). When provided and the
                                 source declares views, view DDLs are included
@@ -166,9 +164,7 @@ class SchemaBuilderV2:
         self._registry = registry or TypeRegistry.default()
         self._schemas_base_dir = Path(schemas_base_dir) if schemas_base_dir else None
         self._derived_base_dir = Path(derived_base_dir) if derived_base_dir else None
-        self._ddl_gen = DDLGenerator(
-            self._registry, use_legacy_indexes=use_legacy_indexes, platform=platform
-        )
+        self._ddl_gen = DDLGenerator(self._registry, platform=platform)
         self._field_map_registry = field_map_registry
         self._default_engine = default_engine or "MergeTree"
         self._default_ttl_days = default_ttl_days

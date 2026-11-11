@@ -635,13 +635,21 @@ def settings_move_for(
 
 
 def _index_moves(
-    client: Any, definition: TableDefinition, *, database: str, table: str, kept: Sequence[str]
+    client: Any,
+    definition: TableDefinition,
+    *,
+    database: str,
+    table: str,
+    kept: Sequence[str],
+    catalogue_only: bool = False,
 ) -> list[str]:
     """The index DDL that brings the *kept* columns to the indexes *definition* declares.
 
     A declared index the table lacks is added, and one whose type or granularity
     differs is dropped and added again. An ``idx_<column>`` index, or its ``_key``
     and ``_value`` pair, that the definition does not declare is dropped.
+    *catalogue_only* limits the moves to those ``idx_`` names, which a column's
+    use case renders, and leaves a table's own declared indexes alone.
     """
     rows = _select(
         client,
@@ -653,8 +661,12 @@ def _index_moves(
     target = table_target(database, table)
     statements: list[str] = []
     for column in kept:
-        wanted = {i.name: i for i in definition.indexes if column in i.columns}
         managed = {f"idx_{column}", f"idx_{column}_key", f"idx_{column}_value"}
+        wanted = {
+            i.name: i
+            for i in definition.indexes
+            if column in i.columns and (not catalogue_only or i.name in managed)
+        }
         for name in sorted(managed & live.keys()):
             index = wanted.get(name)
             if index is None or not index.matches(*live[name]):
@@ -1141,13 +1153,28 @@ class ManifestApplier(SchemaApplier):
         settings = settings_move(target=target, wanted=definition.json_settings, live=live_settings)
         for statement in settings.statements:
             self._run(statement)
+        # A use-case index whose answer changed, set(0) to bloom_filter say, is dropped
+        # and added again, as on a source table.
+        kept = [name for name in definition.columns if name in live]
+        indexes = _index_moves(
+            self._client,
+            definition,
+            database=database,
+            table=rendered.name,
+            kept=kept,
+            catalogue_only=True,
+        )
+        for statement in indexes:
+            self._run(statement)
 
         if drift and not self._allow_drift:
             action: Action = "refused"
         else:
             for column, message in drift:
                 self._apply_drift(definition, target, column, message)
-            action = "altered" if missing or settings.statements or drift else "unchanged"
+            action = (
+                "altered" if missing or settings.statements or indexes or drift else "unchanged"
+            )
         return self._record(
             rendered,
             action,

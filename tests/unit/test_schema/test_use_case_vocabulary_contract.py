@@ -133,24 +133,19 @@ class TestWhatTheEngineEmits:
 
 class TestWhatTheEngineRenders:
     @pytest.mark.parametrize("use_case", sorted(EXPECTED_VOCABULARY))
-    @pytest.mark.parametrize("legacy", [False, True], ids=["ga", "legacy"])
-    def test_every_accepted_use_case_renders_an_index(
-        self, use_case: str, legacy: bool, registry: TypeRegistry
-    ):
+    def test_every_accepted_use_case_renders_an_index(self, use_case: str, registry: TypeRegistry):
         """A name the registry accepts and no template answers gets no index at all."""
         primitive = registry.valid_primitives_for_use_case(use_case)[0]
-        generator = DDLGenerator(registry, use_legacy_indexes=legacy)
+        generator = DDLGenerator(registry)
         column = SchemaColumn(name="c", type=primitive, use_case=_declared(use_case))
 
         assert generator._index_defs(column), f"{use_case} renders no index"
 
-    def test_no_index_template_is_keyed_on_a_name_the_registry_rejects(self):
-        """A template keyed on a retired name can never fire."""
-        from dfe_engine.schema.schema_ddl import _INDEX_TEMPLATES, _INDEX_TEMPLATES_LEGACY
+    def test_the_ddl_catalogue_answers_exactly_the_accepted_vocabulary(self):
+        """An entry keyed on a retired name never fires, and a name with no entry renders nothing."""
+        from dfe_engine.schema.schema_ddl import table_ddl
 
-        keyed = set(_INDEX_TEMPLATES) | set(_INDEX_TEMPLATES_LEGACY)
-
-        assert keyed <= ACCEPTED, f"dead index templates: {sorted(keyed - ACCEPTED)}"
+        assert set(table_ddl().catalogue.use_cases) == ACCEPTED
 
 
 class TestTheRetiredVocabulary:
@@ -178,13 +173,12 @@ class TestTheRetiredVocabulary:
         assert SchemaLoader.validate_columns([column], registry) == []
 
     @pytest.mark.parametrize(("retired", "current"), sorted(RETIRED_USE_CASES.items()))
-    @pytest.mark.parametrize("legacy", [False, True], ids=["ga", "legacy"])
     def test_a_retired_name_renders_the_index_its_current_name_does(
-        self, retired: str, current: str, legacy: bool, registry: TypeRegistry
+        self, retired: str, current: str, registry: TypeRegistry
     ):
         """Translation is a rename, so a table created before it keeps its index."""
         primitive = registry.valid_primitives_for_use_case(current)[0]
-        generator = DDLGenerator(registry, use_legacy_indexes=legacy)
+        generator = DDLGenerator(registry)
         stored = SchemaColumn.model_validate({"name": "c", "type": primitive, "use_case": retired})
         renamed = SchemaColumn.model_validate({"name": "c", "type": primitive, "use_case": current})
 
@@ -201,14 +195,14 @@ class TestTheRetiredVocabulary:
         )
         ddl = DDLGenerator(registry).generate_create_table("events", [column], DDLConfig(db="dfe"))
 
-        assert "INDEX idx_message" in ddl
+        assert "INDEX `idx_message`" in ddl
 
 
 def _indexed_expression(use_case: str, registry: TypeRegistry) -> str:
     """The expression the rendered INDEX line is built over, backticks stripped."""
     column = SchemaColumn(name="message", type="text", use_case=use_case)
     (line,) = DDLGenerator(registry)._index_defs(column)
-    between_name_and_type = line.split("INDEX idx_message ", 1)[1].split(" TYPE ", 1)[0]
+    between_name_and_type = line.split("INDEX `idx_message` ", 1)[1].split(" TYPE ", 1)[0]
     return between_name_and_type.replace("`", "")
 
 
@@ -267,8 +261,8 @@ class TestTheQuerySideReadsTheSameVocabulary:
         strict=True,
         reason=(
             "the renderers index the bare column, so lower(col) LIKE prunes nothing yet: "
-            "dfe-engine#496's schema half (schema_ddl._INDEX_TEMPLATES here and "
-            "dfe-schemas render.py _INDEX_TEMPLATES) has still to index lower(col)"
+            "dfe-engine#496's schema half (the dfe-schemas DDL catalogue, "
+            "registries/ddl.yaml) has still to index lower(col)"
         ),
     )
     @pytest.mark.parametrize("use_case", sorted(TEXT_INDEX_USE_CASES))
