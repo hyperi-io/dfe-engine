@@ -62,7 +62,7 @@ import shlex
 import subprocess
 import time
 import warnings
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -552,6 +552,20 @@ def ch_params(request, local_tier_notice):
     Takes ``request`` to name any container after the test that owns it -- pytest
     exposes the node name directly, so nothing has to be passed at the call site.
     """
+    with _resolved_ch_params(request) as params:
+        yield params
+
+
+@pytest.fixture(scope="module")
+def module_ch_params(request, local_tier_notice):
+    """``ch_params`` held for a whole module, for tests that load one large data set and query it many times."""
+    with _resolved_ch_params(request) as params:
+        yield params
+
+
+@contextmanager
+def _resolved_ch_params(request) -> Generator[dict]:
+    """The ClickHouse ``ch_params`` resolves, held for the lifetime of *request*'s scope."""
     clickhouse_connect = pytest.importorskip("clickhouse_connect")
     tier = _resolve_tier()
     teardown = None
@@ -673,7 +687,7 @@ class ReplicaPair:
 @contextmanager
 def _replica_set(
     request, aliases: tuple[str, ...]
-) -> Iterator[tuple[list[dict], list[str], list[str], str]]:
+) -> Generator[tuple[list[dict], list[str], list[str], str]]:
     """Start one replica per alias on their own docker network, sharing the first one's Keeper.
 
     Yields ``(params, names, docker, spec)`` and removes every container and the network
@@ -1052,7 +1066,7 @@ def _prepare_engine(*, ch_client: Any, monkeypatch: pytest.MonkeyPatch, settings
 
 
 @contextmanager
-def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Iterator[SimpleNamespace]:
+def _engine_process(*, database: str, settings: Any, tmp_path: Path) -> Generator[SimpleNamespace]:
     """One engine API process over *settings*, its admin signed in.
 
     Without gitops on, the process gets a local deploy repo once it has started.
