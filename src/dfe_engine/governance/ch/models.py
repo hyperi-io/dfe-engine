@@ -24,11 +24,12 @@ CH object naming (spec 5.1): a tier ``analyst_tier_2`` yields role
 """
 
 from functools import lru_cache
-from typing import Any
+from typing import Annotated, Any
 
 from dfe_schemas import schemas_root
-from dfe_schemas.loader import load_version_entry
-from pydantic import BaseModel, Field
+from dfe_schemas.loader import SchemaError, load_version_entry
+from dfe_schemas.render import Renderer
+from pydantic import AfterValidator, BaseModel, Field
 
 # ---- The seed catalogue, read from dfe-schemas ----------------------------
 
@@ -150,6 +151,21 @@ def group_secret_path(group: str) -> str:
 
 # ---- Config models --------------------------------------------------------
 
+type _Settings = dict[str, int | dict[str, int | float | bool]]
+
+
+def _valid_profile(settings: _Settings) -> _Settings:
+    """Refuse a profile dfe-schemas cannot render, at edit time rather than at reconcile."""
+    try:
+        Renderer.profile_settings(settings)
+    except SchemaError as exc:
+        raise ValueError(str(exc)) from exc
+    return settings
+
+
+ProfileSettings = Annotated[_Settings, AfterValidator(_valid_profile)]
+"""A settings profile: each setting a plain value or a dfe-schemas constraint mapping."""
+
 
 class ChTier(BaseModel):
     """A quota tier: consumption envelope reconciled to profile + quota + role.
@@ -162,7 +178,7 @@ class ChTier(BaseModel):
     kind: str = "analyst"  # analyst | hunt (the two seeded families; extensible)
     default: bool = False  # the fallback tier FOR ITS KIND (one default per kind)
     grants: list[str] = Field(default_factory=list)  # analyst = SELECT; hunt adds INSERT
-    settings: dict[str, int] = Field(default_factory=dict)  # -> CREATE SETTINGS PROFILE
+    settings: ProfileSettings = Field(default_factory=dict)  # -> CREATE SETTINGS PROFILE
     # quota -> CREATE QUOTA: an ``interval`` (str) plus per-interval maxima (ints).
     quota: dict[str, Any] = Field(default_factory=dict)
 
@@ -198,7 +214,7 @@ class ChServiceRole(BaseModel):
     name: str
     mint_user: bool = False
     grants: list[str] = Field(default_factory=list)
-    settings: dict[str, int] = Field(default_factory=dict)
+    settings: ProfileSettings = Field(default_factory=dict)
 
     def role(self) -> str:
         """The ClickHouse role this service role creates."""
