@@ -32,7 +32,6 @@ from dfe_engine.kafka.topics import TopicAdmin, consumer_group_backlog
 from dfe_engine.schema.schema_loader import SchemaLoader
 from dfe_engine.source.models import (
     DEFAULT_HEADER_TYPE,
-    DEFAULT_HEADER_VERSION,
     Source,
     external_consumer_group,
     transformed_topic,
@@ -119,11 +118,11 @@ def reads_from_expr(field: str, expr: str) -> str | None:
 
 @functools.cache
 def header_fields(
-    header_type: str = DEFAULT_HEADER_TYPE, header_version: str = DEFAULT_HEADER_VERSION
+    header_type: str = DEFAULT_HEADER_TYPE, header_version: str | None = None
 ) -> tuple[HeaderField, ...]:
     """The fields the header profile reads from a record, in its column order.
 
-    Read from the pinned dfe-schemas profile, so the read order named here is the
+    Read from the pinned dfe-schemas profile at its current version unless one is given, so the read order named here is the
     one the loader applies. ``_timestamp_load``, ``_uuid``, ``_json`` and ``_raw``
     carry no ``@source`` expression: the loader and ClickHouse always write those,
     and a value the pipeline sets is not read.
