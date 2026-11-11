@@ -790,10 +790,20 @@ class SchemaLoader:
         Returns:
             List of error messages (empty if all valid).
         """
+        # Imported here because schema_ddl's own imports reach back into this module.
+        from dfe_engine.schema.schema_ddl import unsafe_ident_reason
+
         errors: list[str] = []
         seen_names: set[str] = set()
 
         for col in columns:
+            # The renderer refuses such a name, so the definition is refused first.
+            reason = unsafe_ident_reason(col.name)
+            if reason is not None:
+                errors.append(
+                    f"Column {col.name!r}: not a usable ClickHouse column name ({reason})"
+                )
+
             # Check for duplicate names
             normalized = col.name.replace(".", "_").replace("-", "_")
             if normalized in seen_names:

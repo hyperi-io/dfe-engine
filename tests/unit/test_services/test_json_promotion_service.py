@@ -565,7 +565,7 @@ class TestPromotionPreviewDdl:
         joined = "\n".join(statements)
         assert "ALTER TABLE `dfe`.`filebeat` ADD COLUMN IF NOT EXISTS `user_email`" in joined
         assert "COMMENT '@source: user.email - Promoted from _json.user.email'" in joined
-        assert "ADD INDEX idx_user_email `user_email` TYPE bloom_filter" in joined
+        assert "ADD INDEX `idx_user_email` `user_email` TYPE bloom_filter" in joined
 
 
 # ── discover_paths (SQL building) ────────────────────────────

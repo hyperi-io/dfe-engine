@@ -132,7 +132,7 @@ def _config(table: dict[str, Any], database: str) -> DDLConfig:
         partition_granularity=table.get("partition_granularity", defaults.partition_granularity),
         order_by=table.get("order_by"),
         extra_indexes=list(table.get("indexes") or []),
-        index_granularity=int(table.get("index_granularity", 2048)),
+        index_granularity=int(table.get("index_granularity", defaults.index_granularity)),
     )
 
 
