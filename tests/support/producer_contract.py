@@ -103,7 +103,7 @@ class ProducerFile:
 # release, never to a branch: a branch compares against whatever merged last.
 DFE_LOADER = Producer(
     repo="dfe-loader",
-    ref="v1.18.69",
+    ref="v1.18.70",
     dir_env="DFE_LOADER_DIR",
     files=("src/config/pipeline.rs", "docs/config-schema.json"),
 )
