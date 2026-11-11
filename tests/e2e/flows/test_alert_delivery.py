@@ -178,6 +178,7 @@ class TestAlertDelivery:
                 "cron": "* * * * *",
                 "customers": [customer],
                 "rules": [hunt_parts["rule"]],
+                "global_source_table_name": table,
             },
         )
         assert hunt.status_code == 201, f"the hunt was refused: {hunt.status_code} {hunt.text}"
