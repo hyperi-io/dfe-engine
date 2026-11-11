@@ -24,6 +24,7 @@ from dfe_engine.orgs.models import Org
 from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.services.source_routing import compile_loader_routing, version_rules
 from dfe_engine.settings import DFESettings
+from dfe_engine.source.external import header_fields, reads_from_expr
 from dfe_engine.source.flow import FlowError, resolve_flow
 from dfe_engine.source.models import Source, SourceTransform, SourceWriteRequest
 from tests.unit.test_services.test_source_routing import FakeSourceRegistry
@@ -279,7 +280,13 @@ class TestConnectionBlock:
         assert block.bootstrap == "kafka.example:9094"
         assert block.credential_ref == "vault:kv/acme/kafka"
         assert block.allowed_sources == ["acme-audit"]
-        assert [field.field for field in block.header_fields][:2] == ["_timestamp", "_org_id"]
+        assert [field.field for field in block.header_fields] == [
+            "_timestamp",
+            "_timestamp_received",
+            "_org_id",
+            "_source",
+            "_tags",
+        ]
         assert block.sample_record["_source"] == "acme-logs"
 
     def test_an_origin_writes_the_landing_topic_and_joins_no_group(self):
@@ -307,3 +314,48 @@ class TestConnectionBlock:
         receiver = Source.model_validate({"source": "auth", "match": {"field": "a", "value": "b"}})
 
         assert _connection_model(receiver, _settings()) is None
+
+
+@pytest.mark.parametrize(
+    ("field", "expr", "text"),
+    [
+        (
+            "_timestamp",
+            "@source: timestamp | now()",
+            "the loader reads timestamp, and when it is not there it takes the load time",
+        ),
+        (
+            "_tags",
+            "@source: first(_tags/tags/meta/metadata.tags)",
+            "the loader reads _tags, then tags, then meta, then metadata.tags, "
+            "and when none is there it stays empty",
+        ),
+        (
+            "_source",
+            "@source: first(_source) | topic_name",
+            "the loader reads _source, and when it is not there "
+            "it takes the topic name, which is this source",
+        ),
+        (
+            "other",
+            "@source: a | lower(a)",
+            "the loader reads a, and when it is not there it uses lower(a)",
+        ),
+        ("other", "@source: first(a/b)", "the loader reads a, then b"),
+        ("_uuid", "@generated: generateUUIDv7()", None),
+        ("_raw", "", None),
+    ],
+)
+def test_what_the_loader_reads_comes_from_the_header_expression(field, expr, text):
+    assert reads_from_expr(field, expr) == text
+
+
+def test_the_fields_a_pipeline_can_set_are_the_default_headers_source_columns():
+    fields = {f.field: f.when_missing for f in header_fields()}
+
+    assert list(fields) == ["_timestamp", "_timestamp_received", "_org_id", "_source", "_tags"]
+    assert fields["_timestamp"] == (
+        "the loader reads timestamp, and when it is not there it takes the load time"
+    )
+    assert "@timestamp" not in fields["_timestamp"]
+    assert fields["_tags"].startswith("the loader reads _tags, then tags")

@@ -10,11 +10,11 @@ One row per operation the engine serves today. **New** is where it goes, and its
 |---|---|---|
 | moved | 87 | A new path, method or both |
 | merged into | 9 | Folded into the operation **New** names |
-| unchanged | 41 | Same method and path |
+| unchanged | 42 | Same method and path |
 | frozen | 54 | Kept as it is |
 | decide | 129 | Not placed yet: see its question |
 | removed | 0 | Gone, with nothing in its place |
-| total | 320 | |
+| total | 321 | |
 
 ## Questions
 
@@ -180,6 +180,7 @@ One row per operation the engine serves today. **New** is where it goes, and its
 | `DELETE /api/v1/schemas/definitions/{schema_path}/versions/{version}` | `DELETE /api/v1/schemas/{schema}/versions/{version}` | `schemas.versions.delete` | `dfe schemas versions delete` | `dfe_schemas_versions_delete` | moved | ui 2 |  |
 | `POST /api/v1/schemas/elastic-converter` | `POST /api/v1/schemas/elastic-converter` | `schemas.elastic-converter` | `dfe schemas elastic-converter` | `dfe_schemas_elastic_converter` | unchanged | ui 2 |  |
 | `POST /api/v1/schemas/import` | `POST /api/v1/schemas/import` | `schemas.import` | `dfe schemas import` | `dfe_schemas_import` | unchanged | 0 |  |
+| `GET /api/v1/schemas/vocabulary` | `GET /api/v1/schemas/vocabulary` | `schemas.vocabulary` | `dfe schemas vocabulary` | `dfe_schemas_vocabulary` | unchanged | 0 |  |
 
 ## sources
 

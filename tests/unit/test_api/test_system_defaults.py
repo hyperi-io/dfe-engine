@@ -21,6 +21,7 @@ import pytest
 from dfe_engine.api.deps import _registries
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.gitcrud import GitCrud, default_registry
+from dfe_engine.gitcrud.retention import MAX_DEFAULT_TTL_DAYS
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.settings import ClickHouseResilienceSettings, ClickHouseSettings
 
@@ -40,6 +41,7 @@ def _deployment_body(*, editable: bool) -> dict:
             "stored": None,
             "origin": "deployment",
             "deployment_default": 90,
+            "maximum": MAX_DEFAULT_TTL_DAYS,
         },
         "common_header_type": {
             "effective": "timeseries",

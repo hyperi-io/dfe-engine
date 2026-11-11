@@ -136,9 +136,9 @@ from dfe_engine.source.deployment import (
     ttl_change_for_table,
 )
 from dfe_engine.source.external import (
-    HEADER_FIELDS,
     external_connection,
     external_group_lag,
+    header_fields,
     sample_record,
 )
 from dfe_engine.source.flow import FlowError, SourceFlow, resolve_flow
@@ -164,6 +164,7 @@ from dfe_engine.source.registry import (
     SourceRuleError,
     SourceValidationError,
 )
+from dfe_engine.source.type_registry import LOW_CARDINALITY, Cardinality, fold_cardinality
 from dfe_engine.transport import SourceTransport
 
 router = APIRouter(prefix="/sources", tags=["Sources"], dependencies=[WRITE_TURN])
@@ -944,6 +945,10 @@ class SchemaColumn(BaseModel):
     type: str
     use_case: str = ""
     attribute: list[str] | None = None
+    cardinality: Cardinality | None = Field(
+        default=None,
+        description="How many distinct values the column holds, as declared. A column holding the retired lowcardinality attribute reads as low. Absent means unknown.",
+    )
     description: str = ""
 
 
@@ -3790,7 +3795,7 @@ def _connection_model(
         allowed_sources=list(connection.allowed_sources),
         header_fields=[
             HeaderFieldModel(field=f.field, when_missing=f.when_missing, when_set=f.when_set)
-            for f in HEADER_FIELDS
+            for f in header_fields()
         ],
         sample_record=sample_record(source),
     )
@@ -3871,11 +3876,21 @@ def _normalize_attribute(value: Any) -> list[str] | None:
     return list(value)
 
 
+def _declared_cardinality(col: Any) -> Cardinality | None:
+    """The cardinality *col* declares, with the retired attribute read as the value it names."""
+    declared = getattr(col, "cardinality", None)
+    if declared:
+        return declared
+    folded = fold_cardinality(None, getattr(col, "attribute", None))
+    return "low" if folded == LOW_CARDINALITY else None
+
+
 def _to_api_schema_column(col: Any) -> SchemaColumn:
     return SchemaColumn(
         name=col.name,
         type=col.type,
         use_case=getattr(col, "use_case", "") or "",
         attribute=_normalize_attribute(getattr(col, "attribute", None)),
+        cardinality=_declared_cardinality(col),
         description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
     )
