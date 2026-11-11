@@ -421,7 +421,7 @@ def _query(table: Table, case: Case) -> str:
     return f"SELECT row_id FROM {table.qualified} WHERE ({window}) AND ({case.where}) {case.tail}"
 
 
-def _ids(client: Any, sql: str, **settings: int) -> frozenset[int]:
+def _ids(client: Any, sql: str, **settings: int | str) -> frozenset[int]:
     rows = client.query(sql, settings=_MEASURE | settings).result_rows
     return frozenset(int(row[0]) for row in rows)
 
@@ -441,7 +441,7 @@ def _check(
     sql = _query(table, case)
     # The data is what the row says it is, read with no skip index at all.
     assert _ids(client, sql, use_skip_indexes=0) == case.expected, f"{case.id}: bad fixture"
-    got = _ids(client, sql)
+    got = _ids(client, sql, **case.exact)
     missing, extra = sorted(case.expected - got), sorted(got - case.expected)
     assert not missing, f"{case.id}: {len(missing)} rows missing, e.g. {missing[:5]}"
     assert not extra, f"{case.id}: {len(extra)} rows that do not match, e.g. {extra[:5]}"
@@ -482,5 +482,10 @@ def test_an_index_prunes_beyond_the_common_header(loaded, catalogue, case: Case)
 
 @pytest.mark.parametrize("case", [pytest.param(c, id=c.id) for c in CASES])
 def test_an_index_lands_and_answers_without_a_header(loaded, catalogue, case: Case) -> None:
-    """With no common header the DDL lands and the rows are right. Pruning is printed only."""
-    _check(loaded, catalogue, case, "plain")
+    """With no common header the DDL lands and the rows are right. Pruning is printed only.
+
+    A vector search still has to read its index, since that is the whole of its gate.
+    """
+    pruning = _check(loaded, catalogue, case, "plain")
+    if case.gate == "used":
+        assert pruning.index is not None, f"{case.id}: the plan never used its index: {pruning}"
