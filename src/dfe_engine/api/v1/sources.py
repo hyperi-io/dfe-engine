@@ -136,9 +136,9 @@ from dfe_engine.source.deployment import (
     ttl_change_for_table,
 )
 from dfe_engine.source.external import (
-    HEADER_FIELDS,
     external_connection,
     external_group_lag,
+    header_fields,
     sample_record,
 )
 from dfe_engine.source.flow import FlowError, SourceFlow, resolve_flow
@@ -3790,7 +3790,7 @@ def _connection_model(
         allowed_sources=list(connection.allowed_sources),
         header_fields=[
             HeaderFieldModel(field=f.field, when_missing=f.when_missing, when_set=f.when_set)
-            for f in HEADER_FIELDS
+            for f in header_fields()
         ],
         sample_record=sample_record(source),
     )

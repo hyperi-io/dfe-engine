@@ -397,3 +397,137 @@ class TestIntrospection:
     def test_primitive_defaults_unknown(self, registry: TypeRegistry):
         with pytest.raises(UnknownPrimitiveError):
             registry.primitive_defaults("nonexistent")
+
+
+_DECLARED = {
+    "primitives": {
+        "string": {"ch_type": "String", "label": "Text line"},
+        "decimalish": {"ch_type": "Float64"},
+        "map": {"ch_type": "Map(String,String)"},
+    },
+    "use_cases": {
+        "word_search": {
+            "valid_primitives": ["string"],
+            "label": "Word search",
+            "description": "I search for whole words",
+        },
+        "similarity_search": {"valid_primitives": ["string"], "parameters": ["dims"]},
+        "bloom": {"valid_primitives": ["string"]},
+    },
+    "attributes": {
+        "lowcardinality": {"valid_primitives": ["string"]},
+        "not_null": {"valid_primitives": "all", "label": "Not null"},
+    },
+    "ch_overrides": {
+        "exact": ["Map(String,String)"],
+        "options": [
+            {"value": "Int8", "label": "Int8", "primitive": "string"},
+            {
+                "value": "Decimal",
+                "label": "Decimal (fixed)",
+                "primitive": "decimalish",
+                "parameters": [
+                    {"name": "precision", "kind": "integer"},
+                    {"name": "scale", "label": "Scale places", "kind": "integer"},
+                ],
+                "template": "Decimal({precision},{scale})",
+                "hint": "Fixed point.",
+            },
+        ],
+    },
+}
+
+
+class TestVocabulary:
+    def test_a_declared_label_wins_and_a_missing_one_reads_off_the_name(self):
+        vocabulary = TypeRegistry(_DECLARED).vocabulary()
+
+        assert {p.name: p.label for p in vocabulary.primitives} == {
+            "string": "Text line",
+            "decimalish": "Decimalish",
+            "map": "Map",
+        }
+        use_cases = {u.name: u for u in vocabulary.use_cases}
+        assert use_cases["word_search"].description == "I search for whole words"
+        assert use_cases["similarity_search"].label == "Similarity search"
+        assert use_cases["similarity_search"].parameters == ("dims",)
+
+    def test_a_use_case_lists_the_names_it_replaced(self):
+        use_cases = {u.name: u for u in TypeRegistry(_DECLARED).vocabulary().use_cases}
+
+        assert use_cases["word_search"].retired_names == ("fulltext",)
+
+    def test_the_retired_attribute_is_left_out_and_all_means_every_primitive(self):
+        attributes = {a.name: a for a in TypeRegistry(_DECLARED).vocabulary().attributes}
+
+        assert set(attributes) == {"not_null"}
+        assert attributes["not_null"].valid_primitives == ("string", "decimalish", "map")
+
+    def test_override_options_keep_their_template_and_hint(self):
+        options = {o.value: o for o in TypeRegistry(_DECLARED).vocabulary().ch_override_options}
+
+        assert options["Int8"].template is None
+        assert options["Int8"].parameters == ()
+        assert options["Decimal"].template == "Decimal({precision},{scale})"
+        assert [(p.name, p.label, p.kind) for p in options["Decimal"].parameters] == [
+            ("precision", "Precision", "integer"),
+            ("scale", "Scale places", "integer"),
+        ]
+        assert options["Decimal"].hint == "Fixed point."
+
+    @pytest.mark.parametrize(
+        ("option", "message"),
+        [
+            ({"label": "No value", "primitive": "string"}, "with a 'value'"),
+            ({"value": "Int8", "primitive": "nope"}, "primitive 'nope'"),
+            ({"value": "Int8", "primitive": "string", "template": "Int8({n})"}, "or neither"),
+            (
+                {
+                    "value": "Int8",
+                    "primitive": "string",
+                    "parameters": [{"name": "n", "kind": "integer"}],
+                },
+                "or neither",
+            ),
+            (
+                {
+                    "value": "Int8",
+                    "primitive": "string",
+                    "template": "Int8({n})",
+                    "parameters": [{"name": "n", "kind": "float"}],
+                },
+                "kind of integer or text",
+            ),
+            (
+                {
+                    "value": "Int8",
+                    "primitive": "string",
+                    "template": "Int8()",
+                    "parameters": [{"name": "n", "kind": "integer"}],
+                },
+                "does not use",
+            ),
+        ],
+    )
+    def test_a_malformed_override_option_is_refused(self, option, message):
+        data = {**_DECLARED, "ch_overrides": {"options": [option]}}
+
+        with pytest.raises(TypeRegistryError, match=message):
+            TypeRegistry(data).vocabulary()
+
+    def test_the_shipped_registry_offers_only_overrides_it_accepts(self, registry: TypeRegistry):
+        for option in registry.vocabulary().ch_override_options:
+            registry.validate_ch_override(
+                (option.template or option.value).format(
+                    **{parameter.name: 8 for parameter in option.parameters}
+                )
+            )
+
+    def test_the_shipped_registry_labels_every_entry(self, registry: TypeRegistry):
+        vocabulary = registry.vocabulary()
+
+        assert len(vocabulary.primitives) == len(registry.primitives)
+        assert all(
+            entry.label
+            for entry in (*vocabulary.primitives, *vocabulary.use_cases, *vocabulary.attributes)
+        )

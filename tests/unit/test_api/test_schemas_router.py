@@ -15,12 +15,51 @@ routers guard against missing infrastructure cleanly.
 
 from types import SimpleNamespace
 
+from dfe_engine.source.type_registry import TypeRegistry
 from tests.support.accounts import OnboardedClient, session_token
 from tests.support.present import present
 
 # These apps run the production posture, which refuses to start on the shipped
 # admin password, so each injects one the way a deployment's secret store does.
 ADMIN_PASSWORD = "test-admin-pw"
+
+
+class TestSchemaVocabulary:
+    """GET /api/v1/schemas/vocabulary serves what the schema forms offer."""
+
+    URL = "/api/v1/schemas/vocabulary"
+
+    def test_serves_every_registry_entry_with_a_label(self, client, admin_headers):
+        resp = client.get(self.URL, headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        registry = TypeRegistry.default()
+        assert {p["name"] for p in body["primitives"]} == set(registry.primitives)
+        assert {u["name"] for u in body["use_cases"]} == set(registry.use_cases)
+        for entry in body["primitives"] + body["use_cases"] + body["attributes"]:
+            assert entry["label"], entry
+
+    def test_a_use_case_carries_its_arguments_and_the_names_it_replaced(
+        self, client, admin_headers
+    ):
+        body = client.get(self.URL, headers=admin_headers).json()
+        use_cases = {u["name"]: u for u in body["use_cases"]}
+
+        assert use_cases["similarity_search"]["parameters"] == ["dims"]
+        assert use_cases["similarity_search"]["valid_primitives"] == ["vector"]
+        assert use_cases["word_search"]["retired_names"] == ["fulltext"]
+        assert use_cases["exact_match"]["retired_names"] == ["bloom"]
+        assert not {"fulltext", "bloom"} & set(use_cases)
+
+    def test_the_retired_lowcardinality_attribute_is_not_offered(self, client, admin_headers):
+        body = client.get(self.URL, headers=admin_headers).json()
+
+        assert "lowcardinality" not in {a["name"] for a in body["attributes"]}
+        assert {a["name"] for a in body["attributes"]} >= {"nullable", "not_null"}
+
+    def test_requires_authentication(self, client):
+        assert client.get(self.URL).status_code == 401
 
 
 class TestSchemasRouter:

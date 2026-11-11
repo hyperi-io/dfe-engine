@@ -98,6 +98,7 @@ from dfe_engine.services.schema.elastic_schema_service import (
 from dfe_engine.services.schema.json_promotion_service import PROMOTED_FIELD_TYPE
 from dfe_engine.source.models import Source, SourceHeader, SourceWriteRequest
 from dfe_engine.source.registry import SourceNotFoundError, SourceValidationError
+from dfe_engine.source.type_registry import TypeRegistry
 
 router = APIRouter(prefix="/schemas", tags=["schemas"])
 
@@ -573,6 +574,93 @@ async def list_schemas(
     ]
     return SchemaSummaryPage.from_summaries(
         summaries, query, bound={"search": search, "schema_type": schema_type}
+    )
+
+
+class _FromRegistry(BaseModel):
+    """Built from the registry's frozen entries, which are not dicts."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VocabularyPrimitive(_FromRegistry):
+    """A primitive a column may declare."""
+
+    name: str
+    label: str
+    ch_type: str = Field(description="The ClickHouse type the primitive maps to.")
+
+
+class VocabularyUseCase(_FromRegistry):
+    """An index use case: the question the user asks of a column."""
+
+    name: str
+    label: str
+    description: str = Field(description="The question the use case answers, in plain words.")
+    valid_primitives: list[str]
+    parameters: list[str] = Field(
+        description="Arguments the use case takes in brackets, such as dims for similarity_search."
+    )
+    retired_names: list[str] = Field(
+        description="Names this use case replaced. A stored column may still carry one."
+    )
+
+
+class VocabularyAttribute(_FromRegistry):
+    """An attribute a column may carry."""
+
+    name: str
+    label: str
+    valid_primitives: list[str]
+
+
+class VocabularyOverrideParameter(_FromRegistry):
+    """An argument an override type takes, and the input a form shows for it."""
+
+    name: str = Field(description="The name the template wraps in braces.")
+    label: str
+    kind: Literal["integer", "text"]
+
+
+class VocabularyChOverride(_FromRegistry):
+    """A ClickHouse type offered as an override, and the primitive it refines."""
+
+    value: str
+    label: str
+    primitive: str
+    parameters: list[VocabularyOverrideParameter] = Field(
+        description="Inputs the type needs, in the order the type takes them."
+    )
+    template: str | None = Field(
+        description="The override text with each parameter in braces; null when it takes none."
+    )
+    hint: str = Field(description="A note to show beside the option, empty when there is none.")
+
+
+class SchemaVocabulary(_FromRegistry):
+    """What a schema form may offer, read from the dfe-schemas registry the engine runs."""
+
+    primitives: list[VocabularyPrimitive]
+    use_cases: list[VocabularyUseCase]
+    attributes: list[VocabularyAttribute]
+    ch_overrides: list[VocabularyChOverride]
+
+
+@router.get(
+    "/vocabulary",
+    response_model=SchemaVocabulary,
+    dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
+)
+def get_schema_vocabulary(user: CurrentUser) -> SchemaVocabulary:
+    """The primitives, use cases, attributes and override types a column may use."""
+    vocabulary = TypeRegistry.default().vocabulary()
+    return SchemaVocabulary.model_validate(
+        {
+            "primitives": vocabulary.primitives,
+            "use_cases": vocabulary.use_cases,
+            "attributes": vocabulary.attributes,
+            "ch_overrides": vocabulary.ch_override_options,
+        }
     )
 
 

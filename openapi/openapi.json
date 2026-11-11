@@ -18707,6 +18707,78 @@
         }
       }
     },
+    "/api/v1/schemas/vocabulary": {
+      "get": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Get Schema Vocabulary",
+        "description": "The primitives, use cases, attributes and override types a column may use.",
+        "operationId": "schemas.vocabulary",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaVocabulary"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No valid session: the credentials are missing, invalid or expired, or the account behind them is disabled or blocked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Refused: the session lacks the action this route checks, or its account must replace an issued password first. A SCIM route answers a refused action in the RFC 7644 error envelope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "Problem details (RFC 9457)",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "x-scalo": {
+          "group": "schemas",
+          "resource": "schemas",
+          "hierarchy": [
+            "schemas"
+          ],
+          "verb": "vocabulary",
+          "read_only": true,
+          "cli": {
+            "hidden": false,
+            "aliases": [],
+            "positional": []
+          },
+          "action": "schema:read"
+        }
+      }
+    },
     "/api/v1/schemas/definitions/{schema_path}/versions/columns": {
       "get": {
         "tags": [
@@ -42132,6 +42204,11 @@
           "deployment_default": {
             "type": "integer",
             "title": "Deployment Default"
+          },
+          "maximum": {
+            "type": "integer",
+            "title": "Maximum",
+            "description": "The largest value a PATCH accepts, so a form can bound it."
           }
         },
         "type": "object",
@@ -42139,7 +42216,8 @@
           "effective",
           "stored",
           "origin",
-          "deployment_default"
+          "deployment_default",
+          "maximum"
         ],
         "title": "IntDefault",
         "description": "One integer default: the value in force, and where it came from."
@@ -50349,6 +50427,47 @@
         "title": "SchemaVersionGet",
         "description": "The selected version's metadata, its columns paged in the answer's ``items``."
       },
+      "SchemaVocabulary": {
+        "properties": {
+          "primitives": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyPrimitive"
+            },
+            "type": "array",
+            "title": "Primitives"
+          },
+          "use_cases": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyUseCase"
+            },
+            "type": "array",
+            "title": "Use Cases"
+          },
+          "attributes": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyAttribute"
+            },
+            "type": "array",
+            "title": "Attributes"
+          },
+          "ch_overrides": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyChOverride"
+            },
+            "type": "array",
+            "title": "Ch Overrides"
+          }
+        },
+        "type": "object",
+        "required": [
+          "primitives",
+          "use_cases",
+          "attributes",
+          "ch_overrides"
+        ],
+        "title": "SchemaVocabulary",
+        "description": "What a schema form may offer, read from the dfe-schemas registry the engine runs."
+      },
       "SelectionResponse": {
         "properties": {
           "rules": {
@@ -55957,6 +56076,190 @@
         ],
         "title": "ViewParameter",
         "description": "Parameter discovered from a ClickHouse parameterized view.\n\nExtracted from the view's CREATE SQL by parsing {param:Type} patterns.\nProvides type metadata across the full stack (ClickHouse -> Python -> TypeScript -> HTML)."
+      },
+      "VocabularyAttribute": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "valid_primitives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Valid Primitives"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "valid_primitives"
+        ],
+        "title": "VocabularyAttribute",
+        "description": "An attribute a column may carry."
+      },
+      "VocabularyChOverride": {
+        "properties": {
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "primitive": {
+            "type": "string",
+            "title": "Primitive"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/VocabularyOverrideParameter"
+            },
+            "type": "array",
+            "title": "Parameters",
+            "description": "Inputs the type needs, in the order the type takes them."
+          },
+          "template": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template",
+            "description": "The override text with each parameter in braces; null when it takes none."
+          },
+          "hint": {
+            "type": "string",
+            "title": "Hint",
+            "description": "A note to show beside the option, empty when there is none."
+          }
+        },
+        "type": "object",
+        "required": [
+          "value",
+          "label",
+          "primitive",
+          "parameters",
+          "template",
+          "hint"
+        ],
+        "title": "VocabularyChOverride",
+        "description": "A ClickHouse type offered as an override, and the primitive it refines."
+      },
+      "VocabularyOverrideParameter": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "The name the template wraps in braces."
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "integer",
+              "text"
+            ],
+            "title": "Kind"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "kind"
+        ],
+        "title": "VocabularyOverrideParameter",
+        "description": "An argument an override type takes, and the input a form shows for it."
+      },
+      "VocabularyPrimitive": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "ch_type": {
+            "type": "string",
+            "title": "Ch Type",
+            "description": "The ClickHouse type the primitive maps to."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "ch_type"
+        ],
+        "title": "VocabularyPrimitive",
+        "description": "A primitive a column may declare."
+      },
+      "VocabularyUseCase": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "The question the use case answers, in plain words."
+          },
+          "valid_primitives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Valid Primitives"
+          },
+          "parameters": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Parameters",
+            "description": "Arguments the use case takes in brackets, such as dims for similarity_search."
+          },
+          "retired_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Retired Names",
+            "description": "Names this use case replaced. A stored column may still carry one."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "description",
+          "valid_primitives",
+          "parameters",
+          "retired_names"
+        ],
+        "title": "VocabularyUseCase",
+        "description": "An index use case: the question the user asks of a column."
       },
       "VolumeBand": {
         "type": "string",

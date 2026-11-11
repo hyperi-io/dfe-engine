@@ -126,6 +126,82 @@ def current_use_case(declared: Any) -> Any:
     return RETIRED_USE_CASES.get(declared.strip(), declared)
 
 
+@dataclass(frozen=True)
+class PrimitiveEntry:
+    """One primitive a column may declare, as a form offers it."""
+
+    name: str
+    label: str
+    ch_type: str
+
+
+@dataclass(frozen=True)
+class UseCaseEntry:
+    """One index use case: the question the user asks of a column."""
+
+    name: str
+    label: str
+    description: str
+    valid_primitives: tuple[str, ...]
+    parameters: tuple[str, ...]
+    retired_names: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class AttributeEntry:
+    """One attribute a column may carry, with the primitives it applies to."""
+
+    name: str
+    label: str
+    valid_primitives: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class OverrideParameter:
+    """One argument an override type takes, and the input a form shows for it."""
+
+    name: str
+    label: str
+    kind: Literal["integer", "text"]
+
+
+@dataclass(frozen=True)
+class ChOverrideOption:
+    """One ClickHouse type a form offers as an override, and the primitive it refines.
+
+    ``template`` is the override text with each parameter name in braces
+    (``Decimal({precision},{scale})``). It is None for a type that takes none.
+    """
+
+    value: str
+    label: str
+    primitive: str
+    parameters: tuple[OverrideParameter, ...]
+    template: str | None
+    hint: str
+
+
+@dataclass(frozen=True)
+class Vocabulary:
+    """What a schema form may offer, read from the registry."""
+
+    primitives: tuple[PrimitiveEntry, ...]
+    use_cases: tuple[UseCaseEntry, ...]
+    attributes: tuple[AttributeEntry, ...]
+    ch_override_options: tuple[ChOverrideOption, ...]
+
+
+def default_label(name: str) -> str:
+    """A readable label from a registry name, for an entry that declares none."""
+    spaced = name.replace("_", " ").strip()
+    return spaced[:1].upper() + spaced[1:]
+
+
+def _text(entry: dict[str, Any], key: str, default: str = "") -> str:
+    value = entry.get(key)
+    return value.strip() if isinstance(value, str) and value.strip() else default
+
+
 class TypeRegistry:
     """Canonical registry mapping primitives to ClickHouse types.
 
@@ -395,3 +471,102 @@ class TypeRegistry:
         if primitive not in self._primitives:
             raise UnknownPrimitiveError(f"Unknown primitive '{primitive}'")
         return dict(self._primitives[primitive])
+
+    # -----------------------------------------------------------------
+    # Vocabulary served to the schema forms
+    # -----------------------------------------------------------------
+
+    def vocabulary(self) -> Vocabulary:
+        """Everything a schema form may offer, from this registry.
+
+        A label the registry does not declare reads off the entry's name. The
+        retired ``lowcardinality`` attribute is left out, because a column now
+        declares ``cardinality``. Each use case carries the names it replaced, so
+        a stored column that still holds one resolves to it.
+
+        Raises:
+            TypeRegistryError: An override option names no value, or a primitive
+                the registry does not have.
+        """
+        names = tuple(self._primitives)
+        retired: dict[str, list[str]] = {}
+        for old, current in RETIRED_USE_CASES.items():
+            retired.setdefault(current, []).append(old)
+        return Vocabulary(
+            primitives=tuple(
+                PrimitiveEntry(
+                    name=name,
+                    label=_text(entry, "label", default_label(name)),
+                    ch_type=_text(entry, "ch_type"),
+                )
+                for name, entry in self._primitives.items()
+            ),
+            use_cases=tuple(
+                UseCaseEntry(
+                    name=name,
+                    label=_text(entry, "label", default_label(name)),
+                    description=_text(entry, "description"),
+                    valid_primitives=tuple(entry.get("valid_primitives") or ()),
+                    parameters=tuple(entry.get("parameters") or ()),
+                    retired_names=tuple(retired.get(name, ())),
+                )
+                for name, entry in self._use_cases.items()
+            ),
+            attributes=tuple(
+                AttributeEntry(
+                    name=name,
+                    label=_text(entry, "label", default_label(name)),
+                    valid_primitives=names
+                    if entry.get("valid_primitives") == "all"
+                    else tuple(entry.get("valid_primitives") or ()),
+                )
+                for name, entry in self._attributes.items()
+                if name != LOWCARDINALITY_ATTRIBUTE
+            ),
+            ch_override_options=tuple(
+                self._override_option(raw) for raw in self._ch_overrides.get("options") or ()
+            ),
+        )
+
+    def _override_option(self, raw: Any) -> ChOverrideOption:
+        if not isinstance(raw, dict) or not _text(raw, "value"):
+            raise TypeRegistryError("a ch_overrides option must be a mapping with a 'value'")
+        value = _text(raw, "value")
+        primitive = _text(raw, "primitive")
+        if primitive not in self._primitives:
+            raise TypeRegistryError(
+                f"ch_overrides option '{value}' names primitive '{primitive}', "
+                f"which the registry does not have"
+            )
+        template = _text(raw, "template") or None
+        parameters = tuple(self._override_parameter(value, p) for p in raw.get("parameters") or ())
+        if bool(parameters) != (template is not None):
+            raise TypeRegistryError(
+                f"ch_overrides option '{value}' must give both 'parameters' and 'template', or neither"
+            )
+        for parameter in parameters:
+            if "{" + parameter.name + "}" not in (template or ""):
+                raise TypeRegistryError(
+                    f"ch_overrides option '{value}' template does not use '{{{parameter.name}}}'"
+                )
+        return ChOverrideOption(
+            value=value,
+            label=_text(raw, "label", value),
+            primitive=primitive,
+            parameters=parameters,
+            template=template,
+            hint=_text(raw, "hint"),
+        )
+
+    @staticmethod
+    def _override_parameter(value: str, raw: Any) -> OverrideParameter:
+        name = _text(raw, "name") if isinstance(raw, dict) else ""
+        kind = _text(raw, "kind") if isinstance(raw, dict) else ""
+        if not name or kind not in ("integer", "text"):
+            raise TypeRegistryError(
+                f"ch_overrides option '{value}' has a parameter without a name "
+                f"and a kind of integer or text"
+            )
+        return OverrideParameter(
+            name=name, label=_text(raw, "label", default_label(name)), kind=kind
+        )
