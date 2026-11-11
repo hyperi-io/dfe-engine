@@ -244,6 +244,32 @@ data you have not seen yet, which is slow and usually wrong. Promotion inverts
 it: you work on what is arriving, one field at a time, and the schema grows to
 match reality.
 
+Why promote at all? `_json` takes whatever arrives. Each value keeps the type it came with, row by
+row, so `port` can be `8080` in one record and `"http"` in the next. Inserts
+never fail on it. Queries do.
+
+While every `port` is a number, `WHERE _json.port = 8080` works. The first
+string to land at that path breaks it, with no change to the query:
+
+| Query on a path holding numbers and strings | Result on ClickHouse 26.3 |
+|---------------------------------------------|---------------------------|
+| `_json.port = 8080`, `>`, `<` | `NO_COMMON_TYPE`: no supertype for String and UInt16 |
+| `_json.port IN (8080, 443)` | `ILLEGAL_TYPE_OF_ARGUMENT`: Dynamic is not allowed in `IN` |
+| `startsWith(_json.port, 'ht')`, `LIKE`, `position` | `ILLEGAL_TYPE_OF_ARGUMENT` on every number row |
+| `_json.port.:Int64 = 8080` | Works: reads only the rows stored as Int64 |
+
+So a rule, a hunt or a saved search can pass the day it is written and fail the
+day a source sends one odd value. And no path inside `_json` has an index, so
+even the query that works reads every row.
+
+That is the first reason to promote a field, and usually the most important. A
+promoted column has ONE type, so the query is the plain comparison you meant. Then give it a `use_case` so
+it gets the index that answers how you query it (`exact_match` for an id or an
+IP, `range` for a number, `word_search` for text).
+
+Until a field is promoted, query it through a typed sub-column:
+`_json.port.:Int64` for numbers, `_json.port.:String` for strings.
+
 **It does not backfill.** A promoted column is filled by the records that arrive
 after it, and is empty for every row already in the table. The value is still
 there for those rows -- it is in `_json`, where it always was, at `_json` speed.
