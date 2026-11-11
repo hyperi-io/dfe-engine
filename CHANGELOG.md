@@ -3,6 +3,21 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.89](https://github.com/hyperi-io/dfe-engine/compare/v1.22.88...v1.22.89) (2026-11-11)
+
+### Bug Fixes
+
+* **engine:** take tunables and type tables from config and dfe-schemas ([33e6892](https://github.com/hyperi-io/dfe-engine/commit/33e689286a40796bd233e5690a4eefcaa437511a))
+* **engine:** type CEL _json hunt filters and use scalo Kafka providers ([7afc7d5](https://github.com/hyperi-io/dfe-engine/commit/7afc7d54158466998eed02b8d72235b01ecd5b12))
+* **fieldmap:** read JSON view columns without failing on mixed types ([ee13335](https://github.com/hyperi-io/dfe-engine/commit/ee1333527c82f4a7a6709ebc652c300a3ddda0dc))
+* **hyperdx:** return seed database and tables in connection response ([4f73538](https://github.com/hyperi-io/dfe-engine/commit/4f735383a394c54d81d46abaa072d573be954154))
+* **schema:** render source tables through dfe-schemas' table renderer ([95d2466](https://github.com/hyperi-io/dfe-engine/commit/95d2466eaeed4879d91027b713f9572ae469ffa3))
+* **schemas:** move to dfe-schemas 0.2.27 ([46787f8](https://github.com/hyperi-io/dfe-engine/commit/46787f836fe38cb64e4aec4fbdc73ad81586f68a))
+* **schemas:** serve the column vocabulary ([ea8e845](https://github.com/hyperi-io/dfe-engine/commit/ea8e84580e72a7a87ce38da0ee75f6a32db7a0b5))
+* **security:** contain profile paths under their schemas root ([a232ff0](https://github.com/hyperi-io/dfe-engine/commit/a232ff05d6431d713ae7a51500934d1813f950da))
+* **security:** render profile caps as constraints ([361b9ab](https://github.com/hyperi-io/dfe-engine/commit/361b9abbaef4ab091708ae125c16228b3e0430e3))
+* **services:** take app config defaults from each app's contract ([7b7238b](https://github.com/hyperi-io/dfe-engine/commit/7b7238bd47f50023289c4e3ed31440977c0b3248))
+
 ## [1.22.88](https://github.com/hyperi-io/dfe-engine/compare/v1.22.87...v1.22.88) (2026-11-11)
 
 ### Bug Fixes
