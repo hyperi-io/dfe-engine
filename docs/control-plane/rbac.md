@@ -805,8 +805,8 @@ graph TD
 
 Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
 `/api/v1/apps`, so there is no per-service surface registry and no
-`/api/v1/service-surfaces` endpoint. The typed plugin system (`plugins.py`,
-`plugins_builtin/`) still backs `/api/v1/services`.
+`/api/v1/service-surfaces` endpoint. `/api/v1/services` takes its services from
+the same manifest and each config's defaults from the app's mounted contract.
 
 ---
 

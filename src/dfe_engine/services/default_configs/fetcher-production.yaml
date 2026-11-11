@@ -1,14 +1,9 @@
 # DFE Fetcher -- Production defaults
 # SaaS API fetcher -- pulls from cloud APIs and routes to Kafka
 
-sources: []
-
 kafka:
   brokers: []  # every deployment names its own brokers
   client_id: dfe-fetcher
-  compression: lz4
-  batch_size: 8388608
-  linger_ms: 20
   sasl:
     enabled: true
     mechanism: scram_sha_512
@@ -17,26 +12,6 @@ kafka:
   tls:
     enabled: true
 
-routing:
-  topic_fields:
-    - tags.event.category
-    - event_category
-  default_topic: unmatched
-  topic_suffix: _land
-  category_to_topic: {}
-
-extra_env: {}
-
-memory:
-  limit_bytes: 0
-  pressure_threshold: 0.8
-  tracking_enabled: true
-
 metrics:
   enabled: true
   address: "0.0.0.0:9090"
-  path: /metrics
-
-logging:
-  level: info
-  format: json

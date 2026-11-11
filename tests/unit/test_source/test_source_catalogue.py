@@ -23,7 +23,7 @@ from scalo.logger import logger
 from scalo.rules import CompileOptions
 from scalo.rules import RuleSet as ScaloRuleSet
 
-from dfe_engine.services.models.receiver import RULE_TARGETS, RuleSet
+from dfe_engine.services.routing_models import RULE_TARGETS, RuleSet
 from dfe_engine.services.source_routing import RECEIVER_RULES_PROFILE, source_rules
 from dfe_engine.settings import DFESettings
 from dfe_engine.source import catalogue as sc

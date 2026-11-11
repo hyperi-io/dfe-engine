@@ -12,10 +12,13 @@ bootstrap, so a rename on either side fails here rather than on a broker that
 discards every dead letter.
 """
 
+import json
 from collections.abc import Iterable
+from pathlib import Path
 
 import pytest
 
+from dfe_engine.appmgmt import contract
 from dfe_engine.kafka.topics import TopicAdmin
 from dfe_engine.schema.phase import (
     DeadLetterPathError,
@@ -23,12 +26,17 @@ from dfe_engine.schema.phase import (
     require_dead_letter_topics,
 )
 from dfe_engine.schema.plan import build_plan
-from dfe_engine.services.models.loader import LoaderConfig, LoaderRoutingConfig
-from dfe_engine.services.models.receiver import ReceiverConfig, ReceiverRoutingConfig
 from dfe_engine.services.registry import default_configs
 from dfe_engine.settings import DFESettings
 from dfe_engine.source.models import _topic_policy
-from dfe_engine.yaml_utils import yaml_load_string
+from dfe_engine.yaml_utils import deep_merge, yaml_load_string
+
+EMITTED = Path(__file__).parents[2] / "fixtures" / "contract"
+
+
+def _app_defaults(app: str) -> dict:
+    """What ``app`` runs for every key its config leaves out, off its emitted schema."""
+    return contract.config_defaults(json.loads((EMITTED / app / contract.SCHEMA_FILE).read_text()))
 
 
 def _settings(
@@ -90,11 +98,9 @@ class _Untouchable(TopicAdmin):
 
 
 class TestNames:
-    def test_the_receiver_dead_letters_to_a_topic_the_engine_creates(self, declared):
-        assert ReceiverRoutingConfig().dlq.topic in declared
-
-    def test_the_loader_dead_letters_to_a_topic_the_engine_creates(self, declared):
-        assert LoaderRoutingConfig().dlq.topic in declared
+    @pytest.mark.parametrize("app", ["dfe-receiver", "dfe-loader"])
+    def test_the_app_dead_letters_to_a_topic_the_engine_creates(self, declared, app):
+        assert _app_defaults(app)["routing"]["dlq"]["topic"] in declared
 
     @pytest.mark.parametrize(
         "name",
@@ -107,9 +113,10 @@ class TestNames:
     )
     def test_every_shipped_config_names_a_created_topic(self, declared, name):
         text = default_configs(DFESettings(env="dev", secrets={"provider": "openbao"}))[name]
-        model = ReceiverConfig if name.startswith("receiver-") else LoaderConfig
-        # Through the model, so a seed that leaves the topic to the app's default is judged by it.
-        assert model.model_validate(yaml_load_string(text)).routing.dlq.topic in declared
+        app = "dfe-receiver" if name.startswith("receiver-") else "dfe-loader"
+        # Over the app's defaults, so a seed that leaves the topic to the app is judged by it.
+        runs = deep_merge(_app_defaults(app), yaml_load_string(text))
+        assert runs["routing"]["dlq"]["topic"] in declared
 
 
 class TestTheGate:

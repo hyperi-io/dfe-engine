@@ -12,7 +12,7 @@ from dfe_engine.settings import DFESettings
 
 LIMIT = 4096
 JSON = {"content-type": "application/json"}
-SERVICE = "/api/v1/services/customsvc/capped"
+SERVICE = "/api/v1/services/fetcher/capped"
 
 
 def _json_of(size: int) -> bytes:

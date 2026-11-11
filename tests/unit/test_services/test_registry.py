@@ -1,10 +1,11 @@
-"""Tests for ServiceConfigRegistry — CRUD, validation, list, schema-less mode."""
+"""Tests for ServiceConfigRegistry: CRUD, validation and listing over the manifest's apps."""
 
 import pytest
 
 from dfe_engine.services.registry import (
     ConfigNotFoundError,
     ServiceConfigRegistry,
+    UnknownServiceError,
 )
 from dfe_engine.yaml_utils import yaml_load_string
 
@@ -65,30 +66,27 @@ class TestGetConfig:
         with pytest.raises(ConfigNotFoundError, match="receiver/default"):
             registry.get_config("receiver", "default")
 
-    def test_get_config_returns_typed_model(self, tmp_path, receiver_yaml):
-        svc_dir = tmp_path / "svc_typed"
+    def test_get_config_returns_the_file_as_stored(self, tmp_path, receiver_yaml):
+        svc_dir = tmp_path / "svc_stored"
         svc_dir.mkdir()
         (svc_dir / "receiver-default.yaml").write_text(receiver_yaml)
 
         reg = ServiceConfigRegistry(config_directory=svc_dir, refresh_interval=0)
         try:
             config = reg.get_config("receiver", "default")
-            # Should be a Pydantic model (ReceiverConfig), not a raw dict
-            assert hasattr(config, "model_dump")
         finally:
             reg.close()
+        assert config == yaml_load_string(receiver_yaml)
 
-    def test_get_config_unknown_service_returns_dict(self, tmp_path):
-        """Unknown services (schema-less mode) return raw dict."""
-        svc_dir = tmp_path / "svc_schemaless"
+    def test_a_service_no_app_in_the_manifest_has_is_refused(self, tmp_path):
+        svc_dir = tmp_path / "svc_unknown"
         svc_dir.mkdir()
         (svc_dir / "myservice-default.yaml").write_text("key: value\nfoo: bar\n")
 
         reg = ServiceConfigRegistry(config_directory=svc_dir, refresh_interval=0)
         try:
-            result = reg.get_config("myservice", "default")
-            assert isinstance(result, dict)
-            assert result["key"] == "value"
+            with pytest.raises(UnknownServiceError, match="myservice"):
+                reg.get_config("myservice", "default")
         finally:
             reg.close()
 
@@ -100,7 +98,7 @@ class TestGetConfig:
 
 class TestSaveConfig:
     def test_save_and_retrieve_known_service(self, tmp_path, receiver_yaml):
-        """Save a known service config then retrieve it as a typed model."""
+        """Save a known service config then retrieve it."""
         svc_dir = tmp_path / "svc_save"
         svc_dir.mkdir()
         (svc_dir / "receiver-default.yaml").write_text(receiver_yaml)
@@ -109,30 +107,26 @@ class TestSaveConfig:
         try:
             # Retrieve initial config, mutate, save back
             config = reg.get_config("receiver", "default")
-            data = config.model_dump(mode="json")
-            data["kafka"]["brokers"] = ["kafka-new:9092"]
+            config["kafka"]["brokers"] = ["kafka-new:9092"]
 
-            reg.save_config("receiver", data, instance="default")
+            reg.save_config("receiver", config, instance="default")
 
             updated = reg.get_config("receiver", "default")
-            assert updated.kafka.brokers == ["kafka-new:9092"]
+            assert updated["kafka"]["brokers"] == ["kafka-new:9092"]
         finally:
             reg.close()
 
-    def test_save_unknown_service_dict(self, tmp_path):
-        """Save an unknown service config as raw dict."""
+    def test_a_save_for_a_service_no_app_has_is_refused(self, tmp_path):
         svc_dir = tmp_path / "svc_unknown"
         svc_dir.mkdir()
 
         reg = ServiceConfigRegistry(config_directory=svc_dir, refresh_interval=0)
         try:
-            reg.save_config("new-service", {"alpha": 1, "beta": "ok"}, instance="prod")
-
-            result = reg.get_config("new-service", "prod")
-            assert isinstance(result, dict)
-            assert result["alpha"] == 1
+            with pytest.raises(UnknownServiceError):
+                reg.save_config("new-service", {"alpha": 1}, instance="prod")
         finally:
             reg.close()
+        assert not (svc_dir / "new-service-prod.yaml").exists()
 
     def test_save_file_written_to_disk(self, tmp_path, receiver_yaml):
         svc_dir = tmp_path / "svc_disk"
@@ -147,40 +141,6 @@ class TestSaveConfig:
             yaml_file = svc_dir / "receiver-staging.yaml"
             assert yaml_file.exists()
             assert yaml_file.stat().st_size > 0
-        finally:
-            reg.close()
-
-    def test_a_loader_ca_is_written_where_the_loader_reads_it(self, registry, tmp_path):
-        tls = {"enabled": True, "ca_cert_file": "/etc/dfe/kafka-ca.pem"}
-        registry.save_config("loader", {"kafka": {"tls": tls}, "clickhouse": {"tls": tls}})
-
-        on_disk = yaml_load_string((tmp_path / "services" / "loader-default.yaml").read_text())
-        for block in ("kafka", "clickhouse"):
-            assert on_disk[block]["tls"]["ca_cert_file"] == "/etc/dfe/kafka-ca.pem"
-            assert "ca_file" not in on_disk[block]["tls"]
-        assert on_disk["schema"] == {"cache_ttl_secs": 300, "refresh_on_error": True}
-        assert "schema_cache" not in on_disk
-
-    def test_a_loader_file_in_the_old_spelling_loads_and_saves_in_the_loader_s(self, tmp_path):
-        svc_dir = tmp_path / "svc_old_loader"
-        svc_dir.mkdir()
-        (svc_dir / "loader-default.yaml").write_text(
-            "kafka:\n"
-            "  tls:\n"
-            "    enabled: true\n"
-            "    ca_file: /etc/dfe/kafka-ca.pem\n"
-            "schema_cache:\n"
-            "  cache_ttl_secs: 60\n"
-        )
-        reg = ServiceConfigRegistry(config_directory=svc_dir, refresh_interval=0)
-        try:
-            config = reg.get_config("loader", "default")
-            assert config.kafka.tls.ca_cert_file == "/etc/dfe/kafka-ca.pem"
-            reg.save_config("loader", config)
-
-            on_disk = yaml_load_string((svc_dir / "loader-default.yaml").read_text())
-            assert on_disk["kafka"]["tls"]["ca_cert_file"] == "/etc/dfe/kafka-ca.pem"
-            assert on_disk["schema"]["cache_ttl_secs"] == 60
         finally:
             reg.close()
 
@@ -297,8 +257,7 @@ class TestListConfigs:
         entries = registry.list_configs()
         assert entries == []
 
-    def test_list_unknown_service_included(self, tmp_path):
-        """Unknown services in schema-less mode appear in list_configs."""
+    def test_a_file_no_service_owns_is_not_listed(self, tmp_path):
         svc_dir = tmp_path / "svc_sl"
         svc_dir.mkdir()
         (svc_dir / "custom-prod.yaml").write_text("key: value\n")
@@ -306,7 +265,7 @@ class TestListConfigs:
         reg = ServiceConfigRegistry(config_directory=svc_dir, refresh_interval=0)
         try:
             entries = reg.list_configs()
-            assert any(e["service"] == "custom" and e["instance"] == "prod" for e in entries)
+            assert entries == []
         finally:
             reg.close()
 
@@ -324,18 +283,22 @@ class TestValidate:
         result = registry.validate("receiver", data)
         assert result.valid
 
-    def test_validate_unknown_service_returns_warning(self, registry):
+    def test_validate_unknown_service_is_invalid(self, registry):
         result = registry.validate("myunknownservice", {"a": 1})
-        assert result.valid
-        assert any("No schema registered" in w for w in result.warnings)
+        assert not result.valid
+        assert "Unknown service: myunknownservice" in result.errors[0]
 
-    def test_validate_invalid_data_for_known_service(self, registry):
-        # Pass completely invalid data for receiver
-        result = registry.validate("receiver", {"this_field": "does_not_match_schema"})
-        # May be valid (extra fields allowed) or invalid depending on model
-        # The important thing is it returns a ValidationResult
-        assert hasattr(result, "valid")
-        assert hasattr(result, "errors")
+    def test_with_no_contract_mounted_nothing_is_checked(self, registry, monkeypatch):
+        from dfe_engine.appmgmt import contract
+
+        monkeypatch.setenv(contract.CONTRACT_DIR_ENV, "/nonexistent/contract")
+        contract.reload_contracts()
+        try:
+            result = registry.validate("receiver", {"this_field": "does_not_match_schema"})
+        finally:
+            contract.reload_contracts()
+        assert result.valid
+        assert "no config contract is mounted for dfe-receiver" in result.warnings[0]
 
 
 # ---------------------------------------------------------------------------
@@ -454,13 +417,12 @@ class TestParseTableName:
         assert result == ("receiver", "default")
 
     def test_known_service_hyphenated(self):
-        result = ServiceConfigRegistry._parse_table_name("transform-wasm-production")
-        assert result == ("transform-wasm", "production")
+        result = ServiceConfigRegistry._parse_table_name("transform-vrl-production")
+        assert result == ("transform-vrl", "production")
 
-    def test_unknown_service_fallback(self):
-        """Unknown services fall back to last-hyphen split."""
-        result = ServiceConfigRegistry._parse_table_name("newservice-prod")
-        assert result == ("newservice", "prod")
+    @pytest.mark.parametrize("table", ["newservice-prod", "transform-wasm-production"])
+    def test_a_service_no_app_has_is_none(self, table):
+        assert ServiceConfigRegistry._parse_table_name(table) is None
 
     def test_invalid_no_hyphen_returns_none(self):
         result = ServiceConfigRegistry._parse_table_name("nodash")

@@ -17,14 +17,18 @@ source definition alone decides where its records go. The tenancy blocks are
 asserted the same way, because a wrong one lands a record in another org.
 """
 
+import json
 from dataclasses import replace
+from pathlib import Path
+from typing import Any
 
 import pytest
 
-from dfe_engine.appmgmt import catalogue, instances, routing
+from dfe_engine.appmgmt import catalogue, contract, instances, routing
 from dfe_engine.orgs.ingest_credentials import IngestCredential
 from dfe_engine.orgs.models import Org
 from dfe_engine.orgs.tenancy import Tenancy
+from dfe_engine.services.registry import judge_config
 from dfe_engine.source.alignment import MixedConnectorTypesError
 
 from .conftest import FakeRegistry
@@ -62,6 +66,21 @@ ARCHIVER = "dfe-archiver"
 UI = "dfe-ui"
 
 LOADER_ENDPOINT = "http://dfe-loader:6000"
+
+EMITTED = Path(__file__).parents[2] / "fixtures" / "contract"
+"""The contracts each app emitted, as a deployment mounts them."""
+
+
+def _accepted(app: str, config: dict[str, Any]) -> dict[str, Any]:
+    """``config``, once the app's emitted schema has found no value in it that it refuses."""
+    schema = json.loads((EMITTED / app / contract.SCHEMA_FILE).read_text())
+    emitted = contract.AppContract(
+        service=app, available=True, source=contract.ContractSource.MOUNT, schema=schema
+    )
+    assert judge_config(emitted, config).errors == []
+    return config
+
+
 ARCHIVER_ENDPOINT = "http://dfe-archiver:6000"
 
 # Read off the shipped manifest, so a family added there is covered without an edit here.
@@ -366,18 +385,18 @@ class TestReceiverGolden:
             "credentials": {}
         }
 
-    def test_every_compiled_block_is_one_the_receiver_model_accepts(
+    def test_every_compiled_block_is_one_the_receiver_s_schema_takes(
         self, fetched_registry, settings
     ):
-        from dfe_engine.services.models.receiver import ReceiverConfig
-
         doc = instances.initial_overlay(instances.instance_of(RECEIVER, "default"))
         routing.apply(
             catalogue.descriptor(RECEIVER), doc, _receiver(fetched_registry, settings, TENANCY)
         )
-        accepted = ReceiverConfig.model_validate(doc["config"])
-        assert accepted.ingest_bindings.credentials["acme-agents"].default_org == "acme-prod"
-        assert accepted.server.auth.mode == "bearer"
+        accepted = _accepted(RECEIVER, doc["config"])
+        assert (
+            accepted["ingest_bindings"]["credentials"]["acme-agents"]["default_org"] == "acme-prod"
+        )
+        assert accepted["server"]["auth"]["mode"] == "bearer"
 
 
 class TestReceiverOnTheBus:
@@ -730,8 +749,6 @@ class TestLoaderCapture:
         assert compiled["capture"] == {f"{db}.filebeat": "raw_only"}
 
     def test_keeping_json_alone_compiles_to_json_only(self, tmp_path):
-        from dfe_engine.services.models.loader import LoaderConfig
-
         settings, registry = self._deployment(tmp_path, capture_json=True, capture_raw=False)
         app = catalogue.descriptor(LOADER)
         doc = instances.initial_overlay(instances.instance_of(LOADER, "default"))
@@ -739,8 +756,8 @@ class TestLoaderCapture:
         assert routing.sync(app, doc, registry, settings) is True
 
         db = settings.clickhouse.effective_data_database
-        config = LoaderConfig.model_validate(doc["config"])
-        assert config.metadata.table_capture_modes == {f"{db}.filebeat": "json_only"}
+        config = _accepted(LOADER, doc["config"])
+        assert config["metadata"]["table_capture_modes"] == {f"{db}.filebeat": "json_only"}
 
     def test_the_safety_net_left_on_writes_nothing(self, tmp_path):
         settings, registry = self._deployment(tmp_path, capture_json=True, capture_raw=True)
@@ -751,10 +768,8 @@ class TestLoaderCapture:
 
     def test_the_compiled_value_lands_where_the_loader_reads_it(self, tmp_path):
         # The engine authors both ends of this connection, so assert that what it
-        # writes into the overlay is a config the loader model accepts, on the
+        # writes into the overlay is a config the loader's schema takes, on the
         # key the loader's router builds (<db>.<table>).
-        from dfe_engine.services.models.loader import LoaderConfig
-
         settings, registry = self._deployment(tmp_path, capture_json=False, capture_raw=False)
         app = catalogue.descriptor(LOADER)
         doc = instances.initial_overlay(instances.instance_of(LOADER, "default"))
@@ -762,8 +777,8 @@ class TestLoaderCapture:
         assert routing.sync(app, doc, registry, settings) is True
 
         db = settings.clickhouse.effective_data_database
-        config = LoaderConfig.model_validate(doc["config"])
-        assert config.metadata.table_capture_modes == {f"{db}.filebeat": "extracted_only"}
+        config = _accepted(LOADER, doc["config"])
+        assert config["metadata"]["table_capture_modes"] == {f"{db}.filebeat": "extracted_only"}
 
     def test_a_manifest_with_no_capture_path_says_so_rather_than_failing(
         self, tmp_path, monkeypatch

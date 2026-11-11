@@ -9,26 +9,27 @@
 
 dfe-receiver authenticates bearer tokens on the HTTP, gRPC, OTLP, Splunk HEC and
 Prometheus Remote Write listeners, each from its own ``auth.bearer.secret_source``.
-A listener left unwired accepts no ingest credential at all. The generated production
-template and the receiver-production.yaml a seed writes both name the engine's own
-secrets backend.
+A listener left unwired accepts no ingest credential at all. The receiver-production.yaml
+a seed writes names the engine's own secrets backend.
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from dfe_engine.appmgmt import contract
 from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, LISTENER_SECTIONS
 from dfe_engine.orgs.ingest_tokens import (
     BEARER_REFRESH_SECONDS,
     bearer_secret_path,
 )
-from dfe_engine.services.models.receiver import ReceiverConfig
-from dfe_engine.services.registry import ServiceConfigRegistry
-from dfe_engine.services.templates import generate_template
+from dfe_engine.services.registry import ServiceConfigRegistry, judge_config
 from dfe_engine.settings import DFESettings, SecretsSettings
 from dfe_engine.yaml_utils import yaml_load_string
+
+RECEIVER_SCHEMA = Path(__file__).parents[2] / "fixtures" / "contract" / "dfe-receiver"
 
 # The dfe-receiver config section each listener's auth block sits in.
 SECTIONS = {
@@ -107,42 +108,14 @@ def test_a_seed_builds_from_the_settings_it_is_given(engine_on, tmp_path):
 
 
 @pytest.mark.parametrize("backend", sorted(BACKENDS))
-@pytest.mark.parametrize("listener", BEARER_LISTENERS)
-def test_the_production_template_reads_the_secret_on_the_engine_s_backend(
-    engine_on, backend: str, listener: str
-):
+def test_the_seeded_config_is_one_the_receiver_s_schema_takes(engine_on, tmp_path, backend: str):
     engine_on(BACKENDS[backend])
-
-    auth = generate_template("receiver", "production")[SECTIONS[listener]]["auth"]
-
-    assert auth["mode"] == "bearer"
-    assert auth["bearer"]["secret_source"] == SOURCES[backend].format(
-        path=bearer_secret_path(listener)
+    schema = json.loads((RECEIVER_SCHEMA / contract.SCHEMA_FILE).read_text())
+    receiver = contract.AppContract(
+        service="dfe-receiver", available=True, source=contract.ContractSource.MOUNT, schema=schema
     )
-    # The interval the API promises a revoked token stops within, as the compile sets it.
-    assert auth["bearer"]["refresh_interval_secs"] == BEARER_REFRESH_SECONDS
-
-
-def test_the_template_reads_the_backend_when_generated_not_when_the_plugin_loads(engine_on):
-    engine_on(BACKENDS["openbao"])
-    first = generate_template("receiver", "production")["server"]["auth"]["bearer"]
-    engine_on(BACKENDS["aws"])
-    second = generate_template("receiver", "production")["server"]["auth"]["bearer"]
-
-    assert first["secret_source"].startswith("vault:")
-    assert second["secret_source"].startswith("aws:")
-
-
-@pytest.mark.parametrize("backend", sorted(BACKENDS))
-def test_the_seeded_config_is_one_the_receiver_model_takes(engine_on, tmp_path, backend: str):
-    engine_on(BACKENDS[backend])
-    ReceiverConfig.model_validate(_seeded(tmp_path))
-
-
-@pytest.mark.parametrize("backend", sorted(BACKENDS))
-def test_the_template_is_one_the_receiver_model_takes(engine_on, backend: str):
-    engine_on(BACKENDS[backend])
-    ReceiverConfig.model_validate(generate_template("receiver", "production"))
+    result = judge_config(receiver, _seeded(tmp_path))
+    assert (result.errors, result.warnings) == ([], [])
 
 
 def test_the_seed_carries_only_the_production_keys_and_leaves_the_rest_to_the_receiver(

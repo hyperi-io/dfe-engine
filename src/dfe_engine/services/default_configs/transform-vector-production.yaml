@@ -1,52 +1,29 @@
 # DFE Transform Vector -- Production defaults
 # Kafka-to-Kafka transform using vector.dev pipelines
 
-kafka:
-  consumer:
-    brokers: []  # every deployment names its own brokers
-    group: dfe-transform-vector
-    topics: []
-    client_id: dfe-transform-vector
-    sasl:
-      enabled: true
-      mechanism: scram_sha_512
-      username: ""
-      password: ""
-    tls:
-      enabled: true
-  producer:
-    brokers: []  # every deployment names its own brokers
-    client_id: dfe-transform-vector
-    compression: lz4
-    batch_size: 8388608
-    linger_ms: 20
-    sasl:
-      enabled: true
-      mechanism: scram_sha_512
-      username: ""
-      password: ""
-    tls:
-      enabled: true
+source:
+  brokers: []  # every deployment names its own brokers
+  group_id: dfe-transform-vector
+  sasl:
+    enabled: true
+    mechanism: scram_sha_512
+    username: ""
+    password: ""
+  tls:
+    enabled: true
 
-sources: []
-
-extra_yaml_files: []
-extra_env: {}
-
-ipc:
-  enabled: false
-  transport: memory
-  address: ""
-
-memory:
-  limit_bytes: 2147483648
-  pressure_threshold: 0.8
-  tracking_enabled: true
+sink:
+  brokers: []  # every deployment names its own brokers
+  sasl:
+    enabled: true
+    mechanism: scram_sha_512
+    username: ""
+    password: ""
+  tls:
+    enabled: true
 
 metrics:
-  enabled: true
   address: "0.0.0.0:9090"
-  path: /metrics
 
 logging:
   level: info
