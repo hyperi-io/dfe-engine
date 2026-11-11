@@ -118,3 +118,6 @@ _.execute_ddl_statements, _.extract_metadata, _.FORK_ACCEPTS
 _.get_draft, _.get_published, _.get_version, _.list_adapters, _.load_clickhouse_settings
 _.load_plan, _.protocol_paths, _.query_names, _.read_payload, _.save_draft, _.save_plan
 _.set_deployed
+
+# Registry entries the schema vocabulary route reads through pydantic from_attributes.
+_.retired_names, _.retired_attributes, _.ch_overrides
