@@ -20,7 +20,7 @@ module is the thin Sigma facade over it - it keeps the ``sigma_field`` stored
 contract + the CRUD store, and delegates rendering. Those JSON-derived columns are
 the capability the fixed meta schema lacks: a Sigma field like ``EventID`` that
 lives INSIDE the JSON payload is not a real column, so the view extracts it with
-the dynamic-subcolumn idiom ``assumeNotNull(_json).`path``` (optionally CAST). The
+the dynamic-subcolumn idiom ``assumeNotNull(_json).`path``` (as text or a declared type). The
 store reuses the SAME sigma gitcrud registry (``catalog.sigma_registry``) over the
 deploy repo, so every view mutation is one attributed git commit - survivability +
 audit come free.
@@ -59,8 +59,7 @@ class SigmaViewColumn(BaseModel):
     A column maps a standard ``sigma_field`` (the alias the view exposes) to EITHER
     a real table column (``source_column``) OR a dotted path inside the source's
     ``_json`` column (``json_path``) - exactly one of the two. ``type`` is an
-    optional ClickHouse type the extracted value is CAST to (mainly for a
-    JSON-derived column, whose subcolumn is otherwise a ``Dynamic``). This is the
+    optional ClickHouse type for the value, read as RemapColumn reads it. This is the
     Sigma-named shape of :class:`~dfe_engine.fieldmap.remap_view.RemapColumn`.
     """
 
@@ -72,7 +71,7 @@ class SigmaViewColumn(BaseModel):
     )
     type: str | None = Field(
         default=None,
-        description="Optional ClickHouse type to CAST the value to (e.g. 'String', 'UInt32')",
+        description="Optional ClickHouse type for the value (e.g. 'String', 'UInt32')",
     )
 
     @model_validator(mode="after")
