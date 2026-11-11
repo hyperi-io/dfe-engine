@@ -310,14 +310,27 @@ def _index_name(column: str, spec: IndexSpec) -> str:
     return f"idx_{column}" if spec.suffix is None else f"idx_{column}_{spec.suffix}"
 
 
-def _expected_indexes(catalogue: DDLCatalogue, case: Case) -> dict[str, tuple[str, str, int]]:
+def _nullable(client: Any, table: Table, column: str) -> bool:
+    """Whether the server's type for *column* is Nullable, which picks a spec's ``when_nullable``."""
+    kind = client.query(
+        "SELECT type FROM system.columns "
+        "WHERE database = {db:String} AND table = {tbl:String} AND name = {col:String}",
+        parameters={"db": table.database, "tbl": table.name, "col": column},
+    ).result_rows[0][0]
+    return "Nullable(" in str(kind)
+
+
+def _expected_indexes(
+    catalogue: DDLCatalogue, case: Case, *, nullable: bool
+) -> dict[str, tuple[str, str, int]]:
     """Index name -> (expression, type, granularity) as the server should report the catalogue's answer."""
     use_case, dims, cardinality = _declared(case)
     expected: dict[str, tuple[str, str, int]] = {}
     for spec in catalogue.specs(use_case, cardinality=cardinality):
-        index_type = spec.type.replace("{dims}", str(dims)) if spec.needs_dims else spec.type
+        chosen = spec.when_nullable if (nullable and spec.when_nullable) else spec
+        index_type = chosen.type.replace("{dims}", str(dims)) if chosen.needs_dims else chosen.type
         granularity = (
-            _TEXT_INDEX_GRANULARITY if index_type.startswith("text(") else spec.granularity
+            _TEXT_INDEX_GRANULARITY if index_type.startswith("text(") else chosen.granularity
         )
         expected[_index_name(case.index_column, spec)] = (
             _squash(spec.expression.replace("{col}", case.index_column)),
@@ -359,7 +372,8 @@ def _check(
     """Gate the DDL and the rows, and return the plan's pruning for the caller to judge."""
     client, tables = loaded
     table = tables[key]
-    expected = _expected_indexes(catalogue, case)
+    nullable = _nullable(client, table, case.index_column)
+    expected = _expected_indexes(catalogue, case, nullable=nullable)
 
     live = _live_indexes(client, table, set(expected))
     assert live == expected, f"{case.id}: the server holds {live}, the catalogue says {expected}"
