@@ -16,7 +16,7 @@ This is the generalisation of what used to live only in ``sigma/views.py``: each
 column maps a standard ``field`` (the alias the view exposes) to EITHER a real
 table column (``source_column``) OR a dotted path inside the source's ``_json``
 column (``json_path``, extracted with the dynamic-subcolumn idiom
-``assumeNotNull(_json).`path```), optionally CAST to a declared ClickHouse type.
+``assumeNotNull(_json).`path```), read as text or as a declared ClickHouse type.
 One engine now serves every standard, so an ECS or CIM view gets the same
 json-path + cast capability Sigma had - the importer stays PHYSICAL and the
 standard naming is a read-time view (see the elastic importer + the ECS/CIM/Sigma
@@ -46,6 +46,15 @@ _STANDARD_RE = re.compile(r"^[a-z][a-z0-9_]*\Z")
 # matches before a trailing newline.
 _CH_TYPE_RE = re.compile(r"^[A-Za-z0-9_(), ']+\Z")
 
+# Declared types a JSON-derived column reads with ClickHouse's to<T>OrNull, bare or Nullable.
+_NUMERIC = r"U?Int(?:8|16|32|64|128|256)|Float32|Float64"
+_NUMERIC_TYPE_RE = re.compile(rf"^(?:({_NUMERIC})|Nullable\(({_NUMERIC})\))\Z")
+
+# Declared String types, which a CAST from Dynamic never fails to produce.
+_STRING_TYPE_RE = re.compile(
+    r"^(?:String|Nullable\(String\)|LowCardinality\(String\)|LowCardinality\(Nullable\(String\)\))\Z"
+)
+
 
 class RemapViewError(ValueError):
     """Raised when a view definition cannot be rendered to safe DDL."""
@@ -60,8 +69,9 @@ class RemapColumn(BaseModel):
     Maps a standard ``field`` (the alias the view exposes) to EITHER a real table
     column (``source_column``) OR a dotted path inside the source's ``_json``
     column (``json_path``) - exactly one of the two. ``type`` is an optional
-    ClickHouse type the extracted value is CAST to (mainly for a JSON-derived
-    column, whose subcolumn is otherwise a ``Dynamic``).
+    ClickHouse type for the value. A JSON-derived column without one reads as
+    ``Nullable(String)``, and with one reads NULL in a row whose value does not
+    convert.
     """
 
     field: str = Field(description="Standard field name (the view alias)")
@@ -72,7 +82,7 @@ class RemapColumn(BaseModel):
     )
     type: str | None = Field(
         default=None,
-        description="Optional ClickHouse type to CAST the value to (e.g. 'String', 'UInt32')",
+        description="Optional ClickHouse type for the value (e.g. 'String', 'UInt32')",
     )
 
     @model_validator(mode="after")
@@ -200,15 +210,35 @@ def _json_accessor(json_path: str) -> str:
     return f"assumeNotNull({JSON_COLUMN}).`{json_path}`"
 
 
+def _json_typed(accessor: str, ch_type: str | None) -> str:
+    """Read a ``_json`` path as ``ch_type`` without failing on a row whose value is another type.
+
+    The path is ``Dynamic``, so its type can differ row to row, and a CAST or a typed
+    comparison fails the whole query on the first row it cannot convert. Each form
+    here gives NULL for that row instead.
+    """
+    if not ch_type:
+        # Nullable keeps a missing path NULL, so `field is null` still finds it.
+        return f"CAST({accessor} AS Nullable(String))"
+    safe = _safe_type(ch_type)
+    numeric = _NUMERIC_TYPE_RE.match(safe)
+    if numeric:
+        return f"to{numeric.group(1) or numeric.group(2)}OrNull(toString({accessor}))"
+    if _STRING_TYPE_RE.match(safe):
+        return f"CAST({accessor} AS {safe})"
+    quoted = safe.replace("'", "\\'")
+    return f"accurateCastOrNull(toString({accessor}), '{quoted}')"
+
+
 def _column_select_expr(col: RemapColumn) -> str:
     """Render one column to a ``<expr> AS `<field>``` SELECT term."""
     alias = _safe_ident(col.field, what="field")
     if col.is_json_derived:
-        expr = _json_accessor(col.json_path or "")
+        expr = _json_typed(_json_accessor(col.json_path or ""), col.type)
     else:
         expr = f"`{_safe_ident(col.source_column or '', what='source_column')}`"
-    if col.type:
-        expr = f"CAST({expr} AS {_safe_type(col.type)})"
+        if col.type:
+            expr = f"CAST({expr} AS {_safe_type(col.type)})"
     return f"{expr} AS `{alias}`"
 
 
@@ -223,7 +253,7 @@ def build_remap_view_ddl(
     The view is named ``{table}_{standard}`` over table ``{table}`` (``table``
     defaults to the definition's ``source_name``). Each declared column becomes a
     standard-aligned alias; a JSON-derived column is extracted from ``_json`` with
-    the dynamic-subcolumn idiom (optionally CAST to its declared type). ``{db}`` is a
+    the dynamic-subcolumn idiom and read as text or its declared type. ``{db}`` is a
     placeholder the deployer substitutes, consistent with the schema DDL writer.
 
     Raises:

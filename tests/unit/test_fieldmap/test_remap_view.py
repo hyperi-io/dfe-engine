@@ -86,12 +86,57 @@ def test_source_column_alias():
 
 def test_json_derived_extract_and_cast():
     ddl = build_remap_view_ddl(_ecs_def(), db="dfe", table_name="filebeat_aws")
-    # ECS field lives inside _json -> dynamic-subcolumn extraction (same idiom sigma used)
-    assert "assumeNotNull(_json).`event.action` AS `event.action`" in ddl
-    assert "CAST(assumeNotNull(_json).`source.port` AS UInt16) AS `source.port`" in ddl
+    assert "CAST(assumeNotNull(_json).`event.action` AS Nullable(String)) AS `event.action`" in ddl
+    assert "toUInt16OrNull(toString(assumeNotNull(_json).`source.port`)) AS `source.port`" in ddl
     assert "`host_name` AS `host.name`" in ddl
     # include_source_columns default True -> keep base cols
     assert "    *," in ddl or "    *\n" in ddl
+
+
+_P = "assumeNotNull(_json).`p`"
+
+
+@pytest.mark.parametrize(
+    ("ch_type", "expr"),
+    [
+        pytest.param(None, f"CAST({_P} AS Nullable(String))", id="untyped-is-text"),
+        pytest.param("String", f"CAST({_P} AS String)", id="string"),
+        pytest.param(
+            "LowCardinality(String)", f"CAST({_P} AS LowCardinality(String))", id="low-cardinality"
+        ),
+        pytest.param("Int64", f"toInt64OrNull(toString({_P}))", id="int"),
+        pytest.param("UInt32", f"toUInt32OrNull(toString({_P}))", id="uint"),
+        pytest.param("Nullable(Float64)", f"toFloat64OrNull(toString({_P}))", id="nullable-float"),
+        pytest.param("Date", f"accurateCastOrNull(toString({_P}), 'Date')", id="date"),
+        pytest.param(
+            "DateTime64(3)", f"accurateCastOrNull(toString({_P}), 'DateTime64(3)')", id="datetime"
+        ),
+        pytest.param(
+            "Enum8('a', 'b')",
+            f"accurateCastOrNull(toString({_P}), 'Enum8(\\'a\\', \\'b\\')')",
+            id="quoted-type",
+        ),
+    ],
+)
+def test_json_derived_type_never_fails_on_another_type(ch_type, expr):
+    """A row whose value does not convert reads NULL, so one odd row cannot fail the query."""
+    d = RemapViewDefinition(
+        standard="ecs",
+        source_name="win",
+        columns=[RemapColumn(field="f", json_path="p", type=ch_type)],
+        include_source_columns=False,
+    )
+    assert f"SELECT\n    {expr} AS `f`\nFROM" in build_remap_view_ddl(d, db="default")
+
+
+def test_source_column_type_is_a_plain_cast():
+    d = RemapViewDefinition(
+        standard="ecs",
+        source_name="win",
+        columns=[RemapColumn(field="f", source_column="c", type="UInt16")],
+        include_source_columns=False,
+    )
+    assert "CAST(`c` AS UInt16) AS `f`" in build_remap_view_ddl(d, db="default")
 
 
 def test_empty_definition_selects_star():

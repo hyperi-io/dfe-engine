@@ -72,7 +72,7 @@ The conversion is the [pysigma-backend-clickhouse](https://pypi.org/project/pysi
 - A correlation rule, which is a whole query and not a condition.
 - A keyword-only rule (`- needle`), which has no column to search. About 3% of the SigmaHQ set.
 
-Plain string equality is case-sensitive, where Sigma matches case-insensitively (`OriginalFileName: CertUtil.exe` misses `certutil.exe`). A JSON-derived view column holds a ClickHouse `Dynamic` value, so a `|contains` or `|startswith` match throws on a field that lands as a number in some rows. Give such a column a CAST `type` in its view definition. Numbers in an equality or a list are compared as quoted text, which suits either form.
+Plain string equality is case-sensitive, where Sigma matches case-insensitively (`OriginalFileName: CertUtil.exe` misses `certutil.exe`). A JSON-derived view column with no `type` reads as `Nullable(String)`, so `|contains`, `|startswith`, equality and lists work whatever type each row sent, and a missing field is still NULL. Numbers in an equality or a list are compared as quoted text, which suits that column. A `|gt` or `|lt` needs a numeric `type` such as `UInt32`: the view reads it with `toUInt32OrNull`, so a row whose value is not a number reads NULL and matches nothing. Any other declared type reads through `accurateCastOrNull`, with the same NULL for a value that does not convert.
 
 ## Source-views - Sigma-aligned columns
 
@@ -80,7 +80,7 @@ A Sigma rule references fields (`Image`, `EventID`) that may not be real columns
 A `SigmaViewDefinition` (`views.py`, one per source) declares each Sigma field as
 either a real column OR a path inside the source's `_json` payload, and generates
 a `CREATE OR REPLACE VIEW {source}_sigma` that extracts JSON-derived columns with
-the `assumeNotNull(_json).path` idiom (optionally CAST). Identifiers + CAST types
+the `assumeNotNull(_json).path` idiom (as text or a declared type). Identifiers + types
 are validated (`_safe_ident` / `_safe_type` / parens-balance) so a definition
 cannot inject into the DDL.
 

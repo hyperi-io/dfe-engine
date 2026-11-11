@@ -142,8 +142,11 @@ def test_generate_ddl_from_stored_definition(client, app, admin_headers, api_set
     database = api_settings.clickhouse.effective_data_database
     assert f"CREATE OR REPLACE VIEW `{database}`.`windows-audit_sigma` AS" in ddl
     # JSON-derived columns extracted from _json with the dynamic-subcolumn idiom
-    assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
-    assert "assumeNotNull(_json).`process.command_line` AS `CommandLine`" in ddl
+    assert "toUInt32OrNull(toString(assumeNotNull(_json).`EventID`)) AS `EventID`" in ddl
+    assert (
+        "CAST(assumeNotNull(_json).`process.command_line` AS Nullable(String)) AS `CommandLine`"
+        in ddl
+    )
     # a real source column is a plain alias
     assert "`process_name` AS `Image`" in ddl
 

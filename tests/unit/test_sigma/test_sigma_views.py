@@ -97,7 +97,7 @@ def test_build_ddl_json_derived_extracts_from_json():
     )
     ddl = build_sigma_view_ddl(definition, db="default")
     # assumeNotNull(_json).`path` AS `SigmaField` - matches json_promotion_service idiom
-    assert "assumeNotNull(_json).`EventID` AS `EventID`" in ddl
+    assert "CAST(assumeNotNull(_json).`EventID` AS Nullable(String)) AS `EventID`" in ddl
 
 
 def test_build_ddl_json_derived_with_type_casts():
@@ -106,7 +106,7 @@ def test_build_ddl_json_derived_with_type_casts():
         columns=[SigmaViewColumn(sigma_field="EventID", json_path="EventID", type="UInt32")],
     )
     ddl = build_sigma_view_ddl(definition, db="default")
-    assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
+    assert "toUInt32OrNull(toString(assumeNotNull(_json).`EventID`)) AS `EventID`" in ddl
 
 
 def test_build_ddl_nested_json_path_is_single_quoted_identifier():
@@ -116,15 +116,21 @@ def test_build_ddl_nested_json_path_is_single_quoted_identifier():
     )
     ddl = build_sigma_view_ddl(definition, db="default")
     # the WHOLE dotted path is one backtick-quoted identifier (JSON subcolumn access)
-    assert "assumeNotNull(_json).`process.command_line` AS `CommandLine`" in ddl
+    assert (
+        "CAST(assumeNotNull(_json).`process.command_line` AS Nullable(String)) AS `CommandLine`"
+        in ddl
+    )
 
 
 def test_build_ddl_mixed_columns_and_star():
     definition = _definition()
     ddl = build_sigma_view_ddl(definition, db="dfe", table_name="windows-audit")
     assert "CREATE OR REPLACE VIEW `dfe`.`windows-audit_sigma` AS" in ddl
-    assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
-    assert "assumeNotNull(_json).`process.command_line` AS `CommandLine`" in ddl
+    assert "toUInt32OrNull(toString(assumeNotNull(_json).`EventID`)) AS `EventID`" in ddl
+    assert (
+        "CAST(assumeNotNull(_json).`process.command_line` AS Nullable(String)) AS `CommandLine`"
+        in ddl
+    )
     assert "`process_name` AS `Image`" in ddl
     assert ddl.rstrip().endswith("FROM `dfe`.`windows-audit`;")
     # include_source_columns default True -> SELECT * retained
@@ -242,7 +248,7 @@ def test_store_generate_ddl_from_stored_definition(crud):
     store.save(_definition(), actor="a")
     ddl = store.generate_ddl("windows-audit", db="default")
     assert "CREATE OR REPLACE VIEW `default`.`windows-audit_sigma` AS" in ddl
-    assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
+    assert "toUInt32OrNull(toString(assumeNotNull(_json).`EventID`)) AS `EventID`" in ddl
     assert "`process_name` AS `Image`" in ddl
 
 
@@ -290,7 +296,7 @@ def test_source_mapper_prefers_stored_view_definition(crud):
 
     ddl = present(mapper.generate_sigma_view("windows-audit", db="default"))
     # stored def wins: JSON-derived extraction present, legacy field-map alias absent
-    assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
+    assert "toUInt32OrNull(toString(assumeNotNull(_json).`EventID`)) AS `EventID`" in ddl
     assert "legacy_col" not in ddl
 
 
