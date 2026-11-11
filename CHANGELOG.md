@@ -3,6 +3,15 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.22.88](https://github.com/hyperi-io/dfe-engine/compare/v1.22.87...v1.22.88) (2026-11-11)
+
+### Bug Fixes
+
+* **ci:** run the dfe-engine-types sync on a GitHub-hosted runner ([cdcd7ea](https://github.com/hyperi-io/dfe-engine/commit/cdcd7eade5fe1ac4082f525d908f6b2485d60079))
+* **hunts:** keep alert destination URLs in the secrets backend ([b3c6feb](https://github.com/hyperi-io/dfe-engine/commit/b3c6feb7efa67a5139cc6e99e040c7346419ea72))
+* **keda:** read scaling pressure over two export intervals ([6dabc01](https://github.com/hyperi-io/dfe-engine/commit/6dabc016ad01a67088f0b0f8b0f639f62282f30a))
+* **secrets:** reject unsupported providers at settings load ([6fac9f7](https://github.com/hyperi-io/dfe-engine/commit/6fac9f7ab8ef5ec5d9f889b2dd41bdeba6e5b229))
+
 ## [1.22.87](https://github.com/hyperi-io/dfe-engine/compare/v1.22.86...v1.22.87) (2026-11-10)
 
 ### Bug Fixes
