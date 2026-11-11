@@ -554,7 +554,12 @@ class DryRunRequest(BaseModel):
         "source-bound app IS the source.",
     )
     limit: int = Field(
-        default=10, ge=1, le=dryrun.MAX_EVENTS, description="Events to sample and run over"
+        default=10,
+        ge=1,
+        description=(
+            "Events to sample and run over, at most transform_validation.dry_run_max_events "
+            "(100 by default), which a larger value is refused against"
+        ),
     )
 
 
@@ -1607,6 +1612,7 @@ def set_scaling(
         changes = scaling.changes(
             doc,
             keda_by_default=scaling.keda_by_default(_CLASS, app.overlay_name),
+            max_replicas_ceiling=request.app.state.settings.deployment.max_replicas_ceiling,
             **body.model_dump(exclude_none=True),
         )
     except InvalidDialError as exc:
@@ -2273,6 +2279,13 @@ async def dry_run_app_file(
     _require_dry_run(request, user)
     _require_sampler_read(request, user)
     fs = _file_set(service, set_name)
+    limits = request.app.state.settings.transform_validation
+    if body.limit > limits.dry_run_max_events:
+        raise ProblemError(
+            422,
+            f"limit {body.limit} is over the {limits.dry_run_max_events}-event ceiling",
+            code="validation_error",
+        )
 
     content = body.content
     if content is None:
@@ -2292,7 +2305,10 @@ async def dry_run_app_file(
             fs.language,
             content,
             events,
-            enabled=request.app.state.settings.transform_validation.dry_run,
+            enabled=limits.dry_run,
+            timeout=limits.dry_run_timeout_seconds,
+            max_events=limits.dry_run_max_events,
+            max_output_bytes=limits.dry_run_max_output_bytes,
         )
     )
     audit_resource_change(user.user_id, "dryrun", f"{service}/{instance}/{body.name}", "executed")

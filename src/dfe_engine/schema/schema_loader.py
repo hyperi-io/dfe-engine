@@ -310,6 +310,19 @@ def _resolve_profile_yaml_path(
     return _profile_yaml_path(_resolve_profiles_dir(), stem)
 
 
+def current_profile_version(profile_name: str) -> str:
+    """The ``current`` marker of a common-header profile, from the dfe-schemas tree the engine loads.
+
+    Raises:
+        SchemaLoadError: The profile is not found, or declares no ``current``.
+    """
+    path = _resolve_profile_yaml_path(profile_name, None)
+    current = SchemaLoader.load_version_metadata(path).get("current")
+    if not current:
+        raise SchemaLoadError(f"Profile {profile_name!r} at {path} declares no 'current' version")
+    return str(current)
+
+
 def resolve_schema_yaml_path(schemas_base: Path, path_str: str) -> Path:
     """Resolve a schema file reference under ``schemas_base``.
 

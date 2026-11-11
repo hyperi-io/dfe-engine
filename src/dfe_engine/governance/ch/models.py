@@ -124,6 +124,26 @@ def tenant_policy_name(db: str, table: str) -> str:
     return _naming("row_policy").format(database=db, table=table)
 
 
+def role_name(name: str) -> str:
+    """The ClickHouse role a tier or service role called *name* creates."""
+    return _naming("role").format(name=name)
+
+
+def service_user_name(name: str) -> str:
+    """The user a service role called *name* mints when it mints one."""
+    return _naming("service_user").format(name=name)
+
+
+def default_quota_interval() -> str:
+    """The interval a tier that names none takes: the one the catalogue's default analyst tier uses."""
+    default = next(
+        t
+        for t in catalogue()["tiers"]
+        if t.get("kind", "analyst") == "analyst" and t.get("default")
+    )
+    return str(default["quota"]["interval"])
+
+
 def org_user_name(org: str) -> str:
     """The org's pinned CH user - the identity a hyperdx team connects as."""
     return _naming("org_user").format(org=org)
@@ -184,7 +204,7 @@ class ChTier(BaseModel):
 
     def role(self) -> str:
         """The ClickHouse role this tier creates."""
-        return _naming("role").format(name=self.name)
+        return role_name(self.name)
 
     def profile(self) -> str:
         """The settings profile this tier creates."""
@@ -195,8 +215,8 @@ class ChTier(BaseModel):
         return _naming("quota").format(name=self.name)
 
     def quota_interval(self) -> str:
-        """The quota's interval, an hour unless set."""
-        return str(self.quota.get("interval", "1 hour"))
+        """The quota's interval, the catalogue's default analyst tier's unless set."""
+        return str(self.quota.get("interval", default_quota_interval()))
 
     def quota_maxima(self) -> dict[str, int]:
         """The quota's per-interval maxima (everything except ``interval``)."""
@@ -218,7 +238,7 @@ class ChServiceRole(BaseModel):
 
     def role(self) -> str:
         """The ClickHouse role this service role creates."""
-        return _naming("role").format(name=self.name)
+        return role_name(self.name)
 
     def profile(self) -> str:
         """The settings profile this service role creates."""
@@ -226,7 +246,7 @@ class ChServiceRole(BaseModel):
 
     def user(self) -> str:
         """The minted user name (used when ``mint_user`` is set)."""
-        return _naming("service_user").format(name=self.name)
+        return service_user_name(self.name)
 
     def secret_path(self) -> str:
         """Where the minted user's password lives in the engine's secrets store."""
