@@ -677,7 +677,7 @@ dependencies = [
     { name = "pyyaml" },
     { name = "requests" },
     { name = "ruamel-yaml" },
-    { name = "scalo", extra = ["api", "cli", "expression", "http", "metrics", "secrets-kubernetes"] },
+    { name = "scalo", extra = ["api", "cli", "expression", "http", "kafka", "metrics", "secrets-kubernetes"] },
     { name = "scim2-models" },
     { name = "sqlglot" },
     { name = "sse-starlette" },
@@ -714,7 +714,7 @@ requires-dist = [
     { name = "confluent-kafka", specifier = ">=2.16.0" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
-    { name = "dfe-schemas", specifier = ">=0.2.27,<1" },
+    { name = "dfe-schemas", specifier = ">=0.2.28,<1" },
     { name = "dulwich", specifier = ">=1.2.7" },
     { name = "faker", specifier = ">=40.43.0" },
     { name = "fastapi", specifier = ">=0.143.0" },
@@ -740,7 +740,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["api", "cli", "expression", "http", "metrics", "secrets-kubernetes"], specifier = ">=2.32.5,<3" },
+    { name = "scalo", extras = ["api", "cli", "expression", "http", "kafka", "metrics", "secrets-kubernetes"], specifier = ">=2.32.7,<3" },
     { name = "scim2-models", specifier = ">=0.6.12,<0.7" },
     { name = "sqlglot", specifier = ">=30.22.0" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
@@ -769,14 +769,14 @@ dev = [
 
 [[package]]
 name = "dfe-schemas"
-version = "0.2.27"
+version = "0.2.28"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/66/51/6fc0ca981f51611c4ff56adb15e17a617eae71985b05bc76a9f95c406008/dfe_schemas-0.2.27.tar.gz", hash = "sha256:ee80282ab548a5c1e2e12cdb746294d2c53c43b3de21c945148034cde6dcbde4", size = 1279328, upload-time = "2026-11-11T04:32:19.942Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/86/6008855128ceebd39f37c00050b72254b7069839eec952fed4e3a1836650/dfe_schemas-0.2.28.tar.gz", hash = "sha256:1ea9691a306ee39b55d33f7d7d3d018f13e5b335718870e6dd20ef2de51d6964", size = 1293635, upload-time = "2026-11-11T06:46:08.684Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/da/75/d6890a5f6b159f903146dd4a6191b48ed0d688d0a77d5a5aa4a1a46a7ee9/dfe_schemas-0.2.27-py3-none-any.whl", hash = "sha256:0497216b21aa3c9df6aa46df1938cf3e77f8b094243fe87eb30d82ebee02d8b2", size = 2819856, upload-time = "2026-11-11T04:32:18.4Z" },
+    { url = "https://files.pythonhosted.org/packages/41/fb/233d56c5f08ad3ec5b233f2d775fba4b5a30531c439d7113fc0a7dd1effa/dfe_schemas-0.2.28-py3-none-any.whl", hash = "sha256:ae42d7c73df2483ee7e5d05eaeb7ffe82153b1ff27d3118a6529b6dc45f203c3", size = 2831673, upload-time = "2026-11-11T06:46:07.159Z" },
 ]
 
 [[package]]
@@ -895,6 +895,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/e9/eb/2cf8c80abf09b2800aef0a83b41066fbfda8ee5495b7a08b9d1af40f7046/fastapi-0.162.0.tar.gz", hash = "sha256:6a22c1e2e6e32e0633ee7e170f00009a29b8228b16feb219ee42f32fd8d88a8f", size = 527867, upload-time = "2026-10-23T18:47:33.264Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b4/4f/3f2c25c9b43970b5e9a08beb5e04776247edea684ddc0930f4f02f0bb6cb/fastapi-0.162.0-py3-none-any.whl", hash = "sha256:3785963de305dd09912426cb81f2d230fce98ab3521cdfe97265c8d14983128c", size = 148912, upload-time = "2026-10-23T18:47:31.734Z" },
+]
+
+[[package]]
+name = "genson"
+version = "1.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f8/53/de162dc8e03fccd9ebe59d17c7812378fe8bd2b604f6b1b94d00165140ac/genson-1.4.0.tar.gz", hash = "sha256:bc7f1c1bae87a21ca44d81149aec95a3f4468d676de9b8b08caa064f3c50b3da", size = 47908, upload-time = "2026-07-06T08:21:50.331Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/02/767f744ab6d4cb7761e5008acc3d534b7a0481af62563d52e391fbcb2140/genson-1.4.0-py3-none-any.whl", hash = "sha256:03bc71bbe52defde70660cc4dcd1ea1097997da5a1cbb90a9dbd3acc7c9e1b65", size = 24484, upload-time = "2026-07-06T08:21:49.046Z" },
 ]
 
 [[package]]
@@ -2384,7 +2393,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.32.5"
+version = "2.32.7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2402,9 +2411,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/fd/2c/c2999d29c45df14095f81d3e7cf06dbfcb7a01e2214575931d0758f196e2/scalo-2.32.5.tar.gz", hash = "sha256:645fe7b0c5c3da1249fad5f623f8c8b3e94f3ce72abe9215a367b6a43d9279aa", size = 551847, upload-time = "2026-11-04T08:27:06.668Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/06/11c5d8513063e9b0ea208712c9412ab89a0802ce210dd85eab0ac0b6f6e7/scalo-2.32.7.tar.gz", hash = "sha256:d63122d554321a5ad5a0f5737d2ddd9f1247d9063133a4135ff72be2d2932442", size = 550726, upload-time = "2026-11-11T05:34:28.065Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/80/cc/b847cf00fcde6030826b9edcd51a6eef92b75dc9752dd9d35f5f4334e63f/scalo-2.32.5-py3-none-any.whl", hash = "sha256:ab66a1bf81af61d04f2667d31be0adbf83ce3a68cb2c336da05177443109298d", size = 645298, upload-time = "2026-11-04T08:27:03.175Z" },
+    { url = "https://files.pythonhosted.org/packages/55/bc/431747d7efbcf46b93c266d86251b3770cd287cf1b4a71c46e1d90c5d055/scalo-2.32.7-py3-none-any.whl", hash = "sha256:dcadb3c998e75907641baf8e9a79f1859f10e2038b44562d1fc4915572a2d52e", size = 643310, upload-time = "2026-11-11T05:34:26.448Z" },
 ]
 
 [package.optional-dependencies]
@@ -2423,6 +2432,10 @@ expression = [
 http = [
     { name = "httpx" },
     { name = "stamina" },
+]
+kafka = [
+    { name = "confluent-kafka" },
+    { name = "genson" },
 ]
 metrics = [
     { name = "opentelemetry-api" },

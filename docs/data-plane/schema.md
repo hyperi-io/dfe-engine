@@ -518,6 +518,12 @@ can pick a different one on a later ClickHouse without your schema changing.
 the vector's dimension count up front and cannot read it off the column. You
 give it that, and the engine still picks the method and the distance metric.
 
+A field you query often belongs in a typed column with a use case, not inside
+`_json`. `_json` stores each value with its own type, row by row, so a path that
+holds both strings and numbers breaks `=`, `IN` and the string functions at
+query time, and no `_json` path has an index. Promoting the field fixes both:
+see [Data evolution](../data-evolution.md#promote-see-it-then-shape-it).
+
 ### Use Cases Are Tied to Primitives
 
 Not every use case makes sense on every type. The engine enforces valid
@@ -558,9 +564,9 @@ vocabulary.
 text index (inverted index, v26.2+) instead of the older bloom-filter based
 `tokenbf_v1` and `ngrambf_v1`. The text index is deterministic (no false
 positives), provides row-level filtering instead of granule-level, and is
-10-100x faster for text search workloads. For ClickHouse versions before
-v25.10, the engine falls back to the legacy bloom-filter indexes automatically,
-and `key_search` falls back to a bloom filter over the keys and values.
+10-100x faster for text search workloads. `DDLGenerator` can still render the
+pre-25.10 bloom-filter indexes (`use_legacy_indexes=True`), but nothing in the
+engine sets it, so every table it creates gets the text index.
 
 **Note on word_search vs substring_search:** Both use the text index but with
 different tokenizers. `word_search` uses word-level tokenization

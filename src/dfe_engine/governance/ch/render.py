@@ -19,6 +19,8 @@ objects that already exist.
 
 from typing import Any, Self
 
+from dfe_schemas.render import Renderer
+
 from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
 
 from .models import (
@@ -48,8 +50,13 @@ def _sq(value: str) -> str:
 
 
 def _settings_kv(settings: dict[str, int]) -> str:
-    """``k1 = v1, k2 = v2`` for a SETTINGS PROFILE, sorted for stable diffs."""
+    """``k1 = v1, k2 = v2`` for a quota's maxima, sorted for stable diffs."""
     return ", ".join(f"{k} = {v}" for k, v in sorted(settings.items()))
+
+
+# A profile's settings render through dfe-schemas, so the schema phase and this
+# reconciler write the same constraints to the same profile.
+_profile_settings = Renderer.profile_settings
 
 
 class ReplacingGrant(str):
@@ -96,7 +103,7 @@ def render_tier(tier: ChTier) -> list[str]:
 
     if tier.settings:
         prof = _bq(tier.profile())
-        kv = _settings_kv(tier.settings)
+        kv = _profile_settings(tier.settings)
         # Create-then-alter so edits to an existing profile converge; a bare
         # IF NOT EXISTS silently ignores changed settings forever.
         stmts.append(f"CREATE SETTINGS PROFILE IF NOT EXISTS {prof}")
@@ -129,7 +136,9 @@ def render_service_role(role_def: ChServiceRole) -> list[str]:
     if role_def.settings:
         prof = _bq(role_def.profile())
         stmts.append(f"CREATE SETTINGS PROFILE IF NOT EXISTS {prof}")
-        stmts.append(f"ALTER SETTINGS PROFILE {prof} SETTINGS {_settings_kv(role_def.settings)}")
+        stmts.append(
+            f"ALTER SETTINGS PROFILE {prof} SETTINGS {_profile_settings(role_def.settings)}"
+        )
 
     stmts.append(f"CREATE ROLE IF NOT EXISTS {role}")
     stmts.append(ReplacingGrant(role, list(role_def.grants)))

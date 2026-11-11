@@ -63,6 +63,11 @@ ROWS: dict[str, dict[str, str | int]] = {
         "CommandLine": DECODE,
     },
     "decode_other_binary": {"Image": r"C:\Windows\notepad.exe", "CommandLine": DECODE},
+    # A number at a path other rows hold text in: |contains must not fail the query.
+    "certutil_command_line_as_a_number": {
+        "Image": r"C:\Windows\System32\certutil.exe",
+        "CommandLine": 42,
+    },
     "certutil_without_decode": {
         "Image": r"C:\Windows\System32\certutil.exe",
         "CommandLine": "certutil.exe -urlcache -f http://x/y",
@@ -190,6 +195,39 @@ def test_a_plain_value_matches_whatever_its_case(ch_client, dfe_db, sigma_view):
     )
 
     assert result.result_rows == [("lowercase_name",)]
+
+
+@pytest.mark.parametrize(
+    ("where", "expected"),
+    [
+        pytest.param("EventID = 4649", {"number", "text"}, id="equals"),
+        pytest.param("EventID > 4000", {"number", "text"}, id="greater-than"),
+        pytest.param("EventID is null", {"word", "list", "missing"}, id="unconverted-reads-null"),
+    ],
+)
+def test_a_typed_column_reads_null_where_a_value_does_not_convert(
+    ch_client, dfe_db, where, expected
+):
+    definition = SigmaViewDefinition(
+        source_name="main",
+        columns=[SigmaViewColumn(sigma_field="EventID", json_path="EventID", type="UInt32")],
+    )
+    ch_client.command(build_sigma_view_ddl(definition, db=dfe_db, table_name="main"))
+    payloads = {
+        "number": {"EventID": 4649},
+        "text": {"EventID": "4649"},
+        "word": {"EventID": "replay"},
+        "list": {"EventID": [4649]},
+        "missing": {"Image": "x"},
+    }
+    for case, payload in payloads.items():
+        ch_client.insert(
+            f"{dfe_db}.main", [[case, json.dumps(payload)]], column_names=["_org_id", "_json"]
+        )
+
+    result = ch_client.query(f"SELECT _org_id FROM `{dfe_db}`.`{VIEW}` WHERE {where}")
+
+    assert {row[0] for row in result.result_rows} == expected
 
 
 def test_a_sigmahq_rule_runs_as_a_hunt_over_the_sigma_view(ch_client, dfe_db, sigma_view, tmp_path):
