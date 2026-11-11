@@ -164,7 +164,7 @@ from dfe_engine.source.registry import (
     SourceRuleError,
     SourceValidationError,
 )
-from dfe_engine.source.type_registry import DEFAULT_CARDINALITY, fold_cardinality
+from dfe_engine.source.type_registry import LOW_CARDINALITY, Cardinality, fold_cardinality
 from dfe_engine.transport import SourceTransport
 
 router = APIRouter(prefix="/sources", tags=["Sources"], dependencies=[WRITE_TURN])
@@ -945,7 +945,7 @@ class SchemaColumn(BaseModel):
     type: str
     use_case: str = ""
     attribute: list[str] | None = None
-    cardinality: Literal["low", "high", "unknown"] | None = Field(
+    cardinality: Cardinality | None = Field(
         default=None,
         description="How many distinct values the column holds, as declared. A column holding the retired lowcardinality attribute reads as low. Absent means unknown.",
     )
@@ -3876,13 +3876,13 @@ def _normalize_attribute(value: Any) -> list[str] | None:
     return list(value)
 
 
-def _declared_cardinality(col: Any) -> str | None:
+def _declared_cardinality(col: Any) -> Cardinality | None:
     """The cardinality *col* declares, with the retired attribute read as the value it names."""
     declared = getattr(col, "cardinality", None)
     if declared:
         return declared
     folded = fold_cardinality(None, getattr(col, "attribute", None))
-    return folded if folded != DEFAULT_CARDINALITY else None
+    return "low" if folded == LOW_CARDINALITY else None
 
 
 def _to_api_schema_column(col: Any) -> SchemaColumn:
