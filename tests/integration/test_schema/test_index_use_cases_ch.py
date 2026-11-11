@@ -26,7 +26,8 @@ The rows live in ``tests/support/index_use_cases.py``. A new use case is one row
 """
 
 import json
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,6 +39,8 @@ from dfe_schemas.clickhouse import PlatformProbe, create_database
 from dfe_schemas.ddl_catalogue import DDLCatalogue, IndexSpec
 from dfe_schemas.loader import DEFAULT_CARDINALITY
 from dfe_schemas.render import split_use_case
+from scalo.deployment.test_support.pytest_plugin import suite_for
+from scalo.deployment.test_support.shared_service import locked
 
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.schema.schema_loader import SchemaLoader
@@ -58,7 +61,9 @@ from tests.support.index_use_cases import (
 )
 
 # Loading both tables took 263 s on a remote docker host, against the suite's 300 s default.
-pytestmark = [pytest.mark.integration, pytest.mark.timeout(900)]
+_TIMEOUT_S = 900
+
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(_TIMEOUT_S)]
 
 HEADER = ("timeseries", "1.0.3")
 
@@ -167,16 +172,56 @@ def _insert(client: Any, table: Table) -> None:
     client.command(f"OPTIMIZE TABLE {table.qualified} FINAL")
 
 
+@contextmanager
+def _shared(state: Path, load: Callable[[str], None], drop: Callable[[str], None]) -> Iterator[str]:
+    """The run's one loaded database on a server, loaded by the first process to ask.
+
+    The suite runs under xdist, which hands this module's tests to several workers.
+    Each loading its own copy put four loads on one server and timed them all out.
+    Every worker holding the database is counted in *state*, and the last one out
+    drops it.
+    """
+    lock = state.with_suffix(".lock")
+    with locked(lock):
+        held = json.loads(state.read_text(encoding="utf-8")) if state.exists() else None
+        if held is None:
+            database = f"dfe_index_{datetime.now(tz=UTC):%H%M%S%f}"
+            try:
+                load(database)
+            except BaseException:
+                with suppress(Exception):
+                    drop(database)
+                raise
+            held = {"database": database, "users": 0}
+        held["users"] += 1
+        state.write_text(json.dumps(held), encoding="utf-8")
+    try:
+        yield held["database"]
+    finally:
+        with locked(lock):
+            held = json.loads(state.read_text(encoding="utf-8"))
+            held["users"] -= 1
+            if held["users"]:
+                state.write_text(json.dumps(held), encoding="utf-8")
+            else:
+                state.unlink()
+                drop(held["database"])
+
+
 @pytest.fixture(scope="module")
 def loaded(
-    module_ch_params: dict, tmp_path_factory: pytest.TempPathFactory
+    request: pytest.FixtureRequest,
+    module_ch_params: dict,
+    tmp_path_factory: pytest.TempPathFactory,
 ) -> Iterator[tuple[Any, dict[str, Table]]]:
     """The client, and both tables built through the deploy path with ``ROWS`` rows each."""
     import clickhouse_connect
 
-    client = clickhouse_connect.get_client(**module_ch_params)
-    database = f"dfe_index_{datetime.now(tz=UTC):%H%M%S%f}"
-    client.command(create_database(database, PlatformProbe(client).platform))
+    # The load outlasts the driver's 300 s read default. No session, so a query left
+    # running after a client error cannot lock out the cleanup.
+    client = clickhouse_connect.get_client(
+        **module_ch_params, send_receive_timeout=_TIMEOUT_S, autogenerate_session_id=False
+    )
     meta = tmp_path_factory.mktemp("index-use-cases") / "index_use_cases.yaml"
     meta.write_text(yaml.safe_dump(meta_schema(), sort_keys=False), encoding="utf-8")
     sources = {
@@ -184,20 +229,30 @@ def loaded(
         "plain": _source("index-probe-plain", meta, header=False),
     }
     windows = {"header": HEADER_WINDOW, "plain": PLAIN_WINDOW}
-    tables = {
-        key: Table(database, source.table_name, key == "header", windows[key])
-        for key, source in sources.items()
-    }
-    try:
-        for key, table in tables.items():
+
+    def tables(database: str) -> dict[str, Table]:
+        return {
+            key: Table(database, source.table_name, key == "header", windows[key])
+            for key, source in sources.items()
+        }
+
+    def load(database: str) -> None:
+        client.command(create_database(database, PlatformProbe(client).platform))
+        for key, table in tables(database).items():
             _deploy(client, database, sources[key])
             _insert(client, table)
-        yield client, tables
+
+    run_dir = suite_for(request.config).run_dir
+    run_dir.mkdir(parents=True, exist_ok=True)
+    server = "".join(c if c.isalnum() else "-" for c in str(module_ch_params["host"]))
+    state = run_dir / f"index-use-cases-{server}-{module_ch_params['port']}.json"
+    try:
+        with _shared(
+            state, load, lambda database: drop_database_and_policies(client, database)
+        ) as database:
+            yield client, tables(database)
     finally:
-        try:
-            drop_database_and_policies(client, database)
-        finally:
-            client.close()
+        client.close()
 
 
 # -- reading the plan -------------------------------------------------------
