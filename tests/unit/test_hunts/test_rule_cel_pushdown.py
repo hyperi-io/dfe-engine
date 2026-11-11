@@ -137,6 +137,8 @@ CEL_TO_SQL = [
         ("a > 1", "b >= 2", "c < 3", "d <= 4", "e = 5", "f != 6"),
     ),
     ('event.user.role == "admin"', ("event.user.role = 'admin'",)),
+    ("_json.port == 8080", ("_json.port.:Int64 = 8080",)),
+    ('_json.port == "8080"', ("_json.port.:String = '8080'",)),
     ('message == "it\'s a test"', ("message = ", "it\\'s a test")),
     (
         '(severity == "high" || severity == "critical") && (status == "open" || status == "in_progress")',

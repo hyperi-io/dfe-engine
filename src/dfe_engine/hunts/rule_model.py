@@ -216,7 +216,12 @@ class Rule(BaseModel):
         if create.cel_filter:
             from scalo.expression import transpile_to_clickhouse
 
-            cel_sql = transpile_to_clickhouse(create.cel_filter, _hunt_profile())
+            from dfe_engine.services.schema.json_promotion_service import JSON_COLUMN
+
+            # A _json path holds a different type row to row, so it is read typed.
+            cel_sql = transpile_to_clickhouse(
+                create.cel_filter, _hunt_profile(), json_columns=(JSON_COLUMN,)
+            )
 
             if where_clause.strip():
                 # Both SQL and CEL -- AND them together
