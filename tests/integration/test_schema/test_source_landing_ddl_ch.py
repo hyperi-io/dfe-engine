@@ -33,6 +33,9 @@ from dfe_engine.source.type_registry import TypeRegistry
 
 pytestmark = pytest.mark.integration
 
+# The renderer may backtick the index name, and a text index type nests parentheses.
+_RAW_INDEX = re.compile(r"INDEX\s+`?idx__raw`?\s.*?\bTYPE\s+(text\(.*\))\s+GRANULARITY\b")
+
 
 @pytest.fixture
 def source_database(clickhouse_test_database):
@@ -115,7 +118,7 @@ def test_the_declared_raw_index_survives_onto_the_server(ch_client, source_datab
     source = _source("raw-index-probe")
     statements = _deploy(ch_client, source_database, source)
 
-    declared = re.search(r"INDEX\s+idx__raw\s+.*?TYPE\s+(text\(.*?\))", statements[0])
+    declared = _RAW_INDEX.search(statements[0])
     assert declared, f"the deploy DDL declares no _raw text index:\n{statements[0]}"
     tokenizer = re.search(r"tokenizer\s*=\s*'?([A-Za-z0-9_]+)", declared.group(1))
     assert tokenizer, f"no tokenizer in {declared.group(1)!r}"
