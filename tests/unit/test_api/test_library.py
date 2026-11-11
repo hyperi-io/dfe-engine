@@ -228,6 +228,15 @@ class TestVersions:
         assert resp.status_code == 400
         assert resp.json()["code"] == "invalid_content"
 
+    def test_the_size_cap_is_the_deployments(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _create(client, admin_headers)
+        app.state.settings.deployment.library_max_artifact_bytes = 64
+        resp = _publish(client, admin_headers, content="." + "a" * 100)
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "invalid_content"
+        assert "64-byte limit" in resp.json()["detail"]
+
     def test_invalid_base64_is_400(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         _create(client, admin_headers, name="mod", kind="wasm")

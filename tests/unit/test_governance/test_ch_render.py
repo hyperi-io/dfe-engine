@@ -54,6 +54,55 @@ class TestNaming:
         assert GroupChBinding(group="x", ch_user="custom").user() == "custom"
 
 
+class TestCatalogueNaming:
+    """Every name the engine mints comes from the catalogue's naming rules, never a literal."""
+
+    @pytest.fixture
+    def renamed(self, monkeypatch):
+        from dfe_engine.governance.ch import models
+
+        real = models.catalogue()
+        naming = {
+            **real["naming"],
+            "role": "x_{name}_r",
+            "service_user": "svc_{name}",
+        }
+        monkeypatch.setattr(models, "catalogue", lambda: {**real, "naming": naming})
+
+    def test_the_service_user_and_role_follow_the_catalogue(self, renamed):
+        role = ChServiceRole(name="loader", mint_user=True)
+        assert role.user() == "svc_loader"
+        assert role.role() == "x_loader_r"
+
+    def test_the_roles_a_group_is_granted_follow_the_catalogue(self, renamed):
+        from dfe_engine.governance.ch.reconciler import ChRbacReconciler
+
+        tier = ChTier(name="t1", kind="analyst", default=True)
+        extra = ChServiceRole(name="otel_reader")
+        stmts = ChRbacReconciler(admin_client=None).render_all(
+            tiers=[tier],
+            service_roles=[extra],
+            orgs=[],
+            bindings=[GroupChBinding(group="soc", ch_roles=["otel_reader"])],
+            org_tables=[],
+            service_hashes={},
+            group_hashes={"soc": "sochash"},
+            org_hashes={},
+        )
+        assert "GRANT `x_t1_r`, `x_otel_reader_r` TO `dfe_grp_soc` WITH REPLACE OPTION" in _joined(
+            stmts
+        )
+
+    def test_a_tier_naming_no_quota_interval_takes_the_catalogues(self, monkeypatch):
+        from dfe_engine.governance.ch import models
+
+        real = models.catalogue()
+        tiers = [{**t, "quota": {**t["quota"], "interval": "30 minute"}} for t in real["tiers"]]
+        monkeypatch.setattr(models, "catalogue", lambda: {**real, "tiers": tiers})
+        assert ChTier(name="mine").quota_interval() == "30 minute"
+        assert ChTier(name="mine", quota={"interval": "1 day"}).quota_interval() == "1 day"
+
+
 class TestRenderTier:
     def test_analyst_tier_full(self):
         t = ChTier(

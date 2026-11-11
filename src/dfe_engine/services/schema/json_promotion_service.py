@@ -20,6 +20,7 @@ Two responsibilities, kept separate so the column maths is pure and testable:
   per-path outcomes with no I/O.
 """
 
+import functools
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -31,13 +32,13 @@ from dfe_engine.schema.applier import table_exists
 from dfe_engine.schema.models import SchemaColumn as MetaSchemaColumn
 from dfe_engine.source.expression import ExpressionBuilder, ExpressionValidator
 from dfe_engine.source.models import SchemaColumn
+from dfe_engine.source.type_registry import TypeRegistry
 
 # Standard JSON column name across all schema profiles (timeseries, minimal,
 # passthrough). Single source of truth -- import this rather than hard-coding.
 JSON_COLUMN = "_json"
 PROMOTED_FIELD_TYPE = "promoted"
 
-_WRAPPER_RE = re.compile(r"^(?:Nullable|LowCardinality)\((.*)\)$")
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
 _NON_IDENT_RE = re.compile(r"[^0-9a-zA-Z]+")
 
@@ -168,35 +169,84 @@ def promoted_path_from_column(column: MetaSchemaColumn) -> str | None:
     return result.source_field
 
 
+_JSON_PRIMITIVE = "json"
+
+# ClickHouse's own families of one type: a UInt8 and an Int64 are both ``integer`` to a DFE schema.
+_CH_FAMILIES = (
+    (re.compile(r"U?Int(?:8|16|32|64|128|256)"), "Int64"),
+    (re.compile(r"Float(?:32|64)"), "Float64"),
+    (re.compile(r"FixedString\(\d+\)"), "String"),
+    (re.compile(r"DateTime(?:64\(.*\))?"), "DateTime64"),
+    (re.compile(r"Date32"), "Date"),
+    (re.compile(r"IPv4"), "IPv6"),
+    (re.compile(r"Boolean"), "Bool"),
+)
+
+
+def _without_wrappers(ch_type: str) -> str:
+    """``ch_type`` with every ``Nullable(...)`` and ``LowCardinality(...)`` removed, at any depth.
+
+    A JSON array reports ``Array(Nullable(Float32))`` where the registry says ``Array(Float32)``,
+    and a map's key is ``LowCardinality(String)`` in the registry and ``String`` in a JSON path.
+    """
+    out: list[str] = []
+    closers: list[bool] = []
+    i = 0
+    while i < len(ch_type):
+        wrapper = next(
+            (w for w in ("Nullable(", "LowCardinality(") if ch_type.startswith(w, i)), None
+        )
+        if wrapper:
+            closers.append(True)
+            i += len(wrapper)
+            continue
+        char = ch_type[i]
+        if char == "(":
+            closers.append(False)
+        elif char == ")" and closers and closers.pop():
+            i += 1
+            continue
+        out.append(char)
+        i += 1
+    return "".join(out).replace(" ", "")
+
+
+def _ch_family(ch_type: str) -> str:
+    """The key a ClickHouse type is looked up by: wrappers off, its numeric or date family folded."""
+    bare = _without_wrappers(ch_type)
+    for pattern, family in _CH_FAMILIES:
+        if pattern.fullmatch(bare):
+            return family
+    return bare
+
+
+@functools.cache
+def _primitive_by_ch_family() -> dict[str, str]:
+    """Each ClickHouse type the registry maps a primitive to, and the primitive it maps to.
+
+    Read from dfe-schemas ``registries/types.yaml``, so a primitive added there is
+    promotable here with no edit. Primitives are walked in sorted order, so where two
+    share a ClickHouse type the first wins: ``string`` over ``text``, ``datetime`` over
+    ``timestamp``.
+    """
+    registry = TypeRegistry.default()
+    table: dict[str, str] = {}
+    for name in registry.primitives:
+        table.setdefault(_ch_family(registry.primitive_defaults(name)["ch_type"]), name)
+    return table
+
+
 def ch_dynamic_type_to_primitive(ch_type: str) -> tuple[str, list[str]]:
     """Map a ClickHouse dynamic type to a DFE primitive and its storage attributes.
 
-    The type is one JSONDynamicPathsWithTypes reports. Unwraps ``Nullable(...)`` / ``LowCardinality(...)`` first. Unknown or
-    compound types (Array/Tuple/Map/Object/JSON) fall back to ``json``.
+    The type is one JSONDynamicPathsWithTypes reports. It is matched against the
+    ClickHouse type of each primitive in dfe-schemas ``registries/types.yaml``, with
+    ``Nullable`` and ``LowCardinality`` removed and the integer, float, date and IP
+    families folded. A type no primitive carries (``Array(String)``, ``Tuple``, ``Decimal``)
+    falls back to ``json``.
     """
-    base = ch_type.strip()
-    match = _WRAPPER_RE.match(base)
-    while match:
-        base = match.group(1).strip()
-        match = _WRAPPER_RE.match(base)
-
-    if base.startswith(("Int", "UInt")):
-        return "integer", []
-    if base.startswith("Float"):
-        return "float", []
-    if base in ("Bool", "Boolean"):
-        return "boolean", []
-    if base.startswith("DateTime"):
-        return "datetime", []
-    if base.startswith("Date"):
-        return "date", []
-    if base == "UUID":
-        return "uuid", []
-    if base.startswith("IPv"):
-        return "ip", []
-    if base == "String" or base.startswith("FixedString"):
-        return "string", []
-    return "json", ["nullable"]
+    primitive = _primitive_by_ch_family().get(_ch_family(ch_type), _JSON_PRIMITIVE)
+    return primitive, ["nullable"] if primitive == _JSON_PRIMITIVE else []
 
 
 def suggested_column_name(path: str, existing: set[str]) -> str:

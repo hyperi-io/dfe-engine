@@ -195,7 +195,7 @@ def materialise() -> None:
     settings = load_settings()
     ch, db = _build_ch(settings)
     specs = load_specs(settings.hunts.hunt_dir, **_spec_sources(settings, db))
-    live = publish_schedule(ch, db, specs)
+    live = publish_schedule(ch, db, specs, fraction=settings.hunts.phase_spread_fraction)
     typer.echo(f"materialised {live} hunt(s) into {db}.hunt_schedule")
 
 
@@ -246,7 +246,7 @@ def run(
     hunt_dir = settings.hunts.hunt_dir
     sources = _spec_sources(settings, db)
     # Outlives each rebuild below, so a reload does not restart a failing hunt's back-off.
-    failures = HuntFailures()
+    failures = HuntFailures.from_settings(settings.hunts)
 
     def _build_runner() -> HuntRunner:
         return HuntRunner(
@@ -257,6 +257,7 @@ def run(
             poll_seconds=poll_seconds,
             metrics=obs,
             failures=failures,
+            phase_fraction=settings.hunts.phase_spread_fraction,
         )
 
     runners = _ReloadingRunner(

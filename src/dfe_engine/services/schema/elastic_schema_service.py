@@ -18,7 +18,7 @@ it never says whether that keyword holds three values or three million. So the
 importer sets a ``use_case`` only where the template states the intent - ``text``
 means word search, ``date`` and the numerics mean ranges, ``boolean`` and
 ``constant_keyword`` are bounded by definition - and leaves a plain ``keyword``
-with no ``use_case`` and no ``lowcardinality`` for the field picker to decide.
+with no ``use_case`` and no ``cardinality`` for the field picker to decide.
 Guessing them produced ``LowCardinality(String)`` plus a ``set(0)`` index on
 ``url.full`` and ``event.original``, which costs more than it saves, and a
 column that already looks decided never gets re-reviewed. Those columns carry
@@ -83,20 +83,30 @@ def _index_suppressed(mapping: dict[str, Any]) -> bool:
     return mapping.get("index") is False or mapping.get("doc_values") is False
 
 
+# Elastic types a template itself bounds to a handful of values: a constant_keyword holds one.
+_LOW_CARDINALITY_ES_TYPES = frozenset({"constant_keyword"})
+
+
+def _es_cardinality(es_type: str) -> str | None:
+    """``low`` for an Elastic type the template bounds, else None, which leaves it to the picker."""
+    return "low" if es_type in _LOW_CARDINALITY_ES_TYPES else None
+
+
 def _map_es_type(
     es_type: str,
 ) -> tuple[str, list[str], str]:
     """Map Elasticsearch field type to DFE primitive, attributes, and use_case.
 
     Only the use cases the template actually DECLARES are set. A plain ``keyword``
-    covers both a three-value enum and an unbounded URL, so it gets neither
-    ``lowcardinality`` nor a ``use_case`` - the picker decides those.
+    covers both a three-value enum and an unbounded URL, so it gets neither a
+    ``cardinality`` (see :func:`_es_cardinality`) nor a ``use_case`` - the picker
+    decides those.
     """
     match es_type:
         case "keyword" | "wildcard" | "version":
             return "string", [], ""
         case "constant_keyword":
-            return "string", ["lowcardinality"], "dimension"
+            return "string", [], "dimension"
         case "text" | "match_only_text":
             return "text", [], "word_search"
         case "long" | "integer" | "short" | "byte" | "unsigned_long":
@@ -173,10 +183,11 @@ def _walk_mapping(prefix: str, mapping: dict[str, Any], columns: list[SchemaColu
         primitive, attrs, use_case = _map_es_type(es_type)
         fp = prefix
         comment = f"Elasticsearch mapping type: {es_type}"
+        cardinality = _es_cardinality(es_type)
         if _index_suppressed(mapping):
             # `index: false` / `doc_values: false` is the template declaring the
             # field is not searched or not grouped by - it beats the type default.
-            attrs = [attr for attr in attrs if attr != "lowcardinality"]
+            cardinality = None
             use_case = ""
         elif primitive == "string" and not use_case:
             comment = f"{comment} ({CARDINALITY_NOT_MEASURED})"
@@ -186,6 +197,7 @@ def _walk_mapping(prefix: str, mapping: dict[str, Any], columns: list[SchemaColu
                 type=primitive,
                 attribute=list(attrs),
                 use_case=use_case,
+                cardinality=cardinality,
                 expr=f"@source: {fp}",
                 comment=comment,
                 field_type=ELASTIC_IMPORT_FIELD_TYPE,

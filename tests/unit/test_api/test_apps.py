@@ -464,6 +464,17 @@ class TestScaling:
         assert resp.status_code == 400
         assert resp.json()["code"] == "invalid_dial"
 
+    def test_the_replica_ceiling_is_the_deployments(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        app.state.settings.deployment.max_replicas_ceiling = 30
+        resp = client.put(f"{BASE}/scaling", json={"max_replicas": 31}, headers=admin_headers)
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "invalid_dial"
+        assert "30 ceiling" in resp.json()["detail"]
+        resp = client.put(f"{BASE}/scaling", json={"max_replicas": 30}, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+
     def test_dials_are_refused_off_kubernetes(self, client, app, admin_headers, tmp_path):
         # The instance is deployed first: a docker target refuses the source that
         # would derive one, which is a different refusal from the dials'.
@@ -1384,6 +1395,18 @@ class TestDryRun:
         )
         assert resp.status_code == 404
         assert resp.json()["code"] == "no_such_file"
+
+    def test_the_event_ceiling_is_the_deployments(self, client, app, admin_headers, tmp_path):
+        self._deployed(client, app, admin_headers, tmp_path)
+        self._sampler(app)
+        app.state.settings.transform_validation.dry_run_max_events = 20
+        resp = client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "000.vrl", "limit": 21},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert "20-event ceiling" in resp.json()["detail"]
 
     def test_the_event_ceiling_is_enforced_at_the_edge(self, client, app, admin_headers, tmp_path):
         self._deployed(client, app, admin_headers, tmp_path)

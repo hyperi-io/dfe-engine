@@ -126,9 +126,23 @@ def test_raising_only_the_ceiling_validates_against_the_stored_floor():
     assert scaling.changes(doc, max_replicas=9) == {"keda.maxReplicaCount": 9}
 
 
-def test_absurd_ceiling_is_refused():
+@pytest.mark.parametrize(
+    ("given", "over"),
+    [
+        pytest.param({}, scaling.MAX_REPLICAS_CEILING + 1, id="default"),
+        pytest.param({"max_replicas_ceiling": 50}, 51, id="configured"),
+    ],
+)
+def test_absurd_ceiling_is_refused(given, over):
     with pytest.raises(InvalidDialError, match="ceiling"):
-        scaling.changes({}, max_replicas=scaling.MAX_REPLICAS_CEILING + 1)
+        scaling.changes({}, max_replicas=over, **given)
+
+
+def test_a_raised_ceiling_admits_what_the_default_refuses():
+    over = scaling.MAX_REPLICAS_CEILING + 1
+    assert scaling.changes({}, max_replicas=over, max_replicas_ceiling=over) == {
+        "keda.maxReplicaCount": over
+    }
 
 
 @pytest.mark.parametrize("good", ["500m", "2", "0.5", "1000m"])

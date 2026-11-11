@@ -26,9 +26,10 @@ _IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 ORG_ID_COLUMN = "_org_id"
 
 DEFAULT_LIMIT = 200
-"""Distinct ids returned at most -- a suggestion list, not an export."""
+"""Distinct ids returned at most -- a suggestion list, not an export. ``orgs.available_ids_limit`` defaults to it."""
 
 DEFAULT_TIMEOUT_SECONDS = 10
+"""Seconds the read may run. ``orgs.available_ids_timeout_seconds`` defaults to it."""
 
 
 class OrgIdDiscoveryError(Exception):
@@ -74,7 +75,9 @@ def available_org_ids(
     """Every tenant id present in *database*, sorted, empty values dropped.
 
     Returns an empty list when no table in the database carries ``_org_id``,
-    which is what a deployment with no ingested data looks like.
+    which is what a deployment with no ingested data looks like. ``limit`` and
+    ``timeout_seconds`` are ``orgs.available_ids_limit`` and
+    ``orgs.available_ids_timeout_seconds``.
 
     Raises:
         OrgIdDiscoveryError: when ClickHouse refuses either query.
