@@ -53,23 +53,39 @@ from dfe_engine.api.deps import (
 )
 from dfe_engine.api.v1.sources import held_source_orgs
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.governance.ch.models import org_user_name
+from dfe_engine.governance.ch.models import DEFAULT_SERVICE_ROLES, org_user_name
+from dfe_engine.schema.plan import object_names
 
 router = APIRouter(prefix="/hyperdx", tags=["Search"])
 
 # The minted platform reader (a service role, no tenant role -> reads across orgs,
 # tier-limited). Handed only to a caller that passes _reads_every_org.
-_PLATFORM_USERNAME = "dfe_query_reader"
-_PLATFORM_SECRET = "ch/service/query_reader"  # noqa: S105, RUF100 - a secrets-backend path, not the secret
+_PLATFORM_ROLE = next(role for role in DEFAULT_SERVICE_ROLES if role.name == "query_reader")
+
+# dfe-schemas manifest ids of the tables the fork seeds a HyperDX source over.
+_SEED_TABLE_IDS = (
+    "data.main",
+    "data.detection",
+    "data.otel_logs",
+    "data.otel_traces",
+    "data.otel_metrics_gauge",
+    "data.otel_metrics_sum",
+    "data.otel_metrics_histogram",
+    "data.otel_metrics_exponential_histogram",
+    "data.otel_metrics_summary",
+)
 
 
 class HyperDXConnection(BaseModel):
-    """Connection material in the fork's shape (name, host URL, username, password)."""
+    """Connection material in the fork's shape, plus where its seed sources live."""
 
     name: str
     host: str
     username: str
     password: str
+    platform: bool = Field(description="True for the platform reader, which reads every org")
+    database: str = Field(description="The DFE data database every seeded table lives in")
+    tables: dict[str, str] = Field(description="Seeded table name by dfe-schemas manifest id")
 
 
 def _ch_host_url(settings) -> str:
@@ -105,6 +121,7 @@ class ConnectionIdentity:
     name: str
     username: str
     secret_path: str
+    platform: bool = False
 
 
 class _Refusal(NamedTuple):
@@ -118,7 +135,9 @@ def _resolve_identity(request: Request, user) -> ConnectionIdentity | _Refusal:
         return _Refusal("forbidden", "query:execute required (at system or your org scope)")
 
     if _reads_every_org(request, user):
-        return ConnectionIdentity("platform", _PLATFORM_USERNAME, _PLATFORM_SECRET)
+        return ConnectionIdentity(
+            "platform", _PLATFORM_ROLE.user(), _PLATFORM_ROLE.secret_path(), platform=True
+        )
 
     # A held caller reads as exactly one registered org, held as every org-held read holds it.
     matched = held_orgs(request, user, scopes_dict["query_execute"])
@@ -168,7 +187,7 @@ async def hyperdx_connection(
     store = secrets_store(request)
     password = await run_blocking(lambda: store.get_or_none(identity.secret_path)) or ""
     if not password:
-        if identity.username == _PLATFORM_USERNAME:
+        if identity.platform:
             raise ProblemError(
                 503,
                 "the platform ClickHouse reader has no credential yet",
@@ -180,11 +199,15 @@ async def hyperdx_connection(
             code="org_unprovisioned",
         )
 
+    database = settings.clickhouse.effective_data_database
     return HyperDXConnection(
         name=identity.name,
         host=_ch_host_url(settings),
         username=identity.username,
         password=password,
+        platform=identity.platform,
+        database=database,
+        tables=object_names(*_SEED_TABLE_IDS, data_database=database),
     )
 
 

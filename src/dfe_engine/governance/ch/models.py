@@ -210,7 +210,7 @@ class ChServiceRole(BaseModel):
 
     def user(self) -> str:
         """The minted user name (used when ``mint_user`` is set)."""
-        return f"dfe_{self.name}"
+        return _naming("service_user").format(name=self.name)
 
     def secret_path(self) -> str:
         """Where the minted user's password lives in the engine's secrets store."""
