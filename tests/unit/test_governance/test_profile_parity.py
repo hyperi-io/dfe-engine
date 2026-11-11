@@ -33,7 +33,7 @@ def _schema_phase_profiles() -> dict[str, str]:
     renderer = Renderer(manifest, platform=Platform.SELF_HOSTED)
     profiles = {}
     for obj in manifest.objects:
-        if obj.kind != "role" or obj.section == "tenant":
+        if obj.kind != "role" or obj.key is None:
             continue
         statements = list(renderer.render(obj).statements)
         if any(s.startswith("ALTER SETTINGS PROFILE") for s in statements):
