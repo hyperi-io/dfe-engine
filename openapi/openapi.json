@@ -41744,6 +41744,24 @@
           "password": {
             "type": "string",
             "title": "Password"
+          },
+          "platform": {
+            "type": "boolean",
+            "title": "Platform",
+            "description": "True for the platform reader, which reads every org"
+          },
+          "database": {
+            "type": "string",
+            "title": "Database",
+            "description": "The DFE data database every seeded table lives in"
+          },
+          "tables": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Tables",
+            "description": "Seeded table name by dfe-schemas manifest id"
           }
         },
         "type": "object",
@@ -41751,10 +41769,13 @@
           "name",
           "host",
           "username",
-          "password"
+          "password",
+          "platform",
+          "database",
+          "tables"
         ],
         "title": "HyperDXConnection",
-        "description": "Connection material in the fork's shape (name, host URL, username, password)."
+        "description": "Connection material in the fork's shape, plus where its seed sources live."
       },
       "HyperDXSourcesResponse": {
         "properties": {
