@@ -26,7 +26,7 @@ The rows live in ``tests/support/index_use_cases.py``. A new use case is one row
 """
 
 import json
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -173,7 +173,9 @@ def _insert(client: Any, table: Table) -> None:
 
 
 @contextmanager
-def _shared(state: Path, load: Callable[[str], None], drop: Callable[[str], None]) -> Iterator[str]:
+def _shared(
+    state: Path, load: Callable[[str], None], drop: Callable[[str], None]
+) -> Generator[str]:
     """The run's one loaded database on a server, loaded by the first process to ask.
 
     The suite runs under xdist, which hands this module's tests to several workers.
@@ -183,8 +185,11 @@ def _shared(state: Path, load: Callable[[str], None], drop: Callable[[str], None
     """
     lock = state.with_suffix(".lock")
     with locked(lock):
-        held = json.loads(state.read_text(encoding="utf-8")) if state.exists() else None
-        if held is None:
+        if state.exists():
+            held = json.loads(state.read_text(encoding="utf-8"))
+            database: str = held["database"]
+            users: int = held["users"]
+        else:
             database = f"dfe_index_{datetime.now(tz=UTC):%H%M%S%f}"
             try:
                 load(database)
@@ -192,20 +197,20 @@ def _shared(state: Path, load: Callable[[str], None], drop: Callable[[str], None
                 with suppress(Exception):
                     drop(database)
                 raise
-            held = {"database": database, "users": 0}
-        held["users"] += 1
-        state.write_text(json.dumps(held), encoding="utf-8")
+            users = 0
+        state.write_text(json.dumps({"database": database, "users": users + 1}), encoding="utf-8")
     try:
-        yield held["database"]
+        yield database
     finally:
         with locked(lock):
-            held = json.loads(state.read_text(encoding="utf-8"))
-            held["users"] -= 1
-            if held["users"]:
-                state.write_text(json.dumps(held), encoding="utf-8")
+            users = json.loads(state.read_text(encoding="utf-8"))["users"] - 1
+            if users:
+                state.write_text(
+                    json.dumps({"database": database, "users": users}), encoding="utf-8"
+                )
             else:
                 state.unlink()
-                drop(held["database"])
+                drop(database)
 
 
 @pytest.fixture(scope="module")
