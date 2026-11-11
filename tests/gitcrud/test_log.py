@@ -5,6 +5,9 @@ from __future__ import annotations
 import threading
 
 import pytest
+from dulwich.objects import ObjectID
+from dulwich.refs import Ref
+from dulwich.repo import Repo
 
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud import log as log_module
@@ -108,6 +111,62 @@ class TestReadLog:
         entries, _ = read_log(crud, applied_revision=first.commit_sha)
         assert entries[0].state == "pending"  # newest, after the applied SHA
         assert entries[1].state == "applied"
+
+
+class TestPathHistory:
+    @pytest.mark.parametrize(
+        "path",
+        [
+            pytest.param("values/receiver-default.yaml", id="file"),
+            pytest.param("values", id="directory"),
+            pytest.param("values/receiver", id="name_prefix_is_not_a_directory"),
+        ],
+    )
+    def test_matches_dulwichs_path_walk(self, crud, path):
+        _commit_var(
+            actor="derek", crud=crud, name="receiver-default", path="keda.maxReplicas", value=1
+        )
+        _commit_var(actor="kaz", crud=crud, name="loader-default", path="keda.maxReplicas", value=2)
+        _commit_var(
+            actor="derek", crud=crud, name="receiver-default", path="keda.maxReplicas", value=3
+        )
+
+        entries, _ = read_log(crud=crud, paths=[path])
+
+        with Repo(str(crud.repo_path)) as repo:
+            expected = [
+                walked.commit.id.decode() for walked in repo.get_walker(paths=[path.encode()])
+            ]
+        assert [entry.sha for entry in entries] == expected
+
+    def test_a_commit_after_a_read_is_listed(self, crud):
+        path = "values/receiver-default.yaml"
+        _commit_var(
+            actor="derek", crud=crud, name="receiver-default", path="keda.maxReplicas", value=1
+        )
+        first, _ = read_log(crud=crud, paths=[path])
+
+        newest = _commit_var(
+            actor="derek", crud=crud, name="receiver-default", path="keda.maxReplicas", value=2
+        )
+        entries, _ = read_log(crud=crud, paths=[path])
+
+        assert [entry.sha for entry in entries] == [newest.commit_sha, first[0].sha]
+
+    def test_a_rewound_head_drops_the_commits_it_left(self, crud):
+        first = _commit_var(
+            actor="derek", crud=crud, name="receiver-default", path="keda.maxReplicas", value=1
+        )
+        _commit_var(
+            actor="derek", crud=crud, name="receiver-default", path="keda.maxReplicas", value=2
+        )
+        read_log(crud=crud)
+
+        with Repo(str(crud.repo_path)) as repo:
+            repo.refs[Ref(b"HEAD")] = ObjectID(first.commit_sha.encode())
+        entries, _ = read_log(crud=crud)
+
+        assert [entry.sha for entry in entries] == [first.commit_sha]
 
 
 class TestTheWalkHoldsTheTree:
