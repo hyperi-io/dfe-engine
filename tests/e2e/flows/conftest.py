@@ -92,9 +92,16 @@ def applies_routing(deployment: dict[str, Any]) -> bool:
     return bool(fact)
 
 
+def catalogue(engine: EngineAPI) -> list[dict[str, Any]]:
+    """Return every app GET /apps lists, read from its one page."""
+    page = engine.json("GET", "/apps?page_size=1000")
+    assert page.get("next_page_token") is None, "the app catalogue ran past one page"
+    return list(page["items"])
+
+
 def app_instance(engine: EngineAPI, service: str) -> str:
     """The stack's single instance of a stack-scoped app."""
-    entry = next(a for a in engine.json("GET", "/apps") if a["service"] == service)
+    entry = next(a for a in catalogue(engine) if a["service"] == service)
     assert entry["instances"], f"the deployment carries no {service} instance"
     return str(entry["instances"][0])
 
@@ -132,7 +139,7 @@ def offered(engine: EngineAPI) -> tuple[str, ...]:
     running against, and a shape whose origin needs an app this tier does not
     deploy is refused at save exactly as a source on the other transport is.
     """
-    apps = engine.json("GET", "/apps")
+    apps = catalogue(engine)
     return tuple(str(a["service"]) for a in apps if a.get("offered", True))
 
 
@@ -145,7 +152,7 @@ def per_config(engine: EngineAPI) -> tuple[str, ...]:
     configure such an instance refuses the source rather than storing one nothing
     runs.
     """
-    apps = engine.json("GET", "/apps")
+    apps = catalogue(engine)
     return tuple(str(a["service"]) for a in apps if a.get("multiplicity") == "per_config")
 
 

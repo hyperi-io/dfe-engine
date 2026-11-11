@@ -54,7 +54,7 @@ from tests.e2e.conftest import (
 )
 from tests.e2e.engine_api import EngineAPI
 from tests.e2e.flows import shapes
-from tests.e2e.flows.conftest import app_instance
+from tests.e2e.flows.conftest import app_instance, catalogue
 
 # Argo polls the deploy repo every 300 s with up to 60 s of jitter, and the pod
 # then rolls on the new ConfigMap checksum, so a routing change is minutes away.
@@ -111,7 +111,7 @@ def _receiver_instance(engine: EngineAPI) -> str:
 
 
 def _instances(engine: EngineAPI, service: str) -> list[str]:
-    apps = engine.json("GET", "/apps")
+    apps = catalogue(engine)
     entry = next((a for a in apps if a["service"] == service), None)
     return [str(i) for i in (entry or {}).get("instances", [])]
 
