@@ -65,6 +65,7 @@ from enum import StrEnum
 from typing import Any
 
 from dfe_engine.gitcrud.versioned import SPEC_KEY, VERSIONS_KEY, VersionConflictError
+from dfe_engine.settings import LIBRARY_MAX_ARTIFACT_BYTES
 
 from .catalogue import ARTIFACT_KINDS, ArtifactKind, Encoding
 
@@ -84,10 +85,6 @@ _TIMESTAMP = "at"
 
 VERSIONS_DIR = "versions"
 CURRENT_STEM = "current"
-
-# A version is a file in a git repo, not an object in a blob store: the cap keeps
-# a clone, a checkout and an Argo sync proportionate to configuration.
-MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 
 # A label key or value, a group and a tag all end up in a YAML document and in a
 # query string, so they keep to the same boring character set.
@@ -259,13 +256,16 @@ def digest_of(artifact_kind: ArtifactKind, content: str) -> str:
     return f"sha256:{hashlib.sha256(canonical_bytes(artifact_kind, content)).hexdigest()}"
 
 
-def validate_content(artifact_kind: ArtifactKind, content: str) -> None:
-    """Reject content that cannot be stored, or that is too big to carry in git."""
+def validate_content(
+    artifact_kind: ArtifactKind, content: str, *, max_bytes: int = LIBRARY_MAX_ARTIFACT_BYTES
+) -> None:
+    """Reject content that cannot be stored, or that is over ``max_bytes`` for git to carry.
+
+    ``max_bytes`` is ``deployment.library_max_artifact_bytes``.
+    """
     raw = canonical_bytes(artifact_kind, content)
-    if len(raw) > MAX_ARTIFACT_BYTES:
-        raise InvalidArtifactError(
-            f"artefact is {len(raw)} bytes, over the {MAX_ARTIFACT_BYTES}-byte limit"
-        )
+    if len(raw) > max_bytes:
+        raise InvalidArtifactError(f"artefact is {len(raw)} bytes, over the {max_bytes}-byte limit")
     if artifact_kind.encoding is Encoding.TEXT:
         found = sorted(_FORBIDDEN_TEXT.intersection(content))
         if found:
@@ -477,6 +477,7 @@ def publish(
     message: str = "",
     version: int | None = None,
     now: int | None = None,
+    max_bytes: int = LIBRARY_MAX_ARTIFACT_BYTES,
 ) -> tuple[int, bool, BundlePlan]:
     """Freeze content as a version. Mutates ``env``. Returns (version, changed, plan).
 
@@ -487,10 +488,11 @@ def publish(
     likewise a no-op.
 
     The plan carries the new version's file and the refreshed ``current`` copy;
-    both must land in the same commit as the manifest.
+    both must land in the same commit as the manifest. ``max_bytes`` is
+    ``deployment.library_max_artifact_bytes``.
     """
     artifact_kind = artifact_kind_of(env)
-    validate_content(artifact_kind, content)
+    validate_content(artifact_kind, content, max_bytes=max_bytes)
     digest = digest_of(artifact_kind, content)
     existing = _versions(env)
     next_version = (max(existing) + 1) if existing else 1

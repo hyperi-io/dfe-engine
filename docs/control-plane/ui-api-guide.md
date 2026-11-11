@@ -499,6 +499,9 @@ optimistic concurrency - a mismatch returns
 |------|-------|---------------------|
 | Preferences doc (PATCH) | 256 KiB (`DFE_ENGINE_REPOSITORY_MAX_PREFS_BYTES`) | `413 {"code": "payload_too_large"}` |
 | Object value (PUT) | 1 MiB (`DFE_ENGINE_REPOSITORY_MAX_OBJECT_BYTES`) | `413 {"code": "payload_too_large"}` |
+| Library artefact version (POST) | 8 MiB (`DFE_ENGINE_DEPLOYMENT_LIBRARY_MAX_ARTIFACT_BYTES`) | `400 {"code": "invalid_content"}` |
+| Dry run `limit` | 100 events (`DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_EVENTS`) | `422 {"code": "validation_error"}` |
+| Scaling `replica_count`, `max_replicas` | 1000 (`DFE_ENGINE_DEPLOYMENT_MAX_REPLICAS_CEILING`) | `400 {"code": "invalid_dial"}` |
 
 ## TypeScript Type Generation
 

@@ -43,6 +43,7 @@ from dfe_engine.clickhouse.inserts import keep_identical_rows
 from dfe_engine.clickhouse.quoting import quote_identifier
 from dfe_engine.hunts.hunt_spec import HuntSpec
 from dfe_engine.schema.require import require_objects
+from dfe_engine.settings import PHASE_SPREAD_FRACTION
 
 # Unit suffix -> seconds. Ordered largest-first only for readability; the parser
 # accepts the units in any order and sums compound forms ("2d12h", "1h30m").
@@ -154,8 +155,14 @@ def parse_interval(value: str | int) -> int:
     return duration_to_seconds(text)
 
 
-def phase_offset(hunt_id: str, interval_seconds: int, fraction: float = 0.8) -> int:
-    """Stable per-hunt offset in [0, interval*fraction). Deterministic from id."""
+def phase_offset(
+    hunt_id: str, interval_seconds: int, fraction: float = PHASE_SPREAD_FRACTION
+) -> int:
+    """Stable per-hunt offset in [0, interval*fraction). Deterministic from id.
+
+    ``fraction`` is ``hunts.phase_spread_fraction``: every caller that decides a fire
+    time passes it, or the runner, the KEDA schedule and the API disagree on when a hunt fires.
+    """
     window = max(1, int(interval_seconds * fraction))
     digest = int(hashlib.sha256(hunt_id.encode()).hexdigest(), 16)
     return digest % window
@@ -165,7 +172,7 @@ def next_due(
     hunt_id: str,
     interval_seconds: int,
     now_epoch: int,
-    fraction: float = 0.8,
+    fraction: float = PHASE_SPREAD_FRACTION,
 ) -> int:
     """Next fire time = next interval boundary + the hunt's stable phase offset."""
     offset = phase_offset(hunt_id, interval_seconds, fraction)
@@ -176,13 +183,17 @@ def next_due(
     return due
 
 
-def current_fire(hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = 0.8) -> int:
+def current_fire(
+    hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = PHASE_SPREAD_FRACTION
+) -> int:
     """The scheduled fire time for the CURRENT interval (boundary + offset)."""
     offset = phase_offset(hunt_id, interval_seconds, fraction)
     return (now_epoch // interval_seconds) * interval_seconds + offset
 
 
-def latest_fire(hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = 0.8) -> int:
+def latest_fire(
+    hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = PHASE_SPREAD_FRACTION
+) -> int:
     """The most recent scheduled fire at or before now.
 
     This interval's fire once it has arrived, else the previous interval's. A fire
@@ -225,7 +236,7 @@ def publish_schedule(
     database: str,
     specs: Mapping[str, HuntSpec],
     *,
-    fraction: float = 0.8,
+    fraction: float = PHASE_SPREAD_FRACTION,
 ) -> int:
     """Materialise the deterministic schedule KEDA scales on. Returns live count.
 

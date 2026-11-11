@@ -475,6 +475,28 @@ class TestValidateColumns:
         errors = SchemaLoader.validate_columns(columns, registry)
         assert len(errors) > 0
 
+    @pytest.mark.parametrize(
+        ("name", "refused"),
+        [
+            ("has space", True),
+            ("a`b", True),
+            ("a'b", True),
+            ("f(x)", True),
+            ("a;b", True),
+            ("event.action", False),
+            ("app-type", False),
+        ],
+    )
+    def test_a_column_name_unusable_in_ddl_is_refused_by_name(self, name: str, refused: bool):
+        """The renderer refuses such a name, so a source definition is refused before it gets there."""
+        from dfe_engine.source.type_registry import TypeRegistry
+
+        errors = SchemaLoader.validate_columns(
+            [SchemaColumn(name=name, type="string")], TypeRegistry.default()
+        )
+        named = [e for e in errors if e.startswith(f"Column {name!r}: not a usable ClickHouse")]
+        assert bool(named) is refused
+
 
 # ── get_order_by_columns ────────────────────────────────────────────
 

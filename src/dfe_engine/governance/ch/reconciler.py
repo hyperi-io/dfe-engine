@@ -40,6 +40,7 @@ from .models import (
     group_secret_path,
     meta_projection,
     org_user_name,
+    role_name,
     tenant_policy_name,
 )
 from .render import (
@@ -475,7 +476,7 @@ class ChRbacReconciler:
             stmts += render_tier(t)
         stmts += self._render_service_identities(service_roles, service_hashes)
         default_analyst = _default_tier_name(tiers, "analyst")
-        default_tier_role = f"dfe_{default_analyst}_role"
+        default_tier_role = role_name(default_analyst)
         stmts += render_tenant_axis(org_tables, deny_tables)
         available = (
             None
@@ -512,10 +513,10 @@ class ChRbacReconciler:
         for b in bindings:
             if b.group not in group_hashes:
                 continue
-            tier_role = f"dfe_{b.tier or default_analyst}_role"
+            tier_role = role_name(b.tier or default_analyst)
             org = orgs_by_name.get(b.org) if b.org else None
             org_ids = org_tenant_ids(org) if org is not None else []
-            extra = [f"dfe_{r}_role" for r in getattr(b, "ch_roles", [])]
+            extra = [role_name(r) for r in getattr(b, "ch_roles", [])]
             stmts += pinned(b.user(), group_hashes[b.group], tier_role, org_ids, extra)
         return stmts
 

@@ -74,7 +74,7 @@ def test_searchable_system_defaults_are_undeployed_drift(seeder, registry):
     """Fifty sources storing a retention other than the default, so the drift list finds them."""
     from dfe_engine.api.e2e.seed.sources import searchable_default_names
     from dfe_engine.gitcrud.table_defaults import source_default_drift
-    from dfe_engine.source.models import DEFAULT_HEADER_TYPE, DEFAULT_HEADER_VERSION
+    from dfe_engine.source.models import DEFAULT_HEADER_TYPE, inherited_header_version
 
     assert seeder.seed_searchable_system_defaults() is True
     assert seeder.seed_searchable_system_defaults() is False
@@ -88,7 +88,7 @@ def test_searchable_system_defaults_are_undeployed_drift(seeder, registry):
     report = source_default_drift(
         registry.get_source(names[0]),
         header_type=DEFAULT_HEADER_TYPE,
-        header_version=DEFAULT_HEADER_VERSION,
+        header_version=inherited_header_version(),
         ttl_days=90,
         engine="MergeTree",
     )

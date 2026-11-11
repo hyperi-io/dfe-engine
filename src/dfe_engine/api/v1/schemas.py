@@ -91,6 +91,7 @@ from dfe_engine.schema.models import (
 from dfe_engine.schema.models import (
     SchemaColumn as MetaSchemaColumn,
 )
+from dfe_engine.schema.schema_loader import current_profile_version
 from dfe_engine.services.schema.elastic_schema_service import (
     ElasticSchemaConversionError,
     ElasticSchemaService,
@@ -1402,27 +1403,13 @@ def _resolve_promote_meta_schema(
 _DEFAULT_PROMOTE_HEADER_TYPE = "common-header/minimal"
 
 
-def _minimal_header_current_version() -> str:
-    """``current`` version marker from the bundled minimal common-header profile."""
-    from dfe_engine.schema.schema_loader import _resolve_profile_yaml_path
-    from dfe_engine.yaml_utils import yaml_load
-
-    path = _resolve_profile_yaml_path(_DEFAULT_PROMOTE_HEADER_TYPE, None)
-    if not path.is_file():
-        return "1.0.0"
-    data = yaml_load(path)
-    if not isinstance(data, dict):
-        return "1.0.0"
-    return str(data.get("current") or "1.0.0")
-
-
 def _header_for_promote_attach(snap, *, had_meta_schema: bool) -> SourceHeader:
     """Default ``common-header/minimal`` @ profile ``current`` on first meta-schema pin."""
     if had_meta_schema and snap.header is not None:
         return snap.header
     return SourceHeader(
         type=_DEFAULT_PROMOTE_HEADER_TYPE,
-        version=_minimal_header_current_version(),
+        version=current_profile_version(_DEFAULT_PROMOTE_HEADER_TYPE),
     )
 
 

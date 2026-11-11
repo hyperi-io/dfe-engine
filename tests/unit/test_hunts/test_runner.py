@@ -70,6 +70,26 @@ def test_a_hunt_whose_offset_falls_between_ticks_still_runs_every_interval():
     assert coord.watermarks[hunt_id] == base + 2 * 60 + 46 - 60
 
 
+@pytest.mark.parametrize("fraction", [0.1, 0.5, 1.0])
+def test_the_runner_fires_where_the_configured_phase_spread_puts_the_hunt(fraction):
+    """The runner, publish_schedule and the API's next_due all take hunts.phase_spread_fraction."""
+    from dfe_engine.hunts.hunt_spec import HuntSpec
+
+    spec = HuntSpec(hunt_id="h", interval_seconds=600, queries=["SELECT 1"])
+    boundary = 600_000
+    assert phase_offset("h", 600, fraction) != phase_offset("h", 600)
+    coord = _WatermarkCoordinator()
+    runner = HuntRunner(
+        coord,  # ty: ignore[invalid-argument-type]  # stand-ins carrying only the calls this path makes
+        _CountingWorker(),  # ty: ignore[invalid-argument-type]
+        {"h": spec},
+        cap=8,
+        phase_fraction=fraction,
+    )
+    runner.tick(boundary + phase_offset("h", 600, fraction))
+    assert coord.watermarks["h"] == boundary + phase_offset("h", 600, fraction)
+
+
 class _RecordingCoordinator:
     """A coordinator that records call order and grants every claim."""
 
@@ -446,6 +466,23 @@ def test_the_back_off_doubles_from_its_first_step_up_to_its_cap():
     gaps = [later - earlier for earlier, later in itertools.pairwise(attempted)]
     assert gaps[:3] == [30, 60, 120]
     assert set(gaps[3:]) == {120}
+
+
+def test_the_back_off_takes_its_start_and_cap_from_the_hunts_settings():
+    from dfe_engine.settings import HuntsSettings
+
+    worker = _TableWorker()
+    failures = HuntFailures.from_settings(
+        HuntsSettings(failure_backoff_initial_seconds=45, failure_backoff_max_seconds=90),
+        jitter=_exact,
+    )
+    runner, now = _due_runner(_RecordingCoordinator(), worker, failures=failures)
+
+    attempted = _ticks(runner, worker, now, 60)
+
+    gaps = [later - earlier for earlier, later in itertools.pairwise(attempted)]
+    assert gaps[:2] == [45, 90]
+    assert set(gaps[2:]) == {90}
 
 
 def test_a_backed_off_hunt_runs_again_by_itself_once_its_table_exists(manager):

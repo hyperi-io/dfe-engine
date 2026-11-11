@@ -100,7 +100,11 @@ thing from the same inputs:
 4. **Self-healing.** If a worker claims a hunt then dies before writing the watermark, its lease expires (`lease_seconds`, default 300) and the fire is still owed (`watermark < fire`), so the scaler keeps >=1 worker and the hunt is reclaimed. Nothing double-runs (a hunt run twice writes and notifies twice): a claim stands only if acknowledged within a settle of its free read and still the latest row after it. A later claim is never released, as it may sit over the winner, but it holds nothing, so the next poll claims again.
 5. **No thundering herd.** The phase offset spreads same-interval hunts across the
    interval, so `due_count` rises gradually and KEDA scales out smoothly rather
-   than all-at-once at the boundary.
+   than all-at-once at the boundary. The offset falls in the first
+   `hunts.phase_spread_fraction` of the interval (default 0.8, env
+   `DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION`). The runner, the API's `next_due` and
+   the materialised schedule all read it, so republish the schedule
+   (`dfe-hunt-runner materialise`) after changing it.
 
 Bounded catch-up: a fire stays owed until its watermark is written, so a worker
 that ticks inside `[boundary, boundary+offset)` runs the previous interval's fire
