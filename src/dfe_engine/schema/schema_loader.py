@@ -260,11 +260,31 @@ def profile_file_stem(profile_name: str) -> str | None:
     return stem or None
 
 
-def _profile_yaml_path(directory: Path, stem: str) -> Path:
+def _contained_under(root: Path, candidate: Path, profile_name: str) -> Path:
+    """Return *candidate* with symlinks resolved, refusing it unless it stays under *root*.
+
+    ``realpath`` plus a prefix check is the containment shape CodeQL's
+    path-injection query recognises, and resolving both sides also refuses a
+    symlink inside the tree that points out of it.
+
+    Raises:
+        SchemaLoadError: The resolved candidate lies outside *root*.
+    """
+    real_root = os.path.join(os.path.realpath(root), "")
+    real_candidate = os.path.realpath(candidate)
+    if not real_candidate.startswith(real_root):
+        raise SchemaLoadError(f"Profile {profile_name!r} resolves outside {root}")
+    return Path(real_candidate)
+
+
+def _profile_yaml_path(
+    directory: Path, stem: str, profile_name: str, root: Path | None = None
+) -> Path:
+    """``<directory>/<stem>.yaml``, contained under *root* (default *directory*)."""
     cleaned = _strip_yaml_suffix(stem).strip().strip("/")
     if not cleaned:
         raise SchemaLoadError("Profile name is empty")
-    return directory / f"{cleaned}.yaml"
+    return _contained_under(root or directory, directory / f"{cleaned}.yaml", profile_name)
 
 
 def _resolve_profile_yaml_path(
@@ -277,7 +297,7 @@ def _resolve_profile_yaml_path(
         raise SchemaLoadError(f"Profile {profile_name!r} is empty")
 
     if profiles_dir is not None:
-        return _profile_yaml_path(Path(profiles_dir), stem)
+        return _profile_yaml_path(Path(profiles_dir), stem, profile_name)
 
     normalized = profile_name.replace("\\", "/").strip()
     # Traversal is already rejected in profile_file_stem; keep the same
@@ -288,9 +308,9 @@ def _resolve_profile_yaml_path(
         if normalized.startswith(_COMMON_HEADER_PREFIX) or "/" in normalized:
             parts = [p for p in normalized.split("/") if p]
             if len(parts) == 1:
-                return _profile_yaml_path(root, parts[0])
-            return _profile_yaml_path(root.joinpath(*parts[:-1]), parts[-1])
-        return _profile_yaml_path(root / _COMMON_HEADER_SUBDIR, stem)
+                return _profile_yaml_path(root, parts[0], profile_name)
+            return _profile_yaml_path(root.joinpath(*parts[:-1]), parts[-1], profile_name, root)
+        return _profile_yaml_path(root / _COMMON_HEADER_SUBDIR, stem, profile_name, root)
 
     # Same as ``_resolve_subdir``: DFE_ENGINE_SCHEMAS_DIR may be a partial tree
     # (common-header only, no manifest.yaml). ``_resolve_schemas_root``
@@ -307,7 +327,7 @@ def _resolve_profile_yaml_path(
         if candidate.exists():
             return candidate
 
-    return _profile_yaml_path(_resolve_profiles_dir(), stem)
+    return _profile_yaml_path(_resolve_profiles_dir(), stem, profile_name)
 
 
 def current_profile_version(profile_name: str) -> str:

@@ -148,6 +148,47 @@ class TestLoadProfile:
         with pytest.raises(SchemaLoadError, match="must not contain"):
             _resolve_profile_yaml_path(traversal)
 
+    @pytest.fixture
+    def schemas_tree(self, tmp_path, monkeypatch):
+        """A complete schemas tree under DFE_ENGINE_SCHEMAS_DIR, an outside file and a symlink to it."""
+        root = tmp_path / "schemas"
+        header = root / "common-header"
+        header.mkdir(parents=True)
+        (root / "manifest.yaml").write_text("{}\n", encoding="utf-8")
+        (header / "minimal.yaml").write_text("columns: []\n", encoding="utf-8")
+        outside = tmp_path / "outside.yaml"
+        outside.write_text("columns: []\n", encoding="utf-8")
+        (header / "escape.yaml").symlink_to(outside)
+        monkeypatch.setenv("DFE_ENGINE_SCHEMAS_DIR", str(root))
+        return root
+
+    @pytest.mark.parametrize("ref", ["minimal", "minimal.yaml", "common-header/minimal"])
+    def test_a_normal_profile_ref_resolves_inside_the_tree(self, schemas_tree, ref):
+        from dfe_engine.schema.schema_loader import _resolve_profile_yaml_path
+
+        expected = (schemas_tree / "common-header" / "minimal.yaml").resolve()
+        assert _resolve_profile_yaml_path(ref) == expected
+
+    @pytest.mark.parametrize("ref", ["escape", "common-header/escape"])
+    @pytest.mark.parametrize("explicit_dir", [False, True])
+    def test_a_symlink_out_of_the_tree_is_refused(self, schemas_tree, ref, explicit_dir):
+        from dfe_engine.schema.schema_loader import _resolve_profile_yaml_path
+
+        profiles_dir = schemas_tree / "common-header" if explicit_dir else None
+        with pytest.raises(SchemaLoadError, match=r"'.*escape' resolves outside"):
+            _resolve_profile_yaml_path(ref, profiles_dir)
+
+    @pytest.mark.parametrize("ref", ["/etc/passwd", "//etc/passwd", "\\etc\\passwd"])
+    @pytest.mark.parametrize("explicit_dir", [False, True])
+    def test_an_absolute_looking_ref_stays_inside_the_tree(self, schemas_tree, ref, explicit_dir):
+        """A leading separator is dropped, so the ref is rebuilt under the tree, never at /etc."""
+        from dfe_engine.schema.schema_loader import _resolve_profile_yaml_path
+
+        profiles_dir = schemas_tree / "common-header" if explicit_dir else None
+        resolved = _resolve_profile_yaml_path(ref, profiles_dir)
+        assert resolved.is_relative_to(schemas_tree.resolve())
+        assert not resolved.exists()
+
     def test_load_timeseries(self):
         columns = SchemaLoader.load_profile("timeseries")
         names = [c.name for c in columns]
