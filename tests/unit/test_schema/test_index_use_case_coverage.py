@@ -13,6 +13,7 @@ and fails the moment a new catalogue entry, or a cardinality that renders a diff
 index, has no row in ``tests/support/index_use_cases.py``.
 """
 
+import re
 from pathlib import Path
 
 import yaml
@@ -64,7 +65,6 @@ def test_the_meta_schema_the_rows_generate_is_one_the_engine_accepts(tmp_path: P
     result = SchemaBuilderV2().build(source)
     assert not result.validation_errors, result.validation_errors
     for column in columns():
-        assert f"INDEX idx_{column.name} " in result.create_table_ddl or (
-            f"INDEX idx_{column.name}_" in result.create_table_ddl
-        ), f"{column.name} renders no index"
+        named = re.compile(rf"INDEX `?idx_{re.escape(column.name)}(_[a-z]+)?`? ")
+        assert named.search(result.create_table_ddl), f"{column.name} renders no index"
     assert len({case.id for case in CASES}) == len(CASES), "two rows share an id"

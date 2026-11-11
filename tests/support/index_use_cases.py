@@ -78,12 +78,14 @@ class Column:
         declare: The rest of its meta schema declaration.
         haystack: The SQL value of an ordinary row, over the row number ``n``.
         needle: The SQL value on the needle rows, or None to keep the haystack.
+        outside: The SQL value on the ``OUTSIDE`` row, when it must differ from *needle*.
     """
 
     name: str
     declare: dict[str, Any]
     haystack: str
     needle: str | None = None
+    outside: str | None = None
 
     @property
     def meta(self) -> dict[str, Any]:
@@ -95,6 +97,12 @@ class Column:
         """The SQL that fills the column for row ``n``."""
         if self.needle is None:
             return self.haystack
+        if self.outside is not None:
+            rows = ", ".join(str(row) for row in NEEDLES)
+            return (
+                f"if(n IN ({rows}), {self.needle}, "
+                f"if(n = {OUTSIDE}, {self.outside}, {self.haystack}))"
+            )
         rows = ", ".join(str(row) for row in (*NEEDLES, OUTSIDE))
         return f"if(n IN ({rows}), {self.needle}, {self.haystack})"
 
@@ -204,11 +212,14 @@ KS_MAP = Column(
     "map('needle_key', 'needle_val')",
 )
 # Directions spread over the whole sphere, and needles exactly on the query vector.
+# The outside row sits just off it: a vector index returns its k nearest before the
+# WHERE runs, so a fourth exact tie outside the window can take a needle's place.
 SIM_VEC = Column(
     "sim_vec",
     {"type": "vector", "use_case": "similarity_search(4)"},
     "[sin(n * 1.1), cos(n * 1.7), sin(n * 2.3), cos(n * 0.7)]",
     "[0.0, 0.0, 0.0, 1.0]",
+    "[0.0, 0.0, 0.1, 1.0]",
 )
 
 CASES: tuple[Case, ...] = (
