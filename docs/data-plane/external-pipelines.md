@@ -105,13 +105,13 @@ Nothing makes your records carry the DFE common header. The loader fills in a mi
 
 | Field | Missing, the loader | Set, you get |
 |---|---|---|
-| `_timestamp` | reads `timestamp`, then `@timestamp`, and takes the load time when neither is there | the event's own time, so time-range queries and retention follow when it happened |
-| `_org_id` | lands the record in the source's org | the source's org or one `allowed_org_ids` lists, which is how a provider lands each customer in their own org |
-| `_source` | takes it from the topic name, which is this source | this source or one `allowed_sources` lists, which picks the table |
-| `_tags` | reads `tags`, then `meta`, then `metadata.tags`, and leaves it empty when none is there | tags a query or an alert can filter on without parsing the payload |
-| `_timestamp_received` | takes the load time | when your pipeline first saw the event, so you can measure the delay before DFE |
+| `_timestamp` | reads `timestamp`, and takes the load time when it is not there | the event's own time, so time-range queries and retention follow when it happened |
+| `_org_id` | reads `_org_id`, and lands the record in the source's org when it is not there | the source's org or one `allowed_org_ids` lists, which is how a provider lands each customer in their own org |
+| `_source` | reads `_source`, and takes the topic name, which is this source, when it is not there | this source or one `allowed_sources` lists, which picks the table |
+| `_tags` | reads `_tags`, then `tags`, then `meta`, then `metadata.tags`, and leaves it empty when none is there | tags a query or an alert can filter on without parsing the payload |
+| `_timestamp_received` | reads `_timestamp_received`, then `timestamp_received`, then `received_at`, and takes the load time when none is there | when your pipeline first saw the event, so you can measure the delay before DFE |
 
-`_timestamp_load`, `_uuid`, `_json` and `_raw` are always written by the loader and ClickHouse, and a value you send isn't read. The columns come from the source's header profile in dfe-schemas (`common-header/`), and the default profile is `timeseries`.
+`_timestamp_load`, `_uuid`, `_json` and `_raw` are always written by the loader and ClickHouse, and a value you send isn't read. The columns and the order the loader reads them in come from the source's header profile in dfe-schemas (`common-header/`), and the default profile is `timeseries`.
 
 A compliant record looks like this:
 

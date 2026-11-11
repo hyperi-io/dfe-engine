@@ -222,6 +222,7 @@ routes = [
   { old = "DELETE /api/v1/schemas/definitions/{schema_path}/versions/{version}", new = "DELETE /api/v1/schemas/{schema}/versions/{version}", status = "moved" },
   { old = "POST /api/v1/schemas/elastic-converter", status = "unchanged" },
   { old = "POST /api/v1/schemas/import", status = "unchanged" },
+  { old = "GET /api/v1/schemas/vocabulary", status = "unchanged" },
   { old = "POST /api/v1/schemas/{source_name}/build", status = "decide", note = "source-schema-overlap" },
   { old = "GET /api/v1/schemas/{source_name}/columns", status = "decide", note = "source-schema-overlap" },
   { old = "GET /api/v1/schemas/{source_name}/json-paths", new = "GET /api/v1/sources/{source}/json-paths", verb = "json-paths", status = "moved" },

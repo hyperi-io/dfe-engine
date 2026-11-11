@@ -674,6 +674,7 @@ class IntDefault(BaseModel):
     stored: int | None = Field(description="The admin's override; null when none is stored.")
     origin: Literal["override", "deployment"]
     deployment_default: int
+    maximum: int = Field(description="The largest value a PATCH accepts, so a form can bound it.")
 
 
 class StrDefault(BaseModel):
@@ -751,6 +752,7 @@ def _system_defaults(request: Request, settings: Any) -> SystemDefaults:
             stored=ttl.stored,
             origin=ttl.origin,
             deployment_default=ttl.deployment_default,
+            maximum=MAX_DEFAULT_TTL_DAYS,
         ),
         common_header_type=StrDefault(
             effective=table.header_type,
