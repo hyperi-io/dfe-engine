@@ -11,7 +11,6 @@ readonly=2 lets a query change any setting its profile does not constrain. The
 settings go as HTTP query parameters, as HyperDX sends them.
 """
 
-import hashlib
 import uuid
 
 import httpx
@@ -20,7 +19,7 @@ import pytest
 from dfe_engine.governance.ch.bootstrap import service_roles_for
 from dfe_engine.governance.ch.models import DEFAULT_TIERS
 from dfe_engine.governance.ch.reconciler import ChRbacReconciler, resolve_grant_databases
-from dfe_engine.governance.ch.render import render_service_user, render_tier
+from dfe_engine.governance.ch.render import render_tier
 from dfe_engine.settings import DFESettings
 
 pytestmark = pytest.mark.integration
@@ -69,9 +68,12 @@ def reader(ch_client, ch_params, clickhouse_test_database):
         [role]
     )
     assert result.errors == []
+    # The minted user's own grant and profile, as render_service_user writes them.
     password = uuid.uuid4().hex
-    for statement in render_service_user(role, hashlib.sha256(password.encode()).hexdigest()):
-        ch_client.command(statement)
+    user = f"`{role.user()}`"
+    ch_client.command(f"CREATE USER {user} IDENTIFIED WITH plaintext_password BY '{password}'")
+    ch_client.command(f"GRANT `{role.role()}` TO {user}")
+    ch_client.command(f"ALTER USER {user} SETTINGS PROFILE `{role.profile()}`")
     try:
         yield role, ch_params, password
     finally:
