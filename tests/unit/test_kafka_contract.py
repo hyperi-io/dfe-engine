@@ -1,14 +1,14 @@
 """Kafka credential contract - provider->mechanism derivation (dfe-engine#98).
 
-Checkpoint 1: the derivation table is the SSoT and is MIRRORED in scalo-rs (Rust).
-CANONICAL_TABLE below is the exact cross-language expectation - a Rust reviewer
-cross-checks scalo's table against this. No broker is touched (pure derivation).
+The table is scalo's. CANONICAL_TABLE is what the engine requires of it, so a
+scalo release that moves a provider fails here. No broker is touched.
 """
 
 import os
 
 import pytest
 from pydantic import ValidationError
+from scalo.kafka import providers as scalo_providers
 
 from dfe_engine.kafka.contract import (
     KafkaContractError,
@@ -17,8 +17,7 @@ from dfe_engine.kafka.contract import (
 )
 from dfe_engine.settings import KafkaSettings, _get_env_overrides
 
-# The cross-language contract. provider -> (security_protocol, sasl_mechanism).
-# scalo-rs A1 MUST produce this exact table. Change here + #98 + Rust together.
+# provider -> (security_protocol, sasl_mechanism), as scalo-py and scalo-rs derive it.
 CANONICAL_TABLE = {
     "strimzi": ("SASL_SSL", "SCRAM-SHA-512"),
     "redpanda": ("SASL_SSL", "SCRAM-SHA-512"),
@@ -31,9 +30,8 @@ CANONICAL_TABLE = {
     "msk_iam": ("SASL_SSL", "OAUTHBEARER"),
 }
 
-# The two `-no-tls` keys the charts already use for a DFE-owned broker on its
-# TLS-off in-cluster listener. dfe-infra's own table carries them
-# (helm/library/dfe-common/templates/_kafka.tpl); scalo-rs and scalo-py do not yet.
+# The two `-no-tls` keys the charts use for a DFE-owned broker on its TLS-off
+# in-cluster listener (dfe-infra helm/library/dfe-common/templates/_kafka.tpl).
 NO_TLS_PROVIDERS = ("strimzi-no-tls", "redpanda-no-tls")
 
 
@@ -41,6 +39,10 @@ class TestDerive:
     @pytest.mark.parametrize(("provider", "expected"), list(CANONICAL_TABLE.items()))
     def test_table(self, provider, expected):
         assert derive(provider) == expected
+
+    def test_scalo_knows_exactly_the_canonical_providers(self):
+        scalo_table = {p: scalo_providers.derive(p) for p in scalo_providers.KNOWN_PROVIDERS}
+        assert scalo_table == CANONICAL_TABLE
 
     def test_owned_brokers_are_scram(self):
         # DFE controls these brokers -- SCRAM-512, never weakened to PLAIN.

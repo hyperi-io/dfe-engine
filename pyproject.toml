@@ -59,6 +59,11 @@ dependencies = [
     #            ClickHouse the integration tier tests on.
     # >=2.32.5:  the one API contract: token-paged Page lists, problem+json errors,
     #            Operation for 202s and Preconditions.guard.
+    # >=2.32.7:  transpile_to_clickhouse(json_columns=...), which reads a JSON path
+    #            through its typed sub-columns, and the strimzi-no-tls and
+    #            redpanda-no-tls Kafka providers kafka.contract takes from scalo.
+    # [kafka]: importing scalo.kafka.providers loads the scalo.kafka package, which
+    # needs the extra's genson.
     # Upper bound: <3 is the API-stability boundary. An unbounded `>=` is invisible
     # to Renovate -- the constraint is satisfied by every future release, so no PR
     # is ever raised and the version moves silently in the lock.
@@ -70,7 +75,7 @@ dependencies = [
     # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
     # goes green while reporting nothing. [opentelemetry] is no longer a separate
     # extra: [metrics] carries the SDK.
-    "scalo[api,cli,expression,http,metrics,secrets-kubernetes]>=2.32.5,<3",
+    "scalo[api,cli,expression,http,kafka,metrics,secrets-kubernetes]>=2.32.7,<3",
     # The DFE schema trees as package data under dfe_schemas/data/, replacing
     # the `schemas` git submodule. schema_loader resolves them through
     # importlib.resources; the Dockerfile bakes its seed from the installed
