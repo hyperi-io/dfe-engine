@@ -1086,7 +1086,7 @@ class SourceRegistry:
             SourceRuleError: The rows do not compile.
         """
         # Lazy import: source_routing imports this module (cycle).
-        from dfe_engine.services.models.receiver import RULE_TARGETS, RuleSet
+        from dfe_engine.services.routing_models import RULE_TARGETS, RuleSet
         from dfe_engine.services.source_routing import (
             MatchTooWideError,
             check_rule_set,

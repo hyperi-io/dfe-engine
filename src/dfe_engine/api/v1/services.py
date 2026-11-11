@@ -9,45 +9,53 @@ GET    /api/v1/services/{service}/{instance}/history   -> Git history
 POST   /api/v1/services/seed                   -> Seed built-in defaults
 """
 
+import copy
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field
 from scalo.api import ListQuery, Page, ProblemError, list_query, paginate, sort_by_order
 
 from dfe_engine.api.conventions import apply_search
 from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, Settings, require_action
 from dfe_engine.appmgmt import contract
+from dfe_engine.appmgmt.appconfig import CONFIG_ROOT
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.services.registry import ConfigNotFoundError, stored_form
+from dfe_engine.services.registry import (
+    ConfigNotFoundError,
+    InvalidServiceConfigError,
+    ServiceConfigRegistry,
+    UnknownServiceError,
+)
+from dfe_engine.yaml_utils import deep_merge
 
 router = APIRouter(prefix="/services", tags=["Services"])
 
-_SECRET_MASK = str(SecretStr("x"))
-"""pydantic's own placeholder for a set secret, which a write still reads as the mask."""
 
+def _shown(registry: ServiceConfigRegistry, service: str, config: dict[str, Any]) -> dict[str, Any]:
+    """A config as a read shows it, every credential masked as :data:`contract.REDACTED`.
 
-def _shown(config: Any) -> dict[str, Any]:
-    """A stored config as a read shows it, every credential masked as :data:`contract.REDACTED`.
-
-    A typed config's dump masks only what its model declares secret, so a map of
-    plain strings such as ``extra_env`` is judged by name as a schema-less one is.
+    Judged against the app's own schema, so a field it marks secret is hidden
+    whatever it is called. With no readable contract the name rule judges alone.
     """
-    if isinstance(config, dict):
-        return contract.shown_resource(config)
-    return contract.shown_resource(_as_redacted(config.model_dump(mode="json")))
+    try:
+        found = registry.app_contract(service)
+    except contract.ContractError:
+        found = contract.AppContract(
+            service=service, available=False, source=contract.ContractSource.ABSENT
+        )
+    return contract.redact_overlay(found, {CONFIG_ROOT: config})[CONFIG_ROOT]
 
 
-def _as_redacted(value: Any) -> Any:
-    """``value`` with pydantic's secret placeholder read as the engine's own mask."""
-    if isinstance(value, str):
-        return contract.REDACTED if value == _SECRET_MASK else value
-    if isinstance(value, dict):
-        return {key: _as_redacted(item) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_as_redacted(item) for item in value]
-    return value
+def _unknown(exc: UnknownServiceError) -> ProblemError:
+    """The refusal for a service the app manifest does not declare."""
+    return ProblemError(404, str(exc), code="unknown_service")
+
+
+def _unreadable(exc: contract.ContractError) -> ProblemError:
+    """The failure for a contract mounted but unreadable, as the app contract routes answer it."""
+    return ProblemError(500, str(exc), code="contract_unreadable")
 
 
 # --- Response models ---
@@ -69,7 +77,7 @@ class ValidationResult(BaseModel):
 
 
 class ServiceConfigDetail(BaseModel):
-    """Full service config. Inner config is dynamic (schema-less mode)."""
+    """One service config as its instance runs it: the stored keys over the app's defaults."""
 
     service: str = Field(description="Service type (e.g. receiver, loader)")
     instance: str = Field(description="Instance name (e.g. production, staging)")
@@ -129,14 +137,24 @@ async def get_service_config(
     user: CurrentUser,
     registry: ServiceConfigReg,
 ) -> ServiceConfigDetail:
-    """Get a full service config by service + instance, every credential masked."""
+    """A service config as its instance runs it, every credential masked.
+
+    The stored keys over the app's own defaults, read from its mounted contract.
+    With no contract mounted only the stored keys are shown.
+    """
     try:
-        config = registry.get_config(service, instance)
+        config = registry.effective_config(service, instance)
+    except UnknownServiceError as exc:
+        raise _unknown(exc) from exc
+    except contract.ContractError as exc:
+        raise _unreadable(exc) from exc
     except ConfigNotFoundError:
         raise ProblemError(
             404, f"Service config '{service}/{instance}' not found", code="not_found"
         )
-    return ServiceConfigDetail(service=service, instance=instance, config=_shown(config))
+    return ServiceConfigDetail(
+        service=service, instance=instance, config=_shown(registry, service, config)
+    )
 
 
 @router.put(
@@ -161,28 +179,35 @@ async def save_service_config(
     stored behind it, or in a list entry that cannot be told apart, is a 400
     ``masked_value`` and nothing is saved. A changed field beside a masked secret,
     in the same mapping or with the secret one mapping down, is a 400
-    ``credential_reentry_required``: the secret is typed again.
+    ``credential_reentry_required``: the secret is typed again. A value the app's
+    contract refuses is a 422 ``invalid_config``.
     """
     try:
-        current = registry.get_config(service, instance)
+        stored = registry.get_config(service, instance)
+    except UnknownServiceError as exc:
+        raise _unknown(exc) from exc
     except ConfigNotFoundError:
-        stored: dict[str, Any] = {}
-        shown: dict[str, Any] = {}
-    else:
-        stored = stored_form(current)
-        shown = _shown(current)
+        stored = {}
+    # A read shows the defaults beside the stored keys, so a write of that read is
+    # restored against both.
+    try:
+        current = deep_merge(registry.defaults(service), copy.deepcopy(stored))
+    except contract.ContractError as exc:
+        raise _unreadable(exc) from exc
+    shown = _shown(registry, service, current)
     sent = {key: value for key, value in body.items() if value is not None}
     try:
-        restored = contract.restore_masked(_as_redacted(sent), stored, shown=shown)
+        restored = contract.restore_masked(sent, current, shown=shown)
     except contract.MaskedValueError as exc:
         raise ProblemError(400, str(exc), code=exc.code) from exc
     removed = {key for key, value in body.items() if value is None}
     config = {key: value for key, value in stored.items() if key not in removed} | restored
-    registry.save_config(
-        service=service,
-        config=config,
-        instance=instance,
-    )
+    try:
+        registry.save_config(service=service, config=config, instance=instance)
+    except InvalidServiceConfigError as exc:
+        raise ProblemError(422, str(exc), code="invalid_config") from exc
+    except contract.ContractError as exc:
+        raise _unreadable(exc) from exc
     audit_resource_change(user.user_id, "service_config", f"{service}/{instance}", "updated")
     return {"service": service, "instance": instance, "message": "saved"}
 
@@ -202,6 +227,8 @@ async def delete_service_config(
     # Verify existence before delete (delete_config is a no-op on missing)
     try:
         registry.get_config(service, instance)
+    except UnknownServiceError as exc:
+        raise _unknown(exc) from exc
     except ConfigNotFoundError:
         raise ProblemError(
             404, f"Service config '{service}/{instance}' not found", code="not_found"
@@ -223,10 +250,11 @@ async def validate_service_config(
     registry: ServiceConfigReg,
 ):
     """Dry-run validate a service config without saving."""
-    result = registry.validate(service, body)
-    return ValidationResult(
-        valid=result.valid, errors=result.errors if hasattr(result, "errors") else []
-    )
+    try:
+        result = registry.validate(service, body)
+    except contract.ContractError as exc:
+        raise _unreadable(exc) from exc
+    return ValidationResult(valid=result.valid, errors=result.errors)
 
 
 @router.post(

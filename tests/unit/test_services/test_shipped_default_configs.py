@@ -9,9 +9,9 @@
 
 These files are authored here and read by a Rust app, so nothing in the engine's
 own test suite catches a key the app ignores or refuses. Two things are asserted:
-the blob validates against its service model, and the archiver's path template
-carries only placeholders dfe-archiver substitutes -- it refuses to start on any
-other token, so a shipped default with one strands the deployment.
+the blob holds no value the app's emitted schema refuses, and the archiver's path
+template carries only placeholders dfe-archiver substitutes -- it refuses to start
+on any other token, so a shipped default with one strands the deployment.
 """
 
 import json
@@ -20,15 +20,22 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.appmgmt import catalogue
-from dfe_engine.services.models.archiver import PATH_TEMPLATE_PLACEHOLDERS
-from dfe_engine.services.models.receiver import ReceiverConfig
-from dfe_engine.services.plugins import get_plugin
-from dfe_engine.services.registry import ServiceConfigRegistry, default_configs
+from dfe_engine.appmgmt import catalogue, contract
+from dfe_engine.services.registry import (
+    ServiceConfigRegistry,
+    default_configs,
+    judge_config,
+    service_apps,
+)
 from dfe_engine.settings import DFESettings, SecretsSettings
 from dfe_engine.yaml_utils import yaml_load_string
 
 _TOKEN = re.compile(r"\{[^{}]*\}")
+
+# dfe-archiver crates/core/src/archive/writer.rs PATH_TEMPLATE_PLACEHOLDERS.
+_PATH_TEMPLATE_PLACEHOLDERS = frozenset(
+    {"{year}", "{month}", "{day}", "{hour}", "{minute}", "{timestamp}", "{seq}"}
+)
 
 # Every config a seed writes, on a backend the receiver reads, so no developer .env decides.
 _SHIPPED = sorted(
@@ -47,19 +54,26 @@ def _app_default(fixture_dir: str, app: str, section: str) -> dict:
     return schema["properties"][section]["default"]
 
 
-@pytest.mark.parametrize(("name", "text"), _SHIPPED, ids=[n for n, _ in _SHIPPED])
-def test_every_shipped_config_validates_against_its_service_model(name: str, text: str):
-    """The blob parses into the service's model -- no refused value, no unknown key.
+def _emitted(app: str) -> contract.AppContract:
+    """The contract fixture ``app`` emitted, as a deployment mounts it."""
+    schema = json.loads((_FIXTURES / "contract" / app / contract.SCHEMA_FILE).read_text())
+    return contract.AppContract(
+        service=app, available=True, source=contract.ContractSource.MOUNT, schema=schema
+    )
 
-    The model layer only. The production blobs leave credentials blank for the
-    deploy layer to fill, so the cross-field completeness rules do not apply to
-    a template the way they apply to a deployment's own config.
+
+@pytest.mark.parametrize(("name", "text"), _SHIPPED, ids=[n for n, _ in _SHIPPED])
+def test_every_shipped_config_holds_only_values_its_app_takes(name: str, text: str):
+    """No type, closed set or null the app's emitted schema refuses.
+
+    The production blobs leave credentials blank for the deploy layer to fill.
     """
     parsed = ServiceConfigRegistry._parse_table_name(name.removesuffix(".yaml"))
     assert parsed is not None, f"{name} does not name a service"
     service, _instance = parsed
 
-    get_plugin(service).config_class.model_validate(yaml_load_string(text) or {})
+    result = judge_config(_emitted(service_apps()[service]), yaml_load_string(text) or {})
+    assert result.errors == []
 
 
 @pytest.mark.parametrize(("name", "text"), _ARCHIVER, ids=[n for n, _ in _ARCHIVER])
@@ -69,7 +83,7 @@ def test_every_shipped_archiver_template_uses_a_placeholder_the_archiver_substit
     # dfe-archiver PR #73: the loader rejects an unknown token at startup, so
     # {topic} or {date} here is a pod that never boots.
     template = (yaml_load_string(text) or {})["archive"]["path_template"]
-    unsupported = set(_TOKEN.findall(template)) - PATH_TEMPLATE_PLACEHOLDERS
+    unsupported = set(_TOKEN.findall(template)) - _PATH_TEMPLATE_PLACEHOLDERS
 
     assert unsupported == set(), f"{name} carries {sorted(unsupported)}"
 
@@ -84,7 +98,7 @@ def test_no_shipped_archiver_config_pins_the_roll_interval(name: str, text: str)
 @pytest.mark.parametrize(("name", "text"), _ARCHIVER, ids=[n for n, _ in _ARCHIVER])
 def test_no_shipped_archiver_config_pins_the_expression_fields(name: str, text: str):
     # dfe-archiver #127 picks the fields from the transport; a pin overrides that.
-    routing = (yaml_load_string(text) or {})["routing"]
+    routing = (yaml_load_string(text) or {}).get("routing", {})
     assert "expression_fields" not in routing, f"{name} pins routing.expression_fields"
 
 
@@ -100,10 +114,9 @@ def test_every_shipped_loader_config_consumes_as_the_loader_does(name: str, text
 @pytest.mark.parametrize(("name", "text"), _RECEIVER, ids=[n for n, _ in _RECEIVER])
 def test_every_shipped_receiver_config_sends_inside_the_hold(name: str, text: str):
     # A seeded 5 s deadline replaced the receiver's own 20 s one.
-    # Through the model, so a config that leaves the deadline to the receiver is judged by it.
-    shipped = ReceiverConfig.model_validate(yaml_load_string(text) or {}).loader.timeout_ms
+    shipped = (yaml_load_string(text) or {}).get("loader", {})
     app = _app_default("contract-acknowledgements", "dfe-receiver", "loader")["timeout_ms"]
-    assert shipped == app, name
+    assert shipped.get("timeout_ms", app) == app, name
 
 
 @pytest.mark.parametrize(("name", "text"), _RECEIVER, ids=[n for n, _ in _RECEIVER])
@@ -113,10 +126,7 @@ def test_no_shipped_receiver_config_accepts_a_published_header(name: str, text: 
     assert auth.get("accepted_headers", []) == [], name
 
 
-def test_the_receiver_model_accepts_no_header_by_default():
-    model = get_plugin("receiver").config_class.model_validate({})
-    assert isinstance(model, ReceiverConfig)
-    assert model.server.auth.accepted_headers == []
+def test_the_receiver_accepts_no_header_by_default():
     assert _app_default("contract", "dfe-receiver", "server")["auth"]["accepted_headers"] == []
 
 
@@ -125,9 +135,8 @@ def test_every_shipped_receiver_dials_the_loader_the_app_manifest_places(name: s
     # The Service name with no namespace resolves wherever the suite is installed.
     shipped = yaml_load_string(text) or {}
     assert "address" not in shipped.get("loader", {}), f"{name} pins the loader address"
-    assert ReceiverConfig.model_validate(shipped).loader.address == catalogue.push_address(
-        catalogue.descriptor("dfe-loader")
-    )
+    app = _app_default("contract-main", "dfe-receiver", "loader")["address"]
+    assert app == catalogue.push_address(catalogue.descriptor("dfe-loader"))
 
 
 def test_no_shipped_fetcher_config_authors_a_dlq_topic():

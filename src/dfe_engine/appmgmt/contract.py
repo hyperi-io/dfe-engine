@@ -1214,6 +1214,40 @@ def walk_schema(schema: dict) -> Iterator[tuple[str, dict, Any]]:
     yield from descend(schema, "", MISSING, 0)
 
 
+def config_defaults(schema: dict) -> dict[str, Any]:
+    """The config an app runs when its file sets nothing, as one document.
+
+    A section's own default is what serde fills an absent section with, so it
+    outranks the defaults of the fields inside it. A null default stays null,
+    because the app runs that section switched off. A field the schema marks
+    secret keeps only an empty default: any other is the redaction literal.
+    """
+
+    def build(node: Any, inherited: Any, depth: int) -> Any:
+        resolved = _merged(_deref(node, schema), schema)
+        own = resolved.get("default", MISSING)
+        base = own if isinstance(inherited, _Missing) else inherited
+        if any(_marked_secret(branch) for branch in _branches(node, schema)):
+            return base if base is None or base == "" else MISSING
+        props = resolved.get("properties")
+        if not isinstance(props, dict) or not props or depth >= _MAX_DEPTH:
+            return base
+        if not isinstance(base, (dict, _Missing)):
+            return base
+        out: dict[str, Any] = {}
+        for name, child in props.items():
+            below = base.get(name, MISSING) if isinstance(base, dict) else MISSING
+            value = build(child, below, depth + 1)
+            if not isinstance(value, _Missing):
+                out[name] = value
+        if isinstance(base, dict):
+            out |= {key: value for key, value in base.items() if key not in props}
+        return out if out or isinstance(base, dict) else MISSING
+
+    found = build(schema, MISSING, 0)
+    return found if isinstance(found, dict) else {}
+
+
 def catalogue_enums(capabilities: list[Any]) -> dict[str, list[Any]]:
     """Config paths the capability catalogue constrains, keyed by dotted path.
 

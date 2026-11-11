@@ -252,7 +252,7 @@ class TestTheConfigRoute:
         _deploy(client, admin_headers)
         body = client.get(CONFIG, headers=admin_headers).json()
         assert body["available"] is True
-        assert len(body["fields"]) == 169
+        assert len(body["fields"]) == 189
         assert body["etag"]
 
     def test_the_chart_derived_key_is_reported_as_the_chart_s(

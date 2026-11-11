@@ -23,7 +23,7 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from dfe_engine.services.models.receiver import RULE_TARGETS
+from dfe_engine.services.routing_models import RULE_TARGETS
 from dfe_engine.source.models import (
     COMPAT_PROFILE_ID_MAX_LENGTH,
     COMPAT_PROFILE_ID_PATTERN,

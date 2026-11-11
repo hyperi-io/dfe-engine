@@ -26,7 +26,6 @@ from dfe_engine.orgs.seed import ensure_default_org
 from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.secrets import build_secrets
 from dfe_engine.services.registry import default_configs
-from dfe_engine.services.templates import generate_template
 from dfe_engine.settings import DFESettings, SecretsSettings
 from dfe_engine.source.models import Source
 from dfe_engine.yaml_utils import yaml_dump_string, yaml_load, yaml_load_string
@@ -268,23 +267,20 @@ TENANCIES = {
 
 
 class TestCompiledAuthOverTheTemplate:
-    """A deployment that takes the production template as its receiver base still runs the compiled auth.
+    """A deployment that takes the seeded production config as its receiver base runs the compiled auth.
 
-    The template is generated on one backend and the engine compiles on another, so a
-    listener reading the compiled secret could not have got it from the template.
+    The seed is written on one backend and the engine compiles on another, so a
+    listener reading the compiled secret could not have got it from the seed.
     """
 
     @pytest.mark.parametrize("tenancy", sorted(TENANCIES))
     @pytest.mark.parametrize("template_backend", ["aws", "openbao"])
     @pytest.mark.parametrize("engine_backend", ["aws", "openbao"])
     def test_every_listener_runs_the_compiled_block(
-        self, crud, tmp_path, monkeypatch, engine_backend, template_backend, tenancy
+        self, crud, tmp_path, engine_backend, template_backend, tenancy
     ):
-        monkeypatch.setattr(
-            "dfe_engine.settings._settings",
-            DFESettings(env="dev", secrets=BACKENDS[template_backend]),
-        )
-        template = generate_template("receiver", "production")
+        seed_settings = DFESettings(env="dev", secrets=BACKENDS[template_backend])
+        template = yaml_load_string(default_configs(seed_settings)["receiver-production.yaml"])
         settings = DFESettings(
             env="dev",
             transport={"default": "bus"},

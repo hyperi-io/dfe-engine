@@ -6,68 +6,79 @@ Storage model:
   - In-memory caching with background polling refresh
   - Thread-safe reads via RLock
   - Change callbacks for reactive configuration
-- Rust services (loader, receiver, archiver) read these YAML files directly
+
+Which services exist is the app manifest's (``appmgmt/apps.yaml``): every app whose
+image reads a config file. What each one's config may hold, and what it runs when a
+key is left out, is that app's own mounted contract (``appmgmt/contract.py``), so
+no default or type is restated here.
 """
 
+import copy
+from dataclasses import replace
 from datetime import UTC, datetime
 from importlib import resources
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, SecretBytes, SecretStr
-from pydantic_core import to_jsonable_python
+from pydantic import BaseModel, Field
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
-from dfe_engine.services.plugins import get_plugin, valid_services
-from dfe_engine.services.templates import profile_overrides
-from dfe_engine.services.validators import ValidationResult, validate_config
-from dfe_engine.settings import DFESettings
-from dfe_engine.yaml_utils import yaml_dump, yaml_dump_string
+from dfe_engine.appmgmt import catalogue, contract
+from dfe_engine.appmgmt.appconfig import CONFIG_ROOT
+from dfe_engine.settings import DFESettings, get_settings
+from dfe_engine.yaml_utils import deep_merge, yaml_dump, yaml_dump_string, yaml_load_string
 
-RENDERED_DEFAULTS = {"receiver-production.yaml": ("receiver", "production")}
-"""Defaults built from a template profile when they are seeded, by file name.
+RECEIVER_PRODUCTION = "receiver-production.yaml"
+"""The shipped default the engine adds each bearer listener's auth to when it is seeded.
 
-Each follows the engine's settings, so the receiver's bearer listeners name the
-secrets backend this engine writes the tokens to.
+The listeners read the secret the engine writes their tokens to, so the block follows
+the secrets backend the engine's settings name.
 """
 
 
-def _unwrapped(value: Any) -> Any:
-    """``value`` with every pydantic secret replaced by what it holds."""
-    if isinstance(value, SecretStr | SecretBytes):
-        return value.get_secret_value()
-    if isinstance(value, dict):
-        return {key: _unwrapped(item) for key, item in value.items()}
-    if isinstance(value, list | tuple):
-        return [_unwrapped(item) for item in value]
-    return value
+def service_apps() -> dict[str, str]:
+    """Every service the registry holds configs for, by name, with the app it configures.
 
-
-def stored_form(config: BaseModel | dict[str, Any]) -> dict[str, Any]:
-    """A config as its YAML file holds it, every secret written out in full.
-
-    The Rust services read that file, so a secret in it is the secret itself. The
-    JSON dump a read returns shows pydantic's placeholder instead.
+    The manifest's apps whose image reads a config file, named without the
+    ``dfe-`` prefix, as the stored files are: ``dfe-transform-vrl`` is
+    ``transform-vrl``.
     """
-    if isinstance(config, dict):
-        return config
-    return to_jsonable_python(_unwrapped(config.model_dump()))
+    return {
+        app.service.removeprefix(catalogue.PROJECT_PREFIX): app.service
+        for app in catalogue.APP_CATALOGUE.values()
+        if app.config_file
+    }
+
+
+def _with_bearer_auth(text: str, settings: DFESettings) -> str:
+    """The receiver's production default with each bearer listener's auth block set."""
+    from dfe_engine.orgs.ingest_credentials import BEARER_LISTENERS, LISTENER_SECTIONS
+    from dfe_engine.orgs.ingest_tokens import bearer_auth
+
+    config = yaml_load_string(text) or {}
+    deep_merge(
+        config,
+        {
+            LISTENER_SECTIONS[listener]: {"auth": bearer_auth(listener, settings.secrets)}
+            for listener in BEARER_LISTENERS
+        },
+    )
+    return yaml_dump_string(config)
 
 
 def default_configs(settings: DFESettings | None = None) -> dict[str, str]:
     """Every config :meth:`ServiceConfigRegistry.seed_defaults` writes, by file name, as YAML.
 
-    The files shipped under ``default_configs`` byte for byte, and each of
-    :data:`RENDERED_DEFAULTS` as its template profile's keys, which leave every other
-    key to the service's own default.
+    The files shipped under ``default_configs`` byte for byte, except
+    :data:`RECEIVER_PRODUCTION`, which takes its bearer listeners from *settings*.
 
     Args:
-        settings: The engine settings a rendered default is built from, the process's
-            own when None.
+        settings: The engine settings the receiver's bearer listeners are built from,
+            the process's own when None.
 
     Raises:
-        ValueError: A rendered default names something its service cannot read.
+        ValueError: The secrets backend is one dfe-receiver has no provider for.
     """
     shipped = resources.files("dfe_engine.services") / "default_configs"
     configs = {
@@ -75,9 +86,17 @@ def default_configs(settings: DFESettings | None = None) -> dict[str, str]:
         for entry in shipped.iterdir()
         if entry.name.endswith(".yaml")
     }
-    for name, (service, profile) in RENDERED_DEFAULTS.items():
-        configs[name] = yaml_dump_string(profile_overrides(service, profile, settings))
+    engine = settings if settings is not None else get_settings()
+    configs[RECEIVER_PRODUCTION] = _with_bearer_auth(configs[RECEIVER_PRODUCTION], engine)
     return dict(sorted(configs.items()))
+
+
+class ValidationResult(BaseModel):
+    """Whether a service config is one its app accepts, and what was found."""
+
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class ServiceConfigError(Exception):
@@ -86,6 +105,58 @@ class ServiceConfigError(Exception):
 
 class ConfigNotFoundError(ServiceConfigError):
     """Configuration not found for service/instance."""
+
+
+class UnknownServiceError(ServiceConfigError):
+    """The service names no app the manifest declares with a config file."""
+
+
+class InvalidServiceConfigError(ServiceConfigError):
+    """A config holds a value its app refuses at startup."""
+
+    def __init__(self, errors: list[str]) -> None:
+        self.errors = errors
+        super().__init__("; ".join(errors))
+
+
+def _option_checks(
+    options: dict[str, contract.DeclaredOption], value: Any, path: str
+) -> tuple[list[str], list[str]]:
+    """Each declared option under ``path`` judged, and each key no option explains."""
+    option = options.get(f"{CONFIG_ROOT}.{path}")
+    if option is not None:
+        if value is None:
+            return [], []
+        refused = contract.check_value(replace(option, path=path), value)
+        return ([refused] if refused else []), []
+    if isinstance(value, dict):
+        errors: list[str] = []
+        warnings: list[str] = []
+        for key, child in value.items():
+            found, unknown = _option_checks(options, child, f"{path}.{key}" if path else str(key))
+            errors += found
+            warnings += unknown
+        return errors, warnings
+    return [], [f"{path} is not an option the app declares, so the app may ignore it"]
+
+
+def judge_config(app_contract: contract.AppContract, config: dict) -> ValidationResult:
+    """Whether *config* holds only values the app's own schema takes.
+
+    A type, a closed set or a null the app refuses is an error. A key the schema
+    does not declare is a warning, as is a config judged with no contract mounted.
+    """
+    if not app_contract.available:
+        return ValidationResult(
+            valid=True,
+            warnings=[f"no config contract is mounted for {app_contract.service}; not checked"],
+        )
+    prefix = f"{CONFIG_ROOT}."
+    nulls = contract.refused_nulls(app_contract, CONFIG_ROOT, config)
+    errors = [f"{path.removeprefix(prefix)} does not accept a null" for path in nulls]
+    found, warnings = _option_checks(contract.declared_options(app_contract), config, "")
+    errors += found
+    return ValidationResult(valid=not errors, errors=errors, warnings=warnings)
 
 
 class ServiceConfigRegistry:
@@ -98,14 +169,10 @@ class ServiceConfigRegistry:
             receiver-default.yaml
             receiver-production.yaml
             loader-default.yaml
-            loader-staging.yaml
-            archiver-default.yaml
             ...
 
-    Each file is named ``{service}-{instance}.yaml`` and contains the full
-    configuration for that service instance as a YAML document.
-
-    Supports multiple instances per service (e.g., 'production', 'staging').
+    Each file is named ``{service}-{instance}.yaml`` and holds what the operator
+    set for that instance, nothing more: a key left out runs the app's own default.
     """
 
     _instance: ServiceConfigRegistry | None = None
@@ -161,102 +228,101 @@ class ServiceConfigRegistry:
         cls._instance = None
 
     # -------------------------------------------------------------------------
-    # Table naming convention
+    # Naming
     # -------------------------------------------------------------------------
 
     @staticmethod
     def _table_name(service: str, instance: str) -> str:
-        """Map service + instance to a DirectoryConfigStore table name.
-
-        The table name is the YAML filename without extension.
-        """
+        """The DirectoryConfigStore table name: the YAML filename without extension."""
         return f"{service}-{instance}"
 
     @staticmethod
     def _parse_table_name(table: str) -> tuple[str, str] | None:
-        """Parse a table name back into (service, instance).
+        """``(service, instance)`` for a table, or None for a file no service owns.
 
-        Tries known service prefixes first (handles hyphenated names like
-        'transform-wasm'). Falls back to splitting on the last hyphen for
-        services not registered as plugins (schema-less mode).
+        The longest service name wins, so ``transform-vrl-x`` is ``transform-vrl``.
         """
-        for svc in sorted(valid_services(), key=len, reverse=True):
+        for svc in sorted(service_apps(), key=len, reverse=True):
             prefix = f"{svc}-"
-            if table.startswith(prefix):
-                instance = table[len(prefix) :]
-                if instance:
-                    return svc, instance
-        # Unknown service: split on last hyphen so any "{service}-{instance}"
-        # file is included in listings (e.g. a new Rust service not yet registered)
-        idx = table.rfind("-")
-        if idx > 0 and idx < len(table) - 1:
-            return table[:idx], table[idx + 1 :]
+            if table.startswith(prefix) and table[len(prefix) :]:
+                return svc, table[len(prefix) :]
         return None
+
+    @staticmethod
+    def app_of(service: str) -> str:
+        """The manifest app *service* configures.
+
+        Raises:
+            UnknownServiceError: No app in the manifest is configured by that name.
+        """
+        apps = service_apps()
+        if service not in apps:
+            known = ", ".join(sorted(apps))
+            raise UnknownServiceError(f"Unknown service: {service}. Valid: {known}")
+        return apps[service]
+
+    def app_contract(self, service: str) -> contract.AppContract:
+        """The contract the deployment mounted for *service*'s app.
+
+        Raises:
+            UnknownServiceError: As :meth:`app_of`.
+            ContractError: The mounted contract is there but unreadable.
+        """
+        return contract.contract(self.app_of(service))
 
     # -------------------------------------------------------------------------
     # CRUD Operations
     # -------------------------------------------------------------------------
 
-    def get_config(self, service: str, instance: str = "default"):
-        """Get a service configuration.
-
-        Reads from the DirectoryConfigStore in-memory cache (backed by YAML).
-        For registered services, returns a typed Pydantic model. For unknown
-        services (schema-less mode), returns the raw dict.
-
-        Args:
-            service: Service name (e.g. 'receiver', 'loader', or any new service)
-            instance: Deployment instance name (e.g., 'default', 'production')
-
-        Returns:
-            Typed configuration model for registered services, raw dict otherwise.
+    def get_config(self, service: str, instance: str = "default") -> dict[str, Any]:
+        """The config stored for *service*/*instance*, as its file holds it.
 
         Raises:
-            ConfigNotFoundError: Config not found
+            UnknownServiceError: As :meth:`app_of`.
+            ConfigNotFoundError: Nothing is stored for the instance.
         """
-        table = self._table_name(service, instance)
-
-        config_data = self._store.get(table)
+        self.app_of(service)
+        config_data = self._store.get(self._table_name(service, instance))
         if config_data is None:
             raise ConfigNotFoundError(f"Config not found for {service}/{instance}")
+        return copy.deepcopy(config_data)
 
-        try:
-            plugin = get_plugin(service)
-            return plugin.config_class.model_validate(config_data)
-        except KeyError:
-            # Unknown service: return the raw dict (schema-less mode)
-            return config_data
+    def defaults(self, service: str) -> dict[str, Any]:
+        """What *service*'s app runs for every key its file leaves out, empty with no contract.
 
-    def save_config(
-        self,
-        service: str,
-        config,
-        instance: str = "default",
-    ) -> None:
-        """Save a service configuration to the YAML directory.
-
-        Args:
-            service: Service name
-            config: Configuration model or dict
-            instance: Deployment instance name
+        Raises:
+            UnknownServiceError: As :meth:`app_of`.
+            ContractError: As :meth:`app_contract`.
         """
-        # Normalize to dict. For registered services, validate via typed model.
-        # For unknown services (schema-less mode), store the raw dict as-is.
-        if isinstance(config, dict):
-            try:
-                plugin = get_plugin(service)
-                config_data = stored_form(plugin.config_class.model_validate(config))
-            except KeyError:
-                # Unknown service: store as-is
-                config_data = config
-        else:
-            config_data = stored_form(config)
+        found = self.app_contract(service)
+        return contract.config_defaults(found.schema) if found.available else {}
+
+    def effective_config(self, service: str, instance: str = "default") -> dict[str, Any]:
+        """The stored config over the app's own defaults: what the instance runs.
+
+        Raises:
+            UnknownServiceError: As :meth:`app_of`.
+            ConfigNotFoundError: As :meth:`get_config`.
+            ContractError: As :meth:`app_contract`.
+        """
+        stored = self.get_config(service, instance)
+        return deep_merge(self.defaults(service), stored)
+
+    def save_config(self, service: str, config: dict[str, Any], instance: str = "default") -> None:
+        """Write *config* as the instance's file, after the app's contract has judged it.
+
+        Raises:
+            UnknownServiceError: As :meth:`app_of`.
+            InvalidServiceConfigError: The config holds a value the app refuses.
+            ContractError: As :meth:`app_contract`.
+        """
+        result = judge_config(self.app_contract(service), config)
+        if not result.valid:
+            raise InvalidServiceConfigError(result.errors)
 
         table = self._table_name(service, instance)
-
-        # Write YAML file directly (full document replacement)
         yaml_path = self._config_directory / f"{table}.yaml"
-        yaml_dump(config_data, yaml_path)
+        yaml_dump(config, yaml_path)
 
         # Force cache refresh for this table
         self._store._refresh_all()
@@ -266,10 +332,10 @@ class ServiceConfigRegistry:
     def delete_config(self, service: str, instance: str = "default") -> None:
         """Delete a service configuration.
 
-        Args:
-            service: Service name (any, including unregistered services)
-            instance: Deployment instance name
+        Raises:
+            UnknownServiceError: As :meth:`app_of`.
         """
+        self.app_of(service)
         table = self._table_name(service, instance)
         yaml_path = self._config_directory / f"{table}.yaml"
 
@@ -285,7 +351,7 @@ class ServiceConfigRegistry:
         logger.info(f"Deleted config for {service}/{instance}")
 
     def list_configs(self, service: str | None = None) -> list[dict[str, Any]]:
-        """List all stored configurations.
+        """List every stored configuration a known service owns.
 
         Args:
             service: Optional filter by service name
@@ -324,25 +390,16 @@ class ServiceConfigRegistry:
     # -------------------------------------------------------------------------
 
     def validate(self, service: str, config_data: dict) -> ValidationResult:
-        """Validate a configuration without saving (dry-run).
+        """Judge a configuration against its app's contract without saving it.
 
-        For registered services, runs Pydantic + cross-field validation.
-        For unknown services (schema-less mode), returns valid with a warning.
-
-        Args:
-            service: Service name
-            config_data: Configuration dictionary
-
-        Returns:
-            ValidationResult with errors and warnings
+        Raises:
+            ContractError: As :meth:`app_contract`.
         """
-        result = validate_config(service, config_data)
-        if not result.valid and result.errors and result.errors[0].startswith("Unknown service:"):
-            # Unknown service: no schema to validate against, treat as valid
-            return ValidationResult(
-                valid=True, warnings=[f"No schema registered for service '{service}'; stored as-is"]
-            )
-        return result
+        try:
+            found = self.app_contract(service)
+        except UnknownServiceError as exc:
+            return ValidationResult(valid=False, errors=[str(exc)])
+        return judge_config(found, config_data)
 
     def on_change(self, service: str, instance: str, callback) -> None:
         """Register a callback for when a service config changes.
@@ -367,16 +424,14 @@ class ServiceConfigRegistry:
 
         Args:
             overwrite: If True, overwrite existing configs with defaults.
-            settings: The engine settings a rendered default is built from, the
-                process's own when None.
+            settings: The engine settings the receiver's production default is built
+                from, the process's own when None.
 
         Returns:
             Number of configs seeded.
 
         Raises:
-            ValueError: A rendered default names something its service cannot read,
-                such as receiver bearer tokens on a secrets backend dfe-receiver has
-                no provider for.
+            ValueError: As :func:`default_configs`.
         """
         count = 0
         for name, content in default_configs(settings).items():

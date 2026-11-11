@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Config",
-  "description": "Main configuration for dfe-loader.\n\n## Hot-Reload Behaviour\n\n**Hot-reloaded (takes effect on next batch):**\n- `routing.*` -- table fields, defaults, the tenant field and default org, org routing.\n  The deployment contract lists `routing` in `hot_paths`, so an edit there\n  reaches a running pod without rolling it\n- `timestamp_dq.*` -- timestamp validation thresholds\n- `metadata.*` -- common header injection, tags, _raw handling\n- `field_sanitization.*` -- field name sanitisation rules\n- `buffer.flush_rows` / `buffer.flush_bytes` / `buffer.flush_age_secs`\n\n**Requires pod restart (connections/state established at startup):**\n- `transport` -- transport type (kafka/grpc) bound at startup\n- `kafka.*` -- Kafka consumer created at startup\n- `grpc.*` -- gRPC server binds at startup\n- `clickhouse.*` -- HTTP client + `clickhouse::Client` created at startup\n- `payload.pipeline_mode` -- pipeline path chosen at startup\n- `metrics.*` -- HTTP metrics server binds at startup\n- `logging.*` -- tracing subscriber installed at startup\n- `scaling.*` -- scaling pressure built at startup\n- `hot_reload.*` -- watcher config set at startup\n- `schema.*` -- schema cache created at startup\n- `geoip.*` -- MMDB readers opened at startup\n- `computed_columns.*` -- computed column cache built at startup\n- `column_directives.*` -- column directive cache built at startup\n- `routing.dlq` -- DLQ backends opened at startup\n- `field_mapping.*` -- mapping rules built at startup\n- `enrichment.*` -- enrichment pipeline built at startup",
+  "description": "Main configuration for dfe-loader.\n\n## Hot-Reload Behaviour\n\n**Hot-reloaded (takes effect on next batch):**\n- `routing.*` -- table fields, defaults, the tenant field and default org, org routing.\n  The deployment contract lists `routing` in `hot_paths`, so an edit there\n  reaches a running pod without rolling it\n- `timestamp_dq.*` -- timestamp validation thresholds\n- `metadata.*` -- common header injection, tags, _raw handling\n- `field_sanitization.*` -- field name sanitisation rules\n- `buffer.flush_rows` / `buffer.flush_bytes` / `buffer.flush_age_secs`\n\n**Requires pod restart (connections/state established at startup):**\n- `transport` -- transport type (kafka/grpc) bound at startup\n- `kafka.*` -- Kafka consumer created at startup\n- `grpc.*` -- gRPC server binds at startup\n- `clickhouse.*` -- HTTP client + `clickhouse::Client` created at startup\n- `payload.pipeline_mode` -- pipeline path chosen at startup\n- `metrics.*` -- HTTP metrics server binds at startup\n- `logging.*` -- tracing subscriber installed at startup\n- `scaling.*` -- scaling pressure built at startup\n- `hot_reload.*` -- watcher config set at startup\n- `schema.*` -- schema cache created at startup\n- `geoip.*` -- MMDB readers opened at startup\n- `computed_columns.*` -- computed column cache built at startup\n- `column_directives.*` -- column directive cache built at startup\n- `routing.dlq` -- DLQ backends opened at startup\n- `dlq_load.*` -- DLQ topics subscribed at startup\n- `field_mapping.*` -- mapping rules built at startup\n- `enrichment.*` -- enrichment pipeline built at startup",
   "type": "object",
   "properties": {
     "transport": {
@@ -181,6 +181,20 @@
         ]
       }
     },
+    "dlq_load": {
+      "description": "Kafka DLQ topics loaded into a table of their own. **Restart required.**",
+      "$ref": "#/$defs/DlqLoadConfig",
+      "default": {
+        "topics": [
+          "dfe_receiver_dlq",
+          "dfe_loader_dlq",
+          "dfe_archiver_dlq",
+          "dfe_fetcher_dlq",
+          "dfe_transform_dlq"
+        ],
+        "table": "dlq"
+      }
+    },
     "routing": {
       "description": "Table and tenant routing. **Hot-reloaded**, `routing.dlq` aside.",
       "$ref": "#/$defs/RoutingConfig",
@@ -283,35 +297,6 @@
         "remove_routing_fields": true
       }
     },
-    "coercion": {
-      "description": "Type coercion config. Refused unless every field is at its default: the\ndynamic insert applies fixed coercion rules.",
-      "$ref": "#/$defs/CoercionConfig",
-      "default": {
-        "type_mappings": {},
-        "unknown_type_fallback": "String",
-        "null_handling": "default",
-        "null_strings": [
-          "null",
-          "NULL",
-          "Null",
-          "None",
-          "nil",
-          "undefined",
-          "\\N",
-          "<null>",
-          "NA",
-          "N/A",
-          "n/a",
-          "NaN"
-        ],
-        "default_timezone": "UTC",
-        "timezone_fields": [
-          "tags_collector_timezone"
-        ],
-        "array_to_json": true,
-        "strict": false
-      }
-    },
     "field_mapping": {
       "description": "Field mapping overrides. **Restart required.**",
       "$ref": "#/$defs/FieldMappingConfig",
@@ -340,7 +325,117 @@
         },
         "risk_scoring": {
           "enabled": false,
-          "preset": "global"
+          "preset": "global",
+          "presets": {
+            "apac_enterprise": {
+              "high": [
+                "KP",
+                "AF",
+                "MM"
+              ],
+              "medium": [
+                "RU",
+                "IR"
+              ]
+            },
+            "eu_enterprise": {
+              "high": [
+                "RU",
+                "KP",
+                "IR",
+                "SY",
+                "BY"
+              ],
+              "medium": [
+                "CN",
+                "UA",
+                "PK"
+              ]
+            },
+            "global": {
+              "high": [
+                "KP",
+                "IR",
+                "SY"
+              ],
+              "medium": [
+                "RU",
+                "CN",
+                "VE",
+                "CU"
+              ]
+            },
+            "high_security": {
+              "high": [
+                "CN",
+                "RU",
+                "KP",
+                "IR",
+                "SY",
+                "CU",
+                "VE",
+                "BY",
+                "MM"
+              ],
+              "medium": [
+                "UA",
+                "PK",
+                "NG",
+                "VN",
+                "BD",
+                "NP"
+              ]
+            },
+            "us_enterprise": {
+              "high": [
+                "CN",
+                "RU",
+                "KP",
+                "IR",
+                "SY",
+                "CU",
+                "VE"
+              ],
+              "medium": [
+                "UA",
+                "BY",
+                "PK",
+                "NG",
+                "VN"
+              ]
+            }
+          },
+          "weights": {
+            "geo": 15,
+            "reputation": 25,
+            "privacy": 25,
+            "threat": 35
+          },
+          "scores": {
+            "unknown_country": 35,
+            "high_risk_country": 90,
+            "medium_risk_country": 60,
+            "other_country": 15,
+            "vpn": 50,
+            "proxy": 60,
+            "tor": 80,
+            "datacenter": 40,
+            "relay": 45,
+            "one_anonymiser": 40,
+            "two_anonymisers": 70,
+            "three_anonymisers": 95,
+            "botnet": 95,
+            "malicious": 90,
+            "spam": 70,
+            "scanner": 60,
+            "high_abuse_score": 80
+          },
+          "levels": {
+            "low": 20,
+            "medium": 40,
+            "high": 60,
+            "critical": 80
+          }
         }
       }
     }
@@ -1249,6 +1344,31 @@
         }
       ]
     },
+    "DlqLoadConfig": {
+      "description": "Kafka DLQ topics whose dead letters the loader loads into a table of their own.\n\nA dead letter carries the routing fields of the record it wraps, so each\ntopic here routes to `table` whatever its records name. One that fails is\ndropped and counted, never dead-lettered again. Empty `topics` loads none.",
+      "type": "object",
+      "properties": {
+        "topics": {
+          "description": "DLQ topics to consume, alongside the data topics.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "dfe_receiver_dlq",
+            "dfe_loader_dlq",
+            "dfe_archiver_dlq",
+            "dfe_fetcher_dlq",
+            "dfe_transform_dlq"
+          ]
+        },
+        "table": {
+          "description": "Table every record from `topics` lands in, in the database `routing`\npicks for its tenant.",
+          "type": "string",
+          "default": "dlq"
+        }
+      }
+    },
     "RoutingConfig": {
       "type": "object",
       "properties": {
@@ -1693,96 +1813,6 @@
         }
       ]
     },
-    "CoercionConfig": {
-      "description": "Type coercion configuration. No encoder reads it, so `Config::validate`\nrefuses any field set away from its default.",
-      "type": "object",
-      "properties": {
-        "type_mappings": {
-          "description": "Map custom type names to base coercer categories\ne.g., {\"MyCustomInt\": \"Int\", \"SpecialString\": \"String\"}",
-          "type": "object",
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": {}
-        },
-        "unknown_type_fallback": {
-          "description": "Fallback coercer for unknown types (default: \"String\")",
-          "type": "string",
-          "default": "String"
-        },
-        "null_handling": {
-          "description": "How to handle null values in non-nullable columns",
-          "$ref": "#/$defs/NullHandling",
-          "default": "default"
-        },
-        "null_strings": {
-          "description": "Strings to recognise as null (case-sensitive)",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "null",
-            "NULL",
-            "Null",
-            "None",
-            "nil",
-            "undefined",
-            "\\N",
-            "<null>",
-            "NA",
-            "N/A",
-            "n/a",
-            "NaN"
-          ]
-        },
-        "default_timezone": {
-          "description": "Default timezone for naive timestamps (IANA name or +HH:MM)",
-          "type": "string",
-          "default": "UTC"
-        },
-        "timezone_fields": {
-          "description": "Event fields to check for timezone info",
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [
-            "tags_collector_timezone"
-          ]
-        },
-        "array_to_json": {
-          "description": "Convert arrays to JSON strings if true",
-          "type": "boolean",
-          "default": true
-        },
-        "strict": {
-          "description": "Strict mode: fail on any coercion error",
-          "type": "boolean",
-          "default": false
-        }
-      }
-    },
-    "NullHandling": {
-      "description": "Null handling strategy",
-      "oneOf": [
-        {
-          "description": "Substitute type-appropriate default value (recommended)",
-          "type": "string",
-          "const": "default"
-        },
-        {
-          "description": "Return error for null in non-nullable column",
-          "type": "string",
-          "const": "error"
-        },
-        {
-          "description": "Pass null through (may cause `ClickHouse` errors)",
-          "type": "string",
-          "const": "passthrough"
-        }
-      ]
-    },
     "FieldMappingConfig": {
       "description": "Field mapping configuration for normalising source field names.\n\nSupports renaming or copying fields from source to destination names.\nRules come from two sources with clear precedence:\n1. `ClickHouse` column comments (`@renamed` directives) — highest priority\n2. External remap files (CSV/YAML/JSON) and built-in presets — lower priority\n\nCSV files are compatible with the elastic/ecs-mapper format:\n`source_field,destination_field,copy_action`",
       "type": "object",
@@ -1864,7 +1894,117 @@
           "$ref": "#/$defs/RiskScoringConfig",
           "default": {
             "enabled": false,
-            "preset": "global"
+            "preset": "global",
+            "presets": {
+              "apac_enterprise": {
+                "high": [
+                  "KP",
+                  "AF",
+                  "MM"
+                ],
+                "medium": [
+                  "RU",
+                  "IR"
+                ]
+              },
+              "eu_enterprise": {
+                "high": [
+                  "RU",
+                  "KP",
+                  "IR",
+                  "SY",
+                  "BY"
+                ],
+                "medium": [
+                  "CN",
+                  "UA",
+                  "PK"
+                ]
+              },
+              "global": {
+                "high": [
+                  "KP",
+                  "IR",
+                  "SY"
+                ],
+                "medium": [
+                  "RU",
+                  "CN",
+                  "VE",
+                  "CU"
+                ]
+              },
+              "high_security": {
+                "high": [
+                  "CN",
+                  "RU",
+                  "KP",
+                  "IR",
+                  "SY",
+                  "CU",
+                  "VE",
+                  "BY",
+                  "MM"
+                ],
+                "medium": [
+                  "UA",
+                  "PK",
+                  "NG",
+                  "VN",
+                  "BD",
+                  "NP"
+                ]
+              },
+              "us_enterprise": {
+                "high": [
+                  "CN",
+                  "RU",
+                  "KP",
+                  "IR",
+                  "SY",
+                  "CU",
+                  "VE"
+                ],
+                "medium": [
+                  "UA",
+                  "BY",
+                  "PK",
+                  "NG",
+                  "VN"
+                ]
+              }
+            },
+            "weights": {
+              "geo": 15,
+              "reputation": 25,
+              "privacy": 25,
+              "threat": 35
+            },
+            "scores": {
+              "unknown_country": 35,
+              "high_risk_country": 90,
+              "medium_risk_country": 60,
+              "other_country": 15,
+              "vpn": 50,
+              "proxy": 60,
+              "tor": 80,
+              "datacenter": 40,
+              "relay": 45,
+              "one_anonymiser": 40,
+              "two_anonymisers": 70,
+              "three_anonymisers": 95,
+              "botnet": 95,
+              "malicious": 90,
+              "spam": 70,
+              "scanner": 60,
+              "high_abuse_score": 80
+            },
+            "levels": {
+              "low": 20,
+              "medium": 40,
+              "high": 60,
+              "critical": 80
+            }
           }
         }
       }
@@ -1896,7 +2036,7 @@
       }
     },
     "RiskScoringConfig": {
-      "description": "Risk scoring configuration",
+      "description": "Risk scoring configuration. Every country list, weight, score and level band\nbelow is a default a deployment can override.",
       "type": "object",
       "properties": {
         "enabled": {
@@ -1905,9 +2045,378 @@
           "default": false
         },
         "preset": {
-          "description": "Risk preset to use for country risk tables\n\nOptions: \"global\" (default), \"`us_enterprise`\", \"`eu_enterprise`\",\n         \"`apac_enterprise`\", \"`high_security`\"",
+          "description": "The entry in `presets` whose country lists apply. A name `presets` does\nnot hold is refused at load.",
           "type": "string",
           "default": "global"
+        },
+        "presets": {
+          "description": "Country lists by preset name. The loader ships `global`,\n`us_enterprise`, `eu_enterprise`, `apac_enterprise` and `high_security`.\nAn entry set in config replaces the shipped entry of that name, or adds\na new preset, and leaves the others as shipped.",
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/RiskCountries"
+          },
+          "default": {
+            "apac_enterprise": {
+              "high": [
+                "KP",
+                "AF",
+                "MM"
+              ],
+              "medium": [
+                "RU",
+                "IR"
+              ]
+            },
+            "eu_enterprise": {
+              "high": [
+                "RU",
+                "KP",
+                "IR",
+                "SY",
+                "BY"
+              ],
+              "medium": [
+                "CN",
+                "UA",
+                "PK"
+              ]
+            },
+            "global": {
+              "high": [
+                "KP",
+                "IR",
+                "SY"
+              ],
+              "medium": [
+                "RU",
+                "CN",
+                "VE",
+                "CU"
+              ]
+            },
+            "high_security": {
+              "high": [
+                "CN",
+                "RU",
+                "KP",
+                "IR",
+                "SY",
+                "CU",
+                "VE",
+                "BY",
+                "MM"
+              ],
+              "medium": [
+                "UA",
+                "PK",
+                "NG",
+                "VN",
+                "BD",
+                "NP"
+              ]
+            },
+            "us_enterprise": {
+              "high": [
+                "CN",
+                "RU",
+                "KP",
+                "IR",
+                "SY",
+                "CU",
+                "VE"
+              ],
+              "medium": [
+                "UA",
+                "BY",
+                "PK",
+                "NG",
+                "VN"
+              ]
+            }
+          }
+        },
+        "weights": {
+          "description": "Weight of each component in the composite score.",
+          "$ref": "#/$defs/RiskWeights",
+          "default": {
+            "geo": 15,
+            "reputation": 25,
+            "privacy": 25,
+            "threat": 35
+          }
+        },
+        "scores": {
+          "description": "Score each signal gives its component, 0-100.",
+          "$ref": "#/$defs/RiskScores",
+          "default": {
+            "unknown_country": 35,
+            "high_risk_country": 90,
+            "medium_risk_country": 60,
+            "other_country": 15,
+            "vpn": 50,
+            "proxy": 60,
+            "tor": 80,
+            "datacenter": 40,
+            "relay": 45,
+            "one_anonymiser": 40,
+            "two_anonymisers": 70,
+            "three_anonymisers": 95,
+            "botnet": 95,
+            "malicious": 90,
+            "spam": 70,
+            "scanner": 60,
+            "high_abuse_score": 80
+          }
+        },
+        "levels": {
+          "description": "Lowest composite score of each level above `minimal`.",
+          "$ref": "#/$defs/RiskLevelBands",
+          "default": {
+            "low": 20,
+            "medium": 40,
+            "high": 60,
+            "critical": 80
+          }
+        }
+      }
+    },
+    "RiskCountries": {
+      "description": "The high- and medium-risk country codes of one preset (ISO 3166-1 alpha-2).",
+      "type": "object",
+      "properties": {
+        "high": {
+          "description": "Countries scored `scores.high_risk_country`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        },
+        "medium": {
+          "description": "Countries scored `scores.medium_risk_country`.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      }
+    },
+    "RiskWeights": {
+      "description": "Weight of each component in the composite score. All zero scores 0.",
+      "type": "object",
+      "properties": {
+        "geo": {
+          "description": "Geographic component.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 15
+        },
+        "reputation": {
+          "description": "Reputation component.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 25
+        },
+        "privacy": {
+          "description": "Privacy (anonymiser) component.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 25
+        },
+        "threat": {
+          "description": "Threat component.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 35
+        }
+      }
+    },
+    "RiskScores": {
+      "description": "Score each signal gives its component. Reputation and threat signals add\nup, capped at 100.",
+      "type": "object",
+      "properties": {
+        "unknown_country": {
+          "description": "Geo: a public IP with no country.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 35
+        },
+        "high_risk_country": {
+          "description": "Geo: a country in the preset's `high` list.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 90
+        },
+        "medium_risk_country": {
+          "description": "Geo: a country in the preset's `medium` list.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 60
+        },
+        "other_country": {
+          "description": "Geo: any other country.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 15
+        },
+        "vpn": {
+          "description": "Reputation: VPN exit.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 50
+        },
+        "proxy": {
+          "description": "Reputation: open proxy.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 60
+        },
+        "tor": {
+          "description": "Reputation: Tor exit.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 80
+        },
+        "datacenter": {
+          "description": "Reputation: datacenter range.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 40
+        },
+        "relay": {
+          "description": "Reputation: private relay.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 45
+        },
+        "one_anonymiser": {
+          "description": "Privacy: one anonymiser among VPN, proxy, Tor and relay.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 40
+        },
+        "two_anonymisers": {
+          "description": "Privacy: two anonymisers.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 70
+        },
+        "three_anonymisers": {
+          "description": "Privacy: three or more anonymisers.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 95
+        },
+        "botnet": {
+          "description": "Threat: botnet member.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 95
+        },
+        "malicious": {
+          "description": "Threat: known malicious.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 90
+        },
+        "spam": {
+          "description": "Threat: spam source.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 70
+        },
+        "scanner": {
+          "description": "Threat: scanner.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 60
+        },
+        "high_abuse_score": {
+          "description": "Threat: the external abuse score at or above which the row carries the\n`high_abuse_score` factor. The abuse score itself is added as given.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 80
+        }
+      }
+    },
+    "RiskLevelBands": {
+      "description": "Lowest composite score of each risk level. Below `low` is `minimal`.",
+      "type": "object",
+      "properties": {
+        "low": {
+          "description": "Lowest `low` score.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 20
+        },
+        "medium": {
+          "description": "Lowest `medium` score.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 40
+        },
+        "high": {
+          "description": "Lowest `high` score.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 60
+        },
+        "critical": {
+          "description": "Lowest `critical` score.",
+          "type": "integer",
+          "format": "uint8",
+          "minimum": 0,
+          "maximum": 255,
+          "default": 80
         }
       }
     }

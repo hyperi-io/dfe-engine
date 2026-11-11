@@ -18,36 +18,12 @@ class _Names:
 
 _ = _Names()
 
-# Rust app config models: rendered to the YAML each app reads.
-_.accepted_headers, _.access_key_id, _.account_key, _.account_name, _.acknowledgements, _.acks
-_.array_to_json, _.auto_offset_reset, _.aws_access_key_id, _.aws_profile, _.aws_secret_access_key
-_.aws_session_token, _.batch_messages, _.batch_size, _.batch_timeout_ms, _.bearer_token
-_.ca_cert_file, _.ca_file, _.ca_secret, _.cache_ttl_secs, _.category_to_topic, _.client_auth
-_.coercion, _.collapse_underscores, _.collector_timestamp_path, _.collision_strategy
-_.commit_interval_ms, _.compression, _.correct_known_bad, _.debounce_ms, _.default_db
-_.default_org_id, _.default_segment, _.default_table, _.default_timezone, _.default_topic
-_.disable_json_tables, _.disable_raw_tables, _.dlq, _.dlq_on_invalid, _.drop_tags
-_.external_topics, _.extra_env, _.extra_yaml_files, _.extract_timestamp_collector
-_.field_sanitization, _.file_extension, _.flush_age_secs, _.flush_records, _.from_field
-_.grpc_endpoint, _.handle_numeric_prefix, _.header_name, _.header_values, _.ingest_bindings
-_.inject_timestamp_load, _.input_topic, _.invalid_action, _.json_output, _.key_field
-_.librdkafka_options, _.limit_bytes, _.linger_ms, _.max_body_size, _.max_buffer_bytes
-_.max_future_seconds, _.max_hold_ms, _.max_message_size, _.max_past_seconds
-_.max_poll_interval_ms, _.memory, _.message_timeout_ms, _.null_handling, _.null_strings
-_.numeric_prefix, _.oauth_client_secret, _.oauth_extensions, _.oauth_scope, _.org_id_field
-_.org_routes, _.otlp, _.output_topic, _.path_template, _.PATH_TEMPLATE_PLACEHOLDERS
-_.poll_interval_secs, _.pressure_threshold, _.project_id, _.prometheus_rw, _.raw_output
-_.raw_source_fields, _.recv_buffer_size, _.recv_timeout_ms, _.refresh_interval_secs
-_.refresh_on_error, _.reload_interval_secs, _.remove_routing_fields, _.request_timeout_ms
-_.require_json, _.required_fields, _.retries, _.roll_interval_secs, _.roll_size_bytes
-_.schema_cache
-_.secret_access_key, _.service_account_key, _.session_timeout_ms, _.skip_verify, _.splunk_hec
-_.strip_at_prefix, _.table_capture_modes, _.table_fields, _.tags_fields, _.tags_output
-_.timeout_ms, _.timestamp_dq, _.timezone_fields, _.topic_fields, _.topic_regex, _.topic_suffixes
-_.tracking_enabled, _.trim_underscores, _.type_mappings, _.unknown_type_fallback, _.use_ssl
-_.validation, _.writer_parallelism
+# Routing blocks the source compile emits: dumped into the YAML each app reads.
+_.default_db, _.default_org_id, _.default_table, _.dlq, _.from_field, _.org_id_field
+_.org_routes, _.table_fields, _.topic_suffixes
 
 # API request and response bodies: pydantic fills or emits these fields for clients.
+_.brokers
 _.action_writable, _.api_cors_origins, _.api_host, _.api_port, _.api_token, _.applies_routing
 _.apps_sync_error, _.apps_synced, _.as_of, _.auth_enabled, _.auth_local_enabled
 _.authorization_url, _.availability, _.availability_reason, _.average, _.awaiting_review

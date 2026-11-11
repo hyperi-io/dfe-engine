@@ -6,8 +6,6 @@ kafka:
   brokers:
     - localhost:9092
   group_id: dfe-archiver
-  topics:
-    - events
   batch_size: 1000
   max_poll_interval_ms: 300000
   session_timeout_ms: 30000
@@ -25,21 +23,7 @@ buffer:
   flush_records: 1000
   writer_parallelism: 2
 
-memory:
-  limit_bytes: 67108864  # 64 MB fixed cap
-  pressure_threshold: 0.8
-  tracking_enabled: true
-
-routing:
-  mode: topic
-  default_segment: unknown
-
 compression:
   codec: zstd
   level: 3
   enabled: true
-
-metrics:
-  enabled: true
-  address: "0.0.0.0:9090"
-  path: /metrics

@@ -15,7 +15,6 @@ grpc:  # bind_address is the receiver's own default
   enabled: false
 
 validation:
-  require_json: true
   required_fields: []
   dlq_on_invalid: true
 
@@ -39,15 +38,8 @@ kafka:
   client_id: dfe-receiver
   tls:
     enabled: false
-  producer:
-    batch_size: 8388608  # 8 MB
-    batch_messages: 10000
-    linger_ms: 20
-    compression: lz4
-    acks: all
-    retries: 5
 
-loader:  # address is the app manifest's loader push listener
+loader:  # address is the receiver's own default
   transport: kafka
   timeout_ms: 20000  # inside the 25 s a listener holds its answer
 
@@ -58,4 +50,3 @@ buffer:
 metrics:
   enabled: true
   address: "0.0.0.0:9090"
-  path: /metrics

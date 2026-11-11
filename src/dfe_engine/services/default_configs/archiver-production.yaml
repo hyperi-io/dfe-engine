@@ -12,8 +12,6 @@
 kafka:
   brokers: []  # every deployment names its own brokers
   group_id: dfe-archiver
-  topics:
-    - events
   batch_size: 10000
   max_poll_interval_ms: 300000
   session_timeout_ms: 30000
@@ -37,21 +35,7 @@ buffer:
   flush_records: 100000
   writer_parallelism: 8
 
-memory:
-  limit_bytes: 0  # auto-detect from K8s cgroup limits
-  pressure_threshold: 0.8
-  tracking_enabled: true
-
-routing:
-  mode: topic
-  default_segment: unknown
-
 compression:
   codec: zstd
   level: 6  # higher compression for cold storage
   enabled: true
-
-metrics:
-  enabled: true
-  address: "0.0.0.0:9090"
-  path: /metrics

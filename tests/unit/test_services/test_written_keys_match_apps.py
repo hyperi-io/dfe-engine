@@ -5,213 +5,121 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Every key the engine writes for an app, at any depth, is one the app reads.
+"""Every config the engine seeds is one its app reads whole, at any depth.
 
 serde drops an unknown key without a word, so a key spelt the engine's way rather
 than the app's reads as set while the app runs on its own default: a CA file
 written as ``ca_file`` left the loader verifying against the system trust store.
 
-Each app generates ``docs/config-schema.json`` from its config structs and fails
-its own build when the committed copy drifts, so that file at the pinned release
-(``tests/support/producer_contract.py``) is the app's contract. Three writers are
-held to it: ``stored_form``, which every save goes through, ``generate_template``
-for each profile, and every config ``seed_defaults`` writes, from ``default_configs``.
+Each app generates ``docs/config-schema.json`` from its config structs, and the
+deployment mounts that file as the app's contract. The fixtures under
+``tests/fixtures/contract`` are those files at each app's latest release, and the
+ones a pin in ``tests/support/producer_contract.py`` covers are checked against it.
 """
 
+import copy
 import json
-import types
-import typing
+from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
 
-from dfe_engine.services.models.loader import LoaderConfig
-from dfe_engine.services.models.receiver import ReceiverConfig
-from dfe_engine.services.models.transform_vector import TransformVectorConfig
-from dfe_engine.services.models.transform_vrl import TransformVrlConfig
-from dfe_engine.services.registry import default_configs, stored_form
-from dfe_engine.services.templates import generate_template
+from dfe_engine.appmgmt import contract
+from dfe_engine.services.registry import (
+    ServiceConfigRegistry,
+    default_configs,
+    judge_config,
+    service_apps,
+)
 from dfe_engine.settings import DFESettings, SecretsSettings
-from dfe_engine.yaml_utils import yaml_load_string
-from tests.support.config_schema import definitions, unread_keys
+from dfe_engine.yaml_utils import deep_merge, yaml_load_string
+from tests.support.config_schema import definitions, type_mismatches, unread_keys
 from tests.support.producer_contract import (
     DFE_LOADER,
     DFE_RECEIVER,
     DFE_TRANSFORM_VECTOR,
     DFE_TRANSFORM_VRL,
-    Producer,
     producer_file,
 )
 
+EMITTED = Path(__file__).parents[2] / "fixtures" / "contract"
 _SCHEMA = "docs/config-schema.json"
-_PROFILES = ("default", "production", "k8s")
-# A backend the receiver reads, so the templates and seeds do not hang on a developer .env.
+# A backend the receiver reads, so the seeds do not hang on a developer .env.
 _ENGINE = DFESettings(env="dev", secrets=SecretsSettings(provider="openbao"))
 
-# service name -> (its model, the app that reads what the engine writes for it)
-_APPS: dict[str, tuple[type[BaseModel], Producer]] = {
-    "loader": (LoaderConfig, DFE_LOADER),
-    "receiver": (ReceiverConfig, DFE_RECEIVER),
-    "transform-vrl": (TransformVrlConfig, DFE_TRANSFORM_VRL),
-    "transform-vector": (TransformVectorConfig, DFE_TRANSFORM_VECTOR),
-}
 
-# Keys the engine writes that the app's config struct has no field for; the set is
-# exact, so a new one fails and so does one that is fixed. transform-vrl's metrics
-# and scaling are scalo cascade sections, read outside that struct from a --config file.
-_UNREAD: dict[str, frozenset[str]] = {
-    "loader": frozenset({"memory.tracking_enabled", "metrics.path"}),
-    "receiver": frozenset(
-        {
-            "kafka.producer",
-            "kafka.sasl.aws_access_key_id",
-            "kafka.sasl.aws_profile",
-            "kafka.sasl.aws_region",
-            "kafka.sasl.aws_secret_access_key",
-            "kafka.sasl.aws_session_token",
-            "kafka.sasl.oauth_client_id",
-            "kafka.sasl.oauth_client_secret",
-            "kafka.sasl.oauth_extensions",
-            "kafka.sasl.oauth_scope",
-            "kafka.sasl.oauth_token_endpoint",
-            "kafka.tls.skip_verify",
-            "logging",
-            "metrics.path",
-            "validation.require_json",
-        }
-    ),
-    "transform-vrl": frozenset(
-        {
-            "health",
-            "logging",
-            "metrics",
-            "scaling",
-            *(
-                f"{side}.sasl.{key}"
-                for side in ("source", "sink")
-                for key in (
-                    "aws_access_key_id",
-                    "aws_profile",
-                    "aws_region",
-                    "aws_secret_access_key",
-                    "aws_session_token",
-                    "oauth_client_id",
-                    "oauth_client_secret",
-                    "oauth_extensions",
-                    "oauth_scope",
-                    "oauth_token_endpoint",
-                )
-            ),
-        }
-    ),
-    # dfe-transform-vector reads source/sink/pipeline/vector blocks; the engine's
-    # model is shaped for a kafka/sources layout the app does not have.
-    "transform-vector": frozenset(
-        {
-            "extra_env",
-            "extra_yaml_files",
-            "ipc",
-            "kafka",
-            "memory",
-            "metrics.enabled",
-            "metrics.path",
-            "sources",
-        }
-    ),
-}
-
-
-def _model_in(annotation: Any) -> type[BaseModel] | None:
-    """The one model a field holds, bare or optional; None for a list, map or scalar."""
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return annotation
-    if typing.get_origin(annotation) in (types.UnionType, typing.Union):
-        models = [
-            arg
-            for arg in typing.get_args(annotation)
-            if isinstance(arg, type) and issubclass(arg, BaseModel)
-        ]
-        if len(models) == 1:
-            return models[0]
-    return None
-
-
-def _every_block(model: type[BaseModel]) -> dict[str, Any]:
-    """Input that sets every nested block ``model`` declares, the optional ones too."""
-    doc: dict[str, Any] = {}
-    for name, field in model.model_fields.items():
-        nested = _model_in(field.annotation)
-        if nested is not None:
-            doc[field.alias or name] = _every_block(nested)
-    return doc
-
-
-@pytest.fixture(scope="module")
-def schemas() -> dict[str, dict[str, Any]]:
-    """Each app's config schema at its pinned release, keyed by engine service name."""
-    found: dict[str, dict[str, Any]] = {}
-    for service, (_, producer) in _APPS.items():
-        source = producer_file(producer, _SCHEMA)
-        schema = json.loads(source.text)
-        # A reshaped schema must fail here, not pass every walk against nothing.
-        assert schema.get("properties"), f"no top-level fields in {source.origin}"
-        found[service] = schema
+def _seeds() -> list[tuple[str, str, dict[str, Any]]]:
+    """Every config a seed writes, as ``(app, file name, document)``."""
+    found = []
+    for name, text in default_configs(_ENGINE).items():
+        parsed = ServiceConfigRegistry._parse_table_name(name.removesuffix(".yaml"))
+        assert parsed is not None, f"{name} names no service"
+        found.append((service_apps()[parsed[0]], name, yaml_load_string(text) or {}))
     return found
 
 
-def _written(service: str) -> list[tuple[str, dict[str, Any]]]:
-    """What each writer puts in a config file for ``service``, named by writer."""
-    model, _ = _APPS[service]
-    docs = [("stored_form", stored_form(model.model_validate(_every_block(model))))]
-    docs += [(f"template:{p}", generate_template(service, p, _ENGINE)) for p in _PROFILES]
-    for name, text in default_configs(_ENGINE).items():
-        if name.startswith(f"{service}-"):
-            docs.append((name, yaml_load_string(text) or {}))
-    return docs
+_SEEDS = _seeds()
 
 
-_WRITERS = [(service, writer) for service in _APPS for writer, _ in _written(service)]
+def _schema(app: str) -> dict[str, Any]:
+    schema = json.loads((EMITTED / app / contract.SCHEMA_FILE).read_text())
+    # A reshaped schema must fail here, not pass every walk against nothing.
+    assert schema.get("properties"), f"no top-level fields in {app}'s fixture"
+    return schema
 
 
-def _unread_in(doc: dict[str, Any], schema: dict[str, Any]) -> set[str]:
-    return set(unread_keys(doc, schema, definitions(schema)))
+@pytest.mark.parametrize(("app", "name", "doc"), _SEEDS, ids=[n for _, n, _ in _SEEDS])
+def test_every_seeded_config_is_one_its_app_reads_whole(app: str, name: str, doc: dict):
+    schema = _schema(app)
+    found = judge_config(
+        contract.AppContract(
+            service=app, available=True, source=contract.ContractSource.MOUNT, schema=schema
+        ),
+        doc,
+    )
+    assert {
+        "unread": unread_keys(doc, schema, definitions(schema)),
+        "types": type_mismatches(doc, schema, definitions(schema)),
+        "refused": found.errors,
+    } == {"unread": [], "types": [], "refused": []}
 
 
-def _unread_by(service: str, writer: str, schema: dict[str, Any]) -> set[str]:
-    return _unread_in(dict(_written(service))[writer], schema)
+def test_every_app_with_a_config_file_but_vrl_and_elastic_is_seeded():
+    seeded = {app for app, _, _ in _SEEDS}
+    assert seeded == set(service_apps().values()) - {"dfe-transform-vrl", "dfe-transform-elastic"}
 
 
-@pytest.mark.parametrize(("service", "writer"), _WRITERS, ids=[f"{s}-{w}" for s, w in _WRITERS])
-def test_every_written_key_is_one_the_app_reads(schemas, service: str, writer: str):
-    unread = _unread_by(service, writer, schemas[service]) - _UNREAD[service]
-    assert not unread, (
-        f"{writer} writes {sorted(unread)} for the {service}, which has no such "
-        "field: serde drops it and the app runs on its own default"
+_ARCHIVER = [(name, doc) for app, name, doc in _SEEDS if app == "dfe-archiver"]
+
+
+@pytest.mark.parametrize(("name", "doc"), _ARCHIVER, ids=[n for n, _ in _ARCHIVER])
+def test_every_seeded_archiver_discovers_its_topics_and_routes_as_the_app_does(name, doc):
+    """A non-empty kafka.topics turns discovery off, and no DFE topic is named by the seed.
+
+    Sources land on ``<source>_land``, so a fixed list archives only what it names.
+    The routing mode and default segment are the app's own.
+    """
+    defaults = contract.config_defaults(_schema("dfe-archiver"))
+    runs = deep_merge(copy.deepcopy(defaults), doc)
+    assert runs["kafka"]["topics"] == []
+    assert runs["routing"] == defaults["routing"]
+    assert (runs["routing"]["mode"], runs["routing"]["default_segment"]) == (
+        "expression",
+        "default",
     )
 
 
-@pytest.mark.parametrize("service", sorted(_APPS))
-def test_the_unread_set_is_exact(schemas, service: str):
-    writers = [writer for s, writer in _WRITERS if s == service]
-    seen = set().union(*(_unread_by(service, w, schemas[service]) for w in writers))
-    assert seen == _UNREAD[service], (
-        f"no longer written or now read by the {service}: {sorted(_UNREAD[service] - seen)}; "
-        f"newly unread: {sorted(seen - _UNREAD[service])}"
-    )
+def test_no_loader_config_the_engine_writes_carries_coercion():
+    """dfe-loader retired its coercion section, so the app's own handling decides."""
+    loader = [name for app, name, doc in _SEEDS if app == "dfe-loader" and "coercion" in doc]
+    assert loader == []
 
 
-def test_the_loader_reads_its_ca_where_the_engine_writes_it(schemas):
-    written = stored_form(LoaderConfig.model_validate({"kafka": {"tls": {"ca_file": "/ca.pem"}}}))
-    assert written["kafka"]["tls"]["ca_cert_file"] == "/ca.pem"
-    assert "ca_file" not in written["kafka"]["tls"]
-    assert not _unread_in(written, schemas["loader"]) - _UNREAD["loader"]
-
-
-@pytest.mark.parametrize("side", ["source", "sink"])
-def test_transform_vrl_reads_its_ca_where_the_engine_writes_it(schemas, side: str):
-    config = TransformVrlConfig.model_validate({side: {"tls": {"ca_file": "/ca.pem"}}})
-    written = stored_form(config)
-    assert written[side]["tls"]["ca_cert_file"] == "/ca.pem"
-    assert "ca_file" not in written[side]["tls"]
-    assert not _unread_in(written, schemas["transform-vrl"]) - _UNREAD["transform-vrl"]
+@pytest.mark.parametrize(
+    "producer",
+    [DFE_LOADER, DFE_RECEIVER, DFE_TRANSFORM_VRL, DFE_TRANSFORM_VECTOR],
+    ids=lambda p: p.repo,
+)
+def test_the_fixture_is_the_schema_the_pinned_release_ships(producer):
+    shipped = json.loads(producer_file(producer, _SCHEMA).text)
+    assert _schema(producer.repo) == shipped
