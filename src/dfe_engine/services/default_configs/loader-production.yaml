@@ -64,12 +64,10 @@ buffer:
 memory:
   limit_bytes: 0  # auto-detect from K8s cgroup limits
   pressure_threshold: 0.8
-  tracking_enabled: true
 
 metrics:
   enabled: true
   address: "0.0.0.0:9090"
-  path: /metrics
 
 logging:
   level: info
@@ -109,15 +107,6 @@ metadata:
   disable_json_tables: []
   disable_raw_tables: []
   remove_routing_fields: true
-
-coercion:
-  unknown_type_fallback: String
-  null_handling: default
-  default_timezone: UTC
-  timezone_fields:
-    - tags_collector_timezone
-  array_to_json: true
-  strict: false
 
 schema:
   cache_ttl_secs: 300

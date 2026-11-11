@@ -1,6 +1,5 @@
 """Tests for the services router."""
 
-import json
 from pathlib import Path
 
 import pytest
@@ -64,7 +63,6 @@ class TestServiceConfigNotFound:
         assert resp.json()["code"] == "not_found"
 
 
-MASK = "**********"
 SECRETS = ("sasl-pw-8810", "hdr-8812", "tok-8813")
 
 
@@ -113,7 +111,6 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
             {"name": "x-key", "values": [contract.REDACTED]}
         ]
         assert shown["server"]["auth"]["bearer"]["tokens"] == [contract.REDACTED]
-        assert MASK not in resp.text
         for secret in SECRETS:
             assert secret not in resp.text
 
@@ -122,17 +119,15 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
     ):
         assert client.put(self.URL, json=self._body(), headers=admin_headers).status_code == 200
         shown = client.get(self.URL, headers=admin_headers).json()["config"]
-        retries = shown["kafka"]["producer"]["retries"]
-        shown["kafka"]["producer"]["retries"] = retries + 7
+        shown["buffer"] = {"pressure_threshold": 0.7}
 
         resp = client.put(self.URL, json=shown, headers=admin_headers)
         assert resp.status_code == 200, resp.text
         saved = _saved(api_settings, "receiver-placeholder")
-        assert saved["kafka"]["producer"]["retries"] == retries + 7
+        assert saved["buffer"] == {"pressure_threshold": 0.7}
         assert saved["kafka"]["sasl"]["password"] == "sasl-pw-8810"
         assert saved["server"]["auth"]["accepted_headers"][0]["values"] == ["hdr-8812"]
         assert saved["server"]["auth"]["bearer"]["tokens"] == ["tok-8813"]
-        assert MASK not in json.dumps(saved)
 
     def test_a_kafka_setting_changed_beside_its_masked_password_is_refused(
         self, client, admin_headers, api_settings
@@ -152,27 +147,13 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
     def test_the_placeholder_with_nothing_stored_is_refused(
         self, client, admin_headers, api_settings
     ):
-        body = {"server": {"auth": {"bearer": {"tokens": ["tok-8811", MASK]}}}}
+        body = {"server": {"auth": {"bearer": {"tokens": ["tok-8811", contract.REDACTED]}}}}
         resp = client.put(self.URL, json=body, headers=admin_headers)
         assert resp.status_code == 400, resp.text
         assert resp.json()["code"] == "masked_value"
         assert "server.auth.bearer.tokens[1]" in resp.json()["detail"]
         path = Path(api_settings.services.config_yaml_dir) / "receiver-placeholder.yaml"
         assert not path.exists()
-
-    def test_a_read_in_pydantic_s_own_placeholder_still_keeps_every_secret(
-        self, client, admin_headers, api_settings
-    ):
-        # A client holding a read from before the engine spelled every mask one way.
-        assert client.put(self.URL, json=self._body(), headers=admin_headers).status_code == 200
-        read = client.get(self.URL, headers=admin_headers).text
-        body = json.loads(read.replace(contract.REDACTED, MASK))["config"]
-        resp = client.put(self.URL, json=body, headers=admin_headers)
-        assert resp.status_code == 200, resp.text
-        saved = _saved(api_settings, "receiver-placeholder")
-        assert saved["kafka"]["sasl"]["password"] == "sasl-pw-8810"
-        assert saved["server"]["auth"]["accepted_headers"][0]["values"] == ["hdr-8812"]
-        assert saved["server"]["auth"]["bearer"]["tokens"] == ["tok-8813"]
 
     @pytest.mark.parametrize(
         ("url", "table", "body", "path", "secret"),
@@ -196,8 +177,7 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
     def test_a_typed_string_map_is_masked_by_name_and_restores(
         self, client, admin_headers, api_settings, url, table, body, path, secret
     ):
-        # The typed dump masks only the fields its model declares secret; a map of
-        # plain strings has only its keys to go on.
+        # A map of plain strings has only its keys to go on.
         assert client.put(url, json=body, headers=admin_headers).status_code == 200
         resp = client.get(url, headers=admin_headers)
         assert resp.status_code == 200, resp.text
@@ -215,22 +195,24 @@ class TestLegacySecretsAreStoredAndMaskedOnTheWayOut:
             saved = saved[part]
         assert saved == secret
 
-    def test_a_schema_less_config_is_masked_by_name(self, client, admin_headers, api_settings):
-        url = "/api/v1/services/customsvc/one"
+    def test_a_key_no_contract_declares_is_masked_by_name(
+        self, client, admin_headers, api_settings
+    ):
+        url = "/api/v1/services/fetcher/one"
         body = {"db": {"host": "db-1", "password": "raw-pw-8814"}}
         assert client.put(url, json=body, headers=admin_headers).status_code == 200
         resp = client.get(url, headers=admin_headers)
         assert resp.status_code == 200, resp.text
         assert resp.json()["config"]["db"] == {"host": "db-1", "password": contract.REDACTED}
         assert "raw-pw-8814" not in resp.text
-        assert _saved(api_settings, "customsvc-one")["db"]["password"] == "raw-pw-8814"
+        assert _saved(api_settings, "fetcher-one")["db"]["password"] == "raw-pw-8814"
 
 
 class TestASectionThePutLeavesOutIsKept:
     """A form sends some sections; the rest, and the secrets in them, stay as stored."""
 
-    URL = "/api/v1/services/customsvc/sections"
-    TABLE = "customsvc-sections"
+    URL = "/api/v1/services/fetcher/sections"
+    TABLE = "fetcher-sections"
     STORED = {
         "db": {"host": "db-1", "password": "db-pw-8840"},
         "cache": {"host": "cache-1", "token": "cache-tok-8841"},
@@ -270,8 +252,8 @@ class TestASectionThePutLeavesOutIsKept:
 class TestALegacyMaskedCredentialRestoresOnlyWhereItWasSet:
     """A masked credential written back beside a changed field has to be typed again."""
 
-    URL = "/api/v1/services/customsvc/conn"
-    TABLE = "customsvc-conn"
+    URL = "/api/v1/services/fetcher/conn"
+    TABLE = "fetcher-conn"
     STORED = {
         "connections": [
             {"id": "a", "tenant_url": "https://a.example", "token": "tok-a-8820"},
@@ -339,75 +321,6 @@ class TestALegacyMaskedCredentialRestoresOnlyWhereItWasSet:
         assert resp.json()["code"] == "credential_reentry_required"
         assert "kafka.sasl" in resp.json()["detail"]
         assert _saved(api_settings, "receiver-placeholder")["kafka"]["sasl"]["username"] == "dfe"
-
-
-@pytest.fixture
-def stored_before_retirement(api_settings: DFESettings) -> None:
-    """Service files as a deployment saved them before ``payload`` and ``format`` were retired."""
-    services = Path(api_settings.services.config_yaml_dir)
-    (services / "loader-old.yaml").write_text(
-        "clickhouse:\n  password: ch-pw-8815\npayload:\n  format: auto\n  mismatch_threshold: 10\n",
-        encoding="utf-8",
-    )
-    (services / "transform-vrl-old.yaml").write_text(
-        "source:\n  brokers: [k:9092]\n  format: auto\n", encoding="utf-8"
-    )
-
-
-class TestAConfigStoredBeforeAKeyWasRetired:
-    """An upgrade keeps its stored files, so a key since retired must not fail the read."""
-
-    @pytest.mark.parametrize(
-        "url", ["/api/v1/services/loader/old", "/api/v1/services/transform-vrl/old"]
-    )
-    def test_the_read_answers(self, stored_before_retirement, client, admin_headers, url):
-        resp = client.get(url, headers=admin_headers)
-        assert resp.status_code == 200, resp.text
-        assert "payload" not in resp.json()["config"]
-        assert "format" not in resp.json()["config"].get("source", {})
-        assert "ch-pw-8815" not in resp.text
-
-
-_LOADER_CA = "/etc/dfe/kafka-ca.pem"
-
-
-@pytest.fixture
-def loader_stored_in_the_receiver_s_spelling(api_settings: DFESettings) -> None:
-    """A loader file as the engine wrote it with the receiver's CA key and the field name."""
-    services = Path(api_settings.services.config_yaml_dir)
-    (services / "loader-tls.yaml").write_text(
-        f"kafka:\n  tls:\n    enabled: true\n    ca_file: {_LOADER_CA}\n"
-        "schema_cache:\n  cache_ttl_secs: 60\n",
-        encoding="utf-8",
-    )
-
-
-class TestTheLoaderCaRoundTrips:
-    """The loader's CA path is read back and written as dfe-loader reads it."""
-
-    URL = "/api/v1/services/loader/tls"
-    CA = _LOADER_CA
-
-    def test_a_read_written_back_keeps_the_ca_under_the_loader_s_key(
-        self, loader_stored_in_the_receiver_s_spelling, client, admin_headers, api_settings
-    ):
-        resp = client.get(self.URL, headers=admin_headers)
-        assert resp.status_code == 200, resp.text
-        shown = resp.json()["config"]
-        assert shown["kafka"]["tls"]["ca_cert_file"] == self.CA
-        assert shown["schema"]["cache_ttl_secs"] == 60
-
-        assert client.put(self.URL, json=shown, headers=admin_headers).status_code == 200
-        saved = _saved(api_settings, "loader-tls")
-        assert saved["kafka"]["tls"] == {
-            "enabled": True,
-            "ca_cert_file": self.CA,
-            "cert_file": None,
-            "key_file": None,
-            "skip_verify": False,
-        }
-        assert saved["schema"]["cache_ttl_secs"] == 60
-        assert "schema_cache" not in saved
 
 
 class TestServicesSeed:

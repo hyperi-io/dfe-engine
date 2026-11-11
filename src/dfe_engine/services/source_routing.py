@@ -38,14 +38,15 @@ from scalo.rules import RuleSet as ScaloRuleSet
 from dfe_engine.ingest.models import ALIASES_TABLE, IngestRules
 from dfe_engine.orgs.models import DEFAULT_ORG_ID
 from dfe_engine.orgs.tenancy import Tenancy, UnknownOrgError
-from dfe_engine.services.models.loader import LoaderExternalTopic, LoaderRoutingConfig
-from dfe_engine.services.models.receiver import (
+from dfe_engine.services.routing_models import (
     BUS_DESTINATION,
     LOADER_DESTINATION,
     RULE_TARGETS,
     SOURCE_FIELD,
     DestinationRef,
     DestinationsConfig,
+    LoaderExternalTopic,
+    LoaderRoutingConfig,
     MatchOp,
     ReceiverRoutingConfig,
     Rule,

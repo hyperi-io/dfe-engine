@@ -216,17 +216,25 @@ class TestBindings:
 
         assert bound == {"orgs": ["acme-prod", "acme-dev", "beta"], "default_org": "beta"}
 
-    def test_every_binding_is_one_the_receiver_accepts(self, registry):
-        from dfe_engine.services.models.receiver import IngestBindingsConfig
+    def test_every_binding_is_one_the_receiver_s_schema_takes(self, registry):
+        import json
+        from pathlib import Path
+
+        from dfe_engine.appmgmt import contract
+        from dfe_engine.services.registry import judge_config
 
         registry.ingest_credentials.put(_credential(orgs=["acme", "beta"], default_org="beta"))
-
         compiled = compile_ingest_bindings(Tenancy.read(registry))
 
-        assert IngestBindingsConfig.model_validate(compiled).model_dump() == {
-            **compiled,
-            "listeners": {},
-        }
+        emitted = Path(__file__).parents[2] / "fixtures" / "contract" / "dfe-receiver"
+        receiver = contract.AppContract(
+            service="dfe-receiver",
+            available=True,
+            source=contract.ContractSource.MOUNT,
+            schema=json.loads((emitted / contract.SCHEMA_FILE).read_text()),
+        )
+        result = judge_config(receiver, {"ingest_bindings": compiled})
+        assert (result.errors, result.warnings) == ([], [])
 
 
 class TestTokens:

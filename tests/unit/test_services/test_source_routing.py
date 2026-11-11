@@ -18,15 +18,13 @@ import pytest
 from pydantic import ValidationError
 
 from dfe_engine.ingest.models import IngestRules
-from dfe_engine.services.models.loader import LoaderConfig, LoaderRoutingConfig
-from dfe_engine.services.models.receiver import (
+from dfe_engine.services.routing_models import (
     DestinationsConfig,
-    IngestBindingsConfig,
+    LoaderRoutingConfig,
     ReceiverRoutingConfig,
     Rule,
     RuleSet,
 )
-from dfe_engine.services.registry import stored_form
 from dfe_engine.services.source_routing import (
     MAX_SOURCE_ROWS,
     compile_loader_routing,
@@ -89,7 +87,6 @@ class FakeSourceRegistry:
 # ---------------------------------------------------------------------------
 
 _PIPELINE_RS = "src/config/pipeline.rs"
-_LOADER_RS = "src/config/loader.rs"
 
 _UNPARSED = object()
 
@@ -186,12 +183,6 @@ def _rust_literal(expr: str) -> object:
     return _UNPARSED
 
 
-def _parse_rust_fields(source: ProducerFile, name: str) -> set[str]:
-    """A Rust struct's field names, for a struct that derives Default."""
-    struct_body = _strip_comments(_rust_block(source.text, f"pub struct {name} {{"))
-    return set(re.findall(r"^\s*pub (\w+)\s*:", struct_body, re.MULTILINE))
-
-
 def _parse_rust_struct(source: ProducerFile, name: str) -> RustStruct:
     text = source.text
 
@@ -228,15 +219,6 @@ def rust_routing() -> RustStruct:
     # than pass every assertion against an empty field set.
     assert "default_db" in parsed.fields, f"could not parse RoutingConfig out of {source.origin}"
     return parsed
-
-
-@pytest.fixture(scope="module")
-def rust_loader_fields() -> set[str]:
-    """dfe-loader's top-level Config field names, as the Rust source declares them."""
-    source = producer_file(DFE_LOADER, _LOADER_RS)
-    fields = _parse_rust_fields(source, "Config")
-    assert "clickhouse" in fields, f"could not parse Config out of {source.origin}"
-    return fields
 
 
 @pytest.fixture
@@ -361,19 +343,6 @@ class TestReceiverRoutingConfigModel:
     def test_an_empty_default_org_is_refused(self):
         with pytest.raises(ValidationError):
             ReceiverRoutingConfig(default_org_id="")
-
-
-class TestIngestBindingsModel:
-    def test_a_default_outside_the_binding_is_refused(self):
-        # The receiver refuses the whole config for it, so every listener stops.
-        with pytest.raises(ValidationError, match="not one of orgs"):
-            IngestBindingsConfig.model_validate(
-                {"credentials": {"agents": {"orgs": ["acme"], "default_org": "beta"}}}
-            )
-
-    def test_a_binding_with_no_org_is_refused(self):
-        with pytest.raises(ValidationError):
-            IngestBindingsConfig.model_validate({"credentials": {"agents": {"orgs": []}}})
 
 
 class TestDestinationsModel:
@@ -625,18 +594,6 @@ class TestLoaderRoutingAgainstRustContract:
                 f"routing.{name} defaults to {ours[name]!r} here and {expected!r} in "
                 "the loader - the loader's value is the one that ships"
             )
-
-    def test_every_top_level_key_exists_in_the_rust_config(self, rust_loader_fields):
-        # Scoped to RoutingConfig alone, this pin missed an entire emitted block
-        # the loader had no field for. The keys are the ones stored_form writes,
-        # since a by_alias dump spells them as no file on disk does.
-        emitted = set(stored_form(LoaderConfig()))
-        unknown = emitted - rust_loader_fields
-        assert not unknown, (
-            f"the loader's Config has no {sorted(unknown)} - serde would drop "
-            f"{'them' if len(unknown) > 1 else 'it'} without a word, so the knob "
-            "would read as live while doing nothing"
-        )
 
     def test_the_compiled_block_is_serde_compatible(self, registry, rust_routing):
         # What actually reaches a deployed loader is the compiled block, so the

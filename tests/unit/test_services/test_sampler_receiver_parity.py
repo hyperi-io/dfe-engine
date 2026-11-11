@@ -27,7 +27,7 @@ import pytest
 from scalo.rules import CompileOptions
 from scalo.rules import RuleSet as ScaloRuleSet
 
-from dfe_engine.services.models.receiver import RULE_TARGETS, RuleSet
+from dfe_engine.services.routing_models import RULE_TARGETS, RuleSet
 from dfe_engine.services.schema.json_promotion_service import match_condition
 from dfe_engine.services.source_routing import RECEIVER_RULES_PROFILE, source_rules
 from dfe_engine.source.models import Source

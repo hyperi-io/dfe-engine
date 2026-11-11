@@ -235,7 +235,7 @@ moves.
 | dfe-infra | Deploys this engine, and owns `apps.yaml` -- a byte copy is vendored here at `appmgmt/apps.yaml` as the last resort in the resolution order. Lockstep: a catalogue entry the engine does not carry is not reflected by its management API. |
 | dfe-schemas | Ships the schema and DDL trees as a PACKAGE, not a submodule. Read out of the installed wheel unless `DFE_ENGINE_SCHEMAS_DIR` points elsewhere. |
 | scalo-py | The shared Python library, plus a contract guard: this repo overrides scalo's runtime base image with its own literal, and its own test fails when the committed Dockerfile stops matching. |
-| dfe-loader, dfe-receiver | Their config validation is MIRRORED by hand in `services/plugins_builtin/`. Nothing is copied, so no script can check it -- re-read the producer whenever their config schema changes. |
+| the Rust apps | Each emits its config schema (`<app> config-schema`), and the deployment mounts it at `DFE_ENGINE_APP_CONTRACT_DIR`. `/api/v1/services` takes every default and type from it, so nothing of an app's config is restated here. |
 | logreducer | A declared dependency (`logreducer[enhanced]`). The sampler's `smart` mode, its default, and `anomaly` mode run it, imported lazily so the scikit-learn stack loads only when one of them does. |
 
 **What depends on dfe-engine:**

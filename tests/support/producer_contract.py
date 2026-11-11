@@ -105,7 +105,7 @@ DFE_LOADER = Producer(
     repo="dfe-loader",
     ref="v1.18.65",
     dir_env="DFE_LOADER_DIR",
-    files=("src/config/pipeline.rs", "src/config/loader.rs", "docs/config-schema.json"),
+    files=("src/config/pipeline.rs", "docs/config-schema.json"),
 )
 DFE_RECEIVER = Producer(
     repo="dfe-receiver",
