@@ -32,9 +32,11 @@ def _org(name: str, ids: list[str]) -> SimpleNamespace:
     return SimpleNamespace(name=name, org_ids=ids)
 
 
-def _settings(tmp_path):
+def _settings(tmp_path, data_database="dfe"):
     return SimpleNamespace(
-        clickhouse=SimpleNamespace(host="ch.example", port=8123, secure=False),
+        clickhouse=SimpleNamespace(
+            host="ch.example", port=8123, secure=False, effective_data_database=data_database
+        ),
         secrets=SecretsSettings(provider="file", path=str(tmp_path)),
     )
 
@@ -109,6 +111,35 @@ async def test_platform_role_gets_the_unrestricted_reader(tmp_path):
     assert conn.name == "platform"
     assert conn.username == "dfe_query_reader"
     assert conn.password == "qr-pw"
+    assert conn.platform is True
+
+
+@pytest.mark.parametrize(
+    ("data_database", "roles", "secret"),
+    [
+        ("dfe", ["data_analyst"], "ch/service/query_reader"),
+        ("acme_data", ["data_analyst"], "ch/service/query_reader"),
+        ("acme_data", ["org_viewer"], "ch/orgs/acme"),
+    ],
+)
+async def test_the_connection_names_the_deployments_seed_tables(
+    tmp_path, data_database, roles, secret
+):
+    # The fork seeds its sources from these, so a non-default data database
+    # must reach it rather than the fork assuming `dfe`.
+    settings = _settings(tmp_path, data_database)
+    build_secrets(settings.secrets).put(secret, "pw")
+    user = AuthContext(user_id="u", roles=roles, org_ids=["acme"])
+    req = _request([_org("acme", ["acme"])], settings)
+
+    conn = await hyperdx_connection(req, user, settings)
+
+    assert conn.database == data_database
+    assert conn.platform is (roles == ["data_analyst"])
+    assert conn.tables["data.main"] == "main"
+    assert conn.tables["data.detection"] == "detection"
+    assert conn.tables["data.otel_metrics_summary"] == "otel_metrics_summary"
+    assert len(conn.tables) == 9
 
 
 async def test_a_system_query_role_beside_org_viewer_reads_unrestricted(tmp_path):
