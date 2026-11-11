@@ -182,9 +182,20 @@ class ChOverrideOption:
 
 
 @dataclass(frozen=True)
+class CardinalityVocabulary:
+    """The cardinalities a column may declare, and how the retired spelling maps onto them."""
+
+    values: tuple[str, ...]
+    default: str
+    labels: dict[str, str]
+    retired_attributes: dict[str, str]
+
+
+@dataclass(frozen=True)
 class Vocabulary:
     """What a schema form may offer, read from the registry."""
 
+    cardinality: CardinalityVocabulary
     primitives: tuple[PrimitiveEntry, ...]
     use_cases: tuple[UseCaseEntry, ...]
     attributes: tuple[AttributeEntry, ...]
@@ -492,7 +503,15 @@ class TypeRegistry:
         retired: dict[str, list[str]] = {}
         for old, current in RETIRED_USE_CASES.items():
             retired.setdefault(current, []).append(old)
+        values = tuple(self.cardinalities)
+        labels = self._cardinality.get("labels") or {}
         return Vocabulary(
+            cardinality=CardinalityVocabulary(
+                values=values,
+                default=str(self._cardinality.get("default") or DEFAULT_CARDINALITY),
+                labels={name: _text(labels, name, default_label(name)) for name in values},
+                retired_attributes={LOWCARDINALITY_ATTRIBUTE: LOW_CARDINALITY},
+            ),
             primitives=tuple(
                 PrimitiveEntry(
                     name=name,

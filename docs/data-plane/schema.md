@@ -373,7 +373,7 @@ catalogue:
 | **Enum** | `Enum8(...)`, `Enum16(...)` |
 | **Special** | `Dynamic`, `Variant(...)`, `AggregateFunction(...)`, `SimpleAggregateFunction(...)` |
 
-`GET /api/v1/schemas/vocabulary` serves what a schema form offers, read from this registry: the primitives, the index use cases with their labels and the names they replaced, the attributes, and the override types with the primitive each refines. A type that takes parameters carries a `template` such as `Decimal({precision},{scale})`, so a form builds the override text without knowing the type. A label the registry does not declare reads off the entry's name. The retired `lowcardinality` attribute is not offered: a column declares `cardinality`.
+`GET /api/v1/schemas/vocabulary` serves what a schema form offers, read from this registry: the primitives, the index use cases with their labels and the names they replaced, the attributes, the cardinalities with their default, and the override types with the primitive each refines. A type that takes parameters carries a `template` such as `Decimal({precision},{scale})`, so a form builds the override text without knowing the type. A label the registry does not declare reads off the entry's name. The retired `lowcardinality` attribute is not offered: a column declares `cardinality`, and the vocabulary says a stored `lowcardinality` reads as `low`.
 
 ---
 

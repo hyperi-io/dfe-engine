@@ -414,6 +414,11 @@ _DECLARED = {
         "similarity_search": {"valid_primitives": ["string"], "parameters": ["dims"]},
         "bloom": {"valid_primitives": ["string"]},
     },
+    "cardinality": {
+        "values": ["low", "high", "unknown"],
+        "default": "unknown",
+        "labels": {"low": "Few values"},
+    },
     "attributes": {
         "lowcardinality": {"valid_primitives": ["string"]},
         "not_null": {"valid_primitives": "all", "label": "Not null"},
@@ -451,6 +456,21 @@ class TestVocabulary:
         assert use_cases["word_search"].description == "I search for whole words"
         assert use_cases["similarity_search"].label == "Similarity search"
         assert use_cases["similarity_search"].parameters == ("dims",)
+
+    def test_cardinality_carries_its_labels_default_and_the_retired_spelling(self):
+        cardinality = TypeRegistry(_DECLARED).vocabulary().cardinality
+
+        assert cardinality.values == ("low", "high", "unknown")
+        assert cardinality.default == "unknown"
+        assert cardinality.labels == {"low": "Few values", "high": "High", "unknown": "Unknown"}
+        assert cardinality.retired_attributes == {"lowcardinality": "low"}
+
+    def test_a_registry_that_declares_no_cardinality_gets_the_package_default(self):
+        data = {k: v for k, v in _DECLARED.items() if k != "cardinality"}
+
+        cardinality = TypeRegistry(data).vocabulary().cardinality
+
+        assert (cardinality.values, cardinality.default) == (("low", "high", "unknown"), "unknown")
 
     def test_a_use_case_lists_the_names_it_replaced(self):
         use_cases = {u.name: u for u in TypeRegistry(_DECLARED).vocabulary().use_cases}
@@ -516,12 +536,18 @@ class TestVocabulary:
             TypeRegistry(data).vocabulary()
 
     def test_the_shipped_registry_offers_only_overrides_it_accepts(self, registry: TypeRegistry):
-        for option in registry.vocabulary().ch_override_options:
+        options = registry.vocabulary().ch_override_options
+
+        assert options
+        for option in options:
             registry.validate_ch_override(
                 (option.template or option.value).format(
                     **{parameter.name: 8 for parameter in option.parameters}
                 )
             )
+
+    def test_the_shipped_registry_describes_every_use_case(self, registry: TypeRegistry):
+        assert all(entry.description for entry in registry.vocabulary().use_cases)
 
     def test_the_shipped_registry_labels_every_entry(self, registry: TypeRegistry):
         vocabulary = registry.vocabulary()

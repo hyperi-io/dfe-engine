@@ -52,6 +52,16 @@ class TestSchemaVocabulary:
         assert use_cases["exact_match"]["retired_names"] == ["bloom"]
         assert not {"fulltext", "bloom"} & set(use_cases)
 
+    def test_cardinality_is_offered_with_its_default_and_the_retired_spelling(
+        self, client, admin_headers
+    ):
+        body = client.get(self.URL, headers=admin_headers).json()
+
+        assert body["cardinality"]["values"] == ["low", "high", "unknown"]
+        assert body["cardinality"]["default"] == "unknown"
+        assert set(body["cardinality"]["labels"]) == {"low", "high", "unknown"}
+        assert body["cardinality"]["retired_attributes"] == {"lowcardinality": "low"}
+
     def test_the_retired_lowcardinality_attribute_is_not_offered(self, client, admin_headers):
         body = client.get(self.URL, headers=admin_headers).json()
 

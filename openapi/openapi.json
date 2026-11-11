@@ -50429,6 +50429,9 @@
       },
       "SchemaVocabulary": {
         "properties": {
+          "cardinality": {
+            "$ref": "#/components/schemas/VocabularyCardinality"
+          },
           "primitives": {
             "items": {
               "$ref": "#/components/schemas/VocabularyPrimitive"
@@ -50460,6 +50463,7 @@
         },
         "type": "object",
         "required": [
+          "cardinality",
           "primitives",
           "use_cases",
           "attributes",
@@ -56103,6 +56107,47 @@
         ],
         "title": "VocabularyAttribute",
         "description": "An attribute a column may carry."
+      },
+      "VocabularyCardinality": {
+        "properties": {
+          "values": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Values"
+          },
+          "default": {
+            "type": "string",
+            "title": "Default",
+            "description": "What a column that declares none is read as."
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels",
+            "description": "The label to show for each value."
+          },
+          "retired_attributes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Retired Attributes",
+            "description": "A retired attribute and the cardinality a column holding it reads as."
+          }
+        },
+        "type": "object",
+        "required": [
+          "values",
+          "default",
+          "labels",
+          "retired_attributes"
+        ],
+        "title": "VocabularyCardinality",
+        "description": "The cardinalities a column may declare."
       },
       "VocabularyChOverride": {
         "properties": {

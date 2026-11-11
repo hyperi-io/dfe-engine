@@ -637,9 +637,21 @@ class VocabularyChOverride(_FromRegistry):
     hint: str = Field(description="A note to show beside the option, empty when there is none.")
 
 
+class VocabularyCardinality(_FromRegistry):
+    """The cardinalities a column may declare."""
+
+    values: list[str]
+    default: str = Field(description="What a column that declares none is read as.")
+    labels: dict[str, str] = Field(description="The label to show for each value.")
+    retired_attributes: dict[str, str] = Field(
+        description="A retired attribute and the cardinality a column holding it reads as."
+    )
+
+
 class SchemaVocabulary(_FromRegistry):
     """What a schema form may offer, read from the dfe-schemas registry the engine runs."""
 
+    cardinality: VocabularyCardinality
     primitives: list[VocabularyPrimitive]
     use_cases: list[VocabularyUseCase]
     attributes: list[VocabularyAttribute]
@@ -656,6 +668,7 @@ def get_schema_vocabulary(user: CurrentUser) -> SchemaVocabulary:
     vocabulary = TypeRegistry.default().vocabulary()
     return SchemaVocabulary.model_validate(
         {
+            "cardinality": vocabulary.cardinality,
             "primitives": vocabulary.primitives,
             "use_cases": vocabulary.use_cases,
             "attributes": vocabulary.attributes,
