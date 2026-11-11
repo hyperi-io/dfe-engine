@@ -19,8 +19,8 @@ the same needle value outside it, so a query that ignores the window returns it.
 """
 
 import ipaddress
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -126,6 +126,7 @@ class Case:
         tail: What follows the WHERE.
         index: The header column whose index is measured, when *column* is None.
         window: Replaces the header table's time window.
+        exact: Settings the row check runs under, for an index whose answer is approximate.
     """
 
     id: str
@@ -136,6 +137,7 @@ class Case:
     tail: str = "ORDER BY row_id"
     index: str | None = None
     window: str | None = None
+    exact: Mapping[str, str] = field(default_factory=dict, hash=False)
 
     @property
     def index_column(self) -> str:
@@ -214,6 +216,9 @@ KS_MAP = Column(
 # Directions spread over the whole sphere, and needles exactly on the query vector.
 # The outside row sits just off it: a vector index returns its k nearest before the
 # WHERE runs, so a fourth exact tie outside the window can take a needle's place.
+# HNSW is approximate and its graph differs per build, so the rows are checked under
+# prefilter, an exact search over the window. The plan check reads the default query.
+_VECTOR_EXACT = {"vector_search_filter_strategy": "prefilter"}
 SIM_VEC = Column(
     "sim_vec",
     {"type": "vector", "use_case": "similarity_search(4)"},
@@ -313,6 +318,7 @@ CASES: tuple[Case, ...] = (
         NEEDLE_ROWS,
         gate="used",
         tail=f"ORDER BY cosineDistance(sim_vec, [0.0, 0.0, 0.0, 1.0]) LIMIT {len(NEEDLES)}",
+        exact=_VECTOR_EXACT,
     ),
 )
 
