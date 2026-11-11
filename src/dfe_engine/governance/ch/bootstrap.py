@@ -126,9 +126,30 @@ def service_roles_for(settings: Any) -> list[ChServiceRole]:
     }
     reader = str(catalogue()["view_reader_role"])
     return [
-        r.model_copy(update={"settings": {**r.settings, **budgets}}) if r.role() == reader else r
+        r.model_copy(update={"settings": _with_budgets(r.settings, budgets)})
+        if r.role() == reader
+        else r
         for r in DEFAULT_SERVICE_ROLES
     ]
+
+
+def _with_budgets(profile: dict[str, Any], budgets: dict[str, int]) -> dict[str, Any]:
+    """``profile`` with each budget as its setting's value, keeping the catalogue's constraint.
+
+    A ceiling equal to the old value is a cap at the value, so it moves to the
+    budget. Any other ceiling stays, raised to the budget where it is lower.
+    """
+    merged = dict(profile)
+    for name, budget in budgets.items():
+        setting = profile.get(name)
+        if not isinstance(setting, dict):
+            merged[name] = budget
+            continue
+        merged[name] = {**setting, "value": budget}
+        if "max" in setting:
+            pinned = setting["max"] == setting["value"]
+            merged[name]["max"] = budget if pinned else max(setting["max"], budget)
+    return merged
 
 
 def provided_service_passwords() -> dict[str, str]:

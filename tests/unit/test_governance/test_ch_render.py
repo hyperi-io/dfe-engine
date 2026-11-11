@@ -370,13 +370,22 @@ class TestDefaultTiers:
             "hunt": "hunt_tier_2",
         }
 
-    def test_locked_memory_and_timeouts(self):
+    @pytest.mark.parametrize(
+        ("tier", "setting", "rendered"),
+        [
+            ("analyst_tier_1", "max_memory_usage", "17179869184 MIN 1 MAX 17179869184"),
+            ("analyst_tier_1", "max_execution_time", "600 MIN 1 MAX 600"),
+            # HyperDX sends max_execution_time=60 on every query, so no time cap sits below it.
+            ("analyst_tier_3", "max_execution_time", "2 MIN 1 MAX 60"),
+            ("hunt_tier_2", "max_execution_time", "120 MIN 1 MAX 120"),
+            ("hunt_tier_3", "max_memory_usage", "1073741824 MIN 1 MAX 1073741824"),
+            # HyperDX's key queries send max_rows_to_read=0, so it stays a plain value.
+            ("analyst_tier_2", "max_rows_to_read", "0"),
+        ],
+    )
+    def test_locked_memory_and_timeouts(self, tier, setting, rendered):
         by_name = {t.name: t for t in DEFAULT_TIERS}
-        assert by_name["analyst_tier_1"].settings["max_memory_usage"] == 17179869184
-        assert by_name["analyst_tier_1"].settings["max_execution_time"] == 600
-        assert by_name["analyst_tier_3"].settings["max_execution_time"] == 2
-        assert by_name["hunt_tier_2"].settings["max_execution_time"] == 120
-        assert by_name["hunt_tier_3"].settings["max_memory_usage"] == 1073741824
+        assert f"{setting} = {rendered}" in _joined(render_tier(by_name[tier]))
 
     def test_analyst_readonly_hunt_not(self):
         by_name = {t.name: t for t in DEFAULT_TIERS}
@@ -412,6 +421,10 @@ class TestDefaultTiers:
         """A renamed data database reaches the grants."""
         by_name = {t.name: t for t in resolve_grant_databases(DEFAULT_TIERS, "acme")}
         assert "SELECT ON acme.*" in by_name["analyst_tier_2"].grants
+
+    def test_a_constraint_outside_its_bounds_is_refused_at_edit_time(self):
+        with pytest.raises(ValueError, match="outside"):
+            ChTier(name="t", settings={"max_execution_time": {"value": 90, "min": 1, "max": 60}})
 
     def test_every_default_tier_renders_profile_role_quota(self):
         for t in DEFAULT_TIERS:

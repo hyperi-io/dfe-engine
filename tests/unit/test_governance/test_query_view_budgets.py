@@ -28,24 +28,37 @@ def _reader(settings: DFESettings):
     [
         pytest.param(
             {"max_rows_to_read": 123, "max_memory_usage": 456, "max_execution_time": 7},
-            ["max_execution_time = 7", "max_memory_usage = 456", "max_rows_to_read = 123"],
+            [
+                "max_execution_time = 7 MIN 1 MAX 60,",
+                "max_memory_usage = 456 MIN 1 MAX 456,",
+                "max_rows_to_read = 123,",
+            ],
             id="configured",
         ),
         pytest.param(
             {},
             [
-                "max_execution_time = 30",
-                "max_memory_usage = 2147483648",
-                "max_rows_to_read = 10000000",
+                "max_execution_time = 30 MIN 1 MAX 60,",
+                "max_memory_usage = 2147483648 MIN 1 MAX 2147483648,",
+                "max_rows_to_read = 10000000,",
             ],
             id="defaults",
+        ),
+        pytest.param(
+            {"max_execution_time": 120, "max_memory_usage": 8589934592},
+            [
+                "max_execution_time = 120 MIN 1 MAX 120,",
+                "max_memory_usage = 8589934592 MIN 1 MAX 8589934592,",
+            ],
+            id="above-the-catalogue-ceiling",
         ),
     ],
 )
 def test_the_reader_profile_carries_the_configured_budgets(budgets, rendered):
     settings = DFESettings(env="dev", query_views=QueryViewSettings(**budgets))
 
-    ddl = "\n".join(render_service_role(_reader(settings)))
+    # Every item then ends in a comma, so `MAX 60,` cannot match `MAX 600,`.
+    ddl = "\n".join(s + "," for s in render_service_role(_reader(settings)))
 
     for setting in rendered:
         assert setting in ddl
@@ -57,6 +70,12 @@ def test_only_the_reader_changes():
 
     others = [r for r in service_roles_for(settings) if r.name != "query_reader"]
     assert others == [r for r in DEFAULT_SERVICE_ROLES if r.name != "query_reader"]
+
+
+def test_a_reader_budget_of_zero_seconds_is_refused():
+    """Zero is unlimited to ClickHouse, which the reader's time constraint forbids."""
+    with pytest.raises(ValueError, match="max_execution_time"):
+        QueryViewSettings(max_execution_time=0)
 
 
 def test_a_view_request_cannot_ask_for_longer_than_the_reader_budget():

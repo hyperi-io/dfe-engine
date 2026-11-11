@@ -765,6 +765,7 @@ class QueryViewSettings(BaseModel):
     max_timeout: int = Field(default=300, description="Maximum allowed timeout in seconds")
     max_execution_time: int = Field(
         default=30,
+        ge=1,
         description="ClickHouse settings profile max_execution_time (seconds)",
     )
     max_rows_to_read: int = Field(
