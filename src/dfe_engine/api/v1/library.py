@@ -304,6 +304,11 @@ def _version_summary(found: library.ArtifactVersion) -> VersionSummary:
     )
 
 
+def _max_artifact_bytes(request: Request) -> int:
+    """The deployment's cap on one artefact version, in bytes."""
+    return request.app.state.settings.deployment.library_max_artifact_bytes
+
+
 def _validate(request: Request, language: str, content: str) -> ValidationModel:
     """Check authored content against this deployment's validation posture."""
     posture = request.app.state.settings.transform_validation
@@ -526,7 +531,11 @@ def create_artifact(
         checked = _validate(request, artifact_kind.language, body.content)
         try:
             version, _, plan = library.publish(
-                doc, content=body.content, actor=user.user_id, message=body.message
+                doc,
+                content=body.content,
+                actor=user.user_id,
+                message=body.message,
+                max_bytes=_max_artifact_bytes(request),
             )
         except library.InvalidArtifactError as exc:
             raise ProblemError(400, str(exc), code="invalid_content") from exc
@@ -687,6 +696,7 @@ def publish_version(
             description=body.description,
             message=body.message,
             version=body.version,
+            max_bytes=_max_artifact_bytes(request),
         )
     except library.InvalidArtifactError as exc:
         raise ProblemError(400, str(exc), code="invalid_content") from exc

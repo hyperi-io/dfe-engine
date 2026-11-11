@@ -15,6 +15,7 @@ import pytest
 from dfe_engine.appmgmt import catalogue, library
 from dfe_engine.appmgmt.links import LIBRARY_CLASS
 from dfe_engine.gitcrud.versioned import VersionConflictError, VersionedDoc
+from dfe_engine.settings import LIBRARY_MAX_ARTIFACT_BYTES
 from dfe_engine.yaml_utils import yaml_dump_string
 
 VRL_SOURCE = ". = parse_json!(.message)\n"
@@ -85,9 +86,19 @@ class TestDigest:
         with pytest.raises(library.InvalidArtifactError, match="base64"):
             library.digest_of(wasm_kind, "not base64!!")
 
-    def test_oversized_content_is_refused(self, vrl_kind):
+    @pytest.mark.parametrize(
+        ("given", "size"),
+        [
+            pytest.param({}, LIBRARY_MAX_ARTIFACT_BYTES + 1, id="default"),
+            pytest.param({"max_bytes": 100}, 101, id="configured"),
+        ],
+    )
+    def test_oversized_content_is_refused(self, vrl_kind, given, size):
         with pytest.raises(library.InvalidArtifactError, match="limit"):
-            library.validate_content(vrl_kind, "x" * (library.MAX_ARTIFACT_BYTES + 1))
+            library.validate_content(vrl_kind, "x" * size, **given)
+
+    def test_content_under_a_raised_limit_is_kept(self, vrl_kind):
+        library.validate_content(vrl_kind, "x" * (LIBRARY_MAX_ARTIFACT_BYTES + 1), max_bytes=10**8)
 
     def test_control_characters_are_refused(self, vrl_kind):
         with pytest.raises(library.InvalidArtifactError, match="control characters"):

@@ -89,11 +89,11 @@ def validate_source_name(name: str) -> str:
 
 SourceMatchOperator = Literal[
     "equals",
-    "not_equals",
     "exists",
     "includes",
     "starts_with",
     "ends_with",
+    "not_equals",
     "always",
 ]
 
@@ -328,12 +328,21 @@ class SchemaColumn(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-# Compiled-in header an unauthored source inherits, until a deploy-repo override
-# replaces it. SourceHeader, the table-defaults resolver and ClickHouseSettings
-# all read these so the three cannot drift.
+# Header an unauthored source inherits, until a deploy-repo override replaces it.
+# SourceHeader, the table-defaults resolver and ClickHouseSettings all read these.
 DEFAULT_HEADER_TYPE = "timeseries"
-# 1.0.3 fills _org_id from the _org_id the first hop stamps, where earlier ones read a sender's org_id.
-DEFAULT_HEADER_VERSION = "1.0.3"
+
+
+@cache
+def inherited_header_version() -> str:
+    """The version of the default header an unauthored source inherits.
+
+    The ``current`` marker of that profile in dfe-schemas, so a new header version
+    reaches new sources with the dfe-schemas release that ships it.
+    """
+    from dfe_engine.schema.schema_loader import current_profile_version
+
+    return current_profile_version(DEFAULT_HEADER_TYPE)
 
 
 class SourceHeader(BaseModel):
@@ -345,8 +354,8 @@ class SourceHeader(BaseModel):
         description="Profile name (timeseries, minimal, passthrough)",
     )
     version: str = Field(
-        default=DEFAULT_HEADER_VERSION,
-        description="Common header version (semver)",
+        default_factory=inherited_header_version,
+        description="Common header version (semver); the profile's current version when omitted",
     )
 
 
@@ -359,7 +368,11 @@ class SourceMatch(BaseModel):
     """
 
     # One schema for request and response, which the pruning serializer would otherwise split.
-    model_config = ConfigDict(json_schema_mode_override="validation")
+    # The nesting limit is published so the console reads it instead of restating it.
+    model_config = ConfigDict(
+        json_schema_mode_override="validation",
+        json_schema_extra={"x-dfe-max-nesting": MATCH_NESTING_LIMIT},
+    )
 
     field: str | None = Field(
         default=None,
@@ -379,6 +392,7 @@ class SourceMatch(BaseModel):
             "``always`` matches every record and is reserved for the ``default`` "
             "source. Absent on a group"
         ),
+        json_schema_extra={"x-dfe-reserved-values": list(sorted(RULELESS_OPERATORS))},
     )
     value: str = Field(
         default="",
@@ -667,6 +681,11 @@ def _credential_reference(value: str | None) -> str | None:
     return reference
 
 
+# dfe-fetcher's RESOLVED_PREFIXES (crates/core/src/secret.rs:35), verbatim. Its
+# UNRESOLVED_PREFIXES entry ``aws:`` is deliberately absent: that build carries no
+# provider for it, so such a reference reaches its consumer as literal text.
+_CREDENTIAL_REFERENCE_PREFIXES = ("vault:", "bao:", "openbao:", "env:", "file:")
+
 _CREDENTIAL_REF_DESCRIPTION = (
     "Where the customer's pipeline keeps the Kafka principal it authenticates as, e.g. "
     "vault:kv/acme/kafka/vector. A reference only: the engine never reads, stores or "
@@ -737,7 +756,11 @@ class ExternalPipeline(BaseModel):
     replaced with the source's own org or name and counted, never rejected.
     """
 
-    credential_ref: str | None = Field(default=None, description=_CREDENTIAL_REF_DESCRIPTION)
+    credential_ref: str | None = Field(
+        default=None,
+        description=_CREDENTIAL_REF_DESCRIPTION,
+        json_schema_extra={"x-dfe-reference-prefixes": list(_CREDENTIAL_REFERENCE_PREFIXES)},
+    )
     org: str | None = Field(
         default=None,
         pattern=ORG_NAME_PATTERN,
@@ -993,11 +1016,6 @@ that tests which source a record is has this as its field.
 
 # Keys the engine sets on the compiled fetcher stanza; a source may not carry them.
 _FETCHER_ENGINE_KEYS = frozenset({"enabled", "topic"})
-
-# dfe-fetcher's RESOLVED_PREFIXES (crates/core/src/secret.rs:35), verbatim. Its
-# UNRESOLVED_PREFIXES entry ``aws:`` is deliberately absent: that build carries no
-# provider for it, so such a reference reaches its consumer as literal text.
-_CREDENTIAL_REFERENCE_PREFIXES = ("vault:", "bao:", "openbao:", "env:", "file:")
 
 # Contact details the logger masks are personal data, not secrets, so a source may commit them.
 _PERSONAL_WORDS = frozenset({"email", "phone"})

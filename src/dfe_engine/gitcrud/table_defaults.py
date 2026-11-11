@@ -30,11 +30,11 @@ from scalo.logger import logger
 from dfe_engine.source.engine_registry import InvalidEngineError
 from dfe_engine.source.models import (
     DEFAULT_HEADER_TYPE,
-    DEFAULT_HEADER_VERSION,
     Source,
     SourceHeader,
     SourceSchema,
     engine_registry,
+    inherited_header_version,
     next_major_source_version,
 )
 
@@ -97,7 +97,7 @@ def _fallback_header_type(settings: Any) -> str:
 
 
 def _fallback_header_version(settings: Any) -> str:
-    return getattr(settings.clickhouse, "default_header_version", "") or DEFAULT_HEADER_VERSION
+    return getattr(settings.clickhouse, "default_header_version", "") or inherited_header_version()
 
 
 def _fallback_engine(settings: Any) -> str:
@@ -279,7 +279,7 @@ def commit_patch(
 
     fallback_type = DEFAULT_HEADER_TYPE if settings is None else _fallback_header_type(settings)
     fallback_version = (
-        DEFAULT_HEADER_VERSION if settings is None else _fallback_header_version(settings)
+        inherited_header_version() if settings is None else _fallback_header_version(settings)
     )
     current = _read_doc(crud, NAME)
     header_type = _next_stored(

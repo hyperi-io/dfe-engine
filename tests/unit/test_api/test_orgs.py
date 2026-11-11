@@ -383,10 +383,12 @@ class _FakeClickHouse:
     def __init__(self, tables: list[str], ids: list[str]) -> None:
         self.tables = tables
         self.ids = ids
+        self.id_reads: list[tuple[str, dict | None]] = []
 
     def execute(self, sql: str, parameters=None, settings=None):
         if "system.columns" in sql:
             return [(t,) for t in self.tables]
+        self.id_reads.append((sql, settings))
         return [(i,) for i in self.ids]
 
 
@@ -404,6 +406,30 @@ class TestAvailableOrgIds:
 
         assert resp.status_code == 200, resp.text
         assert resp.json()["org_ids"] == ["acme", "globex"]
+
+    @pytest.mark.parametrize(
+        ("configured", "asked", "limit"),
+        [
+            pytest.param({}, "", 200, id="default"),
+            pytest.param({"available_ids_limit": 5}, "", 5, id="configured"),
+            pytest.param({"available_ids_limit": 5}, "?limit=9", 9, id="caller-wins"),
+        ],
+    )
+    def test_the_limit_and_timeout_come_from_settings(
+        self, client, app, admin_headers, configured, asked, limit
+    ):
+        ch = _FakeClickHouse(["filebeat"], ["acme"])
+        _use(app, ch)
+        app.state.settings.orgs.available_ids_timeout_seconds = 3
+        for key, value in configured.items():
+            setattr(app.state.settings.orgs, key, value)
+
+        resp = client.get(f"/api/v1/orgs/available-ids{asked}", headers=admin_headers)
+
+        assert resp.status_code == 200, resp.text
+        sql, settings = ch.id_reads[0]
+        assert sql.endswith(f"LIMIT {limit}")
+        assert settings == {"max_execution_time": 3}
 
     def test_a_deployment_with_no_ingested_data_offers_nothing(self, client, app, admin_headers):
         _use(app, _FakeClickHouse([], []))

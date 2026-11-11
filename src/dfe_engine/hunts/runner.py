@@ -58,15 +58,13 @@ from dfe_engine.hunts.worker import (
     NoHuntCustomers,
     UnknownHuntCustomers,
 )
-
-FAILURE_BACKOFF_INITIAL_SECONDS = 30.0
-"""The wait after a hunt's first failed fire, two polls at the default cadence."""
-
-FAILURE_BACKOFF_MAX_SECONDS = 600.0
-"""The longest wait between attempts, and so the longest a fixed hunt waits to resume."""
-
-FAILURE_REMINDER_SECONDS = 3600.0
-"""How often a hunt that keeps failing the same way is logged again."""
+from dfe_engine.settings import (
+    FAILURE_BACKOFF_INITIAL_SECONDS,
+    FAILURE_BACKOFF_MAX_SECONDS,
+    FAILURE_REMINDER_SECONDS,
+    PHASE_SPREAD_FRACTION,
+    HuntsSettings,
+)
 
 EMPTY_QUERY_REASON = "empty_query"
 """The failure reason for a hunt whose rules compiled to nothing."""
@@ -109,9 +107,11 @@ class HuntFailures:
     it reloads the specs, and a rebuild must not restart a hunt's wait.
 
     Args:
-        initial_seconds: The wait after the first failure; each further failure doubles it.
-        max_seconds: The cap on that wait.
-        reminder_seconds: How often a failure that has not changed is logged again.
+        initial_seconds: The wait after the first failure; each further failure doubles it
+            (``hunts.failure_backoff_initial_seconds``).
+        max_seconds: The cap on that wait (``hunts.failure_backoff_max_seconds``).
+        reminder_seconds: How often a failure that has not changed is logged again
+            (``hunts.failure_reminder_seconds``).
         jitter: Spreads each wait, so hunts that failed together retry apart.
     """
 
@@ -128,6 +128,18 @@ class HuntFailures:
         self._reminder = reminder_seconds
         self._jitter = jitter
         self._failing: dict[str, _Failing] = {}
+
+    @classmethod
+    def from_settings(
+        cls, hunts: HuntsSettings, *, jitter: Callable[[float], float] = jittered
+    ) -> HuntFailures:
+        """The tracker a deployment's ``hunts.failure_*`` settings describe."""
+        return cls(
+            initial_seconds=hunts.failure_backoff_initial_seconds,
+            max_seconds=hunts.failure_backoff_max_seconds,
+            reminder_seconds=hunts.failure_reminder_seconds,
+            jitter=jitter,
+        )
 
     def retry_at(self, hunt_id: str) -> float | None:
         """When a failing hunt may next be tried, or None when it is not failing."""
@@ -234,8 +246,11 @@ class HuntRunner:
         poll_seconds: float = 15.0,
         metrics: HuntRunnerMetrics | None = None,
         failures: HuntFailures | None = None,
+        phase_fraction: float = PHASE_SPREAD_FRACTION,
     ) -> None:
         self._coord = coordinator
+        # hunts.phase_spread_fraction: the same value publish_schedule writes for KEDA.
+        self._phase_fraction = phase_fraction
         self._worker = worker
         self._specs = specs
         self._cap = cap
@@ -261,7 +276,7 @@ class HuntRunner:
         a fire the API wrote down. Both go through the same claim, so a requested
         run cannot double-run one already in flight.
         """
-        fire = latest_fire(spec.hunt_id, spec.interval_seconds, now)
+        fire = latest_fire(spec.hunt_id, spec.interval_seconds, now, self._phase_fraction)
         if not self._already_run(spec.hunt_id, fire):
             return fire
         return requested.get(spec.hunt_id)

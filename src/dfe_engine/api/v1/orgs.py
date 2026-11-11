@@ -59,7 +59,7 @@ from dfe_engine.auth import Scope
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.gitcrud.routing import WriteOutcome
-from dfe_engine.orgs.available_ids import DEFAULT_LIMIT, OrgIdDiscoveryError
+from dfe_engine.orgs.available_ids import OrgIdDiscoveryError
 from dfe_engine.orgs.available_ids import available_org_ids as discover_available_org_ids
 from dfe_engine.orgs.lifecycle import OrgLifecycleManager
 from dfe_engine.orgs.models import ORG_NAME_PATTERN, Org, ReservedOrgError, TenantId
@@ -233,11 +233,14 @@ async def available_org_ids(
     user: CurrentUser,
     ch: ClickHouseClient,
     settings: Settings,
-    limit: int = Query(
-        default=DEFAULT_LIMIT,
+    limit: int | None = Query(
+        default=None,
         ge=1,
         le=1000,
-        description="Most tenant ids to return -- a suggestion list, not an export",
+        description=(
+            "Most tenant ids to return -- a suggestion list, not an export. "
+            "Unset takes orgs.available_ids_limit (200 by default)"
+        ),
     ),
 ) -> AvailableOrgIdsResponse:
     """Tenant ids the deployment's data actually carries (admin only).
@@ -248,7 +251,12 @@ async def available_org_ids(
     """
     database = settings.clickhouse.effective_data_database
     try:
-        org_ids = discover_available_org_ids(ch, database=database, limit=limit)
+        org_ids = discover_available_org_ids(
+            ch,
+            database=database,
+            limit=limit or settings.orgs.available_ids_limit,
+            timeout_seconds=settings.orgs.available_ids_timeout_seconds,
+        )
     except OrgIdDiscoveryError as exc:
         raise backend_failure(
             503,

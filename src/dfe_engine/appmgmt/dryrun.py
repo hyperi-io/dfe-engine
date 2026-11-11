@@ -22,18 +22,17 @@ rather than raising.
 """
 
 import json
+import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from dfe_engine.settings import (
+    DRY_RUN_MAX_EVENTS,
+    DRY_RUN_MAX_OUTPUT_BYTES,
+    DRY_RUN_TIMEOUT_SECONDS,
+)
 from dfe_engine.yaml_utils import YAMLError, yaml_load_string
-
-MAX_EVENTS = 100
-"""Hard ceiling on events per run, whatever the caller asks for."""
-
-MAX_OUTPUT_BYTES = 256 * 1024
-"""Ceiling on the serialised output of one run."""
-
-DEFAULT_TIMEOUT_SECONDS = 10.0
 
 
 class DryRunStatus(StrEnum):
@@ -101,6 +100,34 @@ def _unavailable(message: str) -> DryRunResult:
     return DryRunResult(status=DryRunStatus.UNAVAILABLE, backend="vectordotdev", message=message)
 
 
+def _within[T](timeout: float, call: Callable[[], T]) -> T:
+    """Run ``call`` and stop waiting for it after ``timeout`` seconds.
+
+    The backend is a native call that cannot be interrupted, so it runs on a daemon
+    thread that is abandoned when the wait ends. VRL has no loops, so the abandoned
+    call finishes on its own rather than holding a core.
+
+    Raises:
+        TimeoutError: ``call`` had not returned in time.
+    """
+    box: dict[str, object] = {}
+
+    def run() -> None:
+        try:
+            box["value"] = call()
+        except BaseException as exc:
+            box["error"] = exc
+
+    worker = threading.Thread(target=run, name="dfe-dry-run", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        raise TimeoutError(f"no answer within {timeout}s")
+    if "error" in box:
+        raise box["error"]  # ty: ignore[invalid-raise]  # stored from the except above
+    return box["value"]  # ty: ignore[invalid-return-type]  # set when no error was stored
+
+
 def _run_vrl(program: str, events: list[str], timeout: float) -> DryRunResult:
     """Execute a VRL program over events through vectordotdev, if it is installed."""
     try:
@@ -111,7 +138,7 @@ def _run_vrl(program: str, events: list[str], timeout: float) -> DryRunResult:
         return _unavailable(f"vectordotdev is not installed: {exc}")
 
     try:
-        raw = quick_vrl_test(program, events, max_events=len(events))
+        raw = _within(timeout, lambda: quick_vrl_test(program, events, max_events=len(events)))
     except ImportError as exc:
         # The package importing is not proof its compiled bindings are present.
         return _unavailable(f"vectordotdev bindings are unavailable: {exc}")
@@ -119,7 +146,7 @@ def _run_vrl(program: str, events: list[str], timeout: float) -> DryRunResult:
         return DryRunResult(
             status=DryRunStatus.FAILED,
             backend="vectordotdev",
-            message=f"the program did not finish within {timeout:.0f}s",
+            message=f"the program did not finish within {timeout:g}s",
         )
     except Exception as exc:
         return _unavailable(f"vectordotdev failed to run: {exc}")
@@ -222,21 +249,24 @@ def run_language(
     events: list[str],
     *,
     enabled: bool,
-    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    timeout: float = DRY_RUN_TIMEOUT_SECONDS,
+    max_events: int = DRY_RUN_MAX_EVENTS,
+    max_output_bytes: int = DRY_RUN_MAX_OUTPUT_BYTES,
 ) -> DryRunResult:
     """Run a program written in ``language`` over ``events``.
 
     ``enabled`` is the deployment's switch; off reports ``disabled`` rather than
     silently returning nothing, so a caller can tell "ran and did nothing" from
-    "never ran". Events are capped at :data:`MAX_EVENTS` and the result is marked
-    truncated when the cap bites.
+    "never ran". Events are capped at ``max_events``, the serialised output at
+    ``max_output_bytes`` and the run at ``timeout`` seconds, which a deployment sets as
+    ``transform_validation.dry_run_*``. The result is marked truncated when a cap bites.
     """
     if not enabled:
         return DryRunResult(status=DryRunStatus.DISABLED)
     if not events:
         return DryRunResult(status=DryRunStatus.COMPLETED, message="no events to run over")
 
-    capped = events[:MAX_EVENTS]
+    capped = events[:max_events]
     truncated = len(events) > len(capped)
 
     if language == "vrl":
@@ -251,10 +281,10 @@ def run_language(
         )
 
     result = _run_vrl(source, capped, timeout)
-    return _bounded(result, truncated)
+    return _bounded(result, truncated, max_output_bytes)
 
 
-def _bounded(result: DryRunResult, truncated: bool) -> DryRunResult:
+def _bounded(result: DryRunResult, truncated: bool, max_output_bytes: int) -> DryRunResult:
     """Drop trailing events once the serialised output passes the size ceiling."""
     if result.status is not DryRunStatus.COMPLETED:
         return result
@@ -262,7 +292,7 @@ def _bounded(result: DryRunResult, truncated: bool) -> DryRunResult:
     size = 0
     for outcome in result.events:
         size += len(outcome.before) + len(outcome.after) + len(outcome.error)
-        if size > MAX_OUTPUT_BYTES:
+        if size > max_output_bytes:
             truncated = True
             break
         kept.append(outcome)

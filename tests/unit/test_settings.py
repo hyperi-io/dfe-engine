@@ -617,6 +617,102 @@ class TestEnvOverrides:
         with pytest.raises(ValidationError):
             HuntsSettings(**{field: value})
 
+    @pytest.mark.parametrize(
+        ("path", "env", "default", "raw", "expected"),
+        [
+            ("hunts.phase_spread_fraction", "HUNTS_PHASE_SPREAD_FRACTION", 0.8, "0.5", 0.5),
+            (
+                "hunts.failure_backoff_initial_seconds",
+                "HUNTS_FAILURE_BACKOFF_INITIAL_SECONDS",
+                30.0,
+                "5",
+                5.0,
+            ),
+            (
+                "hunts.failure_backoff_max_seconds",
+                "HUNTS_FAILURE_BACKOFF_MAX_SECONDS",
+                600.0,
+                "900",
+                900.0,
+            ),
+            (
+                "hunts.failure_reminder_seconds",
+                "HUNTS_FAILURE_REMINDER_SECONDS",
+                3600.0,
+                "60",
+                60.0,
+            ),
+            (
+                "transform_validation.dry_run_max_events",
+                "TRANSFORM_DRY_RUN_MAX_EVENTS",
+                100,
+                "25",
+                25,
+            ),
+            (
+                "transform_validation.dry_run_max_output_bytes",
+                "TRANSFORM_DRY_RUN_MAX_OUTPUT_BYTES",
+                262_144,
+                "1024",
+                1024,
+            ),
+            (
+                "transform_validation.dry_run_timeout_seconds",
+                "TRANSFORM_DRY_RUN_TIMEOUT_SECONDS",
+                10.0,
+                "2.5",
+                2.5,
+            ),
+            (
+                "deployment.max_replicas_ceiling",
+                "DEPLOYMENT_MAX_REPLICAS_CEILING",
+                1000,
+                "50",
+                50,
+            ),
+            (
+                "deployment.library_max_artifact_bytes",
+                "DEPLOYMENT_LIBRARY_MAX_ARTIFACT_BYTES",
+                8_388_608,
+                "1048576",
+                1_048_576,
+            ),
+            ("orgs.available_ids_limit", "ORGS_AVAILABLE_IDS_LIMIT", 200, "50", 50),
+            (
+                "orgs.available_ids_timeout_seconds",
+                "ORGS_AVAILABLE_IDS_TIMEOUT_SECONDS",
+                10,
+                "3",
+                3,
+            ),
+        ],
+    )
+    def test_tunables_ship_their_defaults_and_read_the_environment(
+        self, monkeypatch, path, env, default, raw, expected
+    ):
+        def read() -> Any:
+            node: Any = load_settings()
+            for part in path.split("."):
+                node = getattr(node, part)
+            return node
+
+        assert read() == default
+        monkeypatch.setenv(f"DFE_ENGINE_{env}", raw)
+        assert read() == expected
+
+    @pytest.mark.parametrize(
+        "given",
+        [
+            {"phase_spread_fraction": 0},
+            {"phase_spread_fraction": 1.5},
+            {"failure_backoff_initial_seconds": 0},
+            {"failure_backoff_initial_seconds": 60, "failure_backoff_max_seconds": 30},
+        ],
+    )
+    def test_hunt_tunables_refuse_what_cannot_schedule(self, given):
+        with pytest.raises(ValidationError):
+            HuntsSettings(**given)
+
     def test_multiple_overrides_at_once(self, monkeypatch):
         monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_HOST", "ch1.example.com")
         monkeypatch.setenv("DFE_ENGINE_CLICKHOUSE_PORT", "9000")

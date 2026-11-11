@@ -13,11 +13,14 @@ report ``unavailable``, never a pass.
 """
 
 import sys
+import threading
+import time
 import types
 
 import pytest
 
 from dfe_engine.appmgmt import dryrun
+from dfe_engine.settings import DRY_RUN_MAX_EVENTS
 
 EVENTS = ['{"a": 1}', '{"a": 2}', '{"a": 3}']
 
@@ -109,7 +112,14 @@ class TestOutcomes:
 
 
 class TestBounds:
-    def test_events_are_capped_and_the_cap_is_reported(self, fake_backend):
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [
+            pytest.param({}, DRY_RUN_MAX_EVENTS, id="default"),
+            pytest.param({"max_events": 7}, 7, id="configured"),
+        ],
+    )
+    def test_events_are_capped_and_the_cap_is_reported(self, fake_backend, given, expected):
         seen = {}
 
         def record(program, events, max_events):
@@ -117,17 +127,48 @@ class TestBounds:
             return list(events)
 
         fake_backend(record)
-        many = [f'{{"i": {i}}}' for i in range(dryrun.MAX_EVENTS + 25)]
-        result = dryrun.run_language("vrl", ".", many, enabled=True)
-        assert seen["count"] == dryrun.MAX_EVENTS
+        many = [f'{{"i": {i}}}' for i in range(DRY_RUN_MAX_EVENTS + 25)]
+        result = dryrun.run_language("vrl", ".", many, enabled=True, **given)
+        assert seen["count"] == expected
         assert result.truncated is True
 
-    def test_output_over_the_size_ceiling_is_cut(self, fake_backend):
+    @pytest.mark.parametrize(
+        ("given", "kept"),
+        [
+            pytest.param({}, "fewer", id="default"),
+            pytest.param({"max_output_bytes": 10**9}, "all", id="raised"),
+        ],
+    )
+    def test_output_over_the_size_ceiling_is_cut(self, fake_backend, given, kept):
         big = "x" * 40_000
         fake_backend(lambda program, events, max_events: [big for _ in events])
-        result = dryrun.run_language("vrl", ".", [big] * 10, enabled=True)
-        assert result.truncated is True
-        assert len(result.events) < 10
+        result = dryrun.run_language("vrl", ".", [big] * 10, enabled=True, **given)
+        if kept == "all":
+            assert len(result.events) == 10
+            assert result.truncated is False
+        else:
+            assert len(result.events) < 10
+            assert result.truncated is True
+
+
+class TestTimeout:
+    def test_a_slow_run_is_cut_off_at_the_configured_timeout(self, fake_backend):
+        release = threading.Event()
+        fake_backend(lambda program, events, max_events: release.wait(30) and list(events))
+        began = time.monotonic()
+        try:
+            result = dryrun.run_language("vrl", ".", EVENTS, enabled=True, timeout=0.2)
+            elapsed = time.monotonic() - began
+        finally:
+            release.set()
+        assert result.status is dryrun.DryRunStatus.FAILED
+        assert "did not finish within 0.2s" in result.message
+        assert elapsed < 5
+
+    def test_a_run_inside_the_timeout_is_not_cut(self, fake_backend):
+        fake_backend(lambda program, events, max_events: list(events))
+        result = dryrun.run_language("vrl", ".", EVENTS, enabled=True, timeout=5)
+        assert result.status is dryrun.DryRunStatus.COMPLETED
 
 
 class TestVectorYaml:

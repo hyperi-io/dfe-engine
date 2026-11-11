@@ -62,6 +62,21 @@ def test_next_due_is_derived_from_the_cron(client, admin_headers, created_hunt):
     assert row["next_due"] - now <= 300
 
 
+def test_next_due_follows_the_configured_phase_spread(client, app, admin_headers, created_hunt):
+    from dfe_engine.hunts.schedule import next_due, phase_offset
+
+    assert phase_offset(created_hunt, 300, 0.05) != phase_offset(created_hunt, 300)
+    app.state.settings.hunts.phase_spread_fraction = 0.05
+    before = int(time.time())
+    row = next(
+        item
+        for item in client.get("/api/v1/hunts", headers=admin_headers).json()["items"]
+        if item["name"] == created_hunt
+    )
+    after = int(time.time())
+    assert row["next_due"] in {next_due(created_hunt, 300, now, 0.05) for now in (before, after)}
+
+
 def test_queueing_a_run_says_so_rather_than_claiming_it_ran(client, admin_headers, created_hunt):
     resp = client.post(f"/api/v1/hunts/{created_hunt}/run", headers=admin_headers)
     # No ClickHouse here, so the queue write cannot land. It must say that, not 202.

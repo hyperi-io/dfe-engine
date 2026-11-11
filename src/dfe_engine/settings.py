@@ -25,9 +25,23 @@ from dfe_schemas.clickhouse import platform_override
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .names import MAX_NAME_LENGTH
+from .orgs.available_ids import DEFAULT_LIMIT as AVAILABLE_IDS_LIMIT
+from .orgs.available_ids import DEFAULT_TIMEOUT_SECONDS as AVAILABLE_IDS_TIMEOUT_SECONDS
 from .orgs.models import ORG_NAME_PATTERN, TenantId
 from .transport import SourceTransport
 from .yaml_utils import yaml_load
+
+
+def _inherited_header_type() -> str:
+    from .source.models import DEFAULT_HEADER_TYPE
+
+    return DEFAULT_HEADER_TYPE
+
+
+def _inherited_header_version() -> str:
+    from .source.models import inherited_header_version
+
+    return inherited_header_version()
 
 
 class ClickHouseCloudSettings(BaseModel):
@@ -186,9 +200,9 @@ class ClickHouseSettings(BaseModel):
     # declares its own; 0 disables the default.
     default_ttl_days: int = Field(default=90, ge=0)
     # What an unauthored source header inherits. A deploy-repo override replaces
-    # these; the strings are SourceHeader's compiled-in default.
-    default_header_type: str = Field(default="timeseries")
-    default_header_version: str = Field(default="1.0.3")
+    # these; the defaults are SourceHeader's, the version being the profile's ``current``.
+    default_header_type: str = Field(default_factory=_inherited_header_type)
+    default_header_version: str = Field(default_factory=_inherited_header_version)
     cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
     resilience: ClickHouseResilienceSettings = Field(default_factory=ClickHouseResilienceSettings)
     interactive_budget_seconds: float = Field(
@@ -230,6 +244,28 @@ SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS = 10
 MIN_WINDOW_OVERLAP_SECONDS = SAFE_HORIZON_COMMIT_ALLOWANCE_SECONDS
 WINDOW_OVERLAP_SECONDS = 120
 SAFE_HORIZON_MAX_DEFERRAL_SECONDS = 300
+
+# The share of a hunt's interval its phase offset may span. The runner, the schedule table KEDA
+# scales on and the API's next_due all read the one setting, so they agree on every fire time.
+PHASE_SPREAD_FRACTION = 0.8
+
+# The wait after a hunt's first failed fire is two polls at the default cadence, doubling per
+# failure up to the cap. A hunt that keeps failing the same way is logged again once an hour.
+FAILURE_BACKOFF_INITIAL_SECONDS = 30.0
+FAILURE_BACKOFF_MAX_SECONDS = 600.0
+FAILURE_REMINDER_SECONDS = 3600.0
+
+# What one dry run of an authored transform may read, write and take.
+DRY_RUN_MAX_EVENTS = 100
+DRY_RUN_MAX_OUTPUT_BYTES = 256 * 1024
+DRY_RUN_TIMEOUT_SECONDS = 10.0
+
+# A version is a file in a git repo, not an object in a blob store: the cap keeps a clone, a
+# checkout and an Argo sync proportionate to configuration.
+LIBRARY_MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
+
+# A typo in a replica ceiling should be refused, not scheduled.
+MAX_REPLICAS_CEILING = 1000
 
 # A plain database name, the only shape the rule guard compares a lookup's database against.
 LOOKUP_DATABASE_PATTERN = r"[A-Za-z_][A-Za-z0-9_-]*"
@@ -452,6 +488,41 @@ class HuntsSettings(BaseModel):
             "DFE_ENGINE_HUNTS_SAFE_HORIZON_MAX_DEFERRAL_SECONDS."
         ),
     )
+    phase_spread_fraction: float = Field(
+        default=PHASE_SPREAD_FRACTION,
+        gt=0,
+        le=1,
+        description=(
+            "The share of a hunt's interval its fire time may be offset by, so hunts on the "
+            "same interval do not all fire at once. The hunt runner, the schedule KEDA scales "
+            "on and the API's next_due read this one value, so a change needs the schedule "
+            "republished (dfe-hunt-runner materialise). DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION."
+        ),
+    )
+    failure_backoff_initial_seconds: float = Field(
+        default=FAILURE_BACKOFF_INITIAL_SECONDS,
+        gt=0,
+        description=(
+            "The wait after a hunt's first failed fire. Each further failure doubles it. "
+            "DFE_ENGINE_HUNTS_FAILURE_BACKOFF_INITIAL_SECONDS."
+        ),
+    )
+    failure_backoff_max_seconds: float = Field(
+        default=FAILURE_BACKOFF_MAX_SECONDS,
+        gt=0,
+        description=(
+            "The longest wait between attempts at a failing hunt, and so the longest a fixed "
+            "hunt waits to resume. DFE_ENGINE_HUNTS_FAILURE_BACKOFF_MAX_SECONDS."
+        ),
+    )
+    failure_reminder_seconds: float = Field(
+        default=FAILURE_REMINDER_SECONDS,
+        gt=0,
+        description=(
+            "How often a hunt that keeps failing the same way is logged again. "
+            "DFE_ENGINE_HUNTS_FAILURE_REMINDER_SECONDS."
+        ),
+    )
 
     @field_validator("hunt_dir")
     @classmethod
@@ -485,6 +556,15 @@ class HuntsSettings(BaseModel):
                     "every org's tables and queries"
                 )
         return list(dict.fromkeys(names))
+
+    @model_validator(mode="after")
+    def _backoff_cap_is_not_below_its_start(self) -> HuntsSettings:
+        if self.failure_backoff_max_seconds < self.failure_backoff_initial_seconds:
+            raise ValueError(
+                f"hunts.failure_backoff_max_seconds {self.failure_backoff_max_seconds} is below "
+                f"failure_backoff_initial_seconds {self.failure_backoff_initial_seconds}"
+            )
+        return self
 
 
 class ArtifactorySettings(BaseModel):
@@ -1060,6 +1140,24 @@ class DeploymentSettings(BaseModel):
             "app's own chart. DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR."
         ),
     )
+    max_replicas_ceiling: int = Field(
+        default=MAX_REPLICAS_CEILING,
+        gt=0,
+        description=(
+            "The most replicas a scaling dial update may ask for, as replica_count or "
+            "max_replicas. Above it the update is refused. "
+            "DFE_ENGINE_DEPLOYMENT_MAX_REPLICAS_CEILING."
+        ),
+    )
+    library_max_artifact_bytes: int = Field(
+        default=LIBRARY_MAX_ARTIFACT_BYTES,
+        gt=0,
+        description=(
+            "Largest library artefact version, in bytes. A version is a file in the deploy "
+            "repo, so the cap keeps a clone, a checkout and an Argo sync proportionate to "
+            "configuration. DFE_ENGINE_DEPLOYMENT_LIBRARY_MAX_ARTIFACT_BYTES."
+        ),
+    )
 
 
 class TransformValidationSettings(BaseModel):
@@ -1096,6 +1194,31 @@ class TransformValidationSettings(BaseModel):
             "dns_lookup and reverse_dns. Off by default, so a save that calls one is "
             "refused: they read the pod environment, which holds the Kafka credential, "
             "and reach other hosts. Applies whether or not validation is enabled."
+        ),
+    )
+    dry_run_max_events: int = Field(
+        default=DRY_RUN_MAX_EVENTS,
+        gt=0,
+        description=(
+            "Most events one dry run reads. A request for more is refused. "
+            "DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_EVENTS."
+        ),
+    )
+    dry_run_max_output_bytes: int = Field(
+        default=DRY_RUN_MAX_OUTPUT_BYTES,
+        gt=0,
+        description=(
+            "Ceiling on the serialised output of one dry run. Past it the trailing events "
+            "are dropped and the result is marked truncated. "
+            "DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_OUTPUT_BYTES."
+        ),
+    )
+    dry_run_timeout_seconds: float = Field(
+        default=DRY_RUN_TIMEOUT_SECONDS,
+        gt=0,
+        description=(
+            "Seconds one dry run may take before it is cut off. "
+            "DFE_ENGINE_TRANSFORM_DRY_RUN_TIMEOUT_SECONDS."
         ),
     )
 
@@ -1897,6 +2020,22 @@ class OrgsSettings(BaseModel):
             "{name, display_name, org_ids}."
         ),
     )
+    available_ids_limit: int = Field(
+        default=AVAILABLE_IDS_LIMIT,
+        gt=0,
+        description=(
+            "Tenant ids GET /orgs/available-ids returns when the caller names no limit. "
+            "DFE_ENGINE_ORGS_AVAILABLE_IDS_LIMIT."
+        ),
+    )
+    available_ids_timeout_seconds: int = Field(
+        default=AVAILABLE_IDS_TIMEOUT_SECONDS,
+        gt=0,
+        description=(
+            "Seconds the tenant id read may run in ClickHouse before it is cut off. "
+            "DFE_ENGINE_ORGS_AVAILABLE_IDS_TIMEOUT_SECONDS."
+        ),
+    )
 
 
 class DFESettings(BaseModel):
@@ -2177,6 +2316,12 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_HUNTS_MAX_DETECTIONS_PER_RUN_CEILING": "hunts.max_detections_per_run_ceiling",
             "DFE_ENGINE_HUNTS_WINDOW_OVERLAP_SECONDS": "hunts.window_overlap_seconds",
             "DFE_ENGINE_HUNTS_SAFE_HORIZON_MAX_DEFERRAL_SECONDS": "hunts.safe_horizon_max_deferral_seconds",
+            "DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_EVENTS": "transform_validation.dry_run_max_events",
+            "DFE_ENGINE_TRANSFORM_DRY_RUN_MAX_OUTPUT_BYTES": "transform_validation.dry_run_max_output_bytes",
+            "DFE_ENGINE_DEPLOYMENT_MAX_REPLICAS_CEILING": "deployment.max_replicas_ceiling",
+            "DFE_ENGINE_DEPLOYMENT_LIBRARY_MAX_ARTIFACT_BYTES": "deployment.library_max_artifact_bytes",
+            "DFE_ENGINE_ORGS_AVAILABLE_IDS_LIMIT": "orgs.available_ids_limit",
+            "DFE_ENGINE_ORGS_AVAILABLE_IDS_TIMEOUT_SECONDS": "orgs.available_ids_timeout_seconds",
             "DFE_ENGINE_DETECTION_GUARD_PREVIEW_WINDOW_MINUTES": "hunts.detection_guard.preview_window_minutes",
             "DFE_ENGINE_DETECTION_GUARD_PREVIEW_MAX_ROWS": "hunts.detection_guard.preview_max_rows",
             "DFE_ENGINE_DETECTION_GUARD_WARN_PER_DAY": "hunts.detection_guard.warn_per_day",
@@ -2225,6 +2370,11 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
         {
             "DFE_ENGINE_CLICKHOUSE_BOOTSTRAP_WAIT_SECONDS": "clickhouse.bootstrap_wait_seconds",
             "DFE_ENGINE_DETECTION_GUARD_PREVIEW_TIMEOUT_SECONDS": "hunts.detection_guard.preview_timeout_seconds",
+            "DFE_ENGINE_HUNTS_PHASE_SPREAD_FRACTION": "hunts.phase_spread_fraction",
+            "DFE_ENGINE_HUNTS_FAILURE_BACKOFF_INITIAL_SECONDS": "hunts.failure_backoff_initial_seconds",
+            "DFE_ENGINE_HUNTS_FAILURE_BACKOFF_MAX_SECONDS": "hunts.failure_backoff_max_seconds",
+            "DFE_ENGINE_HUNTS_FAILURE_REMINDER_SECONDS": "hunts.failure_reminder_seconds",
+            "DFE_ENGINE_TRANSFORM_DRY_RUN_TIMEOUT_SECONDS": "transform_validation.dry_run_timeout_seconds",
             "DFE_ENGINE_DETECTION_GUARD_WARN_MATCH_RATIO": "hunts.detection_guard.warn_match_ratio",
             "DFE_ENGINE_DETECTION_GUARD_BLOCK_MATCH_RATIO": "hunts.detection_guard.block_match_ratio",
             "DFE_ENGINE_SAMPLER_MAX_MEMORY_GB": "sampler.max_memory_gb",

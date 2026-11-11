@@ -30,11 +30,11 @@ from dfe_engine.schema.schema_loader import (
 )
 from dfe_engine.source.models import (
     DEFAULT_HEADER_TYPE,
-    DEFAULT_HEADER_VERSION,
     SchemaColumn,
     Source,
     SourceVersion,
     SourceView,
+    inherited_header_version,
 )
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -50,7 +50,7 @@ def _authored_header_profile(
     snap: SourceVersion,
     *,
     default_type: str = DEFAULT_HEADER_TYPE,
-    default_version: str = DEFAULT_HEADER_VERSION,
+    default_version: str | None = None,
 ) -> tuple[str, str] | None:
     """Return ``(type, version)`` when the snapshot names a real profile file.
 
@@ -61,7 +61,7 @@ def _authored_header_profile(
     if snap.header is None:
         if profile_file_stem(default_type) is None:
             return None
-        return default_type, default_version
+        return default_type, default_version or inherited_header_version()
     raw = snap.header.type or ""
     if profile_file_stem(raw) is None:
         return None
@@ -80,7 +80,7 @@ def inherited_builder_kwargs(settings: Any) -> dict[str, Any]:
         "default_ttl_days": getattr(ch, "default_ttl_days", None),
         "default_header_type": getattr(ch, "default_header_type", "") or DEFAULT_HEADER_TYPE,
         "default_header_version": getattr(ch, "default_header_version", "")
-        or DEFAULT_HEADER_VERSION,
+        or inherited_header_version(),
     }
 
 
@@ -123,7 +123,7 @@ class SchemaBuilderV2:
         default_engine: str = "MergeTree",
         default_ttl_days: int | None = None,
         default_header_type: str = DEFAULT_HEADER_TYPE,
-        default_header_version: str = DEFAULT_HEADER_VERSION,
+        default_header_version: str = "",
         platform: Platform = Platform.SELF_HOSTED,
     ) -> None:
         """Initialize the schema builder.
@@ -169,7 +169,8 @@ class SchemaBuilderV2:
         self._default_engine = default_engine or "MergeTree"
         self._default_ttl_days = default_ttl_days
         self._default_header_type = default_header_type or DEFAULT_HEADER_TYPE
-        self._default_header_version = default_header_version or DEFAULT_HEADER_VERSION
+        # Empty until a header is actually inherited, which is when the profile's current version is read.
+        self._default_header_version = default_header_version
 
     # -- Main entry points -------------------------------------------
 
@@ -363,7 +364,7 @@ class SchemaBuilderV2:
         profile_ref = _authored_header_profile(
             snap,
             default_type=self._default_header_type,
-            default_version=self._default_header_version,
+            default_version=self._default_header_version or None,
         )
         if profile_ref is None:
             return []
@@ -430,7 +431,7 @@ class SchemaBuilderV2:
         authored = _authored_header_profile(
             snap,
             default_type=self._default_header_type,
-            default_version=self._default_header_version,
+            default_version=self._default_header_version or None,
         )
         # Empty engine or unset ttl_days = inherit the deployment default; a per-source pin wins.
         return DDLConfig(

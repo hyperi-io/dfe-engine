@@ -22,6 +22,7 @@ from enum import StrEnum
 
 from dfe_engine.gitcrud.commit_policy import keda_owns_replicas
 from dfe_engine.gitcrud.engine import get_path
+from dfe_engine.settings import MAX_REPLICAS_CEILING
 
 from .catalogue import (
     CPU_LIMIT_PATH,
@@ -41,9 +42,6 @@ from .instances import HELMVARS_CLASS, parse_overlay_name
 # milli-cores; memory is a byte count with an optional binary or decimal suffix.
 _CPU_RE = re.compile(r"(\d+(\.\d+)?|\d+m)")
 _MEMORY_RE = re.compile(r"\d+(\.\d+)?(Ki|Mi|Gi|Ti|K|M|G|T)?")
-
-MAX_REPLICAS_CEILING = 1000
-"""Refuse a replica ceiling above this - a typo here bankrupts a cluster."""
 
 
 class DeployTarget(StrEnum):
@@ -172,8 +170,12 @@ def changes(
     memory_request: str | None = None,
     cpu_limit: str | None = None,
     memory_limit: str | None = None,
+    max_replicas_ceiling: int = MAX_REPLICAS_CEILING,
 ) -> dict[str, object]:
     """Validate a dial update and return the helm-var changes it implies.
+
+    ``max_replicas_ceiling`` (``deployment.max_replicas_ceiling``) refuses a replica
+    count or ceiling above it: a typo there bankrupts a cluster.
 
     Only the fields the caller supplied are returned, so a partial update leaves
     every other dial alone. ``doc`` supplies the current values the new range is
@@ -196,9 +198,9 @@ def changes(
     if replica_count is not None:
         if replica_count < 0:
             raise InvalidDialError(f"replica_count cannot be negative, got {replica_count}")
-        if replica_count > MAX_REPLICAS_CEILING:
+        if replica_count > max_replicas_ceiling:
             raise InvalidDialError(
-                f"replica_count {replica_count} exceeds the {MAX_REPLICAS_CEILING} ceiling"
+                f"replica_count {replica_count} exceeds the {max_replicas_ceiling} ceiling"
             )
         # The same reading the commit policy refuses a stored replicaCount by.
         if keda_owns_replicas(effective_keda, keda_by_default=keda_by_default):
@@ -219,9 +221,9 @@ def changes(
         out[KEDA_MIN_PATH] = min_replicas
 
     if max_replicas is not None:
-        if max_replicas > MAX_REPLICAS_CEILING:
+        if max_replicas > max_replicas_ceiling:
             raise InvalidDialError(
-                f"max_replicas {max_replicas} exceeds the {MAX_REPLICAS_CEILING} ceiling"
+                f"max_replicas {max_replicas} exceeds the {max_replicas_ceiling} ceiling"
             )
         out[KEDA_MAX_PATH] = max_replicas
 

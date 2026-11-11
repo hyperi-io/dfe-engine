@@ -66,7 +66,37 @@ CH_TYPE_CASES: list[ChTypeCase] = [
     {"id": "lowcard_string", "ch_type": "LowCardinality(String)", "expected": ("string", [])},
     {"id": "array_fallback", "ch_type": "Array(String)", "expected": ("json", ["nullable"])},
     {"id": "tuple_fallback", "ch_type": "Tuple(String, Int64)", "expected": ("json", ["nullable"])},
-    {"id": "map_fallback", "ch_type": "Map(String, String)", "expected": ("json", ["nullable"])},
+    {"id": "map", "ch_type": "Map(String, String)", "expected": ("map", [])},
+    {
+        "id": "map_low_card_key",
+        "ch_type": "Map(LowCardinality(String), String)",
+        "expected": ("map", []),
+    },
+    {
+        "id": "map_other_value_fallback",
+        "ch_type": "Map(String, Int64)",
+        "expected": ("json", ["nullable"]),
+    },
+    {"id": "point", "ch_type": "Point", "expected": ("geo_point", [])},
+    {"id": "vector", "ch_type": "Array(Float32)", "expected": ("vector", [])},
+    {"id": "vector_from_json", "ch_type": "Array(Nullable(Float32))", "expected": ("vector", [])},
+    {
+        "id": "float64_array_fallback",
+        "ch_type": "Array(Float64)",
+        "expected": ("json", ["nullable"]),
+    },
+    {"id": "int128", "ch_type": "Int128", "expected": ("integer", [])},
+    {"id": "float32", "ch_type": "Float32", "expected": ("float", [])},
+    {"id": "datetime", "ch_type": "DateTime", "expected": ("datetime", [])},
+    {"id": "date32", "ch_type": "Date32", "expected": ("date", [])},
+    {"id": "ipv4", "ch_type": "IPv4", "expected": ("ip", [])},
+    {"id": "boolean_alias", "ch_type": "Boolean", "expected": ("boolean", [])},
+    {"id": "decimal_fallback", "ch_type": "Decimal(18, 4)", "expected": ("json", ["nullable"])},
+    {
+        "id": "nullable_lowcard_nesting",
+        "ch_type": "Nullable(LowCardinality(String))",
+        "expected": ("string", []),
+    },
     {"id": "unknown_fallback", "ch_type": "WeirdType", "expected": ("json", ["nullable"])},
 ]
 

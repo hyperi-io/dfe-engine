@@ -383,15 +383,17 @@ def _run_status_for(hunt_names: list[str], now: int) -> dict[str, RunStatus]:
         return {}
 
 
-def _next_due(row: dict[str, Any], now: int) -> int | None:
-    """The hunt's next scheduled fire, from the same cron reading the runner uses."""
+def _next_due(row: dict[str, Any], now: int, fraction: float) -> int | None:
+    """The hunt's next scheduled fire, from the same cron reading and phase spread the runner uses."""
     interval = interval_seconds_for({"cron": row.get("cron")}, row["name"])
     if interval is None:
         return None
-    return next_due(row["name"], interval, now)
+    return next_due(row["name"], interval, now, fraction)
 
 
-def _hunt_row_to_summary(row: dict[str, Any], status: RunStatus | None, now: int) -> HuntSummary:
+def _hunt_row_to_summary(
+    row: dict[str, Any], status: RunStatus | None, now: int, fraction: float
+) -> HuntSummary:
     customers = row.get("customers") or []
     # No status = the runner has never touched this hunt, or ClickHouse is down.
     run = status or RunStatus(hunt_id=row["name"])
@@ -409,7 +411,7 @@ def _hunt_row_to_summary(row: dict[str, Any], status: RunStatus | None, now: int
         last_run_rows=run.last_run_rows,
         too_aggressive=run.too_aggressive,
         run_requested=run.run_requested,
-        next_due=_next_due(row, now),
+        next_due=_next_due(row, now, fraction),
     )
 
 
@@ -460,6 +462,7 @@ HuntsList = Annotated[
 def list_hunts(
     registry: HuntConfigReg,
     user: CurrentUser,
+    settings: Settings,
     query: HuntsList,
     search: str | None = Query(
         None,
@@ -484,7 +487,8 @@ def list_hunts(
     raw = sort_by_order(raw, query.order_by)
     now = int(time.time())
     status = _run_status_for([row["name"] for row in raw], now)
-    summaries = [_hunt_row_to_summary(row, status.get(row["name"]), now) for row in raw]
+    fraction = settings.hunts.phase_spread_fraction
+    summaries = [_hunt_row_to_summary(row, status.get(row["name"]), now, fraction) for row in raw]
     return paginate(summaries, query, bound={"search": search})
 
 
