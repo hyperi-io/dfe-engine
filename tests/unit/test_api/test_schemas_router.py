@@ -15,6 +15,9 @@ routers guard against missing infrastructure cleanly.
 
 from types import SimpleNamespace
 
+import pytest
+
+from dfe_engine.api.v1.sources import _declared_cardinality
 from dfe_engine.source.type_registry import TypeRegistry
 from tests.support.accounts import OnboardedClient, session_token
 from tests.support.present import present
@@ -1485,3 +1488,18 @@ class TestSchemasMetaWriteRouter:
                 assert core_del.json()["detail"] == "Core resources can't be mutated"
         finally:
             _registries.clear()
+
+
+@pytest.mark.parametrize(
+    ("column", "expected"),
+    [
+        (SimpleNamespace(cardinality="high", attribute=["lowcardinality"]), "high"),
+        (SimpleNamespace(cardinality="low", attribute=[]), "low"),
+        (SimpleNamespace(cardinality=None, attribute=["lowcardinality", "not_null"]), "low"),
+        (SimpleNamespace(cardinality=None, attribute=["not_null"]), None),
+        (SimpleNamespace(cardinality=None, attribute=None), None),
+        (SimpleNamespace(attribute=None), None),
+    ],
+)
+def test_a_source_column_reports_its_declared_cardinality(column, expected):
+    assert _declared_cardinality(column) == expected

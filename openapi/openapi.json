@@ -56949,6 +56949,23 @@
             ],
             "title": "Attribute"
           },
+          "cardinality": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "low",
+                  "high",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cardinality",
+            "description": "How many distinct values the column holds, as declared. A column holding the retired lowcardinality attribute reads as low. Absent means unknown."
+          },
           "description": {
             "type": "string",
             "title": "Description",
