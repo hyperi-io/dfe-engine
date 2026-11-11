@@ -17,6 +17,7 @@ deployment mounts that file as the app's contract. The fixtures under
 ones a pin in ``tests/support/producer_contract.py`` covers are checked against it.
 """
 
+import copy
 import json
 from pathlib import Path
 from typing import Any
@@ -31,7 +32,7 @@ from dfe_engine.services.registry import (
     service_apps,
 )
 from dfe_engine.settings import DFESettings, SecretsSettings
-from dfe_engine.yaml_utils import yaml_load_string
+from dfe_engine.yaml_utils import deep_merge, yaml_load_string
 from tests.support.config_schema import definitions, type_mismatches, unread_keys
 from tests.support.producer_contract import (
     DFE_LOADER,
@@ -86,6 +87,26 @@ def test_every_seeded_config_is_one_its_app_reads_whole(app: str, name: str, doc
 def test_every_app_with_a_config_file_but_vrl_and_elastic_is_seeded():
     seeded = {app for app, _, _ in _SEEDS}
     assert seeded == set(service_apps().values()) - {"dfe-transform-vrl", "dfe-transform-elastic"}
+
+
+_ARCHIVER = [(name, doc) for app, name, doc in _SEEDS if app == "dfe-archiver"]
+
+
+@pytest.mark.parametrize(("name", "doc"), _ARCHIVER, ids=[n for n, _ in _ARCHIVER])
+def test_every_seeded_archiver_discovers_its_topics_and_routes_as_the_app_does(name, doc):
+    """A non-empty kafka.topics turns discovery off, and no DFE topic is named by the seed.
+
+    Sources land on ``<source>_land``, so a fixed list archives only what it names.
+    The routing mode and default segment are the app's own.
+    """
+    defaults = contract.config_defaults(_schema("dfe-archiver"))
+    runs = deep_merge(copy.deepcopy(defaults), doc)
+    assert runs["kafka"]["topics"] == []
+    assert runs["routing"] == defaults["routing"]
+    assert (runs["routing"]["mode"], runs["routing"]["default_segment"]) == (
+        "expression",
+        "default",
+    )
 
 
 def test_no_loader_config_the_engine_writes_carries_coercion():
