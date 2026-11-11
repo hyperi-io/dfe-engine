@@ -12,21 +12,21 @@ Usage:
     ddl = gen.generate_create_table("filebeat", columns, DDLConfig(ttl_days=90))
 """
 
+import functools
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 
-from dfe_schemas.clickhouse import Platform, engine_clause, parse_engine
-from dfe_schemas.deploy_defaults import json_table_settings
+from dfe_schemas.clickhouse import Platform
+from dfe_schemas.ddl_catalogue import CATALOGUE_FILE, TableDefaults
+from dfe_schemas.loader import Column
+from dfe_schemas.loader import SchemaError as DefinitionError
+from dfe_schemas.render import TableDDL
+from dfe_schemas.render import TableSpec as CreateSpec
 from scalo.logger import logger
 
-from dfe_engine.clickhouse.quoting import quote_literal
 from dfe_engine.source.models import SchemaColumn
-from dfe_engine.source.type_registry import (
-    LOW_CARDINALITY,
-    InvalidUseCaseError,
-    TypeRegistry,
-    split_use_case,
-)
+from dfe_engine.source.type_registry import InvalidUseCaseError, TypeRegistry
 
 
 class DDLGenerationError(Exception):
@@ -129,12 +129,13 @@ class DDLConfig:
     # TTL rides the partition column alone: ttl_only_drop_parts drops a part only
     # once every row in it has expired, so a second rule over event time can only
     # ever delay the drop.
-    ttl_columns: list[str] = field(default_factory=lambda: ["_timestamp_load"])
-    partition_column: str = "_timestamp_load"
-    # Partition granularity for *partition_column*: "day" -> toYYYYMMDD,
-    # "month" -> toYYYYMM. A low-volume audit table wants monthly, else it
-    # accumulates a part per day holding very few rows.
-    partition_granularity: str = "day"
+    ttl_columns: list[str] = field(default_factory=lambda: [table_defaults().partition_column])
+    partition_column: str = field(default_factory=lambda: table_defaults().partition_column)
+    # A key into the catalogue's partition functions. A low-volume audit table
+    # wants month, else it accumulates a part per day holding very few rows.
+    partition_granularity: str = field(
+        default_factory=lambda: table_defaults().partition_granularity
+    )
     # Raw clause overrides, for tables whose shape the column model cannot
     # express: an ORDER BY over expressions rather than bare columns
     # (toStartOfHour(TimeUnix), cityHash64(Attributes)), a PARTITION BY the
@@ -145,7 +146,7 @@ class DDLConfig:
     order_by: str | None = None
     primary_key: str | None = None
     extra_indexes: list[str] = field(default_factory=list)
-    index_granularity: int = 2048
+    index_granularity: int = field(default_factory=lambda: table_defaults().index_granularity)
     ttl_only_drop_parts: bool = True
     sample_by: str | None = None
     # Off unless asked for: a SELECT * projection copies every column, so on a JSON-heavy
@@ -173,111 +174,61 @@ class TableSpec:
     config: DDLConfig
 
 
-# -- Index templates -------------------------------------------------
-# A use case names the question a column is asked; the template is the engine's
-# answer, and changes without the vocabulary changing.
-# GA text index (v26.2+) -- deterministic inverted index, row-level filtering
-# ClickHouse rewrites a text index's GRANULARITY to 100000000 whatever is asked
-# for, so a read-back that disagrees with the 1 below is the server, not drift.
-_INDEX_TEMPLATES: dict[str, str] = {
-    "dimension": "INDEX {name} {col} TYPE set(0) GRANULARITY 4",
-    "range": "INDEX {name} {col} TYPE minmax GRANULARITY 4",
-    "word_search": "INDEX {name} {col} TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1",
-    "substring_search": "INDEX {name} {col} TYPE text(tokenizer=ngrams(3)) GRANULARITY 1",
-}
-
-# Legacy fallback (pre-v25.10) -- bloom-filter based indexes
-_INDEX_TEMPLATES_LEGACY: dict[str, str] = {
-    "dimension": "INDEX {name} {col} TYPE set(0) GRANULARITY 4",
-    "range": "INDEX {name} {col} TYPE minmax GRANULARITY 4",
-    "word_search": "INDEX {name} {col} TYPE tokenbf_v1(8192, 4, 0) GRANULARITY 4",
-    "substring_search": "INDEX {name} {col} TYPE ngrambf_v1(3, 256, 2, 0) GRANULARITY 4",
-}
-
-# exact_match reads the column's declared cardinality: set(0) holds every
-# distinct value of a `low` column exactly, and bloom_filter stays bounded on
-# `high` and on `unknown`, which is the safe way to be wrong.
-# Neither changed at v25.10, so the legacy fallback shares them.
-_EXACT_MATCH_LOW_CARDINALITY = "INDEX {name} {col} TYPE set(0) GRANULARITY 4"
-_EXACT_MATCH_HIGH_CARDINALITY = "INDEX {name} {col} TYPE bloom_filter GRANULARITY 4"
-
-# A text index refuses a Map column outright ("Text index must be created on
-# columns of type with base type of String or FixedString"), so key_search
-# indexes the keys and the values apart -- the shape the shipped otel tables use.
-_KEY_SEARCH_TEMPLATES: tuple[tuple[str, str], ...] = (
-    ("key", "INDEX {name} mapKeys({col}) TYPE text(tokenizer=array) GRANULARITY 1"),
-    ("value", "INDEX {name} mapValues({col}) TYPE text(tokenizer=array) GRANULARITY 1"),
-)
-
-# The array tokenizer arrived with the GA text index, so a server old enough to
-# need the legacy fallback cannot answer key_search at all.
-_KEY_SEARCH_TEMPLATES_LEGACY: tuple[tuple[str, str], ...] = (
-    ("key", "INDEX {name} mapKeys({col}) TYPE bloom_filter(0.01) GRANULARITY 1"),
-    ("value", "INDEX {name} mapValues({col}) TYPE bloom_filter(0.01) GRANULARITY 1"),
-)
-
-# hnsw is the only method ClickHouse 26.3 implements and the index will not
-# build without a dimension count, which is the one thing only the user knows.
-_SIMILARITY_SEARCH_TEMPLATE = (
-    "INDEX {name} {col} TYPE vector_similarity('hnsw', 'cosineDistance', {dims}) GRANULARITY 1"
-)
+@functools.cache
+def _tables_at(root: Path, platform: Platform) -> TableDDL:
+    return TableDDL.load(platform=platform, root=root)
 
 
-def _with_max_dynamic_paths(ch_type: str, max_dynamic_paths: int | None) -> str:
-    """Apply a column's ``max_dynamic_paths`` to a bare ``JSON`` type.
+def table_ddl(platform: Platform = Platform.SELF_HOSTED) -> TableDDL:
+    """dfe-schemas' table renderer, over the tree that carries ``registries/ddl.yaml``.
 
-    A type that already carries parameters is left alone, and the setting is
-    meaningless on anything but JSON, so both cases pass through unchanged
-    rather than producing DDL ClickHouse will reject.
+    Every column, index, partition and TTL clause the engine renders comes from
+    it. There is no built-in fallback: a tree without the catalogue fails here,
+    naming every tree it searched.
+
+    Raises:
+        SchemaLoadError: No dfe-schemas tree carries the catalogue.
     """
-    if not max_dynamic_paths or ch_type != "JSON":
-        return ch_type
-    return f"JSON(max_dynamic_paths={max_dynamic_paths})"
+    # Imported here because schema_loader's own imports reach back into this module.
+    from dfe_engine.schema.schema_loader import resolve_registry_path
+
+    return _tables_at(resolve_registry_path(CATALOGUE_FILE).parents[1], platform)
 
 
-def _build_column_comment(expr: str | None, comment: str | None) -> str | None:
-    """Combine DFE directive and human comment into a single ClickHouse COMMENT.
-
-    When both are present, the expr comes first (loader parses it),
-    followed by the human comment separated by `` - ``.
-    """
-    if expr and comment:
-        return f"{expr} - {comment}"
-    return expr or comment or None
+def table_defaults() -> TableDefaults:
+    """The table defaults in dfe-schemas' DDL catalogue."""
+    return table_ddl().catalogue.table
 
 
 class DDLGenerator:
     """Generates ClickHouse DDL from SchemaColumn models.
 
-    Uses TypeRegistry for primitive -> ClickHouse type resolution.
-    Produces CREATE TABLE, ALTER TABLE, and Sigma view DDL.
+    Turns a source's columns and config into a dfe-schemas ``TableSpec`` and
+    renders it through dfe-schemas' ``TableDDL``, the table renderer the
+    manifest tables use. The engine adds only the header comment and the views.
     """
 
     def __init__(
         self,
         registry: TypeRegistry,
         *,
-        use_legacy_indexes: bool = False,
         platform: Platform = Platform.SELF_HOSTED,
+        tables: TableDDL | None = None,
     ) -> None:
         """Initialize the DDL generator.
 
         Args:
-            registry: TypeRegistry for type resolution.
-            use_legacy_indexes: Use tokenbf/ngrambf instead of text index
-                               (for ClickHouse < v25.10).
+            registry: TypeRegistry the columns are validated against.
             platform: The ClickHouse platform the DDL is for, which picks a JSON
                      table's platform-only settings. A live caller passes what its
                      connection's probe names. Self-hosted, the probe's own
                      default, suits the offline paths (reference SQL, gitops
                      artefacts) that have no server to ask.
+            tables: The table renderer. Defaults to :func:`table_ddl` for *platform*.
         """
         self._registry = registry
-        self._index_templates = _INDEX_TEMPLATES_LEGACY if use_legacy_indexes else _INDEX_TEMPLATES
-        self._key_search_templates = (
-            _KEY_SEARCH_TEMPLATES_LEGACY if use_legacy_indexes else _KEY_SEARCH_TEMPLATES
-        )
         self._platform = platform
+        self._tables = tables or table_ddl(platform)
 
     # -- CREATE TABLE ------------------------------------------------
 
@@ -290,6 +241,9 @@ class DDLGenerator:
     ) -> str:
         """Generate a complete CREATE TABLE IF NOT EXISTS statement.
 
+        No ON CLUSTER: the Replicated database replicates the CREATE, and
+        refuses ON CLUSTER on a table inside it (code 80).
+
         Args:
             table_name: ClickHouse table name.
             columns: Schema columns (profile header + source-specific).
@@ -299,78 +253,69 @@ class DDLGenerator:
 
         Returns:
             Complete CREATE TABLE DDL string.
+
+        Raises:
+            DDLGenerationError: A name, clause or column cannot be rendered.
         """
         cfg = config or DDLConfig()
-        lines: list[str] = []
+        header = [
+            line for line in self._build_schema_header(cfg, table_name, generated_time) if line
+        ]
+        spec = self._spec(table_name, columns, cfg)
+        try:
+            create = self._tables.create_table(spec)
+        except DefinitionError as exc:
+            raise DDLGenerationError(str(exc)) from exc
+        return "\n".join([*header, create]) + ";\n"
 
-        # Header comment
-        lines.extend(
-            [line for line in self._build_schema_header(cfg, table_name, generated_time) if line]
-        )
+    def _spec(self, table_name: str, columns: list[SchemaColumn], cfg: DDLConfig) -> CreateSpec:
+        """The dfe-schemas spec for one source table.
 
-        # No ON CLUSTER: the Replicated database replicates the CREATE, and refuses
-        # ON CLUSTER on a table inside it (code 80).
-        create = f"CREATE TABLE IF NOT EXISTS {_qualified(cfg.db, table_name, what='table name')}"
-        lines.append(f"{create}\n(")
-
-        # Column + index + projection definitions
-        body_lines = self._body_lines(columns, cfg)
-        lines.append(",\n".join(body_lines))
-
-        # The one engine form, argumentless Replicated<variant>, from dfe-schemas.
-        lines.append(f")\nENGINE = {engine_clause(parse_engine(cfg.engine))}")
-
-        # PARTITION BY -- a raw expression wins over the column + granularity.
-        partition = None
-        if cfg.partition_by:
-            partition = cfg.partition_by
-        elif any(column for column in columns if column.name == cfg.partition_column):
-            partition = self._partition_expr(cfg)
-        if partition:
-            lines.append(f"PARTITION BY {partition}")
-
-        # ORDER BY + PRIMARY KEY. A raw ORDER BY sets no PRIMARY KEY of its own:
-        # ClickHouse then takes the sorting key as the primary key, which is what
-        # a table declaring only an ORDER BY expects.
-        if cfg.order_by:
-            if cfg.primary_key:
-                lines.append(f"PRIMARY KEY ({cfg.primary_key})")
-            lines.append(f"ORDER BY ({cfg.order_by})")
-        else:
-            order_cols = self._order_by_columns(columns)
-            if order_cols:
-                pk_str = ", ".join(order_cols)
-                lines.append(f"PRIMARY KEY ({pk_str})")
-                lines.append(f"ORDER BY ({pk_str})")
-            else:
-                lines.append("ORDER BY tuple()")
-
-        # SAMPLE BY
-        if cfg.sample_by:
-            lines.append(f"SAMPLE BY {cfg.sample_by}")
-
-        # TTL
-        ttl = self.ttl_clause(cfg, columns)
-        if ttl:
-            lines.append(ttl)
-
-        # SETTINGS
-        settings_parts = [f"index_granularity = {cfg.index_granularity}"]
-        if ttl and cfg.ttl_only_drop_parts:
-            settings_parts.append(
-                f"ttl_only_drop_parts = {int(self._ttl_drops_whole_parts(cfg, partition))}"
+        Design decision: a Nullable ORDER BY column is dropped from the sorting
+        key with a warning, never refused. ClickHouse refuses a Nullable key
+        unless allow_nullable_key=1, and even then a null in the key cripples
+        the index and doubles storage. Mark the column 'not_null' (or give it a
+        DEFAULT) to keep it in the key. See docs/data-plane/schema.md
+        "Nullability Defaults".
+        """
+        _qualified(cfg.db, table_name, what="table name")
+        for col in cfg.ttl_columns:
+            quote_ident(col, what="TTL column")
+        mapped = [self._column(col) for col in columns]
+        for column in mapped:
+            self._indexes_for(column)
+        nullable_keys = set(self._tables.nullable_key_columns(mapped))
+        for name in sorted(nullable_keys):
+            logger.warning(
+                f"Column {name!r} resolves to a Nullable type and is marked as an "
+                f"ORDER BY key; skipping it from the sorting key. ClickHouse keys "
+                f"cannot be Nullable (requires allow_nullable_key and hurts index "
+                f"performance). Add the 'not_null' attribute or a DEFAULT to keep it "
+                f"in the key."
             )
-        settings_parts.extend(
-            f"{key} = {value}" for key, value in self.json_settings(columns).items()
+        keyed = tuple(
+            replace(column, order=None) if column.name in nullable_keys else column
+            for column in mapped
         )
-        lines.append("SETTINGS\n    " + ",\n    ".join(settings_parts))
-
-        # COMMENT
-        comment = self._table_comment(table_name, cfg)
-        if comment:
-            lines.append(f"COMMENT {quote_literal(comment)}")
-
-        return "\n".join(lines) + ";\n"
+        return CreateSpec(
+            database=cfg.db,
+            name=table_name,
+            columns=keyed,
+            engine=cfg.engine,
+            ttl_days=cfg.ttl_days,
+            ttl_columns=tuple(cfg.ttl_columns),
+            ttl_only_drop_parts=cfg.ttl_only_drop_parts,
+            partition_by=cfg.partition_by,
+            partition_column=cfg.partition_column,
+            partition_granularity=cfg.partition_granularity,
+            order_by=cfg.order_by,
+            primary_key=cfg.primary_key,
+            sample_by=cfg.sample_by,
+            extra_indexes=tuple(cfg.extra_indexes),
+            index_granularity=cfg.index_granularity,
+            projection_order_by=cfg.projection_order_by,
+            comment=self._table_comment(table_name, cfg),
+        )
 
     # -- ALTER TABLE -------------------------------------------------
 
@@ -448,26 +393,7 @@ class DDLGenerator:
         """Generate Sigma view (convenience wrapper for generate_view)."""
         return self.generate_view(table_name, mappings, "sigma", config)
 
-    # -- Internal: PARTITION BY --------------------------------------
-
-    _PARTITION_FUNCS = {"day": "toYYYYMMDD", "month": "toYYYYMM"}
-
-    @classmethod
-    def _partition_expr(cls, cfg: DDLConfig) -> str:
-        """Build the PARTITION BY expression for *cfg*.
-
-        Raises:
-            DDLGenerationError: Unknown partition granularity.
-        """
-        func = cls._PARTITION_FUNCS.get(cfg.partition_granularity)
-        if func is None:
-            raise DDLGenerationError(
-                f"unknown partition_granularity {cfg.partition_granularity!r}; "
-                f"valid: {', '.join(sorted(cls._PARTITION_FUNCS))}"
-            )
-        return f"{func}({cfg.partition_column})"
-
-    # -- Internal: body lines ----------------------------------------
+    # -- Internal: header comment ------------------------------------
 
     def _build_schema_header(
         self, cfg: DDLConfig, table_name: str, generated_at: str | None = None
@@ -489,76 +415,33 @@ class DDLGenerator:
             "-- =============================================================================",
         ]
 
-    def _body_lines(
-        self,
-        columns: list[SchemaColumn],
-        cfg: DDLConfig,
-    ) -> list[str]:
-        """Generate all lines inside the CREATE TABLE parentheses."""
-        body: list[str] = []
+    # -- Internal: columns -------------------------------------------
 
-        # Column definitions
-        for col in columns:
-            body.append(f"    {self._column_def(col)}")
+    def _column(self, col: SchemaColumn) -> Column:
+        """The dfe-schemas column for *col*, after the engine's own checks.
 
-        # Index definitions
-        for col in columns:
-            body.extend(f"    {idx}" for idx in self._index_defs(col))
-
-        # Raw index definitions, for shapes the use_case templates cannot express.
-        for idx_def in cfg.extra_indexes:
-            body.append(f"    {idx_def}")
-
-        # Projection
-        if cfg.projection_order_by:
-            col_names = {c.name for c in columns}
-            if cfg.projection_order_by in col_names:
-                name = _ident(f"{cfg.projection_order_by}_optimized", what="projection name")
-                body.append(
-                    f"    PROJECTION {name} (SELECT * ORDER BY `{cfg.projection_order_by}`)"
-                )
-
-        return body
-
-    # -- Internal: column definition ---------------------------------
-
-    def _column_def(self, col: SchemaColumn) -> str:
-        """Generate a single column definition line.
-
-        Format:
-            `name` Type [DEFAULT|MATERIALIZED|ALIAS expr] [COMMENT '...'] [CODEC(...)]
-        """
-        ch_type, codec = self.resolve_type(col)
-        parts = [f"`{col.name}`", ch_type]
-
-        # DEFAULT / MATERIALIZED / ALIAS expression
-        expr = self._default_expr(col)
-        if expr:
-            parts.append(expr)
-
-        # COMMENT -- combines expr (DFE directive) + comment (human description)
-        comment_text = _build_column_comment(col.expr, col.comment)
-        if comment_text:
-            parts.append(f"COMMENT {quote_literal(comment_text)}")
-
-        # CODEC
-        if codec:
-            parts.append(f"CODEC({codec})")
-
-        return " ".join(parts)
-
-    def resolve_type(self, col: SchemaColumn) -> tuple[str, str | None]:
-        """Resolve column to (ch_type, codec).
-
-        Handles enum placeholder substitution by constructing
-        a ch_override from the default field values.
+        An enum with no ``ch_override`` takes ``Enum8(<default>)`` and keeps the
+        enum primitive's codec, which an explicit ``ch_override`` would drop.
 
         Raises:
-            TypeRegistryError: The column's type, attribute or override is not in the registry.
+            DDLGenerationError: The column's name is unsafe in DDL, or its DEFAULT
+                reads outside the row.
+            TypeRegistryError: The column's type, attribute or override is not
+                in the registry.
         """
+        quote_ident(col.name, what="column name")
+        refusals = col.offbox_default_errors()
+        if refusals:
+            raise DDLGenerationError(refusals[0])
+        self._registry.resolve(
+            col.type,
+            attributes=col.attribute,
+            ch_override=col.ch_override,
+            cardinality=col.declared_cardinality,
+        )
         ch_override = col.ch_override
-
-        # Enum special case: construct Enum8(...) from default field values
+        codec = col.codec
+        default = col.default
         if col.type == "enum" and not ch_override:
             if col.default:
                 ch_override = f"Enum8({col.default})"
@@ -568,30 +451,35 @@ class DDLGenerator:
                     f"or default values -- using Enum8('') placeholder"
                 )
                 ch_override = "Enum8('')"
-
-        # Note: use_case is NOT passed to resolve() -- it doesn't affect type
-        # resolution (only index generation). Use-case validation is handled
-        # separately by SchemaLoader.validate_columns().
-        resolved = self._registry.resolve(
-            col.type,
-            attributes=col.attribute,
+            codec = codec or self._registry.primitive_defaults(col.type).get("codec")
+        return Column(
+            name=col.name,
+            primitive=col.type,
             ch_override=ch_override,
+            attribute=tuple(col.attribute),
             cardinality=col.declared_cardinality,
+            use_case=col.use_case,
+            order=col.order,
+            default=default,
+            codec=codec,
+            comment=col.comment,
+            expr=col.expr,
+            max_dynamic_paths=col.max_dynamic_paths,
+            index=col.index,
         )
 
-        codec = resolved.codec
-        # When we constructed ch_override for enum, restore the primitive's codec
-        if col.type == "enum" and ch_override and not col.ch_override:
-            prim = self._registry.primitive_defaults(col.type)
-            codec = prim.get("codec")
+    def _column_def(self, col: SchemaColumn) -> str:
+        """One column's definition, rendered by dfe-schemas."""
+        return self._tables.column_def(self._column(col))
 
-        # An explicit per-column codec always wins -- the only way to set a
-        # codec alongside ch_override, which otherwise resolves to None.
-        if col.codec:
-            codec = col.codec
+    def resolve_type(self, col: SchemaColumn) -> tuple[str, str | None]:
+        """Resolve column to (ch_type, codec).
 
-        ch_type = _with_max_dynamic_paths(resolved.ch_type, col.max_dynamic_paths)
-        return ch_type, codec
+        Raises:
+            TypeRegistryError: The column's type, attribute or override is not in the registry.
+        """
+        resolved = self._tables.resolve(self._column(col))
+        return resolved.ch_type, resolved.codec
 
     def json_settings(self, columns: list[SchemaColumn]) -> dict[str, int]:
         """The table SETTINGS dfe-schemas declares for a table with a JSON column on this platform.
@@ -602,131 +490,26 @@ class DDLGenerator:
         Raises:
             TypeRegistryError: A column's type, attribute or override is not in the registry.
         """
-        return json_table_settings(
-            (self.resolve_type(col)[0] for col in columns), platform=self._platform
-        )
-
-    @staticmethod
-    def _default_expr(col: SchemaColumn) -> str | None:
-        """Build the DEFAULT / MATERIALIZED / ALIAS clause.
-
-        The expression is emitted verbatim and ClickHouse evaluates it on every
-        insert or read of the column, so a call that reads outside the row or
-        sends it to another service is refused here as well as at validation.
-
-        Raises:
-            DDLGenerationError: If the expression makes such a call.
-        """
-        if not col.default:
-            return None
-
-        refusals = col.offbox_default_errors()
-        if refusals:
-            raise DDLGenerationError(refusals[0])
-
-        if "materialized" in col.attribute:
-            return f"MATERIALIZED {col.default}"
-        if "alias" in col.attribute:
-            return f"ALIAS {col.default}"
-        return f"DEFAULT {col.default}"
-
-    # -- Internal: index definition ----------------------------------
+        return self._tables.json_settings([self._column(col) for col in columns])
 
     def _index_defs(self, col: SchemaColumn) -> list[str]:
         """The INDEX definitions a column asks for -- none, one, or two.
 
-        A column declaring its own ``index`` is emitted verbatim: the common
-        header asks ``_raw`` for ``text(tokenizer = 'default') GRANULARITY 64``,
-        which no use_case template expresses, and a template rendered instead
-        drifts the table away from the schema it was generated from.
+        A column declaring its own ``index`` is emitted verbatim: that is a
+        shape no use case answers.
+
+        Raises:
+            InvalidUseCaseError: The use case is unknown, or lacks an argument it needs.
         """
-        index_name = f"idx_{col.name}"
-        quoted = f"`{col.name}`"
-        if col.index:
-            return [f"INDEX {_ident(index_name)} {quoted} TYPE {col.index}"]
+        return self._indexes_for(self._column(col))
 
-        use_case, dims = split_use_case(col.use_case)
-        if use_case is None:
-            return []
-
-        if use_case == "key_search":
-            return [
-                template.format(name=_ident(f"{index_name}_{suffix}"), col=quoted)
-                for suffix, template in self._key_search_templates
-            ]
-
-        if use_case == "similarity_search":
-            if dims is None:
-                raise InvalidUseCaseError(
-                    f"column {col.name!r}: similarity_search needs the vector "
-                    f"dimension count, as similarity_search(<dims>)"
-                )
-            return [
-                _SIMILARITY_SEARCH_TEMPLATE.format(name=_ident(index_name), col=quoted, dims=dims)
-            ]
-
-        if use_case == "exact_match":
-            template = (
-                _EXACT_MATCH_LOW_CARDINALITY
-                if col.declared_cardinality == LOW_CARDINALITY
-                else _EXACT_MATCH_HIGH_CARDINALITY
-            )
-            return [template.format(name=_ident(index_name), col=quoted)]
-
-        template = self._index_templates.get(use_case)
-        if template is None:
-            return []
-        return [template.format(name=_ident(index_name), col=quoted)]
-
-    # -- Internal: ORDER BY ------------------------------------------
-
-    def _order_by_columns(self, columns: list[SchemaColumn]) -> list[str]:
-        """Extract ORDER BY column names sorted by order field.
-
-        Design decision: Nullable columns are skipped from the sorting key
-        (with a warning), never emitted as keys. ClickHouse refuses a
-        Nullable column in a sorting key unless the merge-tree setting
-        allow_nullable_key=1 is enabled, and even then a null in the sort key
-        cripples index effectiveness and doubles storage. Rather than flip
-        allow_nullable_key on -- or fail the whole table -- the engine drops
-        the offending column from the key and warns. To keep a column in the
-        ORDER BY, mark it 'not_null' (or give it a DEFAULT, which also forces
-        non-null). See docs/data-plane/schema.md "Nullability Defaults".
-        """
-        keyed = [(col.order, col) for col in columns if col.order is not None]
-        keyed.sort(key=lambda pair: pair[0])
-        ordered = [col for _, col in keyed]
-
-        result: list[str] = []
-        for col in ordered:
-            # Skip any Nullable key, including LowCardinality(Nullable(T)).
-            ch_type, _ = self.resolve_type(col)
-            if "Nullable" in ch_type:
-                logger.warning(
-                    f"Column {col.name!r} resolves to {ch_type} and is marked "
-                    f"as an ORDER BY key; skipping it from the sorting key. "
-                    f"ClickHouse keys cannot be Nullable (requires "
-                    f"allow_nullable_key and hurts index performance). Add the "
-                    f"'not_null' attribute or a DEFAULT to keep it in the key."
-                )
-                continue
-            result.append(f"`{col.name}`")
-
-        return result
+    def _indexes_for(self, column: Column) -> list[str]:
+        try:
+            return self._tables.index_defs(column)
+        except DefinitionError as exc:
+            raise InvalidUseCaseError(str(exc)) from exc
 
     # -- Internal: TTL -----------------------------------------------
-
-    @staticmethod
-    def _ttl_drops_whole_parts(cfg: DDLConfig, partition: str | None) -> bool:
-        """Whether every TTL column is carried by the partition expression.
-
-        ``ttl_only_drop_parts`` waits for EVERY row in a part to expire, so on a
-        table the TTL is not aligned to it silently retains data forever; those
-        tables need the row-level delete instead.
-        """
-        if not partition:
-            return False
-        return all(col in partition for col in cfg.ttl_columns)
 
     @staticmethod
     def ttl_clause(cfg: DDLConfig, columns: list[SchemaColumn]) -> str | None:
@@ -737,26 +520,22 @@ class DDLGenerator:
                 not carry, which would otherwise render as a table that silently
                 keeps everything forever, or a TTL column's name is unsafe in DDL.
         """
-        if not (cfg.ttl_days):
+        if not cfg.ttl_days:
             return None
-        if not cfg.ttl_columns:
-            raise DDLGenerationError(
-                f"ttl_days={cfg.ttl_days} declared with no ttl_columns to apply it to"
-            )
-
-        present = {column.name for column in columns}
-        missing = [col for col in cfg.ttl_columns if col not in present]
-        if missing:
-            raise DDLGenerationError(
-                f"ttl_days={cfg.ttl_days} declared over absent column(s) "
-                f"{', '.join(missing)}; the table would keep every row forever"
-            )
-
-        parts: list[str] = []
         for col in cfg.ttl_columns:
-            ident = _ident(col, what="TTL column")
-            parts.append(f"{ident} + INTERVAL {cfg.ttl_days} DAY DELETE WHERE {ident} >= 0")
-        return "TTL " + ",\n    ".join(parts)
+            quote_ident(col, what="TTL column")
+        generator = DDLGenerator(TypeRegistry.default())
+        spec = CreateSpec(
+            database=cfg.db,
+            name="table",
+            columns=tuple(generator._column(col) for col in columns),
+            ttl_days=cfg.ttl_days,
+            ttl_columns=tuple(cfg.ttl_columns),
+        )
+        try:
+            return generator._tables.ttl_clause(spec)
+        except DefinitionError as exc:
+            raise DDLGenerationError(str(exc)) from exc
 
     # -- Internal: table comment -------------------------------------
 

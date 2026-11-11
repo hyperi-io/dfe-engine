@@ -23,6 +23,7 @@ from dfe_engine.schema.applier import (
     LiveTtl,
     SchemaApplier,
     SchemaApplyError,
+    plan_source_table,
     read_table,
     ttl_from_engine_full,
     ttl_move,
@@ -351,3 +352,43 @@ def test_a_create_reads_as_it_declares(statement, read, expected):
 def test_a_statement_with_no_column_body_is_refused(statement: str):
     with pytest.raises(SchemaApplyError):
         read_table(statement)
+
+
+@dataclass
+class _IndexedClient(_FakeClient):
+    """As :class:`_FakeClient`, with the indexes ``system.data_skipping_indices`` reports."""
+
+    indexes: list[tuple[str, str, int]] = field(default_factory=list)
+
+    def query(self, sql: str, parameters: dict[str, Any] | None = None) -> _Result:
+        if "data_skipping_indices" in sql:
+            return _Result(list(self.indexes))
+        return super().query(sql, parameters)
+
+
+@pytest.mark.parametrize(
+    ("live_granularity", "moves"),
+    [pytest.param(4, False, id="same_index"), pytest.param(1, True, id="granularity_changed")],
+)
+def test_a_backticked_index_name_matches_the_bare_name_clickhouse_reports(
+    live_granularity: int, moves: bool
+):
+    """The CREATE backticks every index name, and system.data_skipping_indices reports it bare.
+
+    A deployed table whose index is unchanged plans no index statement, so
+    the requoting reads as no drift. A real difference still moves.
+    """
+    columns = [*_columns(), SchemaColumn(name="src_ip", type="ip", use_case="exact_match")]
+    create = DDLGenerator(TypeRegistry.default()).generate_create_table(
+        TABLE, columns, DDLConfig(db=DB, ttl_days=30, projection_order_by=None)
+    )
+    assert "INDEX `idx_src_ip` `src_ip` TYPE bloom_filter GRANULARITY 4" in create
+    client = _IndexedClient(
+        columns=[c.name for c in columns],
+        live_ttl_days=30,
+        indexes=[("idx_src_ip", "bloom_filter", live_granularity)],
+    )
+
+    plan = plan_source_table(client, create, database=DB, table=TABLE, ttl_days=30)
+
+    assert any("idx_src_ip" in statement for statement in plan.statements) is moves

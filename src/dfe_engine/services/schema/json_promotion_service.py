@@ -736,7 +736,6 @@ def promotion_preview_ddl(
     columns: list[SchemaColumn],
     *,
     db: str,
-    use_legacy_indexes: bool = False,
 ) -> list[str]:
     """ALTER TABLE statements that would realise the promoted columns.
 
@@ -746,7 +745,7 @@ def promotion_preview_ddl(
     from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
     from dfe_engine.source.type_registry import TypeRegistry
 
-    generator = DDLGenerator(TypeRegistry.default(), use_legacy_indexes=use_legacy_indexes)
+    generator = DDLGenerator(TypeRegistry.default())
     config = DDLConfig(db=db)
     statements: list[str] = []
     for column in columns:

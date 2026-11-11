@@ -20,11 +20,6 @@ def gen(registry: TypeRegistry) -> DDLGenerator:
     return DDLGenerator(registry)
 
 
-@pytest.fixture
-def gen_legacy(registry: TypeRegistry) -> DDLGenerator:
-    return DDLGenerator(registry, use_legacy_indexes=True)
-
-
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
@@ -180,17 +175,14 @@ class TestGenerateCreateTable:
 
     def test_index_generation(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("t", _basic_columns())
-        assert "INDEX idx__timestamp `_timestamp` TYPE minmax GRANULARITY 4" in ddl
-        assert "INDEX idx__org_id `_org_id` TYPE set(0) GRANULARITY 4" in ddl
-        assert "INDEX idx_user_name `user_name` TYPE set(0) GRANULARITY 4" in ddl
+        assert "INDEX `idx__timestamp` `_timestamp` TYPE minmax GRANULARITY 4" in ddl
+        # Both Nullable, so the bloom filter: set(0) prunes nothing on one on ClickHouse 26.3.
+        assert "INDEX `idx__org_id` `_org_id` TYPE bloom_filter GRANULARITY 4" in ddl
+        assert "INDEX `idx_user_name` `user_name` TYPE bloom_filter GRANULARITY 4" in ddl
         assert (
-            "INDEX idx_message `message` TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1" in ddl
+            "INDEX `idx_message` `message` TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1"
+            in ddl
         )
-
-    def test_legacy_indexes(self, gen_legacy: DDLGenerator):
-        ddl = gen_legacy.generate_create_table("t", _basic_columns())
-        assert "TYPE tokenbf_v1(8192, 4, 0)" in ddl
-        assert "TYPE text(" not in ddl
 
     def test_order_by(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("t", _basic_columns())
@@ -282,7 +274,7 @@ class TestGenerateCreateTable:
     def test_table_comment_escapes_a_quote_and_a_trailing_backslash(self, gen: DDLGenerator):
         cfg = DDLConfig(profile_name="analyst's C:\\Temp\\")
         ddl = gen.generate_create_table("t", _basic_columns(), cfg)
-        assert "COMMENT '@profile: analyst''s C:\\\\Temp\\\\'" in ddl
+        assert "COMMENT '@profile: analyst\\'s C:\\\\Temp\\\\'" in ddl
 
     def test_settings(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("t", _basic_columns())
@@ -377,14 +369,14 @@ class TestColumnTypes:
         cols = [_col(name="src_ip", type="ip", use_case="range")]
         ddl = gen.generate_create_table("t", cols)
         assert "Nullable(IPv6)" in ddl
-        assert "INDEX idx_src_ip" in ddl
+        assert "INDEX `idx_src_ip`" in ddl
         assert "TYPE minmax GRANULARITY 4" in ddl
 
     def test_uuid_type(self, gen: DDLGenerator):
         cols = [_col(name="trace_id", type="uuid", use_case="exact_match")]
         ddl = gen.generate_create_table("t", cols)
         assert "Nullable(UUID)" in ddl
-        assert "INDEX idx_trace_id" in ddl
+        assert "INDEX `idx_trace_id`" in ddl
         assert "TYPE bloom_filter GRANULARITY 4" in ddl
 
     def test_json_type(self, gen: DDLGenerator):
@@ -499,12 +491,12 @@ class TestComments:
     def test_column_comment_escaped(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string", comment="it's a test")]
         ddl = gen.generate_create_table("t", cols)
-        assert "COMMENT 'it''s a test'" in ddl
+        assert "COMMENT 'it\\'s a test'" in ddl
 
     def test_column_comment_escapes_a_trailing_backslash(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string", comment="Analyst's share C:\\Temp\\")]
         ddl = gen.generate_create_table("t", cols)
-        assert "COMMENT 'Analyst''s share C:\\\\Temp\\\\'" in ddl
+        assert "COMMENT 'Analyst\\'s share C:\\\\Temp\\\\'" in ddl
 
     def test_no_comment(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string")]
@@ -532,46 +524,58 @@ class TestEnum:
 
 
 class TestUseCaseIndexes:
-    def test_dimension_index(self, gen: DDLGenerator):
-        cols = [_col(name="cat", type="string", use_case="dimension")]
+    @pytest.mark.parametrize(
+        ("attribute", "index_type"),
+        [
+            pytest.param(["not_null"], "set(0)", id="not_null"),
+            pytest.param([], "bloom_filter", id="nullable"),
+        ],
+    )
+    def test_dimension_index(self, gen: DDLGenerator, attribute: list[str], index_type: str):
+        cols = [_col(name="cat", type="string", use_case="dimension", attribute=attribute)]
         ddl = gen.generate_create_table("t", cols)
-        assert "INDEX idx_cat `cat` TYPE set(0) GRANULARITY 4" in ddl
+        assert f"INDEX `idx_cat` `cat` TYPE {index_type} GRANULARITY 4" in ddl
 
     def test_word_search_index(self, gen: DDLGenerator):
         cols = [_col(name="msg", type="text", use_case="word_search")]
         ddl = gen.generate_create_table("t", cols)
-        assert "INDEX idx_msg `msg` TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1" in ddl
+        assert "INDEX `idx_msg` `msg` TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1" in ddl
 
     def test_substring_search_index(self, gen: DDLGenerator):
         cols = [_col(name="body", type="text", use_case="substring_search")]
         ddl = gen.generate_create_table("t", cols)
-        assert "INDEX idx_body `body` TYPE text(tokenizer=ngrams(3)) GRANULARITY 1" in ddl
+        assert "INDEX `idx_body` `body` TYPE text(tokenizer=ngrams(3)) GRANULARITY 1" in ddl
 
     def test_range_index(self, gen: DDLGenerator):
         cols = [_col(name="latency", type="float", use_case="range")]
         ddl = gen.generate_create_table("t", cols)
-        assert "INDEX idx_latency `latency` TYPE minmax GRANULARITY 4" in ddl
+        assert "INDEX `idx_latency` `latency` TYPE minmax GRANULARITY 4" in ddl
 
     def test_exact_match_index(self, gen: DDLGenerator):
         cols = [_col(name="req_id", type="string", use_case="exact_match")]
         ddl = gen.generate_create_table("t", cols)
-        assert "INDEX idx_req_id `req_id` TYPE bloom_filter GRANULARITY 4" in ddl
+        assert "INDEX `idx_req_id` `req_id` TYPE bloom_filter GRANULARITY 4" in ddl
 
     def test_exact_match_on_a_low_cardinality_column_holds_every_value(self, gen: DDLGenerator):
         cols = [
-            _col(name="code", type="string", use_case="exact_match", attribute=["lowcardinality"])
+            _col(
+                name="code",
+                type="string",
+                use_case="exact_match",
+                attribute=["lowcardinality", "not_null"],
+            )
         ]
         ddl = gen.generate_create_table("t", cols)
-        assert "INDEX idx_code `code` TYPE set(0) GRANULARITY 4" in ddl
+        assert "INDEX `idx_code` `code` TYPE set(0) GRANULARITY 4" in ddl
 
     def test_key_search_indexes_the_keys_and_the_values_apart(self, gen: DDLGenerator):
         cols = [_col(name="attrs", type="map", use_case="key_search")]
         ddl = gen.generate_create_table("t", cols)
         assert (
-            "INDEX idx_attrs_key mapKeys(`attrs`) TYPE text(tokenizer=array) GRANULARITY 1" in ddl
+            "INDEX `idx_attrs_key` mapKeys(`attrs`) TYPE text(tokenizer=array) GRANULARITY 1" in ddl
         )
         assert (
-            "INDEX idx_attrs_value mapValues(`attrs`) TYPE text(tokenizer=array) GRANULARITY 1"
+            "INDEX `idx_attrs_value` mapValues(`attrs`) TYPE text(tokenizer=array) GRANULARITY 1"
             in ddl
         )
 
@@ -579,7 +583,7 @@ class TestUseCaseIndexes:
         cols = [_col(name="embedding", type="vector", use_case="similarity_search(768)")]
         ddl = gen.generate_create_table("t", cols)
         assert (
-            "INDEX idx_embedding `embedding` TYPE "
+            "INDEX `idx_embedding` `embedding` TYPE "
             "vector_similarity('hnsw', 'cosineDistance', 768) GRANULARITY 1" in ddl
         )
 
@@ -591,23 +595,7 @@ class TestUseCaseIndexes:
     def test_no_use_case_no_index(self, gen: DDLGenerator):
         cols = [_col(name="payload", type="string")]
         ddl = gen.generate_create_table("t", cols)
-        assert "INDEX idx_payload" not in ddl
-
-    def test_legacy_word_search(self, gen_legacy: DDLGenerator):
-        cols = [_col(name="msg", type="text", use_case="word_search")]
-        ddl = gen_legacy.generate_create_table("t", cols)
-        assert "tokenbf_v1(8192, 4, 0)" in ddl
-
-    def test_legacy_substring_search(self, gen_legacy: DDLGenerator):
-        cols = [_col(name="body", type="text", use_case="substring_search")]
-        ddl = gen_legacy.generate_create_table("t", cols)
-        assert "ngrambf_v1(3, 256, 2, 0)" in ddl
-
-    def test_legacy_key_search_falls_back_to_a_bloom_filter(self, gen_legacy: DDLGenerator):
-        """The array tokenizer arrived with the GA text index, so it is unavailable here."""
-        cols = [_col(name="attrs", type="map", use_case="key_search")]
-        ddl = gen_legacy.generate_create_table("t", cols)
-        assert "INDEX idx_attrs_key mapKeys(`attrs`) TYPE bloom_filter(0.01) GRANULARITY 1" in ddl
+        assert "INDEX `idx_payload`" not in ddl
 
 
 class TestIndexNames:
@@ -654,7 +642,7 @@ class TestIndexNames:
         cols = [_col(name="req_id", type="string", use_case="exact_match")]
         ddl = gen.generate_create_table("t", cols)
         index_lines = [line for line in ddl.splitlines() if "INDEX" in line]
-        assert index_lines == ["    INDEX idx_req_id `req_id` TYPE bloom_filter GRANULARITY 4"]
+        assert index_lines == ["    INDEX `idx_req_id` `req_id` TYPE bloom_filter GRANULARITY 4"]
 
     def test_the_alter_quotes_a_dotted_index_name(self, gen: DDLGenerator):
         col = _col(name="event.action", type="string", use_case="exact_match")
@@ -666,18 +654,19 @@ class TestIndexNames:
     def test_the_alter_keeps_a_plain_index_name_byte_for_byte(self, gen: DDLGenerator):
         col = _col(name="req_id", type="string", use_case="exact_match")
         assert gen.generate_alter_add_indexes("t", col) == [
-            "ALTER TABLE `{db}`.`t` ADD INDEX idx_req_id `req_id` TYPE bloom_filter GRANULARITY 4;\n"
+            "ALTER TABLE `{db}`.`t` ADD INDEX `idx_req_id` `req_id` TYPE bloom_filter GRANULARITY 4;\n"
         ]
 
-    def test_an_index_name_that_cannot_be_quoted_safely_is_refused(self, gen: DDLGenerator):
-        col = _col(name="a`b", type="string", use_case="exact_match")
-        with pytest.raises(DDLGenerationError, match="unsafe index name"):
+    @pytest.mark.parametrize("name", ["a`b", "has space"])
+    def test_a_column_name_unsafe_in_ddl_is_refused_before_its_index(
+        self, gen: DDLGenerator, name: str
+    ):
+        """Every column name is checked, indexed or not, so none reaches the DDL unquoted."""
+        col = _col(name=name, type="string", use_case="exact_match")
+        with pytest.raises(DDLGenerationError, match="unsafe column name"):
             gen.generate_alter_add_indexes("t", col)
-
-    def test_an_unindexed_column_is_never_checked_as_an_index_name(self, gen: DDLGenerator):
-        cols = [_col(name="has space", type="string")]
-        ddl = gen.generate_create_table("t", cols)
-        assert "INDEX" not in ddl
+        with pytest.raises(DDLGenerationError, match="unsafe column name"):
+            gen.generate_create_table("t", [_col(name=name, type="string")])
 
 
 class TestProjectionNames:
@@ -701,7 +690,7 @@ class TestProjectionNames:
 
     def test_a_projection_name_that_cannot_be_quoted_safely_is_refused(self, gen: DDLGenerator):
         cols = [_col(name="a`b", type="datetime")]
-        with pytest.raises(DDLGenerationError, match="unsafe projection name"):
+        with pytest.raises(DDLGenerationError, match="unsafe column name"):
             gen.generate_create_table("t", cols, DDLConfig(projection_order_by="a`b"))
 
 
@@ -718,7 +707,7 @@ class TestDeclaredIndexes:
             )
         ]
         ddl = gen.generate_create_table("t", cols)
-        assert "INDEX idx__raw `_raw` TYPE text(tokenizer = 'default') GRANULARITY 64" in ddl
+        assert "INDEX `idx__raw` `_raw` TYPE text(tokenizer = 'default') GRANULARITY 64" in ddl
 
     def test_the_declared_index_wins_over_the_use_case_template(self, gen: DDLGenerator):
         cols = [
@@ -745,7 +734,7 @@ class TestDeclaredIndexes:
     def test_a_column_declaring_no_index_still_takes_the_template(self, gen: DDLGenerator):
         cols = [_col(name="body", type="text", use_case="substring_search")]
         ddl = gen.generate_create_table("t", cols)
-        assert "INDEX idx_body `body` TYPE text(tokenizer=ngrams(3)) GRANULARITY 1" in ddl
+        assert "INDEX `idx_body` `body` TYPE text(tokenizer=ngrams(3)) GRANULARITY 1" in ddl
 
 
 class TestCommonHeaderIndexFidelity:
@@ -757,7 +746,7 @@ class TestCommonHeaderIndexFidelity:
         Both are read rather than restated here: a tokenizer named in this file is
         one that goes stale the next time ClickHouse retires one.
         """
-        from dfe_engine.schema.schema_ddl import _INDEX_TEMPLATES
+        from dfe_engine.schema.schema_ddl import table_ddl
         from dfe_engine.schema.schema_loader import SchemaLoader
 
         columns = SchemaLoader.load_profile(profile_name="timeseries")
@@ -766,7 +755,8 @@ class TestCommonHeaderIndexFidelity:
         assert raw.use_case, "the common header declares no _raw use_case"
 
         ddl = gen.generate_create_table("t", columns)
-        assert _INDEX_TEMPLATES[raw.use_case].format(col="`_raw`", name="idx__raw") in ddl
+        (spec,) = table_ddl().catalogue.specs(raw.use_case, cardinality=raw.declared_cardinality)
+        assert spec.render(name="`idx__raw`", column="`_raw`") in ddl
 
 
 # ── ALTER TABLE ─────────────────────────────────────────────────────
