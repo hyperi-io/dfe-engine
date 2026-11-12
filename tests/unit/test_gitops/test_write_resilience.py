@@ -517,7 +517,7 @@ def test_the_budget_bounds_a_call_to_a_silent_forge(
 
 @pytest.fixture
 def black_hole(no_proxy: None) -> Iterator[CountingListener]:
-    """The wedged-forge shape from test_repo.py, with the connections counted.
+    """The hung-forge shape from test_repo.py, with the connections counted.
 
     Each connection is accepted and never answered, so a test can tell whether a
     write dialled at all.
@@ -532,7 +532,7 @@ def black_hole(no_proxy: None) -> Iterator[CountingListener]:
 def test_the_breaker_opens_after_spent_budgets_and_answers_without_dialling(
     tmp_path: Path, black_hole: CountingListener
 ) -> None:
-    """Two writes spend their budget on a wedged forge. The third is a 503 at once.
+    """Two writes spend their budget on a hung forge. The third is a 503 at once.
 
     Without the breaker every write against a forge that is down for minutes costs
     its full timeout and budget, with the writer lock held and later writes queued.
@@ -554,7 +554,7 @@ def test_the_breaker_opens_after_spent_budgets_and_answers_without_dialling(
 
     for _ in range(2):
         with pytest.raises(GitopsUnavailableError):
-            repo.publish({"x.yaml": "v: 1\n"}, message="wedged forge")
+            repo.publish({"x.yaml": "v: 1\n"}, message="hung forge")
     dialled = black_hole.connections
     assert dialled >= 2
     assert _breaker(manager, "opened") == 1

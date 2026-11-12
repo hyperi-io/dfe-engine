@@ -214,9 +214,9 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 # Permanent hang guard (pytest-timeout): fail ANY test running longer than
-# `timeout` seconds and dump every thread's stack, so a wedged test (blocked
+# `timeout` seconds and dump every thread's stack, so a hung test (blocked
 # socket / gRPC / ClickHouse connect, OTLP exporter shutdown-block) fails fast
-# with a traceback instead of stalling the run to the CI job wall-clock. The
+# with a traceback instead of stalling the run until the CI job times out. The
 # `thread` method is REQUIRED here: the block can sit in a worker thread (the
 # anyio lifespan-startup thread, an OTLP export thread) that the `signal`
 # method (main-thread SIGALRM only, and unusable under `-n` xdist) cannot

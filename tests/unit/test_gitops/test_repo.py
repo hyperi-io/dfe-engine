@@ -278,7 +278,7 @@ class _RecordingLogger:
 def black_holed_forge(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     """A URL whose listener completes the handshake and then never answers.
 
-    The shape a wedged forge has, and the one an unbounded read blocks on: the SYN
+    The shape a hung forge has, and the one an unbounded read blocks on: the SYN
     is answered from the kernel's backlog, so the connect succeeds and the client
     waits on a reply that never comes rather than being refused.
     """

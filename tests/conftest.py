@@ -185,7 +185,7 @@ def pytest_collection_modifyitems(config, items):
 
 # Markers whose tests talk to real ClickHouse / Kafka. In-process tests under
 # tests/e2e/ are auto-marked ``e2e`` but use TestClient and must NOT skip the
-# hang guards - a local CH/Redpanda otherwise wedges lifespan startup.
+# hang guards - a local CH/Redpanda otherwise hangs lifespan startup.
 REAL_INFRA_MARKERS = ("integration", "live")
 
 

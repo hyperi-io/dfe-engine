@@ -10,7 +10,7 @@
 
 In-process tests under tests/e2e/ are auto-marked ``e2e``. They use TestClient
 and claim no external infrastructure. If the CH/Kafka hang guards skip them,
-a developer machine with localhost ClickHouse or Redpanda wedges the suite:
+a developer machine with localhost ClickHouse or Redpanda hangs the suite:
 lifespan bootstrap talks to the real broker, pytest-timeout cannot interrupt
 the C client, and ``make test`` sits at ~94% until the job is killed.
 """
