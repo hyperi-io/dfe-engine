@@ -136,10 +136,11 @@ than suggested.
 A source gets its own Kafka topic, where the deployment has Kafka, and its own
 table.
 
-**Routing.** A source declares the condition that selects its records, in
-`key exists` or `key=value` form. It is deliberately not CEL. That condition is
-evaluated against EVERY inbound record, and we have not found a way to make CEL
-fast enough at that position. When we do, it goes in.
+**Routing.** A source declares the condition that selects its records, as a
+`match` (`key exists`, `key=value` and the other operators, grouped `all` or
+`any`) or as `when`, a CEL Fast condition the receiver evaluates. That condition
+runs against EVERY inbound record, so the CEL Fast profile refuses regex,
+iteration and time functions there.
 
 **What is mandatory.** The source name, which is both the topic and the table
 name, and the routing condition when the origin is the receiver. A source
@@ -151,9 +152,8 @@ derived schema is a sub-selection of fields from its parent meta schema, plus
 which of those fields carry which index type -- one index type per field, added
 and removed as a CRUD operation on both the definition and the deployed table.
 
-**Transforms, optional.** A source may carry one transform in 2.2. Chaining is
-a 2.3 question and only if there is demand for it. 2.2 ships transform-elastic,
-transform-vrl and transform-vector.
+**Transforms, optional.** A source carries at most one transform. DFE ships
+transform-elastic, transform-vrl and transform-vector.
 
 ### What a transform is actually for
 
@@ -229,8 +229,8 @@ the DDL comment.
 loader where to read that field from. This is why a derived schema carries its
 base's `expr` unchanged and only overrides the index.
 
-CEL does appear in the pipeline, at `@computed` on a column. It is the routing
-decision that stays `key=value`, because that one runs against every record.
+CEL also appears at `@computed` on a column. Routing CEL is held to the Fast
+profile because it runs against every record.
 
 ## Promote: see it, then shape it
 

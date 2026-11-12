@@ -146,10 +146,10 @@ flowchart TB
         INFRA[(dfe-infra)]
     end
     subgraph cluster["Customer cluster"]
-        ARGO2[DFE's Argo CD - dfe-system]
+        ARGO2[Argo CD - argocd, installed or adopted]
         APPSETS[ApplicationSets]
         RUST[Rust services]
-        SUB[(Backing services<br/>ClickHouse - Kafka - PG/FerretDB - Observe)]
+        SUB[(Backing services<br/>ClickHouse - Kafka - DocumentDB - Observe)]
     end
     CUI --> API
     CCLI --> API
@@ -197,15 +197,14 @@ different subtrees (`config/` and `values/` + `ddl/`).
    ApplicationSets; the engine writes config + DDL + OIDC values into the
    deploy repo and turns dials through overlays. If the engine is about to
    install ClickHouse or author an Argo Application, the work belongs in
-   dfe-infra. (The Helm compiler still generates legacy `argo_*` by-products;
-   they are NOT published to the deploy repo.)
+   dfe-infra.
 4. **Assume only a bare cluster.** Layer 0 detect-or-install brings
    everything else: a default StorageClass, cert-manager, External Secrets,
-   and DFE's own Argo CD in `dfe-system`, coexisting with any host Argo.
+   and Argo CD, installed into `argocd` or, where one already runs, adopted.
 5. **ClickHouse is the only operational store.** All non-gitops state -
    events, results, watermarks, leases - lives in CH via
-   `effective_data_database`. PG/FerretDB are bundled-app
-   conveniences, never DFE state.
+   `effective_data_database`. The DocumentDB store is Observe's own, never
+   DFE state.
 6. **A commit is not a deployment.** The engine reports what it committed;
    Argo (and any org approval gate) decides when it is live.
 7. **Fully operable from the repos alone.** Engine and UI down = running
@@ -213,12 +212,13 @@ different subtrees (`config/` and `values/` + `ddl/`).
 
 ## Layered deployment model (summary)
 
-Layer 0 platform baseline (DFE's own Argo + detect-or-install operators) ->
-Layer 1 backing services (ClickHouse, optional Kafka, PG+FerretDB, Observe) ->
-Layer 2 apps + config (Rust services from pinned base charts + engine-authored
-overlays). Four tiers select defaults: **dfe-docker** (Compose), **slim**
-(gRPC, no Kafka), **single** (+ single-broker Kafka), **scale** (everything
-clustered). Observe ships in EVERY tier - it is the explore UI over all DFE
+Layer 0 platform baseline (Argo CD + detect-or-install operators) ->
+Layer 1 backing services (ClickHouse, optional Kafka, DocumentDB, Observe) ->
+Layer 2 apps + config (digest-pinned thin charts built from each app's
+deployment contract + engine-authored overlays). Five tiers select defaults:
+**dfe-docker** (Compose), **slim** (gRPC, no Kafka), **single** (+
+single-broker Kafka), **scale** (everything clustered), **mesh** (scale's
+replicas and ClickHouse cluster over gRPC, no broker). Observe ships in EVERY tier - it is the explore UI over all DFE
 data and the self-monitoring sink, not an add-on. Full detail including the
 per-tier composition table, deploy-repo providers, backing-service modes, and
 the network model: [deployment/README.md](deployment/README.md).
@@ -238,24 +238,23 @@ flowchart LR
     VIEWS --> QAPI[query API]
 ```
 
-Alert grouping is read-time: ALL matched rows are written at full fidelity
-("suppression = loss of visibility"); grouping is a post-insert
-`SELECT ... GROUP BY` with per-(hunt, rule, customer, group) cooldown in a
-ReplacingMergeTree state table, fail-open.
+All matched rows are written at full fidelity. When a hunt names an alert
+destination, the runner sends one message per fire that matched. There is no
+alert grouping or cooldown.
 
 ## Technology decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Config storage | YAML + git (no DB) | human-readable, versioned, Rust reads directly |
-| API host | dfe-engine FastAPI | dfe-control-plane removed; one artifact |
-| Auth | local JWT default; OIDC + API key + disabled | OIDC via X-Oidc-* headers set at the edge |
+| API host | dfe-engine FastAPI | one artifact |
+| Auth | local JWT by default, plus OIDC, API key and disabled | OIDC through the engine's own relying party (`/api/v1/auth/oidc/{provider}/login`) |
 | Conflict handling | git blob-SHA ETag + 409 | git-native, standard HTTP semantics |
-| Deployment | Argo CD + Helm, base+overlay multi-source | engine turns dials, appsets author apps |
+| Deployment | Argo CD + Helm, thin chart + dfe-extras + overlay, multi-source | engine turns dials, appsets author apps |
 | Platform baseline | Layer 0 detect-or-install | assume only a bare cluster |
 | Deploy repo | provider-agnostic (GitHub/GitLab/Forgejo) | no hard git-server dependency |
 | Backing services | DFE-owned, mode-driven (single/cluster/external) | never piggyback shared infra |
-| Secrets | External Secrets Operator (+ generators) | customer Vault, or in-cluster generators on bare |
+| Secrets | External Secrets Operator for deployment secrets, `DFE_ENGINE_SECRETS_PROVIDER` for secrets the engine mints | ESO: customer Vault, or in-cluster generators on bare. Engine: file by default, OpenBao/Vault or AWS Secrets Manager |
 | Observability | OTel -> ClickHouse -> Observe | single storage backend |
 | Ingress / OIDC | Envoy Gateway (k8s) / oauth2-proxy (docker) | native OIDC at the edge |
 | Expression language | CEL (Python + Rust), DFE subset | one standard, tiered for performance |

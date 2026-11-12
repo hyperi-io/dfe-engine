@@ -20,22 +20,22 @@ A source has a tri-state lifecycle, not a boolean toggle:
 |-------|----------------|------------------------------|----------------|
 | `active` | materialised (idempotent CREATE) | on | held (conflict-checked) |
 | `dormant` | retained -- pre-positioned, never dropped | off | held (conflict-checked -- it may activate later) |
-| `disabled` | reclaimed (guarded DROP) | off | released -- another source may claim it |
+| `disabled` | retained -- nothing drops it, drop it by hand if the data is not wanted | off | released -- another source may claim it |
 
 ```mermaid
 stateDiagram-v2
     [*] --> active: create
     active --> dormant: pause (schema stays)
     dormant --> active: resume
-    active --> disabled: turn off (table reclaimed)
+    active --> disabled: turn off (table stays)
     dormant --> disabled
-    disabled --> active: re-enable (table recreated)
+    disabled --> active: re-enable
     disabled --> dormant
 ```
 
-Materialisation derives from the declared state alone: CREATE on active, LEAVE
-on dormant, guarded RECLAIM on disabled. Creates are idempotent and a dormant
-source's table is never dropped.
+Materialisation derives from the declared state alone: CREATE on active, and
+no DDL on dormant or disabled. Creates are idempotent, and nothing drops a
+source's table.
 
 The deployed apps follow the same declaration. Every source write ends by
 reconciling the deploy repo: the receiver's rules and the loader's table map

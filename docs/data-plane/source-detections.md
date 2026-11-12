@@ -14,53 +14,44 @@ declared. The source itself is [source.md](source.md).
 
 ## Rules
 
-A rule is one SQL detection query tied to a source.
+A rule is one detection condition on a source's table: a SQL WHERE fragment, a
+CEL filter the engine transpiles to one, or both ANDed together.
 
 ```yaml
-# rules/brute_force_login.yaml
-rule: brute_force_login
-source: winaudit                        # Tied to this source's table
-display_name: Brute Force Login Attempt
+# rules/brute_force_login.yaml -- the filename stem is the rule's id
+rule_id: brute_force_login
+name: Brute Force Login Attempt
 severity: high
-
-query: |
-  SELECT
-    _timestamp,
-    _org_id,
-    user_name,
-    source_ip,
-    count() AS attempt_count
-  FROM {db}.{source}
-  WHERE event_id = 4625
-    AND _timestamp >= {from}
-    AND _timestamp < {to}
-  GROUP BY _timestamp, _org_id, user_name, source_ip
-  HAVING attempt_count >= {threshold}
-
-parameters:
-  threshold: 5
-
-schedule: "*/5 * * * *"                 # Cron schedule for hunt execution
+source_table: winaudit                  # In the data database unless source_db names another
+where_clause: "event_id = 4625"
 ```
-
-`{db}`, `{source}`, `{from}` and `{to}` are templated at execution time.
 
 ## Hunts
 
-A hunt is a scheduled batch execution of rules, and its matches are written to
-the alerts table.
+A hunt groups rules, names the customers whose rows they read, and carries the
+schedule. The runner runs `rate` schedules: `anchored` hunts are recognised and
+skipped.
+
+```yaml
+# hunts/windows_logins.yaml -- the filename stem is the hunt's id
+name: Windows logins
+schedule:
+  mode: rate
+  interval: 5m
+customers: [acme]
+rules: [brute_force_login]
+```
 
 ```mermaid
 flowchart TD
-    R[rule: SQL tied to a source] --> H[hunt runner, on the schedule]
-    H -->|expands from/to, runs against db.source| M[matches]
-    M --> A[(db.alerts)]
+    R[rule: condition on a source table] --> H[hunt runner, on the hunt's interval]
+    H -->|runs each rule over the window| M[matches]
+    M --> A[(data database .detection)]
 ```
 
-The alerts table is itself a source (`_source = "alerts"`, `header.type:
-timeseries`), so it gets the same schema management, retention and query
-surface as any other -- including rules written against alerts, which is how
-correlation is expressed. How the runner scales is
+Matches land in `<data database>.detection` unless the hunt
+(`global_target_table_name`) or a rule entry (`target_table_name`) names another
+table. How the runner scales is
 [hunt-runner-scaling.md](hunt-runner-scaling.md), and how a person finds a
 match is [hunt-match-delivery.md](hunt-match-delivery.md).
 

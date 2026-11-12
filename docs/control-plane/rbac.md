@@ -4,17 +4,6 @@
 
 ---
 
-## Implementation Status
-
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **Phase 1** | RBAC foundation, account/group/API key CRUD, 4 auth paths, audit | Done |
-| **Phase 2** | Per-org pinned ClickHouse users, shared tenant row policies, quota tiers | Done |
-| **Phase 3** | OrgRegistry, dfe-hyperdx team/connection sync | Done |
-| **Phase 4** | Schema-less service discovery | Not pursued - see section 13 |
-
----
-
 ## 1. Auth Flow
 
 ### 1.1 Four Authentication Paths
@@ -52,7 +41,7 @@ flowchart TD
 
 | Path | Use case | Credential storage | Token lifetime |
 |------|----------|-------------------|----------------|
-| OIDC headers | Production (Envoy Gateway fronted) | IdP (Entra, Google, etc.) | Session cookie (Envoy managed) |
+| OIDC headers | Fallback, off by default: an engine reachable only through an OIDC proxy | IdP (Entra, Google, etc.) | Session cookie (proxy managed) |
 | API key | CI/CD, Terraform, scripts | `config/auth/api-keys/*.yaml` (SHA-384 hash) | `expires_at` if set, else `auth.api_key_default_ttl_days` from creation (default 90, `0` for no expiry). Revoke by deleting the file |
 | JWT Bearer | Console sessions, standalone, dev | Issued by `POST /api/v1/auth/login`, the OIDC login callback and `POST /api/v1/auth/refresh` | `api.jwt_expire_minutes` (`DFE_ENGINE_API_JWT_EXPIRE_MINUTES`, default 60) |
 | Disabled | Dev/test | N/A | N/A |
@@ -80,12 +69,13 @@ the headers and falls through to API key and JWT.
 |------|---------|--------------|----------|
 | **Dev/test** | `auth.enabled=false` with a dev `DFE_ENGINE_ENV` | Requests with no credential get root admin context. Any other `DFE_ENGINE_ENV` refuses to start | Local development |
 | **Standalone** | `auth.enabled=true` (the default) | JWT Bearer + API keys + local accounts | Docker, no external IdP |
-| **Production** | `auth.enabled=true` + `auth.trust_proxy_auth_headers=true` + Envoy | OIDC headers (precedence) + JWT + API keys | K8s with Envoy Gateway |
+| **Production** | `auth.enabled=true` + an OIDC provider | The engine is the OIDC relying party (`/api/v1/auth/oidc/{provider}/login`) and mints the session JWT, plus API keys and local accounts | Kubernetes |
+| **Proxy headers (fallback)** | `auth.enabled=true` + `auth.trust_proxy_auth_headers=true` | OIDC headers (precedence) + JWT + API keys | An engine reachable only through an OIDC proxy |
 
 ### 1.3 OIDC Header Trust Model
 
-**Security precondition:** When deploying behind Envoy Gateway OIDC,
-dfe-engine MUST only be accessible via Envoy. Direct pod access MUST be
+**Security precondition:** When `auth.trust_proxy_auth_headers` is on,
+dfe-engine MUST only be accessible via the proxy that sets the headers. Direct pod access MUST be
 blocked by K8s NetworkPolicy. Without this, any client with pod access can
 forge OIDC headers and impersonate any user.
 
@@ -275,7 +265,7 @@ The routes enforce more domains than this table lists (accounts, groups, API key
 
 #### The usage scope
 
-`usage:read` opens `GET /api/v1/usage` and `GET /api/v1/usage/overview` ([ui-api-guide.md](ui-api-guide.md#usage-apiv1usage)). Four built-in roles carry it: `infra_admin`, `infra_viewer`, `dfe_operator` and `org_viewer`. `admin` holds it through `*`. Built-in grants reach fresh deploys only, see [2.2](#22-role-definitions).
+`usage:read` opens `GET /api/v1/usage` and `GET /api/v1/usage/overview` ([ui-api-guide.md](ui-api-guide.md#usage-apiv1usage)). Four built-in roles carry it: `infra_admin`, `infra_viewer`, `dfe_operator` and `org_viewer`. `admin` holds it through `*`. A changed built-in grant reaches an existing deployment at its next restart, see [2.2](#22-role-definitions).
 
 A grant at system scope or at an org's scope opens both routes. A holder whose grant reads every org sees the whole deployment and may name any org. Any other holder is held to its own orgs that grant `usage:read`. `org_viewer` is scoped, so it is always held. The reads are described in [rbac-engine-reads.md](rbac-engine-reads.md#usage-reads).
 
@@ -801,15 +791,6 @@ graph TD
 
 ---
 
-## 13. Phase 4 status - schema-less service discovery
-
-Not pursued. An app's shape is data in `dfe-infra/apps.yaml`, served through
-`/api/v1/apps`, so there is no per-service surface registry and no
-`/api/v1/service-surfaces` endpoint. `/api/v1/services` takes its services from
-the same manifest and each config's defaults from the app's mounted contract.
-
----
-
 ## 14. Edge Cases
 
 | Scenario | Behaviour |
@@ -835,24 +816,9 @@ the same manifest and each config's defaults from the app's mounted contract.
 
 ---
 
-## 16. Breaking Changes from Pre-2.2
-
-| What | Old | New |
-|------|-----|-----|
-| JWT library | `python-jose[cryptography]` | `PyJWT[crypto]` |
-| Auth model | `AuthContext.permissions` field | Removed — resolved from roles at auth time |
-| Role names | `admin`, `operator`, `viewer` | 8 granular roles in `roles.yaml` |
-| Role storage | `DEFAULT_ROLE_PERMISSIONS` constant | `auth/resources/roles.yaml` |
-| Account storage | Hardcoded dict in `LocalAuthProvider` | `config/auth/accounts/*.yaml` with full CRUD |
-| Group mapping | `AuthSettings.group_role_mapping` | `config/auth/groups/*.yaml` |
-| Auth paths | JWT Bearer only | OIDC headers + API key + JWT Bearer + disabled |
-| Deep merge | `deepmerge` pip package | `dfe_engine.yaml_utils.deep_merge()` (vendored) |
-
----
-
 ## 17. References
 
 - [ClickHouse Custom Settings + Row Policy (Highlight)](https://www.highlight.io/blog/row-level-security)
-- [API Key Prefix Pattern (Seam)](https://github.com/seamapi/prefixed-api-key)
+- [API Key Prefix Pattern (Seam)](https://github.com/seamapi/prefixed-api-key) <!-- docs-gate: allow register -- the vendor's name -->
 - [Multi-Tenant RBAC Design (WorkOS)](https://workos.com/blog/how-to-design-multi-tenant-rbac-saas)
 - [Envoy Gateway OIDC SecurityPolicy](https://gateway.envoyproxy.io/docs/tasks/security/oidc/)

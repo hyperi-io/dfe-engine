@@ -13,7 +13,7 @@ the network model. The system map is [../architecture.md](../architecture.md).
 |---|---|
 | [backing-services.md](backing-services.md) | per-backend swap matrix |
 | [transports.md](transports.md) | profile x transport, the Kafka provider swap, the mesh tier's Envoy balancer and receiver buffers |
-| [keda-scaling.md](keda-scaling.md) | CPU-default + opt-in ScalingPressure via dfe-keda-shim |
+| [keda-scaling.md](keda-scaling.md) | CPU plus ScalingPressure via dfe-keda-shim, on by default for the ingest apps |
 | [observability-standard.md](observability-standard.md) | one OTel destination, modes, log schema |
 | [supply-chain-pinning.md](supply-chain-pinning.md) | pick-latest-per-rules then SHA-pin |
 | [e2e-acceptance.md](e2e-acceptance.md) | the two sign-off scenarios (k8s + docker) |
@@ -25,13 +25,13 @@ flowchart TB
     subgraph L0["Layer 0 - platform baseline"]
         BARE[bare cluster + admin creds]
         STORE[StorageClass]
-        DARGO[DFE's own Argo CD - dfe-system]
+        DARGO[Argo CD - argocd, installed or adopted]
         OPS[operators via DETECT-OR-INSTALL<br/>cert-manager - ESO - KEDA - CH-op - gateway]
     end
     subgraph L1["Layer 1 - backing services"]
         CH[(ClickHouse)]
         KAFKA[(Kafka - optional)]
-        PG[(Postgres + FerretDB)]
+        PG[(DocumentDB on CloudNativePG)]
         HDX[Observe]
     end
     subgraph L2["Layer 2 - apps + config"]
@@ -53,17 +53,16 @@ DFE's own CRs); if absent, INSTALL a DFE-owned copy. Covered: a default
 StorageClass (local-path fallback), cert-manager, External Secrets, and Argo
 CD itself.
 
-**Two Argo instances coexist.** DFE installs its own Argo into `dfe-system`,
-scoped via `--application-namespaces` + an instance label so it reconciles
-only `dfe-*` namespaces and DFE-labelled apps. On a bare cluster it is the
-only Argo; on a cluster that already runs Argo/Rancher it sits beside the
-host's untouched. Cluster-singleton operators (one CRD, one controller) are
-exactly what detect-or-install handles.
+**Argo CD is installed or adopted.** On a cluster with no running Argo CD,
+bootstrap installs one into the `argocd` namespace. On a cluster that already
+runs Argo CD, DFE adopts it and never reconfigures it: DFE's AppProjects and
+ApplicationSets register into that instance. Cluster-singleton operators (one
+CRD, one controller) are exactly what detect-or-install handles.
 
 ### Layer 1 - backing services
 
-ClickHouse, optionally Kafka, Postgres+FerretDB, and Observe (dfe-hyperdx), deployed by
-DFE's Argo via ApplicationSets. DFE deploys its OWN backing services; it
+ClickHouse, optionally Kafka, the DocumentDB store, and Observe (dfe-hyperdx), deployed by
+Argo CD via ApplicationSets. DFE deploys its OWN backing services and
 never piggybacks a shared one. The backing services are decoupled from the
 deploy repo: layer2-data is a single source (base chart + profile/cloud
 values only), so they come up before any external git or in-cluster git host
@@ -72,20 +71,23 @@ no deploy repo present.)
 
 ### Layer 2 - apps + config
 
-The dfe-* Rust apps, each as a base chart in dfe-infra plus an
-engine-authored overlay from the deploy repo, merged base-then-overlay so the
-engine's values win. The layer2-apps ApplicationSet is a matrix of (clusters
-x git-files over `values/*-values.yaml`) - one Application per service
-instance.
+The dfe-* apps, each a thin chart built from its deployment contract plus an
+engine-authored overlay from the deploy repo, merged so the engine's values
+win. The layer2-apps ApplicationSet is a matrix of (clusters x git-files over
+`values/*-values.yaml`) - one Application per service instance.
 
-**Base + overlay merge (ONE mechanism).** An ApplicationSet whose
-Applications are multi-source: source 1 is the pinned dfe-infra base chart at
-a target revision, source 2 is the deploy repo's overlay file layered last
-via `$values`. The engine turns dials through the overlay; it never authors
-Applications. The crux: base charts must expose every dial as a Helm value.
+**Four sources per Application (ONE mechanism).**
 
-App shapes: singleton-scaled (receiver/loader/engine/ui - one values file
-each) vs multi-instance (fetcher and optional archiver/transforms - N files,
+1. The app's thin chart, assembled from its deployment contract, pulled over OCI and pinned by digest.
+2. dfe-infra's `helm/charts/dfe-extras`, the DFE-only objects beside it.
+3. dfe-infra as ref `infra`, for the value files.
+4. The deploy repo as ref `values`, whose instance file is layered last.
+
+The engine turns dials through that instance file and never authors
+Applications, so every dial has to be a Helm value.
+
+App shapes: one deployment for the stack (receiver/loader/archiver/engine/ui -
+one values file each) vs one per config (fetcher and transforms - N files,
 each its own config). KEDA scaling is folded into each app chart - see
 [keda-scaling.md](keda-scaling.md).
 
@@ -97,19 +99,22 @@ and the balancer per tier: [transports.md](transports.md).
 
 | Tier | Platform | Transport | Kafka | Sizing | Shape |
 |------|----------|-----------|-------|--------|-------|
-| **dfe-docker** | Docker Compose (NOT k8s) | per compose profile: `slim` is gRPC, `single` is Kafka | per profile | minimal | SME / single-host; anything smaller than `slim` |
+| **dfe-docker** | Docker Compose (NOT k8s) | four profiles: `slim-grpc`, `slim-kafka`, `single-grpc`, `single-kafka` (the default) | per profile | minimal | SME / single-host, anything smaller than `slim` |
 | **slim** | k8s | gRPC (receiver->loader direct) | **no** | minimum-viable + safety | bare-minimum k8s; smallest |
 | **single** | k8s | Kafka | **yes** (single broker) | reliability | one node of everything, with Kafka |
 | **scale** | k8s | Kafka | **yes** (multi-broker cluster) | reliability | everything clustered (ReplicatedMergeTree + dedicated Keeper) |
-| **mesh** | k8s | gRPC, Envoy listener per stage pool | **no** | reliability | scale's replicas and ClickHouse cluster with no broker; the receiver buffers instead |
+| **mesh** | k8s | gRPC, Envoy listener per stage pool | **no** | reliability | scale's replicas and ClickHouse cluster with no broker, see [transports.md](transports.md#buffering-without-a-bus) |
 
-A tier sets defaults; a deployer overrides any single dial. `mesh`
-composes as `scale` below with Kafka and Kafbat off.
+A tier sets defaults, and a deployer overrides any single dial. `mesh`
+composes as `scale` below with Kafka and Kafbat off and, like slim, no
+fetchers or transforms.
 
 ## Default composition per k8s tier
 
-`on` = deployed and enabled; `opt` = shipped but off by default, enable via
-the overlay; `off` = not deployed.
+- `on` is deployed by default.
+- `src` is one deployment per source that needs it, written by the engine when the source is saved, and none until then.
+- `opt` is deployable through the overlay but not seeded.
+- `-` is refused on this tier.
 
 | Component | dfe-docker | slim | single | scale |
 |-----------|:---:|:---:|:---:|:---:|
@@ -118,27 +123,26 @@ the overlay; `off` = not deployed.
 | Observe (explore UI + self-telemetry sink) | on | on | on | on |
 | dfe-receiver (ingest) | on | on | on | on |
 | dfe-loader (ingest) | on | on | on | on |
-| dfe-hunt-runner (detection hunts) | on [1] | **off** | on [2] | on [2] |
-| dfe-fetcher | off | off | on | on |
-| dfe-archiver | off | off | opt | opt |
-| transform workers (elastic / vrl / vector) | off | off | opt [3] | opt [3] |
+| dfe-hunt-runner (detection hunts) | on | on [1] | on [1] | on [1] |
+| dfe-archiver | single-kafka | on [2] | on [2] | on [2] |
+| dfe-fetcher | single profiles [3] | - [4] | src | src |
+| dfe-transform-elastic / vrl | single profiles [3] | - [4] | src | src |
+| dfe-transform-vector | single profiles [3] | - [4] | opt | opt |
 | ClickHouse | single | single | single | cluster |
-| Postgres + FerretDB | on | on | on | on |
-| Kafka | off | off | single | cluster |
-| Kafbat | off | off | on | on |
-| Layer 0 (Argo CD + operators + StorageClass/LB) | n/a [4] | on | on | on |
+| DocumentDB store (Observe) | documentdb-local | on | on | on |
+| Kafka | Kafka profiles | off | single | cluster |
+| Kafbat | Kafka profiles | off | on | on |
+| Layer 0 (Argo CD + operators + StorageClass/LB) | n/a [5] | on | on | on |
 
-- **[1]** dfe-docker / SME runs the hunt runner as a single always-on worker
-  (no KEDA); hunts are core single-host value, so it is on.
-- **[2]** KEDA scale-to-zero: the runner idles at 0 replicas when the backlog
-  is empty and wakes on the next due fire (see
-  [../data-plane/hunt-runner-scaling.md](../data-plane/hunt-runner-scaling.md)).
-  Disabling it entirely is one dial - set the app's replica dial off in the
-  deploy overlay; the schedule + watermarks stay in ClickHouse so it resumes
-  cleanly.
-- **[3]** `elastic`, `vrl` and `vector` are enabled per deploy. Each one idles
-  until a source names it.
-- **[4]** dfe-docker is Compose, not k8s - no Argo/operators layer; the
+- [1] One steady pod on every k8s tier, slim included. Its autoscaling is
+  beta and off by default. Keep it off: see
+  [../data-plane/hunt-runner-scaling.md](../data-plane/hunt-runner-scaling.md).
+- [2] Deployed and idle until an operator names a destination and topics.
+- [3] The `single-grpc` and `single-kafka` profiles start one idle instance.
+  The `slim-*` profiles run the core data path alone.
+- [4] The direct transport runs the receiver to loader path alone, so saving
+  a source that needs a fetcher or a transform is refused.
+- [5] dfe-docker is Compose, not k8s - no Argo/operators layer. The
   container brings its own minimal wiring.
 
 ### Admin UI links
@@ -147,11 +151,10 @@ The deployer lists the admin UIs it stood up in `DFE_ENGINE_ADMIN_LINKS`, a JSON
 
 ## Why the tiers compose that way
 
-`dfe-hunt-runner` is OFF for slim because slim is the bare-minimum k8s tier -
-the ingest path (receiver -> loader -> ClickHouse) plus the engine, UI, and
-Observe. Scheduled detection is real recurring ClickHouse load, so it is
-opt-in there and on-by-default everywhere else. Enabling it is one overlay
-dial because the runner is deployed-capable on every tier.
+Slim is the bare-minimum k8s tier: the ingest path (receiver -> loader ->
+ClickHouse) plus the engine, UI, hunt runner and Observe. Its direct
+transport carries no per-source apps, so fetchers and transforms need single
+or scale.
 
 **Observe is ALWAYS present, in EVERY tier - never optional.** Two purposes,
 which is why DFE ships an extended fork: (1) a separate self-monitoring
@@ -162,9 +165,9 @@ telemetry schema.
 
 Implementation: tier behaviour lives in `argocd/values/profile-<tier>.yaml`
 (dfe-infra). Kafka+Kafbat are gated by those values (`kafka.mode` + kafbat
-`enabled`). The full app set is the deploy repo's `values/*-values.yaml` set,
-so slim's omission of archiver/fetcher/transforms is a deploy-repo
-composition, not a chart change.
+`enabled`). The full app set is the deploy repo's `values/*-values.yaml` set.
+dfe-infra's `apps.yaml` `default_in` decides which apps each tier seeds, so
+the default composition is a manifest edit, not a chart change.
 
 Kafka on tier `single` takes the non-operator path: `kafka.mode: single`
 renders a single-broker KRaft StatefulSet (dfe-infra `kafka-single.yaml`,
@@ -180,12 +183,13 @@ NO hard git-server dependency (the backing services do not depend on it).
 - **External git PRIMARY** (GitHub / GitLab) - the deployer sets
   `DFE_CONFIG_REPO_URL` + creds (`DFE_CONFIG_REPO_TOKEN`+`_USER` for HTTPS,
   or `DFE_CONFIG_REPO_SSH_KEY`). bootstrap creates the Argo `repo-deploy`
-  repository secret. No in-cluster git is deployed.
+  repository secret. No in-cluster git is deployed. The engine pushes over
+  HTTPS with `DFE_CONFIG_REPO_TOKEN`, so with an SSH key alone Argo can read
+  the repo but the engine cannot write to it.
 - **Forgejo FALLBACK** (in-cluster) - deployed ONLY when no external URL is
   given, gated on the cluster label
-  `dfe.hyperi.io/bundled-deploy-repo: "true"`. Forgejo (chosen over Gitea for
-  community governance + maintenance; Gitea-API-compatible) hosts the deploy
-  repo for tyre-kicking / air-gapped use, pulled from the canonical
+  `dfe.hyperi.io/bundled-deploy-repo: "true"`. Forgejo, a Gitea-API-compatible
+  git host, holds the deploy repo for tyre-kicking / air-gapped use, pulled from the canonical
   `code.forgejo.org` registry. Never a hard dependency.
 
 All providers use the same downstream mechanism (an Argo repository
@@ -207,9 +211,10 @@ cluster-secret annotations). Full swap matrix:
   by an ESO Password generator - no external secret backend required.
 - **Kafka** - Strimzi by default, Redpanda opt-in (BSL licence gate), or
   external (incl. MSK IAM). With gRPC transport, Kafka is omitted entirely.
-- **FerretDB** - provides the Mongo wire protocol for Observe on its own
-  single-instance Postgres with the DocumentDB extension. Nothing else in the
-  stack uses Postgres.
+- **DocumentDB** - Observe's document store, with the Mongo wire protocol.
+  On k8s it is the DocumentDB operator running on CloudNativePG PostgreSQL 18.
+  dfe-docker runs the single-container `documentdb-local`. Nothing else in the
+  stack uses PostgreSQL.
 
 ## Network model
 
@@ -222,15 +227,15 @@ cluster-secret annotations). Full swap matrix:
 - **CGNAT `100.64.0.0/10` is reserved SOLELY for edge-VPN clients**, never
   for DFE pod/service ranges. The opt-in edge-fleet VPN (culvert) carves its
   tunnel subnets out of it.
-- **Receiver exposure is a values-driven setting.** `receiver.exposure:
-  internal | public | vpn`. Public renders a second LoadBalancer Service
-  (deployer supplies serviceType, annotations, loadBalancerSourceRanges) in a
-  public subnet as the only public surface - a single-homed airlock, NOT
-  dual-homing. Vpn keeps the receiver on a ClusterIP with no public address
-  and admits the tunnel pods instead, for a fleet that dials in. The receiver
-  then talks to internal Kafka (ClusterIP, private); isolation is by
-  NetworkPolicy. The deployer applies whatever ingress-path controls they
-  prefer.
+- **Receiver exposure is `exposure.groups.ingest`**, set in the deploy repo's
+  `infra/common.yaml`. Its `door` is one of three. `loadbalancer` (the
+  default) is the receiver's own LoadBalancer Service, rendered only while
+  `allow` lists CIDRs. `gateway` is `receiver.{domain}` on the gateway.
+  `tunnel` is no public door, for a fleet that dials in over the edge VPN.
+  The receiver then talks to internal Kafka (ClusterIP, private), and
+  isolation is by NetworkPolicy.
+- **Engine ports.** The API listens on 8000. Health (`/livez`, `/readyz`) and
+  `/metrics` are on 9090, apart from the API traffic.
 
 ## Pipeline builds
 

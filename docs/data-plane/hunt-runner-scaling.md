@@ -16,6 +16,13 @@ turned on, KEDA scales the pod count on the deterministic-due backlog this doc
 explains, via the fail-safe `dfe-keda-shim` - never the engine, and no longer
 a MySQL-on-ClickHouse scaler (retired, see "KEDA ScaledObject" below).
 
+**Keep autoscaling off (the default) on 2.2.2.** It reads the due backlog from
+the `hunt_schedule` table, and nothing in the 2.2.2 charts writes that table:
+there is no materialise Job, so the backlog always reads 0. With autoscaling on
+the runner never scales out, and at `minReplicaCount: 0` no hunt ever fires.
+To try it anyway, run `dfe-hunt-runner materialise` after every hunt-config
+change.
+
 This doc is the SCALING contract: how the due backlog is computed with zero
 ambiguity, how the beta ScaledObject wakes/grows/shrinks the pod count from
 it, and the property that matters most - the runner has NO operational
@@ -75,19 +82,18 @@ The worker writes `watermark = scheduled_start` (the fire time) after a run comm
 boundary arithmetic - `watermark < fire` means precisely "this fire has not been
 completed". No unit mismatch, no data-time-vs-fire-time skew.
 
-## Why it is RELIABLE (the property the decision hinged on)
+## Why it is RELIABLE
 
 Autoscaling (when the BETA is enabled) is only safe if KEDA's view of "due"
 never diverges from a worker's. It cannot, because both compute the same
 thing from the same inputs:
 
-1. **Parity, proven.** `tests/unit/test_hunts/test_schedule.py` asserts the scaler
-   predicate equals `runner.tick`'s own gate (via `schedule.latest_fire` +
-   the watermark + lease checks) across a full matrix of (hunt_id, interval, now,
-   watermark, lease). `tests/integration/test_hunt_schedule_scaler.py` then proves
-   the SQL string implements that predicate against real ClickHouse - counting
-   exactly the runnable hunts, excluding tombstoned / future-watermark / leased
-   hunts, and returning 0 when every hunt is caught up.
+1. **Parity, tested.** The scaler predicate equals `runner.tick`'s own gate (via
+   `schedule.latest_fire` + the watermark + lease checks) across a full matrix of
+   (hunt_id, interval, now, watermark, lease), and the SQL implements that
+   predicate against real ClickHouse - counting exactly the runnable hunts,
+   excluding tombstoned / future-watermark / leased hunts, and returning 0 when
+   every hunt is caught up.
 2. **Single source of truth for the offset.** The materialiser computes
    `phase_offset` with the same `schedule.phase_offset` the worker uses, so the two
    can never drift. Change the offset algorithm once and both move together.
@@ -127,11 +133,11 @@ only ClickHouse:
   engine container image under a different entrypoint (`dfe-keda-shim run`,
   not the live `dfe-engine` API service). No call to the running engine API.
 - **The engine's only role is at CONFIG-DEPLOY time**, not runtime: materialise
-  `hunt_schedule` when the hunt config changes. That runs as an Argo `PostSync` hook
-  Job on the deploy (see below) - a one-shot, idempotent `publish_schedule`. It is
-  invoked by the GitOps sync, not as a live service call.
+  `hunt_schedule` when the hunt config changes, with the one-shot, idempotent
+  `dfe-hunt-runner materialise`. The 2.2.2 charts do not run it (see below).
 
-So if the engine pod is down, hunts keep firing and KEDA keeps scaling. The only
+So if the engine pod is down, hunts keep firing, and so does KEDA scaling once
+the schedule is materialised. The only
 thing you lose while the engine is down is the ability to CHANGE configs - which
 needs the engine anyway. ClickHouse is DFE's single operational store, and the runner
 holds to that (no Postgres, no engine, no convenience store on the hot path), which
@@ -150,17 +156,14 @@ phase therefore creates the coordination tables as `ReplicatedReplacingMergeTree
 inside the Replicated `dfe` database on every deployment, so lease, watermark and
 schedule state is shared across nodes (<https://github.com/hyperi-io/dfe-schemas/blob/main/docs/clickhouse-platform.md>).
 
-The synthetic multi-pod integration test detects this and skips on a
-multi-node endpoint rather than flaking (see tests/integration/test_hunt_synthetic).
+### Materialisation (config-deploy time)
 
-### Materialisation trigger (config-deploy time)
-
-`schedule.publish_schedule(ch, db, specs)` is the ONLY writer of `hunt_schedule`. It
-is idempotent and diff-aware (tombstones hunts that vanished from config). Wire it
-as an Argo `PostSync` hook Job in the hunt-runner app, so every deploy-repo sync
-that changed the hunt config refreshes the schedule BEFORE (or as) the workers roll.
-Because it runs at deploy time, a brand-new hunt added while scaled to zero still
-gets a `hunt_schedule` row, so KEDA can wake a worker for it - no chicken-and-egg.
+`schedule.publish_schedule(ch, db, specs)` is the ONLY writer of `hunt_schedule`, and
+`dfe-hunt-runner materialise` is its only caller. It is idempotent and diff-aware
+(tombstones hunts that vanished from config). The 2.2.2 charts run no Job for it,
+so on Kubernetes the table stays empty unless an operator runs the command after
+each hunt-config change. Run that way, a brand-new hunt added while scaled to zero
+still gets a `hunt_schedule` row, so KEDA can wake a worker for it.
 
 ## KEDA ScaledObject (shape)
 
@@ -265,12 +268,11 @@ submit and coordinate concurrently and reliably), not CPU/memory - and the
 large majority of deployments need exactly one pod. So the default is
 deliberately simple:
 
-- **`huntRunner.enabled` (default `true`, except the `slim` tier - see docs
-  deployment-tiers):** deploys `dfe-hunt-runner` as ONE steady pod
+- **`huntRunner.enabled` (default `true` on every tier):** deploys `dfe-hunt-runner` as ONE steady pod
   (`replicas: 1`, no ScaledObject at all). This is the resting state for the
   large majority of deployments - a single always-on pod, not scale-to-zero.
-- **`huntRunner.autoscaling.enabled` (default `false`, BETA):** opts into the
-  ScaledObject described above. `replicas` is then omitted from the
+- **`huntRunner.autoscaling.enabled` (default `false`, BETA, keep it off on
+  2.2.2 - see the top of this page):** opts into the ScaledObject described above. `replicas` is then omitted from the
   Deployment (KEDA owns the count) and the pod count floats between
   `minReplicaCount` (default **1**, not 0 - set it to `0` explicitly via
   values to additionally opt into scale-to-zero) and `maxReplicaCount`

@@ -1,44 +1,29 @@
 # DFE Query API
 
-**Version:** 2.0.0
-**Last Updated:** 2026-07-13
-
-A secure, label-based query interface with multi-tenant isolation, RBAC, and native JSON responses.
+A label-based query interface over ClickHouse parameterised views, with multi-tenant isolation, scope-based RBAC and native JSON responses.
 
 ---
 
 ## Overview
 
-The Query API provides a **secure, label-based interface** for querying multiple datasources. Key security features:
-
-- **No raw SQL from clients** - Queries are referenced by label, SQL is defined server-side
-- **Mandatory tenant isolation** - `_org_id` injected from the org the session's account or API key is bound to, cannot be overridden
-- **Role-based access control** - Queries can require specific roles/permissions
-- **Parameter validation** - All parameters validated against server-side schemas
+- **No raw SQL from clients** - a view is referenced by label, and its SQL is a ClickHouse parameterised view deployed server-side
+- **Mandatory tenant isolation** - `org_id` injected from the org the session's account or API key is bound to, cannot be overridden
+- **Scope-based access control** - `query:read` browses the views and `query:execute` runs them
+- **Declared parameters only** - the executor passes on only the parameters the view declares, unvalidated, and ClickHouse checks their types
 - **Native JSON responses** - dict rows via clickhouse-connect, no intermediate wire format
 
 ### Supported Datasources
 
 | Datasource | Description | Wire Format |
 |------------|-------------|-------------|
-| `clickhouse` | ClickHouse analytics database | JSON |
-| `postgres` | PostgreSQL transactional database | JSON |
-| `prometheus` | Prometheus metrics | JSON |
-| `s3` | S3 bucket directory listing | JSON |
-| `minio` | MinIO (S3-compatible) listing | JSON |
-| `file` | Local filesystem directory listing | JSON |
+| `clickhouse` | ClickHouse: parameterised views, and raw read-only queries | JSON |
+| `s3` | S3 bucket directory listing, raw route only | JSON |
+| `minio` | MinIO (S3-compatible) listing, raw route only | JSON |
+| `file` | Local filesystem directory listing, raw route only | JSON |
 
 ---
 
 ## Security Model
-
-### Key Principles
-
-1. **Query labels, not SQL** - Clients reference pre-defined queries by label
-2. **Server-side SQL** - SQL templates stored in registry, clients cannot modify
-3. **Automatic tenant isolation** - `_org_id` taken from the session's bound org and injected
-4. **Parameter validation** - All params validated against schema before execution
-5. **Role-based access** - Queries can require specific roles/permissions
 
 ### Example Security Flow
 
@@ -54,7 +39,7 @@ sequenceDiagram
     API->>API: AuthN + RBAC scope query:execute
     API->>CAT: Lookup view definition (TTL-cached, discovered from CH)
     CAT-->>EX: View + parameter schema
-    EX->>EX: Validate params against the view's parameters
+    EX->>EX: Keep only the view's declared parameters
     EX->>EX: Inject org_id from the auth context (never client-settable)
     EX->>DB: Execute the parameterized view
     DB-->>C: JSON response (rows + columns + metadata)
@@ -72,8 +57,10 @@ sequenceDiagram
 **Server-side definition:** a ClickHouse parameterized VIEW, deployed
 through the governed DDL path (gitops) and discovered by the engine's
 `ViewCatalog` at runtime - there is no separate YAML query registry in the
-engine. The view's parameter placeholders define the schema the executor
-validates against, and `org_id` is injected from the auth context.
+engine. The executor passes on only the parameters the view's placeholders
+declare, and `org_id` is injected from the auth context. It does not check
+that a required parameter is present or that a value fits its type, so
+ClickHouse refuses those and the request fails 500 `query_error`.
 
 ### Access control on the raw path
 
@@ -92,21 +79,17 @@ A view runs as `dfe_query_reader` (`query_views.restricted_user`), which holds `
 ```mermaid
 flowchart TB
     subgraph Clients["Client Layer"]
-        TS["TypeScript Client"]
-        PY["Python Client"]
-        RS["Rust Client"]
+        HTTP["Any HTTP client"]
     end
 
     subgraph ControlPlane["dfe-engine API layer"]
         Auth["AuthN (JWT / OIDC headers / API key)"]
-        Audit["AuditLogger"]
-        Rate["Rate Limiter"]
         API["POST /api/v1/queries/views/{label}/execute<br/>POST /api/v1/queries/raw"]
     end
 
     subgraph QueryEngine["dfe-engine query module"]
         Registry["ViewCatalog<br/>discovered from ClickHouse<br/>TTL-cached"]
-        Validator["ViewExecutor<br/>parameter validation<br/>auth context injection"]
+        Validator["ViewExecutor<br/>declared parameters<br/>auth context injection"]
 
         subgraph Adapters["Datasource Adapters"]
             CH["ClickHouse<br/>+ EXPLAIN"]
@@ -124,8 +107,6 @@ flowchart TB
 
     Clients -->|"view label + params"| ControlPlane
     Auth --> API
-    Audit --> API
-    Rate --> API
     API -->|"execute"| Registry
     Registry --> Validator
     Validator --> Adapters
@@ -189,7 +170,7 @@ Response: JSON body (metadata embedded alongside rows, no custom headers)
 
 ```typescript
 interface ViewExecuteRequest {
-  // View parameters (validated against the view's parameter schema)
+  // View parameters (only those the view declares are passed on)
   params?: Record<string, unknown>;
 
   // Execution options
@@ -205,7 +186,7 @@ interface RawQueryRequest {
 
 interface QueryOptions {
   // Pagination - offset-based
-  limit?: number;      // 1-100000, default from query definition
+  limit?: number;      // 1-100000
   offset?: number;     // >= 0, default 0; not combinable with after_key
 
   // Pagination - keyset-based
@@ -225,8 +206,8 @@ interface QueryOptions {
   // Caching
   cache?: boolean;     // Allow cached results, default true
 
-  // Store override (only if query allows store: '*')
-  store?: string;      // Target store
+  // Accepted and ignored: views always run in the data database
+  store?: string;
 }
 ```
 
@@ -282,7 +263,6 @@ Simple pagination using `limit` and `offset`. Best for small datasets.
 
 ```json
 {
-  "query": "analytics/events",
   "options": {
     "limit": 100,
     "offset": 0
@@ -301,7 +281,6 @@ Stable pagination on a sort key. Send `order_by` from the first page, then `afte
 
 ```json
 {
-  "query": "analytics/events",
   "options": {
     "limit": 100,
     "order_by": "timestamp",
@@ -323,183 +302,29 @@ The rules a keyset page follows:
 
 ## Query Labels
 
-Queries are referenced by labels in `namespace/name` format:
+A view is referenced by a label in `namespace/name` form, the label goes in the URL path, and the body carries only `params` and `options`. `GET /api/v1/queries/views` lists the labels a deployment has, and `GET /api/v1/queries/views/namespaces` its namespaces.
 
 ```text
-analytics/user_activity
-analytics/conversion_funnel
-hunts/active_threats
-hunts/ioc_matches
-system/health_check
-storage/s3_list
-storage/file_list
+POST /api/v1/queries/views/analytics/user_activity/execute
 ```
-
-### Namespace Conventions
-
-| Namespace | Description | Typical Datasource |
-|-----------|-------------|-------------------|
-| `analytics` | Analytics and reporting | ClickHouse |
-| `hunts` | Threat hunting queries | ClickHouse |
-| `system` | System administration | PostgreSQL |
-| `users` | User management | PostgreSQL |
-| `metrics` | Infrastructure metrics | Prometheus |
-| `storage` | Directory listings | S3/MinIO/File |
 
 ---
 
-## Query Registry
+## Storage Listing
 
-### Query Definition Schema
+Directory listings run on the raw route against a storage datasource, so they need `raw_query:execute`. The datasource names the bucket or root (`s3:<bucket>`, `minio:<bucket>`, `file:<root>`), and `params` narrow it:
 
-```yaml
-queries:
-  analytics/user_activity:
-    # Datasource and store
-    datasource: clickhouse:default
-    store: events  # or "events_*" for glob, "/^tenant_\\d+$/" for regex, "*" for client-specified
-
-    # SQL template (Jinja2)
-    sql: |
-      SELECT user_id, event_type, timestamp
-      FROM {{ store }}.events
-      WHERE org_id = {{ _org_id }}
-      {% if event_types %}
-        AND event_type IN {{ event_types | sql_array }}
-      {% endif %}
-      ORDER BY timestamp DESC
-      LIMIT {{ limit }}
-      OFFSET {{ offset }}
-
-    # Parameter definitions
-    parameters:
-      event_types:
-        type: array
-        items: string
-        required: false
-        description: Filter by event types
-        max_items: 50
-
-    # Standard parameter overrides
-    defaults:
-      limit: 1000
-      timeout_seconds: 30
-    limits:
-      max_limit: 10000
-      max_timeout: 60
-
-    # Time bounding
-    time_column: timestamp
-    time_required: false
-    max_time_range_days: 90
-
-    # Security
-    tenant_isolated: true  # SQL must contain {{ _org_id }}
-    required_roles: [analyst, admin]
-    required_permissions: []
-
-    # Caching
-    cache_ttl_seconds: 300
-    cache_namespace: analytics
-
-    # Audit
-    audit_level: full  # none, basic, full
-    pii_columns: [user_id, email]
-
-    # Metadata
-    description: Query user activity events
-    tags: [analytics, events]
-```
-
-### Jinja2 SQL Filters
-
-| Filter | Description | Example |
-|--------|-------------|---------|
-| `sql_string` | Escape and quote string | `{{ value \| sql_string }}` → `'escaped''value'` |
-| `sql_array` | Convert list to SQL array | `{{ items \| sql_array }}` → `('a', 'b', 'c')` |
-| `sql_identifier` | Quote identifier | `{{ table \| sql_identifier }}` → `"table_name"` |
-
-### Reserved Parameters
-
-These parameters are injected by the server and cannot be overridden:
-
-| Parameter | Source | Description |
-|-----------|--------|-------------|
-| `_org_id` | The session's account or API key `org`, never a token claim | Tenant organization ID |
-| `_user_id` | JWT `user_id` | User ID |
-| `_roles` | JWT `roles` | User roles list |
-| `_request_id` | Generated | Request tracking ID |
-
----
-
-## Storage Listing Queries
-
-Built-in queries for directory listing across storage backends.
-
-### S3/MinIO Listing
-
-```yaml
-storage/s3_list:
-  datasource: s3:default
-  store: "*"
-  parameters:
-    bucket:
-      type: string
-      description: Bucket name (defaults to target)
-    prefix:
-      type: string
-      description: Path prefix to filter
-      default: ""
-    delimiter:
-      type: string
-      description: Path delimiter
-      default: "/"
-```
-
-**Usage:**
+| Datasource | Params |
+|---|---|
+| `s3`, `minio` | `bucket`, `prefix` (default ""), `delimiter` (default "/") |
+| `file` | `path` (default ""), `recursive` (default false), `pattern` (default "*") |
 
 ```json
 {
-  "query": "storage/s3_list",
-  "params": {
-    "bucket": "my-bucket",
-    "prefix": "data/2024/"
-  },
+  "datasource": "s3:my-bucket",
+  "query": "",
+  "params": {"prefix": "data/2024/"},
   "options": {"limit": 100}
-}
-```
-
-### Filesystem Listing
-
-```yaml
-storage/file_list:
-  datasource: file:default
-  store: "*"
-  parameters:
-    path:
-      type: string
-      description: Subdirectory path to list
-      default: ""
-    recursive:
-      type: boolean
-      description: List recursively
-      default: false
-    pattern:
-      type: string
-      description: Glob pattern filter
-      default: "*"
-```
-
-**Usage:**
-
-```json
-{
-  "query": "storage/file_list",
-  "params": {
-    "path": "logs/",
-    "pattern": "*.json",
-    "recursive": true
-  }
 }
 ```
 
@@ -568,28 +393,17 @@ The API does not return EXPLAIN plans. In Python, the ClickHouse datasource adap
 
 ## Error Handling
 
-### Error Types
+A failure is an RFC 9457 problem response with a stable `code`:
 
-| Error | HTTP Status | Description |
-|-------|-------------|-------------|
-| `QueryNotFoundError` | 404 | Invalid query label |
-| `ParameterValidationError` | 400 | Invalid or missing parameter |
-| `AuthorizationError` | 403 | Missing required role/permission |
-| `QueryTimeoutError` | 504 | Query execution timeout |
-| `StorageListingError` | 500 | Storage listing failed |
-
-### Error Response Format
-
-```json
-{
-  "error": {
-    "type": "ParameterValidationError",
-    "message": "Parameter 'severities' must be one of: ['critical', 'high', 'medium', 'low']",
-    "param": "severities",
-    "request_id": "req_abc123"
-  }
-}
-```
+| HTTP Status | `code` | Cause |
+|-------------|--------|-------|
+| 404 | `not_found` | No view with that label |
+| 400 | `invalid_options` | A paging option the executor refuses, for example a keyset cursor that does not parse or `after_key` with `offset` |
+| 422 | - | The request body fails the request model, for example `limit` above 100000 |
+| 403 | - | The caller lacks the route's scope, or the view's org is not granted |
+| 500 | `query_error` | ClickHouse failed the view, including a missing or mistyped view parameter. The engine log has its reason |
+| 503 | `reader_unprovisioned` | The restricted reader has no password yet |
+| 503 | `not_configured` | No ClickHouse connection |
 
 ---
 
@@ -667,11 +481,9 @@ the JSON response body - not in headers or a separate schema:
 
 ---
 
-## SDK Documentation
+## Clients
 
-- [Python SDK](query-api-python.md) - Python client with pandas integration
-- [TypeScript SDK](query-api-typescript.md) - TypeScript client with React Query
-- [Rust SDK](query-api-rust.md) - Rust client (native JSON; optional local Arrow conversion for DataFusion/Polars)
+No SDK is published. Any HTTP client calls the routes above with a bearer token or an API key. Inside the engine image, `dfe_engine.query.QueryClient` wraps the same routes: [query-api-python.md](query-api-python.md).
 
 ---
 
@@ -679,18 +491,17 @@ the JSON response body - not in headers or a separate schema:
 
 | Property | How Achieved |
 |----------|--------------|
-| No SQL injection | Server-side SQL with Jinja2 filters |
-| Tenant isolation | Mandatory `_org_id` injection from the session's bound org |
-| AuthZ | Per-query role/permission requirements |
-| Least privilege | Queries specify minimum required roles |
-| Resource limits | Per-query timeouts, limits, max time range |
-| Audit trail | Full query execution logging |
-| No arbitrary queries | Query registry is the allowlist |
-| Type safety | Parameter validation with strict schemas |
+| No SQL injection | Clients send parameters to a server-side parameterised view, never SQL |
+| Tenant isolation | Mandatory `org_id` injection from the session's bound org |
+| AuthZ | `query:read` / `query:execute` scopes, `raw_query:execute` for the raw route |
+| Least privilege | Views run as `dfe_query_reader`, `SELECT` only and no `SOURCES` grant |
+| Resource limits | Per-request timeout (1-300 s) and limit (1-100000) |
+| No arbitrary queries | Only the views ClickHouse holds can be executed |
+| Type safety | ClickHouse types each parameter from the view's placeholder |
 
 ---
 
 ## References
 
-- [Jinja2](https://jinja.palletsprojects.com/) - Template engine
+- [ClickHouse parameterised views](https://clickhouse.com/docs/sql-reference/statements/create/view#parameterized-view)
 - [ClickHouse](https://clickhouse.com/) - Analytics database

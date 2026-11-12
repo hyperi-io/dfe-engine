@@ -45,7 +45,9 @@ correlated columns together. Format reference: the dfe-schemas repo, at
 
 `GET /synthetic-data/packs`, `POST /synthetic-data/generate`,
 `POST /synthetic-data/lookalike`, and the stream task endpoints
-(`POST /synthetic-data/stream`, `GET/DELETE /synthetic-data/streams...`).
+(`POST /synthetic-data/stream`, `GET /synthetic-data/streams`,
+`GET /synthetic-data/streams/{operation}`,
+`POST /synthetic-data/streams/{operation}/cancel`).
 Reads need `synthetic-data:read`; generating or streaming needs
 `synthetic-data:run` (write-grade - it injects data into the pipeline).
 Full contract: `openapi/openapi.json`.
@@ -54,7 +56,8 @@ Full contract: `openapi/openapi.json`.
 
 `SyntheticDataSettings` (`DFE_ENGINE_SYNTHETIC_DATA_*`) caps inline counts, stream
 rate and stream duration. The **autostart** knobs are the sales-demo posture:
-name pack refs and a receiver URL (chart values
-`config.synthetic_data.autostart_*`) and the engine keeps those streams
+name pack refs and a receiver URL (engine environment variables
+`DFE_ENGINE_SYNTHETIC_DATA_AUTOSTART_*`, set through the overlay's `extraEnv`)
+and the engine keeps those streams
 running for the pod's lifetime - bounded segments, retry while the receiver
 is away, cancelled at shutdown. Default empty = off.

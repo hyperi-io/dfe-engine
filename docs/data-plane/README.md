@@ -30,7 +30,7 @@ flowchart LR
 | [field-mapping.md](field-mapping.md) | standards translation layer (Sigma / ECS / CIM views) |
 | [sigma.md](sigma.md) | Sigma rule-provider pipeline (feeds -> catalogue -> propagation -> source-views) + query cost leaderboard |
 | [expressions-cel.md](expressions-cel.md) | CEL profile, classifier tiers, SQL transpile |
-| [query-api.md](query-api.md) | query API surface + [python](query-api-python.md) / [rust](query-api-rust.md) / [typescript](query-api-typescript.md) consumption |
+| [query-api.md](query-api.md) | query API surface, and the [in-image Python client](query-api-python.md) |
 | [hunt-runner-scaling.md](hunt-runner-scaling.md) | pull-based runner, deterministic-due scaling, keda-shim fail-safe |
 | [hunt-match-delivery.md](hunt-match-delivery.md) | where a hunt match is written, who sees it, alert destinations and what the runner sends |
 | [hunt-schedule-smoothing.md](hunt-schedule-smoothing.md) | phase-drift load smoothing (incl. the reference derivation) |

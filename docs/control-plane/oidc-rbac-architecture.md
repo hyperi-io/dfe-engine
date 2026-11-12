@@ -1,11 +1,9 @@
 # OIDC + RBAC architecture and design
 
 The single source of truth for how dfe-engine handles authentication,
-external OIDC, group->role mapping, the two RBAC planes, the management API,
-the infrastructure it needs, and how we test it. Supersedes and absorbs the
-former `oidc-providers.md` (registry design) and `oidc-infra-requirements.md`
-(infra requirements). The RBAC/multi-tenant ClickHouse detail lives in
-[rbac.md](rbac.md); this doc references it rather than repeating it.
+external OIDC, group->role mapping, the two RBAC planes, the management API
+and the infrastructure it needs. The RBAC/multi-tenant ClickHouse detail lives in
+[rbac.md](rbac.md), and this doc references it rather than repeating it.
 
 Exhaustive reference (exact request/response shapes, tofu outputs, secret
 keys) lives with its source of truth - `openapi.json`, the code
@@ -20,9 +18,7 @@ transcribed here where it would drift.
 4. The two RBAC planes
 5. The management API and CLI
 6. Infrastructure requirements
-7. Emulation for testing
-8. Provider-agnostic onboarding recipe
-9. Status and open decisions
+7. Provider-agnostic onboarding recipe
 
 ## 1. The auth model - local always, OIDC additive
 
@@ -41,9 +37,10 @@ auth, it augments it:
   operator in even if the IdP is down or misconfigured.
 - **External OIDC** is added when provided (recommended for real deployments).
   When present it takes precedence, but the local and key paths stay live.
-- **Groups from both sources unify.** An OIDC group name that matches a local
-  group file inherits that group's roles - OIDC and local groups are the same
-  mechanism (rbac-sign-in.md section 2.1). One role model, two merged identity sources.
+- **Groups from both sources unify.** An IdP group takes a DFE group's roles
+  only through that group file's `source_provider` + `source_id` link. A
+  matching name grants nothing (rbac-sign-in.md section 2.1). One role model,
+  two merged identity sources.
 
 The four auth paths, precedence, and the header-trust security precondition are
 detailed in rbac.md section 1.
@@ -130,8 +127,7 @@ matching layer: each group file is linked by `source_provider` and that provider
 provider it signed in through (`membership.linked_groups`). A group's name links
 nothing. So an Entra login carrying object GUIDs - which match no group filename -
 resolves against `source_id` and lands the right roles. The sync, SCIM's `externalId` and an admin through the groups API or dfe-ui's group form each set the link, so a `token_claim` login carrying names (Okta, dex, Keycloak) lands its roles once a group's `source_id` is the name the IdP sends.
-Verified against the live tenant (see the emulation section). The adapter is the
-ONLY place the remaining quirks live:
+The adapter is the ONLY place the remaining quirks live:
 
 | Quirk | Real cause | Adapter's job | Status |
 |-------|-----------|---------------|--------|
@@ -157,10 +153,10 @@ never reads a short listing as the whole directory.
 
 `auth/oidc/sync.py` enumerates a provider's groups (api mode). It creates a group file for each new one, linked by `source_provider` and `source_id`, and updates only files already linked to that IdP group (their `source_id` is its id and their `source_provider` this provider, or one `auth.source_provider_bindings` joins to it), preserving their roles. A file of the same name with no link is skipped as `name_taken`: a display name is no identity, so linking one is an admin's act through the groups API or dfe-ui's group form (rbac-groups.md section 4.4). A new group whose name is a stored group's `source_id` or whose id is a stored group's name is skipped as `name_taken` too, since an API key resolves an identifier by name, then by `source_id`. A file carrying the id under any other provider, whatever its name, is skipped as `provider_mismatch`, so a sync never moves a group between providers or creates a second group carrying the id. Detaching a provider does NOT delete its groups - they orphan with `source_provider` set, reported on delete.
 
-**The OIDC auth flow does not depend on dfe-engine running.** Envoy (fallback
-path) keeps doing OIDC from a static CRD; group files on disk keep resolving
-roles. Only provider CRUD and group sync stop. dfe-engine is a management layer,
-not a runtime dependency.
+**Sign-in needs the engine.** It is the relying party and the only token
+issuer, so with the engine down nobody can sign in, and provider CRUD and group
+sync stop too. Running pipelines carry on: the data path does not call the
+engine.
 
 ## 4. The two RBAC planes
 
@@ -229,61 +225,15 @@ What a deployment must provide (dfe-infra owns these; the engine consumes them).
   primary login path (the native RP is). When used, the engine MUST be reachable
   only via Envoy (NetworkPolicy), or headers are forgeable.
 
-## 7. Emulation for testing
-
-Two surfaces, each with the honest tool:
-
-- **Surface A - the OIDC login** (auth-code flow + id_token with a groups claim).
-  Emulated by **dex** - a real, standard OIDC IdP, consumed as
-  `type: generic` (never dex-specific engine code). dex emits `groups: []string`;
-  by shaping it, one dex stands in for the token_claim family (readable names =
-  okta/generic; opaque ids = entra-in-token). dex static users cannot carry
-  groups, so a config-file directory (glauth) backs it - invisible to the engine.
-- **Surface B - the directory API** (google/entra/okta group name + membership
-  resolution). dex cannot fake this; emulated by an engine-side mock
-  directory-API server in CI. Correctness otherwise checked against the real
-  providers.
-
-The automated e2e runs the token_claim path headless (dex -> engine -> roles ->
-org_ids -> ClickHouse tenant filter). api-mode adapter correctness runs against
-the Surface-B mocks. Real gsuite/okta/entra logins are interactive
-(bot-detection), never in gating CI.
-
-## 8. Provider-agnostic onboarding recipe
+## 7. Provider-agnostic onboarding recipe
 
 Because the mess is quarantined at Layer 2, onboarding any real external OIDC is
-fixed: (1) register a provider config (type + issuer + client env-var names +
-groups mode/claim); (2) the IdP emits whatever it emits and the Layer-2 adapter
-normalises it; (3) author group files mapping the normalised group id -> roles +
-org_ids; (4) Layers 3-4 do the rest unchanged. dex-as-emulator is the degenerate
-case where the customer IdP is our test IdP. If emulation needs a special path,
-the abstraction has leaked.
+fixed:
+
+1. Register a provider config (type + issuer + client env-var names + groups mode/claim).
+2. The IdP emits whatever it emits, and the Layer-2 adapter normalises it.
+3. Author group files mapping the normalised group id -> roles + org_ids.
+4. Layers 3-4 do the rest unchanged.
 
 Canonical role + group names are in [rbac-vocabulary.md](rbac-vocabulary.md) -
 the SSoT every consumer (engine, ui, infra, deploy, schemas, test envs) aligns to.
-
-## 9. Status and open decisions
-
-The RBAC chain (login -> groups -> roles -> org_ids -> ClickHouse tenant filter)
-exists in the engine and is now exercised end to end against a real provider.
-
-Done since this doc landed:
-
-- **id -> role resolution** across name and `source_id`, so GUID-emitting
-  providers (Entra) resolve. Verified against the live Entra tenant: 12 fixture
-  users deliver exactly their expected group claims.
-- **Login-config verification** (`GET /{name}/verify-login`) and the RP client
-  secret in the onboarding CRUD, written to the `DfeSecrets` store and live on
-  the login routes without a restart.
-- **`/auth/me` returns org_ids**, so the UI can render data-plane scope.
-- **Transitive membership SETTLED by measurement**: Entra emits the full
-  closure in-token, so honour it; transitivity is a per-provider fact
-  (`emits_transitive`), asserted, not a global toggle.
-- **`client_as(...)` role-perspective test framework** so every role is driven
-  against real endpoints, not just asserted to be present in a token.
-
-Remaining Layer-2 work: group-type filtering, and multi-tenant name namespacing. Plus the dex+glauth
-emulation rig for the headless token_claim backbone.
-
-Open: confirm "membership" means the user's own memberships in the token, full
-rosters via sync; and the dex groups mechanism (glauth config-file LDAP).

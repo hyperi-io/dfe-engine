@@ -1,9 +1,7 @@
 # Schema Type System v2
 
-**Status:** Shipped (`schema_builder_v2.py` is the live path). Since this
-design landed, the schema YAML SSoT moved to the dfe-schemas repo (the
-version-pinned `dfe-schemas` wheel), registries included, and the engine keeps no copies. Class-level lookup:
-[schema-classes.md](schema-classes.md).
+The schema YAML SSoT is the dfe-schemas repo (the version-pinned `dfe-schemas`
+wheel), registries included, and the engine keeps no copies.
 
 ---
 
@@ -19,34 +17,6 @@ The engine does the rest.
 If you need a specific ClickHouse type that the primitives don't cover,
 there's an escape hatch (`ch_override`). But you shouldn't need it for 95%
 of columns.
-
----
-
-## Problem
-
-The current schema type system conflates three separate concerns into a
-single `type` field:
-
-```csv
-column,type,index_order,index_type,comment
-user_name,string_fast,,dimension,
-source_ip,ipv4,,,
-message,text,,text_search,
-category,string_lowcardinality,,dimension,
-```
-
-- `string_fast` = type (string) + codec hint (LZ4 for speed)
-- `string_lowcardinality` = type (string) + storage attribute (LowCardinality)
-- `string_fast_lowcardinality` = type + codec + attribute (all combined)
-
-This leads to a combinatorial explosion. Adding a new attribute means
-creating new compound type names. The format is CSV with no structure for
-nested properties. The type system also has no way to:
-
-- Express loader field mapping directives (`@source`, `@renamed`, etc.)
-- Specify exact ClickHouse types when the primitive isn't enough
-- Attach use-case metadata separately from storage decisions
-- Validate that a use case makes sense for a given type
 
 ---
 
@@ -82,10 +52,9 @@ read it. No sync, no cache invalidation race, no drift.
 
 ### Schema Format: YAML
 
-Schema definitions are **YAML**, not CSV. YAML supports structured data
+Schema definitions are **YAML**. YAML supports structured data
 (lists of attributes, nested overrides) and is consistent with the rest
-of the Source definition format. The old CSV format is deprecated for
-schema definitions.
+of the Source definition format.
 
 **CSVs remain only for enrichment files** used by transform stages
 (e.g. GeoIP lookups, threat intelligence feeds, asset inventories).
@@ -107,9 +76,9 @@ operation and can reconcile.
 
 ---
 
-## Solution
+## Four axes
 
-Separate the schema column definition into **four independent axes**:
+A schema column definition has **four independent axes**:
 
 ```text
 type + attribute + use_case + comment (includes loader directives)
@@ -231,6 +200,8 @@ means -- pick the primitive that describes your data.
 | `json` | Structured/semi-structured data | `JSON` |
 | `geo_point` | Latitude/longitude pair | `Point` |
 | `enum` | Fixed set of allowed values (values defined in `default` field) | `Enum8(...)` |
+| `map` | String keys to string values, never null | `Map(LowCardinality(String), String)` |
+| `vector` | Embedding of floats, never null | `Array(Float32)` |
 
 ### Why simplified primitives?
 
@@ -240,7 +211,7 @@ decide between `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`,
 ClickHouse storage internals. The engine picks `Int64` because it covers
 the vast majority of use cases without overflow risk.
 
-If you genuinely need a narrower or unsigned type (performance-critical
+If you need a narrower or unsigned type (performance-critical
 high-volume tables), use `ch_override`:
 
 ```yaml
@@ -346,6 +317,16 @@ primitives:
 
   enum:
     ch_type: "Enum8(...)"   # Values from `default` field
+    codec: ZSTD(1)
+    nullable: false
+
+  map:                      # ClickHouse refuses Map and Array inside Nullable
+    ch_type: "Map(LowCardinality(String), String)"
+    codec: ZSTD(1)
+    nullable: false
+
+  vector:
+    ch_type: "Array(Float32)"
     codec: ZSTD(1)
     nullable: false
 ```
@@ -459,7 +440,7 @@ applies to `LowCardinality(Nullable(T))` too. To keep a column in the
 ORDER BY, mark it `not_null` (or give it a DEFAULT, which also forces
 non-null).
 
-For payload columns where NULL genuinely means "not provided" (as opposed
+For payload columns where NULL means "not provided" (as opposed
 to empty string or zero), Nullable is correct. Don't fight it -- just
 keep it off your ORDER BY and high-filter columns.
 
@@ -819,67 +800,14 @@ scratch.
 Beyond the schema itself, several other entities are scoped to a Source.
 See [source-definition.md](source-definition.md) for the full Source definition.
 
-### Rules
+### Rules and hunts
 
-A **Rule** is a SQL query tied to a Source. It runs against the source's
-ClickHouse table and produces matches (detections).
-
-```yaml
-# rules/brute_force_login.yaml
-rule: brute_force_login
-source: windows_audit                   # Tied to this source
-display_name: Brute Force Login Attempt
-severity: high
-
-query: |
-  SELECT
-    _timestamp,
-    _org_id,
-    user_name,
-    source_ip,
-    count() AS attempt_count
-  FROM {db}.{source}
-  WHERE event_id = 4625
-    AND _timestamp >= {from}
-    AND _timestamp < {to}
-  GROUP BY _timestamp, _org_id, user_name, source_ip
-  HAVING attempt_count >= {threshold}
-
-parameters:
-  threshold: 5
-
-schedule: "*/5 * * * *"                 # Cron (for hunt scheduling)
-```
-
-Rules reference `{db}`, `{source}`, `{from}`, `{to}` -- templated at
-execution time. The rule's SQL runs against the source's table, so it
-has access to exactly the columns defined in the source's schema.
-
-### Hunts
-
-A **Hunt** is a scheduled batch execution of one or more Rules. Hunt
-results (matches/detections) are written to an **alerts table**.
-
-```text
-Rule (SQL query)
-  │  Tied to a Source
-  │  Parameterised: {db}, {source}, {from}, {to}, {threshold}
-  │
-  ▼
-Hunt (batch executor)
-  │  Cron-scheduled
-  │  Runs rule over time window
-  │  Writes matches to alerts table
-  │
-  ▼
-Alerts Table ({db}.alerts)
-  │  Common header + alert-specific columns
-  │  _source = original source
-  │  rule_name, severity, match_data
-```
-
-The alerts table is itself a Source (with `header.type: timeseries`),
-giving it the same schema management, retention, and query capabilities.
+A **Rule** is a detection condition (a SQL WHERE fragment or a CEL filter) on a
+source's table, so it sees exactly the columns the source's schema defines. A
+**Hunt** groups rules, names the customers whose rows they read, and carries the
+interval schedule. Matches land in `<data database>.detection` unless the hunt or
+rule names another table. Current rule and hunt files:
+[source-detections.md](source-detections.md).
 
 ### Sigma Rules (converted)
 
@@ -889,74 +817,3 @@ The conversion produces a Rule definition with:
 - SQL query generated from the Sigma detection logic
 - Source determined by the Sigma `logsource` -> Source mapping
 - Sigma view used for field name compatibility
-
----
-
-## Migration from v1 Type System
-
-### Type Mapping (old -> new)
-
-| Old Type | New Primitive | Attribute | Notes |
-|----------|--------------|-----------|-------|
-| `string` | `string` | | |
-| `string_fast` | `string` | | Codec auto-selected |
-| `string_lowcardinality` | `string` | `lowcardinality` | |
-| `string_fast_lowcardinality` | `string` | `lowcardinality` | |
-| `text` | `text` | | |
-| `json` | `json` | | |
-| `int8` | `integer` | | ch_override: Int8 |
-| `int16` | `integer` | | ch_override: Int16 |
-| `int32` | `integer` | | ch_override: Int32 |
-| `int64` | `integer` | | Default -- no override needed |
-| `int128` | `integer` | | ch_override: Int128 |
-| `int256` | `integer` | | ch_override: Int256 |
-| `float32` | `float` | | ch_override: Float32 |
-| `float64` | `float` | | Default -- no override needed |
-| `boolean` | `boolean` | | |
-| `timestamp` | `timestamp` | | |
-| `datetime` | `datetime` | | |
-| `ipv4` | `ip` | | ch_override: IPv4 if v4-only needed |
-| `ipv6` | `ip` | | Default IPv6 stores both |
-| `ip_field` | `ip` | | |
-| `geo_point` | `geo_point` | | |
-| `uuid` | `uuid` | | |
-| `tuple` | *(use ch_override)* | | `ch_override: Tuple(...)` |
-| `map` | `map` | | `Map(LowCardinality(String), String)`; `ch_override: Map(K,V)` for another shape |
-
-### Index Type Mapping
-
-| Old `index_type` | New `use_case` | Notes |
-|-----------------|----------------|-------|
-| `dimension` | `dimension` | Same |
-| `fulltext` | `word_search` | Named for the question, and now generates the text index (was tokenbf_v1) |
-| `text_search` | `substring_search` | Named for what it matches, and now generates the ngram text index (was ngrambf_v1) |
-| `hc` | `exact_match` | `bloom` in between, which named the ClickHouse index |
-| `range` | `range` | Same |
-| `minmax` | `range` | Merged (both generated minmax) |
-
-No migration step is needed for a schema already stored under `fulltext`,
-`text_search` or `bloom`. The engine reads those three as their current names
-and writes the current name into the next version it saves, so the column keeps
-the index it was created with and an edit elsewhere in the schema no longer
-fails validation on a column nobody touched.
-
-### Format Change
-
-```text
-# Old: CSV
-# column,type,default,index_order,index_type,comment
-
-# New: YAML
-# columns:
-#   - name: ...
-#     type: ...
-#     attribute: [...]
-#     use_case: ...
-#     default: ...
-#     order: ...
-#     comment: ...
-```
-
-The migration is mechanical -- a script maps old compound types to new
-primitives (+ ch_override where the old type was narrower than the
-default), renames `index_type` to `use_case`, and converts CSV to YAML.
