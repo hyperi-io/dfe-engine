@@ -59,7 +59,7 @@ Read from dfe-infra `argocd/values/apps/<app>/` and `apps.yaml` at 2.2.2. The pr
 | dfe-transform-vector | on | CPU ~70% |
 | dfe-ui | on | CPU ~70% |
 | dfe-engine | off - control-plane singleton, always one pod | - |
-| dfe-fetcher | off - a source that supports competing consumers turns it on | CPU ~70% once on |
+| dfe-fetcher | off - one pod per fetcher config. The deployer turns KEDA on in that config's values, and only for a source whose fetch supports competing consumers | CPU ~70% once turned on |
 | dfe-hunt-runner | off - one static pod | BETA, `huntRunner.autoscaling.enabled`: due-hunt backlog via the shim (`metrics-api`, `AverageValue`) - see [hunt-runner-scaling](../data-plane/hunt-runner-scaling.md) |
 
 All ScaledObjects default `minReplicaCount: 1` - there is no scale-to-zero on
