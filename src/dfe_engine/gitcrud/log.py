@@ -17,11 +17,13 @@ revision (the engine never calls Argo).
 """
 
 import re
+import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import cast
 
+from dulwich.graph import can_fast_forward
 from dulwich.objects import ObjectID
 from dulwich.repo import Repo
 
@@ -59,6 +61,22 @@ class LogEntry:
     resources: list[str]  # "cls/name" for files under a registered class dir
     conforming: bool
     state: str  # committed | applied | pending
+
+
+@dataclass(frozen=True, slots=True)
+class _Commit:
+    """One commit as the walk reads it."""
+
+    author: str
+    files: tuple[str, ...]
+    message: str
+    sha: str
+    timestamp: int
+
+
+# Each repo's head and its commits newest first: diffing every commit's tree is what a walk costs
+_WALKS: dict[str, tuple[ObjectID, tuple[_Commit, ...]]] = {}
+_WALKS_LOCK = threading.Lock()
 
 
 def _parse_message(message: str, author: str) -> dict:
@@ -129,6 +147,55 @@ def _reachable(repo: Repo, revision: str) -> set[str]:
     return {e.commit.id.decode() for e in walker}
 
 
+def _commit(*, walked) -> _Commit:
+    """The fields the log reads from one walk entry."""
+    return _Commit(
+        author=walked.commit.author.decode(errors="replace").split("<")[0].strip(),
+        files=tuple(_changed_files(entry=walked)),
+        message=walked.commit.message.decode(errors="replace"),
+        sha=walked.commit.id.decode(),
+        timestamp=walked.commit.commit_time,
+    )
+
+
+def _commits(*, key: str, repo: Repo) -> tuple[_Commit, ...]:
+    """Every commit from head, newest first, walking only those this repo's last read did not see."""
+    head = repo.head()
+    with _WALKS_LOCK:
+        known = _WALKS.get(key)
+        if known and known[0] == head:
+            return known[1]
+        if known and not (_extends(head=head, known=known[0], repo=repo)):
+            known = None
+        walked = list(repo.get_walker(exclude=[known[0]] if known else [], include=[head]))
+        # A merge interleaves its branch's older commits by date, so the walk starts over
+        if known and any(len(entry.commit.parents) > 1 for entry in walked):
+            known = None
+            walked = list(repo.get_walker(include=[head]))
+        fresh = tuple(_commit(walked=entry) for entry in walked)
+        commits = (*fresh, *known[1]) if known else fresh
+        _WALKS[key] = (head, commits)
+        return commits
+
+
+def _extends(*, head: ObjectID, known: ObjectID, repo: Repo) -> bool:
+    """Whether head descends from the head a read walked before, so those commits still stand."""
+    try:
+        return can_fast_forward(c1=known, c2=head, repo=repo)
+    except KeyError:
+        return False
+
+
+def _touches(*, commit: _Commit, paths: Sequence[str]) -> bool:
+    """Whether the commit changed one of the paths or a file under one, as dulwich's path walk matches."""
+    for path in paths:
+        prefix = f"{path}/"
+        for changed in commit.files:
+            if (changed == path) or (changed.startswith(prefix)):
+                return True
+    return False
+
+
 def read_log(
     crud: GitCrud,
     *,
@@ -155,9 +222,15 @@ def read_log(
         applied = _reachable(repo, applied_revision) if applied_revision else None
         skipping = before is not None
         exhausted = True
-        walk_paths = [path.encode() for path in paths] or None
-        for walked in repo.get_walker(paths=walk_paths):
-            sha = walked.commit.id.decode()
+        if paths:
+            commits = _commits(key=str(crud.repo_path), repo=repo)
+            candidates = (
+                (commit.sha, commit) for commit in commits if _touches(commit=commit, paths=paths)
+            )
+        else:
+            # Unfiltered, the walk stops at the page and diffs nothing it skips
+            candidates = ((walked.commit.id.decode(), walked) for walked in repo.get_walker())
+        for sha, found in candidates:
             if skipping:
                 if sha == before:
                     skipping = False
@@ -165,10 +238,9 @@ def read_log(
             if len(entries) >= limit:
                 exhausted = False
                 break
-            message = walked.commit.message.decode(errors="replace")
-            author = walked.commit.author.decode(errors="replace").split("<")[0].strip()
-            fields = _parse_message(message, author)
-            files = _changed_files(walked)
+            commit = found if isinstance(found, _Commit) else _commit(walked=found)
+            fields = _parse_message(author=commit.author, message=commit.message)
+            files = list(commit.files)
             if applied is None:
                 state = "committed"
             else:
@@ -176,7 +248,7 @@ def read_log(
             entries.append(
                 LogEntry(
                     sha=sha,
-                    timestamp=walked.commit.commit_time,
+                    timestamp=commit.timestamp,
                     files=files,
                     resources=_resources_for(files, crud),
                     state=state,

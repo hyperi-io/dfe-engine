@@ -17,6 +17,7 @@ last-good integer. An operations API needs the opposite: real floats, several va
 per call, and an honest error when the database cannot answer.
 """
 
+import functools
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -208,6 +209,12 @@ class SourceSignals:
     last_seen_epoch: float | None = None
 
 
+@functools.cache
+def _named_queries() -> dict[str, Any]:
+    """The named otel queries, parsed once rather than for every reader."""
+    return (yaml_load(_QUERIES) or {}).get("queries", {})
+
+
 class OperationalReader:
     """Answers per-instance state and metrics from the otel tables."""
 
@@ -215,7 +222,7 @@ class OperationalReader:
         self._client = client
         self._database = self._safe_identifier(database)
         self._window = window_seconds
-        self._queries = (yaml_load(_QUERIES) or {}).get("queries", {})
+        self._queries = _named_queries()
 
     @staticmethod
     def _safe_identifier(value: str) -> str:
