@@ -46,12 +46,21 @@ The rule lives in `src/dfe_engine/scaling_pressure.py` and is substituted into b
 
 Read from dfe-infra `argocd/values/apps/<app>/` and `apps.yaml` at 2.2.2. The profile-slim tier clears the ScalingPressure trigger, so on slim every KEDA app scales on CPU alone.
 
+The docs site fills the table below from the dfe-infra chart renders at the build's own stack, so the published copy carries each app's replica bounds, CPU target and pressure trigger per profile.
+
+<!-- dfe-keda-table -->
 | App | KEDA | Triggers by default |
 |-----|------|---------------------|
 | dfe-receiver / dfe-loader | on | CPU ~70% and scalo ScalingPressure (shim, target 70) |
 | dfe-archiver, dfe-transform-elastic / vrl | on | CPU ~70%, plus ScalingPressure on the single, scale and mesh profiles |
 | dfe-transform-vector | on | CPU ~70% |
 | dfe-ui | on | CPU ~70% |
+<!-- /dfe-keda-table -->
+
+Apps that never autoscale:
+
+| App | KEDA | Triggers by default |
+|-----|------|---------------------|
 | dfe-engine | off - control-plane singleton, always one pod | - |
 | dfe-fetcher | off - one pod per fetcher config. The deployer turns KEDA on in that config's values, and only for a source whose fetch supports competing consumers | CPU ~70% once turned on |
 | dfe-hunt-runner | off - one static pod | BETA, `huntRunner.autoscaling.enabled`: due-hunt backlog via the shim (`metrics-api`, `AverageValue`). Keep it off: the 2.2.2 charts do not materialise the schedule it reads - see [hunt-runner-scaling](../data-plane/hunt-runner-scaling.md) |
