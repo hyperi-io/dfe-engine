@@ -59,7 +59,7 @@ hand. Release notes also appear on the GitHub Releases page, one per tag.
 
 ### Bug Fixes
 
-* **schema:** remove the TTL that wedges the schema lease ([86a476d](https://github.com/hyperi-io/dfe-engine/commit/86a476d38bf1fe4e8cce97a49bfb55cc08ca1285))
+* **schema:** remove the TTL that fails every schema lease read after an idle week ([86a476d](https://github.com/hyperi-io/dfe-engine/commit/86a476d38bf1fe4e8cce97a49bfb55cc08ca1285))
 
 ## [1.22.84](https://github.com/hyperi-io/dfe-engine/compare/v1.22.83...v1.22.84) (2026-11-09)
 
@@ -992,7 +992,7 @@ hand. Release notes also appear on the GitHub Releases page, one per tag.
 
 ### Bug Fixes
 
-* **auth:** resolve oidc provider credentials through the secrets seam ([#397](https://github.com/hyperi-io/dfe-engine/issues/397)) ([d03e164](https://github.com/hyperi-io/dfe-engine/commit/d03e16457dd99af31f6611fe19f41516283b09e1)), closes [hyperi-io/dfe-ui#311](https://github.com/hyperi-io/dfe-ui/issues/311) [#392](https://github.com/hyperi-io/dfe-engine/issues/392)
+* **auth:** resolve oidc provider credentials through the secrets provider ([#397](https://github.com/hyperi-io/dfe-engine/issues/397)) ([d03e164](https://github.com/hyperi-io/dfe-engine/commit/d03e16457dd99af31f6611fe19f41516283b09e1)), closes [hyperi-io/dfe-ui#311](https://github.com/hyperi-io/dfe-ui/issues/311) [#392](https://github.com/hyperi-io/dfe-engine/issues/392)
 * **schema:** the default TTL is the environment's ([#396](https://github.com/hyperi-io/dfe-engine/issues/396)) ([dad623a](https://github.com/hyperi-io/dfe-engine/commit/dad623afaaf9f41b1986e3a38c8404e8779a20bd))
 * **schema:** TTL 0 keeps rows forever; registries come from dfe-schemas ([#393](https://github.com/hyperi-io/dfe-engine/issues/393)) ([ea3b59a](https://github.com/hyperi-io/dfe-engine/commit/ea3b59a3151ac689195635e3a896ce97a9aa86b6))
 

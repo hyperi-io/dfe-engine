@@ -223,7 +223,7 @@ class SchemaLock:
             self._client.command(f"ALTER TABLE {target} REMOVE TTL")
         except Exception as exc:
             logger.warning(
-                "schema lease table keeps its TTL; an idle week can wedge the lease",
+                "schema lease table keeps its TTL; an idle week can expire the quorum part every lease read needs",
                 error=str(exc),
             )
             return False
