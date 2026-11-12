@@ -6,7 +6,7 @@ control plane. This page is the map - where each repo sits, the two shapes
 that define the system, the invariants, and links into the depth docs. It
 describes how DFE works today, grounded in code, not a proposal.
 
-## Where this repo sits in the suite
+## Where the engine sits in the suite
 
 dfe-engine is the control plane: a Python library + FastAPI server that turns
 operator intent into governed git commits, which Argo CD reconciles into the
@@ -21,7 +21,7 @@ flowchart TB
         CLI[dfe CLI]
     end
     subgraph control["Control plane"]
-        ENG[dfe-engine<br/>this repo]
+        ENG[dfe-engine<br/>config control plane + API]
         SCH[dfe-schemas<br/>DDL + meta-schema SSoT]
         SPY[scalo-py<br/>shared Python library]
     end
@@ -50,7 +50,7 @@ flowchart TB
 
 | Repo | Role | Relationship to the engine |
 |------|------|---------------------------|
-| dfe-engine | config control plane + API server | this repo |
+| dfe-engine | config control plane + API server | the engine itself |
 | dfe-infra | charts, ApplicationSets, bootstrap | consumes engine-authored overlays via the deploy repo |
 | dfe-ui | web UI | consumes the engine API only |
 | dfe-hyperdx | the Observe view: our extended fork of the upstream HyperDX project, explore UI + telemetry sink | embedded in dfe-ui; reads ClickHouse |

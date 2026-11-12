@@ -731,7 +731,13 @@ def create_app(
         openapi_tags = [E2E_OPENAPI_TAG]
     app = FastAPI(
         title="DFE Engine API",
-        description="Data Fusion Engine -- configuration, scheduling, and query API",
+        description=(
+            "Configuration, scheduling and query API for the Data Fusion Engine.\n\n"
+            "Every route sits under `/api/v1` on the engine URL your deployment "
+            "publishes. Get a token with `POST /api/v1/auth/login` (JSON body "
+            "`username` and `password`, the console's accounts work here), then "
+            "send it as `Authorization: Bearer <token>` on every other call."
+        ),
         version=__version__,
         lifespan=lifespan,
         # The e2e server mounts its own /docs with a spec selector.
