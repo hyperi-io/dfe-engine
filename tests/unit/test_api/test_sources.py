@@ -1,4 +1,4 @@
-"""Tests for sources router — CRUD, pagination, search, sort, bulk."""
+"""Tests for sources router -- CRUD, pagination, search, sort, bulk."""
 
 from dataclasses import replace
 
@@ -93,7 +93,7 @@ class TestListSources:
     def test_list_table_topic_type_tracks_the_working_current_version(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):
-        # Deployed 1.0.0 owns a table; working current 2.0.0 dropped the meta schema.
+        # Deployed 1.0.0 owns a table. Working current 2.0.0 dropped the meta schema.
         client.post(
             "/api/v1/sources",
             json={
@@ -316,7 +316,7 @@ class TestCreateSource:
         assert "1.0.0" in body["versions"]
 
     def test_create_hyphenated_source_round_trips(self, client: TestClient, admin_headers: dict):
-        """A hyphenated name has to survive creation, not merely pass the pattern.
+        """A hyphenated name has to survive creation, not just pass the pattern.
 
         The live regression this pins: the name validated, then the create path
         raised a raw pydantic error nothing caught and the caller got a 500.
@@ -747,7 +747,7 @@ class TestGetSourceFlow:
 
         assert body["source"] == "main"
         assert body["origin"] is None
-        # Nothing selects these records; they arrived on some other path and went unclaimed.
+        # Nothing selects these records. They arrived on some other path and went unclaimed.
         assert body["input"] == "records the loader could not route elsewhere"
         assert body["outputs"]["loader"] == "main_land"
 
@@ -868,7 +868,7 @@ class TestGetSourceVersion:
     def test_get_version_table_topic_type_tracks_working_current(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):
-        # Selected 1.0.0 owns a table; working current 2.0.0 does not.
+        # Selected 1.0.0 owns a table. Working current 2.0.0 does not.
         client.post(
             "/api/v1/sources",
             json={

@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The QueryShim - runs a config-defined ClickHouse query, returns one integer.
 
-KEDA's ``metrics-api`` scaler polls the shim; the shim runs the SQL named in its
+KEDA's ``metrics-api`` scaler polls the shim. The shim runs the SQL named in its
 config catalogue and hands back a single number. The reason for a shim (rather than
 KEDA talking to ClickHouse directly) is the FAIL-SAFE: a wrong or unreachable metric
 must never run replicas UP and blow the cloud bill. So every query caches its
@@ -88,7 +88,7 @@ class QueryShim:
         self._settings = settings
         self._client_factory = client_factory or (lambda: _ch_client(settings))
         self._client: Any = None
-        # Polls arrive on concurrent worker threads; the lock guards which client is current.
+        # Polls arrive on concurrent worker threads. The lock guards which client is current.
         self._client_lock = threading.Lock()
         self._cache: dict[str, int] = {}
         self._queries = self._load_queries()
@@ -195,7 +195,7 @@ class QueryShim:
     def run(self, name: str, params: dict[str, str] | None = None) -> int:
         """Run query ``name`` and return one integer - NEVER raises to the caller.
 
-        Unknown ``name`` is a config error (raised) so the route can log it; every
+        Unknown ``name`` is a config error (raised) so the route can log it. Every
         RUNTIME failure is swallowed by the fail-safe and returns the last-good or
         cold-hold value, so KEDA can only ever hold or scale DOWN on a bad metric.
 

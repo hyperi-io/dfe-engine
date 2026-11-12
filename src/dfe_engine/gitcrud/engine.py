@@ -15,7 +15,7 @@ for and the foundation Tier-1/Tier-2/operations build on.
 A class declares its layout (see ``models.Layout``). FILE is one YAML document per
 resource and the default. BUNDLE is a directory per resource - a manifest plus
 payload files - for a class storing authored content that some tool other than the
-engine parses; ``put_bundle`` writes the manifest and its files in one commit, and
+engine parses. ``put_bundle`` writes the manifest and its files in one commit, and
 every doc-level operation keeps working against the manifest unchanged.
 """
 
@@ -113,7 +113,7 @@ def get_path(doc: dict, dotpath: str, default: Any = None) -> Any:
 
 
 def del_path(doc: dict, dotpath: str) -> bool:
-    """Public dot-path remover; returns whether anything was there. Mutates ``doc``."""
+    """Public dot-path remover. Returns whether anything was there. Mutates ``doc``."""
     return _del_path(doc, dotpath)
 
 
@@ -131,9 +131,9 @@ def _del_path(doc: dict, dotpath: str) -> bool:
 class GitCrud:
     """Generic git-native CRUD over YAML resource classes.
 
-    All git mechanics live in ``GitopsRepo``; this layer adds class resolution,
+    All git mechanics live in ``GitopsRepo``. This layer adds class resolution,
     YAML (de)serialisation, and dot-path edits. ``actor`` is recorded in the commit
-    message; per-actor author/committer split + commit-policy come in the commit
+    message. Per-actor author/committer split + commit-policy come in the commit
     standard (Task 1.14).
     """
 
@@ -307,7 +307,7 @@ class GitCrud:
             return self._read_doc(cls, name)
 
     def _read_doc(self, cls: ResourceClass, name: str) -> dict:
-        """Load a resource's YAML doc off the working tree; caller holds the guard."""
+        """Load a resource's YAML doc off the working tree. Caller holds the guard."""
         f = self._file(cls, name)
         if not f.is_file():
             raise ResourceNotFoundError(self._rel(cls, name))
@@ -452,7 +452,7 @@ class GitCrud:
             return self._payload_names(cls, name)
 
     def _payload_names(self, cls: ResourceClass, name: str) -> builtins.list[str]:
-        """Walk a bundle's payload files; caller holds the guard."""
+        """Walk a bundle's payload files. Caller holds the guard."""
         base = self._repo.path / self._rel_dir(cls, name)
         if not base.is_dir():
             raise ResourceNotFoundError(self._rel_dir(cls, name))

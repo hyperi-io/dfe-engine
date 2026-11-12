@@ -10,10 +10,10 @@
 Clones (or fast-forward-refreshes) a git repo via dulwich - the SAME pure-Python
 git the gitcrud/gitops layers use, so there is no git binary and no new dependency
 - then scans a rules subdir for *.yml and normalises each via pySigma. Serves the
-SigmaHQ default AND any public/private git repo (token via the scalo.secrets seam).
+SigmaHQ default AND any public/private git repo (token via the scalo.secrets interface).
 
 Incremental: the design allows a commit-diff-since-last-sync optimisation where
-practical; this adapter takes the simpler robust path - a full scan plus a
+practical. This adapter takes the simpler path - a full scan plus a
 client-side `modified >= since` filter. The store's upsert then skips everything
 that did not actually change, so a re-sync is cheap regardless. Commit-diff is a
 noted future optimisation, not a correctness requirement.
@@ -55,7 +55,7 @@ class GitRepoProvider(SigmaProvider):
         return self._work_dir / self.config.name
 
     def _authed_url(self, url: str) -> str:
-        """Embed HTTPS token creds in the URL (git_token auth); pass others through.
+        """Embed HTTPS token creds in the URL (git_token auth). Pass others through.
 
         Shared with GitopsRepo via
         :func:`~dfe_engine.gitops.dulwich_auth.authed_https_url` - a local-path or
@@ -117,7 +117,7 @@ class GitRepoProvider(SigmaProvider):
     def _scrub_credentials(self, bare_url: str) -> None:
         """Rewrite remote.origin.url back to the credential-free URL after a clone.
 
-        Shared scrub (see GitopsRepo); best-effort here - a cache clone that keeps
+        Shared scrub (see GitopsRepo). Best-effort here - a cache clone that keeps
         its credential is a hardening miss, not a sync failure.
         """
         if not self._secret():
@@ -160,7 +160,7 @@ class GitRepoProvider(SigmaProvider):
     def _scrub_error(self, message: str, bare_url: str) -> str:
         """Strip the embedded git credential from an error before it surfaces.
 
-        The fetch/clone URL carries ``username:token@`` (``_authed_url``); a dulwich
+        The fetch/clone URL carries ``username:token@`` (``_authed_url``). A dulwich
         failure can echo it into the exception message, which flows to the sync task
         result + logs. Redact the secret and rewrite the authed URL to the bare one.
         """

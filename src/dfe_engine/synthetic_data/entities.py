@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from faker import Faker
 
 # (role prefix, fleet weight, linux-likelihood) - weight shapes how many of the
-# fleet carry the role; linux-likelihood keeps dc/mail boxes windows-heavy.
+# fleet carry the role. linux-likelihood keeps dc/mail boxes windows-heavy.
 _HOST_ROLES: tuple[tuple[str, int, float], ...] = (
     ("web", 6, 0.95),
     ("app", 5, 0.9),
@@ -84,7 +84,7 @@ class EntityPool:
         hosts: Fleet size.
         users: User population size.
         accounts: Cloud account count.
-        org_domain: Org domain for FQDNs/emails; faked when omitted.
+        org_domain: Org domain for FQDNs/emails. Faked when omitted.
     """
 
     def __init__(
@@ -96,7 +96,7 @@ class EntityPool:
         accounts: int = 3,
         org_domain: str | None = None,
     ) -> None:
-        # Seeded reproducibility is the feature; nothing here is security-sensitive.
+        # Seeded reproducibility is the feature. Nothing here is security-sensitive.
         self.rng = random.Random(seed)  # noqa: S311
         self.fake = Faker()
         self.fake.seed_instance(seed)

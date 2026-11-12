@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Git operation log seeding. Public methods are the scripts; privates are reusable.
+"""Git operation log seeding. Public methods are the scripts. Privates are reusable.
 
 The log is the deploy repo's commit history, so each seeded operation is its
 own commit. The script runs outside the seed batch, which would otherwise

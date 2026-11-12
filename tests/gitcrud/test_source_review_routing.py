@@ -8,7 +8,7 @@
 """A production+team source or derived-schema write lands on a review branch, never main.
 
 Real dulwich repos with a bare remote standing in for the deploy repo, as in
-``test_routing.py``. The forge is the recording double at the ForgeProvider seam.
+``test_routing.py``. The forge is the recording double at the ForgeProvider interface.
 """
 
 import pytest

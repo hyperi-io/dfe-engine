@@ -8,7 +8,7 @@
 """POST /api/v1/queries/raw runs caller SQL as the engine's own ClickHouse user.
 
 A role holding ``query:execute`` or ``query:*`` reads through parameterised views
-only; the raw route answers to ``raw_query:execute``, which no built-in role but
+only. The raw route answers to ``raw_query:execute``, which no built-in role but
 ``admin`` holds. An unknown datasource is refused with 400 after the permission
 check, so a 400 proves the caller got past it without a ClickHouse to query.
 """
@@ -50,7 +50,7 @@ def test_admin_passes_the_permission_check(client, admin_headers):
 
 
 def test_a_view_role_still_executes_views(client, app, api_settings):
-    """The view route keeps query:execute; only the raw route moved."""
+    """The view route keeps query:execute. Only the raw route moved."""
     headers = _session_holding(app, api_settings, "data_viewer")
 
     resp = client.post("/api/v1/queries/views/analytics/test/execute", json={}, headers=headers)

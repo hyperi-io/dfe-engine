@@ -118,7 +118,7 @@ class OidcSyncScheduler:
 
     async def run_forever(self) -> None:
         """Check for due providers every tick until cancelled, starting a tick plus jitter after start-up."""
-        # The jitter keeps replicas that start together from checking in step; it is not a secret.
+        # The jitter keeps replicas that start together from checking in step. It is not a secret.
         jitter = random.uniform(a=0, b=self._tick_seconds)  # noqa: S311
         await asyncio.sleep(self._tick_seconds + jitter)
         while True:

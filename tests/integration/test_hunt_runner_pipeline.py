@@ -113,7 +113,7 @@ def test_daemon_loop_fires_a_loaded_hunt_once_against_live_ch(ch_client, dfe_db,
     due -> claim -> execute -> watermark, and never-double-run on the next tick.
 
     Deterministic via a FIXED injected clock: interval 2s + hash offset 0 means the
-    hunt's fire == the fixed 'now', so it is due on tick 1; tick 2 sees the watermark
+    hunt's fire == the fixed 'now', so it is due on tick 1. Tick 2 sees the watermark
     at that fire and does NOT re-run. One shared connection, so no multi-node split.
     """
     ch_client.command(

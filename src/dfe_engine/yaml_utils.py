@@ -251,7 +251,7 @@ def _verified_text(data: Any, target: str | None) -> str:
     try:
         _rt().dump(data, stream)
     except BaseException as exc:
-        # A failed dump leaves ruamel's document open; every later dump on the thread writes nothing.
+        # A failed dump leaves ruamel's document open. Every later dump on the thread writes nothing.
         _local.rt = None
         if not isinstance(exc, Exception):
             raise
@@ -336,7 +336,7 @@ def yaml_dump_string(data: Any, *, target: str | None = None) -> str:
     Args:
         data: Data to serialize
         target: Where the caller will store the text. A refusal leaves it degraded,
-            and a clean dump clears it; None when the text is not stored.
+            and a clean dump clears it. None when the text is not stored.
 
     Returns:
         YAML string representation

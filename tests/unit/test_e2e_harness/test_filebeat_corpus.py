@@ -108,7 +108,7 @@ class TestWrapping:
         assert not any(t.startswith("e2e_run:") for t in tags)
 
     def test_tags_is_a_list_of_strings(self, archive):
-        # The bundled VRL reads tags with includes(array!(.tags), ...); a map
+        # The bundled VRL reads tags with includes(array!(.tags), ...). A map
         # reaches assert!(false, "contains only works on strings and array") and
         # aborts the program, so every corpus event would error out untransformed.
         tags = corpus.wrap(corpus.samples(archive)[0], run="run-1")["tags"]

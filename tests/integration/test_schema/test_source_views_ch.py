@@ -74,7 +74,7 @@ def _shipped_map(standard: str) -> dict[str, str]:
 
 
 def _deploy(manager_client, db: str, source: Source, schemas_dir: Path, maps) -> dict[str, str]:
-    """Build and apply *source* the way the deploy endpoint does; return the view DDLs."""
+    """Build and apply *source* the way the deploy endpoint does. Return the view DDLs."""
     platform = PlatformProbe(manager_client).platform
     result = run_source_build(
         source,
@@ -85,7 +85,7 @@ def _deploy(manager_client, db: str, source: Source, schemas_dir: Path, maps) ->
         field_map_registry=maps,
     )
     assert not result.validation_errors, result.validation_errors
-    # The builder here only renders ALTERs for an existing table; the views come from result.
+    # The builder here only renders ALTERs for an existing table. The views come from result.
     statements, _ = plan_deploy_statements(
         SchemaBuilderV2(platform=platform),
         source,

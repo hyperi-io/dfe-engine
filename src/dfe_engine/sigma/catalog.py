@@ -138,7 +138,7 @@ class SigmaCatalogStore:
         return self._crud.list(RULES_CLASS)
 
     def get_rule(self, rule_id: str) -> dict[str, Any]:
-        """The full stored rule doc ({id, title, rule, provenance}); raises if absent."""
+        """The full stored rule doc ({id, title, rule, provenance}). Raises if absent."""
         return self._crud.get(RULES_CLASS, rule_id)
 
     def exists(self, rule_id: str) -> bool:
@@ -190,7 +190,7 @@ class SigmaCatalogStore:
         """Local-edit-wins merge: upstream is the base, the operator's edits override.
 
         Same existing-wins deep_merge as the gitops publish merge - a shared key
-        keeps the operator's value; a brand-new upstream key still lands. Drift is
+        keeps the operator's value. A brand-new upstream key still lands. Drift is
         recorded when the upstream change signal moved.
         """
         existing_rule = existing.get("rule", {}) or {}
@@ -224,7 +224,7 @@ class SigmaCatalogStore:
     ) -> SyncReport:
         """Idempotent UPSERT of a batch of normalised docs in ONE commit.
 
-        Only genuinely-changed rules are written (via a single put_many), so a
+        Only changed rules are written (via a single put_many), so a
         re-sync of unchanged rules produces NO commit. Counts are classified before
         the write: add / update / skip / merge (local-edit-preserving).
         """
@@ -430,7 +430,7 @@ def default_provider_configs() -> list[ProviderConfig]:
 class SigmaProviderStore:
     """CRUD over provider configs, overlaying the built-in defaults.
 
-    A built-in default (SigmaHQ) is visible OOTB WITHOUT a git write; the first
+    A built-in default (SigmaHQ) is visible OOTB WITHOUT a git write. The first
     mutation (create/update/enable/disable) materialises it into the store. Reads
     are therefore side-effect free.
     """

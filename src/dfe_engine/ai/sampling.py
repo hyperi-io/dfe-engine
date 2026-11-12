@@ -32,7 +32,7 @@ def sample_json_rows(
         where = "WHERE _source = {src:String}"
         params["src"] = source
     rows = ch.query(
-        f"SELECT toString(_json) FROM {table} {where} LIMIT {{lim:UInt32}}",  # noqa: S608 - table is the caller's trusted pre-quoted name; values bound
+        f"SELECT toString(_json) FROM {table} {where} LIMIT {{lim:UInt32}}",  # noqa: S608 - table is the caller's trusted pre-quoted name, values bound
         parameters=params,
     ).result_rows
     return [r[0] for r in rows if r[0]]
@@ -41,7 +41,7 @@ def sample_json_rows(
 def discover_json_keys(samples: list[str], *, max_keys: int = 200) -> list[str]:
     """Top-level keys present across sampled ``_json`` rows (sorted, deduped).
 
-    Parsed in Python - robust across ClickHouse JSON-type quirks. Feeds the
+    Parsed in Python, so ClickHouse JSON-type quirks do not matter. Feeds the
     query-builder's available-columns list and the VRL parser's field discovery.
     """
     keys: set[str] = set()

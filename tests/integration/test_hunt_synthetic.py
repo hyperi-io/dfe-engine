@@ -9,7 +9,7 @@
 
   - scheduling cadence + incremental resume over stepped simulated time,
   - multi-pod competing-consumers: N real threads (one CH client each) claim M
-    hunts and each runs EXACTLY once, with work genuinely shared,
+    hunts and each runs EXACTLY once, with work shared,
   - the global concurrency cap protecting ClickHouse.
 
 Uses the tiered CH harness (cluster / remote docker / local) and the ``dfe_db``

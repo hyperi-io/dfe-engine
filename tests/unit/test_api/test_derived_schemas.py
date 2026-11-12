@@ -137,7 +137,7 @@ class TestCreate:
     def test_the_derived_route_is_not_swallowed_by_the_meta_schema_catch_all(
         self, base_schema, client, admin_headers
     ):
-        # Both routes are POST /definitions/{path}; the derived router is mounted
+        # Both routes are POST /definitions/{path}. The derived router is mounted
         # first so a selection body is not read as a meta-schema body.
         created = client.post(URL, headers=admin_headers, json=_body([{"name": "timestamp"}]))
         assert created.status_code == 201, created.text

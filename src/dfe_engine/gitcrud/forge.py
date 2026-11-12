@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         gitcrud/forge.py
-#  Purpose:      Provider-agnostic seam to open a review PR on the deploy repo
+#  Purpose:      Provider-agnostic interface to open a review PR on the deploy repo
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -9,7 +9,7 @@
 
 When a production+team governed write may NOT commit straight to main (see
 gitcrud/routing.py + docs/control-plane/gitops-commit-standard.md section 4), the engine pushes
-a short-lived branch and opens a PR for review. The forge REST call is a seam:
+a short-lived branch and opens a PR for review. The forge REST call is injectable:
 Forgejo/Gitea, GitHub and GitLab plug in behind one ``ForgeProvider`` protocol,
 selected from settings. REST goes over scalo's ``HttpClient`` (retries +
 raise_for_status baked in) -- never a git CLI, matching the rest of the gitops
@@ -55,7 +55,7 @@ class _RepoCoords:
     scheme: str
     # Bare hostname, no port -- what provider inference and the github.com check want.
     host: str
-    # host:port when the remote carried one; the API's authority. Kept separate from
+    # host:port when the remote carried one. The API's authority. Kept separate from
     # `host` so a port can never leak into a hostname comparison.
     authority: str
     owner: str
@@ -240,7 +240,7 @@ def build_forge(gs: GitopsSettings) -> ForgeProvider | None:
     None (the engine then refuses production+team direct writes rather than
     silently committing to main) when: gitops is off, push is off, there is no
     remote URL, or the URL cannot be parsed. Provider is ``gs.forge_provider`` or
-    inferred from the host; the API base is ``gs.forge_api_base`` or derived.
+    inferred from the host. The API base is ``gs.forge_api_base`` or derived.
     """
     if not gs.enabled or not gs.push or not gs.repo_url:
         return None

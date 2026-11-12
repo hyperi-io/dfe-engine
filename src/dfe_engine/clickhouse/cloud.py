@@ -20,7 +20,7 @@ Control-plane permissions the api key needs (least-privilege):
   - GET  /v1/organizations/{org}/services               (list + read state)
   - PATCH /v1/organizations/{org}/services/{id}/state   (start / stop)
 A SERVICE-SCOPED key with service read + state-management is sufficient (NOT an
-org-admin key; no billing / member-management). Every start it issues is billable
+org-admin key. No billing / member-management). Every start it issues is billable
 and is logged.
 """
 
@@ -93,7 +93,7 @@ class CloudService:
             ``.json()``. Defaults to a scalo :class:`HttpClient` with basic auth.
             Tests inject a fake so no network is touched.
         sleep / now: injectable clock for :meth:`wait_running` (tests pass fakes
-            so they never really sleep and never race a wall clock).
+            so they never really sleep and never race a real clock).
         timeout / attempts: per-request timeout in seconds, and how many tries the
             default client makes. A read a console waits on passes fewer and shorter.
     """
@@ -223,8 +223,8 @@ class CloudService:
     def wait_running(self, *, timeout: float, poll_interval: float = 10.0) -> CloudServiceStatus:
         """Poll until the service is ``running`` or *timeout* (seconds) elapses.
 
-        Gate on the real ``state==running`` signal (not a timer race); poll every
-        ``poll_interval`` and return the INSTANT it is up (fast reconnect); fail
+        Gate on the real ``state==running`` signal (not a timer race). Poll every
+        ``poll_interval`` and return the INSTANT it is up (fast reconnect). Fail
         only when the GENEROUS *timeout* budget is exceeded. Both are config-cascade
         values from the caller, never hardcoded here.
         """

@@ -87,7 +87,7 @@ def session_auth_time(claims: Mapping[str, Any] | None, *, now: int) -> int:
 
 
 def remaining_seconds(auth_time: int, *, now: int, max_session_minutes: int) -> int:
-    """Seconds a session that began at *auth_time* may still run; zero or less once over."""
+    """Seconds a session that began at *auth_time* may still run. Zero or less once over."""
     return auth_time + max_session_minutes * 60 - now
 
 

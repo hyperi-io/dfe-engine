@@ -178,7 +178,7 @@ class TestTrustedPeer:
     def test_star_records_the_leftmost_entry(
         self, api_settings: DFESettings, audit_events: list[dict]
     ):
-        """'*' trusts every hop, so the caller's own entry wins; the setting says so."""
+        """'*' trusts every hop, so the caller's own entry wins. The setting says so."""
         with _engine(api_settings, OUTSIDER, "*") as client:
             headers = _xff(f"{FORGED}, {CLIENT}")
             assert _audited_ip(client, audit_events, headers) == FORGED
@@ -187,7 +187,7 @@ class TestTrustedPeer:
 def test_console_login_audits_the_forwarded_client(
     api_settings: DFESettings, audit_events: list[dict]
 ):
-    """The console's server-side login forwards the browser's chain; the caller is recorded."""
+    """The console's server-side login forwards the browser's chain. The caller is recorded."""
     with _engine(api_settings, CONSOLE_POD) as client:
         client.app.state.account_store.reset_password("admin", ADMIN_PASSWORD)  # ty: ignore[unresolved-attribute]  # TestClient types app as the bare ASGI callable, and this one is the FastAPI app
         resp = client.post(

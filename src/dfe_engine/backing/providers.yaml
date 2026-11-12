@@ -5,7 +5,7 @@
 # what each key means: who runs the service, and which deploy-repo values a write
 # cannot move there because nothing in the deployment reads them.
 #
-# The source of truth is dfe-infra's providers.yaml; this is the snapshot bundled
+# The source of truth is dfe-infra's providers.yaml. This is the snapshot bundled
 # in the engine image. The engine resolves the catalogue in this order:
 # DFE_ENGINE_PROVIDER_CATALOGUE_FILE (which a chart points at its mounted copy), then
 # this snapshot.

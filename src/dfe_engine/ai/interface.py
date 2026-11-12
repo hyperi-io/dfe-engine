@@ -267,7 +267,7 @@ class AIModuleRegistry:
     """Discovery and management of AI modules.
 
     Modules register by name and can be retrieved by name or type.
-    Thread-safe for registration; modules themselves handle concurrency.
+    Thread-safe for registration. Modules themselves handle concurrency.
     """
 
     def __init__(self) -> None:

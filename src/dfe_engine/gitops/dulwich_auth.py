@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """dulwich HTTPS-credential helpers: embed for one op, keep it off disk and out of logs.
 
-``dulwich.porcelain`` clone/push/fetch take no username/password kwargs; HTTPS
+``dulwich.porcelain`` clone/push/fetch take no username/password kwargs. HTTPS
 auth is carried IN THE URL. That has two security hazards:
 
 - ``porcelain.clone`` persists whatever URL it cloned from into the clone's
@@ -46,7 +46,7 @@ def redact_credentials(text: str) -> str:
     Applied to anything derived from a credentialed remote URL before it reaches a
     log, a stream or an exception message - dulwich embeds the URL verbatim in all
     three. The userinfo runs to the last ``@`` a host follows, so a token holding
-    ``@`` or ``/`` goes whole; a credential-free ``ssh://git@host`` has no colon and is
+    ``@`` or ``/`` goes whole. A credential-free ``ssh://git@host`` has no colon and is
     left alone.
     """
     return mask_url_userinfo(text, _USERINFO_MASK, keep_user=False)
@@ -110,7 +110,7 @@ def authed_https_url(
     """Return ``url`` with basic-auth creds spliced in - HTTPS + token only.
 
     A non-HTTP URL (ssh / local path) or an absent token is returned UNCHANGED
-    (SSH auths via the agent; a public repo needs nothing). When a token is
+    (SSH auths via the agent, a public repo needs nothing). When a token is
     present the username defaults to ``default_username`` (the git-forge
     token-user convention, e.g. GitHub's ``x-access-token``). The result is passed
     per-op and never persisted - pair every clone with :func:`scrub_remote_credentials`.

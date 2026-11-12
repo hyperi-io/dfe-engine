@@ -408,7 +408,7 @@ class SchemaRegistry:
         """Return an existing table key that occupies the same path location, if any.
 
         Uses DirectoryConfigStore table keys only (no YAML parsing). Registry keys
-        match on-disk layout; ``MetaSchema.path`` is not persisted in YAML files.
+        match on-disk layout. ``MetaSchema.path`` is not persisted in YAML files.
         """
         parent, name = _schema_location(schema_path)
         for table in self._known_tables():
@@ -460,7 +460,7 @@ class SchemaRegistry:
             except OSError:
                 updated_at = ""
 
-            # 'current' always names a real version; fall back to the first if it ever doesn't.
+            # 'current' always names a real version. Fall back to the first if it ever doesn't.
             current_version = schema.versions.get(schema.current)
             version = current_version or next(iter(schema.versions.values()))
 

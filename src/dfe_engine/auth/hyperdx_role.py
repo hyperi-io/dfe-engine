@@ -49,7 +49,7 @@ AUTHOR_ACTION = "query:write"
 """The engine permission that saves searches and dashboards in HyperDX."""
 
 FORK_ACCEPTS = frozenset({"admin", "owner"})
-"""The values the fork allows a team-wide change; it refuses every other one."""
+"""The values the fork allows a team-wide change. It refuses every other one."""
 
 TEAM_ADMIN_ROLES = frozenset({"admin", "infra_admin"})
 """Engine roles that may change what a whole HyperDX team sees.
@@ -69,7 +69,7 @@ def role_claim(grants: Iterable[ScopedGrant], role_config: RoleConfig | None = N
 
     Args:
         grants: The account's grants.
-        role_config: The role definitions ``authorize()`` reads; None reads the
+        role_config: The role definitions ``authorize()`` reads. None reads the
             shipped ones.
 
     Returns:

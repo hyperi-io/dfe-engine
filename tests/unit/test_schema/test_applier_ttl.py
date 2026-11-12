@@ -53,7 +53,7 @@ class _Result:
 
 @dataclass
 class _FakeClient:
-    """A live table with the given columns and TTL; every statement is recorded."""
+    """A live table with the given columns and TTL. Every statement is recorded."""
 
     columns: list[str]
     live_ttl_days: int | None

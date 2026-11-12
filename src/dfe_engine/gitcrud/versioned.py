@@ -21,10 +21,9 @@ no built-in keyword) + per-version metadata like a change log. Envelope::
       1: {by: kaz, message: "...", spec: {...}}   # metadata + the payload
       2: {by: kaz, message: "...", spec: {...}}
 
-Each op is ONE git commit via GitCrud (audit); the version series lives IN the doc -
+Each op is ONE git commit via GitCrud (audit). The version series lives IN the doc -
 a per-artifact grouping, NOT repo git-log. Published snapshots are immutable (never
-overwritten - the Sources append-only rule). See
-docs/superpowers/plans/2026-07-01-rules-hunts-versioning.md.
+overwritten - the Sources append-only rule).
 """
 
 import copy
@@ -71,7 +70,7 @@ class VersionedDoc:
     def _envelope(self, cls: str, name: str) -> dict[str, Any] | None:
         """The version envelope, or None if the resource does not exist.
 
-        VersionedDoc owns every write, so a stored doc is always an envelope; a doc
+        VersionedDoc owns every write, so a stored doc is always an envelope. A doc
         with no ``versions`` map reads as "no published versions" (no legacy
         flat-doc back-compat - nothing is GA to migrate from).
 
@@ -101,7 +100,7 @@ class VersionedDoc:
     def _versions(env: dict) -> dict[int, Any]:
         """Version map with int keys (YAML may load numeric keys as str).
 
-        Key validity is guaranteed by _envelope; None/missing still reads as {}.
+        Key validity is guaranteed by _envelope. None/missing still reads as {}.
         """
         return {int(k): v for k, v in (env.get(VERSIONS_KEY) or {}).items()}
 
@@ -177,7 +176,7 @@ class VersionedDoc:
         return self._save(cls, name, env, actor, f"{cls}({name}): draft by {actor}")
 
     def publish(self, cls: str, name: str, actor: str, message: str = "") -> int:
-        """Freeze the draft as the next immutable version; return its number."""
+        """Freeze the draft as the next immutable version. Return its number."""
         env = self._envelope(cls, name)
         if env is None or env.get("draft") is None:
             raise ValueError(f"{cls}/{name}: no draft to publish")

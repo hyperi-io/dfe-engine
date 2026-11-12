@@ -41,7 +41,7 @@ def wrapper_over_recorder():
     """The engine's wrapper with a recording driver client underneath it."""
     manager = ClickHouseManager()
     recorder = _RecordingConnectClient()
-    # Stand in for the driver client so nothing connects; the wrapper resolves it live.
+    # Stand in for the driver client so nothing connects. The wrapper resolves it live.
     manager._client = cast("Any", recorder)
     return manager.get_clickhouse_client(), recorder
 

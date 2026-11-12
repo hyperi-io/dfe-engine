@@ -51,7 +51,7 @@ _VALID_SCOPES = ("system", "org", "group", "user")
 
 # The closed set in the CONTRACT (path params render as an enum in OpenAPI so
 # generated clients offer a select, not a text box). Literal keeps the runtime
-# value a plain str; _VALID_SCOPES stays as the guard for direct helper calls.
+# value a plain str. _VALID_SCOPES stays as the guard for direct helper calls.
 RepositoryScope = Literal["system", "org", "group", "user"]
 
 _PREFS_NAMESPACE = "preferences"
@@ -118,7 +118,7 @@ def _validate_names(namespace: str, key: str | None = None) -> None:
 def _map_scope(request: Request, scope: str, scope_id: str) -> tuple[Scope, str]:
     """Map path (scope, scope_id) to a Scope and the stored scope_id.
 
-    system requires scope_id "-" (stored as ""); group looks up the owning
+    system requires scope_id "-" (stored as ""). Group looks up the owning
     org from the GroupStore (404 for unknown groups).
     """
     if scope not in _VALID_SCOPES:
@@ -160,7 +160,7 @@ def _require_read(request: Request, user: AuthContext, scope: str, scope_id: str
 
 
 def _require_write(request: Request, user: AuthContext, scope: str, scope_id: str) -> str:
-    """Owner may write the own user layer; everything else needs repository:write."""
+    """Owner may write the own user layer. Everything else needs repository:write."""
     mapped, stored_id = _map_scope(request, scope, scope_id)
     if scope == "user" and user.user_id == scope_id:
         return stored_id

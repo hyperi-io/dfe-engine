@@ -264,7 +264,7 @@ def execute_raw_query(
     start = time.perf_counter()
 
     try:
-        # Risk accepted: running caller SQL is this route's job; only raw_query:execute reaches it and ClickHouse runs it with readonly=1.
+        # Risk accepted: running caller SQL is this route's job. Only raw_query:execute reaches it and ClickHouse runs it with readonly=1.
         # nosemgrep: python.django.security.injection.sql.sql-injection-using-db-cursor-execute.sql-injection-db-cursor-execute
         rows, columns = adapter.execute(request.query, request.params, timeout, limit + 1)
     except Exception as exc:

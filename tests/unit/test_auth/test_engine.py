@@ -318,13 +318,13 @@ class TestInfraAdminRole:
         assert argo_patterns == ["argo:*"]
 
     def test_infra_admin_service_config_wildcard(self):
-        """infra_admin has service:*:config:* — matches any service config."""
+        """infra_admin has service:*:config:* -- matches any service config."""
         config = RoleConfig.load_builtin()
         assert config.has_permission("infra_admin", "service:loader:config:write")
         assert config.has_permission("infra_admin", "service:receiver:config:read")
 
     def test_infra_admin_service_metrics_read(self):
-        """infra_admin has service:*:metrics:read — read any service metrics."""
+        """infra_admin has service:*:metrics:read -- read any service metrics."""
         config = RoleConfig.load_builtin()
         assert config.has_permission("infra_admin", "service:loader:metrics:read")
         assert not config.has_permission("infra_admin", "service:loader:metrics:write")

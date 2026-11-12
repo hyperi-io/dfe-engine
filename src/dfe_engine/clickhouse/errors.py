@@ -120,7 +120,7 @@ _IDENTITY_CODES = frozenset({192, 193, 516})
 class ChError(Exception):
     """A typed ClickHouse error - carries the CH ``code``, category + ``user_safe``.
 
-    ``user_safe`` marks a caller-fault error whose message is safe to surface; a
+    ``user_safe`` marks a caller-fault error whose message is safe to surface. A
     server/connection error is not (do not leak internals). Callers catch ChError
     (or check ``.category``) instead of parsing driver text.
     """
@@ -149,8 +149,8 @@ def classify(exc: BaseException) -> ErrorCategory:
     """The coarse :class:`ErrorCategory` for *exc* (for metrics + retry).
 
     A Python builtin ``ConnectionError`` / ``TimeoutError`` and the driver's
-    transport ``OperationalError`` are CONNECTION; otherwise the parsed CH code
-    decides; otherwise UNKNOWN.
+    transport ``OperationalError`` are CONNECTION. Otherwise the parsed CH code
+    decides. Otherwise UNKNOWN.
     """
     if isinstance(exc, (ConnectionError, TimeoutError)):
         return ErrorCategory.CONNECTION

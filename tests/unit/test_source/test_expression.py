@@ -8,7 +8,7 @@ from dfe_engine.source.expression import (
     ExpressionValidator,
 )
 
-# ── Validator: basic parsing ────────────────────────────────────
+# -- Validator: basic parsing ------------------------------------
 
 
 class TestValidatorBasic:
@@ -49,7 +49,7 @@ class TestValidatorBasic:
         assert result.valid
 
 
-# ── Validator: @source ──────────────────────────────────────────
+# -- Validator: @source ------------------------------------------
 
 
 class TestValidatorSource:
@@ -106,7 +106,7 @@ class TestValidatorSource:
         assert result.fallback == "toDateTime(0)"
 
 
-# ── Validator: @generated ───────────────────────────────────────
+# -- Validator: @generated ---------------------------------------
 
 
 class TestValidatorGenerated:
@@ -128,7 +128,7 @@ class TestValidatorGenerated:
         assert not result.valid
 
 
-# ── Validator: @computed ────────────────────────────────────────
+# -- Validator: @computed ----------------------------------------
 
 
 class TestValidatorComputed:
@@ -145,7 +145,7 @@ class TestValidatorComputed:
         assert not result.valid
 
 
-# ── Validator: @config ──────────────────────────────────────────
+# -- Validator: @config ------------------------------------------
 
 
 class TestValidatorConfig:
@@ -172,7 +172,7 @@ class TestRetiredCopyDirective:
 
 
 class TestRetiredCapturedDirective:
-    """@captured is retired -- dfe-loader does not parse it; its capture mode fills _raw and _json."""
+    """@captured is retired -- dfe-loader does not parse it. Its capture mode fills _raw and _json."""
 
     @pytest.mark.parametrize("expr", ["@captured: raw_payload", "@captured: raw_payload as JSON"])
     def test_captured_is_rejected_as_an_unknown_directive(self, expr):
@@ -181,7 +181,7 @@ class TestRetiredCapturedDirective:
         assert "Unknown directive '@captured'" in result.errors[0]
 
 
-# ── Validator: real-world expressions from dfe-schemas ──────────
+# -- Validator: real-world expressions from dfe-schemas ----------
 
 
 class TestRealWorldExpressions:
@@ -204,7 +204,7 @@ class TestRealWorldExpressions:
         assert result.valid, f"Expected valid: {expr} — errors: {result.errors}"
 
 
-# ── Builder ─────────────────────────────────────────────────────
+# -- Builder -----------------------------------------------------
 
 
 class TestBuilder:

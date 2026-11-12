@@ -8,7 +8,7 @@
 
 """Two schema registries stand in for two deployments.
 
-``alpha`` is where an operator authored a schema; ``beta`` is a clean deployment
+``alpha`` is where an operator authored a schema. ``beta`` is a clean deployment
 carrying only what dfe-schemas ships. Nothing is shared between them, so a
 schema only reaches beta by travelling in an exchange document.
 """

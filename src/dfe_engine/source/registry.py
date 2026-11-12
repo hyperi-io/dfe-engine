@@ -4,7 +4,7 @@ Two interchangeable backends behind one registry surface:
 
 - **gitcrud** (preferred): the all-in-one source YAML IS the gitcrud doc in the
   deploy repo's ``config/sources/`` (ResourceClass ``sources``). Every mutation
-  is one git commit; the stored doc carries the universal gitcrud ``metadata``
+  is one git commit. The stored doc carries the universal gitcrud ``metadata``
   block. Pass ``crud=GitCrud(...)`` to select it.
 - **DirectoryConfigStore** (standalone): a plain YAML directory as SSoT,
   mirroring the ServiceConfigRegistry pattern. Used when no gitops deploy repo
@@ -98,7 +98,7 @@ def _first_error_message(exc: ValidationError) -> str:
     """The readable half of a pydantic error, so the API can hand it to a caller.
 
     Keeps the explanation a field validator wrote and drops the report scaffolding
-    around it; a caller told only "1 validation error for Source" learns nothing.
+    around it. A caller told only "1 validation error for Source" learns nothing.
     """
     errors = exc.errors()
     if not errors:
@@ -336,7 +336,7 @@ class SourceRegistry:
 
         Args:
             sources_directory: Path to the YAML sources directory
-                (DirectoryConfigStore backend; ignored when ``crud`` is given).
+                (DirectoryConfigStore backend, ignored when ``crud`` is given).
             writable: Whether writes are allowed. None = auto-detect.
             refresh_interval: Seconds between background cache refresh polls.
             crud: Governed Ops engine over the deploy repo. When provided the
@@ -460,7 +460,7 @@ class SourceRegistry:
         routing: ReviewRouting | None = None,
         engine_owned: bool = False,
     ) -> str:
-        """Write one stored source doc; returns the destination label for the save log.
+        """Write one stored source doc. Returns the destination label for the save log.
 
         gitcrud: the doc gains the universal gitcrud ``metadata`` block (derived
         from the doc's own description/display_name) and the write is ONE commit
@@ -508,7 +508,7 @@ class SourceRegistry:
         routing: ReviewRouting | None = None,
         engine_owned: bool = False,
     ) -> bool:
-        """Remove one stored source doc; False when it did not exist.
+        """Remove one stored source doc. False when it did not exist.
 
         gitcrud: one attributed commit ("(by <created_by>)" suffix, like save).
         Directory backend: unlink, and ``created_by`` is unused.
@@ -716,7 +716,7 @@ class SourceRegistry:
         deployment_store: Any | None = None,
         routing: ReviewRouting | None = None,
     ) -> Source:
-        """Update a source; version bump only when the deployed version is edited."""
+        """Update a source. Version bump only when the deployed version is edited."""
         if isinstance(write, dict):
             try:
                 write = SourceWriteRequest.model_validate(write)
@@ -997,7 +997,7 @@ class SourceRegistry:
         live = source.state != "disabled"
 
         # A DISABLED source skips every gate below - disabling is exactly how an
-        # operator retires a stored source the current rules would reject;
+        # operator retires a stored source the current rules would reject.
         # active/dormant still reject (a dormant source may activate later).
         ingest = self.ingest_rules() if live else None
         if live and candidate_version is not None and ingest is not None:
@@ -1177,7 +1177,7 @@ class SourceRegistry:
         """A source is one connector type, however many connections it polls.
 
         One schema per source is what keeps its table one shape, so the write is
-        refused here; dfe-fetcher takes any mix and is never asked to.
+        refused here. dfe-fetcher takes any mix and is never asked to.
         """
         from dfe_engine.settings import get_settings
 
@@ -1213,7 +1213,7 @@ class SourceRegistry:
 
     @staticmethod
     def _validate_engine_arguments(source: Source, version: SourceVersion | None) -> None:
-        """A set engine must follow its variant's argument rule; a blank one follows the default."""
+        """A set engine must follow its variant's argument rule. A blank one follows the default."""
         engine = version.effective_schema().engine if version else ""
         if not (engine):
             return
@@ -1365,7 +1365,7 @@ class SourceRegistry:
         """The shipped definition with its ``source`` name filled from the filename.
 
         dfe-schemas names a source by its file so one definition can be adopted
-        under whatever name a deployment gives it; the stored copy carries the
+        under whatever name a deployment gives it. The stored copy carries the
         name, because every read path validates a Source model.
         """
         from dfe_engine.yaml_utils import yaml_dump_string, yaml_load_string

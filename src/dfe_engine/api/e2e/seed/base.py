@@ -43,7 +43,7 @@ if TYPE_CHECKING:
     from dfe_engine.source.registry import SourceRegistry
 
 _TEST_ENV = "test"
-_SETUP_ADMIN_PASSWORD = "already_reset"  # noqa: S105, RUF100 - e2e fixture password; Seed refuses any DFE_ENGINE_ENV but test
+_SETUP_ADMIN_PASSWORD = "already_reset"  # noqa: S105, RUF100 - e2e fixture password, Seed refuses any DFE_ENGINE_ENV but test
 
 
 class Seed:
@@ -52,7 +52,7 @@ class Seed:
     The account, group and organisation stores are always present. The deploy
     repo, the source registry and the settings are optional, because the auth and
     setup scripts predate them and must keep working on a process with gitops
-    off; the app-management scripts ask for them explicitly and raise a named
+    off. The app-management scripts ask for them explicitly and raise a named
     error when the deployment does not have them.     The hunt registry is optional
     as the org routes take it, and an org seeder moves the hunts naming an org
     whenever there is one. The rule registry is optional for the same reason:
@@ -133,7 +133,7 @@ class Seed:
         )
 
     def _attach_seeders(self, env: str) -> None:
-        """``Seed`` owns child seeders; a child instance is that seeder."""
+        """``Seed`` owns child seeders. A child instance is that seeder."""
         from dfe_engine.api.e2e.seed.accounts import Accounts
         from dfe_engine.api.e2e.seed.apps import Apps
         from dfe_engine.api.e2e.seed.artefacts import Artefacts

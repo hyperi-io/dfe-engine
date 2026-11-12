@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Schema seeding. Public methods are the scripts; privates are reusable.
+"""Schema seeding. Public methods are the scripts. Privates are reusable.
 
 The schema list searches the path and filters on its top-level directory, so
 each script writes paths under ``meta``, ``common-header`` or ``hunts``. The

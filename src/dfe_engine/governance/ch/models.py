@@ -10,7 +10,7 @@
 A TIER is "how much you can consume + what you can do" (grants + settings profile
 + quota). A SERVICE ROLE is a fixed identity (loader/query_reader/hunt_runner). A
 GROUP BINDING ties an RBAC group's CH user to one tier axis + at most one org
-axis. The tenant axis is one SHARED role plus a per-user pinned setting; per-org
+axis. The tenant axis is one SHARED role plus a per-user pinned setting. per-org
 users are derived from the Org registry by the reconciler.
 
 The seed CATALOGUE -- the six tiers, the four service roles, the tenant axis, the
@@ -91,7 +91,7 @@ TENANT_ROLE = str(catalogue()["tenant"]["role"])
 """The ONE shared role the tenant row policies target.
 
 Held by every org-pinned user and by nothing else. A user holding it reads only
-the ``_org_id`` values named by its own pinned tenant setting; a user without it
+the ``_org_id`` values named by its own pinned tenant setting. A user without it
 is targeted by no policy and reads unrestricted.
 """
 
@@ -105,7 +105,7 @@ custom-settings prefix (the clickhouse-cluster chart does).
 """
 
 # The governance projection's database and tables, by manifest id. The engine's
-# schema phase creates them; the reconciler only writes rows into them.
+# schema phase creates them. The reconciler only writes rows into them.
 META_DATABASE_ID = "db.meta"
 META_ORGS_ID = "meta.orgs"
 META_TIERS_ID = "meta.ch_tiers"
@@ -155,7 +155,7 @@ def group_user_name(group: str) -> str:
 
 
 GROUP_USER_PREFIX = group_user_name("")
-"""What every derived group user name starts with; the drop sweep is scoped to it."""
+"""What every derived group user name starts with. The drop sweep is scoped to it."""
 
 
 def group_of_user(user: str) -> str | None:
@@ -195,9 +195,9 @@ class ChTier(BaseModel):
     """
 
     name: str
-    kind: str = "analyst"  # analyst | hunt (the two seeded families; extensible)
+    kind: str = "analyst"  # analyst | hunt (the two seeded families, extensible)
     default: bool = False  # the fallback tier FOR ITS KIND (one default per kind)
-    grants: list[str] = Field(default_factory=list)  # analyst = SELECT; hunt adds INSERT
+    grants: list[str] = Field(default_factory=list)  # analyst = SELECT, hunt adds INSERT
     settings: ProfileSettings = Field(default_factory=dict)  # -> CREATE SETTINGS PROFILE
     # quota -> CREATE QUOTA: an ``interval`` (str) plus per-interval maxima (ints).
     quota: dict[str, Any] = Field(default_factory=dict)
@@ -227,7 +227,7 @@ class ChServiceRole(BaseModel):
     """A fixed service identity (loader / query_reader / hunt_runner base).
 
     Not tiered. ``mint_user`` creates a CH user whose password the deployment
-    provides or the engine mints through the scalo.secrets seam; otherwise the
+    provides or the engine mints through the scalo.secrets interface. Otherwise the
     role is granted to an existing identity by the reconciler.
     """
 
@@ -258,15 +258,15 @@ class GroupChBinding(BaseModel):
 
     Inline grants/settings/quota are GONE (they moved to tiers, spec 6.4): a
     binding is just a group -> (tier, org) pointer. Empty ``tier`` resolves to the
-    default analyst tier; empty ``org`` means unrestricted (no tenant pin).
+    default analyst tier. Empty ``org`` means unrestricted (no tenant pin).
     """
 
     group: str
     ch_user: str = ""  # defaults to dfe_grp_{group}
     tier: str = ""  # -> dfe_{tier}_role (empty = the default analyst tier)
     org: str = ""  # -> tenant pin with that org's org_ids (empty = unrestricted)
-    # Extra service-role names composed onto the tier (e.g. otel_reader);
-    # quotas and settings still come from the tier alone.
+    # Extra service-role names composed onto the tier (e.g. otel_reader).
+    # Quotas and settings still come from the tier alone.
     ch_roles: list[str] = Field(default_factory=list)
 
     def user(self) -> str:
@@ -278,7 +278,7 @@ class GroupChBinding(BaseModel):
 #
 # The tiers, their memory and timeout envelopes, their quotas and the service
 # roles are DATA in ``roles/clickhouse.yaml``. Operators edit, delete and extend
-# them as ordinary governed-ops edits; seeding skips any file that already
+# them as ordinary governed-ops edits. Seeding skips any file that already
 # exists, so an edit is never clobbered.
 
 
@@ -294,7 +294,7 @@ def _tier(entry: dict[str, Any]) -> ChTier:
 
 
 def _service_role(entry: dict[str, Any]) -> ChServiceRole:
-    """One service role; ``system_introspection`` expands to the declared grant list."""
+    """One service role. ``system_introspection`` expands to the declared grant list."""
     grants = list(entry.get("grants") or [])
     if entry.get("system_introspection"):
         grants += SYSTEM_INTROSPECTION_GRANTS

@@ -10,7 +10,7 @@
 
 The old "SCRAM-512 everywhere" single-mechanism standard is dead - Confluent Cloud
 has no SCRAM. The invariant that DOES hold everywhere is SASL with a
-username+password pair; only the ``sasl.mechanism`` string differs, and it is
+username+password pair. Only the ``sasl.mechanism`` string differs, and it is
 derivable from the provider. Client code is written once against the user/pass
 contract. TLS under it is the default and the only exception is the in-cluster
 listener below.
@@ -24,8 +24,8 @@ Rules (dfe-engine#98):
   MSK). Never weakened to PLAIN.
 - PLAIN is the single sanctioned fallback, ONLY where the platform forbids SCRAM
   (Confluent Cloud). Always over TLS, never plaintext transport.
-- msk_iam stays quarantined at the mode=external seam (a different credential
-  shape, not username+password); MANDATORY for MSK Serverless (IAM-only).
+- msk_iam stays quarantined at the mode=external boundary (a different credential
+  shape, not username+password). MANDATORY for MSK Serverless (IAM-only).
 - OAUTHBEARER/OIDC is the end-state watch item, OUT of scope here.
 
 Amended by dfe-engine#332 with ``strimzi-no-tls`` and ``redpanda-no-tls``: one
@@ -35,7 +35,7 @@ so ``strimzi`` - which means SASL_SSL - was the only name for a broker that
 speaks SASL_PLAINTEXT, and every admin call against it failed with a broker
 transport failure. A key rather than a flag because the provider identity is the
 whole input every layer derives from. SCRAM-SHA-512 is the one mechanism
-allowed onto a plaintext transport; there is deliberately no such key for a PLAIN
+allowed onto a plaintext transport. There is deliberately no such key for a PLAIN
 or OAUTHBEARER provider.
 """
 
@@ -60,7 +60,7 @@ __all__ = [
 ]
 
 # Mechanisms that put the secret itself on the wire, so nothing under them but TLS
-# will do; SCRAM is absent because its challenge-response never sends the password.
+# will do. SCRAM is absent because its challenge-response never sends the password.
 ON_THE_WIRE = frozenset({"PLAIN", "OAUTHBEARER"})
 
 
@@ -75,7 +75,7 @@ def derive(provider: str) -> tuple[str, str]:
     ``*-no-tls``         -> ``("SASL_PLAINTEXT", "SCRAM-SHA-512")`` (a DFE-owned
                             broker on its TLS-off in-cluster listener).
     ``msk_iam``          -> ``("SASL_SSL", "OAUTHBEARER")`` (quarantined IAM token
-                            path; the caller wires the AWS MSK IAM callback).
+                            path. The caller wires the AWS MSK IAM callback).
     unknown              -> ``KafkaContractError``.
     """
     try:

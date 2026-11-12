@@ -124,7 +124,7 @@ class DDLConfig:
     engine: str = "MergeTree"
     # Retention is DECLARED, in dfe-schemas or a source's config, never defaulted
     # here: a default no operator can see is how a table ends up keeping
-    # everything or dropping what it should not. None is undeclared; 0 declares no TTL.
+    # everything or dropping what it should not. None is undeclared. 0 declares no TTL.
     ttl_days: int | None = None
     # TTL rides the partition column alone: ttl_only_drop_parts drops a part only
     # once every row in it has expired, so a second rule over event time can only

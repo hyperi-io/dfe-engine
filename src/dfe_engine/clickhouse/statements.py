@@ -27,7 +27,7 @@ from sqlglot.tokens import TokenType
 
 _CLICKHOUSE = Dialect.get_or_raise("clickhouse")
 
-# ClickHouse's compiled-in max_query_size; a statement within it is sent without the setting.
+# ClickHouse's compiled-in max_query_size. A statement within it is sent without the setting.
 CLICKHOUSE_DEFAULT_MAX_QUERY_SIZE = 262_144
 
 # Headroom over the statement's own bytes, so a statement measured at the limit still parses.
@@ -50,7 +50,7 @@ def split_statements(script: str) -> list[str]:
         script: One statement or several, with or without a trailing ``;``.
 
     Returns:
-        Each statement, stripped, in order; empty for a blank script. Text the
+        Each statement, stripped, in order. Empty for a blank script. Text the
         tokenizer cannot read, an unterminated quote say, comes back whole for
         ClickHouse to refuse with its own message.
     """

@@ -96,7 +96,7 @@ NOT_CONFIGURED_MESSAGE = (
 NO_DIRECTORY_MESSAGE = (
     "Each login reads that user's groups with their own token, so there is no directory to sync"
 )
-"""What a sync's ``skipped`` says for a provider with no directory listing; its ``sync_error`` stays empty."""
+"""What a sync's ``skipped`` says for a provider with no directory listing. Its ``sync_error`` stays empty."""
 
 _DIRECTORY_API = "The directory API"
 
@@ -390,7 +390,7 @@ def _upsert_groups(
                     source_provider=provider_name,
                 )
             except GroupExistsError:
-                # A stored group that does not load holds the name; the store counts the file.
+                # A stored group that does not load holds the name. The store counts the file.
                 logger.warning(
                     "OIDC group sync skipped a group whose stored copy does not load",
                     group=group_name,
@@ -465,7 +465,7 @@ async def sync_provider(
         group_store: Store to upsert group records into.
         adapter: Optional adapter override, primarily for testing.  When
             ``None`` the adapter is resolved via ``get_adapter(provider)``.
-        secrets: The DfeSecrets seam the directory credential resolves through
+        secrets: The DfeSecrets interface the directory credential resolves through
             when the adapter is built here.
         metrics: Where each group left unsynced is counted. ``None`` counts nothing.
         bindings: ``auth.source_provider_bindings``. A group stamped with a name

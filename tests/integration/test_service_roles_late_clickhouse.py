@@ -87,7 +87,7 @@ def _users(client) -> set[str]:
 def hunt_runner_minted(monkeypatch):
     """The seeded service roles with the hunt runner's user minted, whatever the pin ships.
 
-    dfe-schemas declares the hunt runner a minted user from 9f39032 on; a pinned
+    dfe-schemas declares the hunt runner a minted user from 9f39032 on. A pinned
     release that predates it would make no user for this test to wait for.
     """
     roles = [

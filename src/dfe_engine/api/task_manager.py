@@ -10,7 +10,7 @@
 
 Provides fire-and-forget task execution with status polling and SSE streaming.
 Tasks are ephemeral -- lost on restart. This is intentional: dfe-engine is a
-control plane, not a job scheduler. If it restarts, pending tasks simply need
+control plane, not a job scheduler. If it restarts, pending tasks need
 to be re-submitted.
 
 A task can be held to a set of orgs at submit. A reader held to its own orgs then
@@ -144,7 +144,7 @@ class _Task:
         self._progress_event = asyncio.Event()
 
     def visible_to(self, reader_orgs: frozenset[str] | None) -> bool:
-        """Whether a reader held to ``reader_orgs`` may see this task; None sees every task."""
+        """Whether a reader held to ``reader_orgs`` may see this task. None sees every task."""
         if reader_orgs is None:
             return True
         return self.held_to is not None and self.held_to <= reader_orgs
@@ -213,7 +213,7 @@ class TaskManager:
         to report progress.
 
         Every failure is logged. Its message reaches the task's readers only when
-        it is one of ``reportable``; any other failure reads as
+        it is one of ``reportable``. Any other failure reads as
         :data:`TASK_FAILED_MESSAGE`, because a backend's own error text can carry
         statement fragments, user names and password hashes.
 
@@ -291,7 +291,7 @@ class TaskManager:
         """List the tasks visible to the reader, most recent first, optionally filtered by kind.
 
         Args:
-            kind: Only tasks of this kind; None or empty for every kind.
+            kind: Only tasks of this kind. None or empty for every kind.
             reader_orgs: As for :meth:`get`.
 
         Returns:

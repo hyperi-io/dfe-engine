@@ -1,4 +1,4 @@
-"""Tests for HuntResultSchema — dynamic hunt output column generation."""
+"""Tests for HuntResultSchema -- dynamic hunt output column generation."""
 
 import pytest
 
@@ -61,7 +61,7 @@ class TestInsertColumns:
         assert "severity" in cols
 
     def test_includes_json_when_profile_has_it(self):
-        """Timeseries profile has _json — should be in insert columns."""
+        """Timeseries profile has _json -- should be in insert columns."""
         schema = HuntResultSchema(profile_name="timeseries")
         cols = schema.insert_columns()
         assert "_json" in cols

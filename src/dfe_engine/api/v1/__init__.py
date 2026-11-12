@@ -55,7 +55,7 @@ async def _deploy_repo_scope():
     """One view of the deploy repo per request.
 
     Each engine replica reads its own clone, so the first read of the request takes
-    the remote's head and every read after it answers from that same view; the next
+    the remote's head and every read after it answers from that same view. The next
     request checks again. Without the scope a listing would ask the deploy repo once
     per source.
     """
@@ -72,7 +72,7 @@ async def _attribution_scope(request: Request):
     per endpoint. It is the template, never the path, so no login or other value in
     the path is stored with the query.
     Auth-agnostic (no user dependency) so it runs on public routes
-    too; user/tenant enrichment is a follow-up needing the per-route auth context.
+    too. User/tenant enrichment is a follow-up needing the per-route auth context.
     """
     with tags_context(feature=route_template(request.scope)):
         yield

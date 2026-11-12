@@ -17,15 +17,15 @@ API keys use a prefix+short_token+long_token format:
   pre-existing "sha256:" keys still verify)
 
 The full key is shown exactly once -- at creation time. Only the hash is
-persisted on disk; there is no way to reconstruct the full key from
+persisted on disk. There is no way to reconstruct the full key from
 stored metadata.
 
 Keys may carry an optional ``expires_at`` (ISO-8601, normalised to UTC).
 Expiry is enforced at verify() time, so an expired key stops working the
-moment it lapses without any sweeper having to run; the file stays on disk
+moment it lapses without any sweeper having to run. The file stays on disk
 until an admin revokes it, which keeps the lapse visible in list().
 
-Lookup strategy: filename is the key name; short_token is stored inside
+Lookup strategy: filename is the key name. short_token is stored inside
 the YAML for cross-file lookup during verify()/revoke().
 """
 
@@ -77,14 +77,14 @@ class APIKey(BaseModel):
 
     name: str
     short_token: str
-    key_hash: str  # "sha384:{hex}" (CNSA); legacy "sha256:{hex}" still verifies
+    key_hash: str  # "sha384:{hex}" (CNSA), legacy "sha256:{hex}" still verifies
     enabled: bool = True
     groups: list[str] = Field(default_factory=list)
     # The org the key's sessions are bound to, empty for none.
     org: str = ""
     description: str = ""
     created_at: str = ""
-    expires_at: str | None = None  # ISO-8601 UTC; None = never expires
+    expires_at: str | None = None  # ISO-8601 UTC, None = never expires
 
     def is_expired(self, now: datetime | None = None) -> bool:
         """True when the key carries an expiry that has already passed.
@@ -207,7 +207,7 @@ class APIKeyStore:
             submitted_key: Full key string in ``dfe_ak_{short}_{long}`` format.
 
         Returns:
-            APIKey metadata if valid, enabled and unexpired; None otherwise.
+            APIKey metadata if valid, enabled and unexpired. None otherwise.
         """
         key_meta, _reason = self.verify_detailed(submitted_key)
         return key_meta
@@ -237,7 +237,7 @@ class APIKeyStore:
         if key_meta is None:
             return None, "unknown_key"
 
-        # Timing-safe comparison. New keys are SHA-384 (CNSA); pre-existing
+        # Timing-safe comparison. New keys are SHA-384 (CNSA). pre-existing
         # sha256: keys still verify under their stored algorithm.
         algo, _, stored_hash = key_meta.key_hash.partition(":")
         if algo not in ("sha256", "sha384"):

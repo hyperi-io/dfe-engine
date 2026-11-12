@@ -129,7 +129,7 @@ def test_a_push_the_remote_moved_under_is_re_applied_once(tmp_path: Path, monkey
     pushes: list[bytes] = []
 
     def racing_push(refspec: bytes) -> None:
-        # The fetch saw a quiet remote; the other replica then pushes before this
+        # The fetch saw a quiet remote. The other replica then pushes before this
         # clone's first push goes out.
         pushes.append(refspec)
         if len(pushes) == 1:
@@ -145,7 +145,7 @@ def test_a_push_the_remote_moved_under_is_re_applied_once(tmp_path: Path, monkey
 
 
 def test_a_rejected_push_with_a_quiet_remote_stays_an_error(tmp_path: Path, monkeypatch) -> None:
-    """Only a moved remote earns the retry; any other rejection is raised as it was."""
+    """Only a moved remote earns the retry. Any other rejection is raised as it was."""
     remote, branch = _seeded_remote(tmp_path)
     repo = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
     repo.ensure()
@@ -338,7 +338,7 @@ def test_refresh_serves_this_clone_when_the_forge_stops_answering(
 def test_read_remote_file_gives_up_on_a_forge_that_never_answers(
     tmp_path: Path, black_holed_forge: str
 ) -> None:
-    """The review-PR merge poll reads through this; unbounded, it waits out the OS."""
+    """The review-PR merge poll reads through this. Unbounded, it waits out the OS."""
     repo = _clone_then_point_at(tmp_path, black_holed_forge)
 
     started = time.monotonic()
@@ -434,7 +434,7 @@ def test_read_locked_holds_the_tree_lock_across_the_read(tmp_path: Path) -> None
 
 
 def test_a_refused_ref_raises_instead_of_reporting_a_successful_push(tmp_path: Path) -> None:
-    """dulwich reports a refused ref in ref_status and returns normally; we must not."""
+    """dulwich reports a refused ref in ref_status and returns normally. We must not."""
     remote, branch = _seeded_remote(tmp_path)
     repo = GitopsRepo(local_path=str(tmp_path / "a"), repo_url=remote, branch=branch, push=True)
     repo.ensure()

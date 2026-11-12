@@ -1,4 +1,4 @@
-"""Tests for the alerts router — alert destination CRUD."""
+"""Tests for the alerts router -- alert destination CRUD."""
 
 import json
 from types import SimpleNamespace

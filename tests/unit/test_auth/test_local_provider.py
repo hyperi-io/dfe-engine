@@ -46,7 +46,6 @@ def stores(auth_dirs: tuple[Path, Path]) -> tuple[AccountStore, GroupStore]:
     group_store.create("dfe-viewers", roles=["data_viewer"], description="Viewers")
     group_store.create("dfe-infra", roles=["infra_admin"], description="Infra")
 
-    # Create accounts
     account_store.create("admin", "admin-secret", groups=["dfe-admins"])
     account_store.create("operator", "operator-secret", groups=["dfe-analysts", "dfe-infra"])
     account_store.create("viewer", "viewer-secret", groups=["dfe-viewers"])
@@ -332,7 +331,7 @@ class TestIntegration:
         assert authorize(auth, "helm:execute_ddl", enabled=True).allowed
         # admin-only action that neither data_analyst nor infra_admin have
         # (there is no such action in the current role set since infra_admin
-        # has broad argo:* — test a truly restricted action instead)
+        # has broad argo:* -- test a truly restricted action instead)
         # data_analyst cannot write config
         auth_viewer = provider.authenticate("viewer", "viewer-secret")
         assert not authorize(auth_viewer, "config:write", enabled=True).allowed

@@ -189,7 +189,7 @@ def test_generate_all_views_respects_an_explicit_database(client, app, admin_hea
 
 def test_generate_invalid_stored_type_returns_422(client, app, admin_headers, tmp_path):
     _wire_gitcrud(app, tmp_path)
-    # type is a free string at write time; an illegal CH type only fails at render
+    # type is a free string at write time. An illegal CH type only fails at render
     bad = _view_body(columns=[{"sigma_field": "X", "json_path": "p", "type": "String; DROP"}])
     put = client.put("/api/v1/sigma/views/windows-audit", json=bad, headers=admin_headers)
     assert put.status_code == 200, put.text
@@ -229,7 +229,7 @@ def _add_mapped_source(name: str, mappings: dict[str, str]) -> None:
 
 
 def test_field_map_preview_keeps_only_columns_the_table_carries(client, admin_headers):
-    # _source is a header column every table has; process_executable is on none of these.
+    # _source is a header column every table has. process_executable is on none of these.
     _add_mapped_source("winlog", {"EventID": "_source", "Image": "process_executable"})
 
     gen = client.post("/api/v1/sigma/views/winlog", headers=admin_headers)
@@ -276,14 +276,14 @@ def test_generate_view_source_not_found(client, admin_headers):
 
 
 def test_generate_all_views(client, admin_headers):
-    """Generate all views — may return empty list or 503."""
+    """Generate all views -- may return empty list or 503."""
     resp = client.post("/api/v1/sigma/views", headers=admin_headers)
     # Either succeeds with empty list (no sources) or 503 (not configured)
     assert resp.status_code in (200, 503)
 
 
 def test_logsource_search(client, admin_headers):
-    """Find sources for logsource — returns list (possibly empty)."""
+    """Find sources for logsource -- returns list (possibly empty)."""
     resp = client.get(
         "/api/v1/sigma/logsource?product=windows&category=process_creation",
         headers=admin_headers,

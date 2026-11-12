@@ -8,16 +8,14 @@
 
 """The two facts the bootstrap topic set is rendered against: tiering, and size.
 
-Both used to be wrong in the same way -- a value the engine already had was
-passed where the renderer wanted a fact about the deployment, so the render
-agreed with the config and never with the bus.
+The renderer must be handed a fact about the deployment, never a value the engine
+already had from config, or the render agrees with the config and never with the bus.
 
-``kafka_tiered_storage`` had no way through at all: the renderer grew the kwarg
-and the engine's own call sites took a fixed list, so the landing topic was
-created without ``remote.storage.enable`` on every deployment that tiers.
+``kafka_tiered_storage`` must reach the renderer, or the landing topic is created
+without ``remote.storage.enable`` on every deployment that tiers.
 
-``broker_count`` was handed the configured replication factor, so the clamp
-compared that factor against itself and could never reduce it.
+``broker_count`` must be the observed broker count, not the configured replication
+factor, or the clamp compares that factor against itself and can never reduce it.
 """
 
 from __future__ import annotations
@@ -76,7 +74,7 @@ def test_the_replication_factor_is_clamped_to_the_brokers_there_are(settings):
 
 
 def test_a_bigger_bus_keeps_the_declared_factor(settings):
-    """The clamp reduces; it never raises past what the manifest asked for."""
+    """The clamp reduces. It never raises past what the manifest asked for."""
     declared = _landing(build_plan(settings=settings, broker_count=99))["replication_factor"]
     assert declared > 1
     assert (

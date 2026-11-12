@@ -303,7 +303,7 @@ def refuse_calls_outside_the_row(
 
 
 def _before_in(tokens: list[Token], index: int) -> Token | None:
-    """The token before the IN keyword at ``index``, past NOT and GLOBAL; None when it is first.
+    """The token before the IN keyword at ``index``, past NOT and GLOBAL. None when it is first.
 
     The keyword is the operator when an operand ends there: ``x IN (...)``,
     ``x NOT IN (...)``, ``x GLOBAL IN (...)``. ``in(x, t)`` stands where an operand

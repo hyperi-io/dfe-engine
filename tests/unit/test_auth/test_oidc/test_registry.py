@@ -73,12 +73,12 @@ class TestOIDCProviderRegistryCreate:
         assert oidc_dir.exists()
 
     def test_create_name_not_stored_as_field_in_yaml(self, tmp_path):
-        """Provider name is the filename stem — NOT a field in the YAML body."""
+        """Provider name is the filename stem -- NOT a field in the YAML body."""
         oidc_dir = tmp_path / "oidc"
         registry = OIDCProviderRegistry(oidc_dir)
         registry.create("my-sso", _make_generic_provider())
         data = yaml_load(oidc_dir / "my-sso.yaml")
-        # The name field doesn't exist on OIDCProvider — confirmed absent
+        # The name field doesn't exist on OIDCProvider -- confirmed absent
         assert "name" not in data
 
     def test_create_returns_provider_object(self, tmp_path):

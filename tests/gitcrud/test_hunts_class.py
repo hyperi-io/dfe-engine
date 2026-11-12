@@ -13,8 +13,8 @@ rule YAML off a git-sync of the deploy repo's ``config/hunts`` and ``config/rule
 sidecar syncs, it is byte-for-byte what the directory backend writes, and the
 runner's own loader and rule compiler read it back.
 
-The forge is a recording double at the ForgeProvider seam, matching
-test_routing.py; its REST behaviour is covered in test_forge.py.
+The forge is a recording double at the ForgeProvider interface, matching
+test_routing.py. Its REST behaviour is covered in test_forge.py.
 """
 
 from pathlib import Path
@@ -52,7 +52,7 @@ RULE = Rule(
 
 
 class _RecordingForge:
-    """A ForgeProvider seam double that records the PR it was asked to open."""
+    """A ForgeProvider double that records the PR it was asked to open."""
 
     def __init__(self, url: str = "http://forge/pr/1") -> None:
         self.calls: list[dict] = []

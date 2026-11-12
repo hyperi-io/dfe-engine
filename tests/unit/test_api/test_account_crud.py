@@ -192,7 +192,7 @@ class TestCreateAccount:
         assert app.state.account_store.get("long-pw") is None
 
     def test_a_store_fault_is_not_answered_as_a_bad_request(self, app, client, admin_headers):
-        """Only the name rule makes a store refusal the caller's fault; anything else is the server's."""
+        """Only the name rule makes a store refusal the caller's fault. Anything else is the server's."""
         app.state.account_store = _FaultingAccountStore(app.state.account_store._dir)
 
         resp = client.post(
@@ -556,7 +556,7 @@ class TestUpdateAccount:
     def test_resending_the_groups_repairs_a_membership_the_group_file_lost(
         self, client, app, admin_headers
     ):
-        """drift's own list names dfe-analysts; the group file, which decides, does not."""
+        """drift's own list names dfe-analysts. The group file, which decides, does not."""
         app.state.account_store.create("drift", _PASSWORD, groups=["dfe-analysts"])
 
         resp = client.put(
@@ -1276,7 +1276,7 @@ class TestRotatePassword:
         assert resp.status_code == 501
         body = resp.json()
         assert body["code"] == "admin_password_kept_outside_dfe"
-        # The wording varies with the detected deploy kind; that it names a store
+        # The wording varies with the detected deploy kind. That it names a store
         # operation rather than an engine one is what matters here.
         assert body["store_command"]
 
@@ -1433,7 +1433,7 @@ class TestDeleteAccount:
     def test_delete_own_account_as_last_admin_is_self_delete(
         self, recovery_accounts, client, admin_headers, app
     ):
-        """The sole usable admin cannot remove itself; self_delete wins over last_admin."""
+        """The sole usable admin cannot remove itself. self_delete wins over last_admin."""
 
         store = recovery_accounts.state.account_store
         created = client.post(
@@ -1462,7 +1462,7 @@ class TestDeleteAccount:
         assert store.get("ops") is not None
 
 
-# ── The protected-name floor (issue #505) ────────────────────
+# -- The protected-name floor (issue #505) --------------------
 
 
 @pytest.mark.parametrize("username", ["admin", "breakglass"])
@@ -1476,7 +1476,7 @@ class TestProtectedAccounts:
             headers=admin_headers,
         )
         assert resp.status_code == 403, resp.text
-        # Disabling yourself is refused before the protected-name floor; another
+        # Disabling yourself is refused before the protected-name floor. Another
         # recovery credential still hits protected_account.
         expected = "self_deactivate" if username == "admin" else "protected_account"
         assert resp.json()["code"] == expected

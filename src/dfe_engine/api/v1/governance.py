@@ -16,7 +16,7 @@ POST /api/v1/governance/admin/actions/validate  -> check a def + diff, no commit
 POST/PUT/DELETE /api/v1/governance/admin/actions[/{name}]   -> CRUD defs (governance:write)
 POST/DELETE     /api/v1/governance/admin/policies[/{name}]  -> CRUD policies (governance:write)
 
-Operators get curated actions via `action:invoke:<name>`; raw class CRUD stays with
+Operators get curated actions via `action:invoke:<name>`. Raw class CRUD stays with
 admins (governance:write). Everything commits to gitops via the engine.
 """
 
@@ -116,7 +116,7 @@ def _route_admin_write(
 ) -> WriteOutcome:
     """route_write for a governance-class admin CRUD write (201/204 endpoints).
 
-    Direct commit in dev/solo; a production+team write is pushed to a review branch
+    Direct commit in dev/solo. A production+team write is pushed to a review branch
     and a PR opened (or 409 ``review_required`` when no forge is configured). The
     caller surfaces any PR via response headers since these bodies are fixed.
     """
@@ -148,7 +148,7 @@ def list_actions(query: ListParams, user: CurrentUser, request: Request) -> Page
     "/actions/{name}", dependencies=[Depends(require_action(scopes_dict["governance_read"]))]
 )
 def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
-    """One defined action; a credential a legacy definition still carries comes back masked."""
+    """One defined action. A credential a legacy definition still carries comes back masked."""
     try:
         return _actions(request).get_shown(name)
     except ResourceNotFoundError as exc:
@@ -184,14 +184,14 @@ def invoke_action(
     """Invoke a defined action - gated on the action's OWN required_action.
 
     ``body.params`` supplies values for the action's declared params (422 on a
-    constraint violation; omitted params take their defaults). A hunt or rule
+    constraint violation. Omitted params take their defaults). A hunt or rule
     document the action would leave invalid is 422 ``invalid_document``, with the
     hunts API's own message. A change to the infra overlay meets the backing-services
     guards on what the action leaves, dry run included, whatever the caller holds:
     409 ``managed_by_provider`` for a read-only value of a service DFE does not run,
     then 400 ``scale_down_refused`` where it lowers or un-declares a node or broker
     count.
-    Direct commit in dev/solo; a production+team invoke is routed to a review PR (or
+    Direct commit in dev/solo. A production+team invoke is routed to a review PR (or
     409 ``review_required`` when no forge is configured).
     """
     _check_name(name)

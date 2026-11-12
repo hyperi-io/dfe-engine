@@ -110,7 +110,7 @@ def _resolve_customers(request: Request, config: dict[str, Any]) -> None:
 def _validate_hunt_config(config: dict[str, Any], settings: Any, rules: Any) -> None:
     """Run the deep HuntValidator on an API create/update hunt config (422 on error).
 
-    Pydantic only checks the request SHAPE; this closes the gap where API CRUD skipped
+    Pydantic only checks the request SHAPE. This closes the gap where API CRUD skipped
     rule-file + structural (source/customer) validation. Each rule is looked up as the
     ``{name}.yaml`` the rule registry writes and the hunt runner reads: in the registry's
     directory (the deploy repo's ``config/rules`` under gitops), else ``hunts.rules_dir``.
@@ -357,7 +357,7 @@ def _live_runners() -> int:
     """Best-effort count of hunt runners that have beaten within their last two polls.
 
     Hunt execution runs in the separate dfe-hunt-runner service and coordinates via
-    ClickHouse; each runner writes a row to hunt_runner_heartbeat at the top of every
+    ClickHouse. Each runner writes a row to hunt_runner_heartbeat at the top of every
     tick. Returns 0 (never errors) when ClickHouse is unreachable or the coordination
     table does not exist yet.
     """
@@ -432,7 +432,7 @@ def get_engine_status(
     Hunts execute in the separate dfe-hunt-runner service (pull-based, coordinated
     via ClickHouse), not in this API process, so ``runners`` counts the runners that
     beat within their last two polls and ``running`` is whether any did. For "is this
-    hunt running", read the per-hunt ``running`` on the hunts list; ``hunt_count`` is
+    hunt running", read the per-hunt ``running`` on the hunts list. ``hunt_count`` is
     the configured-hunt count.
     """
     runners = _live_runners()
@@ -593,7 +593,7 @@ def delete_hunt(
     """Delete a hunt configuration.
 
     A production+team delete is routed to a review branch, so the runner keeps
-    executing the hunt until that branch is merged; ``X-DFE-Review-Required`` says so.
+    executing the hunt until that branch is merged. ``X-DFE-Review-Required`` says so.
     """
     try:
         registry.get(name)
@@ -623,13 +623,13 @@ def trigger_hunt(
     The pull model is kept. Nothing is pushed at the runner and no listener is added
     -- the fire is written into the coordination state, and the runner that is
     already running picks it up on its next poll, through the same claim that stops
-    a hunt double-running. 202 says it is queued, not that it has run; the response
+    a hunt double-running. 202 says it is queued, not that it has run. The response
     carries the poll interval so the caller knows the longest wait before it starts.
 
     A hunt with no rate schedule is not something the runner ticks, so a queued run
     for one sits unclaimed. That is the schedule's shape, not a failure here.
 
-    503 is reserved for ClickHouse actually being unreachable; any other failure to
+    503 is reserved for ClickHouse actually being unreachable. Any other failure to
     write the request is a 500, so a bug here never reads as an outage.
     """
     try:

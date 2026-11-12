@@ -52,7 +52,7 @@ class Dispatcher:
         self._senders: dict[str, Sender] = senders or {"log": LogSender()}
 
     def dispatch(self, rule: AlertRule, count_in_window: int, subject: str, body: str) -> bool:
-        """Send if the rule fires; returns whether anything was sent."""
+        """Send if the rule fires. Returns whether anything was sent."""
         if not fires(rule, count_in_window):
             return False
         dest = self._destinations.get(rule.destination)

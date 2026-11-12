@@ -183,7 +183,7 @@ class SyntheticDataService:
         self.resolve_ref(req.schema_ref)
 
     async def run_stream(self, req: StreamRequest, *, task: Any = None) -> dict[str, Any]:
-        """Stream to the receiver as a TaskManager coroutine; returns the summary."""
+        """Stream to the receiver as a TaskManager coroutine. Returns the summary."""
         factory = self.build_factory(
             req.schema_ref,
             version=req.version,

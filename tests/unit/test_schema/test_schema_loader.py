@@ -40,7 +40,7 @@ def tmp_versioned_schema(tmp_path):
     return _write
 
 
-# ── load_columns ────────────────────────────────────────────────────
+# -- load_columns ----------------------------------------------------
 
 
 class TestLoadColumns:
@@ -125,7 +125,7 @@ class TestLoadColumns:
             SchemaLoader.load_columns(path)
 
 
-# ── load_profile ────────────────────────────────────────────────────
+# -- load_profile ----------------------------------------------------
 
 
 class TestLoadProfile:
@@ -292,7 +292,7 @@ class TestLoadProfile:
         assert order_cols[1] == "_timestamp"
 
 
-# ── resolve_schema_yaml_path ────────────────────────────────────────
+# -- resolve_schema_yaml_path ----------------------------------------
 
 
 class TestResolveSchemaYamlPath:
@@ -319,7 +319,7 @@ class TestResolveSchemaYamlPath:
         assert resolved == yaml_file
 
 
-# ── apply_derived_schema ────────────────────────────────────────────
+# -- apply_derived_schema --------------------------------------------
 
 
 def _derived(tmp_versioned_schema, select: list[dict], **version_keys):
@@ -413,7 +413,7 @@ class TestDerivedCapture:
             SchemaLoader.load_derived_capture(path)
 
 
-# ── apply_additional_fields ─────────────────────────────────────────
+# -- apply_additional_fields -----------------------------------------
 
 
 class TestApplyAdditional:
@@ -451,7 +451,7 @@ class TestApplyAdditional:
         assert result == base
 
 
-# ── compose ─────────────────────────────────────────────────────────
+# -- compose ---------------------------------------------------------
 
 
 class TestCompose:
@@ -470,7 +470,7 @@ class TestCompose:
     def test_duplicate_dropped(self):
         profile = [SchemaColumn(name="_org", type="string")]
         source = [
-            SchemaColumn(name="_org", type="text"),  # duplicate — should be dropped
+            SchemaColumn(name="_org", type="text"),  # duplicate -- should be dropped
             SchemaColumn(name="data", type="string"),
         ]
         result = SchemaLoader.compose(profile, source)
@@ -480,7 +480,7 @@ class TestCompose:
         assert result[1].name == "data"
 
 
-# ── validate_columns ────────────────────────────────────────────────
+# -- validate_columns ------------------------------------------------
 
 
 class TestValidateColumns:
@@ -539,7 +539,7 @@ class TestValidateColumns:
         assert bool(named) is refused
 
 
-# ── get_order_by_columns ────────────────────────────────────────────
+# -- get_order_by_columns --------------------------------------------
 
 
 class TestGetOrderByColumns:
@@ -562,7 +562,7 @@ class TestGetOrderByColumns:
         assert result == []
 
 
-# ── Package resolution ────────────────────────────────────────────
+# -- Package resolution --------------------------------------------
 
 
 @requires_schemas
@@ -637,7 +637,7 @@ class TestPackageResolution:
             _resolve_profiles_dir()
 
 
-# ── is_shipped_schema ────────────────────────────────────────────
+# -- is_shipped_schema --------------------------------------------
 
 
 class TestIsShippedSchema:
@@ -660,7 +660,7 @@ class TestIsShippedSchema:
         assert is_shipped_schema(user_file) is False
 
 
-# ── Version tree ───────────────────────────────────────────────────
+# -- Version tree ---------------------------------------------------
 
 
 class TestVersionTree:
@@ -918,7 +918,7 @@ class TestVersionTree:
                 assert "date" in entry, f"Version '{ver}' in profile '{profile}' missing 'date'"
 
 
-# ── load_version_metadata ──────────────────────────────────────────
+# -- load_version_metadata ------------------------------------------
 
 
 class TestLoadVersionMetadata:

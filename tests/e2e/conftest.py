@@ -18,7 +18,7 @@ Configure via env (typically `dfe-engine`-side of a `single`/`standard` deployme
   DFE_E2E_RECEIVER_TOKEN   bearer token for the receiver (optional)
   DFE_E2E_CH_HOST/PORT     ClickHouse HTTP endpoint (default port 8123)
   DFE_E2E_CH_USER/PASSWORD/DB   ClickHouse creds + database (default db: dfe)
-  DFE_E2E_CH_SECURE        1 when that endpoint speaks TLS (default off); set
+  DFE_E2E_CH_SECURE        1 when that endpoint speaks TLS (default off). Set
                            DFE_E2E_CH_PORT to its HTTPS port too
   DFE_E2E_HYPERDX_URL      HyperDX base URL
   DFE_E2E_HYPERDX_API_KEY  HyperDX API key (optional)
@@ -37,7 +37,7 @@ Configure via env (typically `dfe-engine`-side of a `single`/`standard` deployme
 OIDC fixture logins are separate, because they name a shared test identity the
 whole suite reuses rather than one deployment's endpoint:
   DFE_OIDC_FIXTURE_USER      default dfe-test@dfe-oidc.test
-  DFE_OIDC_FIXTURE_PASSWORD  no default; pre-shared into .env
+  DFE_OIDC_FIXTURE_PASSWORD  no default. Pre-shared into .env
   DFE_OIDC_<PROVIDER>_FIXTURE_USER / _PASSWORD  per-provider override, <PROVIDER>
                              uppercased as /api/v1/auth/setup-status names it
 """
@@ -212,7 +212,7 @@ def poll_until(
     """Poll predicate until ``done`` accepts what it returns, or raise on timeout.
 
     A readiness-gated wait: we poll the real signal (the row exists, the API
-    returns it) and use the timeout only as a BACKSTOP for a genuinely-stuck
+    returns it) and use the timeout only as a BACKSTOP for a stuck
     dependency - never as the thing we race against. ``done`` defaults to
     truthiness. Returns the accepted value.
     """
@@ -331,7 +331,7 @@ def drop_table(ch_client, db: str, name: str) -> None:
     ch_client.command(f"DROP TABLE IF EXISTS {db}.`{name}` SYNC")
 
 
-# ClickHouse says one of these when the table or database is simply not there
+# ClickHouse says one of these when the table or database is not there
 # yet, which is the only absence a poll should read as "no rows".
 NOT_THERE_YET = ("UNKNOWN_TABLE", "UNKNOWN_DATABASE", "does not exist", "doesn't exist")
 

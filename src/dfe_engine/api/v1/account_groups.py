@@ -315,7 +315,7 @@ def _refuse_bad_link(
 def _refuse_identifier_collision(
     *, groups: list[Group], name: str, source_id: str, target: str
 ) -> None:
-    """Refuse a write giving group *target* a *name* that is another group's source ID or a *source_id* that is another group's name (:func:`identifier_holder`); pass empty for the one the write leaves alone."""
+    """Refuse a write giving group *target* a *name* that is another group's source ID or a *source_id* that is another group's name (:func:`identifier_holder`). Pass empty for the one the write leaves alone."""
     holder = identifier_holder(exclude=target, groups=groups, name=name, source_id=source_id)
     if holder is None:
         return
@@ -579,7 +579,7 @@ async def update_group(
     if changes_link:
         _refuse_link_below_system_scope(request, user)
     if (body.roles is not None) or (changes_members) or (changes_link):
-        # Members and linked logins keep, gain or lose the roles before and after; a role removed counts too.
+        # Members and linked logins keep, gain or lose the roles before and after. A role removed counts too.
         roles_after = body.roles if body.roles is not None else existing.roles
         check_role_assignment(request, user, [*existing.roles, *roles_after], scope_of(existing))
     _refuse_bad_link(
@@ -650,7 +650,7 @@ async def add_member(
     user: CurrentUser,
     request: Request,
 ):
-    """Add a member to a group (idempotent; checked at the group's scope)."""
+    """Add a member to a group (idempotent, checked at the group's scope)."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
@@ -742,7 +742,7 @@ async def delete_group(
 
 # -- Attributes -----------------------------------------------
 #
-# Non-sensitive attributes ride inline on the Group model; sensitive attributes
+# Non-sensitive attributes ride inline on the Group model. Sensitive attributes
 # live in the separate keyed store (never inline, so a broad group read cannot
 # leak them). Both sensitive endpoints require the group to exist first.
 

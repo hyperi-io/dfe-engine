@@ -181,7 +181,7 @@ def vector_step_name_to_input(vector_step: str) -> str:
     """Converts a vector step name to an input name format.
 
     Args:
-        vector_step (str): The vector step name, expected to be in the format "step-name.yaml" or simply "step-name".
+        vector_step (str): The vector step name, expected to be in the format "step-name.yaml" or "step-name".
 
     Returns:
         str: The formatted input name, with the step name converted to uppercase, hyphens replaced with underscores,
@@ -259,7 +259,7 @@ def gather_env_variables_for_pipeline(package_config: dict, pipeline_name: str) 
     step_env_vars.update(step_inputs)
 
     # A template's own default, or None for a var it requires, only fills a gap the
-    # package and pipeline left; a step's input wiring wins over both.
+    # package and pipeline left. A step's input wiring wins over both.
     for key, value in step_env_vars.items():
         if key in step_inputs or key not in required_env_vars:
             required_env_vars[key] = value
@@ -278,7 +278,7 @@ def gather_env_variables_for_pipeline(package_config: dict, pipeline_name: str) 
 def merge_configs(default_yaml: dict, override_yaml: dict) -> dict:
     """Merge a package config over the core config, leaving both inputs unchanged.
 
-    Dictionaries merge recursively; a list or scalar the package sets replaces the
+    Dictionaries merge recursively. A list or scalar the package sets replaces the
     core one, so a package naming its own topic list gets exactly that list.
 
     Args:

@@ -91,7 +91,7 @@ def registry(request, directory_registry, gitcrud_registry) -> DerivedSchemaRegi
 
 class TestDocument:
     def test_a_base_with_a_file_extension_is_refused(self):
-        # The UI and the schemas list both speak registry paths; a suffix here
+        # The UI and the schemas list both speak registry paths. A suffix here
         # would be a second spelling of one reference.
         with pytest.raises(ValueError, match="without a file extension"):
             DerivedSchema.model_validate({**_doc(), "base": "meta/beats/filebeat.yaml"})

@@ -17,7 +17,7 @@ identity (sub/email/name/groups), and then RE-MINTS its own ES384 engine token v
 external IdP's RS256 token never leaves the engine<->IdP leg.
 
 Config never holds a secret: it holds the client_id in the clear, a PATH into
-the DfeSecrets seam, and the NAME of an env var. The RP resolves the real
+the DfeSecrets interface, and the NAME of an env var. The RP resolves the real
 client_id/client_secret at registration time, store before env, so a secret
 written through the provider API takes effect without a restart.
 
@@ -44,7 +44,7 @@ if TYPE_CHECKING:
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
     from dfe_engine.secrets import DfeSecrets
 
-# Claims a userinfo response may fill; groups stay ID-token-only because they decide roles.
+# Claims a userinfo response may fill. Groups stay ID-token-only because they decide roles.
 _USERINFO_FILL_CLAIMS = ("email", "name", "preferred_username")
 
 DIRECTORY_GROUPS_FALLBACKS = "auth_oidc_login_directory_fallbacks_total"
@@ -126,7 +126,7 @@ class NormalizedIdentity(BaseModel):
     """True when the IdP signalled a group-claim overage (Entra >200 groups).
 
     When set, the ``groups`` list did NOT come from the token (the token carried
-    only a ``_claim_names`` pointer); the RP fills it by calling the directory
+    only a ``_claim_names`` pointer). The RP fills it by calling the directory
     API. A consumer that only reads ``groups`` need not care - this is a
     diagnostic flag so the enrichment path is observable in logs and tests."""
 
@@ -291,7 +291,7 @@ class OidcRelyingParty:
     OIDC provider registry. Each provider registers with client_id/client_secret
     resolved through ``resolve_credential`` (store before env) and an OIDC
     discovery URL, so Authlib validates the id_token against the IdP JWKS on
-    callback. Every login sends a PKCE ``S256`` code challenge; its verifier
+    callback. Every login sends a PKCE ``S256`` code challenge. Its verifier
     stays in the login session and goes with the code exchange.
 
     Zero enabled providers is a valid state: the RP holds an empty registry and
@@ -399,7 +399,7 @@ class OidcRelyingParty:
 
         ``authorize_access_token`` exchanges the code, then validates the
         id_token signature/nonce/aud/exp against the IdP JWKS. The parsed claims
-        arrive under ``token['userinfo']``; we run them through the pure
+        arrive under ``token['userinfo']``. We run them through the pure
         ``extract_identity`` to get sub/email/name/groups.
         """
         provider = self._providers[provider_name]  # KeyError if unknown - caller guards
@@ -453,7 +453,7 @@ class OidcRelyingParty:
         Runs ONLY after Authlib has validated the id_token, so it never weakens
         token validation. Handles two shapes with one path:
           - Entra >200 overage: the token carried a ``_claim_names`` pointer, not
-            the groups; Graph is asked with the user's ``access_token`` first, then
+            the groups. Graph is asked with the user's ``access_token`` first, then
             the app credentials, and the fetched GUIDs resolve to roles by
             ``source_id`` just like a normal (<200) Entra login.
           - Providers with no groups claim (google-workspace): the directory is
@@ -543,7 +543,7 @@ def build_relying_party(
     An RP SNAPSHOTS the enabled providers at construction - both its own
     ``_providers`` map and the Authlib client registry underneath it, which
     caches one client per name and will NOT pick up a re-registration. So the RP
-    has to be rebuilt wholesale whenever the registry changes; otherwise the
+    has to be rebuilt wholesale whenever the registry changes. Otherwise the
     login endpoints keep serving the provider set from process start and a
     freshly created provider 404s until a restart. Rebuilding is local work:
     Authlib fetches the discovery document lazily on first use, so nothing here

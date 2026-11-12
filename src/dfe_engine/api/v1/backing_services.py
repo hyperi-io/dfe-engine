@@ -1,12 +1,12 @@
 #  Project:      dfe-engine
 #  File:         api/v1/backing_services.py
-#  Purpose:      Read the backing services' declared deploy config; govern the
+#  Purpose:      Read the backing services' declared deploy config. Govern the
 #                overlay that declares it
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The deploy repo's substrate overlay, read and governed.
+"""The deploy repo's infra overlay, read and governed.
 
 GET    /api/v1/backing-services                        -> declared config per service
 GET    /api/v1/backing-services/{service}              -> one service
@@ -96,7 +96,7 @@ class BackingReload(StrEnum):
     """What Argo syncing this change actually does to the running store."""
 
     APPLY = "apply"
-    """The operator reconciles it in place; nothing restarts."""
+    """The operator reconciles it in place. Nothing restarts."""
 
     ROLL = "roll"
     """The pod template or server config changed, so the operator restarts pods."""
@@ -105,7 +105,7 @@ class BackingReload(StrEnum):
     """Needs the StatefulSet recreated by hand - volumeClaimTemplates are immutable."""
 
     REDEPLOY = "redeploy"
-    """The Application's object set changes shape; the store may be deployed or removed."""
+    """The Application's object set changes shape. The store may be deployed or removed."""
 
 
 @dataclass(frozen=True)
@@ -224,9 +224,9 @@ _RESOURCE_PATHS = (
 # What a written key does once Argo has it, keyed by the first segment below the
 # service prefix. Matched by segment equality, not string prefix, so `storage` and
 # `storageModel` stay distinct. A service's own `reload_by_segment` wins where the
-# two disagree; anything in neither falls to APPLY.
+# two disagree. Anything in neither falls to APPLY.
 _RELOAD_SHARED: dict[str, BackingReload] = {
-    # mode=external removes the store's objects; mode=cluster creates them.
+    # mode=external removes the store's objects. mode=cluster creates them.
     "mode": BackingReload.REDEPLOY,
     # Server or broker config -- the operator restarts pods onto the new settings.
     "objectStore": BackingReload.ROLL,
@@ -239,7 +239,7 @@ _RELOAD_SHARED: dict[str, BackingReload] = {
 class DeclaredValue(BaseModel):
     """One value as the deploy repo declares it.
 
-    ``source`` names the overlay file it came from; a null source means the
+    ``source`` names the overlay file it came from. A null source means the
     deployment declared nothing and the chart or profile default applies. Those
     defaults live in dfe-infra, which the engine does not read, so the API says
     "not declared" rather than guessing a number.
@@ -468,7 +468,7 @@ def backing_facts(request: Request) -> dict[str, BackingFacts]:
     """Who runs each backing service, keyed by service, for GET /system/deployment.
 
     Blocking where a stated provider leaves the answer to the declared mode, which
-    is read from the deploy repo; with gitops off nothing is declared.
+    is read from the deploy repo. With gitops off nothing is declared.
     """
     has_repo = getattr(request.app.state, "gitcrud", None) is not None
     out: dict[str, BackingFacts] = {}
@@ -513,7 +513,7 @@ def _config(request: Request, spec: BackingService) -> BackingServiceConfig:
 def _observed(
     request: Request, spec: BackingService, resolution: Resolution
 ) -> ObservedSizing | None:
-    """A managed service's size off its data plane, held per service; None where DFE runs it.
+    """A managed service's size off its data plane, held per service. None where DFE runs it.
 
     A self-run service's declared values are its size, so it is never read.
     """
@@ -559,7 +559,7 @@ def _resolved(docs: list[tuple[str, dict]], path: str) -> Any | None:
 
 
 def _is_count(value: Any) -> TypeGuard[int]:
-    """A member count is a plain int; bool is an int in Python and is not one."""
+    """A member count is a plain int. Bool is an int in Python and is not one."""
     return isinstance(value, int) and not isinstance(value, bool)
 
 
@@ -597,7 +597,7 @@ def _guard_member_count(
     would declare after, so editing the shared file cannot be refused for a drop
     the per-chart file goes on to override anyway. Nothing declared means nothing
     to compare against, and the edit is accepted. An edit to a parent of a count
-    is compared on every count below it, since it replaces or removes them; a
+    is compared on every count below it, since it replaces or removes them. A
     declared count the edit leaves undeclared, or as anything but a count, hands
     the members to the chart default, which can be fewer.
 
@@ -727,7 +727,7 @@ def guard_action_change(request: Request, cls: str, name: str, path: str, docume
 
     Args:
         request: The request carrying the settings and the gitops client.
-        cls: The class the change writes; any class but this router's is left alone.
+        cls: The class the change writes. Any class but this router's is left alone.
         name: The overlay resource the change lands in.
         path: The dot-path the change sets.
         document: The resource as the whole action leaves it, every change applied.
@@ -771,7 +771,7 @@ def list_backing_services(
 
 @router.get("/overlays", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
 def list_overlays(query: ListParams, user: CurrentUser, request: Request) -> Page[str]:
-    """List substrate/platform overlay resources in the deploy repo's infra/ dir."""
+    """List infra overlay resources in the deploy repo's infra/ dir."""
     return paginate(gitcrud_of(request).list(_CLASS), query)
 
 
@@ -828,15 +828,15 @@ def set_overlay_var(
     request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> BackingWriteResult:
-    """Set a substrate/platform value.
+    """Set an infra overlay value.
 
     409 managed_by_provider, before any other check, when DFE does not run the
-    service and the value is one of its read_only paths; helmvars:override does not
+    service and the value is one of its read_only paths. helmvars:override does not
     lift it. 403 with the policy that blocked it when the var is protected - the
     storage model, the data-layer modes and the disk size are decided at deploy, and
     moving one on a live deployment is a data migration. 400 when the value would
     lower a declared node or broker count, or leave it undeclared (a parent map that
-    omits it), which loses data rather than capacity; helmvars:override does not lift it.
+    omits it), which loses data rather than capacity. helmvars:override does not lift it.
     """
     check_name(name)
     _refuse_managed(request, name, path)
@@ -854,7 +854,7 @@ def set_overlay_var(
 def delete_overlay_var(
     name: str, path: str, user: CurrentUser, request: Request
 ) -> BackingWriteResult:
-    """Revert a substrate/platform value to its chart default. Protected vars refuse.
+    """Revert an infra overlay value to its chart default. Protected vars refuse.
 
     409 managed_by_provider, before any other check and whatever the caller holds,
     when DFE does not run the service and the value is one of its read_only paths.

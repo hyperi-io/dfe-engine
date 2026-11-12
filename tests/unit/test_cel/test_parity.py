@@ -77,7 +77,7 @@ def test_python_classifier_matches_fixture(case: dict) -> None:
             )
     else:
         # Tier 2/3: compare sorted field lists (order is insertion-order
-        # in both Python and Rust, but sorting makes the assertion robust
+        # in both Python and Rust, but sorting makes the assertion stable
         # against future iteration changes).
         expected_fields = sorted(case.get("fields", []))
         actual_fields = sorted(result.fields or [])

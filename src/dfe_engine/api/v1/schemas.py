@@ -214,7 +214,7 @@ class DraftColumn(BaseModel):
     Shaped to drop straight into ``MetaSchemaAddVersionRequest.columns`` (the
     create-version endpoint) or a new meta-schema's version -- the UI sends these
     verbatim, no field mapping. ``type`` is derived from the first observed
-    ClickHouse type; for a multi-type path (``is_consistent=false``) confirm it
+    ClickHouse type. For a multi-type path (``is_consistent=false``) confirm it
     before saving.
     """
 
@@ -1581,7 +1581,7 @@ def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None,
     Returns:
         ``(target_table, match_rule_or_none, existing_columns)``. ``match_rule_or_none``
         is set when sampling/discovery runs on the landing table filtered by the
-        version's match; null when the dedicated source table is queried whole.
+        version's match. Null when the dedicated source table is queried whole.
 
     Raises:
         ProblemError: 422 ``match_not_sampleable`` when the landing table would be
@@ -1712,7 +1712,7 @@ async def discover_json_paths(
 
     Returns one record per path with observed types, a suggested column name,
     and whether the path is already promoted. ``?samples=N`` adds random
-    distinct example values; ``?stats=true`` adds coverage + distinct counts.
+    distinct example values. ``?stats=true`` adds coverage + distinct counts.
 
     A caller without a platform grant holding ``schema:read`` reads only its own
     orgs' rows, as the sampler holds it, and a table it cannot be held on is 403.
@@ -1812,7 +1812,7 @@ async def sample_source_rows(
 
     Resolves the requested ``version`` (or the source's current version). A
     version with a ``meta_schema`` uses ``db.<source>`` only after that version
-    is deployed and the table exists; otherwise rows are read from
+    is deployed and the table exists. Otherwise rows are read from
     ``db.<landing>`` filtered by the version's match rule.
 
     Intended for inspecting real data while authoring a match condition or CEL
@@ -1912,7 +1912,7 @@ async def promote_field(
     ``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,
     adding meta-schema versions, or updating the source. A core source, such as the
     landing source ``main``, is refused with 409 before any schema is resolved or
-    written, dry run included; its ``json-paths`` and ``sample-rows`` reads stay open.
+    written, dry run included. Its ``json-paths`` and ``sample-rows`` reads stay open.
     """
     from dfe_engine.schema.schema_manager import (
         SchemaManager,

@@ -135,7 +135,7 @@ MISSING_PROVIDER_CASES: list[MissingProviderCase] = [
 ]
 
 
-# The IdP-owned account IDP_MEMBER_WRITE_CASES write into groups; ADMINS_SOURCE_ID is the IdP group id dfe-admins is linked to.
+# The IdP-owned account IDP_MEMBER_WRITE_CASES write into groups. ADMINS_SOURCE_ID is the IdP group id dfe-admins is linked to.
 IDP_ACCOUNT = "jane-corp-com"
 ADMINS_SOURCE_ID = "DFE-Admins"
 
@@ -285,7 +285,7 @@ class IdentifierCollisionCase(TypedDict):
     expected_error: dict[str, str]
 
 
-# dfe-admins carries ADMINS_SOURCE_ID; sec-team is an unlinked group with no members.
+# dfe-admins carries ADMINS_SOURCE_ID. sec-team is an unlinked group with no members.
 IDENTIFIER_COLLISION_CASES: list[IdentifierCollisionCase] = [
     {
         "id": "groups_api_create_named_like_another_groups_source_id",

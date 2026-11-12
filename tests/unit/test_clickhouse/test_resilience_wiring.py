@@ -12,7 +12,7 @@ a :class:`~scalo.resilience.ReconnectingResilience` with the CH classifiers, the
 reconnect, and the CH Cloud auto-wake hook, sourced from the ``clickhouse``
 settings. Faults are injected as REAL exceptions (driver-style ``Code: NNN``
 strings and Python ``ConnectionError``) - no ClickHouse and no mocks of internal
-code; the clock is faked so the back-off never really sleeps or races a wall
+code. The clock is faked so the back-off never really sleeps or races a wall
 clock. The ONLY double is the external CH Cloud lifecycle (a billable network
 call), the sanctioned external-paid-service exception - it records ``start()``
 and never touches the network.
@@ -29,7 +29,7 @@ from dfe_engine.settings import ClickHouseResilienceSettings, DFESettings
 
 
 class _Clock:
-    """Injectable clock - sleep advances a monotonic counter, never a wall clock."""
+    """Injectable clock - sleep advances a monotonic counter, never a real clock."""
 
     def __init__(self) -> None:
         self.t = 0.0
@@ -45,7 +45,7 @@ class _FlakyOp:
     """A REAL op that raises a scripted error sequence, then returns a value.
 
     Not a mock - a plain recording callable, so the assertions read its real call
-    count. ``errors`` are raised one per call (front to back); once drained the op
+    count. ``errors`` are raised one per call (front to back). Once drained the op
     returns ``result``.
     """
 
@@ -62,7 +62,7 @@ class _FlakyOp:
 
 
 class _RecordingManager(ClickHouseManager):
-    """Manager that COUNTS reconnects (observes real behaviour; calls through)."""
+    """Manager that COUNTS reconnects (observes real behaviour, calls through)."""
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -201,7 +201,7 @@ class TestAutowakeHook:
         clock = _Clock()
         cloud = _FakeCloudService(state="stopped")
         # Short base budget (1s) but a generous waking budget: without the wake the
-        # 5-failure outage would exhaust the base budget; WITH it, it recovers.
+        # 5-failure outage would exhaust the base budget. WITH it, it recovers.
         mgr = _manager(
             _settings(autowake=True, budget=1.0, waking_budget=1000.0),
             clock=clock,
@@ -230,7 +230,7 @@ class TestAutowakeHook:
         with pytest.raises(ServiceUnavailable):
             mgr.run_resilient(op)
 
-        # autowake off -> on_connect_failure is None -> the Cloud seam is untouched.
+        # autowake off -> on_connect_failure is None -> the Cloud hook is untouched.
         assert cloud.start_calls == 0
         assert cloud.status_calls == 0
 

@@ -10,7 +10,7 @@
 
 ``ClickHouseManager``, the restricted query client,
 the hunt-runner CLI and the KEDA shim each build their own clickhouse-connect
-client; every one of them resolves its secure/verify/ca_cert kwargs through
+client. Every one of them resolves its secure/verify/ca_cert kwargs through
 :func:`resolve_clickhouse_tls` so a CA path or a verify override applies
 identically everywhere, and an unreadable CA file is refused up front rather
 than silently connecting without a trust anchor.
@@ -50,7 +50,7 @@ class ClickHouseTls:
         """The secure/verify/ca_cert kwargs for ``clickhouse_connect.get_client``.
 
         Returns:
-            An empty dict when ``secure`` is off; otherwise ``secure``,
+            An empty dict when ``secure`` is off. Otherwise ``secure``,
             ``verify``, and ``ca_cert`` (only when set).
         """
         if not self.secure:
@@ -69,7 +69,7 @@ def resolve_clickhouse_tls(
     The single builder every clickhouse-connect call site in the engine goes
     through. Verify defaults ON whenever ``secure`` is on (scalo's
     ``tls_parts``, via ``DFE_ENGINE_CLICKHOUSE_VERIFY`` or the ``SCALO_TLS_VERIFY``
-    escape valve); turning it off is an explicit setting and scalo logs one
+    escape valve). Turning it off is an explicit setting and scalo logs one
     warning per process. A ``ca_cert`` path that does not exist or cannot be
     opened raises before any client is built, naming
     ``DFE_ENGINE_CLICKHOUSE_CA_CERT``, rather than clickhouse-connect silently

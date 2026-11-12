@@ -82,7 +82,7 @@ def pending_seed(*, repo_root: Path) -> dict[str, str]:
     """Return {repo-relative path: content} for shipped files this repo lacks.
 
     Empty means nothing to do, which is the steady state on every start after the
-    first. The caller commits the result; this function never writes.
+    first. The caller commits the result. This function never writes.
     """
     ignore = _load_ignore(repo_root)
     artifacts: dict[str, str] = {}

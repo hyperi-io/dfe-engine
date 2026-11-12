@@ -59,14 +59,14 @@ SOURCE_FILE = "source.json"
 SECRET_MARKERS = ("x-scalo-secret", "x-dfe-secret")  # noqa: S105, RUF100 - schema keywords
 """The schema keywords an app uses to mark a field as credential material.
 
-scalo writes ``x-scalo-secret``; an app built on an older scalo writes ``x-dfe-secret``.
+scalo writes ``x-scalo-secret``. An app built on an older scalo writes ``x-dfe-secret``.
 """
 
 ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]*\Z")
 """What a key under ``extraEnv`` may be called.
 
 The whole point of the block is a name no contract declares, so the name is all
-there is to check; the value is never judged against the app's schema. ``\\Z``, not ``$``:
+there is to check. The value is never judged against the app's schema. ``\\Z``, not ``$``:
 ``$`` also matches before a trailing newline.
 """
 
@@ -127,7 +127,7 @@ is shown.
 IDENTITY_KEYS = ("id", "name")
 """Fields that name a list entry, so a masked entry finds the stored one it was read from.
 
-dfe-fetcher requires an ``id`` on each of its ``connections``; dfe-receiver names
+dfe-fetcher requires an ``id`` on each of its ``connections``. dfe-receiver names
 each accepted header by ``name``.
 """
 
@@ -429,7 +429,7 @@ def _type_of(node: dict, root: dict) -> str:
 def _enum_of(node: dict, root: dict) -> list[Any] | None:
     """The values this option accepts, in either spelling the apps use.
 
-    ``enum`` is rare in the shipped contracts; a Rust enum comes out as a
+    ``enum`` is rare in the shipped contracts. A Rust enum comes out as a
     ``oneOf`` of ``const`` branches instead, and that is a dropdown too.
     """
     declared = node.get("enum")
@@ -850,7 +850,7 @@ def _restore_list(value: list, stored: Any, shown: Any, path: str) -> list:
     Entries named by one of :data:`IDENTITY_KEYS` are matched by name, so deleting
     or reordering one cannot hand its credential to a neighbour. Unnamed entries are
     matched in stored order, and only while every stored entry is accounted for and
-    each masked one is otherwise unchanged; anything else cannot be told apart.
+    each masked one is otherwise unchanged. Anything else cannot be told apart.
 
     A written entry accounts for a stored one only when it matches the entry as a read
     showed it, so a credential typed back in the clear is counted as new and a guess
@@ -1004,7 +1004,7 @@ def _require_unchanged_holder(
     }
     if not masked:
         return
-    # Only a mapping read back says which fields are credentials; nothing else does.
+    # Only a mapping read back says which fields are credentials. Nothing else does.
     seen = shown if isinstance(shown, dict) else {}
     changed = sorted(
         str(key)
@@ -1633,8 +1633,8 @@ def resolve_config(
         for path, value in flatten(shown).items()
         if not _declares(path, leaves)
     ]
-    # Apart from `unknown`, which is an overlay key that has outrun its contract;
-    # an extraEnv key is outside every contract on purpose.
+    # Apart from `unknown`, which is an overlay key that has outrun its contract.
+    # An extraEnv key is outside every contract on purpose.
     custom = [
         CustomEnvEntry(path=f"{ENV_ROOT}.{key}", value=value)
         for key, value in sorted(_redact_env(custom_env(overlay)).items())

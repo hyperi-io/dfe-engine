@@ -157,7 +157,7 @@ class TestLinkedGroups:
         assert linked_groups(["0295f72c"], [_group("dfe-admins"), linked], {"entra"}) == [linked]
 
     def test_a_group_naming_no_provider_links_for_none(self):
-        """The model refuses such a group; a copy that skipped validation still links nothing."""
+        """The model refuses such a group. A copy that skipped validation still links nothing."""
         unvalidated = Group.model_construct(name="dfe-admins", roles=["admin"], source_id="Admins")
         providers = {"okta", "google", "corp-sso"}
         assert linked_groups(["Admins"], [unvalidated], providers) == []

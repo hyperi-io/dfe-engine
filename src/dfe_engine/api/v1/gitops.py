@@ -11,7 +11,7 @@ The auto-merge pair is the dfe-ui banner contract, and the generated clients bui
 their selects from the enumeration.
 
 GET /api/v1/gitops/auto-merge -> {stored, effective, allowed, reason} (governance:read)
-PUT /api/v1/gitops/auto-merge -> toggle; refuses to enable when the deployment
+PUT /api/v1/gitops/auto-merge -> toggle. Refuses to enable when the deployment
 gate (dev posture OR DFE_ENGINE_GITOPS_MODE=solo) does not permit (governance:write).
 GET /api/v1/gitops/log -> flat {entries, next_before} or, with ?group_by=,
 {groups} - every gitcrud commit, newest-first (governance:read).
@@ -103,7 +103,7 @@ def get_auto_merge(user: CurrentUser, request: Request) -> AutoMergeStatus:
     dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 def put_auto_merge(body: AutoMergeRequest, user: CurrentUser, request: Request) -> AutoMergeStatus:
-    """Toggle auto-merge. Enabling requires the deployment gate; disabling always works."""
+    """Toggle auto-merge. Enabling requires the deployment gate. Disabling always works."""
     gc = _gitcrud(request)
     # warn=False both calls: the stranded-flag case on enable is already refused
     # below with a 403 that carries the reason - no need to also WARN here.
@@ -161,7 +161,7 @@ def list_classes(query: ListParams, user: CurrentUser, request: Request) -> Page
     """The resource-class registry - what VarChange.cls may legally name.
 
     Registry metadata only (no resource content), so any authenticated caller
-    may read it; the per-class listings below are gated by each class's grant.
+    may read it. The per-class listings below are gated by each class's grant.
     """
     gc = _gitcrud(request)
     return paginate(
@@ -298,7 +298,7 @@ def get_log(
 
     Flat + cursor-paginated by default; ?group_by= buckets the page for
     summaries. applied_revision (the Argo-synced SHA) turns state into
-    applied/pending; without it every entry is 'committed'.
+    applied/pending. Without it every entry is 'committed'.
     """
     gc = _gitcrud(request)
     try:

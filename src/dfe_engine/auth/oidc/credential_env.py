@@ -10,7 +10,7 @@
 
 A provider names each credential in up to three ways: a plain value on the model
 for the things that are not secret (``client_id``), a PATH into the
-``DfeSecrets`` seam for the secret material, and the NAME of an environment
+``DfeSecrets`` interface for the secret material, and the NAME of an environment
 variable. The store is read BEFORE the environment so a secret written through
 the API takes effect in the running process, while an ESO-mounted env var keeps
 serving a provider that was configured that way.
@@ -166,7 +166,7 @@ def credential_check(
     """Return (ok, detail) for a configured credential, never echoing its value.
 
     Misconfigured YAML often puts the secret itself where the env var NAME
-    belongs; that shape is named in the detail so an operator can act on it. A
+    belongs. That shape is named in the detail so an operator can act on it. A
     secret store that did not answer is named too, unless the env var serves the
     credential, as it does for a login.
     """

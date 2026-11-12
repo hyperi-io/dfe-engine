@@ -39,10 +39,10 @@ class DryRunStatus(StrEnum):
     """Outcome of a dry run as a whole."""
 
     COMPLETED = "completed"
-    """The program ran; per-event results say what happened to each one."""
+    """The program ran. Per-event results say what happened to each one."""
 
     UNAVAILABLE = "unavailable"
-    """No backend could run it; nothing was executed."""
+    """No backend could run it. Nothing was executed."""
 
     DISABLED = "disabled"
     """Dry running is switched off for this deployment."""
@@ -207,7 +207,7 @@ def _vector_remap_source(content: str) -> tuple[str, str]:
 
     A file is Vector's own shape - a ``transforms`` map of named components, which
     is what dfe-transform-vector loads and passes through to Vector verbatim. Only
-    ``remap`` carries a VRL program; every other type is a component whose
+    ``remap`` carries a VRL program. Every other type is a component whose
     behaviour lives in Vector itself, so running it needs Vector rather than a VRL
     interpreter.
 
@@ -255,7 +255,7 @@ def run_language(
 ) -> DryRunResult:
     """Run a program written in ``language`` over ``events``.
 
-    ``enabled`` is the deployment's switch; off reports ``disabled`` rather than
+    ``enabled`` is the deployment's switch. Off reports ``disabled`` rather than
     silently returning nothing, so a caller can tell "ran and did nothing" from
     "never ran". Events are capped at ``max_events``, the serialised output at
     ``max_output_bytes`` and the run at ``timeout`` seconds, which a deployment sets as

@@ -145,7 +145,7 @@ class TestKafkaSettings:
 
     def test_security_floor_applies_without_provider(self):
         # Even on the transition (no provider), PLAIN-over-plaintext is refused.
-        # Pydantic wraps the KafkaContractError into a ValidationError; the
+        # Pydantic wraps the KafkaContractError into a ValidationError. The
         # contract message ("SASL_SSL") still carries through.
         with pytest.raises(ValidationError, match="SASL_SSL"):
             KafkaSettings(security_protocol="SASL_PLAINTEXT", sasl_mechanism="PLAIN")
@@ -239,7 +239,7 @@ class TestEnvWiring:
 
 class TestTopicEnvWiring:
     """The topic-creation dials bind to env. Unset means "follow the transport",
-    so a brokerless profile needs no second dial; setting the env is the operator
+    so a brokerless profile needs no second dial. Setting the env is the operator
     overriding that fact from the deploy that configures it."""
 
     @pytest.fixture(autouse=True)

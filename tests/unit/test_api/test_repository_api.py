@@ -59,7 +59,7 @@ def fake_ch(app) -> Iterator[FakeRepositoryCH]:
 
 @pytest.fixture
 def repo_setup(client: TestClient, app, fake_ch, admin_headers: dict[str, str]) -> TestClient:
-    """Two orgs; org-local admin + analyst groups in acme, analysts in globex."""
+    """Two orgs. Org-local admin + analyst groups in acme, analysts in globex."""
     account_store = app.state.account_store
 
     for org in ("acme", "globex"):
@@ -84,7 +84,7 @@ def repo_setup(client: TestClient, app, fake_ch, admin_headers: dict[str, str]) 
     return client
 
 
-# ── Preferences ──────────────────────────────────────────────
+# -- Preferences ----------------------------------------------
 
 
 class TestPreferences:
@@ -160,7 +160,7 @@ class TestPreferences:
         assert resp.json()["code"] == "payload_too_large"
 
 
-# ── Objects RBAC matrix ──────────────────────────────────────
+# -- Objects RBAC matrix --------------------------------------
 
 
 class TestObjectsRbac:
@@ -445,7 +445,7 @@ class TestOrgAccessComesOnlyFromTheBoundAccount:
         )
 
 
-# ── Validation + size caps ───────────────────────────────────
+# -- Validation + size caps -----------------------------------
 
 
 class TestValidation:

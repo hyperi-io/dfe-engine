@@ -395,7 +395,7 @@ def test_propagate_preserves_existing_hunt_rules_and_overrides(env):
     _propagator(env).propagate()
     hunt = env.hunts.get(sigma_hunt_name("windows-audit"))
     by_name = {r["rule_name"]: r for r in hunt["rules"]}
-    # the operator rule + its override survive; the binding is appended
+    # the operator rule + its override survive. The binding is appended
     assert by_name["operator_rule"]["target_table_name"] == "custom"
     assert binding_rule_id(_ID, "windows-audit") in by_name
     assert hunt["cron"] == "*/10 * * * *"  # existing hunt fields untouched
@@ -465,7 +465,7 @@ def test_delete_binding_none_for_non_sigma_rule(env):
 
 
 class _RecordingForge:
-    """ForgeProvider seam double: one PR per review branch, numbered in order."""
+    """ForgeProvider double: one PR per review branch, numbered in order."""
 
     def __init__(self) -> None:
         self.calls: list[dict] = []

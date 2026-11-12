@@ -6,7 +6,7 @@
 # License:   BUSL-1.1
 # Copyright: (c) 2026 HYPERI PTY LIMITED
 
-# Each entry is the POST /api/v1/sources body verbatim; the suite adds transport.
+# Each entry is the POST /api/v1/sources body verbatim. The suite adds transport.
 sources:
   - source: flowplain
     display_name: Flow e2e - receiver, no transform

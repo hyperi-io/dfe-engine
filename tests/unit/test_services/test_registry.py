@@ -365,7 +365,7 @@ class TestSeedDefaults:
         reg = ServiceConfigRegistry(config_directory=svc_dir, refresh_interval=0)
         try:
             count = reg.seed_defaults()
-            # There are built-in default configs; should seed > 0
+            # There are built-in default configs. Should seed > 0
             assert count > 0
             yaml_files = list(svc_dir.glob("*.yaml"))
             assert len(yaml_files) == count

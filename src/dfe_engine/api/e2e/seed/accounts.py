@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Local-account seeding. Public methods are the scripts; privates are reusable."""
+"""Local-account seeding. Public methods are the scripts. Privates are reusable."""
 
 from dfe_engine.api.e2e.seed.base import Seed
 from dfe_engine.auth import account_durability

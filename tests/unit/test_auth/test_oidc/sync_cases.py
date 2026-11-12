@@ -19,7 +19,7 @@ class SyncIdentifierCollisionCase(TypedDict):
     group_name: str
 
 
-# Each provider group would be created as soc-team; the stored group holds its name or id in the other namespace.
+# Each provider group would be created as soc-team. The stored group holds its name or id in the other namespace.
 SYNC_IDENTIFIER_COLLISION_CASES: list[SyncIdentifierCollisionCase] = [
     {
         "id": "the_name_is_a_stored_groups_source_id",

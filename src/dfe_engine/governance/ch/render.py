@@ -35,12 +35,12 @@ from .models import (
 
 
 def _bq(identifier: str) -> str:
-    """Backtick-quote a CH identifier - delegates to the canonical quoting seam."""
+    """Backtick-quote a CH identifier - delegates to the canonical quoting module."""
     return quote_identifier(identifier)
 
 
 def _sq(value: str) -> str:
-    r"""Single-quote a CH string literal - delegates to the canonical quoting seam.
+    r"""Single-quote a CH string literal - delegates to the canonical quoting module.
 
     Uses ``quote_literal`` so backslashes are escaped BEFORE single quotes: a
     RESTRICTIVE row-policy predicate must not fail open via a crafted ``\' OR 1=1``
@@ -104,7 +104,7 @@ def render_tier(tier: ChTier) -> list[str]:
     if tier.settings:
         prof = _bq(tier.profile())
         kv = _profile_settings(tier.settings)
-        # Create-then-alter so edits to an existing profile converge; a bare
+        # Create-then-alter so edits to an existing profile converge. A bare
         # IF NOT EXISTS silently ignores changed settings forever.
         stmts.append(f"CREATE SETTINGS PROFILE IF NOT EXISTS {prof}")
         stmts.append(f"ALTER SETTINGS PROFILE {prof} SETTINGS {kv}")
@@ -151,14 +151,14 @@ def render_service_user(role_def: ChServiceRole, pw_hash: str) -> list[str]:
     """DDL for a minted service USER (``mint_user``): create + grant its role.
 
     Separate from ``render_service_role`` because it carries the freshly minted
-    password hash; the reconciler calls it only after minting the secret.
+    password hash. The reconciler calls it only after minting the secret.
 
     The ALTER re-asserts the password every reconcile. ``CREATE USER IF NOT
     EXISTS`` sets a password only when it FIRST creates the user, so an already
     existing user keeps whatever hash it was born with - and the served secret
     (``ch/service/<name>``) is the source of truth, so any drift between the two
     is a hard CH auth failure (code 516) until the user is realigned. The ALTER
-    converges the user to the stored secret's hash on every run; it is a no-op
+    converges the user to the stored secret's hash on every run. It is a no-op
     when they already match.
     """
     qu = _bq(role_def.user())
@@ -189,8 +189,8 @@ def render_tenant_axis(
     by every org (the hunt orchestration tables are this class). Each gets a
     RESTRICTIVE ``USING 0`` policy so a tenant reads nothing from it.
 
-    RESTRICTIVE-only is load-bearing (spec 5.2): a user not holding
-    ``dfe_tenant_role`` is targeted by no policy and reads ALL rows; a holder reads
+    RESTRICTIVE-only is required (spec 5.2): a user not holding
+    ``dfe_tenant_role`` is targeted by no policy and reads ALL rows. A holder reads
     only its pinned ids. NEVER emit a PERMISSIVE policy here - it would flip the
     table to default-deny. ``getSetting`` on a holder with NO pin throws, so a
     misconfigured grant fails closed and loudly rather than leaking.
@@ -200,7 +200,7 @@ def render_tenant_axis(
     stmts: list[str] = [f"CREATE ROLE IF NOT EXISTS {role}"]
     # Under select_from_system_db_requires_grant the system database is
     # deny-by-default, so the embedded HyperDX cannot build a field list without
-    # these four; the server config alone would leave a tenant staring at an
+    # these four. The server config alone would leave a tenant staring at an
     # empty source.
     stmts.append(ReplacingGrant(role, list(TENANT_SYSTEM_GRANTS)))
     for db, table in tables:
@@ -241,13 +241,13 @@ def render_pinned_user(
     READONLY - the pin is what makes an attacker-authored ``SETTINGS`` override a
     hard 452 instead of a cross-tenant read. The analyst tier role grants the
     whole data db ``dfe.*``, so the fenced org user sees every source table
-    automatically; isolation is by the RESTRICTIVE ``_org_id`` row policy plus the
+    automatically. Isolation is by the RESTRICTIVE ``_org_id`` row policy plus the
     ``USING 0`` deny policy on the non-``_org_id`` tables (dfe.otel_*, meta), NOT
     by grant scope.
 
     Empty ``org_ids`` is the unrestricted shape (PLATFORM analysts/operators):
     tier only, no tenant role, no pin. ``extra_roles`` compose additional grant
-    roles (e.g. otel_reader) onto the tier; quotas and settings still come from
+    roles (e.g. otel_reader) onto the tier. Quotas and settings still come from
     the tier alone.
 
     Two ALTERs re-run every reconcile, because ``CREATE USER IF NOT EXISTS``
@@ -257,7 +257,7 @@ def render_pinned_user(
     so a user that was created in a different epoch than its stored secret keeps
     a stale hash and every hyperdx connect fails CH auth (code 516) until it is
     realigned. The IDENTIFIED ALTER converges the user to the stored hash on
-    every run; it is a no-op when they already match.
+    every run. It is a no-op when they already match.
 
     The role GRANT replaces the user's whole role set in one statement, so a
     demoted tier, a dropped ``extra_roles`` entry or a lifted tenant pin is
@@ -308,12 +308,12 @@ def render_materialise(orgs: list[Any], tiers: list[Any]) -> list[str]:
         display = getattr(o, "display_name", "") or ""
         enabled = 1 if getattr(o, "enabled", True) else 0
         stmts.append(
-            f"INSERT INTO {orgs_table} (name, org_ids, display_name, enabled) VALUES "  # noqa: S608 - manifest table; every value escaped by quote_literal
+            f"INSERT INTO {orgs_table} (name, org_ids, display_name, enabled) VALUES "  # noqa: S608 - manifest table, every value escaped by quote_literal
             f"({_sq(o.name)}, [{ids}], {_sq(display)}, {enabled})"
         )
     for t in tiers:
         stmts.append(
-            f"INSERT INTO {tiers_table} (name, kind, is_default) VALUES "  # noqa: S608 - manifest table; every value escaped by quote_literal
+            f"INSERT INTO {tiers_table} (name, kind, is_default) VALUES "  # noqa: S608 - manifest table, every value escaped by quote_literal
             f"({_sq(t.name)}, {_sq(t.kind)}, {1 if t.default else 0})"
         )
     return stmts

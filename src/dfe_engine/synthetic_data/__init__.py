@@ -11,8 +11,8 @@ Generates lookalike source events for testing, demos and sales - a live-feeling
 stream at modest rates, never a load generator. Two modes:
 
 - **schema** (default): drive generation from a dfe-schemas meta schema. The
-  ``@source:`` exprs give the source JSON shape; column name/type/use_case
-  heuristics pick semantic generators (IPs, FQDNs, users, ...); optional
+  ``@source:`` exprs give the source JSON shape. Column name/type/use_case
+  heuristics pick semantic generators (IPs, FQDNs, users, ...). Optional
   per-column ``synthetic:`` hints in the schema YAML supply curated vocabularies
   and message templates where heuristics cannot reach.
 - **sample**: lookalike generation from a logreducer-reduced sample (later

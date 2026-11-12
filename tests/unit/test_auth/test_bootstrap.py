@@ -63,7 +63,7 @@ def test_explicit_password_beats_the_default(tmp_path: Path, monkeypatch):
     assert account_store.verify_password("admin", "from-arg")
 
 
-# ── Named seed accounts (dfe-infra #106) ─────────────────────────
+# -- Named seed accounts (dfe-infra #106) -------------------------
 
 
 def test_seed_account_created_with_password_and_groups(tmp_path: Path, monkeypatch):

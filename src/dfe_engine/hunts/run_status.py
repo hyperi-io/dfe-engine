@@ -54,7 +54,7 @@ def _query(database: str) -> str:
     """The per-hunt join over watermark, lease, state and run."""
     db = quote_identifier(database)
     return (
-        "SELECT h.hunt_id, coalesce(w.wm, 0), coalesce(l.lu, 0), "  # noqa: S608 - quoted configured database; ids bound
+        "SELECT h.hunt_id, coalesce(w.wm, 0), coalesce(l.lu, 0), "  # noqa: S608 - quoted configured database, ids bound
         "coalesce(s.overruns, 0), coalesce(s.aggressive, 0), "
         "coalesce(r.last_fire, 0), coalesce(r.rows_written, 0), coalesce(q.pending, 0) "
         "FROM (SELECT arrayJoin({ids:Array(String)}) AS hunt_id) h "
@@ -91,7 +91,7 @@ def live_runner_count(ch: Any, database: str, now: int) -> int:
         now: epoch seconds to judge the beats against.
     """
     rows = ch.query(
-        "SELECT countIf(s > {now:Int64} - 2 * p) FROM ("  # noqa: S608 - quoted configured database; values bound
+        "SELECT countIf(s > {now:Int64} - 2 * p) FROM ("  # noqa: S608 - quoted configured database, values bound
         "SELECT runner_id, argMax(seen, updated) AS s, argMax(poll_seconds, updated) AS p "
         f"FROM {quote_identifier(database)}.hunt_runner_heartbeat GROUP BY runner_id)",
         parameters={"now": now},
@@ -100,7 +100,7 @@ def live_runner_count(ch: Any, database: str, now: int) -> int:
 
 
 def read_run_status(ch: Any, database: str, hunt_ids: list[str], now: int) -> dict[str, RunStatus]:
-    """Run status for each named hunt. Missing ids simply do not come back.
+    """Run status for each named hunt. Missing ids do not come back.
 
     Args:
         ch: a ClickHouse client exposing ``query``.

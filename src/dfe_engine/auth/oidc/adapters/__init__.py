@@ -40,7 +40,7 @@ def get_adapter(
         access_token: The user's access token from the login being enriched.
             Google and Entra take it: each directory answers the user about their
             own groups, where Okta and generic read with a credential of their own.
-        secrets: The DfeSecrets seam the directory credential resolves through,
+        secrets: The DfeSecrets interface the directory credential resolves through,
             ahead of the env var named in the provider config.
 
     Returns:

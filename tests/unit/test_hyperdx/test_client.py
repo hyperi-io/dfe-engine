@@ -56,7 +56,7 @@ class TestClientConstruction:
 
 
 # ---------------------------------------------------------------------------
-# HTTP-dependent tests (skipped — requires running HyperDX)
+# HTTP-dependent tests (skipped -- requires running HyperDX)
 # ---------------------------------------------------------------------------
 
 

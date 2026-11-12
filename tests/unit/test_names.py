@@ -137,5 +137,5 @@ def test_a_published_pattern_accepts_exactly_what_the_validator_accepts(pattern,
 
 
 def test_the_store_key_module_hands_out_no_name_rule():
-    """dfe_engine.names is where a name rule comes from; store_names keeps only the store key."""
+    """dfe_engine.names is where a name rule comes from. store_names keeps only the store key."""
     assert not hasattr(store_names, "VALID_NAME")

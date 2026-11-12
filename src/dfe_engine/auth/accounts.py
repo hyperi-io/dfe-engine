@@ -49,7 +49,7 @@ BCRYPT_ROUNDS = 12
 """The bcrypt cost every stored password hash is made at."""
 
 BCRYPT_MAX_PASSWORD_BYTES = 72
-"""The longest password, in UTF-8 bytes, bcrypt hashes; it refuses a longer one."""
+"""The longest password, in UTF-8 bytes, bcrypt hashes. It refuses a longer one."""
 
 
 @cache
@@ -134,7 +134,7 @@ class Account(BaseModel):
     """Free-form NON-sensitive attributes (nested JSON, KVP is the floor).
 
     Stored inline on the account and round-trips through both backends. Never put
-    secrets here - a broad account read returns this blob; sensitive attributes
+    secrets here - a broad account read returns this blob. Sensitive attributes
     live in the separate keyed store (:mod:`dfe_engine.auth.attributes`)."""
     password_change_required: bool = False
     """The password was issued to the account rather than chosen by its owner.
@@ -547,7 +547,7 @@ class AccountStore:
         two replicas creating one account at once exactly one succeeds.
 
         Raises:
-            FileExistsError: A file already holds *path*; it is left untouched.
+            FileExistsError: A file already holds *path*. It is left untouched.
         """
         text = yaml_dump_string(account.model_dump(exclude={"username"}), target=str(path))
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -563,7 +563,7 @@ class AccountStore:
             raise
 
 
-# Fields update() may change; username and password_hash are excluded (the
+# Fields update() may change. username and password_hash are excluded (the
 # password changes only via reset_password). Shared by both store backends.
 _UPDATABLE_FIELDS = (
     "enabled",
@@ -619,7 +619,7 @@ def anonymized_soft_delete_username() -> str:
     """A one-use account name: a UUID with ``-deleted`` as the trailing marker.
 
     Account names must start with an alphanumeric (:data:`VALID_NAME`), so the
-    delete marker cannot lead; it trails the UUID as ``{uuid}-deleted``.
+    delete marker cannot lead. It trails the UUID as ``{uuid}-deleted``.
     """
     return f"{uuid.uuid4()}-deleted"
 
@@ -658,7 +658,7 @@ def soft_delete_account(store: AccountStore, username: str) -> Account:
         }
     )
     store.put(rewritten)
-    # Old key must go; the account now lives only under the anonymized name.
+    # Old key must go. The account now lives only under the anonymized name.
     store.delete(username)
     return rewritten
 
@@ -694,7 +694,7 @@ def later_session_end(durable: Account, live: Account) -> Account:
 
 
 def _new_session_epoch() -> str:
-    """A fresh session epoch; no token minted before it carries a marker made from it."""
+    """A fresh session epoch. No token minted before it carries a marker made from it."""
     return secrets.token_urlsafe(16)
 
 

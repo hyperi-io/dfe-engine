@@ -67,8 +67,8 @@ from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend
 from dfe_engine.sigma.source_mapper import SigmaSourceMapper
 
 # Prefixes for the deterministic generated-artifact names. A binding rule keys on
-# (source, sigma id) so a rule that matches N sources yields N distinct bindings;
-# a hunt keys on source so all of a source's bindings share ONE per-source hunt.
+# (source, sigma id) so a rule that matches N sources yields N distinct bindings.
+# A hunt keys on source so all of a source's bindings share ONE per-source hunt.
 BINDING_RULE_PREFIX = "sigma"
 SIGMA_HUNT_PREFIX = "sigma_hunt"
 
@@ -112,7 +112,7 @@ def convert_detection_to_where(rule_dict: dict[str, Any]) -> str:
     ``EventID = '1'``) lines up with the view's columns. Uses the ``default``
     output format (a plain condition, not the INSERT-INTO alert form). A rule that
     yields several queries is OR-combined. Raises on an unconvertible detection
-    (unsupported operator, correlation rule, ...); the caller records the failure
+    (unsupported operator, correlation rule, ...). The caller records the failure
     and moves on.
     """
     collection = SigmaCollection.from_dicts([rule_dict])
@@ -578,7 +578,7 @@ class SigmaPropagator:
 
         Returns None if the rule is absent or is not a sigma binding, else the
         folded routing of the rule delete plus every hunt write the unlink caused.
-        A generated per-source hunt that is emptied by the unlink is deleted; any
+        A generated per-source hunt that is emptied by the unlink is deleted. Any
         other hunt is left with the binding removed.
         """
         try:
@@ -596,7 +596,7 @@ class SigmaPropagator:
         return routing
 
     def _unlink_rule_from_hunt(self, hunt_name: str, rule_id: str) -> WriteOutcome | None:
-        """Remove ``rule_id`` from a hunt; delete the hunt if it is left empty."""
+        """Remove ``rule_id`` from a hunt. Delete the hunt if it is left empty."""
         try:
             config = self._hunts.get(hunt_name)
         except HuntConfigNotFoundError:
@@ -607,7 +607,7 @@ class SigmaPropagator:
             if entry.get("rule_name") != rule_id
         ]
         if not remaining:
-            # An empty hunt is invalid (min one rule); drop it entirely.
+            # An empty hunt is invalid (min one rule). Drop it entirely.
             return self._hunts.delete(hunt_name)
         config = dict(config)
         config["rules"] = remaining

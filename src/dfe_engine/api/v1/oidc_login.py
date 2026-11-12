@@ -13,7 +13,7 @@ GET /api/v1/auth/oidc/{provider}/login?redirect=false -> JSON {authorization_url
 GET /api/v1/auth/oidc/{provider}/login?return_to=<url> -> callback hands the browser back there
 GET /api/v1/auth/oidc/{provider}/callback  -> exchange code, RE-MINT engine token
 
-A browser client (the console) passes ``return_to`` on login; the callback then
+A browser client (the console) passes ``return_to`` on login. The callback then
 303s to it with the engine token in the URL fragment, which never leaves the
 browser, or with the refusal's code there when it refuses the login. ``return_to``
 must be a relative path or an origin the API already trusts for CORS, so a crafted
@@ -267,7 +267,7 @@ async def oidc_login(
 def _hand_back_url(return_to: str, fields: dict[str, str]) -> str:
     """``return_to`` with *fields* as its URL fragment, in place of any fragment it carried.
 
-    The fragment reaches no server and no log line; the console reads it once.
+    The fragment reaches no server and no log line. The console reads it once.
     """
     return f"{return_to.partition('#')[0]}#{urlencode(fields)}"
 
@@ -320,7 +320,7 @@ async def _complete_login(
     rp: OidcRelyingParty,
     return_to: str | None,
 ) -> JSONResponse | RedirectResponse:
-    """Exchange the IdP code, admit the identity and mint its token; a refusal raises ProblemError."""
+    """Exchange the IdP code, admit the identity and mint its token. A refusal raises ProblemError."""
     try:
         identity = await rp.handle_callback(provider, request)
     except Exception as exc:
@@ -359,7 +359,7 @@ async def _complete_login(
             audit_login_denied(identity.subject, "oidc", _get_client_ip(request), exc.reason)
             raise ProblemError(401, str(exc), code=exc.reason) from exc
         except Exception as exc:
-            # A token minted with no account behind it cannot be disabled locally; the text names store paths, so only its class is logged.
+            # A token minted with no account behind it cannot be disabled locally. The text names store paths, so only its class is logged.
             logger.error(
                 "JIT provisioning failed", user_id=identity.subject, **describe_http_error(exc)
             )

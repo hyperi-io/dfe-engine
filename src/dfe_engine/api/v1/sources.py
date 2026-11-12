@@ -24,7 +24,7 @@ POST   /api/v1/sources/reconcile-apps   -> Bring the derived app state into step
 Every write that changes what the apps must do -- a deploy, a state change, a
 delete, an edit -- ends by reconciling the deploy repo: the receiver and loader
 routing blocks are recompiled, and a fetcher-based source gains or loses its
-fetcher instance. The reconcile never fails the source write; its outcome is
+fetcher instance. The reconcile never fails the source write. Its outcome is
 reported, and ``reconcile-apps`` retries it.
 
 The reconcile also deletes the ``_load`` topic a dropped transform left, once its
@@ -439,7 +439,7 @@ def _one_per_app(hints: list[str]) -> list[str]:
     """The restart hints in the order first reported, with repeats dropped.
 
     Every write renders every app, so two overlays written in one reconcile can
-    each report the same app; the caller runs one command per app.
+    each report the same app. The caller runs one command per app.
     """
     return list(dict.fromkeys(hints))
 
@@ -1280,7 +1280,7 @@ def list_sources(
     """List sources with pagination, search, filtering, and a full object tree.
 
     The landing source (``main``) is always the first item when it is in the
-    result set; remaining sources keep the requested sort. A caller held to its
+    result set. Remaining sources keep the requested sort. A caller held to its
     orgs does not see a fetcher source bound to another org.
     """
     raw_sources = _readable_by_caller(
@@ -2525,8 +2525,8 @@ async def _execute_source_deploy(
         )
     )
 
-    # The HyperDX source is how an operator sees the rows the new table takes;
-    # without it the deploy lands and stays invisible until someone adds one.
+    # The HyperDX source is how an operator sees the rows the new table takes.
+    # Without it the deploy lands and stays invisible until someone adds one.
     hyperdx_teams, hyperdx_error = await _sync_hyperdx_source(
         request, source, db, [col.name for col in result.columns]
     )
@@ -2804,7 +2804,7 @@ def _apply_source_schema(
 ) -> SchemaDeployResult | _AppliedSchema:
     """Build a source version's DDL and, unless a dry run, apply it to ClickHouse.
 
-    A dry run returns its finished result; a deploy returns what the caller needs to
+    A dry run returns its finished result. A deploy returns what the caller needs to
     ensure the topics and record the deploy.
     """
     from dfe_engine.schema.schema_builder_v2 import (
@@ -2870,7 +2870,7 @@ def _apply_source_schema(
     views = dict(result.view_ddls or {})
     validation_errors = list(result.validation_errors or [])
 
-    # Plan mode: hand the DDL + validation back for review; never write to ClickHouse.
+    # Plan mode: hand the DDL + validation back for review. Never write to ClickHouse.
     if dry_run:
         ttl_change, settings_change, live_table_error = _dry_run_table_moves(
             builder, source, version_id, result, settings
@@ -3321,7 +3321,7 @@ async def delete_source(
     )
     apps = await run_blocking(functools.partial(reconcile_derived_apps, request, user, registry))
     await _remove_hyperdx_source(request, name)
-    # The table stays in ClickHouse; leaving the registry is what takes it out of all_sources.
+    # The table stays in ClickHouse. Leaving the registry is what takes it out of all_sources.
     await _rebuild_all_sources(registry=registry, settings=settings, sources=[name])
     return SourceDeleteResponse(
         source=name,
@@ -3368,7 +3368,7 @@ async def bulk_action(
 
     ``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.
     ``deploy`` submits one ``source:deploy`` background task per accepted source
-    (poll ``GET /operations/{operation}``); refused names land in ``failed``.
+    (poll ``GET /operations/{operation}``). Refused names land in ``failed``.
 
     An action that applies immediately reports the one reconcile it ends with, as
     a single-source write does.
@@ -3549,7 +3549,7 @@ def _apply_bulk(
             succeeded.append(name)
         except Exception as e:
             code = _failure_code(e)
-            # A refusal the registry composed is the caller's to read; anything else may be
+            # A refusal the registry composed is the caller's to read. Anything else may be
             # the deploy repo's own text.
             error = str(e)
             if code == "internal_error":
@@ -3573,7 +3573,7 @@ def reconcile_apps(user: CurrentUser, registry: SourceReg, request: Request):
 
     Recompiles every stack-scoped routing block (receiver, loader, archiver) and
     deploys, syncs or removes the instances of every instance-scoped app (a fetcher
-    per active fetcher-based source). Every source write does this on its own; this
+    per active fetcher-based source). Every source write does this on its own. This
     route is the retry when one reported ``apps_sync_error``, and the pass that
     deletes a stranded ``_load`` topic a deploy reported in ``topics_pending_removal``.
     """
@@ -3839,7 +3839,7 @@ def _plan_to_response(plan: SourcePlanArtifact) -> SourcePlanResponse:
 
 
 def _pin_landing_source_first(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Keep the landing source (``main``) first; other rows keep their order."""
+    """Keep the landing source (``main``) first. Other rows keep their order."""
     landing = [row for row in rows if row.get("source") == DEFAULT_LANDING_LABEL]
     rest = [row for row in rows if row.get("source") != DEFAULT_LANDING_LABEL]
     return landing + rest

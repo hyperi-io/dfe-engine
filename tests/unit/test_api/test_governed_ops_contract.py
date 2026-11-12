@@ -50,7 +50,7 @@ class TestClassesListing:
         by_name = {c["name"]: c for c in resp.json()["items"]}
         # the registry's classes are all present
         assert set(by_name) == set(default_registry().names())
-        # helmvars is a legal action target; every governance-prefixed class is not
+        # helmvars is a legal action target. Every governance-prefixed class is not
         assert by_name["helmvars"]["action_writable"] is True
         assert by_name["sources"]["action_writable"] is True
         for cls in ("accounts", "groups", "roles", "actions", "policies", "gov_settings"):

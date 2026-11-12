@@ -1,7 +1,7 @@
 """Hunt alert grouping + cooldown -- read-time aggregation for alerts.
 
 DEFERRED (unwired): part of the alerting track (auto-memory project_alerting), NOT
-dead code. AlertStateManager + build_grouping_query have no caller today; they drop in
+dead code. AlertStateManager + build_grouping_query have no caller today. They drop in
 when the alerting build lands. Retained deliberately.
 
 All matched rows are written to the results table at full fidelity.
@@ -303,7 +303,7 @@ class AlertStateManager:
 
         ``customer`` carries the org id and is written to the ``_org_id``
         isolation column. An empty org id is refused (fail-open: the fire is
-        simply not recorded, so the alert may re-fire next run) rather than
+        not recorded, so the alert may re-fire next run) rather than
         writing a blank isolation key.
         """
         if not (customer or "").strip():
@@ -317,7 +317,7 @@ class AlertStateManager:
 
         try:
             # Pass the row as POSITIONAL data (not a `parameters=` kwarg) so the
-            # client wrapper routes it through insert(); a kwarg lands in
+            # client wrapper routes it through insert(). A kwarg lands in
             # command() and silently inserts nothing. last_fired_at is a real
             # datetime (DateTime column), not a string.
             # Not injectable: only the deployment-config database name is formatted in, and the row is insert data.

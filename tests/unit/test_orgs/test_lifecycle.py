@@ -9,7 +9,7 @@
 """Unit tests for OrgLifecycleManager.
 
 Uses a real OrgRegistry backed by tmp_path. The HyperDX client is passed as None
-- the non-fatal pattern means those operations simply skip when it is absent.
+- the non-fatal pattern means those operations skip when it is absent.
 Per-org ClickHouse isolation moved to governance.ch.ChRbacReconciler (row
 policies on _org_id), so the lifecycle manager no longer touches ClickHouse.
 """

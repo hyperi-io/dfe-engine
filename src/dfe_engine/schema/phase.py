@@ -18,7 +18,7 @@ Two things make it a GATE rather than the best-effort pass it replaces. A failur
 leaves the engine UP and NotReady, with the stage that failed on the status route
 and the cause in the engine log, because a silent failure and a success look
 identical to every app downstream. And
-ClickHouse or the broker merely not being up yet is not a failure: the phase
+ClickHouse or the broker not being up yet is not a failure: the phase
 retries for a bounded window first, which is what a stack whose datastore starts
 in the same wave needs.
 """
@@ -120,7 +120,7 @@ def is_transient_failure(exc: BaseException) -> bool:
 
     Each stage wraps the driver's error, so the whole cause chain is read. The query
     retry rule never retries 241, because the same query meets the same ceiling at
-    once; a pass runs again only after a back-off, and its writes are small, so the
+    once. A pass runs again only after a back-off, and its writes are small, so the
     server's memory pressure may have passed by then. A missed lease quorum clears
     once the replica that was down or lagging catches up.
 
@@ -301,7 +301,7 @@ def apply_plan(
 
     objects = plan.tables()
     # Up to and including the ledger first, so the compare that follows has a
-    # table to read; the ledger's own row is written by the same pass.
+    # table to read. The ledger's own row is written by the same pass.
     head = next(i for i, obj in enumerate(objects) if obj.id == LEDGER_ID) + 1
     for rendered in objects[:head]:
         applier.apply(rendered)
@@ -344,7 +344,7 @@ def _flush_query_log(client: Any, *, dry_run: bool) -> None:
 def _broker_count(settings: DFESettings) -> int:
     """Brokers to clamp the topic set's replication factor against.
 
-    Only asked where the topic set is actually going to be created, so a
+    Called only where the topic set is actually going to be created, so a
     deployment with no bus gains no broker round trip.
     """
     if _topics_skipped(settings):
@@ -402,8 +402,8 @@ def _apply_topics(plan: SchemaPlan, settings: DFESettings) -> tuple[list[str], s
 
     ``ensure_topics`` leaves an existing topic untouched, so a topic created by
     anything else keeps its own partitions, retention and replication factor. The
-    dry-run converge pass names that difference instead of adopting it silently;
-    applying it stays a separate, deliberate operation.
+    dry-run converge pass names that difference instead of adopting it silently.
+    Applying it stays a separate, deliberate operation.
     """
     from dfe_engine.kafka.topics import ensure_topics, update_topics
 

@@ -408,7 +408,7 @@ class RuleCreationService:
         elif request.user_sql:
             sql_errors = self._validate_sql_syntax(clean_sql or "")
 
-        # Phase 3: Create Rule via existing pipeline; SQL the sanitiser emptied keeps
+        # Phase 3: Create Rule via existing pipeline. SQL the sanitiser emptied keeps
         # the caller's text so the result can carry the errors rather than raise.
         rule_create = RuleCreate(
             name=request.name,
@@ -576,7 +576,7 @@ class RuleCreationService:
         if offbox is not None:
             errors.append(SqlValidationError(message=offbox, suggestion=_OFFBOX_FIX))
 
-        # The keyword checks above read like a lint; only a parse says the SQL is SQL.
+        # The keyword checks above read like a lint. Only a parse says the SQL is SQL.
         if not errors:
             parse_error = self._parse_error(trimmed)
             if parse_error is not None:
@@ -638,7 +638,7 @@ class RuleCreationService:
         try:
             # command(), not query(), as in _parse_error. EXPLAIN PLAN analyses the SELECT and never reads rows.
             # nosemgrep: python.lang.security.audit.formatted-sql-query.formatted-sql-query, python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
-            client.command(f"EXPLAIN PLAN SELECT 1 FROM {target}{condition}")  # noqa: S608 - quoted source; the condition has passed the sanitiser and EXPLAIN never runs it
+            client.command(f"EXPLAIN PLAN SELECT 1 FROM {target}{condition}")  # noqa: S608 - quoted source, the condition has passed the sanitiser and EXPLAIN never runs it
         except Exception as exc:
             if parse_code(exc) not in _SQL_REFUSALS:
                 logger.warning(f"EXPLAIN PLAN unavailable, rule not checked against {db}.{table}")
@@ -654,7 +654,7 @@ class RuleCreationService:
         """Parse the SQL as ClickHouse and return the first syntax error, if any.
 
         ClickHouse's own parser (``EXPLAIN AST``) is authoritative when it is
-        configured and reachable; sqlglot's ClickHouse dialect stands in otherwise.
+        configured and reachable. sqlglot's ClickHouse dialect stands in otherwise.
         """
         client = self._query_client()
         if client is not None:

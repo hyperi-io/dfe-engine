@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Rule seeding. Public methods are the scripts; privates are reusable.
+"""Rule seeding. Public methods are the scripts. Privates are reusable.
 
 A seeded rule is a stored detection the list can search. The WHERE matches
 nothing, so leaving one of these enabled does not alert on every row.

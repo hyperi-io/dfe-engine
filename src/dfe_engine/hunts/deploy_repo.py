@@ -165,7 +165,7 @@ class DeployRepoStore:
         return self._route(scope, summary, actor, _write)
 
     def delete(self, name: str, *, actor: str) -> WriteOutcome | None:
-        """Remove one resource and commit it; None when it was not there."""
+        """Remove one resource and commit it. None when it was not there."""
         if self.get(name) is None:
             return None
         message = self._message(name, "delete", actor)
@@ -215,7 +215,7 @@ def deploy_store(
     settings: DFESettings,
     forge: ForgeProvider | None = None,
 ) -> DeployRepoStore | None:
-    """The deploy-repo backend for one hunt-domain class; None when gitops is off."""
+    """The deploy-repo backend for one hunt-domain class. None when gitops is off."""
     if crud is None:
         return None
     return DeployRepoStore(

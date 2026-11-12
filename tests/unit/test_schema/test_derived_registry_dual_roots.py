@@ -113,9 +113,9 @@ class TestGet:
 class TestWritePathIsUnchanged:
     """A shipped-only name is invisible to exists(), save() and delete().
 
-    list and get read both roots; the write path does not grow new semantics
+    list and get read both roots. The write path does not grow new semantics
     here. The API's create route gates on exists(), so it still treats a
-    shipped-only name as absent and writes the deploy-repo copy; its update
+    shipped-only name as absent and writes the deploy-repo copy. Its update
     and delete routes gate on exists()/delete() the same way, so they still
     answer not-found for a name only the shipped tree carries.
     """

@@ -424,7 +424,7 @@ class TestSourceFetcher:
         assert DEFAULT_LANDING_LABEL in get_args(FetcherTopic)
 
     def test_unknown_source_type_is_refused(self):
-        # The manifest lists the families the fetcher ships; anything else has
+        # The manifest lists the families the fetcher ships. Anything else has
         # no stanza the fetcher would read.
         with pytest.raises(ValueError, match="Unknown fetcher source_type"):
             SourceFetcher(source_type="http_json")
@@ -915,7 +915,7 @@ class TestSourceVersion:
         ],
     )
     def test_origin_is_on_the_api_dump_but_not_in_yaml(self, body, origin):
-        """origin is derived for responses; writing it would duplicate match/fetcher."""
+        """origin is derived for responses. Writing it would duplicate match/fetcher."""
         ver = SourceVersion.model_validate({"date_time": "2026-06-10", **body})
 
         assert ver.model_dump(mode="json")["origin"] == origin
@@ -1464,7 +1464,7 @@ class TestFlowFields:
 
 
 class TestOmittedFieldsKeepTheStoredValue:
-    """A PUT keeps what its body leaves out; only an explicit empty value clears it."""
+    """A PUT keeps what its body leaves out. Only an explicit empty value clears it."""
 
     STORED: dict[str, Any] = {
         "header": {"type": "minimal", "version": "1.0.0"},

@@ -28,13 +28,13 @@ import yaml
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
-# The deployment names its transports after what carries them; a source names
+# The deployment names its transports after what carries them. A source names
 # only which of the two it is on. dfe-ops derives the left word from the profile
 # and dfe-docker's service_profiles.yaml declares it, so this is the one place
 # the two vocabularies meet.
 DEPLOYMENT_TRANSPORTS: dict[str, str] = {"kafka": "bus", "grpc": "direct"}
 
-# Every skip this suite is allowed to report carries this prefix; anything else
+# Every skip this suite is allowed to report carries this prefix. Anything else
 # fails the run (see conftest.py).
 EXPECTED_SKIP = "EXPECTED-SKIP:"
 
@@ -201,9 +201,9 @@ class FlowShape:
 
         Four refusals reach the same save, and three of them are the deployment's
         rather than the fixture's. A deployment binds its stages to ONE transport,
-        so a source on the other is refused whatever the shape is; a tier that
-        deploys no app to run this shape's origin refuses it on either transport;
-        and a target that cannot configure a one-per-source app refuses a shape
+        so a source on the other is refused whatever the shape is. A tier that
+        deploys no app to run this shape's origin refuses it on either transport.
+        And a target that cannot configure a one-per-source app refuses a shape
         needing one, which is why a fetcher or transform shape is refused on
         Compose rather than written and never run. All three are read off the
         deployment at run time, never declared per fixture. What an app in this

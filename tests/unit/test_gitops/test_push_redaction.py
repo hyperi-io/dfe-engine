@@ -191,7 +191,7 @@ def test_a_real_credentialed_push_keeps_the_token_out_of_every_stream(
 
 
 def test_the_clone_does_not_keep_the_token_in_git_config(tmp_path: Path, git_http_remote):
-    """porcelain.clone persists the URL it cloned from; the scrub takes the creds back out.
+    """porcelain.clone persists the URL it cloned from. The scrub takes the creds back out.
 
     ``.git/config`` sits on the engine pod's config volume, so a token left there is
     readable by any co-located sidecar, exec shell or volume snapshot.

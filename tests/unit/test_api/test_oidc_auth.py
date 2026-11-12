@@ -162,7 +162,7 @@ class TestOidcAuthentication:
         assert "admin" in data["roles"]
 
     def test_a_group_name_the_idp_asserts_takes_no_stored_group(self, client: TestClient, app):
-        """A directory user can name a group dfe-admins; only the id the directory assigns links."""
+        """A directory user can name a group dfe-admins. Only the id the directory assigns links."""
         group_store = app.state.group_store
         group_store.create("okta-viewers", roles=["data_viewer"], description="synced")
         group_store.update("okta-viewers", source_provider="okta", source_id="00g-xyz")
@@ -371,7 +371,7 @@ class TestOidcAuthentication:
         )
         assert resp.status_code == 200
         data = resp.json()
-        # OIDC wins — user_id from OIDC, not JWT
+        # OIDC wins -- user_id from OIDC, not JWT
         assert data["user_id"] == "oidc-user@example.com"
 
     def test_a_disabled_account_refuses_a_token_for_its_name_that_another_subject_holds(

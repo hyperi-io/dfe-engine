@@ -1275,7 +1275,7 @@ class TestCredentialsAreNotEchoed:
         for path in ("config.server.auth.bearer.tokens", "config.server.auth.header_values"):
             assert (by_path[path]["secret"], by_path[path]["set"]) == (True, True), path
             assert by_path[path]["value"] is None, path
-        # A header's name is a setting; only its values are the credential.
+        # A header's name is a setting. Only its values are the credential.
         headers = by_path["config.server.auth.accepted_headers"]
         assert (headers["secret"], headers["set"]) == (False, True)
         assert headers["value"] == [{"name": "x-api-key", "values": [contract.REDACTED]}]

@@ -45,7 +45,7 @@ class TestScopeCovers:
         assert not ORG_ACME.covers(GROUP_SYSTEM)
 
     def test_org_does_not_cover_user_scope(self):
-        # User-scope data (e.g. personal prefs) is the owner's; only
+        # User-scope data (e.g. personal prefs) is the owner's. Only
         # system scope reaches it.
         assert not ORG_ACME.covers(USER_ALICE)
 

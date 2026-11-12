@@ -118,13 +118,13 @@ class SetupContext:
     org_registry: OrgRegistry | None = None
     oidc_registry: OIDCProviderRegistry | None = None
     break_glass_git: AccountGitState | None = None
-    # The configured local admin; its password is what ``default_credentials`` grades.
+    # The configured local admin. Its password is what ``default_credentials`` grades.
     bootstrap_admin_name: str = field(default_factory=admin_account_name)
     bootstrap_admin_password: str = field(default_factory=admin_account_password)
     # Where the operator reads the minted password, for the pre-login page.
     deploy_kind: str = ""
     credential_fetch_command: str = ""
-    # Effective retention a source gets when it sets none (override else env); 0 = none.
+    # Effective retention a source gets when it sets none (override else env). 0 = none.
     default_ttl_days: int = 90
     # MergeTree-family variant a source's table gets when it names no engine.
     default_engine: str = "MergeTree"
@@ -211,7 +211,7 @@ def _break_glass_git_state(
 ) -> AccountGitState | None:
     """Durability of the local admin's password in the deploy repo, or None.
 
-    None while auth or settings are still bootstrapping; otherwise the steady-state
+    None while auth or settings are still bootstrapping. Otherwise the steady-state
     git status for the seeded admin so the wizard can show "persisted" vs a pending
     review PR (including the merge command / PR URL). Pre-login safe: no secrets.
     """
@@ -303,7 +303,7 @@ class SetupStatus(BaseModel):
     """Pre-login setup snapshot: the wizard state plus what is configured.
 
     Accounts are deliberately absent. Whether a real user exists is reported
-    through the ``first_user`` step; the account list itself is never served
+    through the ``first_user`` step. The account list itself is never served
     to an unauthenticated caller.
     """
 

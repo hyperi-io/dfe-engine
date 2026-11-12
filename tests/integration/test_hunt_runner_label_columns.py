@@ -142,7 +142,7 @@ def test_a_capped_rule_counts_on_a_column_named_like_the_counts_own_alias(
 
 
 # Each rule matches the first three of the eight rows _land_eight writes. One reads source
-# columns named like the preview's counts; the other ends in a line comment.
+# columns named like the preview's counts. The other ends in a line comment.
 PREVIEWED_RULES = {
     "count names": "dfe_total = 1 AND dfe_matched = 1",
     "trailing comment": "severity >= 7 -- reviewed",

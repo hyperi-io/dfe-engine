@@ -89,7 +89,7 @@ def test_parse_interval_routes(value: str | int, expected: int):
 
 
 def test_parse_interval_irregular_cron():
-    # Weekday-09:00: consecutive weekday fires are 1 day apart (86400s); the min gap
+    # Weekday-09:00: consecutive weekday fires are 1 day apart (86400s). The min gap
     # is the interval the runner tracks. Routed to cron via the inner '-' range char,
     # not whitespace alone, so this also exercises the metachar detection.
     assert parse_interval("0 9 * * 1-5") == 86400

@@ -60,7 +60,7 @@ def _bearer(body: dict) -> dict[str, str]:
 
 
 def _change(client: TestClient, headers: dict[str, str]) -> dict[str, str]:
-    """Replace the issued password; the change ends the session, so sign in again."""
+    """Replace the issued password. The change ends the session, so sign in again."""
     resp = client.post(
         _CHANGE,
         json={"current_password": ADMIN_PASSWORD, "new_password": _OWN_PASSWORD},

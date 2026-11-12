@@ -60,7 +60,7 @@ class TestContractWellFormed:
         assert contract.app_name == "dfe-engine"
         assert contract.binary_name == "dfe-engine"
         # Observability port (#106). API traffic moved to the `http` extra
-        # port; scalo serves health + /metrics on 9090, off the public 8000.
+        # port. scalo serves health + /metrics on 9090, off the public 8000.
         assert contract.metrics_port == 9090
         assert [(p.name, p.port) for p in contract.extra_ports] == [("http", 8000)]
         assert contract.env_prefix == "DFE_ENGINE"
@@ -80,7 +80,7 @@ class TestContractWellFormed:
 
     def test_contract_health_paths(self) -> None:
         contract = engine_deployment_contract()
-        # scalo's health-router paths, which the app serves; /api/v1/system/health
+        # scalo's health-router paths, which the app serves. /api/v1/system/health
         # 404s (#106). /livez + /readyz are the whole surface -- the
         # /health/live|ready aliases were retired in scalo 2.29.12, so a contract
         # still naming one generates a chart probe that 404s.

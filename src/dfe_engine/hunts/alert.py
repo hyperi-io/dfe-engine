@@ -92,7 +92,7 @@ def _secret_value(destination: AlertDestination) -> str:
 
 
 def _stored(store: Any, name: str) -> dict[str, Any] | None:
-    """The stored document for *name*; a name the store refuses to look up holds nothing."""
+    """The stored document for *name*. A name the store refuses to look up holds nothing."""
     try:
         return store.get(name)
     except ValueError:

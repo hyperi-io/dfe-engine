@@ -12,7 +12,7 @@
           "Auth"
         ],
         "summary": "Login",
-        "description": "Authenticate with local credentials and receive a JWT token.\n\nThe password check runs off the event loop. Failed attempts back off per\nusername and per client address (``auth.login_throttle``); a waiting attempt is\nrefused with 429 before the password is checked.",
+        "description": "Authenticate with local credentials and receive a JWT token.\n\nThe password check runs off the event loop. Failed attempts back off per\nusername and per client address (``auth.login_throttle``). A waiting attempt is\nrefused with 429 before the password is checked.",
         "operationId": "auth.login",
         "requestBody": {
           "content": {
@@ -243,7 +243,7 @@
           "Auth"
         ],
         "summary": "Get Me",
-        "description": "Get the current authenticated user's info.\n\nA session on an issued password reports the flag and no roles, permissions,\ngroups or orgs, because its token carries none until the change.\n\n``hyperdx_role`` and ``hyperdx_identity`` are what dfe-hyperdx takes a\nsession's dashboard role and team from; it caches this answer for 30 seconds,\nso a group change reaches dfe-hyperdx in that window rather than at token expiry.",
+        "description": "Get the current authenticated user's info.\n\nA session on an issued password reports the flag and no roles, permissions,\ngroups or orgs, because its token carries none until the change.\n\n``hyperdx_role`` and ``hyperdx_identity`` are what dfe-hyperdx takes a\nsession's dashboard role and team from. It caches this answer for 30 seconds,\nso a group change reaches dfe-hyperdx in that window rather than at token expiry.",
         "operationId": "auth.me.list",
         "responses": {
           "200": {
@@ -387,7 +387,7 @@
           "Auth"
         ],
         "summary": "Get Setup Status",
-        "description": "Report first-run setup state and what is configured (no auth -- pre-login UI).\n\nDriven by the setup state machine (``state_machines/setup.py``). The\nregistries the wizard renders -- OIDC providers and organisations -- are\nreturned while setup is outstanding and dropped once it completes, so a\nconfigured deployment does not serve its inventory to anonymous callers.\nThe exception is the name and display name of each enabled OIDC provider,\nwhich stay (no configuration) because the login screen needs to know which\nIdPs to offer and what to call them. Accounts are never returned; the\n``first_user`` step reports whether a real (non break-glass) user exists.",
+        "description": "Report first-run setup state and what is configured (no auth -- pre-login UI).\n\nDriven by the setup state machine (``state_machines/setup.py``). The\nregistries the wizard renders -- OIDC providers and organisations -- are\nreturned while setup is outstanding and dropped once it completes, so a\nconfigured deployment does not serve its inventory to anonymous callers.\nThe exception is the name and display name of each enabled OIDC provider,\nwhich stay (no configuration) because the login screen needs to know which\nIdPs to offer and what to call them. Accounts are never returned. The\n``first_user`` step reports whether a real (non break-glass) user exists.",
         "operationId": "auth.setup-status.list",
         "responses": {
           "200": {
@@ -1757,7 +1757,7 @@
           "Accounts"
         ],
         "summary": "Account Git Status",
-        "description": "Poll whether an account's password has merged to the deploy repo's main.\n\nStep 2 of the review-PR path for the local admin and ``breakglass``: the UI\npolls this after the operator merges the PR; it fetches remote main and flips\n``merged`` true. Durable immediately in the auto-merge and file-share modes. A\nregular user is never git-persisted, so it reports not-git-backed (durable in\nits own store).",
+        "description": "Poll whether an account's password has merged to the deploy repo's main.\n\nStep 2 of the review-PR path for the local admin and ``breakglass``: the UI\npolls this after the operator merges the PR. It fetches remote main and flips\n``merged`` true. Durable immediately in the auto-merge and file-share modes. A\nregular user is never git-persisted, so it reports not-git-backed (durable in\nits own store).",
         "operationId": "auth.accounts.git-status",
         "parameters": [
           {
@@ -2771,7 +2771,7 @@
           "Groups"
         ],
         "summary": "Add Member",
-        "description": "Add a member to a group (idempotent; checked at the group's scope).",
+        "description": "Add a member to a group (idempotent, checked at the group's scope).",
         "operationId": "auth.groups.members.create",
         "parameters": [
           {
@@ -4763,7 +4763,7 @@
           "OIDC Providers"
         ],
         "summary": "Update Provider",
-        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential; an empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.",
+        "description": "Update an OIDC provider configuration (admin only).\n\nA secret the body omits, value and env var name alike, keeps what the provider already holds, so an update that only flips ``enabled`` does not strand a stored credential. An empty env var name clears the name and keeps the stored copy. A secret the body names an env var for and sends no value for moves onto that env var and its stored copy is deleted once the update is saved, unless the name is the one already held with nothing stored. A move onto an env var the engine does not set is refused (``env_var_not_set``). Any update that touches more than ``enabled`` or ``display_name`` must leave the provider passing the field rules. Both are checked before a secret is written or deleted.",
         "operationId": "auth.oidc-providers.apply",
         "parameters": [
           {
@@ -5331,7 +5331,7 @@
           "Organisations"
         ],
         "summary": "List Orgs",
-        "description": "List organisations visible to the caller, paginated.\n\nSystem-scope org:read holders see every org; org-scope holders see\nonly the orgs their grants cover.",
+        "description": "List organisations visible to the caller, paginated.\n\nSystem-scope org:read holders see every org. Org-scope holders see\nonly the orgs their grants cover.",
         "operationId": "orgs.list",
         "parameters": [
           {
@@ -6576,7 +6576,7 @@
           "Sources"
         ],
         "summary": "List Sources",
-        "description": "List sources with pagination, search, filtering, and a full object tree.\n\nThe landing source (``main``) is always the first item when it is in the\nresult set; remaining sources keep the requested sort. A caller held to its\norgs does not see a fetcher source bound to another org.",
+        "description": "List sources with pagination, search, filtering, and a full object tree.\n\nThe landing source (``main``) is always the first item when it is in the\nresult set. Remaining sources keep the requested sort. A caller held to its\norgs does not see a fetcher source bound to another org.",
         "operationId": "sources.list",
         "parameters": [
           {
@@ -8899,7 +8899,7 @@
           "Sources"
         ],
         "summary": "Bulk Action",
-        "description": "Perform a bulk action on multiple sources.\n\n``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.\n``deploy`` submits one ``source:deploy`` background task per accepted source\n(poll ``GET /operations/{operation}``); refused names land in ``failed``.\n\nAn action that applies immediately reports the one reconcile it ends with, as\na single-source write does.",
+        "description": "Perform a bulk action on multiple sources.\n\n``enable`` / ``disable`` / ``dormant`` / ``delete`` apply immediately.\n``deploy`` submits one ``source:deploy`` background task per accepted source\n(poll ``GET /operations/{operation}``). Refused names land in ``failed``.\n\nAn action that applies immediately reports the one reconcile it ends with, as\na single-source write does.",
         "operationId": "sources.bulk",
         "requestBody": {
           "content": {
@@ -8991,7 +8991,7 @@
           "Sources"
         ],
         "summary": "Reconcile Apps",
-        "description": "Bring the deploy repo's derived app state into step with the sources.\n\nRecompiles every stack-scoped routing block (receiver, loader, archiver) and\ndeploys, syncs or removes the instances of every instance-scoped app (a fetcher\nper active fetcher-based source). Every source write does this on its own; this\nroute is the retry when one reported ``apps_sync_error``, and the pass that\ndeletes a stranded ``_load`` topic a deploy reported in ``topics_pending_removal``.",
+        "description": "Bring the deploy repo's derived app state into step with the sources.\n\nRecompiles every stack-scoped routing block (receiver, loader, archiver) and\ndeploys, syncs or removes the instances of every instance-scoped app (a fetcher\nper active fetcher-based source). Every source write does this on its own. This\nroute is the retry when one reported ``apps_sync_error``, and the pass that\ndeletes a stranded ``_load`` topic a deploy reported in ``topics_pending_removal``.",
         "operationId": "sources.reconcile-apps",
         "responses": {
           "200": {
@@ -11119,7 +11119,7 @@
           "Deployment"
         ],
         "summary": "List Admin Links",
-        "description": "Each admin UI this deployment runs, in the order its deployer listed them.\n\nThe deployer supplies the list, so an empty one means it listed none. Gated to\nthe admin-class roles, which hold ``deployment:*`` or ``*``: the list maps the\ndeployment's consoles. Links only; nothing here carries a credential.",
+        "description": "Each admin UI this deployment runs, in the order its deployer listed them.\n\nThe deployer supplies the list, so an empty one means it listed none. Gated to\nthe admin-class roles, which hold ``deployment:*`` or ``*``: the list maps the\ndeployment's consoles. Links only. Nothing here carries a credential.",
         "operationId": "deployment.admin-links.list",
         "parameters": [
           {
@@ -13399,7 +13399,7 @@
           "System"
         ],
         "summary": "Get System Status",
-        "description": "Conditions that leave the engine degraded while it keeps serving.\n\nA refused YAML write keeps the old file or the old deploy-repo content, so reads\nstay correct and readiness is not failed; this is where the refusal shows.",
+        "description": "Conditions that leave the engine degraded while it keeps serving.\n\nA refused YAML write keeps the old file or the old deploy-repo content, so reads\nstay correct and readiness is not failed. This is where the refusal shows.",
         "operationId": "system.status",
         "responses": {
           "200": {
@@ -13614,7 +13614,7 @@
           "System"
         ],
         "summary": "Put Retention",
-        "description": "Store the override in the deploy repo, then apply it to every table that follows it.\n\nThe engine's own tables and every deployed source's table are brought to the new\neffective default in this request, with ``ALTER TABLE ... MODIFY TTL`` (or\n``REMOVE TTL`` for 0). A table that declares its own TTL is left alone. A\nClickHouse failure answers 502 with the override ALREADY committed; sending the\nsame value again applies it.",
+        "description": "Store the override in the deploy repo, then apply it to every table that follows it.\n\nThe engine's own tables and every deployed source's table are brought to the new\neffective default in this request, with ``ALTER TABLE ... MODIFY TTL`` (or\n``REMOVE TTL`` for 0). A table that declares its own TTL is left alone. A\nClickHouse failure answers 502 with the override ALREADY committed. Sending the\nsame value again applies it.",
         "operationId": "system.retention.apply",
         "requestBody": {
           "content": {
@@ -13798,7 +13798,7 @@
           "System"
         ],
         "summary": "Patch Defaults",
-        "description": "Store the named defaults. Only ttl_days is applied to live tables.\n\nOmitted fields are left alone. null clears that override. Common-header type,\nversion and engine are what a source inherits the next time it is deployed;\nthis request does not rewrite them onto live tables. A patch that names\nttl_days stores it and then runs the same reconcile as PUT /retention.",
+        "description": "Store the named defaults. Only ttl_days is applied to live tables.\n\nOmitted fields are left alone. null clears that override. Common-header type,\nversion and engine are what a source inherits the next time it is deployed.\nThis request does not rewrite them onto live tables. A patch that names\nttl_days stores it and then runs the same reconcile as PUT /retention.",
         "operationId": "system.defaults.update",
         "requestBody": {
           "content": {
@@ -14584,7 +14584,7 @@
           "hunts"
         ],
         "summary": "Get Engine Status",
-        "description": "Report hunt scheduling status.\n\nHunts execute in the separate dfe-hunt-runner service (pull-based, coordinated\nvia ClickHouse), not in this API process, so ``runners`` counts the runners that\nbeat within their last two polls and ``running`` is whether any did. For \"is this\nhunt running\", read the per-hunt ``running`` on the hunts list; ``hunt_count`` is\nthe configured-hunt count.",
+        "description": "Report hunt scheduling status.\n\nHunts execute in the separate dfe-hunt-runner service (pull-based, coordinated\nvia ClickHouse), not in this API process, so ``runners`` counts the runners that\nbeat within their last two polls and ``running`` is whether any did. For \"is this\nhunt running\", read the per-hunt ``running`` on the hunts list. ``hunt_count`` is\nthe configured-hunt count.",
         "operationId": "hunts.status",
         "responses": {
           "200": {
@@ -15102,7 +15102,7 @@
           "hunts"
         ],
         "summary": "Delete Hunt",
-        "description": "Delete a hunt configuration.\n\nA production+team delete is routed to a review branch, so the runner keeps\nexecuting the hunt until that branch is merged; ``X-DFE-Review-Required`` says so.",
+        "description": "Delete a hunt configuration.\n\nA production+team delete is routed to a review branch, so the runner keeps\nexecuting the hunt until that branch is merged. ``X-DFE-Review-Required`` says so.",
         "operationId": "hunts.delete",
         "parameters": [
           {
@@ -15188,7 +15188,7 @@
           "hunts"
         ],
         "summary": "Trigger Hunt",
-        "description": "Queue an ad-hoc run: mark the hunt due now for the runner to claim.\n\nThe pull model is kept. Nothing is pushed at the runner and no listener is added\n-- the fire is written into the coordination state, and the runner that is\nalready running picks it up on its next poll, through the same claim that stops\na hunt double-running. 202 says it is queued, not that it has run; the response\ncarries the poll interval so the caller knows the longest wait before it starts.\n\nA hunt with no rate schedule is not something the runner ticks, so a queued run\nfor one sits unclaimed. That is the schedule's shape, not a failure here.\n\n503 is reserved for ClickHouse actually being unreachable; any other failure to\nwrite the request is a 500, so a bug here never reads as an outage.",
+        "description": "Queue an ad-hoc run: mark the hunt due now for the runner to claim.\n\nThe pull model is kept. Nothing is pushed at the runner and no listener is added\n-- the fire is written into the coordination state, and the runner that is\nalready running picks it up on its next poll, through the same claim that stops\na hunt double-running. 202 says it is queued, not that it has run. The response\ncarries the poll interval so the caller knows the longest wait before it starts.\n\nA hunt with no rate schedule is not something the runner ticks, so a queued run\nfor one sits unclaimed. That is the schedule's shape, not a failure here.\n\n503 is reserved for ClickHouse actually being unreachable. Any other failure to\nwrite the request is a 500, so a bug here never reads as an outage.",
         "operationId": "hunts.run",
         "parameters": [
           {
@@ -16302,7 +16302,7 @@
           "sampler"
         ],
         "summary": "List Samples",
-        "description": "List recent sample tasks (most recent first); a caller held to its orgs sees only theirs.",
+        "description": "List recent sample tasks (most recent first). A caller held to its orgs sees only theirs.",
         "operationId": "samples.list",
         "parameters": [
           {
@@ -20186,7 +20186,7 @@
           "schemas"
         ],
         "summary": "Discover Json Paths",
-        "description": "Discover JSON paths inside a source's ``_json`` column.\n\nResolves the requested ``version`` (or the source's current version). If that\nversion defines a ``meta_schema`` it uses ``db.<source>`` only after deploy;\nuntil then discovery runs on ``db.<landing>`` filtered by the version's\nmatch rule. Versions without ``meta_schema`` always use the landing table.\n\nReturns one record per path with observed types, a suggested column name,\nand whether the path is already promoted. ``?samples=N`` adds random\ndistinct example values; ``?stats=true`` adds coverage + distinct counts.\n\nA caller without a platform grant holding ``schema:read`` reads only its own\norgs' rows, as the sampler holds it, and a table it cannot be held on is 403.",
+        "description": "Discover JSON paths inside a source's ``_json`` column.\n\nResolves the requested ``version`` (or the source's current version). If that\nversion defines a ``meta_schema`` it uses ``db.<source>`` only after deploy;\nuntil then discovery runs on ``db.<landing>`` filtered by the version's\nmatch rule. Versions without ``meta_schema`` always use the landing table.\n\nReturns one record per path with observed types, a suggested column name,\nand whether the path is already promoted. ``?samples=N`` adds random\ndistinct example values. ``?stats=true`` adds coverage + distinct counts.\n\nA caller without a platform grant holding ``schema:read`` reads only its own\norgs' rows, as the sampler holds it, and a table it cannot be held on is 403.",
         "operationId": "schemas.json-paths",
         "parameters": [
           {
@@ -20347,7 +20347,7 @@
           "schemas"
         ],
         "summary": "Sample Source Rows",
-        "description": "Return random sample rows for a source, scoped to its match rule.\n\nResolves the requested ``version`` (or the source's current version). A\nversion with a ``meta_schema`` uses ``db.<source>`` only after that version\nis deployed and the table exists; otherwise rows are read from\n``db.<landing>`` filtered by the version's match rule.\n\nIntended for inspecting real data while authoring a match condition or CEL\nbefore promoting any JSON path -- a row-level companion to the per-path\n``?samples=N`` on ``/json-paths``.\n\nA caller without a platform grant holding ``schema:read`` reads only its own\norgs' rows, as the sampler holds it, and a table it cannot be held on is 403.",
+        "description": "Return random sample rows for a source, scoped to its match rule.\n\nResolves the requested ``version`` (or the source's current version). A\nversion with a ``meta_schema`` uses ``db.<source>`` only after that version\nis deployed and the table exists. Otherwise rows are read from\n``db.<landing>`` filtered by the version's match rule.\n\nIntended for inspecting real data while authoring a match condition or CEL\nbefore promoting any JSON path -- a row-level companion to the per-path\n``?samples=N`` on ``/json-paths``.\n\nA caller without a platform grant holding ``schema:read`` reads only its own\norgs' rows, as the sampler holds it, and a table it cannot be held on is 403.",
         "operationId": "schemas.sample-rows",
         "parameters": [
           {
@@ -20472,7 +20472,7 @@
           "schemas"
         ],
         "summary": "Promote Field",
-        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with an ``@source`` directive\nnaming the bare record path, which is what dfe-loader reads to fill the column on\nthe next ingest. Existing rows are not backfilled. Core meta-schemas are forked to\n``{source_name}_{schema_stem}`` under the same parent path before promoting.\n``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,\nadding meta-schema versions, or updating the source. A core source, such as the\nlanding source ``main``, is refused with 409 before any schema is resolved or\nwritten, dry run included; its ``json-paths`` and ``sample-rows`` reads stay open.",
+        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with an ``@source`` directive\nnaming the bare record path, which is what dfe-loader reads to fill the column on\nthe next ingest. Existing rows are not backfilled. Core meta-schemas are forked to\n``{source_name}_{schema_stem}`` under the same parent path before promoting.\n``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,\nadding meta-schema versions, or updating the source. A core source, such as the\nlanding source ``main``, is refused with 409 before any schema is resolved or\nwritten, dry run included. Its ``json-paths`` and ``sample-rows`` reads stay open.",
         "operationId": "schemas.promote-field",
         "parameters": [
           {
@@ -20667,7 +20667,7 @@
           "SCIM"
         ],
         "summary": "Create User",
-        "description": "Provision a user. IdP-owned; local password is randomised when omitted.\n\nA password the IdP does send is held to the same length floor as every other\npassword the API sets, and one under it is refused rather than replaced.",
+        "description": "Provision a user. IdP-owned. Local password is randomised when omitted.\n\nA password the IdP does send is held to the same length floor as every other\npassword the API sets, and one under it is refused rather than replaced.",
         "operationId": "scim.v2.users.create",
         "responses": {
           "200": {
@@ -21972,7 +21972,7 @@
           "sigma"
         ],
         "summary": "Generate All Sigma Views",
-        "description": "Generate Sigma view DDL for all sources (stored definitions win over field maps).\n\nDefaults to the data database, since that is where a propagated hunt reads\nthe view from (``{source}_sigma``); an explicit ``database`` still overrides it.",
+        "description": "Generate Sigma view DDL for all sources (stored definitions win over field maps).\n\nDefaults to the data database, since that is where a propagated hunt reads\nthe view from (``{source}_sigma``). An explicit ``database`` still overrides it.",
         "operationId": "sigma.views.create",
         "parameters": [
           {
@@ -22370,7 +22370,7 @@
           "sigma"
         ],
         "summary": "Generate Sigma View",
-        "description": "Generate (preview) Sigma view DDL for a source.\n\nA stored view definition drives generation - including its JSON-derived\ncolumns - when one exists; otherwise falls back to the static field maps via\nthe source mapper, keeping only the mappings whose column the source's table\ncarries. Returns the DDL string; does NOT execute it against ClickHouse.\n\nDefaults to the data database, since that is where a propagated hunt reads\nthe view from (``{source}_sigma``); an explicit ``database`` still overrides it.",
+        "description": "Generate (preview) Sigma view DDL for a source.\n\nA stored view definition drives generation - including its JSON-derived\ncolumns - when one exists. Otherwise falls back to the static field maps via\nthe source mapper, keeping only the mappings whose column the source's table\ncarries. Returns the DDL string. Does NOT execute it against ClickHouse.\n\nDefaults to the data database, since that is where a propagated hunt reads\nthe view from (``{source}_sigma``). An explicit ``database`` still overrides it.",
         "operationId": "sigma.views.post",
         "parameters": [
           {
@@ -23260,7 +23260,7 @@
           "sigma"
         ],
         "summary": "Disable Provider",
-        "description": "Disable a provider (blocks scheduled polling; a manual sync is refused).",
+        "description": "Disable a provider (blocks scheduled polling, a manual sync is refused).",
         "operationId": "sigma.providers.disable",
         "parameters": [
           {
@@ -23354,7 +23354,7 @@
           "sigma"
         ],
         "summary": "Sync Provider Endpoint",
-        "description": "Trigger a provider sync into the catalogue.\n\nSubmitted to the task manager (a git-repo clone is long-running); blocks up to\n``wait`` seconds for inline completion, else returns ``pending`` - poll via\nGET /sigma/syncs/{task_id}.",
+        "description": "Trigger a provider sync into the catalogue.\n\nSubmitted to the task manager (a git-repo clone is long-running). Blocks up to\n``wait`` seconds for inline completion, else returns ``pending`` - poll via\nGET /sigma/syncs/{task_id}.",
         "operationId": "sigma.providers.sync",
         "parameters": [
           {
@@ -24020,7 +24020,7 @@
           "sigma"
         ],
         "summary": "Adopt Catalogue Rule",
-        "description": "Detach a rule from upstream (pin its content; a re-import records drift only).",
+        "description": "Detach a rule from upstream (pin its content, a re-import records drift only).",
         "operationId": "sigma.catalogue.adopt",
         "parameters": [
           {
@@ -24375,7 +24375,7 @@
           "sigma"
         ],
         "summary": "Propagate",
-        "description": "Generate sigma-bound DFE rules + hunts from the current selection.\n\nFor each SELECTED sigma rule, converts its detection to a ClickHouse WHERE over\nthe matching source's ``{source}_sigma`` view and stores a DFE rule (with a\n``sigma_rule_id`` back-reference), then binds it into a per-source hunt. Drifted\nor hand-edited bindings are reported ``skipped_drifted`` unless ``force``.\nSubmitted to the task manager; blocks up to ``wait`` seconds for inline\ncompletion, else returns ``pending`` - poll via GET /sigma/propagations/{id}.\n\nA production+team run commits each generated rule and hunt to its own review\nbranch rather than the branch the hunt runner syncs; the report carries every\nbranch and PR, and ``X-DFE-Review-Required`` says so on a run that completed\ninline. 422 ``unknown_org`` when ``hunt_customers`` names no registered org.",
+        "description": "Generate sigma-bound DFE rules + hunts from the current selection.\n\nFor each SELECTED sigma rule, converts its detection to a ClickHouse WHERE over\nthe matching source's ``{source}_sigma`` view and stores a DFE rule (with a\n``sigma_rule_id`` back-reference), then binds it into a per-source hunt. Drifted\nor hand-edited bindings are reported ``skipped_drifted`` unless ``force``.\nSubmitted to the task manager. Blocks up to ``wait`` seconds for inline\ncompletion, else returns ``pending`` - poll via GET /sigma/propagations/{id}.\n\nA production+team run commits each generated rule and hunt to its own review\nbranch rather than the branch the hunt runner syncs. The report carries every\nbranch and PR, and ``X-DFE-Review-Required`` says so on a run that completed\ninline. 422 ``unknown_org`` when ``hunt_customers`` names no registered org.",
         "operationId": "sigma.propagate",
         "parameters": [
           {
@@ -25739,7 +25739,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "List Overlays",
-        "description": "List substrate/platform overlay resources in the deploy repo's infra/ dir.",
+        "description": "List infra overlay resources in the deploy repo's infra/ dir.",
         "operationId": "backing-services.overlays",
         "parameters": [
           {
@@ -26099,7 +26099,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "Set Overlay Var",
-        "description": "Set a substrate/platform value.\n\n409 managed_by_provider, before any other check, when DFE does not run the\nservice and the value is one of its read_only paths; helmvars:override does not\nlift it. 403 with the policy that blocked it when the var is protected - the\nstorage model, the data-layer modes and the disk size are decided at deploy, and\nmoving one on a live deployment is a data migration. 400 when the value would\nlower a declared node or broker count, or leave it undeclared (a parent map that\nomits it), which loses data rather than capacity; helmvars:override does not lift it.",
+        "description": "Set an infra overlay value.\n\n409 managed_by_provider, before any other check, when DFE does not run the\nservice and the value is one of its read_only paths. helmvars:override does not\nlift it. 403 with the policy that blocked it when the var is protected - the\nstorage model, the data-layer modes and the disk size are decided at deploy, and\nmoving one on a live deployment is a data migration. 400 when the value would\nlower a declared node or broker count, or leave it undeclared (a parent map that\nomits it), which loses data rather than capacity. helmvars:override does not lift it.",
         "operationId": "backing-services.overlays.vars.apply",
         "parameters": [
           {
@@ -26237,7 +26237,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "Delete Overlay Var",
-        "description": "Revert a substrate/platform value to its chart default. Protected vars refuse.\n\n409 managed_by_provider, before any other check and whatever the caller holds,\nwhen DFE does not run the service and the value is one of its read_only paths.\n400 when the revert would lower a declared node or broker count, or leave it\nundeclared, unless the caller holds helmvars:override. An undeclared count falls\nto the chart or profile default, which the engine cannot read, so a revert that\nleaves one undeclared is refused whatever that default is.",
+        "description": "Revert an infra overlay value to its chart default. Protected vars refuse.\n\n409 managed_by_provider, before any other check and whatever the caller holds,\nwhen DFE does not run the service and the value is one of its read_only paths.\n400 when the revert would lower a declared node or broker count, or leave it\nundeclared, unless the caller holds helmvars:override. An undeclared count falls\nto the chart or profile default, which the engine cannot read, so a revert that\nleaves one undeclared is refused whatever that default is.",
         "operationId": "backing-services.overlays.vars.delete",
         "parameters": [
           {
@@ -27212,7 +27212,7 @@
           "App Management"
         ],
         "summary": "Set App Config",
-        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and neither this response nor a read route on this\nsurface says what it is. A masked value written back as it was read keeps the\nstored credential; the mask where nothing is stored is a 400 ``masked_value``.\nA changed field beside a stored credential, in the same mapping or with the\ncredential one mapping down (``brokers`` beside ``sasl.password``), is a 400\n``credential_reentry_required`` until that mapping is written whole with its\ncredentials typed again. A setting inside another mapping beside it, such as\n``producer.retries``, is not. ``config`` and ``extraEnv`` are roots, so a\nsetting directly under either never needs one.\n\n409 where the deployment already decides the value: a config path the chart\nderives, or an `extraEnv` name the chart sets for this app.",
+        "description": "Write options the app declares, and environment keys it does not.\n\nJudged against the app's own contract before anything is committed, so a value\nthe app would refuse at startup leaves the deploy repo where it was rather than\nlanding a commit an operator then has to revert.\n\nA secret is written like any other option: it goes into the overlay as the rest\nof this surface writes one, and neither this response nor a read route on this\nsurface says what it is. A masked value written back as it was read keeps the\nstored credential. The mask where nothing is stored is a 400 ``masked_value``.\nA changed field beside a stored credential, in the same mapping or with the\ncredential one mapping down (``brokers`` beside ``sasl.password``), is a 400\n``credential_reentry_required`` until that mapping is written whole with its\ncredentials typed again. A setting inside another mapping beside it, such as\n``producer.retries``, is not. ``config`` and ``extraEnv`` are roots, so a\nsetting directly under either never needs one.\n\n409 where the deployment already decides the value: a config path the chart\nderives, or an `extraEnv` name the chart sets for this app.",
         "operationId": "apps.config.put",
         "parameters": [
           {
@@ -28161,7 +28161,7 @@
           "App Management"
         ],
         "summary": "Relink App Files",
-        "description": "Re-resolve every link in the set to what its target now names.\n\nA tag link follows its tag; a version-pinned link advances to the artefact's\ncurrent version. This is the fix-once-roll-everywhere half of the library.",
+        "description": "Re-resolve every link in the set to what its target now names.\n\nA tag link follows its tag. A version-pinned link advances to the artefact's\ncurrent version. This is the fix-once-roll-everywhere half of the library.",
         "operationId": "apps.files.relink",
         "parameters": [
           {
@@ -28289,7 +28289,7 @@
           "App Management"
         ],
         "summary": "Copy App Files",
-        "description": "Copy this instance's authored files onto another instance of the same app.\n\nA transform is written against one source; reusing it on another should not mean\nretyping it. Only the files move - the target keeps its own source binding,\nscaling and identity.",
+        "description": "Copy this instance's authored files onto another instance of the same app.\n\nA transform is written against one source. Reusing it on another should not mean\nretyping it. Only the files move - the target keeps its own source binding,\nscaling and identity.",
         "operationId": "apps.files.copy",
         "parameters": [
           {
@@ -29079,7 +29079,7 @@
           "App Management"
         ],
         "summary": "Dry Run App File",
-        "description": "Run an authored file over real events from the source, and report each one.\n\nNothing is written: no topic, no table, no commit. ``content`` runs unsaved\ncontent, which is what makes this useful in an editor; omitted, the file\nalready in the overlay runs instead.",
+        "description": "Run an authored file over real events from the source, and report each one.\n\nNothing is written: no topic, no table, no commit. ``content`` runs unsaved\ncontent, which is what makes this useful in an editor. Omitted, the file\nalready in the overlay runs instead.",
         "operationId": "apps.files.dry-run",
         "parameters": [
           {
@@ -30746,7 +30746,7 @@
           "Artefact Library"
         ],
         "summary": "Publish Version",
-        "description": "Publish content as a version.\n\nRe-sending identical content is a no-op naming the version that already holds\nit; sending different content at an existing version number is refused.",
+        "description": "Publish content as a version.\n\nRe-sending identical content is a no-op naming the version that already holds\nit. Sending different content at an existing version number is refused.",
         "operationId": "library.versions.create",
         "parameters": [
           {
@@ -31553,7 +31553,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Get Action",
-        "description": "One defined action; a credential a legacy definition still carries comes back masked.",
+        "description": "One defined action. A credential a legacy definition still carries comes back masked.",
         "operationId": "governance.actions.get",
         "parameters": [
           {
@@ -31870,7 +31870,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Invoke Action",
-        "description": "Invoke a defined action - gated on the action's OWN required_action.\n\n``body.params`` supplies values for the action's declared params (422 on a\nconstraint violation; omitted params take their defaults). A hunt or rule\ndocument the action would leave invalid is 422 ``invalid_document``, with the\nhunts API's own message. A change to the infra overlay meets the backing-services\nguards on what the action leaves, dry run included, whatever the caller holds:\n409 ``managed_by_provider`` for a read-only value of a service DFE does not run,\nthen 400 ``scale_down_refused`` where it lowers or un-declares a node or broker\ncount.\nDirect commit in dev/solo; a production+team invoke is routed to a review PR (or\n409 ``review_required`` when no forge is configured).",
+        "description": "Invoke a defined action - gated on the action's OWN required_action.\n\n``body.params`` supplies values for the action's declared params (422 on a\nconstraint violation. Omitted params take their defaults). A hunt or rule\ndocument the action would leave invalid is 422 ``invalid_document``, with the\nhunts API's own message. A change to the infra overlay meets the backing-services\nguards on what the action leaves, dry run included, whatever the caller holds:\n409 ``managed_by_provider`` for a read-only value of a service DFE does not run,\nthen 400 ``scale_down_refused`` where it lowers or un-declares a node or broker\ncount.\nDirect commit in dev/solo. A production+team invoke is routed to a review PR (or\n409 ``review_required`` when no forge is configured).",
         "operationId": "governance.actions.invoke",
         "parameters": [
           {
@@ -32592,7 +32592,7 @@
           "Governed Ops: Gitops"
         ],
         "summary": "Put Auto Merge",
-        "description": "Toggle auto-merge. Enabling requires the deployment gate; disabling always works.",
+        "description": "Toggle auto-merge. Enabling requires the deployment gate. Disabling always works.",
         "operationId": "gitops.auto-merge.put",
         "requestBody": {
           "content": {
@@ -32685,7 +32685,7 @@
           "Governed Ops: Gitops"
         ],
         "summary": "List Classes",
-        "description": "The resource-class registry - what VarChange.cls may legally name.\n\nRegistry metadata only (no resource content), so any authenticated caller\nmay read it; the per-class listings below are gated by each class's grant.",
+        "description": "The resource-class registry - what VarChange.cls may legally name.\n\nRegistry metadata only (no resource content), so any authenticated caller\nmay read it. The per-class listings below are gated by each class's grant.",
         "operationId": "gitops.classes.list",
         "parameters": [
           {
@@ -33099,7 +33099,7 @@
           "Governed Ops: Gitops"
         ],
         "summary": "Get Log",
-        "description": "Gitcrud audit log: every governed-ops git change, newest-first.\n\nFlat + cursor-paginated by default; ?group_by= buckets the page for\nsummaries. applied_revision (the Argo-synced SHA) turns state into\napplied/pending; without it every entry is 'committed'.",
+        "description": "Gitcrud audit log: every governed-ops git change, newest-first.\n\nFlat + cursor-paginated by default; ?group_by= buckets the page for\nsummaries. applied_revision (the Argo-synced SHA) turns state into\napplied/pending. Without it every entry is 'committed'.",
         "operationId": "gitops.log.list",
         "parameters": [
           {
@@ -33381,7 +33381,7 @@
           "Governed Ops: Lifecycle"
         ],
         "summary": "Set Lifecycle",
-        "description": "Set a service's lifecycle state - per-service RBAC; pinned services are 404.",
+        "description": "Set a service's lifecycle state - per-service RBAC. Pinned services are 404.",
         "operationId": "lifecycle.post",
         "parameters": [
           {
@@ -36060,7 +36060,7 @@
           "git_token"
         ],
         "title": "AuthKind",
-        "description": "How a provider authenticates. Secrets are held via the scalo.secrets seam."
+        "description": "How a provider authenticates. Secrets are held via the scalo.secrets interface."
       },
       "AutoMergeRequest": {
         "properties": {
@@ -39162,7 +39162,7 @@
         },
         "type": "object",
         "title": "DeclaredValue",
-        "description": "One value as the deploy repo declares it.\n\n``source`` names the overlay file it came from; a null source means the\ndeployment declared nothing and the chart or profile default applies. Those\ndefaults live in dfe-infra, which the engine does not read, so the API says\n\"not declared\" rather than guessing a number."
+        "description": "One value as the deploy repo declares it.\n\n``source`` names the overlay file it came from. A null source means the\ndeployment declared nothing and the chart or profile default applies. Those\ndefaults live in dfe-infra, which the engine does not read, so the API says\n\"not declared\" rather than guessing a number."
       },
       "DefaultComparison": {
         "properties": {
@@ -39718,7 +39718,7 @@
           "_field_type"
         ],
         "title": "DraftColumn",
-        "description": "A ready-to-send meta-schema column derived from a discovered JSON path.\n\nShaped to drop straight into ``MetaSchemaAddVersionRequest.columns`` (the\ncreate-version endpoint) or a new meta-schema's version -- the UI sends these\nverbatim, no field mapping. ``type`` is derived from the first observed\nClickHouse type; for a multi-type path (``is_consistent=false``) confirm it\nbefore saving."
+        "description": "A ready-to-send meta-schema column derived from a discovered JSON path.\n\nShaped to drop straight into ``MetaSchemaAddVersionRequest.columns`` (the\ncreate-version endpoint) or a new meta-schema's version -- the UI sends these\nverbatim, no field mapping. ``type`` is derived from the first observed\nClickHouse type. For a multi-type path (``is_consistent=false``) confirm it\nbefore saving."
       },
       "DryRunEventModel": {
         "properties": {
@@ -43149,7 +43149,7 @@
           "versions"
         ],
         "title": "MetaSchema",
-        "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk."
+        "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    path: Registry path key (e.g. ``aws/cloudtrail``). Omitted from YAML on disk."
       },
       "MetaSchemaAddVersionRequest": {
         "properties": {
@@ -48827,7 +48827,7 @@
           "anomaly"
         ],
         "title": "SampleMode",
-        "description": "How to pick the sample.\n\n- ``recent``  - newest rows first (fast tail; ClickHouse ORDER BY ts DESC,\n  Kafka reads from the partition high-watermark backwards).\n- ``random``  - uniform-ish random rows (fair distribution, no recency bias).\n- ``smart``   - logreducer representative/diverse sample (default). Gated.\n- ``anomaly`` - logreducer isolation-forest outliers (the weird events). Gated."
+        "description": "How to pick the sample.\n\n- ``recent``  - newest rows first (fast tail, ClickHouse ORDER BY ts DESC,\n  Kafka reads from the partition high-watermark backwards).\n- ``random``  - uniform-ish random rows (fair distribution, no recency bias).\n- ``smart``   - logreducer representative/diverse sample (default). Gated.\n- ``anomaly`` - logreducer isolation-forest outliers (the weird events). Gated."
       },
       "SampleRecord": {
         "properties": {
@@ -48995,7 +48995,7 @@
         },
         "type": "object",
         "title": "SampleRequest",
-        "description": "A request to sample a source.\n\nProvide EITHER a registered ``source`` (its CH table / land topic are\nresolved for you) OR an explicit ``table``/``topic`` (ad-hoc - for a source\nthat is not registered yet, e.g. AI onboarding). ``filter`` (ClickHouse\nbackend only) must be one condition over the sampled table's columns; it is\nreplaced by the condition rendered from its parse tree, and anything else is\nrefused when the request is built."
+        "description": "A request to sample a source.\n\nProvide EITHER a registered ``source`` (its CH table / land topic are\nresolved for you) OR an explicit ``table``/``topic`` (ad-hoc - for a source\nthat is not registered yet, e.g. AI onboarding). ``filter`` (ClickHouse\nbackend only) must be one condition over the sampled table's columns. It is\nreplaced by the condition rendered from its parse tree, and anything else is\nrefused when the request is built."
       },
       "SampleResult": {
         "properties": {
@@ -50801,7 +50801,7 @@
           "default_ttl_days"
         ],
         "title": "SetupStatus",
-        "description": "Pre-login setup snapshot: the wizard state plus what is configured.\n\nAccounts are deliberately absent. Whether a real user exists is reported\nthrough the ``first_user`` step; the account list itself is never served\nto an unauthenticated caller."
+        "description": "Pre-login setup snapshot: the wizard state plus what is configured.\n\nAccounts are deliberately absent. Whether a real user exists is reported\nthrough the ``first_user`` step. The account list itself is never served\nto an unauthenticated caller."
       },
       "SetupStep": {
         "properties": {
@@ -50926,7 +50926,7 @@
           "source_name"
         ],
         "title": "SigmaViewDefinition",
-        "description": "A CRUD-managed Sigma view definition for one source.\n\nKeyed (in the store) by ``source_name``; the generated view targets table\n``source_name`` and is named ``{source_name}_sigma``. ``include_source_columns``\nappends ``SELECT *`` so the base table columns remain visible alongside the\nSigma-aligned aliases (the legacy view's behaviour)."
+        "description": "A CRUD-managed Sigma view definition for one source.\n\nKeyed (in the store) by ``source_name``. The generated view targets table\n``source_name`` and is named ``{source_name}_sigma``. ``include_source_columns``\nappends ``SELECT *`` so the base table columns remain visible alongside the\nSigma-aligned aliases (the legacy view's behaviour)."
       },
       "SigmaViewResult": {
         "properties": {
@@ -51009,7 +51009,7 @@
         },
         "type": "object",
         "title": "SigmaViewWriteRequest",
-        "description": "Create/replace body for a source's Sigma view definition (source_name is the path).\n\nEach column maps a Sigma field to a real source column OR a path inside the\nsource's ``_json`` payload (a JSON-derived column); the ``SigmaViewColumn``\nvalidator enforces exactly one per column."
+        "description": "Create/replace body for a source's Sigma view definition (source_name is the path).\n\nEach column maps a Sigma field to a real source column OR a path inside the\nsource's ``_json`` payload (a JSON-derived column). The ``SigmaViewColumn``\nvalidator enforces exactly one per column."
       },
       "SourceBundle-Input": {
         "properties": {
@@ -54105,7 +54105,7 @@
         },
         "type": "object",
         "title": "SystemDefaultsPatch",
-        "description": "A partial change. Omitted fields stay as they are; null clears that override."
+        "description": "A partial change. Omitted fields stay as they are. Null clears that override."
       },
       "SystemDefaultsUpdate": {
         "properties": {
@@ -54456,7 +54456,7 @@
           "error"
         ],
         "title": "TopicFailure",
-        "description": "One topic the broker would not do the thing to; the broker's own text is in the log."
+        "description": "One topic the broker would not do the thing to. The broker's own text is in the log."
       },
       "TopicRemoveResponse": {
         "properties": {
@@ -54647,7 +54647,7 @@
         },
         "type": "object",
         "title": "TopicUpdateResponse",
-        "description": "Outcome of a converge pass.\n\n``refused`` is what DFE declined to do (a partition decrease, a replication\nfactor change); ``failed`` is what the broker rejected. They are different\nproblems with different fixes, so they are different lists."
+        "description": "Outcome of a converge pass.\n\n``refused`` is what DFE declined to do (a partition decrease, a replication\nfactor change). ``failed`` is what the broker rejected. They are different\nproblems with different fixes, so they are different lists."
       },
       "TotalsResponse": {
         "properties": {

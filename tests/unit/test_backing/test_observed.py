@@ -8,12 +8,12 @@
 
 """An observed size is shown, never acted on, so every failure reads as unknown.
 
-The broker count used to be readable only through the replication clamp, which
-turns a failure into 1. A card showing "1 broker" for an unreachable cluster
-states a size nobody measured, so the read now says None and the clamp keeps its 1.
+The replication clamp turns a failed broker read into 1. A card showing "1 broker"
+for an unreachable cluster states a size nobody measured, so the read says None
+and the clamp keeps its 1.
 
 ClickHouse's successful read is pinned against a real server in
-tests/integration/test_backing_observed_ch.py; the down-server path is here.
+tests/integration/test_backing_observed_ch.py. The down-server path is here.
 """
 
 import pytest
@@ -25,7 +25,7 @@ from tests.support.down_clickhouse import down_clickhouse
 
 
 class _ReportingAdmin(TopicAdmin):
-    """The admin seam the topic module injects, answering one node count or failing.
+    """The admin client the topic module injects, answering one node count or failing.
 
     It builds no AdminClient: the conftest guard refuses one in a unit test.
     """

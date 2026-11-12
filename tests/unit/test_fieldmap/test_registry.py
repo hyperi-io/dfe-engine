@@ -1,4 +1,4 @@
-"""Tests for FieldMapRegistry — CRUD, seed, and listing."""
+"""Tests for FieldMapRegistry -- CRUD, seed, and listing."""
 
 import pytest
 
@@ -240,7 +240,7 @@ class TestSeedDefaults:
         custom = _make_field_map(mappings={"Custom": "custom_col"})
         registry.save_map(custom)
 
-        # Seed again — should NOT overwrite
+        # Seed again -- should NOT overwrite
         count = registry.seed_defaults()
         assert count == 0
 
@@ -255,7 +255,7 @@ class TestSeedDefaults:
         custom = _make_field_map(mappings={"Custom": "custom_col"})
         registry.save_map(custom)
 
-        # Seed with overwrite — should replace
+        # Seed with overwrite -- should replace
         count = registry.seed_defaults(overwrite=True)
         assert count == 4  # sigma, ecs, cim, ocsf
 

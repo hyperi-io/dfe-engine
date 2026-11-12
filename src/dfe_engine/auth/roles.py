@@ -15,7 +15,7 @@ Wildcard rules:
     "config:*"            -- trailing wildcard: matches "config:read", "config:write",
                             "config:read:sub", etc. (last segment is *, any suffix)
     "argo:*"              -- trailing wildcard: matches "argo:applications:sync" (3 segs)
-    "service:*:config:*"  -- mid wildcard: * matches a single segment; last * is trailing
+    "service:*:config:*"  -- mid wildcard: * matches a single segment. Last * is trailing
     "service:*:config:read" -- mid wildcard only: exact segment count required (no trailing)
 
 Usage:

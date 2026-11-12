@@ -10,7 +10,7 @@
 
 The build raises the registry's own error, not a schema build error. Pinning the
 defaults commits before any table is touched, so that error has to come back as
-that source's outcome; the source pass has to count it and carry on.
+that source's outcome. The source pass has to count it and carry on.
 """
 
 from pathlib import Path
@@ -45,7 +45,7 @@ class _Result:
 
 
 class _Server:
-    """Every table named in *tables* exists as a MergeTree with no TTL; nothing else does."""
+    """Every table named in *tables* exists as a MergeTree with no TTL. Nothing else does."""
 
     def __init__(self, tables: list[str]) -> None:
         self._tables = tables

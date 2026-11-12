@@ -37,7 +37,7 @@ pytest_plugins = [
 
 # --------------------------------------------------------------------------
 # Test-session guard 1/2: never start a live OTLP metrics/trace/log exporter.
-# There is no OTLP collector at localhost:4317 in CI (or most dev machines); a
+# There is no OTLP collector at localhost:4317 in CI (or most dev machines). A
 # live PeriodicExportingMetricReader/OTLPMetricExporter would retry on every
 # export and block on shutdown ("Can't shutdown multiple times"), hanging the
 # run. scalo>=2.29.7 already defaults the endpoint off, but pin it hard here so
@@ -97,14 +97,14 @@ except ImportError:
 # refused connection for the FULL budget - 60s per op, up to 300s while a
 # CH-Cloud wake is in flight (settings.clickhouse.resilience). A handful of
 # such ops stalled the suite for 30-70+ min and timed out CI. The connection
-# REFUSED itself is instant (~2ms); it is the 60s retry budget that hangs.
+# REFUSED itself is instant (~2ms). It is the 60s retry budget that hangs.
 #
 # Shrink the DEFAULT resilience budget to ~50ms for the test session, so a
 # CH-down op still raises ServiceUnavailable (-> API 503, semantics preserved)
 # but in milliseconds, not minutes. This reaches BOTH direct-constructed test
 # settings (which bypass the env cascade) and load_settings(). The CH resilience
 # UNIT tests pass their budgets EXPLICITLY, so this default change never touches
-# them; integration tests hit a READY CH (first attempt succeeds, no retry), so
+# them. Integration tests hit a READY CH (first attempt succeeds, no retry), so
 # the budget is irrelevant there too.
 try:
     from dfe_engine.settings import ClickHouseResilienceSettings
@@ -146,14 +146,14 @@ except Exception:  # never let a settings refactor break test collection
 # unreachable dependency that is up to ~90s of real sleeping per call. Stamina's
 # own test mode disables the backoff AND caps attempts at 1, so a would-be
 # outbound call fails in ~0s (single attempt) instead of waiting the budget.
-# Unit tests already stub their outbound calls; this is the backstop so a test
+# Unit tests already stub their outbound calls. This is the backstop so a test
 # that forgets can never wait-forever on HTTP. scalo tests the retry engine
 # itself, so nothing here needs the real backoff.
 try:
     import stamina
 
     stamina.set_testing(True, attempts=1)
-except ImportError:  # stamina ships with scalo[http]; skip if absent
+except ImportError:  # stamina ships with scalo[http], skip if absent
     pass
 
 

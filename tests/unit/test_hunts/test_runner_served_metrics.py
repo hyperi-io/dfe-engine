@@ -29,7 +29,7 @@ def exposition() -> str:
     """The Prometheus text the probe prints after one tick."""
     env = dict(os.environ)
     env.pop("PYTEST_ADDOPTS", None)
-    # The suite disables the SDK for itself; the pod runs with it on.
+    # The suite disables the SDK for itself. The pod runs with it on.
     env.pop("OTEL_SDK_DISABLED", None)
     # A blank endpoint turns the OTLP push off, so the probe never dials a collector.
     env["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""

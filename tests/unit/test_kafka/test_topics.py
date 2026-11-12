@@ -186,7 +186,7 @@ class TestSourceTopicSpecs:
         assert [s.name for s in specs] == ["syslog_land"]
 
     def test_a_main_landing_source_claims_no_landing_topic(self):
-        # The landing source owns main_land; claiming it here would render it
+        # The landing source owns main_land. Claiming it here would render it
         # with this source's partition count instead.
         specs = source_topic_specs(_main_lander(), partitions=3, replication_factor=1)
         assert specs == []
@@ -872,7 +872,7 @@ class TestTopicAdminAdapter:
         assert created["client"].calls[0] == ("list_topics", (), {"topic": "t", "timeout": 10.0})
 
     def test_describe_config_renders_a_null_value_as_empty(self, monkeypatch):
-        """librdkafka reports an unset config with value None; str(None) is a lie."""
+        """librdkafka reports an unset config with value None. str(None) is a lie."""
         admin, _ = self._admin(monkeypatch)
         assert admin.describe_config("t") == {
             "retention.ms": "604800000",
@@ -933,7 +933,7 @@ class TestAdminConfig:
         assert conf["sasl.password"] == "p"
 
     def test_a_mechanism_without_a_sasl_transport_is_refused(self):
-        """librdkafka would warn and connect UNAUTHENTICATED; that must not pass silently."""
+        """librdkafka would warn and connect UNAUTHENTICATED. That must not pass silently."""
         settings = _settings(
             bootstrap_servers="b:9092",
             security_protocol="PLAINTEXT",
@@ -993,7 +993,7 @@ class TestStrandedSourceTopics:
 
     scalo's resolver suppresses a `_land` topic whenever the matching `_load` one
     exists, so the leftover stops the loader reading the topic the receiver is
-    still producing to. The deploy reports it; deleting it is a separate call.
+    still producing to. The deploy reports it. Deleting it is a separate call.
     """
 
     class _Admin:

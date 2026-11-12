@@ -34,7 +34,7 @@ from scalo.deployment import (
     WritablePath,
 )
 
-# scalo requires an explicit registry, so default to the one dfe-engine publishes to; ops override via env.
+# scalo requires an explicit registry, so default to the one dfe-engine publishes to. Ops override via env.
 _DEFAULT_IMAGE_REGISTRY = "ghcr.io/hyperi-io"
 
 
@@ -56,7 +56,7 @@ def engine_deployment_contract() -> DeploymentContract:
     """Build the deployment contract for dfe-engine.
 
     ``image_registry`` is ``DFE_ENGINE_DEPLOYMENT_IMAGE_REGISTRY`` when that env var is
-    set, else ``_DEFAULT_IMAGE_REGISTRY``; no config file sets it. The base image
+    set, else ``_DEFAULT_IMAGE_REGISTRY``. No config file sets it. The base image
     is derived by scalo from ``python_version``.
 
     Returns:
@@ -69,7 +69,7 @@ def engine_deployment_contract() -> DeploymentContract:
         # Observability port (#106). scalo's ServiceApp binds this and
         # serves health + /metrics on it, SEPARATE from the API traffic port -- so
         # the unauthenticated /metrics is no longer on the public 8000. API traffic
-        # is the `http` extra port below; the ingress targets that.
+        # is the `http` extra port below. The ingress targets that.
         metrics_port=9090,
         extra_ports=[PortContract(name="http", port=8000)],
         health=HealthContract(
@@ -91,7 +91,7 @@ def engine_deployment_contract() -> DeploymentContract:
         or _DEFAULT_IMAGE_REGISTRY,
         python_version="3.14",
         # Digest-pinned runtime base (#106). python:3.14-slim is already
-        # Debian 13 trixie; pinned so the tag cannot float. The committed
+        # Debian 13 trixie. Pinned so the tag cannot float. The committed
         # Dockerfile's runtime FROM must match this literal (validate_dockerfile
         # substring check). Renovate bumps it with the Dockerfile through the
         # custom manager in renovate.json, so keep it on one line in this shape.

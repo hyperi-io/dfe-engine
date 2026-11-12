@@ -9,7 +9,7 @@
 
 Every endpoint returns ``{"value": <int>}`` so a KEDA ``metrics-api`` trigger uses a
 single ``valueLocation: value`` regardless of query. ``/q/{name}`` is the generic
-route; ``/keda/pressure`` and ``/keda/hunt-backlog`` are readable aliases for the two
+route. ``/keda/pressure`` and ``/keda/hunt-backlog`` are readable aliases for the two
 built-in queries. Nothing here 5xx's on a metric outage - the shim's fail-safe turns
 that into a held value (KEDA treats a 5xx as an error and may apply its own fallback).
 """

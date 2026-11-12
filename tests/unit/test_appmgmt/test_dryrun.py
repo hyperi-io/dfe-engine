@@ -5,10 +5,10 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The dry-run seam: bounds, honest statuses, and no invented results.
+"""The dry-run boundary: bounds, honest statuses, and no invented results.
 
 The backend is absent in this checkout, so the tests that need one substitute a
-fake at the import site. That is the point of the seam - an absent backend must
+fake at the import site. That is the point of the boundary - an absent backend must
 report ``unavailable``, never a pass.
 """
 

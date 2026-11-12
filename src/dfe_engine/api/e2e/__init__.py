@@ -12,7 +12,7 @@ Mounted by ``create_app`` only when ``DFE_ENGINE_E2E_SERVER`` is on and the post
 non-production. Lives under ``/api/e2e`` (not the versioned product API). In
 that process, ``/docs`` has a spec dropdown: **API** (``/openapi.json``) vs
 **E2E** (``/openapi.e2e.json``). The committed product spec never includes
-them; ``openapi/openapi.e2e.json`` is generated alongside it.
+them. ``openapi/openapi.e2e.json`` is generated alongside it.
 
 GET  /api/e2e/status       -> confirm the group is live
 POST /api/e2e/seed-static  -> run a named seed script (e.g. seed_admin)
@@ -49,7 +49,7 @@ E2E_OPENAPI_TAG: dict[str, str] = {
     ),
 }
 
-# Hidden from the generated `dfe` CLI; empty security so Swagger Try-it-out
+# Hidden from the generated `dfe` CLI. Empty security so Swagger Try-it-out
 # does not demand a Bearer token for these unauthenticated routes.
 _E2E_OPENAPI_EXTRA: dict[str, Any] = {**CLI_HIDDEN, "security": []}
 

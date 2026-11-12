@@ -189,7 +189,7 @@ class _Console:
         return f"{self.base_url}{path}"
 
 
-# Two concurrent probes each wait here for the other; a serial prober never gets past it.
+# Two concurrent probes each wait here for the other. A serial prober never gets past it.
 _PAIR = threading.Barrier(2, timeout=5.0)
 
 

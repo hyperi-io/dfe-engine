@@ -89,7 +89,7 @@ def test_zero_removes_the_ttl_and_clearing_restores_the_deployment_default(ch_cl
     deploy_source(name="syslog-zero", stack=stack)
     db = stack.database
     # The stored build a console's plan step leaves behind carries no columns, and the
-    # TTL has to be placed over one; the pass must not lean on it.
+    # TTL has to be placed over one. The pass must not lean on it.
     stored = stack.client.post("/api/v1/sources/syslog-zero/build", headers=stack.headers)
     assert stored.status_code == 200, stored.text
 

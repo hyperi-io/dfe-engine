@@ -114,7 +114,7 @@ def test_a_server_out_of_memory_at_connect_is_waited_out_not_fatal():
 
 
 def test_a_refused_login_is_retried_with_back_off_until_the_user_exists():
-    """The engine's background reconcile makes the user; the runner is still running when it does."""
+    """The engine's background reconcile makes the user. The runner is still running when it does."""
     manager = _manager()
     attempts = _Attempts([Exception(_AUTH_FAILED)] * 3 + [ConnectionRefusedError("refused")])
     waits: list[float] = []
@@ -156,7 +156,7 @@ def test_a_failure_waiting_cannot_fix_surfaces_at_once():
 
 
 def test_there_is_no_budget_after_which_the_runner_gives_up():
-    """The configured budget bounds a data-plane op; the runner has nothing else to do."""
+    """The configured budget bounds a data-plane op. The runner has nothing else to do."""
     attempts = _Attempts([ConnectionRefusedError("refused")] * 50)
     waits: list[float] = []
     short_budget = ClickHouseResilienceSettings(

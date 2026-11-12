@@ -10,7 +10,7 @@
 The worker runs ``INSERT ... SELECT`` built from rule text, so the identity it runs
 as decides what a crafted rule can reach. The service-only reconcile mints the user
 on the password a deployment provides, exactly as startup does with tenant isolation
-off; the runner then ticks over a rule compiled from real files, connected as that
+off. The runner then ticks over a rule compiled from real files, connected as that
 user, and the table functions and DDL a crafted rule would reach for are refused.
 
 The catalogue flag comes from the dfe-schemas wheel, so it is set here the way the
@@ -94,7 +94,7 @@ def runner_world(ch_client, ch_params, dfe_db, tmp_path):
 
 
 def _refusal(client, sql: str) -> str:
-    """The error ClickHouse answers ``sql`` with; fails the test if it runs."""
+    """The error ClickHouse answers ``sql`` with. Fails the test if it runs."""
     with pytest.raises(DatabaseError) as caught:
         client.query(sql)
     return str(caught.value)

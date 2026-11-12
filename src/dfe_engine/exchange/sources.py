@@ -170,7 +170,7 @@ def build_source_bundle(
         source_registry: Source registry to read from.
         schema_registry: Schema registry the pins are resolved against.
         name: The ``_source`` label.
-        version: Version id to export; ``None`` takes the source's ``current``.
+        version: Version id to export. ``None`` takes the source's ``current``.
 
     Returns:
         The bundle document.

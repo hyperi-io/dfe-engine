@@ -29,7 +29,7 @@ class AlertRule(BaseModel):
     """Fire to a destination when matched rows in a window cross a threshold.
 
     e.g. "only alert when >1000 of these in the last hour" -> threshold=1000,
-    window_seconds=3600; severity routes to a channel.
+    window_seconds=3600. Severity routes to a channel.
     """
 
     name: str

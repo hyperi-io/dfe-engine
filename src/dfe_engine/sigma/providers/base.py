@@ -14,10 +14,10 @@ optional `modified` / `date` change signals, tagged with a provenance `origin`.
 
 The store (dfe_engine.sigma.catalog) UPSERTs those docs by `id` into the id-keyed
 gitcrud catalogue - so every provider, and the default import file, feed ONE store
-the same way (see docs/superpowers/specs, section G). Providers never touch the
-store; the sync orchestrator (catalog.sync_provider) glues fetch -> upsert.
+the same way. Providers never touch the
+store. The sync orchestrator (catalog.sync_provider) glues fetch -> upsert.
 
-Auth (git token / api key) resolves through the scalo.secrets seam (DfeSecrets):
+Auth (git token / api key) resolves through the scalo.secrets interface (DfeSecrets):
 the provider config holds only a secret PATH, never a secret value.
 """
 
@@ -43,7 +43,7 @@ class ProviderKind(str, Enum):
 
 
 class AuthKind(str, Enum):
-    """How a provider authenticates. Secrets are held via the scalo.secrets seam."""
+    """How a provider authenticates. Secrets are held via the scalo.secrets interface."""
 
     NONE = "none"
     API_KEY = "api_key"
@@ -206,7 +206,7 @@ class SigmaProvider(abc.ABC):
         return f"provider:{self.config.name}"
 
     def _secret(self) -> str:
-        """Resolve the configured auth secret via the scalo.secrets seam, or ''.
+        """Resolve the configured auth secret via the scalo.secrets interface, or ''.
 
         Returns '' when no secret is configured OR no secrets store is wired, so a
         no-auth provider (SigmaHQ public repo, Valhalla demo key) just works.

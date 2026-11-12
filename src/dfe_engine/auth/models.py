@@ -120,7 +120,7 @@ def platform_grants(
 
     Args:
         grants: The grants to filter.
-        role_config: The role definitions ``authorize()`` reads; None reads the
+        role_config: The role definitions ``authorize()`` reads. None reads the
             shipped ones, as ``authorize()`` does.
 
     Returns:
@@ -183,7 +183,7 @@ def platform_caller(
 
     Args:
         user: The caller's auth context.
-        role_config: The role definitions ``authorize()`` reads; None reads the
+        role_config: The role definitions ``authorize()`` reads. None reads the
             shipped ones.
 
     Returns:

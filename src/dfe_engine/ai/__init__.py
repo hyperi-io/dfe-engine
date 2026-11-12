@@ -7,9 +7,9 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """AI assist touch-points for rule/transform/schema authoring.
 
-The interface defines the contracts; real models register via AIModuleRegistry.
-Default stub implementations make the four touch-points functional until migrated -
-see docs/superpowers/plans/2026-07-01-rules-hunts-versioning.md.
+The interface defines the contracts. Real models register via AIModuleRegistry.
+Default stub implementations keep the four touch-points functional until a real
+model registers.
 """
 
 from .interface import (

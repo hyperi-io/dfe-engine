@@ -88,7 +88,7 @@ FORM_WORDS = frozenset({"hash", "hashes", "digest", "digests", "json", "pem"})
 """A last word saying what form a value is held in, so the words before it are judged too.
 
 ``password_hash`` is a crackable digest of a password and ``tls.key_pem`` a private
-key; ``config_hash`` and ``capture_json`` stay shown.
+key. ``config_hash`` and ``capture_json`` stay shown.
 """
 
 CREDENTIAL_MAP = ("credentials",)

@@ -206,7 +206,7 @@ class TestReadsHoldTheTree:
 
 
 class TestOneViewPerRequest:
-    """A request reads many documents; they all answer from one view of the repo."""
+    """A request reads many documents. They all answer from one view of the repo."""
 
     @staticmethod
     def _count_head_checks(crud: GitCrud, monkeypatch) -> list[str]:

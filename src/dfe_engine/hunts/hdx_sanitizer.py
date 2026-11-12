@@ -58,7 +58,7 @@ _HDX_NAME_RE = re.compile(r"^__hdx_")
 _SERIES_CAP = "__hdx_series_limit"
 _METRIC_CTES = frozenset({"Source", "Bucketed", "TopGroups"})
 
-# ClickHouse clause order; clauses sharing a rank may appear in any order.
+# ClickHouse clause order. Clauses sharing a rank may appear in any order.
 _CLAUSE_RANK = {
     "WITH": 0,
     "SELECT": 1,
@@ -301,7 +301,7 @@ class _Reduced:
 
 
 def _tokenize(sql: str) -> list[_Tok]:
-    """Split SQL into significant tokens; whitespace and comments set ``spaced``."""
+    """Split SQL into significant tokens. Whitespace and comments set ``spaced``."""
     tokens: list[_Tok] = []
     spaced = False
     for match in _TOKEN_RE.finditer(sql):
@@ -575,7 +575,7 @@ def _prune(
 ) -> _Pruned | None:
     """Remove the AND-conjuncts ``drop`` accepts, at any depth of AND and brackets.
 
-    A conjunct under OR, NOT or a function call is never removed; ``check`` sees
+    A conjunct under OR, NOT or a function call is never removed. ``check`` sees
     every kept leaf and decides what that means.
     """
     if not toks:
@@ -652,7 +652,7 @@ class HdxSanitizer:
             reduced = self._reduce(_unwrap_all(toks), result)
         except RecursionError:
             raise HdxSanitizeError("The SQL is nested too deeply to reduce safely.") from None
-        clean = f"SELECT {', '.join(reduced.projection)} FROM {reduced.table}"  # noqa: S608 - reassembles the caller's own SQL into a rule base; nothing runs it here
+        clean = f"SELECT {', '.join(reduced.projection)} FROM {reduced.table}"  # noqa: S608 - reassembles the caller's own SQL into a rule base, nothing runs it here
         if reduced.where:
             clean = f"{clean} WHERE {reduced.where}"
         else:
@@ -741,7 +741,7 @@ class HdxSanitizer:
         aliases: dict[str, list[_Tok]],
         result: HdxSanitizeResult,
     ) -> list[str]:
-        """Keep row-level columns; drop aggregates and time buckets, falling back to ``*``."""
+        """Keep row-level columns. Drop aggregates and time buckets, falling back to ``*``."""
         kept: list[str] = []
         for item in items:
             expr, _ = _split_alias(item)
@@ -853,7 +853,7 @@ def _clause_name(toks: Sequence[_Tok], i: int) -> tuple[str, int] | None:
 def _clauses(toks: list[_Tok], *, strict: bool = True) -> list[_Clause]:
     """Split one SELECT statement into its top-level clauses, in order.
 
-    Strict refuses clauses a rule cannot carry and clauses out of order; lenient
+    Strict refuses clauses a rule cannot carry and clauses out of order. Lenient
     only requires the statement to open with WITH or SELECT.
     """
     clauses: list[_Clause] = []

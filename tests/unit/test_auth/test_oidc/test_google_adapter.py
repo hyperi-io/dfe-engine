@@ -132,7 +132,7 @@ class TestGetServiceMissingCredentials:
 
 
 # ---------------------------------------------------------------------------
-# resolve_user_groups (login enrichment) — missing credentials
+# resolve_user_groups (login enrichment) -- missing credentials
 # ---------------------------------------------------------------------------
 
 
@@ -151,7 +151,7 @@ class TestResolveUserGroupsMissingCredentials:
 
 
 # ---------------------------------------------------------------------------
-# list_all_groups — missing credentials
+# list_all_groups -- missing credentials
 # ---------------------------------------------------------------------------
 
 
@@ -172,7 +172,7 @@ class TestListAllGroupsMissingCredentials:
 
 
 # ---------------------------------------------------------------------------
-# test_connection — missing credentials
+# test_connection -- missing credentials
 # ---------------------------------------------------------------------------
 
 

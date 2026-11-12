@@ -41,7 +41,7 @@ def make_promotion_request(json_path: str, **kwargs: str | None) -> PromotionReq
     return PromotionRequest(json_path=json_path, **kwargs)
 
 
-# ── ch_dynamic_type_to_primitive ─────────────────────────────
+# -- ch_dynamic_type_to_primitive -----------------------------
 
 
 class ChTypeCase(TypedDict):
@@ -107,7 +107,7 @@ class TestChDynamicTypeToPrimitive:
         assert ch_dynamic_type_to_primitive(case["ch_type"]) == case["expected"]
 
 
-# ── suggested_column_name ────────────────────────────────────
+# -- suggested_column_name ------------------------------------
 
 
 class SuggestedNameCase(TypedDict):
@@ -145,7 +145,7 @@ class TestSuggestedColumnName:
         assert suggested_column_name(case["path"], case["existing"]) == case["expected"]
 
 
-# ── json_column_path / promoted_column_expr / qualified_table ─
+# -- json_column_path / promoted_column_expr / qualified_table -
 
 
 class JsonColumnPathCase(TypedDict):
@@ -232,7 +232,7 @@ class TestJsonSubcolumn:
             json_subcolumn("a`b")
 
 
-# ── promoted_paths ───────────────────────────────────────────
+# -- promoted_paths -------------------------------------------
 
 
 class PromotedPathsCase(TypedDict):
@@ -302,7 +302,7 @@ class TestListPromotedJsonFields:
         ]
 
 
-# ── build_promotion_columns ──────────────────────────────────
+# -- build_promotion_columns ----------------------------------
 
 _JSON_COL = make_meta_schema_column(name="_json", type="json")
 
@@ -579,7 +579,7 @@ class TestBuildPromotionColumns:
         assert "not valid for primitive 'string'" in present(outcomes[0].error)
 
 
-# ── promotion_preview_ddl ────────────────────────────────────
+# -- promotion_preview_ddl ------------------------------------
 
 
 class TestPromotionPreviewDdl:
@@ -598,7 +598,7 @@ class TestPromotionPreviewDdl:
         assert "ADD INDEX `idx_user_email` `user_email` TYPE bloom_filter" in joined
 
 
-# ── discover_paths (SQL building) ────────────────────────────
+# -- discover_paths (SQL building) ----------------------------
 
 
 class _RecordingClient:
@@ -803,11 +803,11 @@ class TestDiscoverPaths:
         assert result[0].distinct_count == 7
 
 
-# ── sample_rows (SQL building) ───────────────────────────────
+# -- sample_rows (SQL building) -------------------------------
 
 
 class _SampleRowsClient:
-    """Fake ClickHouse client exposing ``query_rows``; records each call."""
+    """Fake ClickHouse client exposing ``query_rows``. Records each call."""
 
     def __init__(
         self,

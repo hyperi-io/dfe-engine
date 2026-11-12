@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """SUPPORT-DRIFT notice over a real pins.yaml on disk (no mocks).
 
-The reading of pins.yaml itself is tested in test_pins.py; this is the notice.
+The reading of pins.yaml itself is tested in test_pins.py. This is the notice.
 """
 
 from __future__ import annotations

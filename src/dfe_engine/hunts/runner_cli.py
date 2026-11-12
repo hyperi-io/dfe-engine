@@ -26,7 +26,7 @@ Two commands, matching the two ways the runner is driven:
       k8s sends SIGTERM (or a local ctrl-c sends SIGINT). A ClickHouse that is down,
       or does not know the runner's user yet, is waited out at the connect and at
       every tick rather than ending the process (see ``connect``). Add a pod and it competes
-      for claims; kill one and its lease expires and is reclaimed - the coordination
+      for claims. Kill one and its lease expires and is reclaimed - the coordination
       is entirely in ClickHouse, so the loop here owns nothing but cadence + signals.
 
 The runner is held in a ``_ReloadingRunner`` so ``on_reload`` can rebuild it from
@@ -224,7 +224,7 @@ def run(
     init_scalo_logger(runner_metrics.SERVICE_NAME, otel_tracing=True)
     settings = load_settings()
     poll_seconds = settings.hunts.runner_poll_seconds if poll is None else poll
-    # The long-running worker is the only entry point that reports telemetry; the
+    # The long-running worker is the only entry point that reports telemetry. The
     # one-shot materialise publishes and exits before an export interval elapses.
     obs = runner_metrics.create()
     ch, coord = connect_when_available(
@@ -264,7 +264,7 @@ def run(
         _build_runner, lambda: refuse_tenant_lookups(ch, settings.hunts.lookup_databases)
     )
 
-    # SIGTERM (k8s pod stop) and SIGINT (local ctrl-c) both flip one stop flag; the
+    # SIGTERM (k8s pod stop) and SIGINT (local ctrl-c) both flip one stop flag. The
     # daemon owns the drain (checks the flag after each tick and before sleeping).
     stop = {"flag": False}
 

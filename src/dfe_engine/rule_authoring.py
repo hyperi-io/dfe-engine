@@ -38,14 +38,14 @@ def strip_hyperdx(query: str, time_fields: list[str] | None = None) -> dict[str,
     an AND-conjunct of the filter that compares a time field with a constant --
     ``_timestamp >= toDateTime('2026-01-01')``, ``timestamp BETWEEN 1 AND 2`` -- or
     any column with the epoch instants HyperDX renders. Every such bound is
-    removed and ``{window}`` leads the filter; the rest of the query is kept.
+    removed and ``{window}`` leads the filter. The rest of the query is kept.
 
     A bound under OR, NOT or a function call cannot come out without changing
     what the query matches, so it stays and is named in ``warnings``.
 
     Args:
         query: The SELECT to convert.
-        time_fields: Time columns whose constant bounds are the window; defaults
+        time_fields: Time columns whose constant bounds are the window. Defaults
             to the DFE timestamp columns. Case-insensitive.
 
     Returns:

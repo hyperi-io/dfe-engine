@@ -5,10 +5,10 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Provider adapters - real local git repo + local dir; Valhalla HTTP is faked.
+"""Provider adapters - real local git repo + local dir. Valhalla HTTP is faked.
 
 No live network: the git-repo provider clones a REAL local dulwich repo, the
-local-files provider scans a real dir, and the Valhalla provider's network seam is
+local-files provider scans a real dir, and the Valhalla provider's network call is
 overridden / monkeypatched with canned data.
 """
 
@@ -63,7 +63,7 @@ def _rule_dict(rule_id: str = _UUID_A, modified: str = "2023-05-01") -> dict:
 
 
 def _make_git_repo(path, files: dict[str, str]) -> str:
-    """Create a real local git repo with the given files; return its branch name."""
+    """Create a real local git repo with the given files. Return its branch name."""
     from dulwich import porcelain
 
     path.mkdir(parents=True, exist_ok=True)
@@ -205,11 +205,11 @@ async def test_git_repo_provider_refresh_picks_up_new_commit(tmp_path):
     assert {doc.id for doc in second} == {_UUID_A, _UUID_B}
 
 
-# -- ValhallaProvider (HTTP seam faked - no live network) -----
+# -- ValhallaProvider (HTTP call faked - no live network) -----
 
 
 class _FakeValhalla(ValhallaProvider):
-    """Override the network seam so fetch() runs on canned rule dicts."""
+    """Override the network call so fetch() runs on canned rule dicts."""
 
     def __init__(self, config, rules):
         super().__init__(config)
@@ -254,7 +254,7 @@ def test_valhalla_extract_rules_tolerates_shapes():
 
 
 async def test_valhalla_backoff_retries_on_429(monkeypatch):
-    """scalo raises HTTPStatusError on a 429; valhalla honours Retry-After + retries.
+    """scalo raises HTTPStatusError on a 429. Valhalla honours Retry-After + retries.
 
     Models the REAL scalo.http behaviour (raise_for_status inside its own retry, so
     a 4xx surfaces as an exception - scalo never retries 4xx), not a client that
@@ -298,7 +298,7 @@ async def test_valhalla_backoff_retries_on_429(monkeypatch):
 
 
 def test_auth_secret_resolves_via_seam():
-    """A git_token provider pulls its token from the DfeSecrets seam."""
+    """A git_token provider pulls its token from the DfeSecrets interface."""
 
     class _FakeSecrets:
         def get(self, path):

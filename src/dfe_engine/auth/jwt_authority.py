@@ -14,7 +14,7 @@ algorithm is config-driven so ML-DSA can replace ES384 once the JOSE + Envoy cha
 supports it (see docs/auth-envoy-topology.md).
 
 The signing private key lives in ``scalo.secrets`` (the file provider by default, or
-the store the deployment configures) via the engine's ``DfeSecrets`` seam - PyJWT does
+the store the deployment configures) via the engine's ``DfeSecrets`` interface - PyJWT does
 the crypto, scalo owns the key at rest. The ``kid`` is the RFC 7638 JWK thumbprint:
 stable, deterministic, and identical wherever the same public key is seen.
 """
@@ -43,7 +43,7 @@ from dfe_engine.auth.hyperdx_role import SERVICE_ROLE
 from dfe_engine.secrets import DfeSecrets
 
 # ES384 = ECDSA P-384 + SHA-384. The feasible CNSA-2.0 signature for JWTs today
-# (Envoy jwt_authn, PyJWT and node jose all verify it; ML-DSA-87 is the roadmap
+# (Envoy jwt_authn, PyJWT and node jose all verify it, ML-DSA-87 is the roadmap
 # target but not yet in the JOSE/Envoy chain). Ed25519 is deliberately NOT offered:
 # at 128-bit security it is below the CNSA target.
 DEFAULT_ALGORITHM = "ES384"
@@ -115,7 +115,7 @@ class JwtAuthority:
         self._expire_minutes = expire_minutes
         self._private_key = self._load_or_mint()
         self._active_kid = _public_jwk(self._private_key.public_key(), self._alg)["kid"]
-        # kid -> public key, for verification. Seeded with the active key; extend via
+        # kid -> public key, for verification. Seeded with the active key. Extend via
         # add_verify_key_pem for a rotation overlap.
         self._verify_keys: dict[str, EllipticCurvePublicKey] = {
             self._active_kid: self._private_key.public_key()
@@ -186,7 +186,7 @@ class JwtAuthority:
 
         Args:
             claims: The claims to sign.
-            expires_delta: Lifetime from the issue time; the authority's default when None.
+            expires_delta: Lifetime from the issue time. The authority's default when None.
             now: The issue time as epoch seconds, read from the clock when None. A
                 caller that capped ``expires_delta`` against its own clock reading
                 passes that reading, so ``exp`` cannot land past the cap.
@@ -254,7 +254,7 @@ class JwtAuthority:
             leeway=_CLOCK_SKEW_SECONDS,
             options={"require": ["exp", "iss"], "verify_aud": False},
         )
-        # Engine identity tokens carry no aud; an aud claim marks a token minted
+        # Engine identity tokens carry no aud. An aud claim marks a token minted
         # for a peer service (e.g. dfe-hyperdx) and must not authenticate here.
         if "aud" in claims:
             raise InvalidTokenError(f"token audience {claims['aud']!r} is not for this issuer")
@@ -277,7 +277,7 @@ class JwtAuthority:
 class MachineTokenSource:
     """Caching supplier of machine tokens: re-mints ~30s before expiry.
 
-    Attributes are private; call :meth:`token` for a token guaranteed valid for
+    Attributes are private. Call :meth:`token` for a token guaranteed valid for
     at least ``_MACHINE_REFRESH_MARGIN_SECONDS``.
     """
 

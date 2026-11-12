@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """What the hunt runner reports about itself, as scalo metrics.
 
-The runner pod has no HTTP listener, so it is never scraped; the chart wires
+The runner pod has no HTTP listener, so it is never scraped. The chart wires
 ``OTEL_EXPORTER_OTLP_ENDPOINT`` and ``OTEL_SERVICE_NAME=dfe-hunt-runner`` into it
 and scalo's OpenTelemetry backend pushes on that endpoint. Until this existed the
 runner - where hunts actually execute - was the only app in the stack reporting
