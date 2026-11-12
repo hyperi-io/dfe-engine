@@ -1,4 +1,4 @@
-# Deployment seam
+# Deployment
 
 How DFE gets onto a cluster and how the engine's dials reach it. The engine
 never deploys backing services and never authors Argo Applications - it
@@ -11,7 +11,7 @@ the network model. The system map is [../architecture.md](../architecture.md).
 
 | Doc | Covers |
 |---|---|
-| [backing-services.md](backing-services.md) | per-backend swap-seam matrix |
+| [backing-services.md](backing-services.md) | per-backend swap matrix |
 | [transports.md](transports.md) | profile x transport, the Kafka provider swap, the mesh tier's Envoy balancer and receiver buffers |
 | [keda-scaling.md](keda-scaling.md) | CPU-default + opt-in ScalingPressure via dfe-keda-shim |
 | [observability-standard.md](observability-standard.md) | one OTel destination, modes, log schema |
@@ -172,7 +172,7 @@ SCRAM-512 at format time), so the Strimzi operator stays scale-only. A cluster
 still annotated with the retired `standard` profile must move to `slim` (gRPC)
 or `single` (Kafka).
 
-## Deploy-repo providers (provider-agnostic seam)
+## Deploy-repo providers (provider-agnostic)
 
 The deploy repo is just `config_repo_url` + revision + credentials. There is
 NO hard git-server dependency (the backing services do not depend on it).
@@ -222,7 +222,7 @@ cluster-secret annotations). Full swap matrix:
 - **CGNAT `100.64.0.0/10` is reserved SOLELY for edge-VPN clients**, never
   for DFE pod/service ranges. The opt-in edge-fleet VPN (culvert) carves its
   tunnel subnets out of it.
-- **Receiver exposure is a values-driven seam.** `receiver.exposure:
+- **Receiver exposure is a values-driven setting.** `receiver.exposure:
   internal | public | vpn`. Public renders a second LoadBalancer Service
   (deployer supplies serviceType, annotations, loadBalancerSourceRanges) in a
   public subnet as the only public surface - a single-homed airlock, NOT

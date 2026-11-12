@@ -56,7 +56,7 @@ What that means for the code here:
 
 - **Keep it generic.** No environment-specific names, hostnames, cluster IDs,
   credentials, or private-infra assumptions belong in this repo.
-- **Code to the seam, not to a deployment.** Configuration is injected; the
+- **Code to the interface, not to a deployment.** Configuration is injected; the
   engine codes to an interface (secrets backend, object store, cluster topology),
   never to a specific provider or to our infrastructure.
 - **Test WITH a deployment, never FOR one.** Integration tests run against a real
@@ -116,7 +116,7 @@ Full system map, invariants, and the docs tree:
 | Sources, schemas, DDL | `source/`, `schema/`, `fieldmap/`, `cel/`, `sigma/` | [data-plane/](docs/data-plane/README.md) |
 | Query API | `query/` | [data-plane/query-api.md](docs/data-plane/query-api.md) |
 | Hunts | `hunts/`, `keda_shim/` | [data-plane/hunt-runner-scaling.md](docs/data-plane/hunt-runner-scaling.md) |
-| Deployment seam (the published chart is assembled from the contract) | `deployment_contract.py` | [deployment/](docs/deployment/README.md) |
+| Deployment (the published chart is assembled from the contract) | `deployment_contract.py` | [deployment/](docs/deployment/README.md) |
 
 ## Configuration
 
@@ -200,7 +200,7 @@ durations -- a test job that "passed" in 0s did not run.
 | Don't | Do | Why |
 |---|---|---|
 | Hardcode an app name in engine code | Add it to `dfe-infra/apps.yaml` | What an app IS is DATA. Adding one is a manifest edit plus a chart, never an engine release. |
-| Treat this as an internal tool | Code to the injected seam | It is a PRODUCT other organisations deploy. Env-specifics -- cluster refs, cred paths, our fleet -- belong in private config repos, never here. |
+| Treat this as an internal tool | Code to the injected config and interface | It is a PRODUCT other organisations deploy. Env-specifics -- cluster refs, cred paths, our fleet -- belong in private config repos, never here. |
 | Hand-edit compiled routing | Change the Source | Receiver and loader routing is derived; the API reports a hand edit as DRIFT and re-syncs over it. |
 | Mock a backing service | testcontainers, a real one | No mocks as proof. `pass` and `TODO` are not functionality. |
 | `from typing import List, Dict, Optional` | `list[str]`, `str \| None` | Built-in generics; `requires-python = ">=3.14"`. |

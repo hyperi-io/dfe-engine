@@ -104,7 +104,7 @@ Providers are YAML files (one per provider, filename stem = name) managed by
 A provider file that does not load, whether its YAML is unreadable or its fields fail validation, is left out of the provider list, the relying party and the sync scheduler. The engine logs it once and counts it on `auth_oidc_providers_skipped_total{reason}` (`unreadable`, `invalid`), and every other provider carries on.
 
 A secret is never stored in config: the client id is not secret and is held in
-the clear, every other credential is a PATH into the `DfeSecrets` seam or the
+the clear, every other credential is a PATH into the `DfeSecrets` store or the
 NAME of an env var. Resolution reads the store before the environment, so a
 secret sent to the API works immediately while an ESO-mounted env var keeps
 serving a provider configured that way.
@@ -224,7 +224,7 @@ What a deployment must provide (dfe-infra owns these; the engine consumes them).
 - **Network egress** to IdP directory APIs for api-mode group resolution
   (`admin.googleapis.com`, `graph.microsoft.com`, `{org}.okta.com`).
 - **Envoy Gateway SecurityPolicy - the FALLBACK path only.** The Envoy
-  header-trust seam (injecting `X-Oidc-Subject`/`X-Oidc-Groups`) is retained as
+  header-trust path (injecting `X-Oidc-Subject`/`X-Oidc-Groups`) is retained as
   the edge posture where the engine sits strictly behind Envoy; it is NOT the
   primary login path (the native RP is). When used, the engine MUST be reachable
   only via Envoy (NetworkPolicy), or headers are forgeable.
@@ -273,7 +273,7 @@ Done since this doc landed:
   providers (Entra) resolve. Verified against the live Entra tenant: 12 fixture
   users deliver exactly their expected group claims.
 - **Login-config verification** (`GET /{name}/verify-login`) and the RP client
-  secret in the onboarding CRUD, written to the `DfeSecrets` seam and live on
+  secret in the onboarding CRUD, written to the `DfeSecrets` store and live on
   the login routes without a restart.
 - **`/auth/me` returns org_ids**, so the UI can render data-plane scope.
 - **Transitive membership SETTLED by measurement**: Entra emits the full
