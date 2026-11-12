@@ -36,13 +36,15 @@ with it.
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from scalo.logger import logger
+
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
 from dfe_engine.gitcrud.engine import ResourceNotFoundError
 from dfe_engine.orgs.tenancy import Tenancy
 from dfe_engine.source.reader import SourceReader
 
-from . import catalogue, files, instances, routing
+from . import appconfig, catalogue, files, instances, routing
 from .instances import AppInstance
 
 DerivedAction = Literal["deploy", "sync", "remove", "forget"]
@@ -170,7 +172,12 @@ def reconcile(
             keep_parked(gc, change, actor)
             gc.delete(instances.HELMVARS_CLASS, name, actor, message=message)
         else:
-            gc.put(instances.HELMVARS_CLASS, name, change.doc or {}, actor, message=message)
+            try:
+                gc.put(instances.HELMVARS_CLASS, name, change.doc or {}, actor, message=message)
+            except appconfig.SharedInstanceConflictError as exc:
+                # The deploy repo kept the overlay, so the shared container runs as it did.
+                logger.warning("an app overlay was not written", app=name, reason=str(exc))
+                continue
             if change.unpark:
                 drop_parked(gc, change.app, actor)
         done.append(change.describe())

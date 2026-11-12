@@ -47162,18 +47162,6 @@
             "title": "Cache",
             "description": "Allow cached results",
             "default": true
-          },
-          "store": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Store",
-            "description": "Target store (database/schema/topic) - only if query allows"
           }
         },
         "type": "object",

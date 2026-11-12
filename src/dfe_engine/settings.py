@@ -17,6 +17,7 @@ the engine's own, not scalo's: moving onto scalo's is #600.
 import json
 import os
 import re
+import string
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Literal
@@ -1140,6 +1141,34 @@ class DeploymentSettings(BaseModel):
             "app's own chart. DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR."
         ),
     )
+    hosted_instances: str = Field(
+        default="",
+        description=(
+            "The per-config app instances a fixed-container deployment declared a "
+            "container for, as <app>=<instance>,<instance> with apps separated by ';'. "
+            "Injected by a deployer that runs only the containers its file declares "
+            "and reads no instance index, so a source needing an instance outside it "
+            "is refused rather than saved and never run. "
+            "DFE_ENGINE_DEPLOYMENT_HOSTED_INSTANCES."
+        ),
+    )
+    apply_command: str = Field(
+        default="",
+        description=(
+            "The command that applies a rendered config change to one Compose service, "
+            "with {service} where the service name goes, for a deployer with no "
+            "checkout to run make in. Empty means make apply. "
+            "DFE_ENGINE_DEPLOYMENT_APPLY_COMMAND."
+        ),
+    )
+    credential_command: str = Field(
+        default="",
+        description=(
+            "How an operator of this deployment reads the admin password, where the "
+            "deployer's own way differs from its target's default. Shown on the "
+            "pre-login page. DFE_ENGINE_DEPLOYMENT_CREDENTIAL_COMMAND."
+        ),
+    )
     max_replicas_ceiling: int = Field(
         default=MAX_REPLICAS_CEILING,
         gt=0,
@@ -1158,6 +1187,53 @@ class DeploymentSettings(BaseModel):
             "configuration. DFE_ENGINE_DEPLOYMENT_LIBRARY_MAX_ARTIFACT_BYTES."
         ),
     )
+
+    @field_validator("apply_command")
+    @classmethod
+    def _apply_command_names_the_service(cls, value: str) -> str:
+        if not value.strip():
+            return value
+        try:
+            parts = [part for part in string.Formatter().parse(value) if part[1] is not None]
+        except ValueError as exc:
+            raise ValueError(f"apply_command is not a template: {exc}") from exc
+        if [name for _, name, _, _ in parts] != ["service"]:
+            raise ValueError(
+                "apply_command must carry {service} once and no other field, where the "
+                "service name goes"
+            )
+        if any(spec or conversion for _, _, spec, conversion in parts):
+            raise ValueError("apply_command's {service} takes no conversion or format spec")
+        # Formatted once here, so a hint never meets a template it cannot fill.
+        if "dfe-probe" not in value.format(service="dfe-probe"):
+            raise ValueError("apply_command does not put the service name into the command")
+        return value
+
+    @field_validator("hosted_instances")
+    @classmethod
+    def _hosted_instances_parse(cls, value: str) -> str:
+        parse_hosted_instances(value)
+        return value
+
+
+def parse_hosted_instances(raw: str) -> dict[str, frozenset[str]]:
+    """Read ``<app>=<instance>,<instance>;<app>=...`` into the instances per app.
+
+    Raises:
+        ValueError: An entry names no app, or names one twice.
+    """
+    hosted: dict[str, frozenset[str]] = {}
+    for entry in (part.strip() for part in raw.split(";")):
+        if not entry:
+            continue
+        app, sep, names = entry.partition("=")
+        app = app.strip()
+        if not sep or not app:
+            raise ValueError(f"hosted instance entry {entry!r} is not <app>=<instance>,...")
+        if app in hosted:
+            raise ValueError(f"hosted instances name {app} twice")
+        hosted[app] = frozenset(n.strip() for n in names.split(",") if n.strip())
+    return hosted
 
 
 class TransformValidationSettings(BaseModel):
@@ -2432,6 +2508,9 @@ _ENV_FIELDS: tuple[tuple[Callable[[str], Any], dict[str, str]], ...] = (
             "DFE_ENGINE_DEPLOYMENT_APP_CONFIG_BASE_DIR": "deployment.app_config_base_dir",
             "DFE_ENGINE_DEPLOYMENT_APP_CONFIG_MOUNT": "deployment.app_config_mount",
             "DFE_ENGINE_DEPLOYMENT_APP_ENV_DIR": "deployment.app_env_dir",
+            "DFE_ENGINE_DEPLOYMENT_HOSTED_INSTANCES": "deployment.hosted_instances",
+            "DFE_ENGINE_DEPLOYMENT_CREDENTIAL_COMMAND": "deployment.credential_command",
+            "DFE_ENGINE_DEPLOYMENT_APPLY_COMMAND": "deployment.apply_command",
             "DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER": "deployment.backing.kafka.provider",
             "DFE_ENGINE_DEPLOYMENT_KAFKA_TIER": "deployment.backing.kafka.tier",
             "DFE_ENGINE_DEPLOYMENT_KAFKA_REGION": "deployment.backing.kafka.region",

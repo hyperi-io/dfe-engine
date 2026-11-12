@@ -225,7 +225,7 @@ class FlowShape:
         if needed is not None and needed not in offered:
             return f"does not deploy {needed}"
         if not applies_routing and self.per_config_apps(per_config):
-            return "cannot configure one"
+            return "would be saved and never run"
         return self.refused.get(transport)
 
 

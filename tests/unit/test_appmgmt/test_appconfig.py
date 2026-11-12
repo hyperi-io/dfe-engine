@@ -565,13 +565,13 @@ class TestOneContainerPerInstance:
         assert _index(settings, VRL).read_text() == "crowdstrike-eu\ncrowdstrike-us\n"
 
     def test_an_app_with_no_source_declares_no_container(self, crud, tmp_path):
-        # A deployment that never adds a fetcher source starts with none running,
+        # A deployment that never adds a transformed source starts with none running,
         # rather than with one container holding an empty config.
         settings = _settings(tmp_path)
 
         appconfig.render(crud, settings)
 
-        assert _index(settings, "dfe-fetcher").read_text() == ""
+        assert _index(settings, VRL).read_text() == ""
 
     def test_a_deleted_source_takes_its_container_and_its_config_with_it(self, crud, tmp_path):
         settings = _settings(tmp_path)
@@ -634,6 +634,247 @@ class TestOneContainerPerInstance:
 
         assert (_app_dir(settings, LOADER) / "loader.yaml").is_file()
         assert not _index(settings, LOADER).exists()
+
+
+FETCHER = "dfe-fetcher"
+
+
+def _fetch(crud, instance: str, **values):
+    """One fetcher instance as the compiler writes it, its stanza keyed under its own name."""
+    stanza = {f"config__sources__rest__{instance}__topic": instance, **values}
+    return _deploy(crud, FETCHER, instance, **stanza)
+
+
+class TestOneContainerForEverySource:
+    """The fetcher declares shared_instance, so Compose runs one for all of its sources."""
+
+    def test_two_instances_merge_into_the_one_file_and_no_index(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _fetch(crud, "github-releases")
+        _fetch(crud, "wikipedia")
+
+        rendered = [r for r in appconfig.render(crud, settings) if r.service == FETCHER]
+
+        config = _rendered(settings, FETCHER)
+        assert config["sources"]["rest"] == {
+            "github-releases": {"topic": "github-releases"},
+            "wikipedia": {"topic": "wikipedia"},
+        }
+        # Bound to the app rather than to either source, so the cursor keys stay put.
+        assert config["instance_id"] == FETCHER
+        assert [r.container for r in rendered] == [FETCHER]
+        assert not _index(settings, FETCHER).exists()
+        assert not _app_dir(settings, FETCHER, "wikipedia").exists()
+
+    def test_a_source_added_to_a_running_fetcher_needs_no_restart(self, crud, tmp_path):
+        # The fetcher's reload starts an added source, so the published install,
+        # which has no make to run, is handed no command.
+        settings = _settings(tmp_path)
+        _fetch(crud, "github-releases")
+        appconfig.render(crud, settings)
+        _fetch(crud, "wikipedia")
+
+        rendered = [r for r in appconfig.render(crud, settings) if r.service == FETCHER]
+
+        assert [r.changed for r in rendered] == [True]
+        assert appconfig.restart_hints(rendered) == []
+
+    def test_a_fetcher_with_no_source_still_gets_the_deployment_base(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _base(settings, FETCHER, "scheduler:\n  default_interval_secs: 60\n")
+
+        appconfig.render(crud, settings)
+
+        assert _rendered(settings, FETCHER) == {"scheduler": {"default_interval_secs": 60}}
+        assert not _index(settings, FETCHER).exists()
+
+    @pytest.mark.parametrize(
+        ("second", "reason"),
+        [
+            # A flat family is one stanza per process, so a second source of it clashes.
+            (
+                {"config__sources__okta__topic": "okta-b"},
+                "its config.sources.okta.topic is already set by another source",
+            ),
+            # One process stamps one org on everything it emits.
+            ({"config__org_id": "acme"}, "its config.org_id differs from okta-a's"),
+        ],
+    )
+    def test_an_instance_the_one_process_cannot_take_is_named_and_not_run(
+        self, crud, tmp_path, second, reason
+    ):
+        settings = _settings(tmp_path)
+        _deploy(crud, FETCHER, "okta-a", config__sources__okta__topic="okta-a")
+        _deploy(crud, FETCHER, "okta-b", **second)
+
+        rendered = appconfig.render(crud, settings)
+
+        assert _rendered(settings, FETCHER)["sources"]["okta"] == {"topic": "okta-a"}
+        hints = [h for h in appconfig.restart_hints(rendered) if h.startswith("not run:")]
+        assert hints == [
+            f"not run: source 'okta-b' cannot share the one {FETCHER} this deployment runs: "
+            f"{reason}"
+        ]
+
+    def test_a_newcomer_that_clashes_never_evicts_the_running_source(self, crud, tmp_path):
+        settings = _settings(tmp_path)
+        _deploy(crud, FETCHER, "okta-b", config__sources__okta__topic="okta-b")
+        appconfig.render(crud, settings)
+        # Sorts first, so name order alone would have put it in place of okta-b.
+        newcomer = _deploy(crud, FETCHER, "okta-a", config__sources__okta__topic="okta-a")
+
+        refusal = appconfig.shared_refusal(
+            crud, descriptor(FETCHER), "okta-a", instances.read_overlay(crud, newcomer), settings
+        )
+        rendered = appconfig.render(crud, settings)
+
+        reason = "its config.sources.okta.topic is already set by another source"
+        assert refusal == (
+            f"source 'okta-a' cannot share the one {FETCHER} this deployment runs: {reason}"
+        )
+        assert _rendered(settings, FETCHER)["sources"]["okta"] == {"topic": "okta-b"}
+        assert [h for h in appconfig.restart_hints(rendered) if "okta-a" in h] == [
+            f"not run: {refusal}"
+        ]
+
+    def test_a_render_after_per_instance_fetchers_retires_their_index_dirs_and_env(
+        self, crud, tmp_path
+    ):
+        settings = _settings(tmp_path)
+        env_dir = Path(settings.deployment.app_env_dir)
+        env_dir.mkdir(parents=True)
+        _index(settings, FETCHER).write_text("old-a\nold-b\n", encoding="utf-8")
+        (env_dir / f"{FETCHER}-old-a{appconfig.CUSTOM_ENV_SUFFIX}").write_text(
+            "KEY=1\n", encoding="utf-8"
+        )
+        for name in ("old-a", "old-b"):
+            (_app_dir(settings, FETCHER, name)).mkdir(parents=True)
+        _fetch(crud, "wikipedia")
+
+        rendered = appconfig.render(crud, settings)
+
+        assert not _index(settings, FETCHER).exists()
+        assert not (env_dir / f"{FETCHER}-old-a{appconfig.CUSTOM_ENV_SUFFIX}").exists()
+        assert not _app_dir(settings, FETCHER, "old-a").exists()
+        assert not _app_dir(settings, FETCHER, "old-b").exists()
+        assert _rendered(settings, FETCHER)["sources"]["rest"] == {
+            "wikipedia": {"topic": "wikipedia"}
+        }
+        removed = [r.container for r in rendered if r.service == FETCHER and r.removed]
+        assert removed == [f"{FETCHER}-old-a", f"{FETCHER}-old-b"]
+        assert appconfig.REMOVE_HINT in appconfig.restart_hints(rendered)
+
+    def test_a_kubernetes_deployment_renders_nothing_for_it(self, crud, tmp_path):
+        # The chart renders one deployment per overlay there, unchanged.
+        settings = _settings(tmp_path, target="kubernetes")
+        _fetch(crud, "github-releases")
+        _fetch(crud, "wikipedia")
+
+        assert appconfig.render(crud, settings) == []
+        assert not appconfig.shares_one_container(descriptor(FETCHER), settings)
+        assert not (tmp_path / "app-config").exists()
+
+    def test_retiring_the_fetcher_s_instances_leaves_every_transform_s_alone(self, crud, tmp_path):
+        # A transform runs one container per source, so its index, directories and
+        # env files are its own and a fetcher's retirement must not reach them.
+        settings = _settings(tmp_path)
+        env_dir = Path(settings.deployment.app_env_dir)
+        env_dir.mkdir(parents=True)
+        _index(settings, FETCHER).write_text("old-a\n", encoding="utf-8")
+        _app_dir(settings, FETCHER, "old-a").mkdir(parents=True)
+        for name in ("cisco-ios", "filebeat"):
+            app = _deploy(crud, VRL, name)
+            doc = instances.read_overlay(crud, app)
+            files.upsert_file(doc, file_set(VRL, "transforms"), f"100_{name}.vrl", ".x = 1\n")
+            set_path(doc, "extraEnv.STAMP", name)
+            _put(crud, app, doc)
+        _fetch(crud, "wikipedia")
+
+        appconfig.render(crud, settings)
+
+        assert not _index(settings, FETCHER).exists()
+        assert _index(settings, VRL).read_text(encoding="utf-8") == "cisco-ios\nfilebeat\n"
+        for name in ("cisco-ios", "filebeat"):
+            program = _app_dir(settings, VRL, name) / "transforms" / f"100_{name}.vrl"
+            assert program.read_text(encoding="utf-8") == ".x = 1\n"
+            assert _rendered(settings, VRL, name)["transforms"]["dir"] == (
+                f"{MOUNT}/{VRL}/{name}/transforms"
+            )
+            assert _env_file(settings, f"{VRL}-{name}").read_text(encoding="utf-8") == (
+                f"STAMP={name}\n"
+            )
+
+
+class TestEveryOverlayWriterMeetsTheSharedContainer:
+    """The deploy repo's own write check, so no writer reaches a commit around it."""
+
+    @pytest.fixture
+    def judged(self, tmp_path):
+        settings = _settings(tmp_path)
+        appconfig.judge_writes_by(lambda: settings)
+        yield settings
+        appconfig.judge_writes_by(None)
+
+    def _running(self, crud, settings) -> None:
+        _deploy(crud, FETCHER, "crates-b", config__sources__crates_io__topic="crates-b")
+        appconfig.render(crud, settings)
+
+    def test_a_key_write_that_clashes_is_refused_before_it_commits(self, crud, judged):
+        self._running(crud, judged)
+        newcomer = instances.instance_of(FETCHER, "crates-a").overlay_name
+
+        with pytest.raises(appconfig.SharedInstanceConflictError, match="cannot share"):
+            crud.set_key(
+                instances.HELMVARS_CLASS,
+                newcomer,
+                "config.sources.crates_io.topic",
+                "crates-a",
+                ACTOR,
+            )
+
+        assert newcomer not in crud.list(instances.HELMVARS_CLASS)
+
+    def test_an_action_that_would_make_an_overlay_clash_is_refused(self, crud, judged):
+        # An action may not create a source-bound instance, so it edits a running one.
+        from dfe_engine.governance import ActionDef, ActionStore, VarChange
+        from dfe_engine.governance.actions import InvalidDocumentError
+
+        self._running(crud, judged)
+        other = _deploy(crud, FETCHER, "pypi-a", config__sources__pypi__topic="pypi-a")
+        appconfig.render(crud, judged)
+        store = ActionStore(crud)
+        store.save(
+            ActionDef(
+                name="stamp-acme",
+                description="x",
+                required_action="action:invoke:stamp-acme",
+                changes=[
+                    VarChange(
+                        cls=instances.HELMVARS_CLASS,
+                        name=other.overlay_name,
+                        path="config.org_id",
+                        value="acme",
+                    )
+                ],
+            ),
+            actor="admin",
+        )
+
+        with pytest.raises(InvalidDocumentError, match="cannot share"):
+            store.invoke("stamp-acme", actor="bob")
+
+        polled = _rendered(judged, FETCHER)["sources"]
+        assert polled["crates_io"] == {"topic": "crates-b"}
+        assert polled["pypi"] == {"topic": "pypi-a"}
+        assert "org_id" not in instances.read_overlay(crud, other).get("config", {})
+
+    def test_a_delete_of_a_running_source_still_goes_through(self, crud, judged):
+        self._running(crud, judged)
+        running = instances.instance_of(FETCHER, "crates-b").overlay_name
+
+        crud.delete(instances.HELMVARS_CLASS, running, ACTOR, message="test: rm")
+
+        assert running not in crud.list(instances.HELMVARS_CLASS)
 
 
 class TestCustomEnvironment:
@@ -999,8 +1240,24 @@ class TestWhatTakingTheChangeCosts:
         assert _rendered(settings, LOADER)["hot_reload"] == {"enabled": False}
         assert rendered[LOADER].restart_hint == f"restart required: make apply SERVICES={LOADER}"
 
-    def test_a_startup_bound_app_names_the_command_that_applies_it(self, crud, tmp_path):
+    @pytest.mark.parametrize(
+        ("apply_command", "expected"),
+        [
+            # A checkout applies it through make.
+            ("", f"restart required: make apply SERVICES={VRL}-filebeat"),
+            # A published install has no Makefile, so it names its own command.
+            (
+                "docker compose -f oci://example/dfe:compose up -d --force-recreate {service}",
+                "restart required: docker compose -f oci://example/dfe:compose up -d "
+                f"--force-recreate {VRL}-filebeat",
+            ),
+        ],
+    )
+    def test_a_startup_bound_app_names_the_command_that_applies_it(
+        self, crud, tmp_path, apply_command, expected
+    ):
         settings = _settings(tmp_path)
+        settings.deployment.apply_command = apply_command
         app = _deploy(crud, VRL, "filebeat")
         appconfig.render(crud, settings)
         doc = instances.read_overlay(crud, app)
@@ -1012,9 +1269,7 @@ class TestWhatTakingTheChangeCosts:
         assert rendered[VRL].restart_required
         # The container carrying this instance, not the app: a per-config app has
         # one per source, so the app's own name would restart the wrong one.
-        assert rendered[VRL].restart_hint == (
-            f"restart required: make apply SERVICES={VRL}-filebeat"
-        )
+        assert rendered[VRL].restart_hint == expected
         assert appconfig.restart_hints(list(rendered.values())) == [rendered[VRL].restart_hint]
 
     def test_the_first_render_of_a_stack_asks_for_no_restart(self, crud, tmp_path):

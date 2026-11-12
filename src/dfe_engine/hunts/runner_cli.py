@@ -16,8 +16,8 @@ stays deliberately small.
 
 Two commands, matching the two ways the runner is driven:
 
-  materialise - the ONE-SHOT the Argo PostSync hook (or the engine, on a hunt-config
-      change) runs to write the deterministic ``hunt_schedule`` table KEDA scales on.
+  materialise - the ONE-SHOT run to write the deterministic ``hunt_schedule`` table
+      KEDA scales on.
       It is deploy-time, NOT the hot path - it runs once per config change, not per
       tick, so it just publishes and exits.
 
@@ -187,9 +187,9 @@ def _match_notifier(settings: DFESettings) -> MatchNotifier:
 def materialise() -> None:
     """Publish the deterministic ``hunt_schedule`` table KEDA scales on (one-shot).
 
-    Deploy-time, not the hot path: the Argo PostSync hook runs this once per
-    hunt-config change so KEDA can answer "is any hunt due?" with zero workers
-    running. Idempotent - re-materialising tombstones removed hunts.
+    Deploy-time, not the hot path: run once per hunt-config change so KEDA can
+    answer "is any hunt due?" with zero workers running. Idempotent -
+    re-materialising tombstones removed hunts.
     """
     init_scalo_logger(runner_metrics.SERVICE_NAME, otel_tracing=False)
     settings = load_settings()

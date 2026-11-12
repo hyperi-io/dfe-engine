@@ -103,6 +103,7 @@ from dfe_engine.appmgmt import (
     instances,
 )
 from dfe_engine.appmgmt import catalogue as app_catalogue
+from dfe_engine.appmgmt.appconfig import SharedInstanceConflictError
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.models import AuthContext
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -517,7 +518,7 @@ def reconcile_derived_apps(request: Request, user: Any, registry: Any) -> AppsSy
             # report of that change: the render below finds the file current.
             hints += written.restart_required
             done.append(change.describe())
-    except ProblemError as exc:
+    except (ProblemError, SharedInstanceConflictError) as exc:
         logger.warning(f"apps not reconciled with the sources: {exc}")
         return AppsSync(changes=done, error=str(exc), restart_required=_one_per_app(hints))
     except Exception as exc:

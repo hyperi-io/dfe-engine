@@ -193,6 +193,7 @@ def install_exception_handlers(app: FastAPI) -> None:
     from dfe_engine.api.password_floor import count_floor_refusal, is_floor_refusal
     from dfe_engine.api.task_manager import TaskCapacityError
     from dfe_engine.api.v1.scim import SCIM_ROOT, scim_error
+    from dfe_engine.appmgmt.appconfig import SharedInstanceConflictError
     from dfe_engine.appmgmt.contract import RefusedNullError
     from dfe_engine.auth.models import AuthenticationError, AuthorizationError
     from dfe_engine.auth.protected_accounts import ProtectedAccountError
@@ -296,6 +297,11 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(RefusedNullError)
     async def refused_null(_request: Request, exc: RefusedNullError):
         return _answer(400, exc.code, str(exc), paths=exc.paths)
+
+    # Any write path that would give a shared container an instance it cannot run.
+    @app.exception_handler(SharedInstanceConflictError)
+    async def shared_instance_conflict(_request: Request, exc: SharedInstanceConflictError):
+        return _answer(409, exc.code, str(exc))
 
     @app.exception_handler(ResourceNotFoundError)
     async def resource_not_found(_request: Request, _exc: ResourceNotFoundError):
