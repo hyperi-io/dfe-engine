@@ -616,7 +616,7 @@ A hunt stores the tenant ids each of its customer orgs resolved to, because the 
 
 - **Delete.** The hunt keeps the org's name and loses its ids, so it fails as `unknown_customers` and holds its watermark until someone edits it.
 - **Rename.** An org's name is its identity, so `PUT` cannot change it.
-- **Review.** A production+team posture puts the hunt change on one review branch, the org answer carries `X-DFE-Review-Required`, and the runner keeps the old ids until it is merged.
+- **Review.** Production with `DFE_ENGINE_GITOPS_MODE=team` puts the hunt change on one review branch, the org answer carries `X-DFE-Review-Required`, and the runner keeps the old ids until it is merged.
 
 Each hunt rewritten emits `resource.hunt.updated` naming the org.
 

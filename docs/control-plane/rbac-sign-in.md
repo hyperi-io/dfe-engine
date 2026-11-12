@@ -96,9 +96,9 @@ account. Every attempt is audit-logged (`auth.breakglass.login`). With
 `enabled: false` the login returns 403 naming the setting.
 
 **No `changeme` outside dev.** The engine refuses to start on an unset or default
-admin password unless `DFE_ENGINE_ENV` is a dev posture -- the predicate gitops
+admin password unless `DFE_ENGINE_ENV` is a dev environment -- the predicate gitops
 auto-merge gates on (`settings.is_dev_posture`), and the error names the variable
-and the fix. A dev posture running the default reports `default_credentials: true` on setup-status, login and refresh, for the UI to banner and force a change. Each reads the admin account at the request, so the forced change clears it with no restart.
+and the fix. A dev environment running the default reports `default_credentials: true` on setup-status, login and refresh, for the UI to banner and force a change. Each reads the admin account at the request, so the forced change clears it with no restart.
 
 **The predicate other repos copy** is `auth.bootstrap.default_credentials_in_use`:
 strip surrounding whitespace, then treat empty and `changeme` as the default. An
