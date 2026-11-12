@@ -64,7 +64,7 @@ API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
 # These are NOT hardcoded -- any argo:*:* action is valid.
 # The RBAC YAML config is the source of truth for which argo actions
 # each role can perform. The prefix is published with the scope catalogue
-# (auth/rbac_scopes); the engine writes no Argo CD RBAC policy of its own.
+# (auth/rbac_scopes). The engine writes no Argo CD RBAC policy of its own.
 ARGO_ACTION_PREFIX = "argo:"
 
 
@@ -82,7 +82,7 @@ def authorize(
     Grant-only union over the caller's scoped grants: a grant allows the
     action when its role's permission patterns match AND its scope covers
     the requested scope. No deny rules, no shadowing - system grants are
-    simply wider. ``scope=None`` is a SYSTEM-scope check ("no scope"
+    wider. ``scope=None`` is a SYSTEM-scope check ("no scope"
     never implicitly means "all scopes"), which keeps every existing
     unscoped require_action() call meaning what it always did: only
     system-wide role holders pass.
@@ -91,7 +91,7 @@ def authorize(
         auth: Identity context (None = root mode in dev/test).
         action: Action string (e.g. "config:read").
         resource: Resource identifier (accepted, ignored -- for caller compat).
-        scope: Requested scope; None means system scope.
+        scope: Requested scope. None means system scope.
         enabled: Whether auth is enabled. When False, all calls return allow.
         role_config: Override role configuration. Defaults to builtin roles.yaml.
 

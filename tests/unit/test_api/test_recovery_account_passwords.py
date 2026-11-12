@@ -107,7 +107,7 @@ def _settings(
 
 @contextlib.contextmanager
 def _booted(settings: DFESettings) -> Iterator[tuple[FastAPI, TestClient]]:
-    """A started engine; leaving the block stops it, as a pod being replaced does."""
+    """A started engine. Leaving the block stops it, as a pod being replaced does."""
     app = create_app(settings=settings)
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -117,7 +117,7 @@ def _booted(settings: DFESettings) -> Iterator[tuple[FastAPI, TestClient]]:
 
 
 def _headers(app, settings: DFESettings, username: str) -> dict[str, str]:
-    """Headers for *username*; roles resolve live from group membership."""
+    """Headers for *username*. Roles resolve live from group membership."""
     token = session_token(app, settings, {"sub": username, "org_id": "acme", "roles": []})
     return {"Authorization": f"Bearer {token}"}
 
@@ -151,7 +151,7 @@ def _assert_plain(message: str) -> None:
 
 
 class _RecordingForge:
-    """Opens a pull request and records it; the forge's HTTP call is not under test."""
+    """Opens a pull request and records it. The forge's HTTP call is not under test."""
 
     def __init__(self) -> None:
         self.opened: list[str] = []
@@ -161,7 +161,7 @@ class _RecordingForge:
         return PullRequest(number=9, url=_PR_URL, branch=head)
 
 
-# ── breakglass: the switch answers only the right password ───
+# -- breakglass: the switch answers only the right password ---
 
 
 def _login(client: TestClient, username: str, password: str):
@@ -203,7 +203,7 @@ class TestBreakglassSwitchAtLogin:
         assert (following.status_code == 429) is counted, following.text
 
 
-# ── breakglass: its hash lives in the deploy repo ────────────
+# -- breakglass: its hash lives in the deploy repo ------------
 
 
 class TestBreakglassOnADirectCommitDeployment:
@@ -304,7 +304,7 @@ class TestBreakglassOnAReviewDeployment:
             assert (status["enabled"], status["merged"]) == (True, False)
 
 
-# ── admin: its first password comes from the deployment ──────
+# -- admin: its first password comes from the deployment ------
 
 
 class TestAdminReset:
@@ -333,7 +333,7 @@ class TestAdminReset:
 
 
 class TestRotate:
-    """Rotate writes the value the deployment injects; only the admin has one."""
+    """Rotate writes the value the deployment injects. Only the admin has one."""
 
     def test_breakglass_is_pointed_at_reset_in_plain_words(self, tmp_path):
         settings = _settings(tmp_path, gitops=True)
@@ -389,7 +389,7 @@ class TestRotate:
         assert build_secrets(settings.secrets).get("auth/admin-password") == new
 
 
-# ── The admin is kept, on every shape ────────────────────────
+# -- The admin is kept, on every shape ------------------------
 
 
 def _complete_setup(app: FastAPI, settings: DFESettings) -> dict[str, str]:

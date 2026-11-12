@@ -8,7 +8,7 @@
 
 """Tests for SOC2 audit event emitters.
 
-Mocking the logger IS acceptable here — we are testing that the correct log
+Mocking the logger IS acceptable here -- we are testing that the correct log
 function is called with the correct structured arguments. This is one of the
 explicit exceptions to the no-mocks policy for audit logging.
 """

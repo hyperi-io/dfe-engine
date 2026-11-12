@@ -26,7 +26,7 @@ def test_subsequent_run_resumes_from_watermark():
 
 
 def test_predicate_uses_the_common_header_load_column():
-    # The landing tables' column is _timestamp_load; timestamp_load exists nowhere.
+    # The landing tables' column is _timestamp_load. timestamp_load exists nowhere.
     assert TIMESTAMP_FIELD == "_timestamp_load"
 
 

@@ -235,7 +235,7 @@ class SampleEventFactory:
 
     Args:
         rows: Parsed sample events (the sampler's ``rows``). Preferred input.
-        lines: Raw sample lines; used when ``rows`` is empty - each generated
+        lines: Raw sample lines. Used when ``rows`` is empty - each generated
             event is ``{"message": <scrubbed line>}``.
         seed: Determinism seed.
         pool: Entity pool (built from ``seed`` when omitted).

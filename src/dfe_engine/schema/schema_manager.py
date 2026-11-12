@@ -102,7 +102,7 @@ def next_version_for_type(current: str, version_type: SchemaVersionType) -> str:
 def _with_current_use_cases(columns: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """*columns* with a retired use case rewritten to its current name.
 
-    Reads translate a retired name either way; without this the old word rides
+    Reads translate a retired name either way. Without this the old word rides
     forward into every version derived from the one that carried it.
     """
     rewritten = []

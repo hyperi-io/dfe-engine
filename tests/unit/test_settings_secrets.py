@@ -1,11 +1,11 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_settings_secrets.py
-#  Purpose:      SecretsSettings - the scalo.secrets backend-by-config seam
+#  Purpose:      SecretsSettings - the scalo.secrets backend-by-config interface
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The secrets seam is chosen by config, never hardcoded (see docs/deployment/backing-services.md)."""
+"""The secrets interface is chosen by config, never hardcoded (see docs/deployment/backing-services.md)."""
 
 import pytest
 from pydantic import ValidationError

@@ -50,7 +50,7 @@ class FakeRepositoryCH:
         self.databases: set[str] = {db for db, _ in (applied or set())}
         self.tables: set[tuple[str, str]] = set(applied or set())
 
-    # ── the applier's surface: command + query ────────────────
+    # -- the applier's surface: command + query ----------------
 
     def command(self, statement: str, *args: Any, **kwargs: Any):
         """DDL passthrough, recording what it created."""
@@ -103,7 +103,7 @@ class FakeRepositoryCH:
             return self._select(parameters)
         raise AssertionError(f"unexpected query: {q}")
 
-    # ── FINAL semantics ───────────────────────────────────────
+    # -- FINAL semantics ---------------------------------------
 
     def _live_rows(self, params: dict[str, Any]) -> list[dict[str, Any]]:
         latest: dict[tuple[str, str, str, str], dict[str, Any]] = {}

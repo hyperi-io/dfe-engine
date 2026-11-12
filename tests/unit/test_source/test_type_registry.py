@@ -1,4 +1,4 @@
-"""Tests for TypeRegistry — primitive-to-ClickHouse type resolution."""
+"""Tests for TypeRegistry -- primitive-to-ClickHouse type resolution."""
 
 import pytest
 
@@ -67,7 +67,7 @@ class TestTypeRegistryLoading:
 
 
 # ---------------------------------------------------------------------------
-# Resolve — normal primitives
+# Resolve -- normal primitives
 # ---------------------------------------------------------------------------
 
 
@@ -127,7 +127,7 @@ class TestResolveNormal:
 
 
 # ---------------------------------------------------------------------------
-# Resolve — with attributes
+# Resolve -- with attributes
 # ---------------------------------------------------------------------------
 
 
@@ -156,7 +156,7 @@ class TestResolveAttributes:
 
 
 # ---------------------------------------------------------------------------
-# Resolve — with ch_override
+# Resolve -- with ch_override
 # ---------------------------------------------------------------------------
 
 
@@ -187,7 +187,7 @@ class TestResolveChOverride:
 
 
 # ---------------------------------------------------------------------------
-# Resolve — with use_case (validation only)
+# Resolve -- with use_case (validation only)
 # ---------------------------------------------------------------------------
 
 
@@ -202,7 +202,7 @@ class TestResolveUseCase:
 
 
 # ---------------------------------------------------------------------------
-# Validation — use_case
+# Validation -- use_case
 # ---------------------------------------------------------------------------
 
 
@@ -272,7 +272,7 @@ class TestValidateUseCase:
 
 
 # ---------------------------------------------------------------------------
-# Validation — attribute
+# Validation -- attribute
 # ---------------------------------------------------------------------------
 
 
@@ -304,7 +304,7 @@ class TestValidateAttribute:
 
 
 # ---------------------------------------------------------------------------
-# Validation — ch_override
+# Validation -- ch_override
 # ---------------------------------------------------------------------------
 
 

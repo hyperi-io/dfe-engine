@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The authoring endpoints (compute-only; AI endpoints return stub results)."""
+"""The authoring endpoints (compute-only, AI endpoints return stub results)."""
 
 from __future__ import annotations
 

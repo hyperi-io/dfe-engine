@@ -11,11 +11,11 @@ A refused write leaves the old content in place, so nothing on disk or in the
 deploy repo shows it happened. Each refusal is counted on
 ``yaml_write_failures_total`` by reason, and leaves its target degraded until a
 later write of that target goes through. ``GET /api/v1/system/status`` reports
-the degraded targets; readiness ignores them, because the content still served is
+the degraded targets. Readiness ignores them, because the content still served is
 the last content that wrote cleanly.
 
 The writer is called from every store without an app in reach, so this state is
-per process. The engine binds its metrics manager at app creation; with none
+per process. The engine binds its metrics manager at app creation. With none
 bound, the counter records nothing, which is the state the CLI runs in.
 """
 

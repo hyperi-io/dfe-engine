@@ -76,7 +76,7 @@ def test_worker_executes_and_resumes_incrementally(ch_client, ch_db):
     # first window [400,1000) -> a,b (not c@1200)
     assert worker.run(spec, scheduled_start=1000) == 1000
     assert _count(ch_client, f"`{ch_db}`.tgt") == 2
-    # next window [1000,1300) -> only c; a,b are NOT re-run
+    # next window [1000,1300) -> only c. A,b are NOT re-run
     assert worker.run(spec, scheduled_start=1300) == 1300
     assert _count(ch_client, f"`{ch_db}`.tgt") == 3  # 2 + 1, no duplicates
     assert coord.get_watermark("h1") == 1300

@@ -103,7 +103,7 @@ def groups_held_by(
     Args:
         username: The account's name, which group member lists name.
         asserted: The identifiers its IdP asserts, its own ``groups`` list.
-        stamp: Its ``source_provider``; empty for a local account, which holds no
+        stamp: Its ``source_provider``. Empty for a local account, which holds no
             linked group.
         groups: Every stored group, listed once by the caller.
         bindings: ``auth.source_provider_bindings``.

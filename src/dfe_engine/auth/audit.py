@@ -137,7 +137,7 @@ def audit_account_change(
     """Emit an audit event for a local account change.
 
     Args:
-        admin_id: Identity of the caller making the change; the account's own
+        admin_id: Identity of the caller making the change. The account's own
             identity when the owner changes it.
         target_user: Username of the affected account.
         change: What happened, e.g. ``"created"``, ``"updated"``, ``"deleted"``,

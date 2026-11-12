@@ -71,7 +71,7 @@ SUITE_TIMEOUT = PROMOTION_DEADLINE + LANDING_DEADLINE * 2 + 300.0
 pytestmark = [pytest.mark.live, pytest.mark.timeout(SUITE_TIMEOUT)]
 
 # The catch-all a record with no source of its own lands in. A deployment may
-# rename it, which the flow suite reads off the receiver and the loader; the
+# rename it, which the flow suite reads off the receiver and the loader. The
 # stage 0 steps assert the default so they need no engine and skip on the
 # receiver and ClickHouse vars alone.
 LANDING_TABLE = "main"
@@ -97,7 +97,7 @@ SHIPPED_SCHEMA = "meta/beats/filebeat"
 PARSED_COLUMN = "source_ip"
 
 # Step 2.7's own source. Named without the catalogue entry's underscore for the
-# DNS-1123 reason above; dfe-transform-elastic carries the entry name separately
+# DNS-1123 reason above. dfe-transform-elastic carries the entry name separately
 # in `transform.variant`, so the two never have to agree.
 TRANSFORM_SOURCE = "ciscoios"
 TRANSFORM_MODULE = "cisco_ios"
@@ -110,7 +110,7 @@ ROUNDTRIP_VERSION = "1.0.0"
 _COMPARED_FIELDS = ("name", "type", "use_case", "expr")
 
 # Steps 2.4 and 2.5. The derived schema selects five of SHIPPED_SCHEMA's twelve
-# columns; DERIVED_DROPPED is the other seven, and its absence from the deployed
+# columns. DERIVED_DROPPED is the other seven, and its absence from the deployed
 # table is what says the selection reached the data plane.
 NARROW_SOURCE = "acceptnarrow"
 DERIVED_PATH = "derived/accept/filebeat_narrow"

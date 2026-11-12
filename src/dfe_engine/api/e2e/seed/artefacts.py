@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Library seeding. Public methods are the scripts; privates are reusable.
+"""Library seeding. Public methods are the scripts. Privates are reusable.
 
 An artefact is a gitcrud bundle, so its manifest and its version files land in one
 commit through ``GitCrud.put_bundle`` -- the same path ``api/v1/library.py`` writes

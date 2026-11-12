@@ -120,7 +120,7 @@ def _changed_files(entry) -> list[str]:
 
 def _reachable(repo: Repo, revision: str) -> set[str]:
     # dulwich's ObjectID is a NewType over bytes (nominal-only at type-check
-    # time); cast so ty accepts our plain-bytes SHA the same way dulwich's own
+    # time). Cast so ty accepts our plain-bytes SHA the same way dulwich's own
     # internals do at runtime.
     try:
         walker = repo.get_walker(include=[cast(ObjectID, revision.encode())])
@@ -137,7 +137,7 @@ def read_log(
     limit: int = 50,
     paths: Sequence[str] = (),
 ) -> tuple[list[LogEntry], str | None]:
-    """Walk history newest-first; returns (entries, next_before cursor or None).
+    """Walk history newest-first. Returns (entries, next_before cursor or None).
 
     Given ``paths``, the walk keeps only the commits that touch one of them, so a
     cursor pages through those files' history alone.

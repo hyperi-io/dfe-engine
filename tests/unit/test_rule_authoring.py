@@ -119,7 +119,7 @@ PARSEABLE = [c for c in GOLDEN.values() if "clean_sql" in c and _parses(c["input
 
 @pytest.mark.parametrize("case", PARSEABLE, ids=lambda c: c["name"])
 def test_output_parses_wherever_the_input_did(case):
-    # The runner substitutes a predicate for {window}; 1 = 1 stands in for it.
+    # The runner substitutes a predicate for {window}. 1 = 1 stands in for it.
     out = strip_hyperdx(case["input"])
     assert _parses(out["query"].replace("{window}", "1 = 1"))
 

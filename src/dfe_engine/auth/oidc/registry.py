@@ -140,7 +140,7 @@ class OIDCProviderRegistry:
         )
 
     def _write(self, name: str, provider: OIDCProvider) -> None:
-        # Persist the full provider model to YAML; no name field to exclude
+        # Persist the full provider model to YAML. No name field to exclude
         data = provider.model_dump()
         yaml_dump(data, self._path(name))
 

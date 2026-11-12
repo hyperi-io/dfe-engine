@@ -329,7 +329,7 @@ class TestALoginThatWouldHoldNoRole:
         ]
 
     def test_an_operator_membership_with_a_role_keeps_an_existing_account_in(self, stores):
-        """No role is granted to an account directly; a membership an operator adds is the nearest."""
+        """No role is granted to an account directly. A membership an operator adds is the nearest."""
         accounts, groups = stores
         jit = JitProvisioner(account_store=accounts, group_store=groups)
         jit.ensure_account("jane@corp.com", ["dfe-admins"], "entra")
@@ -1096,7 +1096,7 @@ class TestResolveHyperdxTeam:
         assert jit.resolve_hyperdx_team(["nonexistent-group"], "entra") == ""
 
     def test_a_group_the_idp_only_names_gives_no_team(self, stores):
-        """A directory user can name a group dfe-admins; only the id the directory assigns links."""
+        """A directory user can name a group dfe-admins. Only the id the directory assigns links."""
         _, groups = stores
         groups.create("platform-admins", roles=["admin"])
         jit = JitProvisioner(account_store=stores[0], group_store=groups)

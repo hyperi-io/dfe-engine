@@ -37,7 +37,7 @@ def daemon(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     root = tmp_path_factory.mktemp("daemon-metrics")
     env = dict(os.environ)
     env.pop("PYTEST_ADDOPTS", None)
-    # The suite disables the SDK for itself; the daemon runs with it on.
+    # The suite disables the SDK for itself. The daemon runs with it on.
     env.pop("OTEL_SDK_DISABLED", None)
     result = subprocess.run(
         [sys.executable, PROBE, str(root)],

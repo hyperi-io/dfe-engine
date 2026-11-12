@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""E2E org lifecycle tests — full create → configure → toggle → delete journeys.
+"""E2E org lifecycle tests -- full create -> configure -> toggle -> delete journeys.
 
 Uses TestClient (in-process HTTP) with real registries backed by tmp_path.
 No external infrastructure required (no ClickHouse, no HyperDX).
@@ -76,7 +76,7 @@ def e2e_client(e2e_settings: DFESettings):
 
 
 class TestOrgLifecycleE2E:
-    """Full org lifecycle: create → configure → toggle dedicated DB → delete."""
+    """Full org lifecycle: create -> configure -> toggle dedicated DB -> delete."""
 
     def _login(self, client: TestClient) -> dict[str, str]:
         resp = client.post(
@@ -231,7 +231,7 @@ class TestOrgLifecycleE2E:
         assert resp.status_code == 401
 
     def test_full_org_lifecycle(self, e2e_client: TestClient):
-        """Complete create → read → update → delete round-trip."""
+        """Complete create -> read -> update -> delete round-trip."""
         headers = self._login(e2e_client)
 
         # Create

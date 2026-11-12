@@ -7,9 +7,8 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """The schema phase's instruments, as scalo metrics.
 
-A completed ArgoCD Job used to be the operator's record that the schema had been
-applied. Once the apply moved inside the engine's lifespan that record went with
-it, so the state, the duration and the schemas version are reported here and on
+The apply runs inside the engine's lifespan, so no ArgoCD Job records that the
+schema was applied. The state, the duration and the schemas version are reported here and on
 ``GET /api/v1/system/schema``.
 
 The daemon registers them on the metrics manager it already serves on ``/metrics``,

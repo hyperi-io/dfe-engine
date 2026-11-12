@@ -53,9 +53,8 @@ TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 # VRL and absent from the corpus body, so one populated means the event was
 # transformed rather than passed through. Both are set ONLY in the umbrella
 # branch of the pipeline, so this assertion covers one of the three corpus
-# modules. `event_module` and `event_dataset` used to be here too; the VRL never
-# sets either, and neither appears in Elastic's own goldens, so they could not
-# fire.
+# modules. `event_module` and `event_dataset` are not asserted: the VRL never
+# sets either, and neither appears in Elastic's own goldens.
 #
 # `source_ip` is the column that covers all three modules (104 of the 377
 # goldens -- umbrella 30, ios 37, meraki 37), is set by the VRL and declared by

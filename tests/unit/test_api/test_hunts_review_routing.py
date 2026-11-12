@@ -39,7 +39,7 @@ _HUNT = {
 
 
 class _RecordingForge:
-    """ForgeProvider seam double: records the PR the write opens."""
+    """ForgeProvider double: records the PR the write opens."""
 
     def __init__(self, url: str = "http://forge/pr/11") -> None:
         self.calls: list[dict] = []

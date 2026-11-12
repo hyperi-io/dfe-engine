@@ -47,7 +47,7 @@ class _Table:
 
 
 class _AdminClient:
-    """Records the DDL a reconcile executes; every discovery query returns no rows."""
+    """Records the DDL a reconcile executes. Every discovery query returns no rows."""
 
     def __init__(self) -> None:
         self.executed: list[str] = []
@@ -164,7 +164,7 @@ def test_an_unknown_marker_gets_nothing_on_every_path(app, api_settings, acme, t
 
 def test_a_marker_naming_one_org_is_that_org_on_every_path(app, client, api_settings, acme, table):
     # A second org, NAMED by acme's first tenant id, predates the collision guard
-    # (planted straight to disk -- create() now refuses this); the name still decides.
+    # (planted straight to disk -- create() now refuses this). The name still decides.
     _plant_org(app.state.org_registry, "t-acme-1", org_ids=["t-other"])
     member = _member(app, api_settings, "named", "t-acme-1")
 

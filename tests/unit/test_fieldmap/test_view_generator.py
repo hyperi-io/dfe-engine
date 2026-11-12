@@ -1,4 +1,4 @@
-"""Tests for ViewGenerator — ClickHouse view DDL from field maps."""
+"""Tests for ViewGenerator -- ClickHouse view DDL from field maps."""
 
 import pytest
 
@@ -192,7 +192,7 @@ class TestGenerateViewsForSource:
         assert "cim" in views
 
     def test_excludes_other_source_maps(self, gen: ViewGenerator, registry: FieldMapRegistry):
-        # Map for a different source — should not appear
+        # Map for a different source -- should not appear
         registry.save_map(
             _make_field_map(
                 standard="cim",
@@ -240,7 +240,7 @@ class TestDiscoverStandards:
             _make_field_map(standard="cim", source="crowdstrike", mappings={"C": "c"})
         )
         result = gen._discover_standards("syslog")
-        # sigma (default), ecs (source-specific for syslog) — NOT cim (different source)
+        # sigma (default), ecs (source-specific for syslog) -- NOT cim (different source)
         assert result == ["ecs", "sigma"]
 
     def test_sorted_output(self, gen: ViewGenerator, registry: FieldMapRegistry):

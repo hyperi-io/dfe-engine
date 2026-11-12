@@ -109,7 +109,7 @@ class TestCatalogue:
         self, client, app, admin_headers, tmp_path
     ):
         # dfe-ui #290 reproduced the dfe-transform- prefix rule to build its engine
-        # picker; this field is what lets it drop that rule.
+        # picker. This field is what lets it drop that rule.
         _wire(app, tmp_path)
         listed = client.get("/api/v1/apps", headers=admin_headers).json()["items"]
         engines = {e["service"]: e["transform_engine"] for e in listed}
@@ -538,7 +538,7 @@ class TestScaling:
     def test_a_dial_write_passes_over_a_count_the_overlay_already_carries(
         self, client, app, admin_headers, tmp_path
     ):
-        # The overlay breaks the KEDA rule already; a CPU dial is not the write that did.
+        # The overlay breaks the KEDA rule already. A CPU dial is not the write that did.
         gc = _wire(app, tmp_path)
         _deploy(client, admin_headers)
         name = f"{VRL}-edge-values"
@@ -1436,7 +1436,7 @@ class TestDryRun:
         self, client, app, admin_headers, operator_headers, tmp_path
     ):
         # A dry run needs dryrun:execute (infra_admin) AND sampler:read
-        # (data_analyst); the operator resolves both, so both gates pass.
+        # (data_analyst). The operator resolves both, so both gates pass.
         self._deployed(client, app, admin_headers, tmp_path)
         held = self._sampler(app)
         resp = client.post(

@@ -5,11 +5,11 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""route_write: dev/solo commit to main; production+team goes to a review PR.
+"""route_write: dev/solo commit to main. Production+team goes to a review PR.
 
 Real dulwich repos throughout: a bare remote stands in for the deploy repo, so the
-side-branch push is a genuine git operation. The forge (an EXTERNAL service) is a
-small recording double at the ForgeProvider seam; its real REST behaviour is
+side-branch push is a real git operation. The forge (an EXTERNAL service) is a
+small recording double at the ForgeProvider interface. Its real REST behaviour is
 covered in test_forge.py.
 """
 
@@ -26,7 +26,7 @@ from tests.support.present import present
 
 
 class _RecordingForge:
-    """A ForgeProvider seam double that records the PR it was asked to open."""
+    """A ForgeProvider double that records the PR it was asked to open."""
 
     def __init__(self, url: str = "http://forge/pr/1") -> None:
         self.calls: list[dict] = []

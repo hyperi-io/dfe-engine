@@ -389,7 +389,7 @@ class TestMemberCountsGoUpOnly:
         assert self._set(client, admin_headers, "kafka", "kafka.replicas", 3).status_code == 200
 
     def test_an_undeclared_count_accepts_anything(self, client, app, admin_headers, tmp_path):
-        # Nothing declared means nothing to compare against; the chart or profile
+        # Nothing declared means nothing to compare against. The chart or profile
         # default is not readable from here.
         _wire_gitcrud(app, tmp_path)
         assert self._set(client, admin_headers, "kafka", "kafka.replicas", 1).status_code == 200
@@ -705,7 +705,7 @@ class TestARevertCannotShrinkAMemberCount:
         self, client, app, api_settings, tmp_path
     ):
         """3 is the shipped keeper default, but the engine cannot see that, so it
-        refuses rather than guess; the override grant is the way through."""
+        refuses rather than guess. The override grant is the way through."""
         gc = _wire_gitcrud(app, tmp_path)
         gc.put(
             "infravars", "clickhouse-cluster", {"clickhouse": {"keeper": {"replicas": 3}}}, "tester"

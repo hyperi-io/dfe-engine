@@ -1,4 +1,4 @@
-"""Tests for the rules router — RuleCreationService create + validate + CRUD."""
+"""Tests for the rules router -- RuleCreationService create + validate + CRUD."""
 
 import pytest
 
@@ -33,7 +33,7 @@ def _sample_create_payload(**overrides):
 
 
 class TestRulesValidate:
-    """POST /api/v1/rules/validate — validate SQL without creating."""
+    """POST /api/v1/rules/validate -- validate SQL without creating."""
 
     def test_validate_valid_sql(self, client, admin_headers):
         resp = client.post(
@@ -237,7 +237,7 @@ class TestRulesUpdateAndDelete:
 
 
 class TestRulesCreate:
-    """POST /api/v1/rules — create rule via RuleCreationService."""
+    """POST /api/v1/rules -- create rule via RuleCreationService."""
 
     def test_create_basic_rule(self, client, admin_headers):
         resp = client.post(
@@ -310,7 +310,7 @@ class TestRulesCreate:
 
 
 class TestRulesFromHyperdx:
-    """POST /api/v1/rules/from-hyperdx — create a rule from a HyperDX view."""
+    """POST /api/v1/rules/from-hyperdx -- create a rule from a HyperDX view."""
 
     _RAW_SQL = "SELECT * FROM default.events WHERE severity = 'high'"
 
@@ -518,7 +518,7 @@ class TestRulesRefuseUncompilable:
 
 
 # Each shape leaves nothing once the time window is stripped: HyperDX's `_json:*`,
-# presence checks on header columns, and conditions that are simply true.
+# presence checks on header columns, and conditions that are true.
 _MATCHES_EVERYTHING = {
     "lucene_star": "notEmpty(toString(`_json`)) = 1",
     "json_present": "notEmpty(_json) = 1",

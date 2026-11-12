@@ -32,7 +32,7 @@ _CAPACITY_CODES = frozenset({241, 202, 439})
 
 
 def unavailable_reason(exc: BaseException) -> str | None:
-    """Why ClickHouse could not be used, when waiting can fix it; None otherwise.
+    """Why ClickHouse could not be used, when waiting can fix it. None otherwise.
 
     Returns:
         ``connection`` for an outage, ``authentication`` for a refused user,
@@ -60,10 +60,10 @@ def connect_when_available[T](
     The back-off steps are ``clickhouse.resilience``'s, each jittered. There is no
     budget: the runner has nothing to do until it connects, so it waits as long as
     the outage or the missing user lasts. The first refusal is logged with its
-    cause; every one is counted.
+    cause. Every one is counted.
 
     Args:
-        attempt: builds the client and whatever must hold before ticking; it is
+        attempt: builds the client and whatever must hold before ticking. It is
             called afresh each time, so it cleans up after a failure itself.
         resilience: the back-off settings.
         metrics: where each refusal is counted.
@@ -117,7 +117,7 @@ class TickGuard:
     """Skip a tick ClickHouse refused, rather than letting it end the process.
 
     The daemon runs the next tick on its poll interval, which is the back-off. The
-    outage is logged once when it starts and once when it clears; every skipped
+    outage is logged once when it starts and once when it clears. Every skipped
     tick is counted.
 
     Args:
@@ -131,7 +131,7 @@ class TickGuard:
         self._down = False
 
     def __call__(self, now: int) -> int:
-        """Run one tick; returns the runs it executed, 0 for a skipped tick."""
+        """Run one tick. Returns the runs it executed, 0 for a skipped tick."""
         try:
             executed = self._tick(now)
         except Exception as exc:

@@ -9,8 +9,7 @@
 
 Every caller - app startup, the governance endpoint, and the trigger an org or
 group change fires - needs the same admin client, secrets store, orgs and
-bindings, and previously built all four inline; the copies drifted, which is how
-``bindings`` came to be passed by neither.
+bindings. Building them in one place keeps the callers from drifting apart.
 
 Building the client stays a separate call so each caller keeps its own failure
 policy: startup logs and continues, the endpoint returns 503, the trigger counts
@@ -76,7 +75,7 @@ def reconcile_from_stores(
     A missing store contributes nothing rather than failing: an org registry with
     no groups still reconciles tiers, roles and row policies. ``role_config`` is
     the role definitions the group bindings read a role's ``scoped`` flag from;
-    None reads the shipped ones. One run at a time in this process; a caller
+    None reads the shipped ones. One run at a time in this process. A caller
     arriving mid-run waits for it.
     """
     from dfe_engine.secrets import build_secrets
@@ -163,7 +162,7 @@ def provided_service_passwords() -> dict[str, str]:
 def service_user_password(settings: Any, username: str) -> str:
     """The password a minted service user connects with, or "" when it has none yet.
 
-    The deployment-provided password wins, as it does in the reconcile; otherwise
+    The deployment-provided password wins, as it does in the reconcile. Otherwise
     it is the secret the reconcile stored. A user that is not a minted service
     user has no password here.
     """

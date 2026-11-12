@@ -12,13 +12,13 @@ Providers are stored as YAML files -- one per provider.  The provider name
 is the filename stem and is NOT stored inside the YAML body.
 
 Supported provider types:
-    generic   -- Any OIDC-compliant IdP; groups resolved from token claims only.
-    google    -- Google Workspace; each login's groups read from Cloud Identity with the user's token.
-    entra_id  -- Microsoft Entra ID (Azure AD); supports Graph API group sync.
-    okta      -- Okta; supports API-based group resolution.
+    generic   -- Any OIDC-compliant IdP. Groups resolved from token claims only.
+    google    -- Google Workspace. Each login's groups read from Cloud Identity with the user's token.
+    entra_id  -- Microsoft Entra ID (Azure AD). Supports Graph API group sync.
+    okta      -- Okta. Supports API-based group resolution.
 
 Group resolution modes:
-    manual       -- Group membership managed manually in dfe-engine; the token's groups are ignored and nothing syncs.
+    manual       -- Group membership managed manually in dfe-engine. The token's groups are ignored and nothing syncs.
     token_claim  -- Groups extracted from a named OIDC token claim at login time (the default).
     api          -- Groups fetched from the provider's admin API on a schedule.
 """
@@ -64,7 +64,7 @@ SyncStatus = Annotated[
 _GroupResolutionMode = Literal["manual", "token_claim", "api"]
 _ProviderType = Literal["generic", "google", "entra_id", "okta"]
 
-# Google and Entra fail a login that asks for `groups`; Google's groups are read with the login's own Cloud Identity scope, and dex and Okta emit the groups claim only when it is requested.
+# Google and Entra fail a login that asks for `groups`. Google's groups are read with the login's own Cloud Identity scope, and dex and Okta emit the groups claim only when it is requested.
 _DEFAULT_SCOPES: dict[_ProviderType, str] = {
     "entra_id": "openid email profile",
     "generic": "openid email profile groups",
@@ -72,7 +72,7 @@ _DEFAULT_SCOPES: dict[_ProviderType, str] = {
     "okta": "openid email profile groups",
 }
 
-# The scopes field's default before it followed the type, sorted; every provider saved then stores it.
+# The scopes field's default before it followed the type, sorted. Every provider saved then stores it.
 _LEGACY_DEFAULT_SCOPES = ("email", "groups", "openid", "profile")
 
 # okta and generic still default to that set, so only these types fail a login on it.
@@ -105,17 +105,17 @@ class GroupResolutionConfig(BaseModel):
     with the user's own token. When set (with ``mode == "api"``) the RP calls the adapter's
     ``resolve_user_groups`` and the directory result is authoritative. Entra's
     >200 overage is handled automatically without this flag (the token's overage
-    marker triggers the same enrichment); a provider that reliably delivers
+    marker triggers the same enrichment). A provider that reliably delivers
     groups in-token (dex, okta) leaves this off."""
 
-    # -- Directory backend selection (test / CI seam) --
+    # -- Directory backend selection (test / CI hook) --
     directory_backend: Literal["live", "mock"] = "live"
     """Which directory backend api-mode enrichment uses.
 
     ``live`` hits the real provider API (Graph / Admin SDK / Okta). ``mock``
     selects the in-process Surface-B directory: a deterministic, offline group
     directory read from a JSON fixture, so api-mode and the Entra >200 overage
-    path can be exercised in CI without a live tenant. This is a TEST/CI seam and
+    path can be exercised in CI without a live tenant. This is a TEST/CI hook and
     is deliberately NOT settable through the provider admin API - flip it in the
     provider YAML only. Never ``mock`` in a real deployment."""
 
@@ -126,7 +126,7 @@ class GroupResolutionConfig(BaseModel):
     is still named indirectly via an env var to match the rest of this config and
     to keep absolute test paths out of committed YAML."""
 
-    # -- Google Workspace (api mode): an optional service account; logins need none --
+    # -- Google Workspace (api mode): an optional service account. Logins need none --
     service_account_json_env: str = ""
     """Env var name holding the Google service account JSON credentials."""
 
@@ -138,13 +138,13 @@ class GroupResolutionConfig(BaseModel):
 
     # -- Microsoft Entra ID (api mode and the >200 group overage lookup) --
     tenant_id: str = ""
-    """The Entra ID tenant ID itself - it is not secret, so it is held in the clear; ``tenant_id_env`` still resolves it when this is empty."""
+    """The Entra ID tenant ID itself - it is not secret, so it is held in the clear. ``tenant_id_env`` still resolves it when this is empty."""
 
     tenant_id_env: str = ""
     """Env var name holding the Entra ID tenant ID."""
 
     client_secret_env: str = ""
-    """Env var name holding the Entra ID application client secret; the login client secret is used when neither this nor ``client_secret_path`` is set."""
+    """Env var name holding the Entra ID application client secret. The login client secret is used when neither this nor ``client_secret_path`` is set."""
 
     client_secret_path: str = ""
     """DfeSecrets path holding the Entra ID application client secret."""
@@ -170,7 +170,7 @@ class OIDCProvider(BaseModel):
 
     The provider name is the filename stem of the YAML file -- it is NOT
     stored as a field here.  Secret material is stored as a PATH into the
-    DfeSecrets seam or as the NAME of an env var, never as the value itself.
+    DfeSecrets interface or as the NAME of an env var, never as the value itself.
     """
 
     type: _ProviderType = "generic"

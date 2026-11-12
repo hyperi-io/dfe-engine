@@ -65,7 +65,7 @@ class HuntDetectionColumn:
     """A hunt-specific detection column."""
 
     name: str
-    select_expr: str | None = None  # source column copied; None = literal injected at query time
+    select_expr: str | None = None  # source column copied, None = literal injected at query time
     ch_type: str = "LowCardinality(String)"
     codec: str | None = None
     comment: str = ""
@@ -171,7 +171,7 @@ def matching_rows(
     # Source is hunt configuration text, so it can only ever name a table.
     source = f"{quote_identifier(source_db)}.{quote_identifier(source_table)}"
     return (
-        f"(\n    SELECT {selected}\n"  # noqa: S608 - quoted source; schema column names; the condition is the rule itself
+        f"(\n    SELECT {selected}\n"  # noqa: S608 - quoted source, schema column names, the condition is the rule itself
         f"    FROM {source}\n"
         f"    WHERE {condition}\n"
         f")"

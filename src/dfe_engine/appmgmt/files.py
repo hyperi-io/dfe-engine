@@ -164,7 +164,7 @@ def upsert_file(doc: dict, file_set: ConsumedFileSet, name: str, content: str) -
     """Add or replace a file in the set. Mutates ``doc``. Returns whether it changed.
 
     New files are appended rather than sorted in, because the order the overlay
-    stores them is the author's; dfe-transform-vrl concatenates by filename
+    stores them is the author's. dfe-transform-vrl concatenates by filename
     regardless, so ordering here is presentation, not behaviour.
     """
     validate_filename(file_set, name)

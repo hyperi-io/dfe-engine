@@ -27,7 +27,7 @@ _real_gensalt = bcrypt.gensalt
 def _fast_bcrypt(monkeypatch):
     """Hash every account password at bcrypt's minimum cost in this tree.
 
-    Production hashes at cost 12 (~0.28s/hash on the CI host); the
+    Production hashes at cost 12 (~0.28s/hash on the CI host). The
     test_api ``client`` fixture alone triggers at least three hashes per
     test across 874+ tests, so at cost 12 that fixture alone accounts for
     minutes of the Test job. No test in this tree asserts the numeric

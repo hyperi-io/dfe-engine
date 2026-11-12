@@ -161,7 +161,7 @@ def test_no_gauge_reads_zero_and_only_a_query_error_holds_the_last_good_value(ch
 
 
 def _wait_running(ch_client, marker: str, deadline_seconds: float = 10.0) -> None:
-    """Return once ClickHouse lists a query carrying ``marker``; fail at the deadline."""
+    """Return once ClickHouse lists a query carrying ``marker``. Fail at the deadline."""
     deadline = time.monotonic() + deadline_seconds
     while time.monotonic() < deadline:
         running = ch_client.query(

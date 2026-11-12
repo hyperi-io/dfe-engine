@@ -9,7 +9,7 @@
 """Tests for the source column, build and deploy routes and the meta-schema routes.
 
 These tests exercise the router-level behaviour without real ClickHouse.
-All CH-dependent endpoints return 503 (not configured) by design — the
+All CH-dependent endpoints return 503 (not configured) by design -- the
 routers guard against missing infrastructure cleanly.
 """
 
@@ -76,7 +76,7 @@ class TestSchemaVocabulary:
 
 
 class TestSchemasRouter:
-    """GET/POST /api/v1/sources/{name}/columns and /build (formerly under /schemas)."""
+    """GET/POST /api/v1/sources/{name}/columns and /build (served under /sources)."""
 
     def test_build_unknown_source_version(self, client, admin_headers, sample_source):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
@@ -99,7 +99,7 @@ class TestSchemasRouter:
         assert "schema.meta_schema" in resp.json()["detail"]
 
     def test_deploy_dry_run_plans_ddl_without_touching_clickhouse(self, tmp_path, monkeypatch):
-        # A source WITH a real schema; dry_run must return the DDL and apply nothing
+        # A source WITH a real schema. dry_run must return the DDL and apply nothing
         # (no ClickHouse configured here - if plan touched CH this would 503).
         import shutil
 
@@ -384,7 +384,7 @@ class TestSchemasRouter:
         from dfe_engine.yaml_utils import yaml_dump
 
         # The columns route resolves schema files via the global settings
-        # singleton; reset it so this test's DFE_ENGINE_SCHEMAS_DIR is honoured even
+        # singleton. Reset it so this test's DFE_ENGINE_SCHEMAS_DIR is honoured even
         # when an earlier test has already populated the cache.
         reset_settings()
 
@@ -605,7 +605,7 @@ class TestSchemasRouter:
 
 
 class TestSchemasMetaListRouter:
-    """GET /api/v1/schemas — meta-schema registry listing."""
+    """GET /api/v1/schemas -- meta-schema registry listing."""
 
     def test_list_meta_empty_registry_returns_200(self, client, admin_headers):
         resp = client.get("/api/v1/schemas", headers=admin_headers)
@@ -964,7 +964,7 @@ class TestSchemasMetaListRouter:
 
 
 class TestSchemasMetaWriteRouter:
-    """POST/DELETE /api/v1/schemas/definitions/... — meta-schema registry writes."""
+    """POST/DELETE /api/v1/schemas/definitions/... -- meta-schema registry writes."""
 
     @staticmethod
     def _minimal_schema_body():

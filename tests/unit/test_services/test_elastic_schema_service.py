@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_services/test_elastic_schema_service.py
-#  Purpose:      Tests for Elasticsearch template → meta-schema conversion
+#  Purpose:      Tests for Elasticsearch template -> meta-schema conversion
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -222,7 +222,7 @@ def test_malformed_leaf_with_properties_descends() -> None:
     }
     cols = ElasticSchemaService.template_dict_to_columns(doc)
     by_name = {c.name: c for c in cols}
-    # Keyword + nested properties is treated as container-only; children are emitted.
+    # Keyword + nested properties is treated as container-only. Children are emitted.
     assert "odd" not in by_name
     assert by_name["odd_nested_kw"].type == "string"
 

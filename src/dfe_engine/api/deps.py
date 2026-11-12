@@ -3,7 +3,7 @@
 Registry singletons are initialized in the lifespan handler and resolved
 per-request via ``Depends()``.  Authentication checks four paths in order:
 
-1. OIDC headers (X-Oidc-Subject) -- Envoy Gateway fronted; trusted ONLY
+1. OIDC headers (X-Oidc-Subject) -- Envoy Gateway fronted. Trusted ONLY
    when auth.trust_proxy_auth_headers is set (else ignored, fail closed)
 2. API key (X-API-Key) -- machine-to-machine
 3. JWT Bearer -- standalone/Docker users
@@ -101,7 +101,7 @@ def bootstrap_registries(
 
     ``gitcrud`` (the Governed Ops engine over the deploy repo, when gitops is
     enabled) makes the deploy repo the SSoT for sources (``config/sources/``),
-    hunts (``config/hunts/``) and rules (``config/rules/``); without it each
+    hunts (``config/hunts/``) and rules (``config/rules/``). Without it each
     registry falls back to its plain YAML directory. ``forge`` opens the review
     PR when the deployment posture refuses a direct commit.
     """
@@ -420,7 +420,7 @@ def _resolve_group_grants(
     comes here, because a name it sends would take the stored group of that name.
     Each identifier is looked up by group NAME first, then by provider
     ``source_id``. Unknown identifiers are silently skipped (no error -- the user
-    just gets fewer roles). A system group's roles bind at system scope; an
+    just gets fewer roles). A system group's roles bind at system scope. An
     org-scoped group's roles bind at that org's scope only. org_ids collects the
     caller's org memberships (the owning org of each org-scoped group, plus each
     group's org_ids list).
@@ -442,7 +442,7 @@ def _resolve_group_grants(
 def _grants_of(groups: Iterable[Group]) -> GroupResolution:
     """The roles, org memberships and scoped grants *groups* carry, and their names.
 
-    A system group's roles bind at system scope; an org-scoped group's roles bind at
+    A system group's roles bind at system scope. An org-scoped group's roles bind at
     that org's scope only, and the group's owning org and ``org_ids`` are its orgs.
     """
     roles: set[str] = set()
@@ -517,7 +517,7 @@ def resolve_live_grants_for_user(
     The account is the one :func:`account_for_session_subject` binds, so a subject that
     binds none, an API-key subject among them, resolves to nothing. The resolution's
     ``groups`` are the ones the account holds (:func:`groups_held`). *groups* is every
-    stored group when the caller has listed them for this request; otherwise they are
+    stored group when the caller has listed them for this request. Otherwise they are
     listed here, once.
     """
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
@@ -685,7 +685,7 @@ async def get_current_user(request: Request) -> AuthContext:
                     headers={"WWW-Authenticate": "Bearer"},
                 ) from exc
             except Exception as exc:
-                # A session with no account behind it cannot be disabled locally; the text names store paths, so only its class is logged.
+                # A session with no account behind it cannot be disabled locally. The text names store paths, so only its class is logged.
                 logger.error(
                     "JIT provisioning failed", user_id=oidc_subject, **describe_http_error(exc)
                 )
@@ -827,7 +827,7 @@ async def get_current_user(request: Request) -> AuthContext:
     # Gated on the POSTURE as well as the flag. `auth.enabled` alone handed an
     # anonymous request roles=["admin"], and `env` defaults to "production" while
     # `auth.enabled` defaults to False, so the pairing that grants anonymous
-    # admin was the out-of-the-box one. DFESettings rejects it at load now; this
+    # admin was the out-of-the-box one. DFESettings rejects it at load now. This
     # is the second line, for anything holding a settings object that did not
     # come through that validator.
     if not settings.auth.enabled and is_dev_posture(settings.env):
@@ -1119,7 +1119,7 @@ def require_action(action: str, *, scope: Scope | None = None):
     """FastAPI dependency factory for RBAC enforcement.
 
     ``scope=None`` is a system-scope check (the historical behaviour).
-    Pass a Scope for endpoints whose target scope is static; use
+    Pass a Scope for endpoints whose target scope is static. Use
     check_action() inside the handler when it depends on the request.
 
     The spec names ``action`` as ``x-scalo.action`` on every route this guards,

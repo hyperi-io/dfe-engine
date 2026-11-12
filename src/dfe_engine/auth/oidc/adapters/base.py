@@ -224,7 +224,7 @@ class OIDCGroupAdapter(ABC):
 
     def __init__(self, provider: OIDCProvider, *, secrets: DfeSecrets | None = None) -> None:
         self._provider = provider
-        # The directory-API credential resolves through this seam before the env.
+        # The directory-API credential resolves through this hook before the env.
         self._secrets = secrets
 
     @abstractmethod

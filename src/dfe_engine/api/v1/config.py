@@ -9,7 +9,7 @@
 
 Fixes the Next.js build-time NEXT_PUBLIC_* trap: instead of baking the API/HyperDX
 URLs into the image, the UI reads them at runtime here -> one image, every
-environment, gitops-driven. Any authenticated caller may read it; an anonymous
+environment, gitops-driven. Any authenticated caller may read it. An anonymous
 request gets 401.
 """
 

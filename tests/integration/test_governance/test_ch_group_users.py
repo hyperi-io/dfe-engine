@@ -12,7 +12,7 @@ Each test reconciles twice through the real path - group records ->
 file-backed secrets store, and reads what the second run left behind.
 
 A reconcile is cluster-global: it drops ``dfe_grp_*`` users no binding renders. On
-the harness's own per-test ClickHouse nothing else is there; on a shared cluster,
+the harness's own per-test ClickHouse nothing else is there. On a shared cluster,
 run this serially (``-n 0``), and the fixture refuses to run where it would drop
 users it did not create.
 """

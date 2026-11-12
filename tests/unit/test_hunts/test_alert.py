@@ -17,7 +17,7 @@ from dfe_engine.hunts.alert import (
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
 
-# ── AlertTrigger ──────────────────────────────────────────────────
+# -- AlertTrigger --------------------------------------------------
 
 
 class TestAlertTrigger:
@@ -46,7 +46,7 @@ class TestAlertTrigger:
             AlertTrigger(when="[1,2,3].map(x, x * 2)")
 
 
-# ── AlertConfig ───────────────────────────────────────────────────
+# -- AlertConfig ---------------------------------------------------
 
 
 class TestAlertConfig:
@@ -65,7 +65,7 @@ class TestAlertConfig:
         assert cfg.title_template == "Alert: {hunt_name}"
 
 
-# ── AlertDestination ─────────────────────────────────────────────
+# -- AlertDestination ---------------------------------------------
 
 
 class TestAlertDestination:
@@ -89,7 +89,7 @@ class TestAlertDestination:
         assert d.enabled is False
 
 
-# ── AlertDestinationRegistry ─────────────────────────────────────
+# -- AlertDestinationRegistry -------------------------------------
 
 
 class TestAlertDestinationRegistry:
@@ -164,7 +164,7 @@ class TestAlertDestinationRegistry:
         assert len(r) == 2
 
 
-# ── AlertDispatcher._should_fire ──────────────────────────────────
+# -- AlertDispatcher._should_fire ----------------------------------
 
 
 class TestShouldFire:
@@ -211,13 +211,13 @@ class TestShouldFire:
         assert d._should_fire(2, results) is False
 
     def test_field_value_missing_field(self):
-        """Missing field in CEL → evaluate_condition returns False."""
+        """Missing field in CEL -> evaluate_condition returns False."""
         d = self._dispatcher([AlertTrigger(when='severity == "critical"')])
         results = [{"other": "value"}]
         assert d._should_fire(1, results) is False
 
     def test_field_value_no_results(self):
-        """Field condition with no results → aggregate-only eval, field missing → False."""
+        """Field condition with no results -> aggregate-only eval, field missing -> False."""
         d = self._dispatcher([AlertTrigger(when='severity == "critical"')])
         assert d._should_fire(0, None) is False
 
@@ -278,7 +278,7 @@ class TestShouldFire:
         assert d._should_fire(1, results) is True
 
 
-# ── AlertDispatcher.evaluate_and_send ─────────────────────────────
+# -- AlertDispatcher.evaluate_and_send -----------------------------
 
 
 class TestEvaluateAndSend:
@@ -334,7 +334,7 @@ class TestEvaluateAndSend:
         assert body == "42 hits for acme"
 
 
-# ── AlertDispatcher._send ─────────────────────────────────────────
+# -- AlertDispatcher._send -----------------------------------------
 
 
 class TestSend:
@@ -371,16 +371,16 @@ class TestSend:
         assert d._send("title", "body") is False
 
 
-# ── build_alert_config ────────────────────────────────────────────
+# -- build_alert_config --------------------------------------------
 
 
 class TestBuildAlertConfig:
     def test_no_alerts_section_no_global(self):
-        """No alert config at all → None."""
+        """No alert config at all -> None."""
         assert build_alert_config({}) is None
 
     def test_global_channels_only(self):
-        """Global channels with no hunt-level alerts → config with default trigger."""
+        """Global channels with no hunt-level alerts -> config with default trigger."""
         config = build_alert_config({}, global_channels=["slack://global"])
         assert config is not None
         assert config.channels == ["slack://global"]
@@ -388,7 +388,7 @@ class TestBuildAlertConfig:
         assert config.triggers[0].when == "result_count > 0"
 
     def test_hunt_channels_only(self):
-        """Hunt-level channels with no global → config with those channels."""
+        """Hunt-level channels with no global -> config with those channels."""
         data = {"alerts": {"channels": ["pagerduty://key"]}}
         config = build_alert_config(data)
         assert config is not None
@@ -430,7 +430,7 @@ class TestBuildAlertConfig:
         assert len(config.triggers) == 2
 
     def test_default_trigger_when_no_triggers_specified(self):
-        """Channels but no triggers → defaults to result_count > 0."""
+        """Channels but no triggers -> defaults to result_count > 0."""
         data = {"alerts": {"channels": ["slack://t"]}}
         config = build_alert_config(data)
         assert config is not None
@@ -457,11 +457,11 @@ class TestBuildAlertConfig:
         assert config.body_template == "Found {result_count}"
 
     def test_invalid_alerts_section(self):
-        """alerts: not a dict → None."""
+        """alerts: not a dict -> None."""
         assert build_alert_config({"alerts": "bad"}) is None
 
 
-# ── build_alert_config with destination registry ─────────────────
+# -- build_alert_config with destination registry -----------------
 
 
 class TestBuildAlertConfigWithRegistry:
@@ -512,7 +512,7 @@ class TestBuildAlertConfigWithRegistry:
         assert config.channels == ["slack://t/b/c/", "pagerduty://key"]
 
     def test_destinations_deduped_with_global(self, registry):
-        """Destination URL same as global → not duplicated."""
+        """Destination URL same as global -> not duplicated."""
         data = {"alerts": {"destinations": ["pd-oncall"]}}
         config = build_alert_config(
             data, global_channels=["pagerduty://key"], destination_registry=registry
@@ -521,13 +521,13 @@ class TestBuildAlertConfigWithRegistry:
         assert config.channels == ["pagerduty://key"]
 
     def test_no_registry_warns(self):
-        """Destinations referenced but no registry → warning, no channels."""
+        """Destinations referenced but no registry -> warning, no channels."""
         data = {"alerts": {"destinations": ["slack-dfe"]}}
         config = build_alert_config(data)
         assert config is None
 
     def test_empty_destinations_list(self, registry):
-        """Empty destinations list → falls through to channels/global."""
+        """Empty destinations list -> falls through to channels/global."""
         data = {"alerts": {"destinations": []}}
         config = build_alert_config(
             data, global_channels=["slack://g"], destination_registry=registry
@@ -536,7 +536,7 @@ class TestBuildAlertConfigWithRegistry:
         assert config.channels == ["slack://g"]
 
 
-# ── AlertDestinationRegistry over the secrets backend ────────────
+# -- AlertDestinationRegistry over the secrets backend ------------
 
 
 def _secrets(tmp_path):

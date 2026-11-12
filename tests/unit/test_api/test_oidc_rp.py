@@ -9,7 +9,7 @@
 """OIDC RP unit tests.
 
 Covers the engine token re-mint against a REAL JwtAuthority over a real
-scalo.secrets file backend; claim extraction is tested in
+scalo.secrets file backend. Claim extraction is tested in
 tests/unit/test_auth/test_oidc/test_rp.py. The live
 redirect flow (Authlib authorize_redirect / authorize_access_token against an
 IdP) is out of scope here and validated against a real dex in integration - no
@@ -45,7 +45,7 @@ def _authority(path) -> JwtAuthority:
     return JwtAuthority(secrets, issuer=ISS)
 
 
-# ── re-mint: NormalizedIdentity -> engine ES384 token ────────────
+# -- re-mint: NormalizedIdentity -> engine ES384 token ------------
 
 
 def test_remint_engine_token_is_es384_and_verifies(tmp_path):
@@ -86,7 +86,7 @@ def test_remint_empty_groups_roundtrips(tmp_path):
     assert claims["groups"] == []
 
 
-# ── provider config round-trip (new RP-login fields) ─────────────
+# -- provider config round-trip (new RP-login fields) -------------
 
 
 def test_provider_config_roundtrip_new_fields(tmp_path):
@@ -118,7 +118,7 @@ def test_provider_config_defaults():
     assert provider.scopes == "openid email profile groups"
 
 
-# ── credential resolution at registration: store before env ──────
+# -- credential resolution at registration: store before env ------
 
 
 def _registry_with(tmp_path, **provider_fields) -> OIDCProviderRegistry:
@@ -278,7 +278,7 @@ def test_the_login_route_hands_out_a_pkce_authorization_url(client, app):
     assert "code_verifier" not in query
 
 
-# ── router wiring (real app, no live IdP) ────────────────────────
+# -- router wiring (real app, no live IdP) ------------------------
 
 
 def test_login_unknown_provider_404(client):
@@ -351,10 +351,10 @@ def test_login_json_mode_returns_authorization_url(client, app):
     assert resp.json() == {"authorization_url": "https://idp.example/authorize?state=test"}
 
 
-# ── RP self-heal on an out-of-band registry change ───────────────
+# -- RP self-heal on an out-of-band registry change ---------------
 #
 # The CRUD endpoints rebuild the RP on write, which only heals the worker that
-# served it; the login path consults the registry before 404ing so a provider
+# served it. The login path consults the registry before 404ing so a provider
 # written by another worker or a gitops sync needs no engine restart.
 
 
@@ -461,7 +461,7 @@ def test_login_still_404s_for_a_provider_that_was_never_configured(client):
     assert resp.status_code == 404
 
 
-# ── return_to: the console hand-back ─────────────────────────────
+# -- return_to: the console hand-back -----------------------------
 
 
 def test_validate_return_to_accepts_relative_and_trusted_origins():
@@ -623,11 +623,11 @@ def test_callback_jit_provisions_account_with_oidc_name(client, app):
 
 
 class TestCallbackTokenLifetime:
-    """The callback reads the clock once; the tests freeze that reading so every expiry is exact."""
+    """The callback reads the clock once. The tests freeze that reading so every expiry is exact."""
 
     @pytest.fixture
     def now(self, client, app, monkeypatch) -> int:
-        # Behind the wall clock so a second clock read while signing lands past the cap.
+        # Behind the real clock so a second clock read while signing lands past the cap.
         frozen = int(time.time()) - 10
         monkeypatch.setattr(oidc_login, "time", SimpleNamespace(time=lambda: frozen))
         app.state.oidc_rp = _FakeOidcRp()

@@ -235,7 +235,7 @@ def test_a_rule_with_only_sql_is_put_through_the_rewriter(tmp_path: Path):
     ],
 )
 def test_a_stored_time_placeholder_leaves_only_the_window(tmp_path: Path, stored, compiled):
-    """The worker fills in only the window; ClickHouse refuses any other placeholder."""
+    """The worker fills in only the window. ClickHouse refuses any other placeholder."""
     _save_rule(tmp_path, rule_id="ph", name="Placeholder", where_clause=stored)
     sql = _compiled_sql(
         {**resolved_customers("acme"), "rules": ["ph"], "global_source_table_name": "dfe.main"},

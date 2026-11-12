@@ -35,7 +35,7 @@ class ValidationStatus(StrEnum):
     INVALID = "invalid"
 
     UNAVAILABLE = "unavailable"
-    """No backend could answer; the content was not checked."""
+    """No backend could answer. The content was not checked."""
 
     DISABLED = "disabled"
     """Validation is switched off for this deployment."""

@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/unit/test_auth/test_api_keys.py
-#  Purpose:      Tests for APIKeyStore — YAML-backed API key management
+#  Purpose:      Tests for APIKeyStore -- YAML-backed API key management
 #  Language:     Python
 #
 #  License:      BUSL-1.1

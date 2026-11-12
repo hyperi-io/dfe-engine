@@ -20,7 +20,7 @@ from dfe_engine.hunts.alert_grouping import AlertStateManager
 BLANK_ORG_IDS = ["", "   ", "\t", "\n", None]
 
 
-# ── AlertStateManager.record_fire ────────────────────────────────
+# -- AlertStateManager.record_fire --------------------------------
 
 
 class TestRecordFireOrgGuard:
@@ -38,6 +38,6 @@ class TestRecordFireOrgGuard:
         ch = MagicMock()
         mgr.record_fire(ch, "hunt_1", "rule_1", "acme", fired_at=datetime(2026, 3, 3, tzinfo=UTC))
         ch.execute.assert_called_once()
-        # Data is a POSITIONAL arg (routes to insert()); _org_id is column index 2.
+        # Data is a POSITIONAL arg (routes to insert()). _org_id is column index 2.
         data = ch.execute.call_args[0][1]
         assert data[0][2] == "acme"

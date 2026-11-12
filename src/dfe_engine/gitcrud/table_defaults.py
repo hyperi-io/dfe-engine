@@ -407,7 +407,7 @@ def _stored_differs(stored: str | int | None, default: str | int | None) -> bool
 
 
 def _live_ttl_value(live: LiveTable) -> int | str:
-    """Days for a table with no TTL (0) or a whole-day one; else the interval, such as ``6 hour``."""
+    """Days for a table with no TTL (0) or a whole-day one. Else the interval, such as ``6 hour``."""
     if live.ttl is None:
         return 0
     days = live.ttl.days
@@ -447,7 +447,7 @@ def source_default_drift(
 
     TTL and engine belong to the table. With *live*, the source's deployed
     table, they are measured on it, so a value the table never took is drift
-    whatever the source stores; a table without a TTL runs 0 days, a TTL that is
+    whatever the source stores. A table without a TTL runs 0 days, a TTL that is
     not whole days is reported as its interval and is always drift, and the
     engine compares as a variant without its Replicated or Shared prefix. Without *live*,
     and always for the header, the stored value is measured: unset inherits on

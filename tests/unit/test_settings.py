@@ -241,7 +241,7 @@ class TestEnvOverrides:
         """There is ONE database setting, and telemetry is not a second one.
 
         The otel, hunts and internal databases were separate knobs naming the
-        same place; a rename had to be applied to each or the grants and the
+        same place. A rename had to be applied to each or the grants and the
         tables disagreed.
         """
         monkeypatch.delenv("DFE_ENGINE_CLICKHOUSE_DATA_DATABASE", raising=False)
@@ -392,7 +392,7 @@ class TestEnvOverrides:
             load_settings()
 
     def test_a_config_file_still_carrying_auth_oidc_loads(self, tmp_path):
-        # Older deployed files carry an auth.oidc block no field reads; they must still load.
+        # Older deployed files carry an auth.oidc block no field reads. They must still load.
         target = tmp_path / "dfe.yaml"
         target.write_text(
             yaml_dump_string({"auth": {"oidc": {"providers_dir": "/x", "sync_enabled": False}}}),
@@ -543,7 +543,7 @@ class TestEnvOverrides:
 
     def test_clickhouse_verify_default_is_none(self):
         # None -> follow the SCALO_TLS_VERIFY escape valve (cert verification ON by
-        # default). Replaces the old insecure default of verify=False.
+        # default), never an implicit verify=False.
         settings = load_settings()
         assert settings.clickhouse.verify is None
 
@@ -556,7 +556,7 @@ class TestEnvOverrides:
         assert get_clickhouse_config(settings)["ch_ca_cert"] == "/etc/ssl/internal-ca.pem"
 
     def test_dfe_tls_verify_bridges_to_scalo_env(self, monkeypatch):
-        # The DFE_ENGINE_-prefixed valve maps onto scalo's env seam so one setting flips
+        # The DFE_ENGINE_-prefixed valve maps onto scalo's env mapping so one setting flips
         # every scalo client. load_settings writes SCALO_TLS_VERIFY straight into
         # os.environ, which monkeypatch never recorded, so patch.dict removes it.
         from scalo.crypto import tls_verify_default
@@ -611,7 +611,7 @@ class TestEnvOverrides:
     @pytest.mark.parametrize("field", ["max_detections_per_run", "max_detections_per_run_ceiling"])
     @pytest.mark.parametrize("value", [0, -1])
     def test_hunt_detection_cap_refuses_unbounded(self, field, value):
-        # 0 would read as "no cap" to anyone used to 0 = unlimited; it is refused instead.
+        # 0 would read as "no cap" to anyone used to 0 = unlimited. It is refused instead.
         from dfe_engine.settings import HuntsSettings
 
         with pytest.raises(ValidationError):
@@ -1041,7 +1041,7 @@ class TestTransportMesh:
             TransportSettings(mesh_enabled=True)
 
     def test_a_namespace_with_the_mesh_off_is_accepted(self):
-        # Every profile passes the namespace; only the switch says to use it.
+        # Every profile passes the namespace. Only the switch says to use it.
         from dfe_engine.settings import TransportSettings
 
         assert TransportSettings(mesh_namespace="envoy-gateway-system").mesh_enabled is False
@@ -1262,7 +1262,7 @@ class TestEverySettingIsRead:
     KNOWN_UNREAD = {("DFESettings", "e2e_server")}
 
     # Names a ClickHouse SERVER setting also carries, where SQL naming the
-    # server setting would otherwise read as a reader; only an attribute
+    # server setting would otherwise read as a reader. Only an attribute
     # access counts for these.
     CH_SERVER_SETTING_NAMES = {
         "max_rows_to_read",

@@ -17,7 +17,7 @@ every write lands as one YAML-in-git commit exactly like the daemon would produc
 
 Two things make it a BREAK-GLASS surface, not an RBAC bypass in disguise:
 
-- There is no RBAC here (the daemon that enforces it is dead); write authority IS
+- There is no RBAC here (the daemon that enforces it is dead). Write authority IS
   git access to the clone. Every write shows a target header + a diff + a default
   y/N confirm first.
 - Every write is marked unmistakably: subject prefixed ``[BREAK-GLASS] `` and the
@@ -27,7 +27,7 @@ Two things make it a BREAK-GLASS surface, not an RBAC bypass in disguise:
 
 GitCrud is built standalone (no ``app.state`` - the daemon is dead) from
 ``settings.gitops`` via the same construction the daemon uses, but with
-``push=False`` so a break-glass write only commits LOCALLY; pushing is a separate
+``push=False`` so a break-glass write only commits LOCALLY. Pushing is a separate
 deliberate step (``dfe local push``, or the post-write prompt). This matches the
 gitops-survivability model: the mutation is a git commit, publishing it is its own
 act. In a clone a push-on daemon also uses, push straight after the commit: the
@@ -93,7 +93,7 @@ def _resolve_repo_path(repo: str | None) -> str:
 def _build_crud(repo: str | None) -> GitCrud:
     """Build GitCrud the SAME way the daemon does, but standalone + push-disabled.
 
-    The daemon builds GitCrud from ``settings.gitops`` via gitcrud.factory; we mirror
+    The daemon builds GitCrud from ``settings.gitops`` via gitcrud.factory. We mirror
     that construction here (no ``app.state`` - the daemon is dead) pointed at the
     local clone. ``push=False`` is deliberate: a break-glass write commits LOCALLY
     only, and publishing is a separate step (``dfe local push`` / the post-write
@@ -168,7 +168,7 @@ def _resolve_reason(reason: str | None, *, allow_prompt: bool) -> str:
     """Return a non-empty break-glass reason, prompting when allowed.
 
     ``--reason`` is REQUIRED. Interactively (no ``--yes``) an omitted reason is
-    prompted for; with ``--yes`` (CI / non-interactive) an omitted reason is a hard
+    prompted for. With ``--yes`` (CI / non-interactive) an omitted reason is a hard
     error rather than a silent unattributed write.
     """
     if reason and reason.strip():
@@ -195,10 +195,10 @@ def _guard(*, repo_path: Path, diff_text: str, yes: bool) -> None:
 
 
 def _keda_by_default(cls: str, name: str) -> bool:
-    """Whether KEDA drives this document as the API reads it; on, if the manifest is broken.
+    """Whether KEDA drives this document as the API reads it. On, if the manifest is broken.
 
     A broken app manifest can be what killed the daemon, so it must not stop the
-    write that repairs it; the strict reading only adds a warning here.
+    write that repairs it. The strict reading only adds a warning here.
     """
     try:
         from dfe_engine.appmgmt.scaling import keda_by_default
@@ -218,7 +218,7 @@ def _safety_warn(cls: str, name: str, before: dict, after: dict, *, yes: bool) -
     who does not know the helm complexity gets the steer the API would give
     (e.g. an unpinned/floating image ref, or handing a stored replicaCount back
     to KEDA) BEFORE they commit a change that would not work or would re-break
-    the daemon. This is the safety half of the API guard; the RBAC half
+    the daemon. This is the safety half of the API guard. The RBAC half
     (protected-var needs the ``helmvars:override`` grant) is deliberately
     dropped. ``--yes`` proceeds without asking.
     """
@@ -467,7 +467,7 @@ def log_cmd(
         typer.echo("no gitcrud history yet.")
         return
     for e in entries:
-        # A break-glass commit is exactly one carrying DFE-Break-Glass: true; read_log
+        # A break-glass commit is exactly one carrying DFE-Break-Glass: true. read_log
         # surfaces the [BREAK-GLASS] subject prefix as the (non-conforming) summary,
         # which is written atomically with that trailer - so the prefix flags them.
         flag = "!! BREAK-GLASS " if e.summary.startswith(BREAK_GLASS_PREFIX) else ""
@@ -641,7 +641,7 @@ def revert_cmd(
 ) -> None:
     """Create a revert-commit that undoes an earlier commit's file changes.
 
-    The one genuinely-new op (GitCrud has no revert): compute the inverse of the
+    The one new op (GitCrud has no revert): compute the inverse of the
     target commit's tree diff and commit it back through GitopsRepo (dulwich, the
     same publish path), marked break-glass.
     """

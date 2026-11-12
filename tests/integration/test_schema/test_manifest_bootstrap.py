@@ -115,7 +115,7 @@ def test_bootstrap_from_empty_clickhouse_creates_every_manifest_object(
         if rendered.kind == "database":
             assert rendered.name in databases, f"{rendered.id} was not created"
         elif rendered.kind == "role":
-            # The rendered name is the catalogue's entry; the object carries the
+            # The rendered name is the catalogue's entry. The object carries the
             # naming rule's role form.
             assert any(rendered.name in role for role in roles), f"{rendered.id} was not created"
 

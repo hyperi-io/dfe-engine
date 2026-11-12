@@ -205,7 +205,7 @@ def test_consolidate_if_due_consolidates_once_the_packs_are_due(
 ) -> None:
     repo = _packed_clone(tmp_path, writes=8)
     assert _packs(repo) >= _PACKS
-    # The clone's config tells dulwich's own gc never to run; consolidation runs anyway.
+    # The clone's config tells dulwich's own gc never to run. Consolidation runs anyway.
     assert _gc_config(repo) == (b"0", b"0")
 
     assert repo.consolidate_if_due() is True

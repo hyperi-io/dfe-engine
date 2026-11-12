@@ -217,7 +217,7 @@ class TestSeeding:
         assert store.load_deploy("main", current) is not None
 
     def test_a_changed_definition_replaces_the_stored_one(self, registry, tmp_path):
-        # An engine upgrade re-seeds the schemas tree; a stored core source that never
+        # An engine upgrade re-seeds the schemas tree. A stored core source that never
         # followed would pin the deployment to the definition it first started on.
         seed_core_sources(registry=registry, settings=_settings(root=tmp_path))
         settings = _settings(root=tmp_path, seeded=False)

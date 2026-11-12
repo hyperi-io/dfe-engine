@@ -1,4 +1,4 @@
-"""Tests for RuleRewriter — SQL parsing and time bound stripping."""
+"""Tests for RuleRewriter -- SQL parsing and time bound stripping."""
 
 import random
 import re

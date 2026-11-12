@@ -8,7 +8,7 @@
 
 """Scoped RBAC through the API.
 
-Proves the two load-bearing properties:
+Proves two properties:
 - org-scoped grants never leak outside their org (create/read/write), and
 - org-local groups are invisible to everyone outside the org, while
   members always see the groups they belong to.
@@ -32,7 +32,7 @@ def _headers(app, api_settings: DFESettings, username: str) -> dict[str, str]:
 
 @pytest.fixture
 def scoped_setup(client: TestClient, app, admin_headers: dict[str, str]):
-    """Two orgs; an org-local admin group and analyst group in acme."""
+    """Two orgs. An org-local admin group and analyst group in acme."""
     account_store = app.state.account_store
 
     for org in ("acme", "globex"):

@@ -14,7 +14,7 @@ mounted copy, then whatever the engine falls back on - and they fail the same
 way, so the resolution and the reading live here once.
 
 Nothing about any particular manifest is here. What a document MEANS is its own
-module's business; this only hands that module a mapping, or says why it cannot.
+module's business. This only hands that module a mapping, or says why it cannot.
 """
 
 from __future__ import annotations

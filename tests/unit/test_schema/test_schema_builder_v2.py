@@ -129,7 +129,7 @@ def _make_source(
     return Source.model_validate(data)
 
 
-# ── Build ───────────────────────────────────────────────────────────
+# -- Build -----------------------------------------------------------
 
 
 class TestBuild:
@@ -244,7 +244,7 @@ class TestBuild:
         assert "_timestamp" not in names  # passthrough has no _timestamp
 
     def test_build_no_meta_schema(self, registry):
-        """Source with no meta_schema → only profile columns."""
+        """Source with no meta_schema -> only profile columns."""
         builder = SchemaBuilderV2(registry=registry)
         source = _make_source()
         result = builder.build(source)
@@ -256,7 +256,7 @@ class TestBuild:
         assert "user_name" not in names
 
     def test_build_without_header_uses_the_default_profile(self, registry, schemas_dir):
-        """Omitted header takes timeseries; it must not resolve to ``.yaml``."""
+        """Omitted header takes timeseries. It must not resolve to ``.yaml``."""
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = Source.model_validate(
             {
@@ -367,7 +367,7 @@ class TestBuild:
         assert "@profile_version: 1.0.0" in result.create_table_ddl
 
 
-# ── Sources that author no header ───────────────────────────────────
+# -- Sources that author no header -----------------------------------
 
 
 class TestUnauthoredHeader:
@@ -446,7 +446,7 @@ class TestUnauthoredHeader:
             assert clause in explicit.create_table_ddl
 
 
-# ── Sigma View ──────────────────────────────────────────────────────
+# -- Sigma View ------------------------------------------------------
 
 
 class TestSigmaView:
@@ -476,12 +476,12 @@ class TestSigmaView:
         assert result.view_ddls == {}
 
 
-# ── Validation ──────────────────────────────────────────────────────
+# -- Validation ------------------------------------------------------
 
 
 class TestValidation:
     def test_validation_errors_reported(self, registry, tmp_path):
-        """Invalid use_case → validation error in result."""
+        """Invalid use_case -> validation error in result."""
         yaml_dump(
             {
                 "columns": [
@@ -496,7 +496,7 @@ class TestValidation:
         assert len(result.validation_errors) > 0
 
 
-# ── Error Handling ──────────────────────────────────────────────────
+# -- Error Handling --------------------------------------------------
 
 
 class TestErrors:
@@ -519,7 +519,7 @@ class TestErrors:
             builder.build(source)
 
 
-# ── View DDL Integration (FieldMapRegistry) ────────────────────────
+# -- View DDL Integration (FieldMapRegistry) ------------------------
 
 
 @pytest.fixture

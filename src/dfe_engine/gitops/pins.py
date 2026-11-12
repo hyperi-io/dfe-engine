@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """pins.yaml: what version of DFE this environment is pinned to.
 
-``base`` selects ONE certified stack; ``overrides`` moves individual components
+``base`` selects ONE certified stack. ``overrides`` moves individual components
 off that set at the operator's own risk (dfe-infra docs/deployment/stack-versioning.md).
 Two surfaces read it - the SUPPORT-DRIFT startup notice and the console's version
 footer - so the load, the shape checks and the never-raise policy live here and
@@ -48,7 +48,7 @@ def load_pins(deploy_repo_path: str | Path) -> dict:
 
 
 def stack_version(pins: dict) -> str | None:
-    """The certified stack this environment is pinned to; None when unpinned."""
+    """The certified stack this environment is pinned to. None when unpinned."""
     base = pins.get("base")
     if not isinstance(base, dict):
         return None

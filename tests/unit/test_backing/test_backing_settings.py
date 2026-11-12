@@ -91,7 +91,7 @@ def test_the_engines_own_kafka_provider_never_becomes_a_backing_fact(monkeypatch
 
 
 def test_a_backing_fact_never_moves_the_engines_own_protocol(monkeypatch):
-    """A managed broker's key derives SASL_SSL; the engine's in-cluster listener is not that."""
+    """A managed broker's key derives SASL_SSL. The engine's in-cluster listener is not that."""
     monkeypatch.setenv("DFE_ENGINE_DEPLOYMENT_KAFKA_PROVIDER", "confluent-cloud")
 
     settings = load_settings()

@@ -863,7 +863,7 @@ _CH_OVERLAY = "clickhouse-cluster"
 
 
 class TestResetClearsRunState:
-    """A reset has to take the substrate overlay with it, or specs inherit it.
+    """A reset has to take the infra overlay with it, or specs inherit it.
 
     The live failure this pins: one spec raised a backing-service node count, the
     next reset left it raised, and that spec then failed against its predecessor's
@@ -1124,7 +1124,7 @@ class TestBreakGlassDurability:
             _registries.clear()
 
     def test_only_the_break_glass_account_reaches_the_deploy_repo(self, tmp_path):
-        """A regular seeded account is durable in its own store; git is the exception."""
+        """A regular seeded account is durable in its own store. git is the exception."""
         app = self._client(tmp_path)
         try:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -1136,7 +1136,7 @@ class TestBreakGlassDurability:
             _registries.clear()
 
     def test_gitops_off_seeds_with_no_deploy_repo_at_all(self, tmp_path):
-        """The mirror only happens on the gitops path; without one nothing changes."""
+        """The mirror only happens on the gitops path. Without one nothing changes."""
         app = create_app(settings=_settings(tmp_path, e2e_server=True))
         try:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -1185,7 +1185,7 @@ class TestBreakGlassReviewPosture:
         # be reached through the endpoint. Only the routing posture is wanted here.
         settings = _settings(tmp_path, e2e_server=False, env="production", gitops=True)
         settings.gitops.mode = "team"
-        # The gate is the seeder's own env; the ROUTING posture is the settings'.
+        # The gate is the seeder's own env. The ROUTING posture is the settings'.
         seeder = Seed(
             account_store=accounts,
             group_store=groups,
@@ -1227,7 +1227,7 @@ def test_an_app_seed_without_a_deploy_repo_fails_loudly(tmp_path):
 
 
 def test_e2e_seed_does_not_disturb_the_bootstrap_break_glass_admin(tmp_path):
-    """The seeders add e2e accounts; startup bootstrap still owns ``admin``.
+    """The seeders add e2e accounts. Startup bootstrap still owns ``admin``.
 
     `make e2e-server` must come up with exactly what `dfe-engine run` seeds --
     default groups plus the break-glass admin -- and a seed call must not

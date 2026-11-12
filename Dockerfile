@@ -13,8 +13,8 @@
 
 # --- Builder stage (uv venv) ---
 # Base image is a build-arg with a digest-pinned default (#106). Trixie both
-# ends so glibc(runtime) >= glibc(builder); pinned so neither tag can float and
-# invert that relationship silently. Re-resolve digests on a bump; Renovate
+# ends so glibc(runtime) >= glibc(builder). Pinned so neither tag can float and
+# invert that relationship silently. Re-resolve digests on a bump. Renovate
 # maintains them.
 ARG BUILDER_IMAGE=ghcr.io/astral-sh/uv:python3.14-trixie-slim@sha256:d8e732839dfc4225a1ff698803b478b2223c05636c055d3add41ab9dbec0f315
 FROM ${BUILDER_IMAGE} AS builder
@@ -22,14 +22,14 @@ FROM ${BUILDER_IMAGE} AS builder
 WORKDIR /app
 
 # Compile .pyc at build so the cost is paid once here, not on every cold start
-# (#106). ~1s off startup for a larger image; the platform ordering ranks
+# (#106). ~1s off startup for a larger image. The platform ordering ranks
 # startup first, image disk last.
 ENV UV_COMPILE_BYTECODE=1
 
 # Phase 1 -- dependencies only, so a source edit does not reinstall the graph
 # (#106). UV_NO_BUILD=1 requires a prebuilt wheel for every third-party dep
 # (#106: a silent compile-from-source is the failure mode we most want to be
-# loud); scoped to this phase because a blanket ENV breaks uv's own editable
+# loud). Scoped to this phase because a blanket ENV breaks uv's own editable
 # self-install (dfe-engine has no wheel of its own). README.md is read during
 # metadata resolution (pyproject sets readme = "README.md").
 COPY pyproject.toml uv.lock README.md ./
@@ -40,7 +40,7 @@ COPY src/ src/
 RUN uv sync --frozen --no-dev
 
 # /app/schemas-seed is copied out of the installed dfe-schemas wheel, so the
-# image ships exactly the version uv.lock pins; bootstrap.py copies it into
+# image ships exactly the version uv.lock pins. bootstrap.py copies it into
 # DFE_ENGINE_SCHEMAS_DIR on the first run of each engine version. It stays root-owned
 # and read-only, as the COPY it replaced was.
 #
@@ -52,7 +52,7 @@ RUN uv sync --frozen --no-dev
 #
 # /app/app-config is where a deployment with no chart has the engine render each
 # app's own config file. It exists in the image so a volume mounted there
-# inherits this ownership; a mountpoint the image does not own lands root-owned
+# inherits this ownership. A mountpoint the image does not own lands root-owned
 # and the engine runs as UID 1000.
 RUN /app/.venv/bin/python -c \
     "import dfe_schemas, shutil; shutil.copytree(dfe_schemas.schemas_root(), '/app/schemas-seed')" \

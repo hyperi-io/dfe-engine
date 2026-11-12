@@ -7,7 +7,7 @@ header profiles.
 Supports per-file schema versioning via a **version tree**: each version
 has its own complete column snapshot under ``versions.<ver>.columns``.
 The ``current`` key names the default version.  Consumers can pin any
-version; the engine returns the exact column snapshot for that version.
+version. The engine returns the exact column snapshot for that version.
 
 Profile resolution order (first match wins):
 1. Explicit ``profiles_dir`` argument
@@ -42,7 +42,7 @@ _COMMON_HEADER_SUBDIR = "common-header"
 REGISTRIES_SUBDIR = "registries"
 
 # The apply manifest at the root of a dfe-schemas tree. Named here rather than
-# imported so this module still loads when dfe-schemas is absent; a rename
+# imported so this module still loads when dfe-schemas is absent. A rename
 # upstream fails test_the_real_package_maps_to_its_data_directory.
 _MANIFEST_FILE = "manifest.yaml"
 
@@ -82,7 +82,7 @@ def _resolve_package_schemas_root() -> Path | None:
     ``importlib.resources`` finds the package wherever it is installed rather
     than guessing a path relative to this file. The wheel force-includes the
     trees under ``dfe_schemas/data/``, the same layout every resolver here
-    expects at a schemas root; a source checkout on ``sys.path`` keeps them one
+    expects at a schemas root. A source checkout on ``sys.path`` keeps them one
     level up instead, so both shapes are tried.
 
     Returns None when the package is absent or carries no trees.
@@ -300,7 +300,7 @@ def _resolve_profile_yaml_path(
         return _profile_yaml_path(Path(profiles_dir), stem, profile_name)
 
     normalized = profile_name.replace("\\", "/").strip()
-    # Traversal is already rejected in profile_file_stem; keep the same
+    # Traversal is already rejected in profile_file_stem. Keep the same
     # guard on this join path so a future edit cannot skip it.
     _reject_traversal(profile_name, normalized.strip("/"))
 
@@ -391,7 +391,7 @@ def is_shipped_schema(path: str | Path) -> bool:
     if schemas_root and resolved.is_relative_to(schemas_root.resolve()):
         return True
 
-    # The env var can point at a different tree; the installed package is
+    # The env var can point at a different tree. The installed package is
     # still shipped even when it is not the active root.
     packaged = _resolve_package_schemas_root()
     return bool(packaged and resolved.is_relative_to(packaged.resolve()))
@@ -442,7 +442,7 @@ class SchemaLoader:
 
         Same file-layout and version resolution as :meth:`load_columns`.
         Returns the raw version mapping (``columns`` plus any sibling keys
-        such as ``synthetic``); flat files are wrapped as ``{"columns": [...]}``.
+        such as ``synthetic``). Flat files are wrapped as ``{"columns": [...]}``.
 
         Args:
             source: Path to the schema YAML.

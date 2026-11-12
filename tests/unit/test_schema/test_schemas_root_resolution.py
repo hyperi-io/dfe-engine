@@ -85,7 +85,7 @@ def test_the_real_package_maps_to_its_data_directory():
 
 
 def test_the_installed_package_beats_the_image_seed(monkeypatch, tmp_path):
-    """The wheel is the schema source; the seed only covers a process that has none."""
+    """The wheel is the schema source. The seed only covers a process that has none."""
     packaged = _make_schemas_tree(tmp_path / "site-packages" / "dfe_schemas" / "data")
     seed = _make_schemas_tree(tmp_path / "schemas-seed")
     monkeypatch.setenv(SEED_DIR_ENV_VAR, str(seed))

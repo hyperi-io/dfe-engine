@@ -35,7 +35,7 @@ CLASS = "gov_settings"
 NAME = "retention"
 KEY = "default_ttl_days"
 
-# 100 years; a longer retention is "keep forever", which is 0.
+# 100 years. A longer retention is "keep forever", which is 0.
 MAX_DEFAULT_TTL_DAYS = 36_500
 
 Origin = Literal["override", "deployment"]
@@ -46,7 +46,7 @@ class RetentionState:
     """Where the effective default TTL comes from, and what it is.
 
     Attributes:
-        stored: The override committed in the deploy repo; None when there is none.
+        stored: The override committed in the deploy repo. None when there is none.
         effective: Days a time-series table that declares no TTL gets; 0 means none.
         origin: ``override`` when the stored value wins, ``deployment`` otherwise.
         deployment_default: ``DFE_ENGINE_CLICKHOUSE_DEFAULT_TTL_DAYS`` as deployed.
@@ -120,7 +120,7 @@ def effective_settings(settings: DFESettings, crud: GitCrud | None) -> DFESettin
     TTL, and the common-header and engine overrides from
     :func:`dfe_engine.gitcrud.table_defaults.resolve`, ride on a copy so the
     deployment's own values stay readable on the original. *settings* itself
-    when nothing is stored. A deploy builds from this copy; retention reconcile
+    when nothing is stored. A deploy builds from this copy. Retention reconcile
     reads the TTL off it and does not apply the header.
     """
     # Local import: table_defaults imports this module's constants.

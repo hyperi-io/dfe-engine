@@ -101,7 +101,7 @@ class TestShippedManifest:
         }
 
     def test_the_archiver_takes_the_record_on_either_transport(self):
-        # On the bus it reads the landing topics; on direct the sender fans the
+        # On the bus it reads the landing topics. On direct the sender fans the
         # record out to its Push listener beside the loader.
         archiver = catalogue.descriptor("dfe-archiver")
 
@@ -134,7 +134,7 @@ class TestShippedManifest:
         }
 
     def test_the_loader_names_the_key_that_turns_its_watcher_on(self):
-        # dfe-loader's HotReloadConfig::enabled defaults false; every other
+        # dfe-loader's HotReloadConfig::enabled defaults false. Every other
         # reloading app watches without being asked.
         settings = {
             name: app.reload_setting
@@ -168,7 +168,7 @@ class TestShippedManifest:
         assert not stamped_org & set(fetcher.restart_paths)
 
     def test_vector_reloads_its_transform_files_in_place(self):
-        # It SIGHUPs Vector when only the transform files changed; the enrichment
+        # It SIGHUPs Vector when only the transform files changed. The enrichment
         # tables are not watched, so they still roll.
         vector = catalogue.descriptor("dfe-transform-vector")
         reloads = {f.name: f.reload for f in vector.files}
@@ -451,7 +451,7 @@ class TestManifestParsing:
         assert apps["dfe-thing"].offered_in("")
 
     def test_an_empty_profile_list_is_refused(self, tmp_path):
-        # Written and left empty says "deployable nowhere"; the absent key already
+        # Written and left empty says "deployable nowhere". The absent key already
         # says "everywhere", so the empty list can only be a mistake. default_in is
         # the key where an empty list means something.
         with pytest.raises(CatalogueError, match="profiles must be a non-empty list"):

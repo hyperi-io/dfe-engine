@@ -17,7 +17,7 @@ orgs and must never be authored by hand:
 - The instances of every instance-scoped app: a fetcher per fetcher-based
   source, a transform per source that names one. An active, deployed source the
   app has something to do for means an instance named for it exists with the
-  source's block compiled in; anything else means no instance. Which apps those
+  source's block compiled in. Anything else means no instance. Which apps those
   are is the manifest's to say, so a new one is a manifest edit.
 
 ``plan`` reads the deploy repo and the sources and lists the overlay writes that

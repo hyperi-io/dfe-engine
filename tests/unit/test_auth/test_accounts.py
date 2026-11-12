@@ -115,9 +115,9 @@ class TestCreate:
         assert yaml_file.exists()
 
     def test_create_username_not_in_yaml(self, store, tmp_path):
-        """Username is the filename stem — NOT stored inside the YAML.
+        """Username is the filename stem -- NOT stored inside the YAML.
 
-        ``previous_username`` is a different field and may appear empty; the
+        ``previous_username`` is a different field and may appear empty. The
         identity key itself must not.
         """
         store.create("alice", "password123")

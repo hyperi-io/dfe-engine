@@ -1,10 +1,10 @@
-"""Tests for Rule model — Pydantic model for detection rule CRUD."""
+"""Tests for Rule model -- Pydantic model for detection rule CRUD."""
 
 import pytest
 
 from dfe_engine.hunts.rule_model import Rule, RuleCreate
 
-# ── RuleCreate ──────────────────────────────────────────────────
+# -- RuleCreate --------------------------------------------------
 
 
 class TestRuleCreate:
@@ -65,7 +65,7 @@ class TestRuleCreate:
         assert rc.source == "crowdstrike_edr"
 
 
-# ── Rule ────────────────────────────────────────────────────────
+# -- Rule --------------------------------------------------------
 
 
 class TestRule:

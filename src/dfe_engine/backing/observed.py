@@ -44,7 +44,7 @@ class SizingCache[T]:
 
     A failed read is held as well, so a down broker costs one admin timeout per
     window rather than one per poll. Concurrent requests for the same service wait
-    on one read; different services never wait on each other.
+    on one read. Different services never wait on each other.
     """
 
     def __init__(
@@ -57,7 +57,7 @@ class SizingCache[T]:
 
         Args:
             ttl_seconds: How long one service's reading is served before it is read again.
-            now: A monotonic clock in seconds; tests pass one they move.
+            now: A monotonic clock in seconds. Tests pass one they move.
         """
         self._ttl = ttl_seconds
         self._now = now
@@ -70,7 +70,7 @@ class SizingCache[T]:
 
         Args:
             service: The backing service the size belongs to.
-            read: Reads the size off the data plane; called at most once per window.
+            read: Reads the size off the data plane. Called at most once per window.
 
         Returns:
             The size, from the cache or from *read*.
@@ -86,7 +86,7 @@ class SizingCache[T]:
             return value
 
 
-# The cgroup limit is what a containerised server may use; the host total is the
+# The cgroup limit is what a containerised server may use. The host total is the
 # fallback where no cgroup limit is reported.
 _MEMORY_METRICS = ("CGroupMemoryTotal", "OSMemoryTotal")
 
@@ -157,7 +157,7 @@ def clickhouse_topology(connect: Callable[[], Any]) -> ClickHouseTopology:
         connect: Returns a ClickHouse client whose ``query`` returns ``result_rows``.
 
     Returns:
-        What could be read; every field None when the server did not answer.
+        What could be read. Every field None when the server did not answer.
     """
     # Any failure leaves the size unknown: the read is shown, never acted on.
     try:

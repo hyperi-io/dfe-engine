@@ -115,7 +115,7 @@ def _python_files() -> list[Path]:
 def _docstring_nodes(tree: ast.AST) -> set[int]:
     """Every string Constant that is a docstring, by node id.
 
-    A docstring names DDL to explain it; only an executed literal is a second
+    A docstring names DDL to explain it. Only an executed literal is a second
     definition.
     """
     holders = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
@@ -275,7 +275,7 @@ def test_the_engine_ships_no_file_the_wheel_already_ships() -> None:
         return "/".join(relative.split("/")[-2:])
 
     # A copy keeps its directory and name wherever it is put, so that pair is what
-    # collides; a bare name alone also matches an unrelated vendor dataset's file.
+    # collides. A bare name alone also matches an unrelated vendor dataset's file.
     # A file at the wheel's root has no directory, so its name alone is the match.
     shipped_tails = {tail(entry) for entry in shipped}
     root_names = {entry for entry in shipped if "/" not in entry}

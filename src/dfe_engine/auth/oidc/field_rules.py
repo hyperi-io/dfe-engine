@@ -22,7 +22,7 @@ _MODES_BY_TYPE = {
     "okta": ("manual", "token_claim", "api"),
 }
 
-# The (type, mode) pairs that use each directory field; every other pair refuses it.
+# The (type, mode) pairs that use each directory field. Every other pair refuses it.
 _DIRECTORY_FIELD_USERS = {
     "api_token": {("okta", "api")},
     "api_token_env": {("okta", "api")},

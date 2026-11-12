@@ -53,7 +53,7 @@ cel_scopes = {
     "cel_check": "cel:check",
 }
 
-# ClickHouse Cloud service lifecycle (control plane; start/stop is billable).
+# ClickHouse Cloud service lifecycle (control plane, start/stop is billable).
 clickhouse_cloud_scopes = {
     "clickhouse_cloud_manage": "clickhouse_cloud:manage",
 }

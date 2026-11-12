@@ -39,7 +39,7 @@
 # default_in
 #   The profiles this app IS deployed in when nobody says otherwise -- the
 #   DEFAULT COMPOSITION, and the only place it is written down. Absent means
-#   the same set as `profiles`; an empty list means the app is deployed on
+#   the same set as `profiles`. An empty list means the app is deployed on
 #   demand and never seeded. scripts/composition.py derives the seeded app set
 #   for each profile from this, so adding an app to the default path is an edit
 #   HERE rather than a hand-composed list per tier.
@@ -117,7 +117,7 @@
 # consumes
 #   The config file the app's own image reads, by name. On Kubernetes the app's
 #   chart renders the instance overlay into a ConfigMap and the name is the
-#   chart's; on Compose there is no chart, so dfe-engine renders the same
+#   chart's. On Compose there is no chart, so dfe-engine renders the same
 #   content into <app-config-dir>/<app>/<name> and the container reads it
 #   there. An app with no `consumes` reads no config file the engine renders --
 #   the console and the UI, which carry no data-plane config at all. Fields:
@@ -225,7 +225,7 @@
 #   is generic over these, so supporting a new authored language is an edit here
 #   rather than engine code. Fields:
 #     language   editor syntax hint, and the key the syntax validator registers
-#                under; a kind with no validator is simply not checked
+#                under; a kind with no validator is not checked
 #     suffixes   extensions a linked file of this kind may carry; the file set it
 #                links into must also accept the extension
 #     encoding   text    the content is stored and transported verbatim
@@ -468,13 +468,13 @@ apps:
     # ceiling is 0 without that and unbounded with it: dfe-engine
     # appmgmt/scaling.py, instance_ceiling.
     default_in: [docker-single]
-    # Anything that can produce a record is work; the ingest listener defaults
+    # Anything that can produce a record is work. The ingest listener defaults
     # off, so an instance that wants it sets config.ingest.enabled true.
     idle_when:
       - config.sources
       - config.extractors.containers
       - config.ingest.enabled
-    # A per-source filter and the scheduler intervals are re-read in place; the
+    # A per-source filter and the scheduler intervals are re-read in place. The
     # rest of the stanza binds a connection, a topic or the concurrency
     # semaphore, all established once at startup (its config.example.yaml).
     hot_reload: true
@@ -636,7 +636,7 @@ apps:
       config.transforms.dir: fileSets.transforms.files
 
   # Supervises a Vector subprocess. It watches the transform files and SIGHUPs
-  # Vector when only those changed; any other config difference is a roll.
+  # Vector when only those changed. Any other config difference is a roll.
   dfe-transform-vector:
     multiplicity: per_config
     scale_deployed: true

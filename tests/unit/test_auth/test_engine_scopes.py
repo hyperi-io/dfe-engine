@@ -62,7 +62,7 @@ class TestSystemGrants:
             ScopedGrant(role="data_viewer", scope=SYSTEM),
             ScopedGrant(role="data_analyst", scope=ORG_ACME),
         )
-        # analyst write only inside acme; viewer read everywhere
+        # analyst write only inside acme. Viewer read everywhere
         assert authorize(ctx, "hunt:write", scope=ORG_ACME).allowed
         assert not authorize(ctx, "hunt:write").allowed
         assert authorize(ctx, "query:execute").allowed

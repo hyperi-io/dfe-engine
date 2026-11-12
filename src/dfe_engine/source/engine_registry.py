@@ -108,7 +108,7 @@ class EngineRegistry:
     def validate(self, engine: str) -> None:
         """Validate an engine's VARIANT against the permitted set.
 
-        The variant is the token before the first ``(``; what is inside the
+        The variant is the token before the first ``(``, what is inside the
         parentheses is checked by :meth:`validate_arguments`, not here.
 
         Raises:

@@ -26,7 +26,7 @@ DOWN_BUDGET_SECONDS = 0.2
 
 @contextmanager
 def down_clickhouse(settings: Any) -> Generator[tuple[CountingListener, Any]]:
-    """Yield the listener and a bounded client aimed at it; both closed afterwards.
+    """Yield the listener and a bounded client aimed at it. Both closed afterwards.
 
     Args:
         settings: Engine settings supplying the client's resilience configuration.

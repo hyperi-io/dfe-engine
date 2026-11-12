@@ -14,7 +14,7 @@ drift from git.
 
 The instance name does three jobs: it keys the file, it names the Argo Application,
 and it becomes the app's OTel ``service.name`` - so it is validated as a DNS label
-rather than merely as a safe filename.
+rather than as a safe filename.
 """
 
 import re

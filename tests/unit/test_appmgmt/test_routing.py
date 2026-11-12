@@ -784,7 +784,7 @@ class TestLoaderCapture:
         self, tmp_path, monkeypatch
     ):
         # dfe-infra's manifest is the SSoT and a deployment may mount an older
-        # copy of it; the compile reflects what that copy declares.
+        # copy of it. The compile reflects what that copy declares.
         warnings: list[str] = []
         monkeypatch.setattr(routing.logger, "warning", warnings.append)
         settings, registry = self._deployment(tmp_path, capture_json=False, capture_raw=False)
@@ -797,7 +797,7 @@ class TestLoaderCapture:
 
     def test_a_derived_schema_only_the_release_ships_still_reaches_the_loader(self, tmp_path):
         # Gitops on puts the store in the deploy repo, which holds no copy of the
-        # derived schemas a release ships; the switches resolve where the build does.
+        # derived schemas a release ships. The switches resolve where the build does.
         from dfe_engine.settings import DFESettings
         from dfe_engine.yaml_utils import yaml_dump
 

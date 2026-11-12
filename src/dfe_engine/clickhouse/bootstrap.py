@@ -13,7 +13,7 @@ pinned dfe-schemas manifest and is the only code path in the engine that issues
 DDL for a declared object. This module is the daemon's way in and the place the
 source tables are brought to the deployment default retention afterwards, so a
 changed default reaches every deployed source's table on restart. The phase
-refuses a changed default on a core table as TTL drift; an admin's change through
+refuses a changed default on a core table as TTL drift. An admin's change through
 ``PUT /api/v1/system/retention`` is what applies it there.
 
 The phase is a GATE, not best-effort: its outcome decides readiness. Disable it
@@ -23,7 +23,7 @@ again in the background (:class:`SchemaRetry`), so one transient error does not 
 the pod NotReady until a restart. So does a pass that gave up waiting on another
 applier's lease, which stays NotReady until a later pass takes the lease itself.
 
-A converged pass also rebuilds the ``all_sources`` Merge table (:mod:`dfe_engine.clickhouse.all_sources`), so a retried pass rebuilds it too. So does a boot with the phase switched off, since nothing else would create the table HyperDX is pointed at; a failed pass does not.
+A converged pass also rebuilds the ``all_sources`` Merge table (:mod:`dfe_engine.clickhouse.all_sources`), so a retried pass rebuilds it too. So does a boot with the phase switched off, since nothing else would create the table HyperDX is pointed at. A failed pass does not.
 """
 
 import math
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 def _reconcile_sources(
     *, load_sources: Callable[[], Iterable[Source]], settings: DFESettings
 ) -> None:
-    """Bring the deployed source tables the registry holds now to the default TTL; a failure here never fails the phase."""
+    """Bring the deployed source tables the registry holds now to the default TTL. A failure here never fails the phase."""
     from dfe_engine.schema.retention import reconcile_source_ttls
 
     # The schema is applied, so neither an unreadable registry nor a TTL fault may undo that.
@@ -81,7 +81,7 @@ def bootstrap_clickhouse(
     Returns the phase state. ``state.ready`` is what the readiness check reads,
     and ``state.converged`` is what says the objects exist -- a caller must not
     report a core table as deployed unless that one is true. ``metrics`` is where
-    the phase reports its outcome; ``None`` reports nothing.
+    the phase reports its outcome. ``None`` reports nothing.
 
     Both source passes read the registry through ``load_sources`` when they run, so a retried pass sees the sources deployed since the boot. ``load_sources`` of None runs neither pass. A pass with the phase switched off (state ``unknown``) still rebuilds all_sources, and a failed pass runs neither.
     """
@@ -120,7 +120,7 @@ class SchemaRetry:
 
     Args:
         run_pass: One pass of the phase, returning its state.
-        resilience: The back-off steps; ``enabled=false`` runs one more pass and stops.
+        resilience: The back-off steps. ``enabled=false`` runs one more pass and stops.
         on_converged: Called once, on the retry's thread, after a pass converges.
     """
 
@@ -131,7 +131,7 @@ class SchemaRetry:
         resilience: ClickHouseResilienceSettings,
         on_converged: Callable[[], None] | None = None,
     ) -> None:
-        """Hold the pass and the back-off; nothing runs until :meth:`start` or :meth:`run`."""
+        """Hold the pass and the back-off. Nothing runs until :meth:`start` or :meth:`run`."""
         self._run_pass = run_pass
         self._resilience = resilience
         self._on_converged = on_converged

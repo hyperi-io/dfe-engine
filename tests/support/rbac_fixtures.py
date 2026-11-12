@@ -17,7 +17,7 @@ names are the contract, and drift between them is the bug this shared vocabulary
 exists to prevent.
 
 Group -> role mappings are the engine's own (``auth/resources/roles.yaml`` via
-``rbac-vocabulary.md``); they are not invented here.
+``rbac-vocabulary.md``). They are not invented here.
 """
 
 from __future__ import annotations
@@ -95,8 +95,8 @@ def seed_fixture_rbac(app) -> None:
 def client_as(client: TestClient, app, api_settings) -> Callable[[str], TestClient]:
     """Return a factory: ``client_as("dfe-viewer")`` -> an authed TestClient.
 
-    The returned client carries a valid engine token for that fixture identity;
-    roles and org scope resolve live from group membership, exactly as a real
+    The returned client carries a valid engine token for that fixture identity.
+    Roles and org scope resolve live from group membership, exactly as a real
     OIDC login would. Unknown names raise, so a typo fails loudly rather than
     silently authenticating as nobody.
 

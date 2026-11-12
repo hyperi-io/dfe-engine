@@ -79,11 +79,11 @@ class TestCreate:
         assert yaml_file.exists()
 
     def test_create_name_not_in_yaml(self, registry, tmp_path):
-        """Name is the filename stem — NOT stored inside the YAML."""
+        """Name is the filename stem -- NOT stored inside the YAML."""
         registry.create("acme")
         yaml_file = tmp_path / "orgs" / "acme.yaml"
         content = yaml_file.read_text()
-        # "name:" as a top-level YAML key should not appear; display_name is fine
+        # "name:" as a top-level YAML key should not appear. display_name is fine
         lines = content.strip().splitlines()
         top_keys = [line.split(":")[0] for line in lines if not line.startswith(" ")]
         assert "name" not in top_keys

@@ -88,7 +88,7 @@ async def _persist_account(
 ) -> AccountGitState:
     """Mirror an account write into the durable deploy repo and report the state.
 
-    Only the local admin's account doc is git-persisted; regular users are durable
+    Only the local admin's account doc is git-persisted. Regular users are durable
     in their own YAML store, so they never touch the deploy repo.
     The mirror is a commit and a push, so it runs on a worker thread.
     """
@@ -395,7 +395,7 @@ def _account_response(request: Request, account: Account, groups: list[Group]) -
 def _contact_updates(
     body: UpdateAccountRequest | UpdateOwnAccountRequest,
 ) -> dict[str, object]:
-    """Partial contact-field updates; omitted values are left unchanged."""
+    """Partial contact-field updates. Omitted values are left unchanged."""
     fields: dict[str, object] = {}
     if body.email is not None:
         fields["email"] = body.email
@@ -998,7 +998,7 @@ async def account_git_status(
     """Poll whether an account's password has merged to the deploy repo's main.
 
     Step 2 of the review-PR path for the local admin and ``breakglass``: the UI
-    polls this after the operator merges the PR; it fetches remote main and flips
+    polls this after the operator merges the PR. It fetches remote main and flips
     ``merged`` true. Durable immediately in the auto-merge and file-share modes. A
     regular user is never git-persisted, so it reports not-git-backed (durable in
     its own store).
@@ -1091,7 +1091,7 @@ async def delete_account(
 #
 # Non-sensitive attributes ride inline on the Account model, so they are read
 # and written through the account store. Sensitive attributes live in a separate
-# keyed store (never inline, so a broad account read cannot leak them); both
+# keyed store (never inline, so a broad account read cannot leak them). Both
 # sensitive endpoints still require the account to exist first.
 
 

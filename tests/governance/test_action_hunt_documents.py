@@ -10,7 +10,7 @@
 An action can set any path on a document, so without a check it could point a hunt
 at ``url(...)``, give it a ``query`` of ``DROP TABLE``, or rename a rule's source
 into a statement. The document the action leaves is validated as the hunts API
-validates one, and refused with the validator's message; nothing is written. Real
+validates one, and refused with the validator's message. Nothing is written. Real
 local gitops repo, no mocks. The address below is in the documentation range
 (RFC 5737).
 """

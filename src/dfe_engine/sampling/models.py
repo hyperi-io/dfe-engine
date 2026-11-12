@@ -25,7 +25,7 @@ from .clickhouse_reader import filter_predicate
 class SampleMode(str, Enum):
     """How to pick the sample.
 
-    - ``recent``  - newest rows first (fast tail; ClickHouse ORDER BY ts DESC,
+    - ``recent``  - newest rows first (fast tail, ClickHouse ORDER BY ts DESC,
       Kafka reads from the partition high-watermark backwards).
     - ``random``  - uniform-ish random rows (fair distribution, no recency bias).
     - ``smart``   - logreducer representative/diverse sample (default). Gated.
@@ -65,7 +65,7 @@ class SampleRequest(BaseModel):
     Provide EITHER a registered ``source`` (its CH table / land topic are
     resolved for you) OR an explicit ``table``/``topic`` (ad-hoc - for a source
     that is not registered yet, e.g. AI onboarding). ``filter`` (ClickHouse
-    backend only) must be one condition over the sampled table's columns; it is
+    backend only) must be one condition over the sampled table's columns. It is
     replaced by the condition rendered from its parse tree, and anything else is
     refused when the request is built.
     """

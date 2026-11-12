@@ -1,6 +1,6 @@
 #  Project:   dfe-engine
 #  File:      tests/smoke/test_startup.py
-#  Purpose:   Startup smoke test — catches init panics, broken imports, missing defaults
+#  Purpose:   Startup smoke test -- catches init panics, broken imports, missing defaults
 #  Language:  Python
 #
 #  License:   BUSL-1.1

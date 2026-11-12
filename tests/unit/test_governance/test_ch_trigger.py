@@ -39,7 +39,7 @@ _WAIT = 10.0
 
 
 class _Recorder:
-    """A reconcile that records each call; it can hold a call open or fail it."""
+    """A reconcile that records each call. It can hold a call open or fail it."""
 
     def __init__(self, *, errors: list[str] | None = None) -> None:
         self.calls = 0
@@ -131,7 +131,7 @@ def test_a_change_during_a_run_gets_exactly_one_more_run() -> None:
 
 
 def _wait_for(check, timeout: float = _WAIT) -> bool:
-    """Poll ``check`` until it holds or ``timeout`` passes; returns whether it held."""
+    """Poll ``check`` until it holds or ``timeout`` passes. Returns whether it held."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if check():
@@ -174,7 +174,7 @@ def test_retries_back_off_and_stop_growing_at_the_cap() -> None:
     assert _wait_for(lambda: len(calls) >= 6)
     assert trigger.close(_WAIT)
 
-    # Nominal 0.1, 0.2, then 0.4 each, each jittered into its upper half; uncapped
+    # Nominal 0.1, 0.2, then 0.4 each, each jittered into its upper half. Uncapped
     # the fifth gap would be 1.6.
     gaps = [later - earlier for earlier, later in itertools.pairwise(calls)]
     assert gaps[0] >= 0.05

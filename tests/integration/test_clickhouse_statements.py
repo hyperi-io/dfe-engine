@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         tests/integration/test_clickhouse_statements.py
-#  Purpose:      Oversized schema DDL lands on a real ClickHouse, and a quoted ; never splits
+#  Purpose:      Oversized schema DDL lands on a real ClickHouse, and a quoted . Never splits
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -127,7 +127,7 @@ def test_the_schema_applier_creates_a_table_over_the_parse_limit(
 def test_a_json_path_with_a_semicolon_samples_through_the_engines_client(
     ch_client, manager_client, database
 ):
-    """JSON keys may carry a ``;``; the sampler quotes the path, and the wrapper sends it whole."""
+    """JSON keys may carry a ``;``. The sampler quotes the path, and the wrapper sends it whole."""
     table = "json_semicolon_probe"
     ch_client.command(
         f"CREATE TABLE `{database}`.`{table}` (_json JSON) ENGINE = MergeTree ORDER BY tuple()"

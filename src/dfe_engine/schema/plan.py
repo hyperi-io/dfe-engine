@@ -431,7 +431,7 @@ def _all_object_names(root: Path, data_database: str) -> dict[str, str]:
         platform=Platform.SELF_HOSTED,
         data_database=data_database,
         default_ttl_days=None,
-        # Renders names only, which no clamp touches; a topic path needs the real count.
+        # Renders names only, which no clamp touches. A topic path needs the real count.
         broker_count=1,
     )
     return {obj.id: renderer.render(obj).name for obj in manifest.objects}

@@ -141,7 +141,7 @@ def deployment(tmp_path: Path) -> Deployment:
 
 @pytest.fixture(autouse=True)
 def _clear_registries():
-    """The registries are a process-wide bootstrap; two apps must not share one."""
+    """The registries are a process-wide bootstrap. Two apps must not share one."""
     _registries.clear()
     yield
     _registries.clear()

@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """What a held caller's sample binds, and which callers are held.
 
-A group lists org markers; the ClickHouse row policy pins each org's user to that
+A group lists org markers. The ClickHouse row policy pins each org's user to that
 org's tenant ids. The sampler binds the same tenant ids, so a sample and a
 HyperDX query of one org read the same rows, and a marker no org declares binds
 nothing. A role marked ``scoped`` is held wherever it is bound, including one an

@@ -9,7 +9,7 @@
 
 The gateway serves the engine on the console's own hostname, so a script those
 pages pull in runs beside the console's session. Outside a dev posture they are
-off unless ``api.docs_enabled`` turns them on; ``/openapi.json`` stays, because
+off unless ``api.docs_enabled`` turns them on. ``/openapi.json`` stays, because
 deployment tooling reads it.
 """
 

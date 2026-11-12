@@ -58,7 +58,7 @@ class _NoCallClient:
 
 
 class _DiscoveryClient:
-    """ClickHouse stand-in returning canned discovery rows; records each query."""
+    """ClickHouse stand-in returning canned discovery rows. Records each query."""
 
     def __init__(
         self,
@@ -89,7 +89,7 @@ class _DiscoveryClient:
 
 
 class _SampleClient:
-    """ClickHouse stand-in returning canned sample rows; records each query."""
+    """ClickHouse stand-in returning canned sample rows. Records each query."""
 
     def __init__(
         self,

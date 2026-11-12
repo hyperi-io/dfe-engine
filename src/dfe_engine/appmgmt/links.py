@@ -10,7 +10,7 @@
 Helm cannot dereference a link, so the overlay carries BOTH: the resolved content
 in the file set's ``values_path``, which is what a chart renders, and the link
 provenance in its ``links_path``, which is what says where that content came from.
-The link is the intent; the resolved content is the build output committed beside
+The link is the intent. The resolved content is the build output committed beside
 it.
 
 That pair is what makes three things possible. Rolling back is repointing the link
@@ -20,7 +20,7 @@ because content whose digest no longer matches the version it claims to have com
 from is visible rather than silently divergent.
 
 A link may name a version number or a tag. Either way the RESOLVED version and
-digest are recorded, so what deployed is never ambiguous; re-resolving a tag link
+digest are recorded, so what deployed is never ambiguous. Re-resolving a tag link
 is what picks up a repointed tag.
 
 These are pure document operations. Committing them is the router's job, so the
@@ -249,7 +249,7 @@ def resolve(
 def relink(doc: dict, file_set: ConsumedFileSet, source: LibrarySource) -> list[Link]:
     """Re-resolve every link in the set. Mutates ``doc``. Returns the links moved.
 
-    A tag link follows its tag; a version-pinned link advances to the artefact's
+    A tag link follows its tag. A version-pinned link advances to the artefact's
     current version. An artefact that is gone or disabled is left alone, so a
     re-resolve never silently drops content an instance is running.
     """

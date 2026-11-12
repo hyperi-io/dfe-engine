@@ -188,7 +188,7 @@ class TestAFailedHuntWriteLeavesTheOrg:
 
 
 class _RecordingForge:
-    """ForgeProvider seam double: records the PR each write opens."""
+    """ForgeProvider double: records the PR each write opens."""
 
     def __init__(self) -> None:
         self.calls: list[dict] = []

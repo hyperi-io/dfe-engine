@@ -8,7 +8,7 @@
 
 """The all_sources Merge table's members, its DDL and the one-at-a-time rebuild.
 
-The rebuild itself reads and writes ClickHouse, so the integration tier covers it; these tests cover every decision it makes on the way.
+The rebuild itself reads and writes ClickHouse, so the integration tier covers it. These tests cover every decision it makes on the way.
 """
 
 import contextlib
@@ -50,7 +50,7 @@ from tests.unit.test_clickhouse.test_all_sources.all_sources_cases import (
     MergeTableDdlCase,
 )
 
-# Long enough that only a hung run reaches it; every wait below ends on an event first.
+# Long enough that only a hung run reaches it. Every wait below ends on an event first.
 EVENT_TIMEOUT_SECONDS = 5.0
 
 

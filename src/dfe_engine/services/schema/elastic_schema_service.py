@@ -27,7 +27,7 @@ question from a column judged to need no index. Measuring it belongs where the
 data is - promote time and derived selection - not here.
 
 PHYSICAL-ONLY. The importer emits the source's PHYSICAL columns (the raw ES field
-path -> snake_case name, kept as ``@source:``); it does NOT bake in a naming
+path -> snake_case name, kept as ``@source:``). It does NOT bake in a naming
 standard. ECS / Sigma / CIM naming is a read-time REMAP VIEW
 (``fieldmap.remap_view``, ``{source}_ecs`` etc.), so a beats source's ECS column
 names come from the ECS view over these physical columns, not from the importer.
@@ -68,7 +68,7 @@ def _join_path(prefix: str, segment: str) -> str:
 
 
 def _column_name_from_field_path(field_path: str) -> str:
-    """Build a ClickHouse-friendly column name; keeps dotted paths as underscore segments."""
+    """Build a ClickHouse-friendly column name. Keeps dotted paths as underscore segments."""
     parts = field_path.split(".")
     cleaned: list[str] = []
     for segment in parts:
@@ -247,8 +247,8 @@ def _fields_to_properties(entries: Any) -> dict[str, Any]:
     the SAME column-mapping code path (no second importer).
 
     A ``group`` (or an entry with nested ``fields`` and no leaf ``type``) becomes a
-    ``properties`` container; an ``alias`` keeps ``type: alias`` (skipped downstream,
-    exactly as in an ES template); a leaf keeps its ES ``type``. A dotted ``name``
+    ``properties`` container. An ``alias`` keeps ``type: alias`` (skipped downstream,
+    exactly as in an ES template). A leaf keeps its ES ``type``. A dotted ``name``
     (e.g. ``body_sent.bytes``) passes through as the property key and splits into the
     column path downstream, so both the nested-group and flat-dotted beats shapes work.
     """

@@ -195,7 +195,7 @@ def test_an_engine_change_needs_a_rebuild_and_stays_drift(ch_client, stack):
 def test_an_existing_header_column_keeps_its_nullability(ch_client, stack):
     db = stack.database
     deploy_source(name="syslog-nullable", schema=ON_THE_DEFAULTS, stack=stack)
-    # The header declares _uuid Nullable(UUID); the table now holds it non-nullable.
+    # The header declares _uuid Nullable(UUID). The table now holds it non-nullable.
     ch_client.command(f"ALTER TABLE `{db}`.`syslog-nullable` MODIFY COLUMN `_uuid` UUID")
     retyped = {"_uuid"}
     before = _columns(ch_client, db, "syslog-nullable")

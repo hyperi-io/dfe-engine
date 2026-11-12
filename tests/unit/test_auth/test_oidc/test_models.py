@@ -57,7 +57,7 @@ class TestOIDCProviderScopes:
     """Each provider type requests only the scopes its IdP accepts.
 
     Google and Entra ID advertise no ``groups`` scope and fail the login that asks
-    for one, and Google reads groups with the login's Cloud Identity scope; dex
+    for one, and Google reads groups with the login's Cloud Identity scope. Dex
     (consumed as generic) and Okta emit the groups claim only when it is requested.
     """
 

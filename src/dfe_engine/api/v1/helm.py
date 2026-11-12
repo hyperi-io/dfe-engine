@@ -118,7 +118,7 @@ def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
     see, so it is masked by the action rule first.
 
     Raises:
-        ResourceNotFoundError: The resource does not exist; the caller maps it.
+        ResourceNotFoundError: The resource does not exist. The caller maps it.
     """
     doc = gc.get(cls, name)
     if cls == ACTION_CLASS:
@@ -131,7 +131,7 @@ def shown_vars(gc: GitCrud, cls: str, name: str) -> dict[str, Any]:
 
 
 def _stored_doc(gc: GitCrud, cls: str, name: str) -> dict:
-    """The document a var write lands in; empty when the resource does not exist yet."""
+    """The document a var write lands in. Empty when the resource does not exist yet."""
     try:
         return gc.get(cls, name)
     except ResourceNotFoundError:

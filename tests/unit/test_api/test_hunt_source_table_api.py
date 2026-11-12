@@ -9,7 +9,7 @@
 
 The hunt runner splices the source into ``FROM``, so a source such as
 ``url(...)`` would read another host. A direct ``query`` is SQL the runner runs
-as written; the hunt request models have no such field, so one sent is dropped
+as written. The hunt request models have no such field, so one sent is dropped
 rather than stored. The address is in the documentation range (RFC 5737).
 """
 

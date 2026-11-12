@@ -10,7 +10,7 @@
 These classifiers are the SSoT the CH manager injects into scalo's
 :class:`~scalo.resilience.ReconnectingResilience` as ``is_transient`` /
 ``is_reconnectable``: they decide connection-outage (reconnect) vs rate-limit
-(back off, no reconnect) vs genuine query error (surface immediately).
+(back off, no reconnect) vs real query error (surface immediately).
 """
 
 from __future__ import annotations
@@ -109,7 +109,7 @@ class TestIsIdentityError:
         assert is_identity_error(_exc(193, "Wrong password")) is True  # WRONG_PASSWORD
 
     def test_a_missing_grant_is_not(self):
-        """The user exists and is known; it lacks a privilege, which waiting does not fix."""
+        """The user exists and is known. It lacks a privilege, which waiting does not fix."""
         assert is_identity_error(_exc(497, "Not enough privileges")) is False
 
     def test_an_outage_is_not(self):

@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""E2E tests for JIT provisioning — shadow account creation on OIDC login."""
+"""E2E tests for JIT provisioning -- shadow account creation on OIDC login."""
 
 import secrets
 

@@ -8,7 +8,7 @@
 
 """The pre-canned HyperDX dashboards, and the code that materialises them.
 
-The engine is the SSoT for dashboard CONTENT; the deploy layer only carries it.
+The engine is the SSoT for dashboard CONTENT. The deploy layer only carries it.
 The ``.json`` files beside this module are HyperDX **Template** dashboards -- they
 reference sources by NAME (``"source": "main"``), not by the per-team ObjectId a
 Document dashboard carries, because there is no id to write until a team exists.

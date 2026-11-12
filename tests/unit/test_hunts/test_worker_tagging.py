@@ -10,7 +10,7 @@
 ``query_settings`` is pure (str -> dict), so it is tested here with no ClickHouse.
 ``log_comment`` is a JSON ``DfeQueryTags`` payload (feature=hunts, id=the hunt) so
 system.query_log -> the query_log_archive MV keeps the row (the MV drops non-JSON
-log_comments) and cost attributes back to the hunt; it is ALWAYS set. ``workload``
+log_comments) and cost attributes back to the hunt. It is ALWAYS set. ``workload``
 is only added when a workload name is configured - an undefined CH workload errors
 on the server, so it must be opt-in (see the worker docstring). Real query_log
 attribution is verified in the live-CH Phase A test.

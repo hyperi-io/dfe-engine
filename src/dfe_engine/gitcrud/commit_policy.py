@@ -28,7 +28,7 @@ ALLOWED_TYPES = frozenset({"cfg", "hunt", "rbac", "action", "ops", "schema", "se
 # Map a resource CLASS prefix -> its commit type.
 _CLASS_TYPE = {
     "helmvars": "cfg",
-    "governance": "rbac",  # rbac/actions/policies; action invokes override to "action"
+    "governance": "rbac",  # rbac/actions/policies, action invokes override to "action"
     "hunts": "hunt",
     "datamodel": "schema",
     "schema": "schema",

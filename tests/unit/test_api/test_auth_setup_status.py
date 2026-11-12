@@ -400,8 +400,8 @@ def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path
             )
             assert user.status_code in (200, 201), user.text
 
-            # Complete now, so the anonymous endpoint withholds the org inventory;
-            # the authenticated list still carries it.
+            # Complete now, so the anonymous endpoint withholds the org inventory.
+            # The authenticated list still carries it.
             body = client.get("/api/v1/auth/setup-status").json()
             assert body["initial_setup"]["complete"] is True
             assert body["organisations"] == []
@@ -412,7 +412,7 @@ def test_an_org_created_through_the_api_is_listed_until_setup_completes(tmp_path
 
 
 def test_setup_status_never_returns_accounts(tmp_path):
-    """The account list is not served pre-login — only the first_user verdict is."""
+    """The account list is not served pre-login -- only the first_user verdict is."""
     app = create_app(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -484,7 +484,7 @@ def test_disabled_break_glass_login_is_403_with_a_reason(tmp_path):
 
 
 def test_setup_status_keeps_oidc_login_options_once_complete(tmp_path):
-    """Post-setup the login screen still gets the enabled IdPs — name + label only."""
+    """Post-setup the login screen still gets the enabled IdPs -- name + label only."""
     app = create_app(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:

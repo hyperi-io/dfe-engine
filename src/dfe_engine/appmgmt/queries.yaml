@@ -26,7 +26,7 @@ queries:
   # is read at its own latest timestamp and the MAX across series is returned, so the
   # hottest pod sets each reading.
   # A pushed row names its pod in the resource (service.instance.id) once the app
-  # runs scalo-rs#331 and none before it, a scraped row in its attributes; rows that
+  # runs scalo-rs#331 and none before it, a scraped row in its attributes. Rows that
   # name no pod share one series.
   # A scalo-rs pod exports a gauge's stuck first stream in the same second as its live one, so the newer start wins the tie.
   latest_gauges:

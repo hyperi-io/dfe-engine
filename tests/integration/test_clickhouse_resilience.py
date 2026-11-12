@@ -138,7 +138,7 @@ def test_a_real_runner_heartbeat_round_trips_through_the_wrapper(manager, heartb
 
 
 def test_two_threads_query_the_shared_client_at_once(manager):
-    """The API's handlers run on worker threads over one client; a session would refuse one."""
+    """The API's handlers run on worker threads over one client. A session would refuse one."""
     import threading
 
     client = manager.get_clickhouse_client()

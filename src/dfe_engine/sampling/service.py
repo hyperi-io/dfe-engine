@@ -97,9 +97,9 @@ class Sampler:
     ) -> dict:
         """Execute a sample request. Returns ``SampleResult`` as a dict.
 
-        ``org_ids`` holds every read to rows whose ``_org_id`` is one of them; None
+        ``org_ids`` holds every read to rows whose ``_org_id`` is one of them. None
         reads every org, which only a platform caller may do. ``task`` is the
-        TaskManager handle (for progress); optional so the CLI can call this
+        TaskManager handle (for progress). Optional so the CLI can call this
         directly without a task.
 
         Raises:
@@ -341,7 +341,7 @@ class Sampler:
             req: The sample request.
             target: The already-quoted table reference.
             source_label: The ``_source`` filter for the shared landing table, if any.
-            org_ids: The tenant ids the scan is held to; None reads every org.
+            org_ids: The tenant ids the scan is held to. None reads every org.
 
         Returns:
             The SELECT, and the parameters it binds.

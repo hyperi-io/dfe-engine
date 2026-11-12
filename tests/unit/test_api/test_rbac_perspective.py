@@ -8,12 +8,12 @@
 
 """Role-perspective tests - drive real endpoints AS each fixture identity.
 
-Proving a token carries the right role string is not enough; these assert the
+Proving a token carries the right role string is not enough. These assert the
 platform actually ALLOWS and DENIES the right actions for each role, which is
 what a UI or CLI user experiences. They use the shared ``client_as`` helper, so
 they double as the worked example a front-end dev copies.
 
-The identities and org ids mirror the shared OIDC test fixture; ``test_org`` is the
+The identities and org ids mirror the shared OIDC test fixture. ``test_org`` is the
 standard org id every consumer uses, ``test_org_2`` only exists for the two-org
 boundary case. Role -> scope mappings are the engine's own
 (``auth/resources/roles.yaml``) - see the mapping asserted in
@@ -53,7 +53,7 @@ EXPECTED_ROLES: dict[str, list[str]] = {
 class TestRoleResolution:
     """Every identity resolves to exactly the roles the fixture maps it to.
 
-    Cheap, robust, and it documents the whole group -> role contract in one place.
+    Cheap, and it documents the whole group -> role contract in one place.
     """
 
     @pytest.mark.parametrize(("identity", "roles"), sorted(EXPECTED_ROLES.items()))
@@ -87,9 +87,9 @@ class TestReadPerspective:
         ["dfe-operator", "dfe-nobody", "dfe-infra-admin", "dfe-infra-viewer"],
     )
     def test_roles_without_read_are_denied(self, client_as, identity):
-        # dfe_operator holds only governance:read + action:invoke:*; the infra
-        # roles hold config/deployment/argo/org/group scopes but NO source:read;
-        # nobody holds nothing. None of them has source:read.
+        # dfe_operator holds only governance:read + action:invoke:*. The infra
+        # roles hold config/deployment/argo/org/group scopes but NO source:read.
+        # Nobody holds nothing. None of them has source:read.
         resp = client_as(identity).get(LIST)
         assert resp.status_code == 403, f"{identity} must NOT be able to list sources"
 
@@ -119,7 +119,7 @@ class TestDataPlanePerspective:
     """org scope - a org viewer carries exactly their org_ids.
 
     This is the data plane (what you can SEE), orthogonal to the control plane
-    above (what you can DO). ``test_org`` is the standard single org; the
+    above (what you can DO). ``test_org`` is the standard single org. The
     multi-viewer case proves a role held at SYSTEM scope still carries both orgs
     without over-granting.
     """

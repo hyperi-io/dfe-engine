@@ -12,7 +12,7 @@ The fork's control API is session-scoped: every call acts on the team of the
 authenticated principal. The engine authenticates as its machine identity
 (``svc:dfe-engine``), which the fork maps to the deployment's default team and
 JIT-creates on first contact. There are NO ``/api/v1/teams`` routes and no team
-create/delete endpoints; the surface this client reaches is::
+create/delete endpoints. The surface this client reaches is::
 
     GET  /team                    the caller's team (JIT-creates the default team)
     POST /team/invitation         invite an email to the caller's team
@@ -92,7 +92,7 @@ class HyperDXClient:
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
-        # Engine-minted machine JWT supplier; wins over any static api_key.
+        # Engine-minted machine JWT supplier. Wins over any static api_key.
         self._token_provider = token_provider
         # One unreachable answer is enough: the call already spent its timeout, and the
         # callers are interactive requests that cannot afford a second one.
@@ -106,7 +106,7 @@ class HyperDXClient:
     # ------------------------------------------------------------------
 
     async def get_team(self) -> dict[str, Any] | None:
-        """Fetch the caller's team; the fork JIT-creates the default team here.
+        """Fetch the caller's team. The fork JIT-creates the default team here.
 
         Returns:
             Team dict (``_id``, ``name``, ``apiKey``, ...) or None on failure.
@@ -166,7 +166,7 @@ class HyperDXClient:
         """Create or replace one DFE source on EVERY team, each over its own connection.
 
         Args:
-            name: DFE source name; the HyperDX source carries the same name.
+            name: DFE source name. The HyperDX source carries the same name.
             spec: Source body without ``name`` or ``connection``.
 
         Returns:
@@ -236,7 +236,7 @@ class HyperDXClient:
                     kwargs["json"] = json_body
                 response = await verb(path, **kwargs)
                 response.raise_for_status()
-                # PUT/DELETE succeed with an empty body; report success, not JSON.
+                # PUT/DELETE succeed with an empty body. Report success, not JSON.
                 result = response.json() if response.content else {}
         except Exception as exc:
             if _is_unreachable(exc):

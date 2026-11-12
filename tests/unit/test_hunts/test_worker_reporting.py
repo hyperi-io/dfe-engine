@@ -7,10 +7,9 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """A fire has to say what it did, or a hunt failure is undiagnosable (#357).
 
-On the rc.13 docker stack the runner logged nothing after startup: three fires ran,
-rows landed in the detection table, and the container's last line was still the one
-it printed while resolving its engine. So these assert the LINE - that it carries
-the hunt, the rows and the duration - and the rows counter beside it.
+Without the line a runner logs nothing after startup, however many fires ran and
+rows landed. These assert the LINE - that it carries the hunt, the rows and the
+duration - and the rows counter beside it.
 """
 
 from scalo.logger import logger

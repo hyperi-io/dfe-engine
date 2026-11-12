@@ -11,8 +11,8 @@ Stands up an ephemeral HTTP server that emulates the ClickHouse Cloud management
 API and points CloudService's own scalo :class:`HttpClient` at it, so the whole
 path is exercised over a real socket: HTTP basic-auth for the control-plane key,
 the GET (status) and PATCH (start/stop) round-trips, JSON parsing and the state
-transitions. Nothing internal is mocked (the no-mocks standard); the only
-double is the external management API, and that is a genuine HTTP server here,
+transitions. Nothing internal is mocked (the no-mocks standard). The only
+double is the external management API, and that is a real HTTP server here,
 not a stubbed object. A fake clock keeps ``wait_running`` instant.
 """
 
@@ -31,7 +31,7 @@ from tests.support.loopback import stop_server
 class _Handler(BaseHTTPRequestHandler):
     """Minimal emulation of the CH Cloud management API, routed by path suffix.
 
-    Suffix routing keeps the test robust to how the client joins ``api_base`` and
+    Suffix routing keeps the test independent of how the client joins ``api_base`` and
     the request path (e.g. whether the ``/v1`` prefix survives).
     """
 

@@ -65,7 +65,7 @@ ORG_A = "orga"
 ORG_B = "orgb"
 UNRESTRICTED = "unrestricted"
 
-# The org ids each viewer's ClickHouse user is pinned to; an empty list is the unrestricted platform shape.
+# The org ids each viewer's ClickHouse user is pinned to. An empty list is the unrestricted platform shape.
 VIEWER_ORGS = {ORG_A: [ORG_A], ORG_B: [ORG_B], UNRESTRICTED: []}
 
 # The header profile each deployed source is built on.
@@ -331,7 +331,7 @@ def _group_by(*, config: dict[str, Any]) -> list[str]:
 
 
 def _member_pattern(*, client: Any, database: str) -> str | None:
-    """The table regex all_sources reads its members through; None when *database* has no all_sources."""
+    """The table regex all_sources reads its members through. None when *database* has no all_sources."""
     rows = client.query(
         "SELECT engine_full FROM system.tables WHERE database = {db:String} AND name = {tbl:String}",
         parameters={"db": database, "tbl": ALL_SOURCES},

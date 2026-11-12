@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Execute one hunt run against ClickHouse, incrementally + crash-safe.
 
-Each of a hunt's statements carries a ``{window}`` placeholder; the worker
+Each of a hunt's statements carries a ``{window}`` placeholder. The worker
 substitutes the incremental predicate on the hunt's timestamp field, runs them (each
 INSERTs matched rows into its target table), then advances the watermark ONLY after
 they commit - so a crashed pod re-runs the same window from the last committed
@@ -106,7 +106,7 @@ def query_settings(hunt_id: str, workload: str = "") -> dict[str, str]:
     UNDEFINED workload errors on the server, and the "hunts" workload is not
     provisioned until the smoothing backstop lands
     (docs/data-plane/hunt-schedule-smoothing.md), so it defaults OFF. Pure, so it is
-    unit-testable; the real attribution is verified in the live-CH Phase A test.
+    unit-testable. The real attribution is verified in the live-CH Phase A test.
     """
     settings = {"log_comment": DfeQueryTags(feature="hunts", kind="hunt", id=hunt_id).to_json()}
     if workload:
@@ -158,7 +158,7 @@ class HuntWorker:
         # None sends nothing: the unit suite and a runner with no destinations configured.
         self._notifier = notifier
         self._coord = coordinator
-        # Optional CH WORKLOAD name for server-side fair-share; empty = do not set it
+        # Optional CH WORKLOAD name for server-side fair-share. Empty = do not set it
         # (an undefined workload errors). Provisioned later (the v2 smoothing backstop).
         self._workload = workload
         # No manager wired records nothing, which is what the unit suite runs on.
@@ -348,7 +348,7 @@ class HuntWorker:
             self._coord.set_safe_horizon_mark(hunt, DEFERRED_SINCE, 0)
 
     def run(self, spec: HuntSpec, scheduled_start: int) -> int:
-        """Execute the incremental window; return the new watermark (= window end).
+        """Execute the incremental window. Return the new watermark (= window end).
 
         Raises:
             NoHuntCustomers: a rules hunt names no customer, so it reads no org. The
@@ -407,7 +407,7 @@ class HuntWorker:
             unseen = self._unseen(spec, statement, read_start, end)
             self._overlap_read(spec, statement, start, read_start, end, settings)
             # INSERT INTO <target> SELECT ... WHERE {window}. log_comment attributes
-            # the query in system.query_log; workload (if configured) puts it in a CH
+            # the query in system.query_log. Workload (if configured) puts it in a CH
             # fair-share class.
             sql = statement.sql.replace(WINDOW_TOKEN, pred).replace(UNSEEN_TOKEN, unseen)
             result = self._ch.command(sql, settings=settings)

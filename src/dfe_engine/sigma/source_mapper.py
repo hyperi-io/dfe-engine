@@ -73,7 +73,7 @@ class SigmaSourceMapper:
             registry: Type registry, the default one when omitted.
             field_map_registry: Registry field maps, the base of every mapping.
             view_store: Stored sigma view definitions, which win over the field maps.
-            columns_for: The column names of a source's table; None renders every
+            columns_for: The column names of a source's table. None renders every
                 mapping whatever the table holds.
         """
         self._source_registry = source_registry
@@ -158,7 +158,7 @@ class SigmaSourceMapper:
         """Render a source's Sigma view DDL (stored definition wins over field maps).
 
         A stored ``SigmaViewStore`` definition is the SSoT when present (it alone
-        can declare JSON-derived columns); otherwise fall back to the static field
+        can declare JSON-derived columns). Otherwise fall back to the static field
         maps, returning None when a source has neither.
         """
         if self._view_store is not None:
@@ -242,7 +242,7 @@ class SigmaSourceMapper:
                 continue
             if sig.taxonomy.lower() != product.lower():
                 continue
-            # Narrow by any facet the source declares; a None facet matches any.
+            # Narrow by any facet the source declares. A None facet matches any.
             if category and sig.category and sig.category.lower() != category.lower():
                 continue
             if service and sig.service and sig.service.lower() != service.lower():

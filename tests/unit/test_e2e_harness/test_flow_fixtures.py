@@ -254,7 +254,7 @@ class TestAnAppTheDeploymentDoesNotDeploy:
                 assert shape.refusal(transport, (transport,), EVERY_APP) is None, shape.name
 
     def test_no_other_origin_reads_the_offer(self) -> None:
-        # Only an origin with an app of its own is affected; the receiver is
+        # Only an origin with an app of its own is affected. The receiver is
         # stack-wide and every deployment runs one.
         for shape in shapes.load_shapes():
             if shape.origin == "fetcher":

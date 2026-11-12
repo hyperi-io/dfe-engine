@@ -10,7 +10,7 @@
 
 The console puts a number beside a source so an operator can see whether it is
 carrying records without leaving the page. A null is the honest answer to "no
-series here" and the console hides it; a zero would claim a measurement nobody
+series here" and the console hides it. A zero would claim a measurement nobody
 took, which is why every reading is nullable and the route still answers 200.
 """
 

@@ -5,12 +5,12 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Canonical ClickHouse identifier + literal quoting - ONE injection-safe seam.
+"""Canonical ClickHouse identifier + literal quoting - ONE injection-safe module.
 
 Every DDL / SQL builder quotes through here instead of re-deriving the rules (the
 CH-sprawl audit found four independent, inconsistent escapers). PREFER server-side
 parameter binding (clickhouse-connect ``parameters={name: Type}``) for VALUES on
-the read path; use :func:`quote_literal` only where a value must be spliced into
+the read path. Use :func:`quote_literal` only where a value must be spliced into
 DDL/DML text that has no bind slot (row-policy predicates, meta-table projections).
 """
 
@@ -65,7 +65,7 @@ def quote_identifier(name: str) -> str:
 def quote_literal(value: str) -> str:
     r"""Single-quote a CH string literal - escape backslashes THEN single quotes.
 
-    Order is load-bearing: ClickHouse honours C-style backslash escapes, so ``\``
+    Order matters: ClickHouse honours C-style backslash escapes, so ``\``
     MUST be doubled before ``'`` is doubled, else a crafted ``\' OR 1=1`` breaks
     out of a RESTRICTIVE row-policy predicate and tenant isolation fails open
     (F-ROWPOLICY-BACKSLASH, proven live on CH 25.8). Matches clickhouse-connect's

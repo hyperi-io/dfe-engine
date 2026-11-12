@@ -126,7 +126,7 @@ class TestMesh:
         )
 
     def test_a_namespace_alone_changes_no_address(self):
-        # The namespace reaches the engine on every profile; the switch is what
+        # The namespace reaches the engine on every profile. The switch is what
         # decides whether a sender uses it.
         flow = resolve_flow(_source(), _settings(default="direct", mesh_namespace=self.NAMESPACE))
 

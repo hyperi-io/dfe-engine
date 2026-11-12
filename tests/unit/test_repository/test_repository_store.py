@@ -21,7 +21,7 @@ from dfe_engine.repository.store import ConflictError, RepositoryStore, json_mer
 
 @pytest.fixture(autouse=True)
 def _reset_schema_flag():
-    """ensure_schema is once-per-process; reset so each test sees fresh DDL."""
+    """ensure_schema is once-per-process. Reset so each test sees fresh DDL."""
     RepositoryStore._ensured_databases.clear()
     yield
     RepositoryStore._ensured_databases.clear()

@@ -13,7 +13,7 @@ from dfe_engine.hunts.alert_grouping import (
     parse_duration,
 )
 
-# ── parse_duration ───────────────────────────────────────────────
+# -- parse_duration -----------------------------------------------
 
 
 class TestParseDuration:
@@ -49,7 +49,7 @@ class TestParseDuration:
         assert parse_duration("0h") == timedelta(0)
 
 
-# ── AlertGroupingConfig ─────────────────────────────────────────
+# -- AlertGroupingConfig -----------------------------------------
 
 
 class TestAlertGroupingConfig:
@@ -89,7 +89,7 @@ class TestAlertGroupingConfig:
         assert cfg.max_sample_events == 5
 
 
-# ── build_group_key ────────────────────────────────────────────
+# -- build_group_key --------------------------------------------
 
 
 class TestBuildGroupKey:
@@ -133,7 +133,7 @@ class TestBuildGroupKey:
         assert key == "b_field=bbb|a_field=aaa"
 
 
-# ── build_grouping_query ────────────────────────────────────────
+# -- build_grouping_query ----------------------------------------
 
 
 class TestBuildGroupingQuery:
@@ -354,7 +354,7 @@ class TestBuildGroupingQuery:
         assert "FROM `acme`.`filebeat-alerts`" in sql
 
 
-# ── AlertStateManager ────────────────────────────────────────────
+# -- AlertStateManager --------------------------------------------
 
 
 class TestAlertStateManager:
@@ -472,7 +472,7 @@ class TestAlertStateManager:
         mgr._table_ensured = True
         ch_client = MagicMock()
 
-        # Group A fired recently — should block
+        # Group A fired recently -- should block
         recent = datetime.now(UTC) - timedelta(minutes=10)
         ch_client.execute.return_value = [(recent,)]
 
@@ -531,7 +531,7 @@ class TestAlertStateManager:
         assert "severity=high|source_ip=10.0.0.1" in insert_params[0]
 
 
-# ── Dispatch Integration ────────────────────────────────────────
+# -- Dispatch Integration ----------------------------------------
 
 
 class TestDispatchIntegration:
@@ -607,7 +607,7 @@ class TestDispatchIntegration:
                 customer="acme",
                 rule_name="test_rule",
                 result_count=5,
-                # No group_context — template should handle missing keys
+                # No group_context -- template should handle missing keys
             )
         assert sent is True
         body = mock_notify.call_args.kwargs.get("body", mock_notify.call_args[1].get("body", ""))
