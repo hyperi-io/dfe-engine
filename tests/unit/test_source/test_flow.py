@@ -28,13 +28,25 @@ from dfe_engine.source.models import Source
 
 
 def _settings(
-    *, profile: str = "", target: str = "unknown", app_config_dir: str = "", **transport
+    *,
+    profile: str = "",
+    target: str = "unknown",
+    app_config_dir: str = "",
+    app_env_dir: str = "",
+    hosted_instances: str = "",
+    **transport,
 ) -> DFESettings:
     """Settings differing from the defaults only in the transport block and the deployment."""
     return DFESettings(
         env="dev",
         transport=transport,
-        deployment={"profile": profile, "target": target, "app_config_dir": app_config_dir},
+        deployment={
+            "profile": profile,
+            "target": target,
+            "app_config_dir": app_config_dir,
+            "app_env_dir": app_env_dir,
+            "hosted_instances": hosted_instances,
+        },
     )
 
 
@@ -373,16 +385,23 @@ class TestAProfileThatDeploysNoSuchApp:
 
 
 class TestATargetThatRunsOneOfEachApp:
-    """A per-config stage needs its own deployment, and Compose holds one of each.
+    """A per-config stage needs a container to run in, and Compose creates none at run time.
 
-    Compose declares its services in a committed file and creates none at run
-    time, so the resident container is started idle and the first source to need
-    it fills it. Where nothing renders the engine's config into that container
-    the source would be saved and never run, so it is refused at save instead.
+    The fetcher runs every source in one container, so it needs only its config
+    rendered. A transform runs one container per source, which a checkout's
+    ``make apply`` declares from the engine's index, and a published install
+    runs only the instances it was published with. Anything else would be saved
+    and never run, so it is refused at save instead.
     """
 
     DOCKER = {"profile": "docker-single", "target": "docker"}
     WRITING = {**DOCKER, "app_config_dir": "/app/app-config"}
+    CHECKOUT = {**WRITING, "app_env_dir": "/app/env"}
+    PUBLISHED_DEMO = {
+        **WRITING,
+        "hosted_instances": "dfe-transform-elastic=demo-syslog,cisco-asa,fortinet",
+    }
+    ELASTIC = {"engine": "elastic", "variant": "filebeat.cisco_asa.default"}
 
     def test_a_kubernetes_tier_runs_one_per_source(self):
         for name in ("okta", "cloudflare"):
@@ -392,39 +411,69 @@ class TestATargetThatRunsOneOfEachApp:
             )
             assert flow.input == f"dfe-fetcher-{name}"
 
-    def test_a_fetched_source_is_refused_where_nothing_renders_the_config(self):
-        with pytest.raises(FlowError, match="cannot configure one"):
-            resolve_flow(_fetched(), _settings(default="bus", **self.DOCKER))
+    @pytest.mark.parametrize("deployment", ["WRITING", "CHECKOUT", "PUBLISHED_DEMO"])
+    @pytest.mark.parametrize("name", ["okta", "cloudflare"])
+    def test_the_one_fetcher_takes_every_fetched_source_where_its_config_is_rendered(
+        self, deployment, name
+    ):
+        settings = _settings(default="bus", **getattr(self, deployment))
 
-    def test_the_refusal_says_it_runs_one_and_names_what_turns_it_on(self):
+        flow = resolve_flow(_fetched(name, fetcher={"source_type": name}), settings)
+
+        assert flow.input == f"dfe-fetcher-{name}"
+
+    @pytest.mark.parametrize(
+        ("source", "service"),
+        [
+            (_fetched(), "dfe-fetcher"),
+            (_source(transform={"engine": "vrl"}), "dfe-transform-vrl"),
+        ],
+    )
+    def test_a_source_is_refused_where_nothing_renders_the_config(self, source, service):
         with pytest.raises(FlowError) as refused:
-            resolve_flow(_fetched(), _settings(default="bus", **self.DOCKER))
+            resolve_flow(source, _settings(default="bus", **self.DOCKER))
 
         said = str(refused.value)
-        assert "runs a single dfe-fetcher and it is deployed idle" in said
-        assert "app-config directory" in said
+        assert f"renders no config into its {service} container" in said
+        assert "DFE_ENGINE_DEPLOYMENT_APP_CONFIG_DIR" in said
 
-    def test_a_transformed_source_is_refused_the_same_way(self):
-        # The transform is per-config too, so the rule reads the manifest rather
-        # than naming the fetcher.
-        with pytest.raises(FlowError, match="cannot configure one"):
+    def test_a_checkout_runs_a_transform_for_any_source(self):
+        flow = resolve_flow(
+            _source("anything", transform=self.ELASTIC), _settings(default="bus", **self.CHECKOUT)
+        )
+
+        assert flow.transform is not None
+        assert flow.transform.app == "dfe-transform-elastic"
+
+    @pytest.mark.parametrize("name", ["demo-syslog", "cisco-asa", "fortinet"])
+    def test_a_published_install_takes_the_sources_it_was_published_with(self, name):
+        flow = resolve_flow(
+            _source(name, transform=self.ELASTIC), _settings(default="bus", **self.PUBLISHED_DEMO)
+        )
+
+        assert flow.transform is not None
+        assert flow.transform.instance == f"dfe-transform-elastic-{name}"
+
+    @pytest.mark.parametrize(
+        ("deployment", "running"),
+        [
+            ("PUBLISHED_DEMO", "(cisco-asa, demo-syslog, fortinet)"),
+            # The stack file declares none.
+            ("WRITING", "(none)"),
+        ],
+    )
+    def test_a_new_transform_source_on_a_published_install_is_refused(self, deployment, running):
+        with pytest.raises(FlowError) as refused:
             resolve_flow(
-                _source(transform={"engine": "vrl"}), _settings(default="bus", **self.DOCKER)
+                _source("paloalto", transform=self.ELASTIC),
+                _settings(default="bus", **getattr(self, deployment)),
             )
 
-    def test_a_docker_target_that_renders_its_app_config_takes_the_first_source(self):
-        # The cap is one, not zero: the resident container now gets a config, so
-        # the source it is given runs. The SECOND is refused against the deploy
-        # repo, which the flow resolver never reads.
-        flow = resolve_flow(_fetched(), _settings(default="bus", **self.WRITING))
-        assert flow.input == "dfe-fetcher-okta"
-
-    def test_a_transformed_source_is_taken_the_same_way(self):
-        flow = resolve_flow(
-            _source(transform={"engine": "vrl"}), _settings(default="bus", **self.WRITING)
-        )
-        assert flow.transform is not None
-        assert flow.transform.app == "dfe-transform-vrl"
+        said = str(refused.value)
+        assert f"dfe-transform-elastic only for the sources it was published with {running}" in said
+        assert "dfe-docker checkout" in said
+        assert "docs/profiles.md#per-source-apps" in said
+        assert "Kubernetes" not in said
 
     def test_a_source_needing_only_stack_wide_apps_still_saves(self):
         # The receiver and the loader are one deployment each, so a plain posted

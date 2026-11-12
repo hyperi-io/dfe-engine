@@ -123,7 +123,7 @@ from dfe_engine.governance import PolicyStore, ProtectedVarError
 from dfe_engine.hunts import runner_metrics
 from dfe_engine.sampling import SampleMode, SampleRequest, SamplerError
 from dfe_engine.settings import DFESettings
-from dfe_engine.source.flow import stage_instance_ceiling
+from dfe_engine.source.flow import hosting_refusal, stage_instance_ceiling
 from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/apps", tags=["App Management"], dependencies=[WRITE_TURN])
@@ -1031,7 +1031,12 @@ def create_instance(
         raise ProblemError(
             409, f"{service}/{body.instance} is already deployed", code="already_exists"
         )
-    ceiling = stage_instance_ceiling(app.descriptor, request.app.state.settings)
+    settings = request.app.state.settings
+    # The same rule a source save meets: a fixed set of containers runs named instances only.
+    refusal = hosting_refusal(app.descriptor, app.instance, "run it", settings)
+    if refusal:
+        raise ProblemError(409, refusal, code="not_hosted")
+    ceiling = stage_instance_ceiling(app.descriptor, settings)
     allowed, reason = instances.additional_instance_allowed(gc, app, ceiling)
     if not allowed:
         raise ProblemError(409, reason, code="single_instance_app")

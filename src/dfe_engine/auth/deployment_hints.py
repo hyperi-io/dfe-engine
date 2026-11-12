@@ -47,8 +47,15 @@ def credential_fetch_command(
     namespace: str = "",
     secret_name: str = "",
     secret_key: str = "",
+    deployer_command: str = "",
 ) -> str:
-    """The one-line command that prints this deployment's admin password."""
+    """The one-line command that prints this deployment's admin password.
+
+    ``deployer_command`` is ``deployment.credential_command``, which wins: an
+    install published as one compose file has no checkout and so no ``make``.
+    """
+    if deployer_command.strip():
+        return deployer_command.strip()
     if kind == DOCKER:
         return "make creds"
     if kind == KUBERNETES:

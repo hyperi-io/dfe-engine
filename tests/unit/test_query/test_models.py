@@ -28,7 +28,13 @@ class TestQueryOptions:
         assert options.after_tiebreak is None
         assert options.timeout_seconds is None
         assert options.cache is True
-        assert options.store is None
+
+    def test_a_store_a_caller_still_sends_is_accepted_and_ignored(self):
+        # Nothing ever read it: a view always runs in the executor's own database.
+        options = QueryOptions.model_validate({"store": "events_db", "limit": 5})
+
+        assert options.limit == 5
+        assert "store" not in options.model_dump()
 
     def test_limit_validation(self):
         """Test limit bounds validation."""

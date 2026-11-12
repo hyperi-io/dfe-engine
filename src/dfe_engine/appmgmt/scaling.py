@@ -17,6 +17,7 @@ needs to render them disabled with a reason rather than have them vanish.
 """
 
 import re
+from collections.abc import Collection
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -73,7 +74,12 @@ class ScalingDials:
 
 
 def instance_ceiling(
-    app: AppDescriptor, target: DeployTarget, *, writes_app_config: bool = False
+    app: AppDescriptor,
+    target: DeployTarget,
+    *,
+    writes_app_config: bool = False,
+    reads_instance_index: bool = True,
+    hosted: Collection[str] = (),
 ) -> int | None:
     """How many deployments of *app* this target can RUN, None meaning unbounded.
 
@@ -82,24 +88,38 @@ def instance_ceiling(
 
     A single-deployment app is one everywhere. A per-config app is unbounded on
     Kubernetes, where each overlay renders its own Argo Application, and equally
-    unbounded on Compose WHERE THE ENGINE RENDERS THE APP CONFIG: each instance
-    gets its own directory and its name goes to the deployer's instance index, so
-    the deployer declares a container per instance on the next up. Where nothing
-    renders it, Compose holds only the services its committed file declares and
-    the source would be saved and never run, which is a ceiling of zero. A target
-    nobody named is not assumed to be Compose.
+    unbounded on Compose WHERE THE ENGINE RENDERS THE APP CONFIG: an app declaring
+    ``shared_instance`` reads every instance from its one container's merged file,
+    and any other gets a directory per instance whose name goes to the deployer's
+    instance index. A deployer that reads no index runs only the instances it
+    declared, so the ceiling is how many those are. Where nothing renders it,
+    Compose holds only the services its committed file declares and the source
+    would be saved and never run, which is a ceiling of zero. A target nobody
+    named is not assumed to be Compose.
 
     Args:
         app: The app the ceiling is being asked about.
         target: Where this deployment runs.
         writes_app_config: Whether the engine renders the apps' config files
             here, which is ``appconfig.enabled``.
+        reads_instance_index: Whether a deployer declares a container per name
+            in the instance index the engine writes.
+        hosted: The instances of *app* the deployment declared a container for.
     """
     if app.multiplicity is not Multiplicity.PER_CONFIG:
         return 1
-    if target is not DeployTarget.DOCKER:
+    if not runs_fixed_containers(target):
         return None
-    return None if writes_app_config else 0
+    if not writes_app_config:
+        return 0
+    if app.shared_instance or reads_instance_index:
+        return None
+    return len(hosted)
+
+
+def runs_fixed_containers(target: DeployTarget) -> bool:
+    """Whether *target* runs only the containers its deployer declared, so per-config instances share one."""
+    return target is DeployTarget.DOCKER
 
 
 def support(app: AppDescriptor, target: DeployTarget) -> tuple[bool, str]:

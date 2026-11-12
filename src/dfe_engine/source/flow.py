@@ -41,6 +41,11 @@ ARCHIVER_SERVICE = "dfe-archiver"
 FETCHER_SERVICE = "dfe-fetcher"
 LOADER_SERVICE = "dfe-loader"
 
+PER_SOURCE_DOCS = (
+    "https://github.com/hyperi-io/dfe-docker/blob/main/docs/profiles.md#per-source-apps"
+)
+"""Where a Compose operator reads how a checkout runs one container per source."""
+
 
 class FlowError(ValueError):
     """Raised when a source's stages cannot be run as declared."""
@@ -68,6 +73,42 @@ def stage_instance_ceiling(app: AppDescriptor, settings: DFESettings) -> int | N
         app,
         DeployTarget(settings.deployment.target),
         writes_app_config=appconfig.enabled(settings),
+        reads_instance_index=appconfig.custom_env_dir(settings) is not None,
+        hosted=_hosted(settings).get(app.service, ()),
+    )
+
+
+def _hosted(settings: DFESettings) -> dict[str, frozenset[str]]:
+    """The instances each per-config app has a container for here, by app."""
+    from dfe_engine.settings import parse_hosted_instances
+
+    return parse_hosted_instances(settings.deployment.hosted_instances)
+
+
+def hosting_refusal(app: AppDescriptor, source: str, purpose: str, settings: DFESettings) -> str:
+    """Why this deployment cannot run *source*'s instance of *app*, empty where it can."""
+    from dfe_engine.appmgmt import appconfig
+
+    ceiling = stage_instance_ceiling(app, settings)
+    hosted = _hosted(settings).get(app.service, frozenset())
+    if app.multiplicity is not Multiplicity.PER_CONFIG or ceiling is None:
+        return ""
+    if ceiling and source in hosted:
+        return ""
+    service = app.service
+    if app.shared_instance or not appconfig.enabled(settings):
+        return (
+            f"source {source!r} needs {service} to {purpose}, and this deployment renders "
+            f"no config into its {service} container, so the source would be saved and "
+            "never run. Set DFE_ENGINE_DEPLOYMENT_APP_CONFIG_DIR to the directory that "
+            "container mounts"
+        )
+    running = ", ".join(sorted(hosted)) or "none"
+    return (
+        f"source {source!r} needs its own {service} to {purpose}, and this install runs "
+        f"{service} only for the sources it was published with ({running}). A new one "
+        f"needs a dfe-docker checkout, where `make apply` starts a {service} per source: "
+        f"{PER_SOURCE_DOCS}"
     )
 
 
@@ -190,15 +231,9 @@ def _stage_app(
             f"runs on {settings.transport.direct_protocol}. Sources that need a per-source "
             f"app (fetcher, transform) need a {settings.transport.bus_provider} deployment"
         )
-    if stage_instance_ceiling(app, settings) == 0:
-        raise FlowError(
-            f"source {source!r} needs its own {service} to {purpose}, and this deployment "
-            f"cannot configure one: {profile or 'compose'} runs a single {service} and it is "
-            "deployed idle, but nothing renders the engine's config into that container, "
-            "so the source would be saved and never run. Deploy on Kubernetes, which runs "
-            f"one {service} per source, or point this deployment's app-config directory at "
-            "what its containers mount"
-        )
+    refusal = hosting_refusal(app, source, purpose, settings)
+    if refusal:
+        raise FlowError(refusal)
     if not app.carries(transport):
         raise FlowError(
             f"source {source!r} is on the {transport} transport, but {service} "

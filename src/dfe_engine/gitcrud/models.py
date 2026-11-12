@@ -17,6 +17,7 @@ Ops").
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 
 class Layout(StrEnum):
@@ -57,6 +58,8 @@ class ResourceClass:
                 through the same name rule. Only the separator is permitted.
     check       opt-in: called with a resource's name and doc on every write of
                 the class, and raises to refuse a doc its reader would refuse.
+    repo_check  opt-in: as ``check``, with the deploy repo being written first, for
+                a refusal that reads the resource's siblings.
     """
 
     name: str
@@ -68,6 +71,7 @@ class ResourceClass:
     manifest: str = "manifest.yaml"
     nested: bool = False
     check: Callable[[str, dict], None] | None = field(default=None, compare=False)
+    repo_check: Callable[[Any, str, dict], None] | None = field(default=None, compare=False)
 
     @property
     def is_bundle(self) -> bool:

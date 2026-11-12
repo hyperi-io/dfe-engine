@@ -14,6 +14,8 @@ overlay Argo applies.
 
 from __future__ import annotations
 
+import pytest
+
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
@@ -244,6 +246,180 @@ class TestFetcherInstancesFollowTheSources:
         assert resp.status_code == 403
 
 
+class TestOneFetcherRunsEveryFetchedSourceOnCompose:
+    """A published Compose install runs one fetcher, so a source it cannot take is refused at save."""
+
+    def _published(self, app, tmp_path, monkeypatch, *, hosted: str = "") -> None:
+        """Move the deployment onto a published install: Compose, rendered config, no index."""
+        from dfe_engine.settings import get_settings
+
+        # The route reads the app's settings and the save gate the process's.
+        found = (app.state.settings.deployment, get_settings().deployment)
+        for deployment in {id(d): d for d in found}.values():
+            monkeypatch.setattr(deployment, "target", "docker")
+            monkeypatch.setattr(deployment, "app_config_dir", str(tmp_path / "app-config"))
+            monkeypatch.setattr(deployment, "app_env_dir", "")
+            monkeypatch.setattr(deployment, "hosted_instances", hosted)
+
+    def _running(self, client, admin_headers, name: str, **fetcher) -> None:
+        from dfe_engine.api.deps import _registries
+
+        body = _fetcher_body(name, **{k: v for k, v in fetcher.items() if v is not None})
+        created = client.post("/api/v1/sources", json=body, headers=admin_headers)
+        assert created.status_code == 201, created.text
+        _registries["source"].set_deployed_version(name, "1.0.0")
+        assert (
+            client.post("/api/v1/sources/reconcile-apps", headers=admin_headers).status_code == 200
+        )
+
+    def _polled(self, tmp_path) -> dict:
+        from dfe_engine.yaml_utils import yaml_load
+
+        rendered = yaml_load(tmp_path / "app-config" / FETCHER / "fetcher.yaml")
+        return rendered["sources"]
+
+    def test_a_clashing_source_is_refused_and_the_running_one_keeps_running(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        self._save_gate(app, tmp_path)
+        self._published(app, tmp_path, monkeypatch)
+        self._running(client, admin_headers, "crates-b")
+
+        # crates_io is one flat stanza per process, and this name sorts first.
+        refused = client.post(
+            "/api/v1/sources", json=_fetcher_body("crates-a"), headers=admin_headers
+        )
+
+        assert refused.status_code in (400, 422), refused.text
+        assert "cannot share the one dfe-fetcher this deployment runs" in refused.text
+        assert "config.sources.crates_io" in refused.text
+        assert self._polled(tmp_path)["crates_io"]["topic"] == "crates-b"
+
+    def _save_gate(self, app, tmp_path):
+        """A deploy repo, and a registry that runs the source save gate with the engine's orgs."""
+        from dfe_engine.api.deps import _registries
+        from dfe_engine.source.registry import SourceRegistry
+
+        gc = _wire(app, tmp_path)
+        _registries["source"] = SourceRegistry(crud=gc)
+        return gc
+
+    @pytest.mark.parametrize(
+        ("running_org", "newcomer_org", "reason"),
+        [
+            # One org on both: the second crates_io stanza is the clash.
+            ("acme", "acme", "its config.sources.crates_io.topic is already set"),
+            # One process stamps one org on everything it emits.
+            (None, "acme", "its config.org_id differs from crates-b's"),
+        ],
+    )
+    def test_a_source_naming_an_org_is_judged_with_that_org(
+        self, client, app, admin_headers, tmp_path, monkeypatch, running_org, newcomer_org, reason
+    ):
+        self._save_gate(app, tmp_path)
+        app.state.org_registry.create("acme", display_name="Acme")
+        self._published(app, tmp_path, monkeypatch)
+        self._running(client, admin_headers, "crates-b", org=running_org)
+
+        refused = client.post(
+            "/api/v1/sources",
+            json=_fetcher_body("crates-a", org=newcomer_org),
+            headers=admin_headers,
+        )
+
+        assert refused.status_code in (400, 422), refused.text
+        assert reason in refused.text
+        assert self._polled(tmp_path)["crates_io"]["topic"] == "crates-b"
+
+    def test_with_no_orgs_to_read_a_source_is_judged_by_its_org_name(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        self._save_gate(app, tmp_path)
+        app.state.org_registry.create("acme", display_name="Acme")
+        self._published(app, tmp_path, monkeypatch)
+        self._running(client, admin_headers, "crates-b")
+        monkeypatch.setattr("dfe_engine.source.registry._tenancy_reader", None)
+
+        refused = client.post(
+            "/api/v1/sources", json=_fetcher_body("crates-a", org="acme"), headers=admin_headers
+        )
+
+        assert refused.status_code in (400, 422), refused.text
+        assert "its config.org_id differs from crates-b's" in refused.text
+        assert "holds no orgs" not in refused.text
+
+    @pytest.mark.parametrize("edited", ["crates-b", "pypi-a"])
+    def test_an_update_the_one_fetcher_cannot_take_is_refused_and_both_keep_running(
+        self, client, app, admin_headers, tmp_path, monkeypatch, edited
+    ):
+        self._save_gate(app, tmp_path)
+        self._published(app, tmp_path, monkeypatch)
+        self._running(client, admin_headers, "crates-b")
+        self._running(
+            client,
+            admin_headers,
+            "pypi-a",
+            source_type="pypi",
+            config={"packages": ["scalo"]},
+        )
+
+        resp = client.put(
+            f"/api/v1/apps/{FETCHER}/{edited}/config",
+            json={"changes": {"extraEnv.ONLY_ME": "1"}},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "shared_instance_conflict"
+        assert "extraEnv.ONLY_ME" in resp.json()["detail"]
+        polled = self._polled(tmp_path)
+        assert polled["crates_io"]["topic"] == "crates-b"
+        assert polled["pypi"]["topic"] == "pypi-a"
+
+    def test_a_generic_helm_write_that_clashes_is_refused(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        gc = self._save_gate(app, tmp_path)
+        self._published(app, tmp_path, monkeypatch)
+        self._running(client, admin_headers, "crates-b")
+
+        resp = client.put(
+            f"/api/v1/helm/files/{FETCHER}-crates-a-values/vars/config.sources.crates_io.topic",
+            json={"value": "crates-a"},
+            headers=admin_headers,
+        )
+
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "shared_instance_conflict"
+        assert f"{FETCHER}-crates-a-values" not in gc.list("helmvars")
+        assert self._polled(tmp_path)["crates_io"]["topic"] == "crates-b"
+
+    def test_a_hand_made_instance_outside_the_hosted_set_is_refused(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        from dfe_engine.api.deps import _registries
+
+        _wire(app, tmp_path)
+        # Saved before the move, so the route's own check is what answers.
+        for name in ("edge", "other"):
+            body = {**_receiver_body(name), "transform": {"engine": "vrl"}}
+            assert (
+                client.post("/api/v1/sources", json=body, headers=admin_headers).status_code == 201
+            )
+            _registries["source"].set_deployed_version(name, "1.0.0")
+        self._published(app, tmp_path, monkeypatch, hosted="dfe-transform-vrl=edge")
+
+        other = client.post(
+            "/api/v1/apps/dfe-transform-vrl/instances",
+            json={"instance": "other", "values": {}},
+            headers=admin_headers,
+        )
+
+        assert other.status_code == 409, other.text
+        assert other.json()["code"] == "not_hosted"
+        assert "only for the sources it was published with (edge)" in other.json()["detail"]
+
+
 class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
     """Where the engine renders the app config, the write that rendered it reports.
 
@@ -258,10 +434,11 @@ class TestTheReconcileReportsTheRestartsItsOwnWritesNeed:
     RECREATE = f"recreate required: make apply SERVICES={TRANSFORM}-elreg"
 
     def _compose(self, app, tmp_path):
-        """A deploy repo plus the app-config directory a Compose stack mounts."""
+        """A deploy repo, the app-config directory a Compose stack mounts, and the env directory its make reads the index from."""
         gc = _wire(app, tmp_path)
         app.state.settings.deployment.target = "docker"
         app.state.settings.deployment.app_config_dir = str(tmp_path / "app-config")
+        app.state.settings.deployment.app_env_dir = str(tmp_path / "app-env")
         return gc
 
     def _deployed_transform_source(self, client, admin_headers, name: str) -> None:

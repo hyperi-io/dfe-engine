@@ -31,6 +31,7 @@ from pydantic import ValidationError
 from scalo.logger import logger
 
 from dfe_engine.appmgmt import contract, instances
+from dfe_engine.appmgmt.appconfig import SharedInstanceConflictError
 from dfe_engine.appmgmt.catalogue import AppDescriptor
 from dfe_engine.appmgmt.scaling import keda_by_default
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, del_path, get_path, set_path
@@ -529,7 +530,7 @@ class ActionStore:
         """
         try:
             self._crud.check(cls, name, doc)
-        except contract.RefusedNullError as exc:
+        except (contract.RefusedNullError, SharedInstanceConflictError) as exc:
             return str(exc)
         try:
             if cls == HUNT_CLASS:

@@ -166,7 +166,7 @@ def engine_deployment_contract() -> DeploymentContract:
             ),
         ],
         depends_on=["clickhouse"],
-        # KEDA not used for dfe-engine (control plane -- HPA on CPU is sufficient).
+        # Nothing scales the engine: it runs one pod (singleton below).
         keda=None,
         # The YAML SSoT directory DFE_CONFIG_DIR names, on a claim so the config outlives the pod.
         writable_paths=[WritablePath(name="config", path="/config", persistent=True, size="1Gi")],

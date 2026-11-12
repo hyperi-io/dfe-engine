@@ -12,7 +12,7 @@ kafka:
   security_protocol: PLAINTEXT
 
 archive:
-  destination: "file:///tmp/dfe-archive"
+  destination: "file:///var/lib/dfe-archiver/archive"
   path_template: "{year}/{month}/{day}/{hour}"
   file_extension: jsonl
   roll_size_bytes: 1073741824  # 1 GB

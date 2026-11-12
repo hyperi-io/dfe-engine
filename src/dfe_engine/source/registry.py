@@ -1289,6 +1289,59 @@ class SourceRegistry:
             allowed, reason = instances.additional_instance_allowed(self._crud, app, ceiling)
             if not allowed:
                 raise SourceValidationError(f"source {source.source!r}: {reason}")
+        if source.fetcher is not None and source.state == "active":
+            self._validate_shared_room(source, settings)
+
+    def _validate_shared_room(self, source: Source, settings: Any) -> None:
+        """A fetched source sharing one container with the others must not clash with them.
+
+        Judged on the overlay a deploy would write, org included, against the
+        instances already there, so a source the render would leave out is refused
+        at save rather than stored and never run.
+        """
+        from dfe_engine.appmgmt import appconfig, instances, routing
+        from dfe_engine.gitcrud.engine import ResourceNotFoundError
+        from dfe_engine.source.flow import FETCHER_SERVICE
+
+        if self._crud is None:
+            return
+        app = instances.instance_of(FETCHER_SERVICE, source.source)
+        # Only a deployment whose one fetcher reads the engine's render shares it.
+        if not (
+            appconfig.shares_one_container(app.descriptor, settings) and appconfig.enabled(settings)
+        ):
+            return
+        tenancy = _tenancy_reader() if _tenancy_reader is not None else None
+        org = source.fetcher.org if source.fetcher is not None else None
+        judged = source
+        if tenancy is None and org and source.fetcher is not None:
+            # With no orgs to read, the org is judged by its own name.
+            vid = source.runtime_version_id()
+            runtime = source.version(vid)
+            bare = runtime.model_copy(
+                update={"fetcher": source.fetcher.model_copy(update={"org": None})}
+            )
+            judged = source.model_copy(update={"versions": {**source.versions, vid: bare}})
+        try:
+            compiled = routing.compile_for(
+                app.descriptor,
+                _WithCandidate(self, judged),
+                settings,
+                instance=source.source,
+                tenancy=tenancy,
+            )
+        except routing.RoutingNotApplicableError:
+            return  # an org nobody registered, which the save refuses on its own
+        if judged is not source:
+            compiled["org_id"] = org
+        try:
+            doc = instances.read_overlay(self._crud, app)
+        except ResourceNotFoundError:
+            doc = instances.initial_overlay(app)
+        routing.apply(app.descriptor, doc, compiled)
+        refusal = appconfig.shared_refusal(self._crud, app.descriptor, source.source, doc, settings)
+        if refusal:
+            raise SourceValidationError(refusal)
 
     # -----------------------------------------------------------------
     # Change Callbacks
@@ -1382,3 +1435,37 @@ class SourceRegistry:
         """Stop background refresh and cleanup."""
         if self._store is not None:
             self._store.stop()
+
+
+_tenancy_reader: Callable[[], Any] | None = None
+"""Reads the orgs a fetched source's org compiles against, set once the engine holds them."""
+
+
+def read_tenancy_from(reader: Callable[[], Any] | None) -> None:
+    """Set where a source save reads the orgs from, or stop reading them with None."""
+    global _tenancy_reader
+    _tenancy_reader = reader
+
+
+class _WithCandidate:
+    """A source reader that answers for one source being saved as it will be stored."""
+
+    def __init__(self, registry: Any, candidate: Source) -> None:
+        self._registry = registry
+        self._candidate = candidate
+
+    def ingest_rules(self) -> Any:
+        """Return the stored ingest rules."""
+        return self._registry.ingest_rules()
+
+    def get_source(self, source_name: str, /) -> Source:
+        """Return the candidate under its own name, any other as stored."""
+        if source_name == self._candidate.source:
+            return self._candidate
+        return self._registry.get_source(source_name)
+
+    def get_all_sources(
+        self, enabled_only: bool = False, *, states: Collection[str] | None = None
+    ) -> list[Source]:
+        """Return the stored sources."""
+        return self._registry.get_all_sources(enabled_only, states=states)

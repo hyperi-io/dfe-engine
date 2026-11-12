@@ -112,6 +112,10 @@ def _build_crud(repo: str | None) -> GitCrud:
         read=gs.read,
         pack=gs.pack,
     )
+    from dfe_engine.appmgmt import appconfig
+
+    # The deploy repo's own write check judges an overlay by this deployment.
+    appconfig.judge_writes_by(get_settings)
     return GitCrud(grepo)
 
 

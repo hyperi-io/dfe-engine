@@ -36,6 +36,40 @@ def test_a_docker_target_that_renders_its_app_config_is_unbounded():
     assert scaling.instance_ceiling(VRL, DeployTarget.DOCKER, writes_app_config=True) is None
 
 
+FETCHER = catalogue.descriptor("dfe-fetcher")
+
+
+@pytest.mark.parametrize(
+    ("app", "reads_index", "hosted", "expected"),
+    [
+        # One container serves every fetcher source, so sources are not containers.
+        (FETCHER, False, (), None),
+        # A checkout's make reads the index and declares a container per name.
+        (VRL, True, (), None),
+        # A published install runs only the instances it declared.
+        (VRL, False, ("intake", "cisco-asa"), 2),
+        (VRL, False, (), 0),
+    ],
+)
+def test_a_docker_target_that_renders_caps_by_what_runs_the_instances(
+    app, reads_index, hosted, expected
+):
+    assert (
+        scaling.instance_ceiling(
+            app,
+            DeployTarget.DOCKER,
+            writes_app_config=True,
+            reads_instance_index=reads_index,
+            hosted=hosted,
+        )
+        == expected
+    )
+
+
+def test_a_shared_instance_app_still_needs_its_config_rendered():
+    assert scaling.instance_ceiling(FETCHER, DeployTarget.DOCKER, reads_instance_index=False) == 0
+
+
 def test_a_single_deployment_app_is_one_everywhere():
     for target in DeployTarget:
         assert scaling.instance_ceiling(LOADER, target) == 1
