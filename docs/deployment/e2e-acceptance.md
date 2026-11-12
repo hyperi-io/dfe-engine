@@ -90,5 +90,5 @@ intended rather than current practice.
 
 ## Related
 
-- [README.md](README.md) - the deployment seam (layers, tiers, Argo model).
+- [README.md](README.md) - the deployment overview (layers, tiers, Argo model).
 - dfe-docker - the standalone-docker distribution this scenario informs.

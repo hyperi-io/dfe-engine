@@ -43,7 +43,7 @@ This part is genuinely well done:
 the engine's `/api/v1/auth/login`, gets a JWT (bearer token), stores it in a secure
 cookie, and attaches `Authorization: Bearer <token>` to every API call. On a 401 it
 signs you out. (In production the intent is OIDC at the edge via Envoy + the
-`X-Oidc-*` headers - the same seam the engine already supports.)
+`X-Oidc-*` headers - the same header contract the engine already supports.)
 
 ## 4. How dfe-hyperdx "auto-integrates" (today)
 

@@ -1,6 +1,6 @@
 # KEDA scaling patterns
 
-CPU is the fleet default, scalo ScalingPressure is opt-in per app via the
+CPU is the fleet default, scalo ScalingPressure is added per app via the
 owned fail-safe `dfe-keda-shim`. On any shim or ClickHouse failure the
 last-good value is returned, so scaling freezes at current replicas rather
 than running up. There is no Kedify OTEL Scaler and no Prometheus fallback
@@ -12,7 +12,7 @@ in the stack.
 scaler (~70% utilisation, metrics-server) as its DEFAULT trigger - zero
 extra code, zero upstream risk.
 
-**scalo ScalingPressure is OPT-IN per app**: an app's dfe-infra values carry
+**scalo ScalingPressure is added per app**: an app's dfe-infra values carry
 the `pressure-trigger` trigger fragment, and `keda.pressure.*` sets its target,
 shim address and reported service. KEDA takes the higher of it and the CPU
 trigger. It is read via the owned, fail-safe `dfe-keda-shim` (folded into the dfe-engine chart,
@@ -24,7 +24,7 @@ ClickHouse table (`otel_metrics_gauge`). Full fail-safe mechanics:
 ```mermaid
 flowchart LR
     ms["metrics-server\n(pod CPU)"] -->|utilization| cpuTrig["cpu trigger\nDEFAULT, ~70%"]
-    subgraph shimPath["opt-in per app: pressure-trigger fragment"]
+    subgraph shimPath["added per app: pressure-trigger fragment"]
         direction LR
         gauge[("dfe.otel_metrics_gauge\nscaling_pressure, any prefix")] --> shim["dfe-keda-shim\nGET /keda/pressure?service=X"]
     end
@@ -50,14 +50,17 @@ The rule lives in `src/dfe_engine/scaling_pressure.py` and is substituted into b
 
 ## Per-app defaults
 
-| App | Default trigger | Opt-in trigger |
-|-----|------------------|-----------------|
-| dfe-receiver / dfe-loader / dfe-archiver | CPU ~70% | scalo ScalingPressure (shim) |
-| dfe-transform-elastic/vector/vrl | CPU ~70% | scalo ScalingPressure (shim) |
-| dfe-ui | CPU ~70% | - |
-| dfe-engine | KEDA disabled by default (control-plane singleton) | CPU (opt-in) |
-| dfe-fetcher | KEDA disabled by default | - |
-| dfe-hunt-runner | no KEDA - one static pod | BETA: due-hunt backlog via the shim (`metrics-api`, `AverageValue`) - see [hunt-runner-scaling](../data-plane/hunt-runner-scaling.md) |
+Read from dfe-infra `argocd/values/apps/<app>/` and `apps.yaml` at 2.2.2. The profile-slim tier clears the ScalingPressure trigger, so on slim every KEDA app scales on CPU alone.
+
+| App | KEDA | Triggers by default |
+|-----|------|---------------------|
+| dfe-receiver / dfe-loader | on | CPU ~70% and scalo ScalingPressure (shim, target 70) |
+| dfe-archiver, dfe-transform-elastic / vrl | on | CPU ~70%, plus ScalingPressure on the single, scale and mesh profiles |
+| dfe-transform-vector | on | CPU ~70% |
+| dfe-ui | on | CPU ~70% |
+| dfe-engine | off - control-plane singleton, always one pod | - |
+| dfe-fetcher | off - one pod per fetcher config. The deployer turns KEDA on in that config's values, and only for a source whose fetch supports competing consumers | CPU ~70% once turned on |
+| dfe-hunt-runner | off - one static pod | BETA, `huntRunner.autoscaling.enabled`: due-hunt backlog via the shim (`metrics-api`, `AverageValue`) - see [hunt-runner-scaling](../data-plane/hunt-runner-scaling.md) |
 
 All ScaledObjects default `minReplicaCount: 1` - there is no scale-to-zero on
 the fleet baseline today (`idleReplicaCount` support exists in `_keda.tpl` for

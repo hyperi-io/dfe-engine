@@ -39,9 +39,9 @@ signals, tagged with a provenance `origin`). Three kinds ship:
 
 | Kind | Source | Auth |
 |---|---|---|
-| `git_repo` | any git repo of `*.yml` (default: `github.com/SigmaHQ/sigma`), cloned via dulwich | git token via the scalo.secrets seam |
+| `git_repo` | any git repo of `*.yml` (default: `github.com/SigmaHQ/sigma`), cloned via dulwich | git token via the scalo.secrets |
 | `local_files` | a directory of `*.yml/*.yaml` under the config dir | none |
-| `valhalla` | the Nextron Valhalla JSON feed | api key via the secrets seam |
+| `valhalla` | the Nextron Valhalla JSON feed | api key via the secrets store |
 
 A provider config holds only a secret PATH, never a value. Reach is confined at
 register time (`_validate_provider_reach`): a `local_files` directory must resolve

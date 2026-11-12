@@ -249,7 +249,7 @@ ReplacingMergeTree state table, fail-open.
 |----------|--------|-----------|
 | Config storage | YAML + git (no DB) | human-readable, versioned, Rust reads directly |
 | API host | dfe-engine FastAPI | dfe-control-plane removed; one artifact |
-| Auth | local JWT default; OIDC + API key + disabled | OIDC via X-Oidc-* edge seam |
+| Auth | local JWT default; OIDC + API key + disabled | OIDC via X-Oidc-* headers set at the edge |
 | Conflict handling | git blob-SHA ETag + 409 | git-native, standard HTTP semantics |
 | Deployment | Argo CD + Helm, base+overlay multi-source | engine turns dials, appsets author apps |
 | Platform baseline | Layer 0 detect-or-install | assume only a bare cluster |
@@ -268,7 +268,7 @@ ReplacingMergeTree state table, fail-open.
 |------|----------|--------|
 | Control-plane surface | [control-plane/README.md](control-plane/README.md) | governed ops, gitops commit standard, RBAC, OIDC, CLI, UI API, type-safety sync |
 | Data plane | [data-plane/README.md](data-plane/README.md) | sources, schemas, field mapping, CEL, query API, hunts |
-| Deployment seam | [deployment/README.md](deployment/README.md) | tiers + composition, backing services, KEDA, observability, supply-chain pinning, e2e acceptance |
+| Deployment | [deployment/README.md](deployment/README.md) | tiers + composition, backing services, KEDA, observability, supply-chain pinning, e2e acceptance |
 | Integrations | [integrations/README.md](integrations/README.md) | dfe-ui guide, dfe-hyperdx fork maintenance |
 | Archive | [archive/README.md](archive/README.md) | superseded research + snapshots, kept for the decision trail |
 
